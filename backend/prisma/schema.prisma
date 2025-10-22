@@ -1,0 +1,677 @@
+// FleetForge Database Schema - PostgreSQL with Prisma ORM
+// This schema defines the complete database structure for equipment rental management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// EQUIPMENT MANAGEMENT
+// ============================================================================
+
+model EquipmentTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(100)
+  category    String   @db.VarChar(50) // 'chassis', 'dry_van', 'reefer', 'flatbed', 'construction'
+
+  // Physical Specifications
+  length      Decimal? @db.Decimal(6,2) // In feet
+  width       Decimal? @db.Decimal(6,2)
+  height      Decimal? @db.Decimal(6,2)
+  capacity    Decimal? @db.Decimal(10,2) // Weight capacity in lbs
+
+  // Equipment Details
+  manufacturer String? @db.VarChar(100)
+  features     String[] // Array of feature strings
+
+  // Default Rates (can be overridden per customer)
+  defaultDailyRate    Decimal? @db.Decimal(10,2)
+  defaultWeeklyRate   Decimal? @db.Decimal(10,2)
+  defaultMonthlyRate  Decimal? @db.Decimal(10,2)
+
+  // Status
+  isActive    Boolean  @default(true)
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  equipmentUnits      EquipmentUnit[]
+  customerRates       CustomerRateStructure[]
+
+  @@index([category])
+  @@index([isActive])
+}
+
+model EquipmentUnit {
+  id                    Int      @id @default(autoincrement())
+  templateId            Int
+
+  // Identification
+  unitNumber            String   @unique @db.VarChar(50)
+  vin                   String?  @unique @db.VarChar(50)
+  licensePlate          String?  @db.VarChar(20)
+
+  // Status Management
+  status                String   @default("available") @db.VarChar(20)
+  // 'available', 'reserved', 'on_lease', 'maintenance', 'inactive'
+
+  // Location
+  currentYardId         Int?
+
+  // Purchase Information
+  purchasePrice         Decimal?  @db.Decimal(12,2)
+  purchaseDate          DateTime?
+  vendor                String?   @db.VarChar(255)
+
+  // Condition
+  condition             String?   @db.VarChar(20) // 'excellent', 'good', 'fair', 'poor'
+  lastInspectionDate    DateTime?
+
+  // GPS Tracking
+  samsaraDeviceId       String?   @unique @db.VarChar(100)
+  currentMileage        Int?      @default(0)
+
+  // Metadata
+  notes                 String?   @db.Text
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  template              EquipmentTemplate @relation(fields: [templateId], references: [id])
+  currentYard           Yard?             @relation(fields: [currentYardId], references: [id])
+  financials            EquipmentFinancial?
+  leases                Lease[]
+  reservations          ReservationUnit[]
+  maintenanceEvents     MaintenanceEvent[]
+  inspections           Inspection[]
+  statusHistory         EquipmentStatusLog[]
+
+  @@index([status])
+  @@index([currentYardId])
+  @@index([templateId])
+}
+
+model EquipmentFinancial {
+  id                    Int      @id @default(autoincrement())
+  equipmentUnitId       Int      @unique
+
+  // Purchase Details
+  purchasePrice         Decimal  @db.Decimal(12,2)
+  purchaseDate          DateTime
+  vendorName            String?  @db.VarChar(255)
+
+  // Financing
+  downPayment           Decimal  @default(0) @db.Decimal(12,2)
+  loanAmount            Decimal  @default(0) @db.Decimal(12,2)
+  interestRate          Decimal  @default(0) @db.Decimal(5,4)
+  loanTermMonths        Int      @default(0)
+  monthlyPayment        Decimal  @default(0) @db.Decimal(10,2)
+
+  // Additional Costs
+  deliveryCost          Decimal  @default(0) @db.Decimal(10,2)
+  modificationCost      Decimal  @default(0) @db.Decimal(10,2)
+  initialInspectionCost Decimal  @default(0) @db.Decimal(10,2)
+  otherInitialCosts     Decimal  @default(0) @db.Decimal(10,2)
+
+  // Depreciation
+  depreciationMethod    String   @default("straight-line") @db.VarChar(50)
+  depreciationRate      Decimal  @default(0.15) @db.Decimal(5,4)
+  salvageValue          Decimal  @default(0) @db.Decimal(12,2)
+
+  // Calculated Fields (updated by business logic)
+  currentBookValue      Decimal  @default(0) @db.Decimal(12,2)
+  totalRevenue          Decimal  @default(0) @db.Decimal(12,2)
+  totalExpenses         Decimal  @default(0) @db.Decimal(12,2)
+  roiPercentage         Decimal  @default(0) @db.Decimal(8,4)
+
+  // Timestamps
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  equipmentUnit         EquipmentUnit @relation(fields: [equipmentUnitId], references: [id])
+}
+
+model EquipmentStatusLog {
+  id              Int      @id @default(autoincrement())
+  equipmentUnitId Int
+
+  fromStatus      String?  @db.VarChar(20)
+  toStatus        String   @db.VarChar(20)
+  reason          String?  @db.Text
+  changedBy       String?  @db.VarChar(100)
+  changedAt       DateTime @default(now())
+
+  // Relations
+  equipmentUnit   EquipmentUnit @relation(fields: [equipmentUnitId], references: [id])
+
+  @@index([equipmentUnitId])
+  @@index([changedAt])
+}
+
+// ============================================================================
+// CUSTOMER MANAGEMENT
+// ============================================================================
+
+model Customer {
+  id                  Int      @id @default(autoincrement())
+
+  // Company Information
+  companyName         String   @db.VarChar(255)
+  businessType        String?  @db.VarChar(100)
+  taxId               String?  @unique @db.VarChar(50)
+
+  // Contact Information
+  primaryEmail        String   @db.VarChar(255)
+  primaryPhone        String   @db.VarChar(20)
+  website             String?  @db.VarChar(255)
+
+  // Address
+  billingAddress      String   @db.Text
+  billingCity         String   @db.VarChar(100)
+  billingState        String   @db.VarChar(50)
+  billingZip          String   @db.VarChar(20)
+  billingCountry      String   @default("USA") @db.VarChar(50)
+
+  // Billing Terms
+  paymentTermsDays    Int      @default(30)
+  creditLimit         Decimal? @db.Decimal(12,2)
+
+  // Status
+  status              String   @default("active") @db.VarChar(20)
+  // 'active', 'inactive', 'suspended', 'archived'
+
+  // QuickBooks Integration
+  quickbooksCustomerId String? @unique @db.VarChar(100)
+
+  // Metadata
+  notes               String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  contacts            CustomerContact[]
+  rateStructures      CustomerRateStructure[]
+  leases              Lease[]
+  reservations        Reservation[]
+  invoices            Invoice[]
+  payments            Payment[]
+  documents           CustomerDocument[]
+
+  @@index([status])
+  @@index([companyName])
+}
+
+model CustomerContact {
+  id          Int      @id @default(autoincrement())
+  customerId  Int
+
+  firstName   String   @db.VarChar(100)
+  lastName    String   @db.VarChar(100)
+  title       String?  @db.VarChar(100)
+  email       String   @db.VarChar(255)
+  phone       String   @db.VarChar(20)
+  mobile      String?  @db.VarChar(20)
+
+  isPrimary   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  customer    Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([email])
+}
+
+model CustomerRateStructure {
+  id                    Int      @id @default(autoincrement())
+  customerId            Int
+  equipmentTemplateId   Int
+
+  // Base Rates
+  dailyRate             Decimal? @db.Decimal(10,2)
+  weeklyRate            Decimal? @db.Decimal(10,2)
+  monthlyRate           Decimal? @db.Decimal(10,2)
+
+  // Mileage Rates
+  mileageRatePerMile    Decimal? @db.Decimal(6,4)
+  includedMilesDaily    Int      @default(0)
+  includedMilesWeekly   Int      @default(0)
+  includedMilesMonthly  Int      @default(0)
+
+  // Add-on Services
+  gpsTrackingFee        Decimal  @default(0) @db.Decimal(8,2)
+  insuranceFee          Decimal  @default(0) @db.Decimal(8,2)
+  damageWaiverFee       Decimal  @default(0) @db.Decimal(8,2)
+  deliveryFee           Decimal  @default(0) @db.Decimal(8,2)
+
+  // Validity
+  effectiveDate         DateTime @default(now())
+  expiryDate            DateTime?
+  isActive              Boolean  @default(true)
+
+  notes                 String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  customer              Customer          @relation(fields: [customerId], references: [id])
+  equipmentTemplate     EquipmentTemplate @relation(fields: [equipmentTemplateId], references: [id])
+
+  @@unique([customerId, equipmentTemplateId, effectiveDate])
+  @@index([isActive])
+}
+
+model CustomerDocument {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+
+  documentType    String   @db.VarChar(50) // 'contract', 'insurance', 'license', 'other'
+  fileName        String   @db.VarChar(255)
+  fileUrl         String   @db.VarChar(500)
+  fileSize        Int      // in bytes
+
+  expiryDate      DateTime?
+  uploadedBy      String?  @db.VarChar(100)
+  uploadedAt      DateTime @default(now())
+
+  notes           String?  @db.Text
+
+  // Relations
+  customer        Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([expiryDate])
+}
+
+// ============================================================================
+// YARD MANAGEMENT
+// ============================================================================
+
+model Yard {
+  id              Int      @id @default(autoincrement())
+
+  name            String   @unique @db.VarChar(100)
+  code            String   @unique @db.VarChar(20)
+
+  // Address
+  address         String   @db.Text
+  city            String   @db.VarChar(100)
+  state           String   @db.VarChar(50)
+  zip             String   @db.VarChar(20)
+
+  // Contact
+  phone           String?  @db.VarChar(20)
+  managerName     String?  @db.VarChar(100)
+  managerEmail    String?  @db.VarChar(255)
+
+  // Capacity
+  totalCapacity   Int?     // Total number of units the yard can hold
+
+  isActive        Boolean  @default(true)
+
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  equipmentUnits  EquipmentUnit[]
+
+  @@index([isActive])
+}
+
+// ============================================================================
+// RESERVATION & LEASE MANAGEMENT
+// ============================================================================
+
+model Reservation {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+
+  reservationNumber String @unique @db.VarChar(50)
+
+  startDate       DateTime
+  endDate         DateTime
+
+  status          String   @default("pending") @db.VarChar(20)
+  // 'pending', 'confirmed', 'converted', 'cancelled'
+
+  totalEstimatedCost Decimal? @db.Decimal(12,2)
+
+  notes           String?  @db.Text
+  createdBy       String?  @db.VarChar(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer          @relation(fields: [customerId], references: [id])
+  units           ReservationUnit[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([startDate])
+}
+
+model ReservationUnit {
+  id              Int      @id @default(autoincrement())
+  reservationId   Int
+  equipmentUnitId Int
+
+  createdAt       DateTime @default(now())
+
+  // Relations
+  reservation     Reservation   @relation(fields: [reservationId], references: [id])
+  equipmentUnit   EquipmentUnit @relation(fields: [equipmentUnitId], references: [id])
+
+  @@unique([reservationId, equipmentUnitId])
+  @@index([equipmentUnitId])
+}
+
+model Lease {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+  equipmentUnitId Int
+
+  leaseNumber     String   @unique @db.VarChar(50)
+
+  // Dates
+  startDate       DateTime
+  endDate         DateTime?
+  actualEndDate   DateTime?
+
+  // Status
+  status          String   @default("pending") @db.VarChar(20)
+  // 'pending', 'active', 'completed', 'cancelled', 'terminated'
+
+  // Billing Configuration
+  billingType     String   @db.VarChar(20) // 'daily', 'weekly', 'monthly'
+  baseRate        Decimal  @db.Decimal(10,2)
+  mileageRate     Decimal  @default(0) @db.Decimal(6,4)
+
+  // Mileage
+  startMileage    Int?
+  endMileage      Int?
+
+  // Totals (calculated)
+  totalAmount     Decimal  @default(0) @db.Decimal(12,2)
+  amountPaid      Decimal  @default(0) @db.Decimal(12,2)
+
+  notes           String?  @db.Text
+  createdBy       String?  @db.VarChar(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  equipmentUnit   EquipmentUnit @relation(fields: [equipmentUnitId], references: [id])
+  billingPeriods  LeaseBillingPeriod[]
+  invoices        Invoice[]
+
+  @@index([customerId])
+  @@index([equipmentUnitId])
+  @@index([status])
+  @@index([startDate])
+}
+
+model LeaseBillingPeriod {
+  id              Int      @id @default(autoincrement())
+  leaseId         Int
+
+  // Period
+  periodStart     DateTime
+  periodEnd       DateTime
+  billingType     String   @db.VarChar(20) // 'daily', 'weekly', 'monthly'
+
+  // Time-based Charges
+  baseDays        Int
+  baseRate        Decimal  @db.Decimal(10,2)
+  baseCharge      Decimal  @db.Decimal(12,2)
+
+  // Mileage Charges
+  mileageStart    Int      @default(0)
+  mileageEnd      Int      @default(0)
+  includedMiles   Int      @default(0)
+  mileageRate     Decimal  @db.Decimal(6,4)
+  mileageCharge   Decimal  @default(0) @db.Decimal(12,2)
+
+  // Add-ons
+  gpsFee          Decimal  @default(0) @db.Decimal(8,2)
+  insuranceFee    Decimal  @default(0) @db.Decimal(8,2)
+
+  // Adjustments
+  manualAdjustment Decimal @default(0) @db.Decimal(10,2)
+  adjustmentReason String? @db.Text
+
+  // Tax
+  taxRate         Decimal  @default(0) @db.Decimal(5,4)
+  taxAmount       Decimal  @default(0) @db.Decimal(12,2)
+  totalAmount     Decimal  @db.Decimal(12,2)
+
+  // Status
+  status          String   @default("draft") @db.VarChar(20)
+  // 'draft', 'invoiced', 'paid'
+
+  invoiceId       Int?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  lease           Lease    @relation(fields: [leaseId], references: [id])
+
+  @@index([leaseId])
+  @@index([status])
+}
+
+// ============================================================================
+// FINANCIAL MANAGEMENT
+// ============================================================================
+
+model Invoice {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+  leaseId         Int?
+
+  invoiceNumber   String   @unique @db.VarChar(50)
+
+  // Dates
+  invoiceDate     DateTime @default(now())
+  dueDate         DateTime
+
+  // Amounts
+  subtotal        Decimal  @db.Decimal(12,2)
+  taxAmount       Decimal  @default(0) @db.Decimal(12,2)
+  totalAmount     Decimal  @db.Decimal(12,2)
+  amountPaid      Decimal  @default(0) @db.Decimal(12,2)
+
+  // Status
+  status          String   @default("draft") @db.VarChar(20)
+  // 'draft', 'sent', 'paid', 'partial', 'overdue', 'void'
+
+  // QuickBooks
+  quickbooksInvoiceId String? @unique @db.VarChar(100)
+
+  notes           String?  @db.Text
+  createdBy       String?  @db.VarChar(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer        @relation(fields: [customerId], references: [id])
+  lease           Lease?          @relation(fields: [leaseId], references: [id])
+  lineItems       InvoiceLineItem[]
+  payments        PaymentAllocation[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model InvoiceLineItem {
+  id              Int      @id @default(autoincrement())
+  invoiceId       Int
+
+  description     String   @db.VarChar(500)
+  quantity        Decimal  @db.Decimal(10,2)
+  unitPrice       Decimal  @db.Decimal(10,2)
+  amount          Decimal  @db.Decimal(12,2)
+
+  createdAt       DateTime @default(now())
+
+  // Relations
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+
+  paymentNumber   String   @unique @db.VarChar(50)
+  paymentDate     DateTime
+  amount          Decimal  @db.Decimal(12,2)
+
+  paymentMethod   String   @db.VarChar(50) // 'check', 'ach', 'wire', 'credit_card', 'cash'
+  referenceNumber String?  @db.VarChar(100)
+
+  notes           String?  @db.Text
+  receivedBy      String?  @db.VarChar(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer            @relation(fields: [customerId], references: [id])
+  allocations     PaymentAllocation[]
+
+  @@index([customerId])
+  @@index([paymentDate])
+}
+
+model PaymentAllocation {
+  id              Int      @id @default(autoincrement())
+  paymentId       Int
+  invoiceId       Int
+
+  amount          Decimal  @db.Decimal(12,2)
+  allocatedAt     DateTime @default(now())
+
+  // Relations
+  payment         Payment  @relation(fields: [paymentId], references: [id])
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id])
+
+  @@index([paymentId])
+  @@index([invoiceId])
+}
+
+// ============================================================================
+// MAINTENANCE MANAGEMENT
+// ============================================================================
+
+model MaintenanceEvent {
+  id              Int      @id @default(autoincrement())
+  equipmentUnitId Int
+
+  eventType       String   @db.VarChar(50) // 'scheduled', 'breakdown', 'inspection'
+  description     String   @db.Text
+
+  scheduledDate   DateTime?
+  completedDate   DateTime?
+
+  cost            Decimal? @db.Decimal(10,2)
+  vendor          String?  @db.VarChar(255)
+
+  status          String   @default("scheduled") @db.VarChar(20)
+  // 'scheduled', 'in_progress', 'completed', 'cancelled'
+
+  notes           String?  @db.Text
+  performedBy     String?  @db.VarChar(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  equipmentUnit   EquipmentUnit @relation(fields: [equipmentUnitId], references: [id])
+
+  @@index([equipmentUnitId])
+  @@index([status])
+  @@index([scheduledDate])
+}
+
+model Inspection {
+  id              Int      @id @default(autoincrement())
+  equipmentUnitId Int
+
+  inspectionDate  DateTime
+  inspectionType  String   @db.VarChar(50) // 'pre_lease', 'post_lease', 'periodic', 'damage'
+
+  inspectorName   String   @db.VarChar(100)
+
+  // Condition Assessment
+  overallCondition String  @db.VarChar(20) // 'excellent', 'good', 'fair', 'poor'
+
+  findings        String   @db.Text
+  photos          String[] // Array of photo URLs
+
+  requiresRepair  Boolean  @default(false)
+  estimatedRepairCost Decimal? @db.Decimal(10,2)
+
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  // Relations
+  equipmentUnit   EquipmentUnit @relation(fields: [equipmentUnitId], references: [id])
+
+  @@index([equipmentUnitId])
+  @@index([inspectionDate])
+}
+
+// ============================================================================
+// AUDIT & SYSTEM
+// ============================================================================
+
+model AuditLog {
+  id              Int      @id @default(autoincrement())
+
+  tableName       String   @db.VarChar(100)
+  recordId        Int
+  action          String   @db.VarChar(20) // 'INSERT', 'UPDATE', 'DELETE'
+
+  oldValues       Json?
+  newValues       Json?
+
+  userId          String?  @db.VarChar(100)
+  userEmail       String?  @db.VarChar(255)
+  ipAddress       String?  @db.VarChar(50)
+
+  timestamp       DateTime @default(now())
+
+  @@index([tableName, recordId])
+  @@index([userId])
+  @@index([timestamp])
+}
+
+model SystemSetting {
+  id          Int      @id @default(autoincrement())
+
+  key         String   @unique @db.VarChar(100)
+  value       String   @db.Text
+  dataType    String   @db.VarChar(20) // 'string', 'number', 'boolean', 'json'
+
+  description String?  @db.Text
+
+  updatedBy   String?  @db.VarChar(100)
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+}
