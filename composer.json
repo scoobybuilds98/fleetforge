@@ -1,0 +1,28 @@
+{
+    "name": "fleetforge/fleetforge",
+    "description": "FleetForge — Truck & Trailer Rental Operations Platform",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2",
+        "mpdf/mpdf": "^8.2",
+        "aws/aws-sdk-php": "^3.300",
+        "ext-bcmath": "*",
+        "ext-mbstring": "*",
+        "ext-pdo": "*",
+        "ext-gd": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "FleetForge\\": "lib/"
+        },
+        "files": [
+            "includes/db.php",
+            "includes/functions.php"
+        ]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}
