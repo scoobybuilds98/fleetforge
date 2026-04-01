@@ -796,7 +796,7 @@ CREATE TABLE inspection_sections (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     inspection_id   INT UNSIGNED NOT NULL,
     section_name    VARCHAR(100) NOT NULL,
-    condition       ENUM('ok','fair','damaged','missing','na') NOT NULL DEFAULT 'ok',
+    `condition`     ENUM('ok','fair','damaged','missing','na') NOT NULL DEFAULT 'ok',
     notes           TEXT NULL,
     sort_order      TINYINT UNSIGNED NOT NULL DEFAULT 0,
     INDEX idx_inspection (inspection_id),
@@ -1253,7 +1253,7 @@ CREATE TABLE documents (
     uploaded_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at      DATETIME NULL,
     INDEX idx_entity (entity_type, entity_id),
-    INDEX idx_entity_created (entity_type, entity_id, created_at), -- [PASS-10:D7] entity timeline ORDER BY
+    INDEX idx_entity_created (entity_type, entity_id, uploaded_at), -- [PASS-10:D7] entity timeline ORDER BY — fixed: uploaded_at (not created_at)
     INDEX idx_expiry (expiration_date),
     FOREIGN KEY (parent_id) REFERENCES documents(id) ON DELETE SET NULL,
     FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
@@ -1409,7 +1409,7 @@ CREATE TABLE ai_summaries (
     is_current      TINYINT(1) NOT NULL DEFAULT 1,
     UNIQUE KEY uq_entity_type (entity_type, entity_id, summary_type),
     INDEX idx_entity (entity_type, entity_id),
-    INDEX idx_entity_created (entity_type, entity_id, created_at), -- [PASS-10:D7] entity timeline ORDER BY
+    INDEX idx_entity_created (entity_type, entity_id, generated_at), -- [PASS-10:D7] entity timeline ORDER BY — fixed: generated_at (not created_at)
     INDEX idx_expires (expires_at),
     FOREIGN KEY (generated_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -2077,7 +2077,7 @@ CREATE TABLE acc_collection_notes (
     outcome         ENUM('no_answer','left_message','spoke_with_customer',
                          'payment_promised','dispute','other') NOT NULL,
     follow_up_date  DATE NULL,
-    created_by      INT UNSIGNED NOT NULL,
+    created_by      INT UNSIGNED NULL,    -- NULL because FK is ON DELETE SET NULL — cannot be NOT NULL
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_customer (customer_id),
     INDEX idx_invoice (invoice_id),
@@ -2096,7 +2096,7 @@ CREATE TABLE acc_promise_to_pay (
     status              ENUM('pending','kept','broken','cancelled') NOT NULL DEFAULT 'pending',
     actual_payment_date DATE NULL,
     notes               TEXT NULL,
-    created_by          INT UNSIGNED NOT NULL,
+    created_by          INT UNSIGNED NULL,    -- NULL because FK is ON DELETE SET NULL — cannot be NOT NULL
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_customer (customer_id),
@@ -2136,7 +2136,7 @@ CREATE TABLE acc_bad_debt_writeoffs (
     recovered_amount            DECIMAL(15,2) NULL,
     recovered_date              DATE NULL,
     recovery_journal_entry_id  INT UNSIGNED NULL,
-    created_by                  INT UNSIGNED NOT NULL,
+    created_by                  INT UNSIGNED NULL,    -- NULL because FK is ON DELETE SET NULL — cannot be NOT NULL
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_customer (customer_id),
     INDEX idx_invoice (invoice_id),
@@ -2253,7 +2253,7 @@ CREATE TABLE acc_documents (
     uploaded_by     INT UNSIGNED NULL,
     uploaded_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_entity (entity_type, entity_id),
-    INDEX idx_entity_created (entity_type, entity_id, created_at), -- [PASS-10:D7] entity timeline ORDER BY
+    INDEX idx_entity_created (entity_type, entity_id, uploaded_at), -- [PASS-10:D7] entity timeline ORDER BY — fixed: uploaded_at (not created_at)
     FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

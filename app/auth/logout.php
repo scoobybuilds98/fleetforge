@@ -28,24 +28,16 @@ if ($cookieVal !== '') {
         [$userId, $plainToken] = $parts;
         $userId = (int) $userId;
 
-        if ($userId > 0 && $plainToken !== '') {
-            $storedHash = hash('sha256', $plainToken);
-
-            // Find and delete the matching token row
+        // Clear the remember_me token from the users row so the cookie
+        // cannot be replayed after logout (auth.php stores hash there)
+        if ($userId > 0) {
             try {
-                $row = db_row(
-                    "SELECT id FROM user_remember_tokens
-                     WHERE user_id = ? AND token_hash = ? AND expires_at > NOW()",
-                    [$userId, $storedHash]
+                db_execute(
+                    "UPDATE users SET remember_token = NULL WHERE id = ?",
+                    [$userId]
                 );
-                if ($row) {
-                    db_execute(
-                        "DELETE FROM user_remember_tokens WHERE id = ?",
-                        [$row['id']]
-                    );
-                }
             } catch (Throwable) {
-                // Table may not exist during early dev — silently skip
+                // DB unavailable — session destroy still proceeds
             }
         }
     }
@@ -62,6 +54,28 @@ if ($cookieVal !== '') {
             'samesite' => 'Lax',
         ]
     );
+}
+
+// ── Audit log ───────────────────────────────────────────────
+// Capture user info before the session is cleared
+try {
+    $__logoutUser = current_user();
+    if ($__logoutUser) {
+        db_insert('audit_log', [
+            'user_id'      => $__logoutUser['id'],
+            'user_name'    => $__logoutUser['name'],
+            'action'       => 'logout',
+            'module'       => 'auth',
+            'entity_type'  => 'user',
+            'entity_id'    => $__logoutUser['id'],
+            'entity_label' => $__logoutUser['email'],
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+        ]);
+    }
+    unset($__logoutUser);
+} catch (Throwable) {
+    // audit_log insert failure must never block logout
 }
 
 // ── Destroy the session ─────────────────────────────────────

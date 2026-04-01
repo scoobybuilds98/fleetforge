@@ -344,3 +344,38 @@ function bcround(string $val, int $scale = 2): string
     return bcsub(bcadd($val, $half, $scale + 1), '0', $scale);
 }
 }
+
+// ============================================================
+// CSRF HELPERS — S010 carry-over from S001 Known Issue #3
+// ============================================================
+
+// generate_csrf_token() — return the session CSRF token,
+// creating it if it does not yet exist.
+// Token is 64 hex characters (32 random bytes).
+// Session must already be started before calling this.
+if (!function_exists('generate_csrf_token')) {
+function generate_csrf_token(): string
+{
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+}
+
+// verify_csrf_token() — compare a submitted token against the
+// session token using constant-time comparison.
+// Returns false if: no session token, empty submitted token,
+// or mismatch.
+if (!function_exists('verify_csrf_token')) {
+function verify_csrf_token(?string $submitted): bool
+{
+    $sessionToken = $_SESSION['csrf_token'] ?? '';
+
+    if ($sessionToken === '' || $submitted === null || $submitted === '') {
+        return false;
+    }
+
+    return hash_equals($sessionToken, $submitted);
+}
+}

@@ -55,10 +55,7 @@ set_exception_handler(function (Throwable $e): void {
 //    Stored in session; injected into the page as a meta tag
 //    so app.js can read it and attach it to every API request.
 // ============================================================
-if (empty($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-$_csrfToken = $_SESSION['csrf_token'];
+$_csrfToken = generate_csrf_token();
 
 // ============================================================
 // 3. Page-level variables
@@ -100,6 +97,9 @@ $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
 </head>
 <body>
 
+<!-- Skip navigation — visually hidden, appears on keyboard focus (S025 / WCAG 2.4.1) -->
+<a href="#main-content" class="skip-nav">Skip to main content</a>
+
 <?php
 // ============================================================
 // 4. Layout shell — sidebar + main wrapper
@@ -117,7 +117,7 @@ $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
         <!-- ============================================================
              5. Page content area — footer.php closes this
              ============================================================ -->
-        <main class="page-content">
+        <main id="main-content" class="page-content">
 
 <?php
 // Clean up local variables so they don't leak into page scope

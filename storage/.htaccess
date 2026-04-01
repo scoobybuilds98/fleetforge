@@ -1,0 +1,23 @@
+# ============================================================
+# FleetForge — storage/.htaccess
+#
+# Blocks direct browser access to all files in this directory
+# tree. PHP execution is also disabled for safety.
+#
+# Files in storage/ are served only via StorageClient::url(),
+# which generates HMAC-signed URLs routed through a PHP handler
+# (local dev) or via pre-signed S3 URLs (production).
+# ============================================================
+
+# Deny all direct access
+Require all denied
+
+# Belt-and-suspenders: also disable PHP execution
+<FilesMatch "\.php$">
+    Require all denied
+</FilesMatch>
+
+# Prevent any script handler from running
+Options -ExecCGI
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8
+RemoveType application/x-httpd-php

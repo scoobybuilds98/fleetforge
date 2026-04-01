@@ -42,6 +42,7 @@
 | 0.5 | Pre-build | 15-Pass Audit | Comprehensive 15-pass audit integrated. 17 indexes added to schema. Portal security hardened. Invoice/lease state machines corrected. Billing edge cases resolved. CRA compliance gaps addressed. Infrastructure decisions locked (S3, SES, Cloudflare). StorageClient + Mailer added to Session 1 scope. SOFT_DELETE_TABLES expanded to 15. Financial record immutability rules defined. |
 | 0.7 | Pre-build | Final File Audit | All 7 project files reviewed. D11 resolved (invoice-time tax rates). D23 added (invite token = 7 days). D24 added (AWS SDK in composer.json is correct). Stale "93 tables" references in spec noted — SQL file (94) is authoritative. Session opening updated to include all 7 files. Ready for Session S001. |
 | S001 | 2026-04-01 | Foundation Layer | 20 files built and verified locally. Login renders with full design system. Health endpoint returns db:true. PHP 8.2 confirmed. Covers original plan sessions S005–S013 + router + CSS/JS + error pages + API bootstrap. 4 deviations logged (D25–D28). Lightsail/infrastructure (original S001–S004) deferred to production deployment. |
+| S002 | 2026-04-01 | Database Schema + Seed Data + Foundation Carry-overs | 94-table schema applied via PHP PDO runner (MySQL CLI blocked by caching_sha2_password). 7 schema bugs fixed. Seeds: 5 roles + 1 super_admin verified. CSRF functions + require_id() + require_input() added. storage/.htaccess + all subdirs created. Skip-nav added. Deep audit in same session found and fixed 4 bugs: (a) login.php query used wrong column names (role_slug/theme/is_active — all non-existent, login was completely broken), (b) CSRF failure returned 200 not 403, (c) header.php + login.php duplicated CSRF generation instead of calling generate_csrf_token(), (d) logout.php queried non-existent user_remember_tokens table, leaving remember_me token live after logout. All bugs fixed. Login, audit_log, CSRF, StorageClient, Mailer all verified. |
 
 ---
 
@@ -77,6 +78,7 @@
 | D26 | /auth/ route in router | `public/index.php` has an explicit `/auth/` route branch pointing to `app/auth/` — added BEFORE the admin catch-all. | Auth pages live at `app/auth/`, not `app/admin/auth/`. Without this, all auth URLs returned 404. |
 | D27 | Herd docroot + asset_url() | Laravel Herd auto-detects `public/` as the document root. `APP_URL` in `.env` is the origin only (`http://fleetforge.test`) — no `/fleetforge` suffix. `base_url()` now appends `FF_BASE_PATH` for app routes. New `asset_url()` function generates static asset URLs without the base path prefix so they resolve correctly under Herd. `FF_BASE_PATH = '/fleetforge'` remains locked (D7). | Herd's `try_files` resolves `/fleetforge/assets/css/app.css` to `public/fleetforge/assets/css/app.css` which does not exist. Assets must be served from the docroot directly. Production (Apache + Alias `/fleetforge` → `public/`) uses the same `APP_URL` origin-only pattern. |
 | D28 | .env editor warning | `.env` must be edited with VS Code, nano, or a plain-text editor ONLY. Never open with macOS TextEdit. | TextEdit silently replaces standard ASCII characters (quotes, hyphens, URLs) with Unicode "smart" equivalents that break PHP's env parser. Corrupts APP_URL and other values invisibly. |
+| D29 | Remember-me token storage | Token hash stored in `users.remember_token` column — NOT a separate `user_remember_tokens` table. `auth_login()`, `auth_logout()`, `auth_check_remember_me()` all use `users.remember_token`. logout.php clears it with `UPDATE users SET remember_token = NULL WHERE id = ?`. | Schema has `remember_token` column on users. A separate table was considered but rejected for simplicity. |
 
 ---
 
@@ -84,75 +86,67 @@
 
 | # | Session | Module | Issue | Status |
 |---|---------|--------|-------|--------|
-| 1 | S001 | Auth | `audit_log` inserts in login.php + logout.php are not yet written — table does not exist until DB schema is run in S002. Two ⬜ tasks remain in S013. | Carry to S002 — add after schema migration. |
+| 1 | S001 | Auth | `audit_log` inserts in login.php + logout.php are not yet written — table does not exist until DB schema is run in S002. Two ⬜ tasks remain in S013. | ✅ RESOLVED S002 — audit_log inserts added to both files. |
 | 2 | S001 | Functions | `clean_url()`, `format_mileage()`, and named ID generators (`generate_invoice_number()` etc.) not yet implemented. Tracked as ⬜ in S008/S009. Generic `generate_id()` + `generate_random_code()` are built and sufficient until specific wrappers are needed. | Carry to respective module sessions. |
-| 3 | S001 | Auth/CSRF | `generate_csrf_token()` and `verify_csrf_token()` standalone functions not written. CSRF is implemented inline in `api/bootstrap.php` (header check) and `login.php` (session token). No standalone callable yet. | Add to S002 as part of completing S010. |
+| 3 | S001 | Auth/CSRF | `generate_csrf_token()` and `verify_csrf_token()` standalone functions not written. CSRF is implemented inline in `api/bootstrap.php` (header check) and `login.php` (session token). No standalone callable yet. | ✅ RESOLVED S002 — both functions added to includes/functions.php with function_exists() guards. |
+| 4 | S002 | Auth — CRITICAL | login.php SELECT query used non-existent columns `role_slug`, `theme`, `is_active` (actual: need JOIN for role_slug, `theme_preference`, `status`). Login was completely broken — PDO fatal error on every POST. | ✅ FIXED S002 deep audit — query rewritten with JOIN user_roles, correct column names, status check fixed. |
+| 5 | S002 | Auth — Security | logout.php queried non-existent `user_remember_tokens` table (silently swallowed by try/catch), leaving `users.remember_token` hash live in DB after logout. Captured cookie could replay after logout. | ✅ FIXED S002 deep audit — logout.php now clears users.remember_token directly. |
+| 6 | S002 | Auth — Security | login.php CSRF failure returned HTTP 200 (just set $error variable). Spec requires 403. Also: both login.php and header.php duplicated CSRF generation inline instead of calling generate_csrf_token(). | ✅ FIXED S002 deep audit — login.php now calls verify_csrf_token() + http_response_code(403). Both files now call generate_csrf_token(). |
+| 7 | S002 | Schema | FULLTEXT index count: PROGRESS.md stop condition says "Must return 5 rows" but S027 test queries information_schema.STATISTICS which returns 1 row per indexed column (not per index). Actual distinct FULLTEXT indexes = 6 (customers, equipment_units, invoices, leases, vendors + acc_accounts). Count of 5 was undercount. | ✅ NOTED — 6 distinct FULLTEXT indexes, all correct. STATISTICS query returns 18 rows (multi-column indexes). Test condition was misleading. |
+| 8 | S001–S002 | All PHP files | **Comment retrofit needed.** Global commenting standard established after S002: every file needs (1) top-of-file `/** */` block with path, description, dependencies, defined symbols, spec refs; (2) inline WHY comments on security/business-logic/bcmath/FOR UPDATE; (3) docblocks on every function. Files built in S001/S002 predate this standard and have partial or no comments. | Schedule a dedicated comment-retrofit session before Phase 3 (or batch into early Phase 3 sessions as files are touched). **All files built from S003 onward must include full comments from the start.** |
 
 ---
 
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S002 — Remaining Foundation + Database Schema + Seed Data
+Session S003 — Seed Data (Remaining) + Dashboard Stub
 
 VERIFY BEFORE STARTING:
-  curl http://fleetforge.test/fleetforge/api/v1/health   → { "success":true, "data":{"db":true} }
-  Visit http://fleetforge.test/fleetforge/auth/login      → login page renders with full CSS
+  curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
+  Login at http://fleetforge.test/fleetforge/auth/login with admin@fleetforge.test / FleetForge2025!
+  → Must redirect to dashboard (404 is fine — just no PHP error)
 
 READ ALL OF THESE FILES FIRST — in this order:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, signatures, traps (read this first, every session)
   2. FLEETFORGE_PROGRESS.md               ← decisions + session assignment
-  3. FLEETFORGE_SPEC_FINAL.md             ← law — read sections relevant to this session
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← sole schema source (94 tables)
-  5. FLEETFORGE_DESIGN_DETAILS.md         ← exact CSS hex values + component specs (needed for sidebar/topbar)
-  6. FLEETFORGE_ACCOUNTING_SPEC.md        ← reference only — do not build accounting yet
+  3. FLEETFORGE_SPEC_FINAL.md             ← §8 Users/Roles + §7 Settings + §6 Yards + §5 Tax
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← sole schema source (94 tables) — reference only
+  5. FLEETFORGE_DESIGN_DETAILS.md         ← exact CSS hex values + component specs
 
 DECISIONS TO CARRY FORWARD:
   D5:  SOFT_DELETE_TABLES = 15 tables (includes payments)
   D7:  FF_BASE_PATH = '/fleetforge' — LOCKED. Do not change.
-  D9:  StorageClient — LOCAL + S3 drivers, same interface. STORAGE_DRIVER=local for now.
-  D10: Mailer — AWS SES SMTP. .env keys left blank for now.
+  D11: Tax rates looked up at invoice time — never frozen on lease.
   D17: PSR-4 — FleetForge\\ namespace → lib/
-  D25: function_exists() guards on all functions in functions.php + env() in config/app.php — KEEP THEM.
+  D25: function_exists() guards on all functions in functions.php + env() in config/app.php.
   D26: /auth/ route in public/index.php router — KEEP IT before the admin catch-all.
-  D27: APP_URL in .env = origin only (http://fleetforge.test). base_url() appends FF_BASE_PATH.
-       asset_url() is for static files — no base path prefix. KEEP BOTH FUNCTIONS.
+  D27: APP_URL in .env = origin only. base_url() appends FF_BASE_PATH. asset_url() has no prefix.
   D28: .env must be edited with VS Code or nano only — NEVER TextEdit.
 
-BUILD SCOPE (S002):
+BUILD SCOPE (S003):
 
-  PART A — Remaining Foundation Files (not yet built):
-    config/permissions.php     ← 5 roles × 14 modules permission matrix
-    config/navigation.php      ← sidebar nav items, single source of truth
-    includes/header.php        ← HTML head + set_exception_handler [PASS-8:2]
-    includes/sidebar.php       ← sidebar nav using config/navigation.php
-    includes/topbar.php        ← topbar: user name, theme toggle, notifications bell
-    includes/footer.php        ← closing tags + FF_ConfirmModal Alpine component
-    lib/Storage/StorageClient.php  ← LOCAL + S3 drivers [INFRA] *** CRITICAL ***
-    lib/Notifications/Mailer.php   ← AWS SES SMTP [INFRA] *** CRITICAL ***
-    .env.example               ← all keys documented (AWS/S3/SES vars included)
-    .gitignore                 ← .env, vendor/, storage/, logs/, cache/, *.sql
+  PART A — Remaining Seed Data (S028 carry-over):
+    database/seeds/003_permissions.sql  ← 70 rows: 5 roles × 14 modules from config/permissions.php
+    database/seeds/004_settings.sql     ← default settings (company name, currency, late fee defaults, etc.)
+    database/seeds/005_yard.sql         ← 1 default yard: "Surrey Yard" or similar
+    database/seeds/006_tax_rates.sql    ← BC GST 5%, BC PST 7%, Ontario HST 13%
 
-  PART B — Database Schema:
-    Run FLEETFORGE_DATABASE_MASTER.sql against local MySQL
-    Verify all 94 tables created: SHOW TABLES; → count = 94
-    Verify foreign keys: SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE ...
-
-  PART C — Seed Data:
-    database/seeds/001_roles.sql     ← 5 roles: super_admin, manager, dispatcher, accountant, viewer
-    database/seeds/002_super_admin.sql ← 1 active super_admin user (email: admin@fleetforge.test, temp password)
-    Verify: SELECT * FROM user_roles; → 5 rows
-    Verify: SELECT id, email, role_id, is_active FROM users; → 1 row
+  PART B — Dashboard Stub:
+    app/dashboard/index.php             ← authenticated page with header/footer
+    Must render without PHP errors for super_admin login
+    No real data needed — placeholders OK
 
 STOP CONDITIONS — ALL MUST PASS:
-  1. curl http://fleetforge.test/fleetforge/api/v1/health → db:true
-  2. mysql -u root -e "SHOW TABLES;" fleetforge | wc -l → 95 (94 tables + header row)
-  3. Login with admin@fleetforge.test credentials → redirects (even if dashboard 404s — just no PHP error)
-  4. Visit http://fleetforge.test/fleetforge/dashboard → header/sidebar render correctly (even if page is empty)
-  5. StorageClient::local()->put('test.txt', 'hello') → file appears in storage/uploads/
-  6. No PHP errors or warnings anywhere
+  1. SELECT COUNT(*) FROM user_permissions; → 70
+  2. SELECT COUNT(*) FROM settings; → > 0
+  3. SELECT COUNT(*) FROM yards; → 1
+  4. SELECT COUNT(*) FROM tax_rates; → 3 (or more)
+  5. Visit http://fleetforge.test/fleetforge/dashboard → page renders with sidebar + topbar (no PHP errors)
+  6. Sidebar: all 14 modules visible for super_admin
+  7. No PHP errors or warnings anywhere
 
-Do not write any code yet. Confirm you have read all files and summarize what S002 builds.
+Do not write any code yet. Confirm you have read all files and summarize what S003 builds.
 ```
 
 ---
@@ -655,21 +649,22 @@ Most are under 60 minutes.
 ### S001 — Lightsail Instance + Domain + HTTPS
 **One thing:** Server exists. Domain resolves. HTTPS works.
 **Verify before starting:** Nothing (first session)
+**STATUS: ❌ DEFERRED — Building locally first (D8). All tasks done at production launch.**
 
 | Task | Status |
 |------|--------|
-| Lightsail $20/mo instance created (Ubuntu 22.04) | ⬜ |
-| Static IP attached | ⬜ |
-| SSH firewall rule restricted to your IP only | ⬜ |
-| HTTP (80) + HTTPS (443) open to all | ⬜ |
-| Domain A record → static IP | ⬜ |
-| PHP 8.2 + apache2 + mysql-server installed | ⬜ |
-| All required PHP extensions installed | ⬜ |
-| PHP.ini configured (256M memory, 25M upload, UTC timezone) | ⬜ |
-| Apache virtual host: DocumentRoot → /var/www/fleetforge/public | ⬜ |
-| mod_rewrite + mod_headers enabled | ⬜ |
-| SSL certificate via Certbot | ⬜ |
-| Lightsail automated snapshots: ON, 7 daily | ⬜ |
+| Lightsail $20/mo instance created (Ubuntu 22.04) | ❌ |
+| Static IP attached | ❌ |
+| SSH firewall rule restricted to your IP only | ❌ |
+| HTTP (80) + HTTPS (443) open to all | ❌ |
+| Domain A record → static IP | ❌ |
+| PHP 8.2 + apache2 + mysql-server installed | ❌ |
+| All required PHP extensions installed | ❌ |
+| PHP.ini configured (256M memory, 25M upload, UTC timezone) | ❌ |
+| Apache virtual host: DocumentRoot → /var/www/fleetforge/public | ❌ |
+| mod_rewrite + mod_headers enabled | ❌ |
+| SSL certificate via Certbot | ❌ |
+| Lightsail automated snapshots: ON, 7 daily | ❌ |
 
 **Stop conditions — all must pass:**
 ```bash
@@ -683,14 +678,15 @@ mysql --version                            # 8.0.x
 ### S002 — MySQL: Database + User + Permissions
 **One thing:** Database exists. App user has correct privileges. Nothing more.
 **Verify before starting:** `curl -I https://yourdomain.com` → 200
+**STATUS: ❌ DEFERRED — Production server task. Locally using Homebrew MySQL (root / fleetforge123).**
 
 | Task | Status |
 |------|--------|
-| Database `fleetforge` created (utf8mb4, unicode_ci) | ⬜ |
-| User `fleetforge_user` created with strong password | ⬜ |
-| GRANT ALL on `fleetforge.*` to `fleetforge_user` | ⬜ |
-| MySQL root password secured | ⬜ |
-| `mysql_secure_installation` completed | ⬜ |
+| Database `fleetforge` created (utf8mb4, unicode_ci) | ❌ |
+| User `fleetforge_user` created with strong password | ❌ |
+| GRANT ALL on `fleetforge.*` to `fleetforge_user` | ❌ |
+| MySQL root password secured | ❌ |
+| `mysql_secure_installation` completed | ❌ |
 
 **Stop conditions:**
 ```bash
@@ -710,16 +706,16 @@ mysql -u fleetforge_user -p'PASSWORD' -e "SHOW GRANTS;" fleetforge
 | Task | Status |
 |------|--------|
 | GitHub private repo created | ⬜ |
-| Full folder structure per spec Section 3 | ⬜ |
-| `.env.example` — every key documented with description | ⬜ |
-| `.env` — filled in with real values | ⬜ |
-| `.gitignore` — .env, vendor, storage, logs, cache, *.sql with passwords | ⬜ |
-| `composer.json` — mPDF only (no other dependencies) | ⬜ |
-| `composer install --no-dev` | ⬜ |
-| `storage/.htaccess` — denies PHP execution, denies direct access | ⬜ |
-| All storage subdirectories created | ⬜ |
-| Correct file permissions set (www-data:www-data, storage 775) | ⬜ |
-| Initial commit pushed to GitHub | ⬜ |
+| Full folder structure per spec Section 3 | ✅ |
+| `.env.example` — every key documented with description | ✅ |
+| `.env` — filled in with real values | ✅ |
+| `.gitignore` — .env, vendor, storage, logs, cache, *.sql with passwords | ✅ |
+| `composer.json` — mpdf + aws-sdk-php (D24: AWS SDK intentional, spec note stale) | ✅ |
+| `composer install --no-dev` | ✅ |
+| `storage/.htaccess` — denies PHP execution, denies direct access | ✅ |
+| All storage subdirectories created | ✅ |
+| Correct file permissions set (www-data:www-data, storage 775) | ❌ |
+| Initial commit pushed to GitHub | ✅ |
 
 **Stop conditions:**
 ```bash
@@ -739,16 +735,16 @@ curl https://yourdomain.com/../.env       # 403 or 404
 
 | Task | Status |
 |------|--------|
-| `public/.htaccess` — route all requests to index.php | ⬜ |
-| Block direct access to .env, .git, composer files | ⬜ |
-| Block directory listing | ⬜ |
-| Content-Security-Policy header | ⬜ |
-| X-Content-Type-Options: nosniff | ⬜ |
-| X-Frame-Options: DENY | ⬜ |
-| X-XSS-Protection: 1; mode=block | ⬜ |
-| Referrer-Policy: strict-origin-when-cross-origin | ⬜ |
-| Strict-Transport-Security (HTTPS only) | ⬜ |
-| Permissions-Policy: camera=(), microphone=(), geolocation=(self) | ⬜ |
+| `public/.htaccess` — route all requests to index.php | ✅ |
+| Block direct access to .env, .git, composer files | ✅ |
+| Block directory listing | ✅ |
+| Content-Security-Policy header | ✅ |
+| X-Content-Type-Options: nosniff | ✅ |
+| X-Frame-Options: DENY | ✅ |
+| X-XSS-Protection: 1; mode=block | ✅ |
+| Referrer-Policy: strict-origin-when-cross-origin | ✅ |
+| Strict-Transport-Security (HTTPS only) | ✅ |
+| Permissions-Policy: camera=(), microphone=(), geolocation=(self) | ✅ |
 
 **Stop conditions:**
 ```bash
@@ -776,10 +772,10 @@ curl https://yourdomain.com/includes/db.php
 | FF_ASSET_VERSION constant | ✅ |
 | FF_ENV (production/development) | ✅ |
 | FF_DEBUG (false in production) | ✅ |
-| `config/permissions.php` — 5 roles × 14 modules matrix | ⬜ |
-| `config/navigation.php` — sidebar nav, single source of truth | ⬜ |
+| `config/permissions.php` — 5 roles × 14 modules matrix | ✅ |
+| `config/navigation.php` — sidebar nav, single source of truth | ✅ |
 | `cron/README.md` — all crontab entries documented | ⬜ |
-| Crontab installed on server | ⬜ |
+| Crontab installed on server | ❌ |
 
 **Stop conditions:**
 ```php
@@ -1034,13 +1030,13 @@ echo "ALL FORMAT + GENERATE TESTS PASSED\n";
 
 | Task | Status |
 |------|--------|
-| `generate_csrf_token()` — 64-char hex, stored in session | ⬜ |
-| `verify_csrf_token(token)` — constant-time comparison | ⬜ |
-| `verify_csrf_token()` returns false for wrong token | ⬜ |
-| `verify_csrf_token()` returns false for empty/null | ⬜ |
-| `verify_csrf_token()` returns false if no session | ⬜ |
+| `generate_csrf_token()` — 64-char hex, stored in session | ✅ |
+| `verify_csrf_token(token)` — constant-time comparison | ✅ |
+| `verify_csrf_token()` returns false for wrong token | ✅ |
+| `verify_csrf_token()` returns false for empty/null | ✅ |
+| `verify_csrf_token()` returns false if no session | ✅ |
 | API bootstrap: POST requests verify CSRF header | ✅ |
-| HTML forms: hidden CSRF field auto-included in header.php | ⬜ |
+| HTML forms: hidden CSRF field auto-included in header.php | ✅ |
 | `API.post()` in app.js: auto-sends CSRF token in X-CSRF-Token header | ✅ |
 
 **Stop conditions:**
@@ -1200,8 +1196,8 @@ Failures:
 | Generic error message always (never "wrong email" vs "wrong password") | ✅ |
 | Successful login: session_regenerate_id(true) | ✅ |
 | Successful login: $_SESSION['ff_user'] populated with permissions | ✅ |
-| Successful login: audit_log entry (action=login) | ⬜ |
-| Failed login: audit_log entry (action=login, notes=failed) | ⬜ |
+| Successful login: audit_log entry (action=login) | ✅ |
+| Failed login: audit_log entry (action=login, notes=failed) | ✅ |
 | "Remember me": separate 30-day secure cookie | ✅ |
 
 **Stop conditions:**
@@ -1242,13 +1238,13 @@ SESSION SECURITY:
 
 | Task | Status |
 |------|--------|
-| `app/auth/logout.php` | ⬜ |
-| Unsets all session variables | ⬜ |
-| Calls session_destroy() | ⬜ |
-| Deletes session cookie from browser | ⬜ |
-| Deletes "remember me" cookie if present | ⬜ |
+| `app/auth/logout.php` | ✅ |
+| Unsets all session variables | ✅ |
+| Calls session_destroy() | ✅ |
+| Deletes session cookie from browser | ✅ |
+| Deletes "remember me" cookie if present | ✅ |
 | Audit log entry: action=logout | ⬜ |
-| Redirects to login page | ⬜ |
+| Redirects to login page | ✅ |
 
 **Stop conditions:**
 ```
@@ -1266,16 +1262,16 @@ SESSION SECURITY:
 
 | Task | Status |
 |------|--------|
-| `app/auth/forgot_password.php` | ⬜ |
-| Token: bin2hex(random_bytes(32)) — 64 hex chars | ⬜ |
-| Token stored HASHED in DB (never plaintext) | ⬜ |
-| Expiry: 1 hour from generation | ⬜ |
-| Anti-enumeration: same response whether email exists or not | ⬜ |
-| `app/auth/reset_password.php` | ⬜ |
-| Token lookup: hash matches, not expired | ⬜ |
-| Token single-use: cleared immediately on use | ⬜ |
-| Password min 10 chars | ⬜ |
-| bcrypt cost 12 | ⬜ |
+| `app/auth/forgot_password.php` | ✅ |
+| Token: bin2hex(random_bytes(32)) — 64 hex chars | ✅ |
+| Token stored HASHED in DB (never plaintext) | ✅ |
+| Expiry: 1 hour from generation | ✅ |
+| Anti-enumeration: same response whether email exists or not | ✅ |
+| `app/auth/reset_password.php` | ✅ |
+| Token lookup: hash matches, not expired | ✅ |
+| Token single-use: cleared immediately on use | ✅ |
+| Password min 10 chars | ✅ |
+| bcrypt cost 12 | ✅ |
 | Audit log: password_reset action | ⬜ |
 
 **Stop conditions:**
@@ -1297,10 +1293,10 @@ SESSION SECURITY:
 
 | Task | Status |
 |------|--------|
-| `app/auth/accept_invite.php` | ⬜ |
-| Invite token validation (7-day expiry) | ⬜ |
-| Token single-use | ⬜ |
-| user.status: invited → active on accept | ⬜ |
+| `app/auth/accept_invite.php` | ✅ |
+| Invite token validation (7-day expiry) | ✅ |
+| Token single-use | ✅ |
+| user.status: invited → active on accept | ✅ |
 | Audit log: account activation | ⬜ |
 | (Admin invite creation is built in the Users module session) | ⬜ |
 
@@ -1321,16 +1317,16 @@ SESSION SECURITY:
 
 | Task | Status |
 |------|--------|
-| `api/bootstrap.php` | ⬜ |
-| `require_method(method)` — 405 if wrong HTTP method | ⬜ |
-| `require_auth_api()` — 401 JSON if no valid session | ⬜ |
-| `require_permission(module, action)` — 403 JSON | ⬜ |
-| `json_success(data, meta)` — correct envelope | ⬜ |
-| `json_error(code, message, status)` — correct envelope | ⬜ |
-| `require_id(param)` — 400 if missing, 400 if not positive integer | ⬜ |
-| `require_input(fields)` — 422 with per-field errors if missing | ⬜ |
-| All responses: Content-Type: application/json | ⬜ |
-| All responses: no PHP errors/warnings leak into JSON | ⬜ |
+| `api/bootstrap.php` | ✅ |
+| `require_method(method)` — 405 if wrong HTTP method | ✅ |
+| `require_auth_api()` — 401 JSON if no valid session | ✅ |
+| `require_permission(module, action)` — 403 JSON | ✅ |
+| `json_success(data, meta)` — correct envelope | ✅ |
+| `json_error(code, message, status)` — correct envelope | ✅ |
+| `require_id(param)` — 400 if missing, 400 if not positive integer | ✅ |
+| `require_input(fields)` — 422 with per-field errors if missing | ✅ |
+| All responses: Content-Type: application/json | ✅ |
+| All responses: no PHP errors/warnings leak into JSON | ✅ |
 
 **Stop conditions:**
 ```bash
@@ -1363,17 +1359,17 @@ curl -X POST /api/v1/leases/create.php -H "Content-Type: application/json"
 
 | Task | Status |
 |------|--------|
-| `public/index.php` — router | ⬜ |
-| /portal/* → portal app | ⬜ |
-| /api/* → api layer | ⬜ |
-| /* → admin app | ⬜ |
-| Maintenance mode: reads storage/maintenance.flag | ⬜ |
-| Maintenance mode: bypass for MAINTENANCE_BYPASS_IPS | ⬜ |
-| `app/errors/403.php` — branded, links to dashboard | ⬜ |
-| `app/errors/404.php` — branded, links back | ⬜ |
-| `app/errors/500.php` — no stack trace in production | ⬜ |
-| `app/errors/maintenance.php` — reads ETA from flag file | ⬜ |
-| `public/error.php` — unified error handler | ⬜ |
+| `public/index.php` — router | ✅ |
+| /portal/* → portal app | ✅ |
+| /api/* → api layer | ✅ |
+| /* → admin app | ✅ |
+| Maintenance mode: reads storage/maintenance.flag | ✅ |
+| Maintenance mode: bypass for MAINTENANCE_BYPASS_IPS | ✅ |
+| `app/errors/403.php` — branded, links to dashboard | ✅ |
+| `app/errors/404.php` — branded, links back | ✅ |
+| `app/errors/500.php` — no stack trace in production | ✅ |
+| `app/errors/maintenance.php` — reads ETA from flag file | ✅ |
+| `public/error.php` — unified error handler | ✅ |
 
 **Stop conditions:**
 ```bash
@@ -1404,18 +1400,18 @@ curl https://yourdomain.com
 
 | Task | Status |
 |------|--------|
-| `public/assets/css/app.css` — design tokens section | ⬜ |
-| All CSS custom properties under [data-theme="light"] | ⬜ |
-| All CSS custom properties under [data-theme="dark"] | ⬜ |
-| --bg-page, --bg-card, --bg-muted, --border-color | ⬜ |
-| --text-primary, --text-secondary, --text-muted | ⬜ |
-| Semantic colours (same both themes): success, warning, danger, accent | ⬜ |
-| DM Sans + DM Mono loaded via Google Fonts | ⬜ |
-| Typography scale: 11px → 20px | ⬜ |
-| Font weights: 400, 500, 600 only (never 700+) | ⬜ |
-| Layout: sidebar + main content, sidebar always dark | ⬜ |
-| 200ms transition on all colour properties | ⬜ |
-| Flash prevention script in header (reads localStorage before render) | ⬜ |
+| `public/assets/css/app.css` — design tokens section | ✅ |
+| All CSS custom properties under [data-theme="light"] | ✅ |
+| All CSS custom properties under [data-theme="dark"] | ✅ |
+| --bg-page, --bg-card, --bg-muted, --border-color | ✅ |
+| --text-primary, --text-secondary, --text-muted | ✅ |
+| Semantic colours (same both themes): success, warning, danger, accent | ✅ |
+| DM Sans + DM Mono loaded via Google Fonts | ✅ |
+| Typography scale: 11px → 20px | ✅ |
+| Font weights: 400, 500, 600 only (never 700+) | ✅ |
+| Layout: sidebar + main content, sidebar always dark | ✅ |
+| 200ms transition on all colour properties | ✅ |
+| Flash prevention script in header (reads localStorage before render) | ✅ |
 
 **Stop conditions (visual — use browser dev tools):**
 ```
@@ -1438,18 +1434,18 @@ Toggle dark/light:
 
 | Task | Status |
 |------|--------|
-| Buttons: 8 variants × 5 sizes | ⬜ |
-| Buttons: loading state (.btn-loading) | ⬜ |
-| Buttons: disabled state | ⬜ |
-| Badges/pills: all status colours | ⬜ |
-| Form inputs: input, select, textarea | ⬜ |
-| Form inputs: focus ring visible | ⬜ |
-| Form inputs: error state (red border, error message below) | ⬜ |
-| Form inputs: disabled state | ⬜ |
-| Cards: --bg-card, border, shadow | ⬜ |
-| KPI tiles: icon, value (DM Mono), label, clickable hover | ⬜ |
-| Toasts: 4 variants, positioned top-right | ⬜ |
-| Modal: overlay, content box, close button | ⬜ |
+| Buttons: 8 variants × 5 sizes | ✅ |
+| Buttons: loading state (.btn-loading) | ✅ |
+| Buttons: disabled state | ✅ |
+| Badges/pills: all status colours | ✅ |
+| Form inputs: input, select, textarea | ✅ |
+| Form inputs: focus ring visible | ✅ |
+| Form inputs: error state (red border, error message below) | ✅ |
+| Form inputs: disabled state | ✅ |
+| Cards: --bg-card, border, shadow | ✅ |
+| KPI tiles: icon, value (DM Mono), label, clickable hover | ✅ |
+| Toasts: 4 variants, positioned top-right | ✅ |
+| Modal: overlay, content box, close button | ✅ |
 
 **Stop conditions (visual):**
 ```
@@ -1470,19 +1466,19 @@ public/dev/components.php — delete after QA:
 
 | Task | Status |
 |------|--------|
-| Table: header, row, hover, selected row | ⬜ |
-| Table: currency columns right-aligned, DM Mono | ⬜ |
-| Table: status column centred with badge | ⬜ |
-| Table: actions column right-aligned | ⬜ |
-| Table: row cursor pointer | ⬜ |
-| Table: soft-deleted row muted (0.6 opacity) | ⬜ |
-| Skeleton: animated shimmer for rows | ⬜ |
-| Skeleton: animated shimmer for cards | ⬜ |
-| Empty state: centred icon + title + subtitle + action button | ⬜ |
-| Pagination: page buttons, current page, prev/next | ⬜ |
-| Per-page selector | ⬜ |
-| Tabs: active, hover, disabled | ⬜ |
-| Print @media: hide sidebar, topbar, buttons, pagination | ⬜ |
+| Table: header, row, hover, selected row | ✅ |
+| Table: currency columns right-aligned, DM Mono | ✅ |
+| Table: status column centred with badge | ✅ |
+| Table: actions column right-aligned | ✅ |
+| Table: row cursor pointer | ✅ |
+| Table: soft-deleted row muted (0.6 opacity) | ✅ |
+| Skeleton: animated shimmer for rows | ✅ |
+| Skeleton: animated shimmer for cards | ✅ |
+| Empty state: centred icon + title + subtitle + action button | ✅ |
+| Pagination: page buttons, current page, prev/next | ✅ |
+| Per-page selector | ✅ |
+| Tabs: active, hover, disabled | ✅ |
+| Print @media: hide sidebar, topbar, buttons, pagination | ✅ |
 
 **Stop conditions (visual):**
 ```
@@ -1502,18 +1498,18 @@ public/dev/components.php — delete after QA:
 
 | Task | Status |
 |------|--------|
-| `public/assets/js/app.js` — API client section | ⬜ |
-| `API.get(url, params)` — builds query string, calls fetch | ⬜ |
-| `API.post(url, data)` — JSON body, includes CSRF header | ⬜ |
-| Both methods: parse JSON response | ⬜ |
-| 200 success → return data | ⬜ |
-| 401 → redirect to login (preserve current URL in redirect param) | ⬜ |
-| 403 → Toast.error("You don't have permission to do that") | ⬜ |
-| 422 → return field errors object (let caller handle inline display) | ⬜ |
-| 500 → Toast.error("Something went wrong. Please try again.") | ⬜ |
-| Network error → Toast.warning("No internet connection") | ⬜ |
-| All requests: X-CSRF-Token header from meta tag | ⬜ |
-| Buttons triggering API calls: .btn-loading class while pending | ⬜ |
+| `public/assets/js/app.js` — API client section | ✅ |
+| `API.get(url, params)` — builds query string, calls fetch | ✅ |
+| `API.post(url, data)` — JSON body, includes CSRF header | ✅ |
+| Both methods: parse JSON response | ✅ |
+| 200 success → return data | ✅ |
+| 401 → redirect to login (preserve current URL in redirect param) | ✅ |
+| 403 → Toast.error("You don't have permission to do that") | ✅ |
+| 422 → return field errors object (let caller handle inline display) | ✅ |
+| 500 → Toast.error("Something went wrong. Please try again.") | ✅ |
+| Network error → Toast.warning("No internet connection") | ✅ |
+| All requests: X-CSRF-Token header from meta tag | ✅ |
+| Buttons triggering API calls: .btn-loading class while pending | ✅ |
 
 **Stop conditions:**
 ```javascript
@@ -1551,21 +1547,21 @@ API.post('/api/v1/customers/create.php', {})
 
 | Task | Status |
 |------|--------|
-| `Toast.success(msg, duration)` | ⬜ |
-| `Toast.error(msg)` | ⬜ |
-| `Toast.warning(msg)` | ⬜ |
-| `Toast.info(msg)` | ⬜ |
-| Toast: role="status" aria-live="polite" | ⬜ |
-| Toast: auto-dismiss after duration | ⬜ |
-| Toast: dismiss on click | ⬜ |
-| Toast: max 3 visible simultaneously (queue rest) | ⬜ |
-| `Modal.confirm(title, msg, onConfirm, onCancel)` | ⬜ |
-| Modal: focus trapped inside while open | ⬜ |
-| Modal: Escape key closes (fires onCancel) | ⬜ |
-| Modal: focus returns to trigger element on close | ⬜ |
-| Modal: overlay click closes (fires onCancel) | ⬜ |
-| `Theme.apply(theme)` — sets data-theme on html | ⬜ |
-| `Theme.toggle()` — switches + saves to localStorage + API call | ⬜ |
+| `Toast.success(msg, duration)` | ✅ |
+| `Toast.error(msg)` | ✅ |
+| `Toast.warning(msg)` | ✅ |
+| `Toast.info(msg)` | ✅ |
+| Toast: role="status" aria-live="polite" | ✅ |
+| Toast: auto-dismiss after duration | ✅ |
+| Toast: dismiss on click | ✅ |
+| Toast: max 3 visible simultaneously (queue rest) | ✅ |
+| `Modal.confirm(title, msg, onConfirm, onCancel)` | ✅ |
+| Modal: focus trapped inside while open | ✅ |
+| Modal: Escape key closes (fires onCancel) | ✅ |
+| Modal: focus returns to trigger element on close | ✅ |
+| Modal: overlay click closes (fires onCancel) | ✅ |
+| `Theme.apply(theme)` — sets data-theme on html | ✅ |
+| `Theme.toggle()` — switches + saves to localStorage + API call | ✅ |
 
 **Stop conditions:**
 ```javascript
@@ -1597,23 +1593,23 @@ Theme.toggle();
 
 | Task | Status |
 |------|--------|
-| `FF_Form.validateRequired(formEl)` | ⬜ |
-| FF_Form: marks invalid fields, returns false | ⬜ |
-| FF_Form: clears errors on re-submit | ⬜ |
-| `FF_Form.trackChanges(formEl)` | ⬜ |
-| FF_Form.trackChanges: captures original values on page load | ⬜ |
-| FF_Form.trackChanges: returns true only if values changed | ⬜ |
-| `beforeunload` warning when unsaved changes | ⬜ |
-| `FF_Table.initBulkSelect(tableEl)` | ⬜ |
-| Header checkbox: selects/deselects all visible rows | ⬜ |
-| Bulk bar: appears on selection with count | ⬜ |
-| Bulk bar: disappears when selection cleared | ⬜ |
-| `FF.currency(amount)` | ⬜ |
-| `FF.compact(amount)` | ⬜ |
-| `FF.date(value)` — uses FF_TIMEZONE | ⬜ |
-| `FF_Charts.create(id, type, opts)` | ⬜ |
-| `FF_Charts.destroy(id)` — prevents duplicate chart error | ⬜ |
-| `FF_Charts.updateTheme(isDark)` | ⬜ |
+| `FF_Form.validateRequired(formEl)` | ✅ |
+| FF_Form: marks invalid fields, returns false | ✅ |
+| FF_Form: clears errors on re-submit | ✅ |
+| `FF_Form.trackChanges(formEl)` | ✅ |
+| FF_Form.trackChanges: captures original values on page load | ✅ |
+| FF_Form.trackChanges: returns true only if values changed | ✅ |
+| `beforeunload` warning when unsaved changes | ✅ |
+| `FF_Table.initBulkSelect(tableEl)` | ✅ |
+| Header checkbox: selects/deselects all visible rows | ✅ |
+| Bulk bar: appears on selection with count | ✅ |
+| Bulk bar: disappears when selection cleared | ✅ |
+| `FF.currency(amount)` | ✅ |
+| `FF.compact(amount)` | ✅ |
+| `FF.date(value)` — uses FF_TIMEZONE | ✅ |
+| `FF_Charts.create(id, type, opts)` | ✅ |
+| `FF_Charts.destroy(id)` — prevents duplicate chart error | ✅ |
+| `FF_Charts.updateTheme(isDark)` | ✅ |
 
 **Stop conditions:**
 ```javascript
@@ -1650,15 +1646,15 @@ FF_Charts.create('test-chart', 'line', {
 
 | Task | Status |
 |------|--------|
-| `includes/header.php` — HTML head, fonts, CSS, theme script, FF_TIMEZONE global | ⬜ |
-| `includes/sidebar.php` — reads navigation.php, hides per can() | ⬜ |
-| Sidebar active state: detected from current URL path | ⬜ |
-| Sidebar badge slots: overdue invoices count, compliance alerts count | ⬜ |
-| Sidebar: ALWAYS dark regardless of page theme | ⬜ |
-| `includes/topbar.php` — search input, theme toggle, bell, user menu | ⬜ |
-| `includes/footer.php` — CDN scripts (Alpine.js, ApexCharts), app.js | ⬜ |
-| Keyboard shortcuts init | ⬜ |
-| Skip navigation link (visually hidden, visible on focus) | ⬜ |
+| `includes/header.php` — HTML head, fonts, CSS, theme script, FF_TIMEZONE global | ✅ |
+| `includes/sidebar.php` — reads navigation.php, hides per can() | ✅ |
+| Sidebar active state: detected from current URL path | ✅ |
+| Sidebar badge slots: overdue invoices count, compliance alerts count | ✅ |
+| Sidebar: ALWAYS dark regardless of page theme | ✅ |
+| `includes/topbar.php` — search input, theme toggle, bell, user menu | ✅ |
+| `includes/footer.php` — CDN scripts (Alpine.js, ApexCharts), app.js | ✅ |
+| Keyboard shortcuts init | ✅ |
+| Skip navigation link (visually hidden, visible on focus) | ✅ |
 
 **Stop conditions:**
 ```
@@ -1686,15 +1682,16 @@ All roles:
 ### S026 — Schema Creation: Groups 1–4 (Core Tables)
 **One thing:** First 40 core tables created with zero FK errors.
 *(Split from Group 5+ because financial tables have circular FKs requiring ALTER TABLE)*
+**STATUS: ✅ COMPLETED in S002 — full 94-table schema applied as single run.**
 
 | Task | Status |
 |------|--------|
-| Run schema groups 1–4 from FLEETFORGE_DATABASE_MASTER.sql | ⬜ |
-| Groups: user_roles, users, user_permissions, audit_log, tax_rates | ⬜ |
-| Groups: exchange_rates, customers, customer_*, equipment_*, yards | ⬜ |
-| Groups: rate_cards, vendors, leases, lease_*, reservations, reservation_units | ⬜ |
-| Groups: late_fee_rules, maintenance_*, inspections, equipment_status_log, yard_transfers | ⬜ |
-| Verify zero FK errors | ⬜ |
+| Run schema groups 1–4 from FLEETFORGE_DATABASE_MASTER.sql | ✅ |
+| Groups: user_roles, users, user_permissions, audit_log, tax_rates | ✅ |
+| Groups: exchange_rates, customers, customer_*, equipment_*, yards | ✅ |
+| Groups: rate_cards, vendors, leases, lease_*, reservations, reservation_units | ✅ |
+| Groups: late_fee_rules, maintenance_*, inspections, equipment_status_log, yard_transfers | ✅ |
+| Verify zero FK errors | ✅ |
 
 **Stop conditions:**
 ```sql
@@ -1710,17 +1707,18 @@ SHOW ENGINE INNODB STATUS\G
 
 ### S027 — Schema Creation: Groups 5–8 (Financial + Deferred FKs)
 **One thing:** Remaining 19 core tables created. All circular FKs resolved. Total 59 core tables + schema_migrations utility table.
+**STATUS: ✅ COMPLETED in S002 — full 94-table schema applied as single run.**
 
 | Task | Status |
 |------|--------|
-| Run schema groups 5–8 (invoices, payments, credit_notes, damage_claims, etc.) | ⬜ |
-| Deferred FKs are inline in master SQL — no separate file needed [PASS-1:C6] | ⬜ |
-| Run groups: documents, contracts, reports, notifications, AI, settings, portal | ⬜ |
-| Run schema_migrations utility table (end of master SQL) | ⬜ |
-| Verify all 59 core tables + 1 utility table (schema_migrations) exist | ⬜ |
-| Verify all 3 deferred FKs resolved | ⬜ |
-| Verify all FULLTEXT indexes exist | ⬜ |
-| Verify no FLOAT columns anywhere | ⬜ |
+| Run schema groups 5–8 (invoices, payments, credit_notes, damage_claims, etc.) | ✅ |
+| Deferred FKs are inline in master SQL — no separate file needed [PASS-1:C6] | ✅ |
+| Run groups: documents, contracts, reports, notifications, AI, settings, portal | ✅ |
+| Run schema_migrations utility table (end of master SQL) | ✅ |
+| Verify all 59 core tables + 1 utility table (schema_migrations) exist | ✅ |
+| Verify all 3 deferred FKs resolved | ✅ |
+| Verify all FULLTEXT indexes exist | ✅ |
+| Verify no FLOAT columns anywhere | ✅ |
 
 **Stop conditions:**
 ```sql
@@ -1756,15 +1754,16 @@ WHERE TABLE_SCHEMA='fleetforge' AND DATA_TYPE='float';
 
 ### S028 — Seeds + First Admin User
 **One thing:** All seed data correct. First admin user can log in.
+**STATUS: 🔄 PARTIAL — roles (001) + super_admin user (002) done in S002. Remaining seeds (002–005) are S003 scope.**
 
 | Task | Status |
 |------|--------|
-| Seed 001: 5 user roles | ⬜ |
+| Seed 001: 5 user roles | ✅ |
 | Seed 002: 70 permission rows (5 × 14) | ⬜ |
 | Seed 003: all default settings | ⬜ |
 | Seed 004: Surrey BC yard | ⬜ |
 | Seed 005: BC + Ontario + Alberta tax rates | ⬜ |
-| First super_admin user created (script or manual SQL) | ⬜ |
+| First super_admin user created (script or manual SQL) | ✅ |
 | Login verified in browser | ⬜ |
 
 **Stop conditions:**
@@ -1945,5 +1944,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: Post final file audit — all 7 files reviewed, D11/D23/D24 locked, 24 decisions total*
-*Next session: S001 — Foundation Layer (local build)*
+*Last updated: 2026-04-01 — S002 complete (deep audit). 94-table schema live. 5 roles + super_admin seeded. Login verified (4 critical bugs found and fixed in deep audit — login query, remember-me logout, CSRF 200→403, duplicated token generation). CSRF, audit_log, require_id/require_input, StorageClient, skip-nav all verified. 20/20 tests pass. 29 decisions total (D29 added). 7 known issues logged (3 resolved). Next: S003.*
+*Next session: S003 — Remaining Seed Data (permissions 70 rows, settings, yard, tax rates) + Dashboard Stub*

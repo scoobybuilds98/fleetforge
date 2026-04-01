@@ -5,7 +5,9 @@
 ---
 
 ## ⚠️ BUILD STRATEGY — READ THIS BEFORE EVERY SESSION
-
+Before listing what needs to be built, scan the actual files 
+on disk and identify what already exists vs what is missing.
+Only build what is missing.
 **We are building everything locally first. AWS Lightsail does not exist yet.**
 
 - All 150 sessions build and test on the local machine (Mac)

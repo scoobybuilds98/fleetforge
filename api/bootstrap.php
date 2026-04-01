@@ -272,3 +272,60 @@ function json_body(): array
 
     return $parsed;
 }
+
+// ============================================================
+// require_id() — assert a route parameter is a positive integer
+//
+// Call at the top of any endpoint that needs an :id segment.
+// Responds with 400 and exits if the value is missing or not
+// a positive integer.
+//
+//   $id = require_id($_GET['id'] ?? null);
+// ============================================================
+function require_id(mixed $val): int
+{
+    $id = clean_int($val);
+
+    if ($id === null || $id <= 0) {
+        json_error('Invalid or missing ID.', 400);
+        exit;
+    }
+
+    return $id;
+}
+
+// ============================================================
+// require_input() — validate required fields in the request body
+//
+// Accepts an array of field names (or name => label pairs).
+// Responds with 422 and a per-field errors object if any are
+// missing or empty. Never throws.
+//
+//   require_input(['name', 'email', 'role_id']);
+//   require_input(['customer_id' => 'Customer', 'start_date' => 'Start date']);
+// ============================================================
+function require_input(array $fields): void
+{
+    $body   = json_body();
+    $errors = [];
+
+    foreach ($fields as $key => $label) {
+        // If the array is sequential (numeric keys), key and label are the same
+        if (is_int($key)) {
+            $key   = $label;
+            $label = ucfirst(str_replace('_', ' ', (string) $label));
+        }
+
+        $val = $body[$key] ?? null;
+
+        if ($val === null || $val === '') {
+            $errors[$key] = $label . ' is required.';
+        }
+    }
+
+    if (!empty($errors)) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'errors' => $errors], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}

@@ -27,10 +27,7 @@ if (current_user_id()) {
 }
 
 // ── CSRF token (generate once per session) ──────────────────
-if (empty($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-$_csrfToken = $_SESSION['csrf_token'];
+$_csrfToken = generate_csrf_token();
 
 // ── Flash message from previous redirects ──────────────────
 // e.g. "Password reset successful — please log in."
@@ -45,7 +42,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $submittedToken = (string) ($_POST['csrf_token'] ?? '');
 
-    if (!hash_equals($_SESSION['csrf_token'] ?? '', $submittedToken)) {
+    if (!verify_csrf_token($submittedToken)) {
+        http_response_code(403);
         $error = 'Invalid request token. Please refresh the page and try again.';
 
     } else {
@@ -61,10 +59,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Password is required.';
         } else {
             $user = db_row(
-                "SELECT id, name, email, password_hash, role_slug, theme,
-                        login_attempts, locked_until, is_active
-                 FROM users
-                 WHERE email = ? AND deleted_at IS NULL",
+                "SELECT u.id, u.name, u.email, u.password_hash,
+                        u.role_id, r.slug AS role_slug,
+                        u.theme_preference, u.status,
+                        u.login_attempts, u.locked_until
+                 FROM users u
+                 JOIN user_roles r ON r.id = u.role_id
+                 WHERE u.email = ? AND u.deleted_at IS NULL",
                 [$email]
             );
 
@@ -88,9 +89,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $passwordHash = $user['password_hash'] ?? '$2y$12$invalid.hash.placeholder.00000000000000000000000000000000';
                 $passwordOk   = password_verify($password, $passwordHash);
 
-                if (!$user || !$user['is_active'] || !$passwordOk) {
+                $isActive = isset($user['status']) && $user['status'] === 'active';
+                if (!$user || !$isActive || !$passwordOk) {
                     // Bad credentials (or inactive account) — same error always
-                    if ($user && $user['is_active'] && !$passwordOk) {
+                    if ($user && $isActive && !$passwordOk) {
                         // Real user, wrong password — increment attempt counter
                         $attempts = (int) ($user['login_attempts'] ?? 0) + 1;
 
@@ -113,6 +115,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                    . $remaining . ' attempt' . ($remaining === 1 ? '' : 's')
                                    . ' remaining before lockout.';
                         }
+
+                        db_insert('audit_log', [
+                            'user_id'      => $user['id'],
+                            'user_name'    => $user['name'],
+                            'action'       => 'login',
+                            'module'       => 'auth',
+                            'entity_type'  => 'user',
+                            'entity_id'    => $user['id'],
+                            'entity_label' => $user['email'],
+                            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                            'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                            'notes'        => "Failed login attempt {$attempts}/5" . ($attempts >= 5 ? ' — account locked' : ''),
+                        ]);
                     } else {
                         // No real user or inactive — don't leak info
                         $error = 'Invalid email or password.';
@@ -122,10 +137,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // ── Successful login ────────────────────────────
                     db_execute(
                         "UPDATE users
-                         SET login_attempts = 0, locked_until = NULL
+                         SET login_attempts = 0, locked_until = NULL,
+                             last_login_at = NOW(), last_login_ip = ?
                          WHERE id = ?",
-                        [$user['id']]
+                        [$_SERVER['REMOTE_ADDR'] ?? '127.0.0.1', $user['id']]
                     );
+
+                    db_insert('audit_log', [
+                        'user_id'      => $user['id'],
+                        'user_name'    => $user['name'],
+                        'action'       => 'login',
+                        'module'       => 'auth',
+                        'entity_type'  => 'user',
+                        'entity_id'    => $user['id'],
+                        'entity_label' => $user['email'],
+                        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                        'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                    ]);
 
                     auth_login($user, $remember);
 

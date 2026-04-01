@@ -2164,3 +2164,24 @@ html.is-mac .non-mac-only { display: none; }
     .page-content { padding: 0; }
     .card { border: 1px solid #ccc; box-shadow: none; }
 }
+
+/* Skip navigation — WCAG 2.4.1 bypass blocks (S025) */
+.skip-nav {
+    position: absolute;
+    top: -100%;
+    left: 1rem;
+    z-index: 9999;
+    padding: 0.5rem 1rem;
+    background: var(--color-primary, #2563eb);
+    color: #fff;
+    border-radius: 0 0 0.375rem 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: top 0.15s ease;
+}
+.skip-nav:focus {
+    top: 0;
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}

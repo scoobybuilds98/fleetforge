@@ -531,5 +531,57 @@ INSERT INTO tax_rates (province, gst_rate, pst_rate, hst_rate, effective_from, i
 
 ---
 
+Before continuing, I want to establish a global commenting 
+standard for every file in this project.
+
+Every PHP file must have:
+
+1. A comment block at the very top (after <?php declare) that includes:
+   - File path relative to project root
+   - One-line description of what this file does
+   - Dependencies (what it requires/includes)
+   - Key functions or classes defined in this file
+   - Any important decisions or spec references (e.g. [D7], [PASS-8:1])
+
+Example format:
+/**
+ * config/app.php
+ *
+ * Application bootstrap — loaded by every entry point before anything else.
+ * Parses .env, defines all FF_* constants, configures PHP runtime settings,
+ * sets up session parameters, and loads Composer autoloader.
+ *
+ * Required by: public/index.php, api/bootstrap.php, all cron jobs
+ * Defines: FF_ROOT, FF_BASE_PATH, FF_VERSION, FF_ENV, FF_DEBUG, 
+ *          FF_DB_*, APP_URL, APP_TIMEZONE, env()
+ *
+ * Decisions: D7 (base path), D17 (PSR-4 autoload), D25 (function guards)
+ * Spec ref:  PASS-8:1 (FF_LOADED guard), PASS-8:7 (PHP ini settings)
+ */
+
+2. Inline comments on any non-obvious logic explaining WHY 
+   not just WHAT — especially for:
+   - Security decisions
+   - Business logic rules
+   - Edge cases
+   - bcmath usage
+   - FOR UPDATE queries
+   - State machine transitions
+
+3. Every function must have a docblock comment explaining:
+   - What it does
+   - Parameters and types
+   - Return value
+   - Any exceptions or edge cases
+
+Apply this standard to ALL files going forward — both files 
+being built in this session and any files you touch or modify.
+
+For existing files already built in S001, add this to the 
+known issues list to retrofit comments in a dedicated cleanup 
+session later.
+
+Confirm you understand this standard before continuing.
+
 *This file fills in the implementation details the spec describes conceptually.*
 *Add to project knowledge alongside FLEETFORGE_SPEC_FINAL.md.*
