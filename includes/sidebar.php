@@ -69,6 +69,12 @@ function sidebar_badge_count(string $key): int
                    OR insurance_expiry < CURDATE() + INTERVAL 30 DAY)",
                 []
             ),
+            // Open damage claims: reported + assessed + repair_ordered (not yet resolved/written_off)
+            'open_damage_claims' => db_count(
+                "SELECT COUNT(*) FROM damage_claims
+                 WHERE status IN ('reported','assessed','repair_ordered') AND deleted_at IS NULL",
+                []
+            ),
             default => 0,
         };
     } catch (Throwable) {

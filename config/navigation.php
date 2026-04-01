@@ -91,6 +91,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'Damage Claims',
+        'icon'   => 'exclamation-triangle',
+        'url'    => '/damage_claims',
+        'module' => 'maintenance',    // same permission group as maintenance (§12 matrix)
+        'badge'  => 'open_damage_claims',
+    ],
+    [
         'label'  => 'Compliance',
         'icon'   => 'shield-check',
         'url'    => '/compliance',
