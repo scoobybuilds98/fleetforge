@@ -45,6 +45,9 @@
 | S002 | 2026-04-01 | Database Schema + Seed Data + Foundation Carry-overs | 94-table schema applied via PHP PDO runner (MySQL CLI blocked by caching_sha2_password). 7 schema bugs fixed. Seeds: 5 roles + 1 super_admin verified. CSRF functions + require_id() + require_input() added. storage/.htaccess + all subdirs created. Skip-nav added. Deep audit in same session found and fixed 4 bugs: (a) login.php query used wrong column names (role_slug/theme/is_active — all non-existent, login was completely broken), (b) CSRF failure returned 200 not 403, (c) header.php + login.php duplicated CSRF generation instead of calling generate_csrf_token(), (d) logout.php queried non-existent user_remember_tokens table, leaving remember_me token live after logout. All bugs fixed. Login, audit_log, CSRF, StorageClient, Mailer all verified. |
 | S003 | 2026-04-01 | Remaining Seed Data + Dashboard Stub | Fixed Bug #9: settings_get() and generate_id() in functions.php used wrong column names (setting_key/setting_value/setting_group vs actual DB columns key/value/group_name — reserved words requiring backtick quoting). All 4 seed files created and applied: 003_permissions.sql (70 rows, 5×14 core modules, role_id resolved by slug JOIN), 004_settings.sql (42 default settings), 005_yard.sql (Surrey Yard), 006_tax_rates.sql (BC GST+PST, Ontario HST, Alberta GST). Dashboard stub at app/admin/dashboard/index.php — all 14 modules visible in sidebar, company name from settings_get() confirmed live. All 6 stop conditions passed. Fixed Bug #10: header.php + footer.php used base_url() for static assets (app.css, app.js, favicon) — produces /fleetforge/assets/... (404 under Herd). Corrected to asset_url() per D27. Dashboard confirmed fully styled after fix. |
 | S004 | 2026-04-01 | Dashboard KPIs + Charts API | 3 new API endpoints + dashboard page wired. api/v1/dashboard/kpis.php: 6 KPI tiles (active revenue, fleet utilization, overdue invoices, compliance alerts, open leases, today's pickups) with 5-min report_cache. api/v1/dashboard/charts.php: 8 ApexCharts datasets (revenue trend, fleet status donut, AR aging, top customers, leases trend, utilization trend, revenue by type, weekly heatmap) with 15-min cache, individual ?chart= param supported. api/v1/dashboard/activity_feed.php: 20 most recent audit_log events, noise-filtered, time_ago computed. app/admin/dashboard/index.php: all stubs replaced — Alpine.js FF_Dashboard() component fetches all 3 APIs in parallel on mount, ApexCharts rendered after data arrives, skeleton loaders + error states + empty states + drilldown links on every KPI tile. All stop conditions passed: kpis 200 ✅, charts 200 ✅, ?chart=fleet_status single ✅, ?chart=bogus 404 ✅, activity_feed 200 ✅, dashboard page 200 no PHP errors ✅. NOTE: session assignment in PROGRESS.md said S004=Customers — overridden by user instruction to build Dashboard KPIs first (matches spec Phase 3 order). Customers moved to S005. |
+| S005 | 2026-04-01 | Customers Module (API + Admin UI) + Global Design Fixes | 11 files built and verified. API: api/v1/customers/index.php (paginated list, FULLTEXT search, filters), api/v1/customers/show.php (single customer + tags + contacts), api/v1/customers/create.php (with tags + initial note + audit_log, 422 on duplicate), api/v1/customers/update.php (D19 optimistic lock on updated_at, wholesale tag replace, audit_log), api/v1/customers/delete.php (soft-delete, blocks with HAS_ACTIVE_LEASES). Notes: api/v1/customers/notes/index.php (pinned first), api/v1/customers/notes/create.php. Admin UI: index.php (4 KPI tiles + filter bar + data table + pagination, Alpine.js), create.php (7-section form: Identity/Address/Regulatory/Billing Contact/Commercial/Tags/Notes), edit.php (pre-populated with server-side PHP, D19 optimistic lock, tags wholesale replace), show.php (4 quick-stat tiles, 4 tabs: Overview/Notes/Leases stub/Invoices stub, inline note add). Router note: file-based router requires /customers/show?id=1 URL pattern (not /customers/1 — no dynamic segment support). All stop conditions passed: list 200 ✅, create 201 ✅, show 200 ✅, update 200 ✅, stale 409 ✅, soft-delete 200 ✅, list page 200 ✅, create page 200 ✅, no PHP errors ✅. CLOSE-OUT FIXES (same session, second pass): (a) All 4 customer admin UI pages fully rewritten — original versions used ~60 invented CSS class names not present in app.css (Bugs #12); now use only confirmed classes. (b) Created all 32 Heroicons SVG files in public/assets/icons/ — directory was empty, causing theme toggle and sidebar to render as invisible spans (Bug #13). (c) app/admin/dashboard/index.php fixed: FF_API→FF_Api (3×, was ReferenceError silently killing all API fetches), empty-state-primary→empty-state-title and empty-state-secondary→empty-state-text (Bug #14). (d) public/assets/css/app.css: added Section 20 "Dashboard & Page-Specific Components" — 14 new classes: .stat-card--link, .stat-card--danger, .stat-card--warning, .stat-card--error, .stat-skeleton, .chart-skeleton, .grid-2-1, .activity-feed, .activity-item, .activity-dot, .activity-dot--{module}, .activity-body, .activity-desc, .activity-meta, .p-4, .text-muted, .link. Decisions D32–D33 added. All pages and dashboard verified: HTTP 200, no PHP errors, correct JS in rendered output. |
+| S007 | 2026-04-01 | Leases Module (API + Admin UI) | 11 files built and all 9 stop conditions passed. API (7): index (paginated, FULLTEXT search, status/customer/unit filters, created_at DESC), show (full lease + status_log, Trap 7 strips file paths), create (FOR UPDATE D20 on unit: checks status=available, snapshots customer+unit+template at creation, tax rates frozen from customer record D11, contract_number CN-XXXXXX-YYYY auto-generated), update (D19 optimistic lock, metadata-only — rates excluded require amendment), delete (soft-delete, blocks active leases with LEASE_NOT_ACTIVE), activate (FOR UPDATE D20: pending→active, unit→on_lease, next_billing_date set for monthly cycle, equipment_status_log + lease_status_log written), close (FOR UPDATE D20: active→completed, unit→available, actual_return_date + mileage_at_end captured, all logs written). Admin UI (4): leases/index.php (3-tab interface: Active+Pending / Closed / All, inline tab styles per D32, search + status filters), leases/show.php (server-side hero render with status badge, Activate/Close action buttons per status, Close modal with return date + mileage, 3 tabs: Overview / Status Log / Amendments stub), leases/create.php (customer dropdown auto-fills currency/billing cycle/tax exemptions, unit dropdown auto-fills template rates, 6 sections: Customer+Unit / Dates / Rates / Discounts+Addons / Tax / Notes), leases/edit.php (server pre-populated, D19 lock, rates read-only — require amendment, editable: dates/po/mileage/addons/notes). Bug fixed during stop-condition testing: equipment_units has no mileage_unit column (removed from queries). Audit_log schema mismatch: action ENUM values 'created'/'updated'/'deleted'/'status_changed' → corrected to 'create'/'update'/'delete'/'status_change'/'lease_closed'; description/entity_label/user_name columns also corrected. All 9 stop conditions passed: GET /leases ✅ 200 paginated, POST /leases/create ✅ 201 id+contract_number returned unit FOR UPDATE, GET /leases/show?id=N ✅ 200 with status_log, POST /leases/activate ✅ 200 pending→active unit→on_lease, POST /leases/create on on_lease unit ✅ 409 UNIT_UNAVAILABLE, POST /leases/close ✅ 200 active→completed unit→available, POST /leases/update stale ✅ 409 STALE_DATA, /leases page ✅ 200 no PHP errors, /leases/create page ✅ 200 no PHP errors. |
+| S006 | 2026-04-01 | Equipment Module (Templates + Units API + Admin UI) | 16 files built and all 9 stop conditions passed. API Templates (5): index (paginated, category filter, unit_count via LEFT JOIN), show (full field set), create (auto-slug de-dup, audit_log), update (D19 optimistic lock), delete (HAS_ACTIVE_UNITS block when unit_count > 0). API Units (5): index (FULLTEXT search, status/template/yard filters, unit_number ASC default sort per spec), show (full field set, Trap 7 — file paths stripped), create (transaction: unit + equipment_status_log "none→available" entry + audit_log), update (D19 optimistic lock, metadata-only — status changes deferred to dedicated endpoint), delete (LEASE_NOT_ACTIVE block when status=on_lease). Admin UI (6): equipment/index.php (4 KPI tiles: available/on_lease/maintenance/total, drilldown filter banner, status+template+search filters, health score + compliance warning columns, statusBadgeClass() maps all 6 statuses per design §9), equipment/show.php (server-side hero render, 6-tab Alpine component: Overview/Compliance/Lease History stub/Status Log/Maintenance stub/Documents stub, compliance expiry countdown with day calculation), equipment/create.php (server-loaded templates for dropdown, onTemplateChange() pre-fills defaults, 5 sections: Identity/Location+GPS/Physical/Compliance/Notes), equipment/edit.php (server pre-populated, D19 lock on submit, status field excluded — requires dedicated endpoint), equipment/templates/index.php (category filter, unit_count drilldown link, delete disabled when unit_count > 0), equipment/templates/create.php (all default fields incl. rates + compliance intervals). CSS: added .badge-purple per design §9 (reserved status). dirname depth: app/admin/equipment/templates/ uses dirname(__DIR__, 4). All stop conditions: GET units ✅, create 201 ✅, show correct ✅, update 200 ✅, stale 409 STALE_DATA ✅, soft-delete 200 ✅, list page 200 ✅, create page 200 ✅, all 6 pages zero PHP errors ✅. |
 
 ---
 
@@ -83,6 +86,8 @@
 | D29 | Remember-me token storage | Token hash stored in `users.remember_token` column — NOT a separate `user_remember_tokens` table. `auth_login()`, `auth_logout()`, `auth_check_remember_me()` all use `users.remember_token`. logout.php clears it with `UPDATE users SET remember_token = NULL WHERE id = ?`. | Schema has `remember_token` column on users. A separate table was considered but rejected for simplicity. |
 | D30 | Static asset URLs — always asset_url() | Every static asset reference (CSS, JS, favicon, images, icons) in any PHP file MUST use `asset_url()`, never `base_url()`. `base_url()` prepends FF_BASE_PATH (/fleetforge) → produces /fleetforge/assets/... → 404 under Herd (and in production under Apache Alias). `asset_url()` outputs origin-only URLs that resolve correctly in both environments. Rule: if it's in `public/assets/`, use `asset_url()`. If it's an app route (page link, form action, API call), use `base_url()`. | header.php + footer.php shipped with base_url() for assets in S001 — dashboard rendered with no styling until caught in S003. |
 | D31 | Session compression — dashboard delivered in one pass | Build sessions S004 covered all of the original plan's S029 (KPI backend), S030 (KPI UI + drilldowns), and the planned-but-not-detailed S031+ dashboard chart sessions (all 8 ApexCharts + activity feed). This is a session compression decision — the original ~3 sessions were merged into one because the work was tightly coupled (chart API + chart rendering + dashboard page are useless without each other). Session numbering: our build S001–S004 maps to original-plan S005–S028 (foundation) + S029–S030+ (dashboard). Customers originally queued at our S004 is now S005. | All dashboard data (KPIs, 8 charts, activity feed) is fetched in a single parallel burst on page load — separating backend from frontend would have required re-touching the same files twice. |
+| D32 | CSS class hygiene — only use confirmed classes | Every HTML class used in any PHP template MUST exist in public/assets/css/app.css. Invented class names produce silent layout breakage — pages render but look completely wrong. Before writing any new template, grep app.css to confirm each class exists. Do not invent classes; extend app.css with a new named section if a new component is genuinely needed. | S005 customer UI pages shipped with ~60 non-existent CSS classes. Silent breakage not caught until user visual review. |
+| D33 | Heroicon SVG files must be pre-created | public/assets/icons/ must contain an SVG file for every icon name passed to heroicon(). The function returns an invisible span placeholder when the file is missing — no error, no warning. All icons referenced in config/navigation.php and all theme-toggle icons (sun, moon) must exist as files. When adding a new icon to navigation, create the SVG file in the same session. | Theme toggle and sidebar icons were invisible for multiple sessions because public/assets/icons/ was empty. |
 
 ---
 
@@ -101,77 +106,107 @@
 | 9 | S003 | Functions | `settings_get()` and `generate_id()` in `includes/functions.php` used wrong column names (`setting_key`, `setting_value`, `setting_group`) against a DB whose actual columns are `key`, `value`, `group_name` (reserved SQL words, backtick-quoted). Both functions were silently catching PDOException and returning defaults, masking the bug entirely. `generate_id()` also used `db_insert()` which doesn't add backticks — fixed to use raw `db_execute()` with explicit backticks for the INSERT. | ✅ FIXED S003 — both functions corrected. Seeded settings now readable. generate_id() atomic counter now works correctly. |
 | 10 | S001 | Layout — D27 violation | `includes/header.php` used `base_url('assets/css/app.css')` and `base_url('assets/icons/favicon.svg')`. `includes/footer.php` used `base_url('assets/js/app.js')`. All three generated `/fleetforge/assets/...` URLs → 404 under Herd. Dashboard and every admin page shipped with zero CSS/JS styling from S001 onward. Masked because login page (standalone, no header.php) worked fine. | ✅ FIXED S003 — all three changed to `asset_url()`. Decision D30 added. All future files must follow D30. |
 | 11 | S004 | Dashboard — KPI field names differ from original S029 contract | Original contract (S029 in session map) named fields `fleet_utilization_pct`, `open_leases_count`, `overdue_invoices_count`, `overdue_invoices_amount`, `compliance_alerts_count`, `todays_pickups_count`. Implemented names are `fleet_utilization`, `on_lease_count`, `total_active_units`, `overdue_invoices: {count, total}`, `compliance_alerts`, `open_leases`, `todays_pickups`. The implemented shape is richer (nested overdue object, separate on_lease + total counts for utilization display). No consumers exist yet beyond the dashboard page itself. | Carry-forward: if a future session builds a separate KPI widget or external consumer, be aware of the actual field names. Not a bug — the dashboard page uses the actual field names correctly. |
+| 12 | S005 | Customer Admin UI — all 4 pages shipped with ~60 invented CSS class names | app/admin/customers/index.php, create.php, edit.php, show.php were written using class names that do not exist in app.css: form-input, filter-bar, data-table, badge-secondary, badge-xs, tab-nav, detail-list, note-card, stat-grid--4, form-grid, form-group--full, page-header-back, page-header-meta, and many more. Pages rendered but all layout/badge/table/form styles were completely broken. Silent failure — no PHP errors, no browser console errors. | ✅ FIXED S005 close-out — all 4 pages fully rewritten using only confirmed CSS classes. Verified HTTP 200 + no PHP errors. Decision D32 added to prevent recurrence. |
+| 13 | S005 | public/assets/icons/ was empty — no SVG files existed | heroicon() reads SVGs from public/assets/icons/{name}.svg. The directory existed but contained zero files. Every heroicon() call returned `<span aria-hidden="true" class="icon-missing">` — invisible placeholder. Theme toggle button had no sun/moon icons (invisible), sidebar had no nav icons, topbar had no bell/search icons. Persisted from S001 through S005 without detection. | ✅ FIXED S005 close-out — 32 Heroicons v2 outline SVG files created in public/assets/icons/. All icons verified non-empty. Theme toggle and sidebar icons confirmed rendering. Decision D33 added. |
+| 14 | S005 | dashboard/index.php — FF_API typo + non-existent empty-state class names | `FF_API.get(...)` used on 3 lines (fetchKpis, fetchCharts, fetchActivity). Object is `window.FF_Api` (mixed case). Caused `ReferenceError: FF_API is not defined` in browser console on every dashboard load — silently killed all 3 API fetches (no KPI data, no charts, no activity). Also: `empty-state-primary` and `empty-state-secondary` used throughout (correct classes: `empty-state-title` and `empty-state-text`). Additionally, dashboard used 14 CSS classes not present in app.css: stat-card--link, stat-card--danger, stat-card--warning, stat-card--error, stat-skeleton, chart-skeleton, grid-2-1, activity-feed, activity-item, activity-dot, activity-body, activity-desc, activity-meta, p-4, text-muted, link. | ✅ FIXED S005 close-out — FF_API→FF_Api (3×), empty-state class names corrected (4× each). All 14 missing CSS classes added to app.css Section 20. Dashboard verified: HTTP 200, correct FF_Api calls in rendered HTML. |
 
 ---
 
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S005 — Customers Module (API + Admin UI)
+Session S008 — Invoices Module (API + Admin UI)
 
-✅ S004 COMPLETE — all stop conditions passed:
-  GET api/v1/dashboard/kpis → 200, 6 KPI fields, cached in report_cache
-  GET api/v1/dashboard/charts → 200, 8 chart datasets returned
-  GET api/v1/dashboard/charts?chart=fleet_status → 200, single chart
-  GET api/v1/dashboard/charts?chart=bogus → 404 NOT_FOUND
-  GET api/v1/dashboard/activity_feed → 200, items array
-  Dashboard page → 200, no PHP errors, FF_Dashboard() + ApexCharts wired
+✅ S007 COMPLETE — all stop conditions passed:
+  GET api/v1/leases → 200 paginated ✅
+  POST api/v1/leases/create → 201 id + contract_number (CN-XXXXXX-YYYY), FOR UPDATE on unit ✅
+  GET api/v1/leases/show?id=N → 200 full lease + status_log ✅
+  POST api/v1/leases/activate → 200 pending→active, unit→on_lease ✅
+  POST api/v1/leases/create on on_lease unit → 409 UNIT_UNAVAILABLE ✅
+  POST api/v1/leases/close → 200 active→completed, unit→available ✅
+  POST api/v1/leases/update stale updated_at → 409 STALE_DATA ✅
+  /fleetforge/leases → 200 no PHP errors ✅
+  /fleetforge/leases/create → 200 no PHP errors ✅
+  /fleetforge/leases/show?id=N → 200 no PHP errors ✅
+  /fleetforge/leases/edit?id=N → 200 no PHP errors ✅
+
+S007 NOTES FOR S008:
+  - Invoice generation is STUBBED in activate.php and close.php (TODO comments).
+    Invoice 1 on activate + final invoice on close must be wired in S008 once
+    InvoiceGenerator is built.
+  - Lease amendments tab is STUB — shows "coming soon". Build in a future session.
+  - audit_log schema uses: action ENUM ('create','update','delete','status_change',
+    'lease_closed','cron',...), user_name VARCHAR, entity_label VARCHAR, notes TEXT.
+    NOT: 'created'/'updated'/'deleted'/'description'. Confirmed from DB schema.
+  - equipment_units has NO mileage_unit column. mileage_unit lives on customers/leases/templates.
+  - Tab UI in all admin pages: no tab CSS classes exist — use inline styles per customers/show.php pattern.
+  - current_user()['name'] is the correct field (not 'full_name', not 'email').
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
   Login: admin@fleetforge.test / FleetForge2025!
-  curl -b <cookie> http://fleetforge.test/fleetforge/api/v1/dashboard/kpis → 200
+  curl -b <cookie> "http://fleetforge.test/fleetforge/api/v1/leases?per_page=1" → 200 paginated
 
 READ ALL OF THESE FILES FIRST — in this order:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, signatures, traps (read first, every session)
   2. FLEETFORGE_PROGRESS.md               ← decisions + session assignment
-  3. FLEETFORGE_SPEC_FINAL.md             ← §7.2 Customers (full section)
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← customers, customer_notes, customer_tags, customer_contacts
-  5. FLEETFORGE_DESIGN_DETAILS.md         ← table/list component, form layout, badge styles
+  3. FLEETFORGE_SPEC_FINAL.md             ← §7.7 Invoices Module + §12 billing formulas (full)
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← invoices, invoice_line_items, invoice_status_log
+  5. FLEETFORGE_DESIGN_DETAILS.md         ← invoice status badges, form layout
+  6. FLEETFORGE_ACCOUNTING_SPEC.md        ← invoice numbering, line items, PDF generation
 
-DECISIONS TO CARRY FORWARD:
-  D5:  SOFT_DELETE_TABLES = 15 (customers is one of them — always AND deleted_at IS NULL)
+DECISIONS TO CARRY FORWARD (all previous + new S007):
+  D5:  SOFT_DELETE_TABLES — invoices in the list
   D7:  FF_BASE_PATH = '/fleetforge' — LOCKED.
-  D11: Tax rates looked up at invoice time.
-  D16: bcmath only for monetary fields (outstanding_balance, credit_limit).
-  D17: PSR-4 — FleetForge\\ namespace → lib/
-  D19: Optimistic lock on all customer UPDATE endpoints (check updated_at).
-  D25: function_exists() guards in functions.php.
-  D26: /auth/ route in router — keep before admin catch-all.
-  D27: APP_URL origin-only. base_url() for app routes. asset_url() for static assets.
-  D30: Static assets (CSS/JS/images/icons) → ALWAYS asset_url(). NEVER base_url(). No exceptions.
-  Settings columns: `key` and `value` (backtick-quoted reserved words) — Bug #9 fixed in S003.
-  Admin pages live at app/admin/{module}/. dirname depth = 3 from app/admin/{module}/ to project root.
-  API endpoints live at api/v1/{module}/. dirname depth = 3 from api/v1/{module}/ to project root.
+  D11: Tax rates looked up at invoice creation time — NEVER frozen at lease time for invoice
+  D12: Sent invoices are frozen — financial fields immutable after status leaves 'draft'
+  D14: Day counting inclusive: (end - start) + 1
+  D15: Invoice numbers strictly sequential, gap-free — atomic counter in settings
+  D16: bcmath only for all monetary fields
+  D19: Optimistic lock on all UPDATE endpoints
+  D20: FOR UPDATE row lock on payment allocation, credit application
+  D22: Granular tax: gst_exempt + pst_exempt independent booleans (frozen from lease)
+  D27/D30: asset_url() for assets, base_url() for routes
+  D32: Only use CSS classes that exist in app.css (no tab-bar/tab-btn — use inline styles)
+  D33: heroicon() requires SVG file in public/assets/icons/
+  Router: query string IDs always (/invoices/show?id=1)
+  Trap 7: never return pdf_path or file paths in API output
+  audit_log: action ENUM values are 'create','update','delete','status_change','lease_closed'
+  current_user()['name'] — correct field (not full_name or email)
+  equipment_units has NO mileage_unit column
+  dirname depth: api/v1/invoices/ → dirname(__DIR__, 3); app/admin/invoices/ → dirname(__DIR__, 3)
 
-BUILD SCOPE (S005):
+BUILD SCOPE (S008):
   API endpoints:
-    api/v1/customers/index.php        ← GET list (paginated, filtered, sorted)
-    api/v1/customers/show.php         ← GET single customer
-    api/v1/customers/create.php       ← POST create
-    api/v1/customers/update.php       ← POST update (optimistic lock)
-    api/v1/customers/delete.php       ← POST soft-delete (blocks if HAS_ACTIVE_LEASES)
-    api/v1/customers/notes/index.php  ← GET notes list
-    api/v1/customers/notes/create.php ← POST add note
+    api/v1/invoices/index.php    ← GET list (paginated, filters: status, customer_id, lease_id)
+    api/v1/invoices/show.php     ← GET single invoice + line items
+    api/v1/invoices/create.php   ← POST manual creation (ProRateCalculator for line items)
+    api/v1/invoices/update.php   ← POST update draft (D19 lock, blocks if sent)
+    api/v1/invoices/delete.php   ← POST soft-delete (draft only)
+    api/v1/invoices/send.php     ← POST draft→sent (freezes financial fields)
+    api/v1/invoices/void.php     ← POST → void status
+
+  lib/Billing/ProRateCalculator.php  ← Pure math class, no DB
+  lib/Billing/TaxCalculator.php      ← Pure math + 1 DB read for tax rate
+  lib/Billing/InvoiceGenerator.php   ← DB write class, calls ProRateCalculator + TaxCalculator
 
   Admin UI:
-    app/admin/customers/index.php   ← list page (table + filters + pagination)
-    app/admin/customers/show.php    ← detail page (tabs: overview, notes, leases, invoices)
-    app/admin/customers/create.php  ← new customer form
-    app/admin/customers/edit.php    ← edit customer form
+    app/admin/invoices/index.php  ← list with AR aging tiles
+    app/admin/invoices/show.php   ← invoice detail + line items + status actions
+    app/admin/invoices/create.php ← new invoice form
 
-STOP CONDITIONS:
-  1. GET api/v1/customers → 200 JSON paginated (empty array OK)
-  2. POST api/v1/customers/create → creates customer, returns 201 with id
-  3. GET api/v1/customers/show?id={id} → returns correct customer record
-  4. POST api/v1/customers/update → updates customer, returns 200
-  5. POST api/v1/customers/update with stale updated_at → 409 STALE_DATA
-  6. POST api/v1/customers/delete → soft-deletes (deleted_at set, not hard delete)
-  7. Visit /fleetforge/customers → list page renders (empty state OK)
-  8. Visit /fleetforge/customers/create → form renders without PHP errors
-  9. No PHP errors or warnings anywhere
+STOP CONDITIONS (S008):
+  1. GET api/v1/invoices → 200 paginated
+  2. POST api/v1/invoices/create → 201, invoice_number generated sequentially (INV-2026-00001)
+  3. GET api/v1/invoices/show?id=N → 200, line items included, pdf_path stripped (Trap 7)
+  4. POST api/v1/invoices/send → 200, status draft→sent, financial fields frozen
+  5. POST api/v1/invoices/update on sent invoice → 422 IMMUTABLE_RECORD
+  6. ProRateCalculator unit test: 1 day = daily_rate; 6-7 days = weekly_rate; 30+ = monthly_rate
+  7. TaxCalculator unit test: gst_exempt suppresses gst; pst_exempt suppresses pst
+  8. /fleetforge/invoices → list page 200, no PHP errors
+  9. /fleetforge/invoices/create → form 200, no PHP errors
 
-Do not write any code yet. Confirm you have read all files and summarize what S005 builds.
+Do not write any code yet. Confirm you have read all files and summarize what S008 builds.
 ```
 
 ---
@@ -1972,5 +2007,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: 2026-04-01 — S004 complete. Dashboard fully wired: api/v1/dashboard/kpis.php (6 KPIs, 5-min cache), api/v1/dashboard/charts.php (8 ApexCharts datasets, 15-min cache), api/v1/dashboard/activity_feed.php (audit_log events). app/admin/dashboard/index.php: stub replaced with Alpine.js FF_Dashboard() + full ApexCharts render. All drilldown links, skeleton loaders, error/empty states present. Original plan S029+S030+chart sessions merged into S004 (D31). 31 decisions total (D31 added). 11 known issues logged (8 resolved). Next: S005.*
-*Next session: S005 — Customers Module (API list/show/create/update/delete/notes + Admin UI list/show/create/edit)*
+*Last updated: 2026-04-01 — S007 complete. Leases Module fully built: 7 API endpoints + 4 Admin UI pages. FOR UPDATE row locking on create/activate/close (D20). D19 optimistic lock on update. Contract numbers CN-XXXXXX-YYYY auto-generated. Tax rates frozen from customer record at creation (D11). Snapshots (customer/unit/template) frozen on lease. Status machine: pending→active→completed. All status changes write lease_status_log + equipment_status_log + audit_log. Bugs fixed: equipment_units has no mileage_unit column; audit_log action ENUM values corrected (create/update/delete/status_change/lease_closed). Invoice generation stubbed in activate + close (wired in S008). Tab UI uses inline styles (no tab CSS classes in app.css). 33 decisions total. 14 known issues (11 resolved). Next: S008.*
+*Next session: S008 — Invoices Module (API + Admin UI + ProRateCalculator + TaxCalculator + InvoiceGenerator)*

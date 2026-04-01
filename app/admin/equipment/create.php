@@ -1,0 +1,430 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * app/admin/equipment/create.php
+ *
+ * New equipment unit form. Loads active templates for the dropdown. When a
+ * template is selected, the JS component pre-fills dimension/rate defaults.
+ * On submit, POSTs to api/v1/equipment/units/create and redirects to show page.
+ *
+ * @depends config/app.php, includes/auth.php, includes/header.php,
+ *          includes/footer.php, api/v1/equipment/units/create.php,
+ *          api/v1/equipment/templates/index.php
+ * @spec    FLEETFORGE_SPEC_FINAL.md §7.4 Equipment Units
+ * @decisions D30, D32
+ * @session S006
+ */
+
+require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
+require_once FF_ROOT . '/includes/auth.php';
+
+require_auth();
+require_permission('equipment', 'create');
+
+$pageTitle = 'Add Equipment Unit';
+
+// Load active templates server-side for <select> options (no flicker)
+$templates = db_select(
+    "SELECT id, name, category, default_daily_rate, default_weekly_rate,
+            default_monthly_rate, default_mileage_rate, default_currency,
+            default_mileage_unit, default_length_ft, default_height_ft,
+            default_width_ft, default_weight_capacity_lbs, default_axle_count,
+            default_ownership_type, default_tracking_provider
+       FROM equipment_templates
+      WHERE deleted_at IS NULL AND is_active = 1
+      ORDER BY name ASC",
+    []
+);
+
+// Load yards for yard_location dropdown
+$yards = db_select("SELECT name FROM yards WHERE is_active = 1 ORDER BY name", []);
+
+require_once FF_ROOT . '/includes/header.php';
+?>
+
+<!-- ============================================================
+     Page header
+     ============================================================ -->
+<div class="page-header">
+    <div>
+        <a href="<?= base_url('equipment') ?>" class="btn btn-ghost btn-sm" style="margin-bottom:0.5rem;">
+            ← Equipment
+        </a>
+        <h1 class="page-header-title h4">Add Equipment Unit</h1>
+    </div>
+</div>
+
+<!-- ============================================================
+     CREATE FORM (Alpine)
+     ============================================================ -->
+<div x-data="FF_CreateUnit()" x-init="init()">
+
+    <form @submit.prevent="submit()" novalidate>
+
+        <!-- ── Section 1: Identity ─────────────────────────────── -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><div class="card-title">Unit Identity</div></div>
+            <div class="card-body">
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label required" for="template_id">Equipment Template</label>
+                        <select id="template_id" class="form-control form-select"
+                                x-model="form.template_id"
+                                @change="onTemplateChange()"
+                                :class="errors.template_id ? 'is-invalid' : ''">
+                            <option value="">— Select template —</option>
+                            <?php foreach ($templates as $tpl): ?>
+                            <option value="<?= $tpl['id'] ?>"
+                                    data-defaults="<?= htmlspecialchars(json_encode($tpl), ENT_QUOTES) ?>">
+                                <?= e($tpl['name']) ?>
+                                (<?= e(str_replace('_', ' ', $tpl['category'])) ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-error" x-show="errors.template_id" x-text="errors.template_id"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label required" for="unit_number">Unit Number</label>
+                        <input type="text" id="unit_number" class="form-control font-mono"
+                               x-model="form.unit_number"
+                               :class="errors.unit_number ? 'is-invalid' : ''"
+                               placeholder="e.g. T-1042"
+                               maxlength="100">
+                        <div class="form-hint">Must be unique across all units.</div>
+                        <div class="form-error" x-show="errors.unit_number" x-text="errors.unit_number"></div>
+                    </div>
+                </div>
+
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label class="form-label" for="vin">VIN</label>
+                        <input type="text" id="vin" class="form-control font-mono"
+                               x-model="form.vin"
+                               placeholder="17-char VIN"
+                               maxlength="50">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="year">Year</label>
+                        <input type="number" id="year" class="form-control font-mono"
+                               x-model="form.year"
+                               placeholder="e.g. 2022"
+                               min="1990" max="2030">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label required" for="ownership_type">Ownership</label>
+                        <select id="ownership_type" class="form-control form-select"
+                                x-model="form.ownership_type"
+                                :class="errors.ownership_type ? 'is-invalid' : ''">
+                            <option value="">— Select —</option>
+                            <option value="owned">Owned</option>
+                            <option value="leased">Leased</option>
+                            <option value="brokered">Brokered</option>
+                        </select>
+                        <div class="form-error" x-show="errors.ownership_type" x-text="errors.ownership_type"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── Section 2: Location & GPS ───────────────────────── -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><div class="card-title">Location & GPS</div></div>
+            <div class="card-body">
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" for="yard_location">Yard Location</label>
+                        <select id="yard_location" class="form-control form-select"
+                                x-model="form.yard_location">
+                            <option value="">— No yard assigned —</option>
+                            <?php foreach ($yards as $yard): ?>
+                            <option value="<?= e($yard['name']) ?>"><?= e($yard['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="tracking_provider">Tracking Provider</label>
+                        <select id="tracking_provider" class="form-control form-select"
+                                x-model="form.tracking_provider">
+                            <option value="none">None</option>
+                            <option value="samsara">Samsara</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row-2" x-show="form.tracking_provider === 'samsara'">
+                    <div class="form-group">
+                        <label class="form-label" for="gps_device_id">GPS Device ID</label>
+                        <input type="text" id="gps_device_id" class="form-control font-mono"
+                               x-model="form.gps_device_id" maxlength="100">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="samsara_vehicle_url">Samsara Vehicle URL</label>
+                        <input type="url" id="samsara_vehicle_url" class="form-control"
+                               x-model="form.samsara_vehicle_url" maxlength="500">
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── Section 3: Physical Specs ───────────────────────── -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><div class="card-title">Physical Specifications</div></div>
+            <div class="card-body">
+
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label class="form-label" for="length_ft">Length (ft)</label>
+                        <input type="number" id="length_ft" class="form-control font-mono"
+                               x-model="form.length_ft" step="0.01" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="width_ft">Width (ft)</label>
+                        <input type="number" id="width_ft" class="form-control font-mono"
+                               x-model="form.width_ft" step="0.01" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="height_ft">Height (ft)</label>
+                        <input type="number" id="height_ft" class="form-control font-mono"
+                               x-model="form.height_ft" step="0.01" min="0">
+                    </div>
+                </div>
+
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label class="form-label" for="axle_count">Axle Count</label>
+                        <input type="number" id="axle_count" class="form-control font-mono"
+                               x-model="form.axle_count" min="1" max="20">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="tire_size">Tire Size</label>
+                        <input type="text" id="tire_size" class="form-control font-mono"
+                               x-model="form.tire_size" maxlength="50" placeholder="e.g. 275/70R22.5">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="weight_capacity_lbs">Weight Capacity (lbs)</label>
+                        <input type="number" id="weight_capacity_lbs" class="form-control font-mono"
+                               x-model="form.weight_capacity_lbs" min="0">
+                    </div>
+                </div>
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" for="license_plate">License Plate</label>
+                        <input type="text" id="license_plate" class="form-control font-mono"
+                               x-model="form.license_plate" maxlength="50">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="license_state">Province / State</label>
+                        <input type="text" id="license_state" class="form-control"
+                               x-model="form.license_state" maxlength="50" placeholder="e.g. BC">
+                    </div>
+                </div>
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" for="mileage">Current Mileage</label>
+                        <input type="number" id="mileage" class="form-control font-mono"
+                               x-model="form.mileage" min="0" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="acquired_date">Acquired Date</label>
+                        <input type="date" id="acquired_date" class="form-control"
+                               x-model="form.acquired_date">
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── Section 4: Compliance Dates ─────────────────────── -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><div class="card-title">Compliance & Expiry Dates</div></div>
+            <div class="card-body">
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" for="cvi_expiry">CVI Expiry</label>
+                        <input type="date" id="cvi_expiry" class="form-control" x-model="form.cvi_expiry">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="cvi_interval_days">CVI Renewal Interval (days)</label>
+                        <input type="number" id="cvi_interval_days" class="form-control font-mono"
+                               x-model="form.cvi_interval_days" min="1" placeholder="365">
+                    </div>
+                </div>
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" for="registration_expiry">Registration Expiry</label>
+                        <input type="date" id="registration_expiry" class="form-control" x-model="form.registration_expiry">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="mvi_expiry">MVI Expiry</label>
+                        <input type="date" id="mvi_expiry" class="form-control" x-model="form.mvi_expiry">
+                    </div>
+                </div>
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" for="insurance_expiry">Insurance Expiry</label>
+                        <input type="date" id="insurance_expiry" class="form-control" x-model="form.insurance_expiry">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="insurance_interval_days">Insurance Renewal Interval (days)</label>
+                        <input type="number" id="insurance_interval_days" class="form-control font-mono"
+                               x-model="form.insurance_interval_days" min="1" placeholder="365">
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── Section 5: Notes ─────────────────────────────────── -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><div class="card-title">Notes</div></div>
+            <div class="card-body">
+
+                <div class="form-group">
+                    <label class="form-label" for="notes">Notes</label>
+                    <textarea id="notes" class="form-control" x-model="form.notes"
+                              rows="3" maxlength="5000"
+                              placeholder="General notes about this unit…"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="internal_notes">Internal Notes (not shown to customers)</label>
+                    <textarea id="internal_notes" class="form-control" x-model="form.internal_notes"
+                              rows="2" maxlength="5000"></textarea>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── Form actions ─────────────────────────────────────── -->
+        <div class="d-flex gap-3" style="justify-content:flex-end;margin-bottom:2rem;">
+            <a href="<?= base_url('equipment') ?>" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary" :disabled="submitting"
+                    :class="submitting ? 'is-loading' : ''">
+                <span x-show="!submitting">Register Unit</span>
+                <span x-show="submitting">Saving…</span>
+            </button>
+        </div>
+
+        <!-- Top-level error -->
+        <template x-if="globalError">
+            <div class="card card-body" style="background:var(--color-danger-light);color:var(--color-danger-text);margin-bottom:1rem;">
+                <strong>Error:</strong> <span x-text="globalError"></span>
+            </div>
+        </template>
+
+    </form>
+</div><!-- /x-data -->
+
+<script>
+function FF_CreateUnit() {
+    // Build template defaults lookup from server-rendered options
+    const templateDefaults = {};
+    document.querySelectorAll('#template_id option[data-defaults]').forEach(opt => {
+        try { templateDefaults[opt.value] = JSON.parse(opt.dataset.defaults); } catch(e) {}
+    });
+
+    return {
+        form: {
+            template_id:        '',
+            unit_number:        '',
+            vin:                '',
+            year:               '',
+            ownership_type:     '',
+            yard_location:      '',
+            tracking_provider:  'none',
+            gps_device_id:      '',
+            samsara_vehicle_url:'',
+            length_ft:          '',
+            height_ft:          '',
+            width_ft:           '',
+            weight_capacity_lbs:'',
+            axle_count:         '',
+            tire_size:          '',
+            license_plate:      '',
+            license_state:      '',
+            mileage:            0,
+            acquired_date:      '',
+            cvi_expiry:         '',
+            registration_expiry:'',
+            mvi_expiry:         '',
+            insurance_expiry:   '',
+            cvi_interval_days:  '',
+            insurance_interval_days: '',
+            notes:              '',
+            internal_notes:     '',
+        },
+        errors:      {},
+        globalError: null,
+        submitting:  false,
+
+        init() {},
+
+        // Pre-fill defaults from selected template
+        onTemplateChange() {
+            const defaults = templateDefaults[this.form.template_id];
+            if (!defaults) return;
+            if (defaults.default_length_ft)          this.form.length_ft           = defaults.default_length_ft;
+            if (defaults.default_height_ft)          this.form.height_ft           = defaults.default_height_ft;
+            if (defaults.default_width_ft)           this.form.width_ft            = defaults.default_width_ft;
+            if (defaults.default_weight_capacity_lbs) this.form.weight_capacity_lbs = defaults.default_weight_capacity_lbs;
+            if (defaults.default_axle_count)         this.form.axle_count          = defaults.default_axle_count;
+            if (defaults.default_ownership_type)     this.form.ownership_type      = defaults.default_ownership_type;
+            if (defaults.default_tracking_provider)  this.form.tracking_provider   = defaults.default_tracking_provider;
+            if (defaults.default_cvi_interval_days)  this.form.cvi_interval_days   = defaults.default_cvi_interval_days;
+            if (defaults.default_insurance_interval_days) this.form.insurance_interval_days = defaults.default_insurance_interval_days;
+        },
+
+        validate() {
+            this.errors = {};
+            if (!this.form.template_id)  this.errors.template_id  = 'Template is required.';
+            if (!this.form.unit_number)  this.errors.unit_number  = 'Unit number is required.';
+            if (!this.form.ownership_type) this.errors.ownership_type = 'Ownership type is required.';
+            return Object.keys(this.errors).length === 0;
+        },
+
+        async submit() {
+            if (!this.validate()) return;
+            this.submitting  = true;
+            this.globalError = null;
+            const payload    = {};
+            // Only send non-empty fields
+            Object.entries(this.form).forEach(([k, v]) => {
+                if (v !== '' && v !== null && v !== undefined) payload[k] = v;
+            });
+            // Numeric coercions
+            if (payload.year)               payload.year               = parseInt(payload.year);
+            if (payload.mileage)            payload.mileage            = parseInt(payload.mileage);
+            if (payload.weight_capacity_lbs) payload.weight_capacity_lbs = parseInt(payload.weight_capacity_lbs);
+            if (payload.axle_count)         payload.axle_count         = parseInt(payload.axle_count);
+            if (payload.cvi_interval_days)  payload.cvi_interval_days  = parseInt(payload.cvi_interval_days);
+            if (payload.insurance_interval_days) payload.insurance_interval_days = parseInt(payload.insurance_interval_days);
+
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/equipment/units/create') ?>', payload);
+                if (r.success) {
+                    window.location.href = '<?= base_url('equipment/show') ?>?id=' + r.data.id;
+                } else {
+                    this.globalError = r.message || 'Failed to create unit.';
+                    if (r.errors) this.errors = r.errors;
+                }
+            } catch(e) {
+                this.globalError = 'Network error. Please try again.';
+            }
+            this.submitting = false;
+        },
+    };
+}
+</script>
+
+<?php require_once FF_ROOT . '/includes/footer.php'; ?>

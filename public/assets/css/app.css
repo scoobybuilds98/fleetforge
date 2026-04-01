@@ -1148,6 +1148,7 @@ kbd {
 .badge-danger   { background: var(--color-danger-light);   color: var(--color-danger-text);   }
 .badge-info     { background: var(--color-info-light);     color: var(--color-info-text);     }
 .badge-neutral  { background: var(--bg-surface-2);         color: var(--text-secondary);      }
+.badge-purple   { background: var(--badge-purple-bg);       color: var(--badge-purple-text);   }
 
 /* Dot indicator */
 .badge::before {
@@ -2163,6 +2164,125 @@ html.is-mac .non-mac-only { display: none; }
     .app-main { margin-left: 0 !important; }
     .page-content { padding: 0; }
     .card { border: 1px solid #ccc; box-shadow: none; }
+}
+
+/* ============================================================
+   20. Dashboard & Page-Specific Components
+   ============================================================ */
+
+/* Stat card variants */
+.stat-card--link {
+    cursor: pointer;
+    text-decoration: none;
+    display: block;
+    transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+.stat-card--link:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+.stat-card--danger {
+    border-left: 3px solid var(--color-danger);
+}
+.stat-card--warning {
+    border-left: 3px solid var(--color-warning);
+}
+.stat-card--error {
+    border-left: 3px solid var(--color-danger);
+    opacity: 0.7;
+}
+
+/* Inline skeleton for stat card value area */
+.stat-skeleton {
+    height: 32px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-muted);
+    animation: skeleton-shimmer 1.5s infinite;
+    width: 60%;
+    margin: 4px 0;
+}
+
+/* Chart loading placeholder */
+.chart-skeleton {
+    width: 100%;
+    border-radius: var(--radius-sm);
+    background: var(--bg-muted);
+    animation: skeleton-shimmer 1.5s infinite;
+}
+
+/* 2/3 + 1/3 grid layout */
+.grid-2-1 {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 24px;
+}
+@media (max-width: 1023px) {
+    .grid-2-1 { grid-template-columns: 1fr; }
+}
+
+/* Activity feed */
+.activity-feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.activity-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.activity-item:last-child {
+    border-bottom: none;
+}
+.activity-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 5px;
+    background: var(--color-primary);
+}
+/* Module-specific dot colors */
+.activity-dot--customers   { background: var(--color-primary); }
+.activity-dot--equipment   { background: var(--color-success); }
+.activity-dot--leases      { background: #8b5cf6; }
+.activity-dot--invoices    { background: var(--color-warning); }
+.activity-dot--payments    { background: var(--color-success); }
+.activity-dot--compliance  { background: var(--color-danger); }
+.activity-dot--maintenance { background: #f97316; }
+.activity-dot--users       { background: #06b6d4; }
+.activity-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.activity-desc {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    line-height: 1.4;
+}
+.activity-meta {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}
+
+/* Utility: padding shorthand */
+.p-4 { padding: 16px; }
+
+/* Utility: muted text color */
+.text-muted { color: var(--text-tertiary); }
+
+/* Inline hyperlink style */
+.link {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+.link:hover {
+    text-decoration: underline;
 }
 
 /* Skip navigation — WCAG 2.4.1 bypass blocks (S025) */

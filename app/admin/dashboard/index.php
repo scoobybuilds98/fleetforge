@@ -241,8 +241,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <!-- Zero state -->
                 <template x-if="kpisLoaded && kpis.todays_pickups === 0">
                     <div class="empty-state" style="padding:24px;">
-                        <p class="empty-state-primary">No pickups today</p>
-                        <p class="empty-state-secondary">No leases starting today.</p>
+                        <p class="empty-state-title">No pickups today</p>
+                        <p class="empty-state-text">No leases starting today.</p>
                     </div>
                 </template>
 
@@ -277,8 +277,8 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <template x-if="kpisLoaded && kpis.compliance_alerts === 0">
                     <div class="empty-state" style="padding:24px;">
-                        <p class="empty-state-primary">All clear</p>
-                        <p class="empty-state-secondary">No compliance expiries in the next 30 days.</p>
+                        <p class="empty-state-title">All clear</p>
+                        <p class="empty-state-text">No compliance expiries in the next 30 days.</p>
                     </div>
                 </template>
 
@@ -322,8 +322,8 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <template x-if="activityLoaded && activity.length === 0">
                     <div class="empty-state" style="padding:24px;">
-                        <p class="empty-state-primary">No activity yet</p>
-                        <p class="empty-state-secondary">Actions will appear here as staff use the system.</p>
+                        <p class="empty-state-title">No activity yet</p>
+                        <p class="empty-state-text">Actions will appear here as staff use the system.</p>
                     </div>
                 </template>
 
@@ -431,7 +431,7 @@ function FF_Dashboard() {
         // ── KPI fetch ──────────────────────────────────────────
         async fetchKpis() {
             try {
-                const res = await FF_API.get('<?= base_url('api/v1/dashboard/kpis') ?>');
+                const res = await FF_Api.get('<?= base_url('api/v1/dashboard/kpis') ?>');
                 if (res.success) {
                     this.kpis       = res.data;
                     this.kpisLoaded = true;
@@ -447,7 +447,7 @@ function FF_Dashboard() {
         // ── Charts fetch ───────────────────────────────────────
         async fetchCharts() {
             try {
-                const res = await FF_API.get('<?= base_url('api/v1/dashboard/charts') ?>');
+                const res = await FF_Api.get('<?= base_url('api/v1/dashboard/charts') ?>');
                 if (res.success) {
                     this.charts      = res.data;
                     this.chartsLoaded = true;
@@ -465,7 +465,7 @@ function FF_Dashboard() {
         // ── Activity feed fetch ────────────────────────────────
         async fetchActivity() {
             try {
-                const res = await FF_API.get('<?= base_url('api/v1/dashboard/activity_feed') ?>');
+                const res = await FF_Api.get('<?= base_url('api/v1/dashboard/activity_feed') ?>');
                 if (res.success) {
                     this.activity       = res.data.items;
                     this.activityLoaded = true;
@@ -622,7 +622,7 @@ function FF_Dashboard() {
                     c.revenue_by_type.render();
                 } else {
                     document.getElementById('chart-revenue-by-type').innerHTML =
-                        '<div class="empty-state" style="padding:40px"><p class="empty-state-primary">No data yet</p><p class="empty-state-secondary">Revenue will appear here once invoices are created.</p></div>';
+                        '<div class="empty-state" style="padding:40px"><p class="empty-state-title">No data yet</p><p class="empty-state-text">Revenue will appear here once invoices are created.</p></div>';
                 }
             }
 
