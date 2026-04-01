@@ -845,6 +845,226 @@ kbd {
 .mac-only     { display: none; }
 .non-mac-only { display: inline; }
 
+/* ── Theme toggle button ────────────────────────────────────────────────────── */
+/* Reuses .btn-icon sizing; just a label for specificity / hover overrides.     */
+.topbar-theme-btn {
+    color: var(--text-secondary);
+}
+.topbar-theme-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-surface-2);
+}
+
+/* ── Quick-create "+" dropdown ──────────────────────────────────────────────── */
+.topbar-create {
+    position: relative;
+}
+
+.topbar-create-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 13px 5px 10px;
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+    white-space: nowrap;
+    height: 32px;
+}
+.topbar-create-btn:hover {
+    background: var(--color-primary-dark, color-mix(in srgb, var(--color-primary) 85%, black));
+    box-shadow: 0 1px 6px rgba(0,0,0,0.18);
+}
+.topbar-create-btn:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+.topbar-create-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 192px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    z-index: var(--z-dropdown);
+    overflow: hidden;
+    padding: 6px 0;
+}
+
+.topbar-dropdown-label {
+    padding: 6px 14px 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin: 0;
+}
+
+.topbar-create-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: background var(--transition-fast);
+}
+.topbar-create-item:hover {
+    background: var(--bg-surface-hover);
+    text-decoration: none;
+    color: var(--text-primary);
+}
+.topbar-create-item svg,
+.topbar-create-item .nav-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+/* ── User avatar + dropdown ─────────────────────────────────────────────────── */
+.topbar-user {
+    position: relative;
+}
+
+/* Base avatar circle — initials badge */
+.user-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-full);
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    flex-shrink: 0;
+    user-select: none;
+    /* Reset button defaults when used as <button> */
+    padding: 0;
+    line-height: 1;
+}
+.user-avatar:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
+.user-avatar:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+/* Large variant — used inside the dropdown header */
+.user-avatar--lg {
+    width: 42px;
+    height: 42px;
+    font-size: 0.9rem;
+    pointer-events: none;  /* decorative inside the dropdown */
+}
+
+/* User dropdown panel */
+.user-dropdown {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 240px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    z-index: var(--z-dropdown);
+    overflow: hidden;
+}
+
+/* Header — avatar + name + role + email */
+.user-dropdown-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px 12px;
+}
+
+.user-dropdown-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+}
+
+.user-dropdown-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-dropdown-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.user-dropdown-email {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Divider line */
+.user-dropdown-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
+
+/* Menu items */
+.user-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 16px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: background var(--transition-fast);
+}
+.user-dropdown-item:hover {
+    background: var(--bg-surface-hover);
+    text-decoration: none;
+    color: var(--text-primary);
+}
+.user-dropdown-item svg,
+.user-dropdown-item .nav-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+/* Sign Out — danger tint on hover */
+.user-dropdown-item--danger { color: var(--color-danger); }
+.user-dropdown-item--danger svg,
+.user-dropdown-item--danger .nav-icon { color: var(--color-danger); }
+.user-dropdown-item--danger:hover {
+    background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+    color: var(--color-danger);
+}
+
 
 /* ============================================================
    07. Page Content & Panels

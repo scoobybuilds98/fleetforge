@@ -1,32 +1,85 @@
 <?php
 declare(strict_types=1);
 
-// ============================================================
-// FleetForge — Admin Topbar
-// Included by includes/header.php — do not include directly.
-//
-// Renders:
-//   • Mobile sidebar toggle
-//   • Page title (from $pageTitle set by the including page)
-//   • Global search trigger (⌘K / Ctrl+K)
-//   • Notifications bell with unread count
-// ============================================================
+/**
+ * includes/topbar.php
+ *
+ * Admin topbar — sticky header rendered inside every authenticated page.
+ * Included by includes/header.php; never include directly.
+ *
+ * Renders (left → right):
+ *   LEFT  : mobile sidebar toggle · page title
+ *   RIGHT : Quick-create (+) dropdown · search ⌘K · theme toggle ·
+ *           notifications bell · user-avatar dropdown (profile, settings, sign out)
+ *
+ * Alpine.js handles all dropdown open/close state.
+ * Theme toggle calls FF_Theme.toggle() from public/assets/js/app.js.
+ * Logout uses GET to app/auth/logout.php — no CSRF required (D29).
+ *
+ * heroicon() is defined in includes/sidebar.php and accepts (name, class) only.
+ * heroicon() caches by $name; always use 'nav-icon' class for consistency.
+ *
+ * @depends  includes/auth.php  (current_user, can, current_user_id)
+ *           includes/helpers.php (heroicon, base_url, e)
+ *           public/assets/js/app.js (FF_Theme.toggle)
+ *           public/assets/css/app.css (topbar-* · user-avatar-* · topbar-create-*)
+ * @session  S009 (enhanced)
+ */
 
-// Unread notification count — wrapped in try/catch so this
-// renders gracefully before the notifications table is created.
+// ── Notification unread count ─────────────────────────────────────────────────
+// Wrapped in try/catch so the topbar renders before the notifications table exists.
 $_unreadCount = 0;
 try {
-    $__userId = current_user_id();
-    if ($__userId) {
+    $_uid = current_user_id();
+    if ($_uid) {
         $_unreadCount = db_count(
-            "SELECT COUNT(*) FROM notifications
-             WHERE user_id = ? AND is_read = 0",
-            [$__userId]
+            "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0",
+            [$_uid]
         );
     }
-    unset($__userId);
+    unset($_uid);
 } catch (Throwable) {
     $_unreadCount = 0;
+}
+
+// ── Current user ──────────────────────────────────────────────────────────────
+$_me = current_user() ?? [];
+
+// Avatar initials: first char of first word + first char of last word.
+$_initials = 'U';
+if (!empty($_me['name'])) {
+    $__parts   = preg_split('/\s+/', trim($_me['name']));
+    $_initials = strtoupper(mb_substr($__parts[0], 0, 1));
+    if (count($__parts) > 1) {
+        $_initials .= strtoupper(mb_substr(end($__parts), 0, 1));
+    }
+    unset($__parts);
+}
+
+// Human-readable role label.
+$_roleMap = [
+    'super_admin' => 'Super Admin',
+    'manager'     => 'Manager',
+    'dispatcher'  => 'Dispatcher',
+    'accountant'  => 'Accountant',
+];
+$_roleLabel = $_roleMap[$_me['role_slug'] ?? '']
+           ?? ucwords(str_replace('_', ' ', $_me['role_slug'] ?? 'User'));
+
+// Quick-create items: permission-gated shortcuts shown in the "+" dropdown.
+// Icons must exist in public/assets/icons/ (checked against disk, S009).
+$_creates = [];
+if (can('customers', 'create')) {
+    $_creates[] = ['New Customer',   base_url('customers/create'),  'users'];
+}
+if (can('leases', 'create')) {
+    $_creates[] = ['New Lease',      base_url('leases/create'),     'clipboard-document-list'];
+}
+if (can('invoices', 'create')) {
+    $_creates[] = ['New Invoice',    base_url('invoices/create'),   'document-text'];
+}
+if (can('payments', 'create')) {
+    $_creates[] = ['Record Payment', base_url('payments/create'),   'credit-card'];
 }
 
 $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
@@ -34,9 +87,11 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
 
 <header class="topbar" role="banner">
 
+    <!-- ================================================================
+         LEFT: mobile sidebar toggle + page title
+         ================================================================ -->
     <div class="topbar-left">
 
-        <!-- Mobile sidebar toggle (hidden on desktop, shown on mobile) -->
         <button class="topbar-menu-btn btn-icon"
                 @click="sidebarOpen = !sidebarOpen"
                 aria-label="Toggle navigation menu"
@@ -45,16 +100,65 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             <?= heroicon('bars-3', 'nav-icon') ?>
         </button>
 
-        <!-- Page title -->
         <?php if ($_topbarTitle !== ''): ?>
             <h1 class="topbar-title"><?= e($_topbarTitle) ?></h1>
         <?php endif; ?>
 
     </div>
 
+    <!-- ================================================================
+         RIGHT: quick-create · search · theme · bell · user avatar
+         ================================================================ -->
     <div class="topbar-right">
 
-        <!-- Global search trigger — opens the search modal via app.js -->
+        <!-- ── Quick-create "+" dropdown ─────────────────────────────── -->
+        <?php if (!empty($_creates)): ?>
+        <div class="topbar-create"
+             x-data="{ open: false }"
+             @click.outside="open = false"
+             @keydown.escape.window="open = false">
+
+            <button class="topbar-create-btn"
+                    @click="open = !open"
+                    :aria-expanded="open"
+                    aria-haspopup="true"
+                    aria-label="Quick create">
+                <!-- Inline "+" SVG — no file dependency -->
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"
+                     fill="currentColor" aria-hidden="true"
+                     style="width:15px;height:15px;flex-shrink:0;">
+                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z"/>
+                </svg>
+                <span>New</span>
+            </button>
+
+            <div class="topbar-create-dropdown"
+                 x-show="open"
+                 x-transition:enter="dropdown-enter"
+                 x-transition:enter-start="dropdown-enter-start"
+                 x-transition:enter-end="dropdown-enter-end"
+                 x-transition:leave="dropdown-leave"
+                 x-transition:leave-start="dropdown-leave-start"
+                 x-transition:leave-end="dropdown-leave-end"
+                 role="menu"
+                 aria-label="Quick create">
+
+                <p class="topbar-dropdown-label">Create</p>
+
+                <?php foreach ($_creates as [$_label, $_url, $_icon]): ?>
+                    <a href="<?= e($_url) ?>"
+                       class="topbar-create-item"
+                       role="menuitem">
+                        <?= heroicon($_icon, 'nav-icon') ?>
+                        <?= e($_label) ?>
+                    </a>
+                <?php endforeach; ?>
+
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- ── Global search ─────────────────────────────────────────── -->
         <button class="topbar-search-btn"
                 id="ff-search-trigger"
                 aria-label="Global search"
@@ -69,7 +173,29 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             </span>
         </button>
 
-        <!-- Notifications bell -->
+        <!-- ── Theme toggle ──────────────────────────────────────────── -->
+        <!-- Initialises from <html data-theme>; tracks state locally so  -->
+        <!-- the icon flips immediately without waiting for a DOM read.    -->
+        <div x-data="{
+                dark: document.documentElement.getAttribute('data-theme') === 'dark',
+                toggle() { FF_Theme.toggle(); this.dark = !this.dark; }
+             }">
+            <button class="btn-icon topbar-theme-btn"
+                    @click="toggle()"
+                    :title="dark ? 'Switch to light mode' : 'Switch to dark mode'"
+                    :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'">
+                <!-- Moon shown in light mode → click to go dark -->
+                <template x-if="!dark">
+                    <?= heroicon('moon', 'nav-icon') ?>
+                </template>
+                <!-- Sun shown in dark mode → click to go light -->
+                <template x-if="dark">
+                    <?= heroicon('sun', 'nav-icon') ?>
+                </template>
+            </button>
+        </div>
+
+        <!-- ── Notifications bell ────────────────────────────────────── -->
         <div class="topbar-notifications"
              x-data="{ open: false }"
              @click.outside="open = false"
@@ -81,14 +207,13 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
                     :aria-expanded="open">
                 <?= heroicon('bell', 'nav-icon') ?>
                 <?php if ($_unreadCount > 0): ?>
-                    <span class="notification-dot"
-                          aria-hidden="true">
+                    <span class="notification-dot" aria-hidden="true">
                         <?= e($_unreadCount > 99 ? '99+' : (string) $_unreadCount) ?>
                     </span>
                 <?php endif; ?>
             </button>
 
-            <!-- Notification dropdown — populated by app.js via API -->
+            <!-- Populated by FF_Notifications.load() in app.js -->
             <div class="notification-dropdown"
                  x-show="open"
                  x-transition:enter="dropdown-enter"
@@ -102,21 +227,17 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
 
                 <div class="notification-header">
                     <span class="notification-heading">Notifications</span>
-                    <button class="btn-link btn-xs"
-                            id="ff-mark-all-read"
-                            type="button">
+                    <button class="btn-link btn-xs" id="ff-mark-all-read" type="button">
                         Mark all read
                     </button>
                 </div>
 
-                <!-- Populated by FF_Notifications.load() in app.js -->
                 <div class="notification-list" id="ff-notification-list">
                     <div class="notification-empty">Loading…</div>
                 </div>
 
                 <div class="notification-footer">
-                    <a href="<?= e(base_url('notifications')) ?>"
-                       class="btn-link btn-sm">
+                    <a href="<?= e(base_url('notifications')) ?>" class="btn-link btn-sm">
                         View all notifications
                     </a>
                 </div>
@@ -124,10 +245,92 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             </div>
         </div>
 
-    </div>
+        <!-- ── User avatar dropdown ──────────────────────────────────── -->
+        <div class="topbar-user"
+             x-data="{ open: false }"
+             @click.outside="open = false"
+             @keydown.escape.window="open = false">
+
+            <!-- Initials circle acts as the trigger button -->
+            <button class="user-avatar"
+                    @click="open = !open"
+                    :aria-expanded="open"
+                    aria-haspopup="true"
+                    aria-label="Account menu for <?= e($_me['name'] ?? 'user') ?>">
+                <?= e($_initials) ?>
+            </button>
+
+            <div class="user-dropdown"
+                 x-show="open"
+                 x-transition:enter="dropdown-enter"
+                 x-transition:enter-start="dropdown-enter-start"
+                 x-transition:enter-end="dropdown-enter-end"
+                 x-transition:leave="dropdown-leave"
+                 x-transition:leave-start="dropdown-leave-start"
+                 x-transition:leave-end="dropdown-leave-end"
+                 role="menu"
+                 aria-label="Account menu">
+
+                <!-- Identity header: large avatar + name + role badge + email -->
+                <div class="user-dropdown-header">
+                    <div class="user-avatar user-avatar--lg" aria-hidden="true">
+                        <?= e($_initials) ?>
+                    </div>
+                    <div class="user-dropdown-identity">
+                        <span class="user-dropdown-name"><?= e($_me['name'] ?? '') ?></span>
+                        <span class="user-dropdown-meta">
+                            <span class="badge badge-info"
+                                  style="font-size:0.65rem; padding:2px 7px; line-height:1.4;">
+                                <?= e($_roleLabel) ?>
+                            </span>
+                        </span>
+                        <span class="user-dropdown-email"><?= e($_me['email'] ?? '') ?></span>
+                    </div>
+                </div>
+
+                <div class="user-dropdown-divider"></div>
+
+                <!-- Settings — permission-gated to super_admin / manager -->
+                <?php if (can('settings', 'view')): ?>
+                    <a href="<?= e(base_url('settings')) ?>"
+                       class="user-dropdown-item"
+                       role="menuitem">
+                        <?= heroicon('cog-6-tooth', 'nav-icon') ?>
+                        Settings
+                    </a>
+                <?php endif; ?>
+
+                <!-- Profile — always visible; no permission check needed -->
+                <a href="<?= e(base_url('profile')) ?>"
+                   class="user-dropdown-item"
+                   role="menuitem">
+                    <!-- user-circle outline (no SVG file exists; inline is safe) -->
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                         stroke-width="1.5" stroke="currentColor" aria-hidden="true"
+                         class="nav-icon">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                              d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+                    </svg>
+                    My Profile
+                </a>
+
+                <div class="user-dropdown-divider"></div>
+
+                <!-- Sign Out — GET accepted by app/auth/logout.php; no CSRF needed -->
+                <a href="<?= e(base_url('auth/logout')) ?>"
+                   class="user-dropdown-item user-dropdown-item--danger"
+                   role="menuitem">
+                    <?= heroicon('arrow-right-on-rectangle', 'nav-icon') ?>
+                    Sign Out
+                </a>
+
+            </div>
+        </div><!-- /topbar-user -->
+
+    </div><!-- /topbar-right -->
 
 </header>
 
 <?php
-unset($_unreadCount, $_topbarTitle);
+unset($_unreadCount, $_topbarTitle, $_me, $_initials, $_roleMap, $_roleLabel, $_creates);
 ?>

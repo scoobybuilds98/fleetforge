@@ -52,6 +52,7 @@
 | AUDIT-1 | 2026-04-02 | Comprehensive QC Audit (S001–S008) | 69 issues found: 13 CRITICAL, 16 MAJOR, 40 MINOR. No files modified. Full findings in KNOWN ISSUES #16–#43 and NEXT SESSION contract for S008.5. Top 5 critical: (1) lease create doesn't reserve unit, (2) activate doesn't generate Invoice 1, (3) close doesn't generate final invoice, (4) 6 endpoints have audit_log outside transactions, (5) customer notes bypass soft-delete filter. Recommended: insert S008.5 fix session before S009 Payments. |
 | S008.5 | 2026-04-02 | Critical Fix Session — Audit Remediation (28 issues #16–#43) | All 28 AUDIT-1 findings resolved. Phase 1 critical (6): lease create now reserves unit; activate wires Invoice 1 via InvoiceGenerator; close wires final invoice with mileage overage extra_lines; all 5 invoice endpoints have audit_log inside transaction; lease update wrapped in transaction; customer notes soft-delete verified (db_exists() auto-handles). Phase 2 major (11): pending badge → badge-info (3 locations); cancel.php + reopen.php created with full state machine + FOR UPDATE + logs; update_status.php created (6 statuses, decommissioned terminal); equipment search fix ($_GET['search']); invoice BEM classes fixed (stat-label/stat-value); CSS aliases added for spec names (--bg-page, --bg-card, --color-accent, etc.); modal-md + modal-full added; customer status transition map with 409 INVALID_TRANSITION; customers/show.php SELECT * → explicit columns; invoices/send.php transaction added. Phase 2 resolved (2 no-ops): invoice search param and customer notes soft-delete both already correct. Phase 3 minor (11): font-mono on invoice tiles + .font-mono utility; .line-through + void badge updated; btn-xl added; units/update.php uniqueness fix; close appends internal_notes; error codes renamed (LEASE_IS_ACTIVE, UNIT_ON_LEASE); invoices/create.php wrapped in form; Invoices tab on lease show; dashboard CSS vars via getComputedStyle; equipment show delete button; InvoiceGenerator updated_by. Key infrastructure fix: includes/db.php db_transaction() nesting guard (inTransaction() check) required to allow InvoiceGenerator calls from within existing transactions. All 10 stop conditions passed. |
 | S009 | 2026-04-02 | Payments Module (API + Admin UI) | 10 files built and all 10 stop conditions passed. API (6): index (paginated list, filters: customer_id/invoice_id/status/reference search via LIKE — no FULLTEXT needed, sort by payment_date DESC), show (full payment + allocations[] with invoice detail), create (gap-free PAY-YYYY-NNNNN number via FOR UPDATE on settings row D15; D18 currency match enforced; D20 FOR UPDATE on invoice prevents concurrent over-allocation race; auto-allocates to invoice; drives invoice state machine sent→partially_paid→paid; updates all 4 denormalized counters — invoices.amount_paid/balance_due + leases.total_paid + customers.outstanding_balance — in single transaction; overpayment tracked on payment row; audit_log inside transaction), update (metadata-only: reference_number/bank_name/notes; D19 optimistic lock; D12 financial fields immutable), delete (soft-delete D5/D13; reverses all allocations: per-invoice bcmath counter reversal, invoice status revert paid→partially_paid→sent depending on remaining applied amount, leases.total_paid reversed, customers.outstanding_balance restored; audit_log inside transaction; returns invoice_statuses_reverted array), allocate (manual allocation of unapplied payment to different invoice; D18/D20/ALLOCATION_EXCEEDS_BALANCE guards; updates counters in same transaction). Admin UI (3 pages): payments/index.php (4 KPI tiles server-rendered: collected this month/total AR outstanding/overdue AR/today count; Alpine.js table with status filter + reference search + sortable columns; status badges per §9 design: cleared=success/failed=danger/refunded=warning/pending=info; formatMethod() label map), payments/show.php (full detail: 4 summary tiles, 2-col detail card + financial notes card, allocation table with invoice links, edit-metadata inline form + delete modal with reason — all via Alpine.js), payments/create.php (outstanding invoice picker with balance pre-fill; amount field with quick-fill-balance button; currency auto-locks to invoice currency D18; method-conditional fields: check#/bank/card-last-4; submit→redirect to show page). Invoice extension: invoices/show.php now has server-rendered Payments History section — queries payment_allocations JOIN payments for this invoice, shows applied_amount (not total payment amount), total applied footer row, Record Payment button when invoice is payable. CSS additions: dl.detail-grid added to app.css (key-value pair layout for detail cards). Bug found and fixed during stop conditions: api_url() function does not exist — all 3 UI pages used api_url() incorrectly; fixed to base_url('api/v1/payments/...'); CSS class audit: data-table→table, stats-grid→stat-grid, page-title→page-header-title, page-subtitle→inline style (D32 verified classes only). All 10 stop conditions passed: POST create → 201 PAY-2026-00001 sent→partially_paid ✅; currency mismatch → 422 CURRENCY_MISMATCH ✅; concurrent FOR UPDATE test — one succeeds/one ALLOCATION_EXCEEDS_BALANCE, invoice balance exact ✅; GET index → 200 paginated ✅; GET show?id=1 → 200 with allocations ✅; POST delete → soft-deleted invoice paid→partially_paid balance restored ✅; POST update → 200 + stale → 409 STALE_DATA ✅; /payments page → 200 no PHP errors ✅; /payments/create page → 200 no PHP errors ✅; /invoices/show?id=1 → 200 Payment History section with PAY-2026 entries ✅. |
+| S009-EXT | 2026-04-02 | Topbar Enhancement (UX — all pages) | includes/topbar.php fully rewritten; public/assets/css/app.css extended with 17 new classes. Three features added to the right-side topbar cluster: (1) Quick-create "+" dropdown — pill-shaped "New" button; opens a permission-gated dropdown with shortcuts for New Customer / New Lease / New Invoice / Record Payment; each entry only rendered if current user's role has create permission on that module; uses icons confirmed on disk (users, clipboard-document-list, document-text, credit-card). (2) Theme toggle button — `.btn-icon .topbar-theme-btn`; shows moon in light mode / sun in dark mode; Alpine.js `x-data` initialises `dark` from `document.documentElement.getAttribute('data-theme')` and tracks state locally so icon flips instantly; calls existing `FF_Theme.toggle()` from app.js — no app.js changes needed. (3) User avatar dropdown — circular initials button (first char of first + last name word, e.g. "AV"); opens panel with large avatar + full name + role badge (role_slug → human label map) + email; Settings link (rendered only if `can('settings', 'view')`); My Profile link (always shown); Sign Out (links to `base_url('auth/logout')` via GET; logout.php accepts GET, no CSRF required per D29); Sign Out has danger-tint hover. Right-cluster order: [New ▾] [Search ⌘K] [🌙] [🔔] [avatar ▾]. New CSS classes added to app.css: `.topbar-theme-btn`, `.topbar-create`, `.topbar-create-btn`, `.topbar-create-dropdown`, `.topbar-dropdown-label`, `.topbar-create-item`, `.topbar-user`, `.user-avatar`, `.user-avatar--lg`, `.user-dropdown`, `.user-dropdown-header`, `.user-dropdown-identity`, `.user-dropdown-name`, `.user-dropdown-meta`, `.user-dropdown-email`, `.user-dropdown-divider`, `.user-dropdown-item`, `.user-dropdown-item--danger`. Implementation notes: heroicon() accepts only 2 params — no third attr arg; caches by $name only (nav-icon class used consistently throughout). Icons for quick-create verified against public/assets/icons/ directory listing before use. |
 
 ---
 
@@ -154,10 +155,9 @@
 ```
 Session S010 — Monthly Billing Cron + Late Fee Engine
 
-S009 is complete. All 10 stop conditions passed.
-Payments module fully built: 6 API endpoints + 3 admin pages + invoice/show Payments section.
-Payment number counter (PAY-YYYY-NNNNN) live in settings table.
-Invoice state machine fully wired: sent → partially_paid → paid (driven by payments).
+S009 is complete (Payments module + Topbar enhancement). All 10 S009 stop conditions passed.
+S009-EXT complete: topbar fully enhanced with quick-create dropdown, theme toggle, user avatar
+dropdown (profile, settings, sign out). includes/topbar.php + app.css updated.
 
 ═══════════════════════════════════════════════════════════════════
 CONTEXT — READ BEFORE WRITING ANY CODE
@@ -174,7 +174,7 @@ VERIFY BEFORE STARTING:
   Login: admin@fleetforge.test / FleetForge2025!
 
 ═══════════════════════════════════════════════════════════════════
-CRITICAL CARRY-FORWARD FROM S009
+CRITICAL CARRY-FORWARD FROM S009 / S009-EXT
 ═══════════════════════════════════════════════════════════════════
 
 BILLING ENGINE (lib/Billing/ — all built, all pure functions):
@@ -190,18 +190,31 @@ PAYMENTS MODULE (S009 — fully built):
   - payment number counter: PAY-YYYY-NNNNN stored in settings table key 'payment.next_number.YYYY'
   - D18 currency lock, D20 FOR UPDATE, Trap 6 all implemented
 
+TOPBAR (S009-EXT — fully built):
+  - includes/topbar.php — rewritten; 3 new right-side features:
+      · Quick-create "+" dropdown (permission-gated: customers/leases/invoices/payments)
+      · Theme toggle button (moon/sun, calls FF_Theme.toggle() from app.js — no app.js changes)
+      · User avatar dropdown (initials → name/role badge/email → Settings/Profile/Sign Out)
+  - app.css — 17 new classes added (topbar-create-*, user-avatar, user-dropdown-*, etc.)
+  - heroicon() takes ONLY 2 params (name, class) — no third arg, caches by $name only
+  - Icon names verified on disk: users, clipboard-document-list, document-text, credit-card,
+    cog-6-tooth, arrow-right-on-rectangle, moon, sun (all in public/assets/icons/)
+  - Settings link: only rendered for roles with can('settings','view')
+  - Sign Out: base_url('auth/logout') GET — no CSRF needed (D29)
+
 CRON ARCHITECTURE DECISIONS:
   - D21: All write-heavy crons use MySQL GET_LOCK() advisory lock
   - Template: cron/invoice_generate_monthly.php (already in reference file)
   - Cron jobs are NOT scheduled locally — test by running manually:
     php /Users/avi/Documents/fleetforge/cron/invoice_generate_monthly.php
 
-CSS LESSONS LEARNED (S009 — check before writing any new CSS class):
-  - Table class is .table (not .data-table)
-  - Grid is .stat-grid (not .stats-grid)
-  - Page heading is .page-header-title (not .page-title)
-  - API URL helper is base_url('api/v1/...') (api_url() does NOT exist)
-  - Detail list: dl.detail-grid now in app.css (added S009)
+CSS LESSONS LEARNED (confirmed good patterns — use these):
+  - Table class: .table (not .data-table)
+  - Grid: .stat-grid (not .stats-grid)
+  - Page heading: .page-header-title (not .page-title)
+  - API URL helper: base_url('api/v1/...') — api_url() does NOT exist
+  - Detail list: dl.detail-grid (added S009)
+  - Topbar new classes all in app.css (added S009-EXT — grep before adding more)
 
 ═══════════════════════════════════════════════════════════════════
 S010 DELIVERABLES (proposed)
@@ -2031,5 +2044,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: 2026-04-01 — S007 complete. Leases Module fully built: 7 API endpoints + 4 Admin UI pages. FOR UPDATE row locking on create/activate/close (D20). D19 optimistic lock on update. Contract numbers CN-XXXXXX-YYYY auto-generated. Tax rates frozen from customer record at creation (D11). Snapshots (customer/unit/template) frozen on lease. Status machine: pending→active→completed. All status changes write lease_status_log + equipment_status_log + audit_log. Bugs fixed: equipment_units has no mileage_unit column; audit_log action ENUM values corrected (create/update/delete/status_change/lease_closed). Invoice generation stubbed in activate + close (wired in S008). Tab UI uses inline styles (no tab CSS classes in app.css). 33 decisions total. 14 known issues (11 resolved). Next: S008.*
-*Next session: S009 — Payments Module (API + Admin UI)*
+*Last updated: 2026-04-02 — S009-EXT complete. Sessions completed to date: S001 (Foundation), S002 (Schema + Seeds), S003 (Dashboard Stub + Remaining Seeds), S004 (Dashboard KPIs + Charts), S005 (Customers), S006 (Equipment), S007 (Leases), S008 (Invoices + Billing Engine), AUDIT-1 (69-issue QC audit), S008.5 (Critical Fix — 28 audit remediation items), S009 (Payments Module — 6 API endpoints + 3 admin pages + invoice Payments History section), S009-EXT (Topbar Enhancement — quick-create dropdown + theme toggle + user avatar dropdown). 34 decisions locked. SOFT_DELETE_TABLES: 15 (payments added). All known audit issues resolved. Next: S010 — Monthly Billing Cron + Late Fee Engine.*
+*Next session: S010 — Monthly Billing Cron + Late Fee Engine (cron/invoice_generate_monthly.php, cron/invoice_overdue.php, cron/late_fee_apply.php, lib/Billing/LateFeeEngine.php)*
