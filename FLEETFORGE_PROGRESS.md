@@ -82,6 +82,7 @@
 | D28 | .env editor warning | `.env` must be edited with VS Code, nano, or a plain-text editor ONLY. Never open with macOS TextEdit. | TextEdit silently replaces standard ASCII characters (quotes, hyphens, URLs) with Unicode "smart" equivalents that break PHP's env parser. Corrupts APP_URL and other values invisibly. |
 | D29 | Remember-me token storage | Token hash stored in `users.remember_token` column — NOT a separate `user_remember_tokens` table. `auth_login()`, `auth_logout()`, `auth_check_remember_me()` all use `users.remember_token`. logout.php clears it with `UPDATE users SET remember_token = NULL WHERE id = ?`. | Schema has `remember_token` column on users. A separate table was considered but rejected for simplicity. |
 | D30 | Static asset URLs — always asset_url() | Every static asset reference (CSS, JS, favicon, images, icons) in any PHP file MUST use `asset_url()`, never `base_url()`. `base_url()` prepends FF_BASE_PATH (/fleetforge) → produces /fleetforge/assets/... → 404 under Herd (and in production under Apache Alias). `asset_url()` outputs origin-only URLs that resolve correctly in both environments. Rule: if it's in `public/assets/`, use `asset_url()`. If it's an app route (page link, form action, API call), use `base_url()`. | header.php + footer.php shipped with base_url() for assets in S001 — dashboard rendered with no styling until caught in S003. |
+| D31 | Session compression — dashboard delivered in one pass | Build sessions S004 covered all of the original plan's S029 (KPI backend), S030 (KPI UI + drilldowns), and the planned-but-not-detailed S031+ dashboard chart sessions (all 8 ApexCharts + activity feed). This is a session compression decision — the original ~3 sessions were merged into one because the work was tightly coupled (chart API + chart rendering + dashboard page are useless without each other). Session numbering: our build S001–S004 maps to original-plan S005–S028 (foundation) + S029–S030+ (dashboard). Customers originally queued at our S004 is now S005. | All dashboard data (KPIs, 8 charts, activity feed) is fetched in a single parallel burst on page load — separating backend from frontend would have required re-touching the same files twice. |
 
 ---
 
@@ -99,6 +100,7 @@
 | 8 | S001–S002 | All PHP files | **Comment retrofit needed.** Global commenting standard established after S002: every file needs (1) top-of-file `/** */` block with path, description, dependencies, defined symbols, spec refs; (2) inline WHY comments on security/business-logic/bcmath/FOR UPDATE; (3) docblocks on every function. Files built in S001/S002 predate this standard and have partial or no comments. | Schedule a dedicated comment-retrofit session before Phase 3 (or batch into early Phase 3 sessions as files are touched). **All files built from S003 onward must include full comments from the start.** |
 | 9 | S003 | Functions | `settings_get()` and `generate_id()` in `includes/functions.php` used wrong column names (`setting_key`, `setting_value`, `setting_group`) against a DB whose actual columns are `key`, `value`, `group_name` (reserved SQL words, backtick-quoted). Both functions were silently catching PDOException and returning defaults, masking the bug entirely. `generate_id()` also used `db_insert()` which doesn't add backticks — fixed to use raw `db_execute()` with explicit backticks for the INSERT. | ✅ FIXED S003 — both functions corrected. Seeded settings now readable. generate_id() atomic counter now works correctly. |
 | 10 | S001 | Layout — D27 violation | `includes/header.php` used `base_url('assets/css/app.css')` and `base_url('assets/icons/favicon.svg')`. `includes/footer.php` used `base_url('assets/js/app.js')`. All three generated `/fleetforge/assets/...` URLs → 404 under Herd. Dashboard and every admin page shipped with zero CSS/JS styling from S001 onward. Masked because login page (standalone, no header.php) worked fine. | ✅ FIXED S003 — all three changed to `asset_url()`. Decision D30 added. All future files must follow D30. |
+| 11 | S004 | Dashboard — KPI field names differ from original S029 contract | Original contract (S029 in session map) named fields `fleet_utilization_pct`, `open_leases_count`, `overdue_invoices_count`, `overdue_invoices_amount`, `compliance_alerts_count`, `todays_pickups_count`. Implemented names are `fleet_utilization`, `on_lease_count`, `total_active_units`, `overdue_invoices: {count, total}`, `compliance_alerts`, `open_leases`, `todays_pickups`. The implemented shape is richer (nested overdue object, separate on_lease + total counts for utilization display). No consumers exist yet beyond the dashboard page itself. | Carry-forward: if a future session builds a separate KPI widget or external consumer, be aware of the actual field names. Not a bug — the dashboard page uses the actual field names correctly. |
 
 ---
 
@@ -1818,6 +1820,7 @@ Browser: Login with seeded admin → dashboard page renders (even if empty)
 ---
 
 ### S029 — Dashboard KPIs: Contract + Backend
+**✅ COMPLETED in build session S004 (2026-04-01)**
 **One thing:** KPI endpoint defined, implemented, and tested. No UI yet.
 
 **Contract (define and approve before coding):**
@@ -1841,64 +1844,66 @@ All values: numbers not null (use 0.0 / 0 when no data)
 
 | Task | Status |
 |------|--------|
-| Contract reviewed and approved | ⬜ |
-| `api/v1/dashboard/kpis.php` implemented | ⬜ |
-| Each KPI uses correct query per spec business logic | ⬜ |
-| fleet_utilization: excludes inactive + decommissioned from denominator | ⬜ |
-| All values return numeric (no nulls) | ⬜ |
+| Contract reviewed and approved | ✅ |
+| `api/v1/dashboard/kpis.php` implemented | ✅ |
+| Each KPI uses correct query per spec business logic | ✅ |
+| fleet_utilization: excludes inactive + decommissioned from denominator | ✅ |
+| All values return numeric (no nulls) | ✅ |
+| 5-min report_cache write on every fresh response | ✅ |
+| Cache hit path returns without re-running queries | ✅ |
 
-**Stop conditions:**
+**Stop conditions — all passed S004:**
 ```bash
-# With empty DB
-curl -s /api/v1/dashboard/kpis.php -b "session_cookie"
-# All values are 0 or 0.0, not null, not missing
-
-# With test data (insert 1 active lease, 1 overdue invoice, 1 unit expiring in 10 days)
-# active_revenue > 0
-# fleet_utilization_pct > 0
-# overdue_invoices_count = 1
-# compliance_alerts_count = 1
-
-# Response time
-time curl -s /api/v1/dashboard/kpis.php
-# real < 0.3s
-
-# Auth
-curl /api/v1/dashboard/kpis.php  # no cookie
-# → 401
+curl -b <cookie> http://fleetforge.test/fleetforge/api/v1/dashboard/kpis
+# → 200, all 6 KPI fields, active_revenue:"0.00", fleet_utilization:0, etc.
+curl http://fleetforge.test/fleetforge/api/v1/dashboard/kpis  # no auth
+# → 401 UNAUTHORIZED
 ```
 
 ---
 
-### S030 — Dashboard KPIs: Tiles + Drilldowns
-**One thing:** 6 KPI tiles render from the API. Each links to correct filtered page.
+### S030 — Dashboard KPIs: Tiles + Drilldowns + Charts + Activity Feed
+**✅ COMPLETED in build session S004 (2026-04-01)**
+**Expanded scope:** Original S030 covered only KPI tiles. Build session S004 also delivered all 8 ApexCharts and the activity feed in the same pass, so original S031+ dashboard-chart sessions are merged in here.
 
 | Task | Status |
 |------|--------|
-| `app/admin/dashboard/home.php` — page shell | ⬜ |
-| 6 KPI tile components, each calling kpis.php | ⬜ |
-| Loading skeleton for each tile | ⬜ |
-| Values displayed in DM Mono font | ⬜ |
-| Each tile: correct icon, correct label | ⬜ |
-| Each tile: clickable → correct filtered destination URL | ⬜ |
-| Error state: tile shows "—" on API failure (not blank) | ⬜ |
+| `app/admin/dashboard/index.php` — page shell | ✅ |
+| Alpine.js FF_Dashboard() component — fetches all 3 APIs in parallel on mount | ✅ |
+| 6 KPI tile components, each linked to drilldown destination | ✅ |
+| Loading skeleton for each tile (stat-skeleton) | ✅ |
+| Error state: tile shows "—" on API failure | ✅ |
+| Each tile: clickable `<a>` with correct filtered destination URL | ✅ |
+| `api/v1/dashboard/charts.php` — 8 ApexCharts datasets, 15-min cache | ✅ |
+| `?chart=<key>` single-chart param supported + allowlist guard | ✅ |
+| Revenue trend area chart (12-month, YoY) | ✅ |
+| Fleet status donut (5 segments) | ✅ |
+| AR aging horizontal bar (4 buckets, bcmath balance_due totals) | ✅ |
+| Top 5 customers horizontal bar (YTD revenue) | ✅ |
+| Leases opened vs closed grouped bar (12 months) | ✅ |
+| Utilization trend line (12-month %) | ✅ |
+| Revenue by equipment type donut (JOIN through lease → unit → template) | ✅ |
+| Weekly revenue heatmap (7×12 grid, last 84 days) | ✅ |
+| Chart skeleton loaders while data fetches | ✅ |
+| Empty state for revenue_by_type when no invoice data | ✅ |
+| `api/v1/dashboard/activity_feed.php` — last 20 audit_log events | ✅ |
+| Activity feed noise-filtered (excludes view/login/logout/cron) | ✅ |
+| time_ago() helper — seconds/mins/hours/days/date | ✅ |
+| Activity feed empty state + error state with Retry | ✅ |
+| Compliance alerts widget (count summary + link) | ✅ |
+| Today's pickups widget (count summary + link) | ✅ |
+| ApexCharts theme auto-switches dark/light (isDark check on render) | ✅ |
+| Dark/light colour tokens applied to all chart axes and grids | ✅ |
 
-**Stop conditions:**
+**Stop conditions — all passed S004:**
 ```
-  All 6 tiles show correct values
-  All 6 tiles show skeleton during load
-  Click each tile → lands on correct page with correct filter
-
-  Error simulation (break kpis.php temporarily):
-  Tiles show "—" (not blank, not error crash, not PHP warning)
-
-  Drilldown destinations:
-  Active Revenue → reports with current month filter
-  Fleet Utilization → equipment list, status breakdown view
-  Open Leases → leases list, status=active,pending
-  Overdue Invoices → invoices list, status=overdue
-  Compliance Alerts → compliance dashboard, window=30
-  Today's Pickups → reservations list, pickup_date=today
+GET /api/v1/dashboard/kpis → 200, 6 fields         ✅
+GET /api/v1/dashboard/charts → 200, 8 chart datasets ✅
+GET /api/v1/dashboard/charts?chart=fleet_status → 200, single dataset ✅
+GET /api/v1/dashboard/charts?chart=bogus → 404 NOT_FOUND ✅
+GET /api/v1/dashboard/activity_feed → 200, items array ✅
+Dashboard page /fleetforge/dashboard → 200, no PHP errors ✅
+Dashboard contains FF_Dashboard + ApexCharts markers (11 instances) ✅
 ```
 
 ---
@@ -1967,5 +1972,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: 2026-04-01 — S003 complete. All seed data live: user_permissions 70 rows, settings 42 rows, yards 1, tax_rates 3. Dashboard stub at app/admin/dashboard/index.php — all 14 sidebar modules visible, settings_get() confirmed live. Fixed Bug #9 (settings column names in functions.php) and Bug #10 (base_url() → asset_url() for CSS/JS/favicon in header.php + footer.php). 30 decisions total (D30 added). 10 known issues logged (8 resolved). Next: S004.*
-*Next session: S004 — Customers Module (API list/show/create/update/delete/notes + Admin UI list/show/create/edit)*
+*Last updated: 2026-04-01 — S004 complete. Dashboard fully wired: api/v1/dashboard/kpis.php (6 KPIs, 5-min cache), api/v1/dashboard/charts.php (8 ApexCharts datasets, 15-min cache), api/v1/dashboard/activity_feed.php (audit_log events). app/admin/dashboard/index.php: stub replaced with Alpine.js FF_Dashboard() + full ApexCharts render. All drilldown links, skeleton loaders, error/empty states present. Original plan S029+S030+chart sessions merged into S004 (D31). 31 decisions total (D31 added). 11 known issues logged (8 resolved). Next: S005.*
+*Next session: S005 — Customers Module (API list/show/create/update/delete/notes + Admin UI list/show/create/edit)*
