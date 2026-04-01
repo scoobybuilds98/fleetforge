@@ -228,11 +228,12 @@ if (!function_exists('settings_get')) {
 function settings_get(string $key, mixed $default = null): mixed
 {
     try {
+        // DB schema: columns are `key` and `value` (reserved words — must be backtick-quoted)
         $row = db_row(
-            "SELECT setting_value FROM settings WHERE setting_key = ?",
+            "SELECT `value` FROM settings WHERE `key` = ?",
             [$key]
         );
-        return $row !== null ? $row['setting_value'] : $default;
+        return $row !== null ? $row['value'] : $default;
     } catch (Throwable) {
         // Table doesn't exist yet — silent fallback
         return $default;
@@ -263,25 +264,27 @@ function generate_id(string $prefix, string $year): string
     $key  = strtolower($prefix) . '.next_number.' . $year;
 
     // Lock the settings row for this prefix+year (must be inside transaction)
+    // DB schema: columns are `key` and `value` — reserved words, backtick-quoted throughout.
+    // db_insert() is NOT used here because db_sanitize_column() does not add backticks,
+    // and `key`/`value` are MySQL reserved words that require them. Raw SQL used instead.
     $row  = db_row(
-        "SELECT setting_value FROM settings WHERE setting_key = ? FOR UPDATE",
+        "SELECT `value` FROM settings WHERE `key` = ? FOR UPDATE",
         [$key]
     );
 
-    $next   = $row !== null ? (int) $row['setting_value'] : 1;
+    $next   = $row !== null ? (int) $row['value'] : 1;
     $result = sprintf('%s-%s-%05d', strtoupper($prefix), $year, $next);
 
     if ($row !== null) {
         db_execute(
-            "UPDATE settings SET setting_value = ? WHERE setting_key = ?",
+            "UPDATE settings SET `value` = ? WHERE `key` = ?",
             [$next + 1, $key]
         );
     } else {
-        db_insert('settings', [
-            'setting_key'   => $key,
-            'setting_value' => (string) ($next + 1),
-            'setting_group' => strtolower($prefix),
-        ]);
+        db_execute(
+            "INSERT INTO settings (`key`, `value`, group_name) VALUES (?, ?, ?)",
+            [$key, (string) ($next + 1), strtolower($prefix)]
+        );
     }
 
     return $result;

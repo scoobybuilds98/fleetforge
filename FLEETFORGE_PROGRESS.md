@@ -43,6 +43,7 @@
 | 0.7 | Pre-build | Final File Audit | All 7 project files reviewed. D11 resolved (invoice-time tax rates). D23 added (invite token = 7 days). D24 added (AWS SDK in composer.json is correct). Stale "93 tables" references in spec noted — SQL file (94) is authoritative. Session opening updated to include all 7 files. Ready for Session S001. |
 | S001 | 2026-04-01 | Foundation Layer | 20 files built and verified locally. Login renders with full design system. Health endpoint returns db:true. PHP 8.2 confirmed. Covers original plan sessions S005–S013 + router + CSS/JS + error pages + API bootstrap. 4 deviations logged (D25–D28). Lightsail/infrastructure (original S001–S004) deferred to production deployment. |
 | S002 | 2026-04-01 | Database Schema + Seed Data + Foundation Carry-overs | 94-table schema applied via PHP PDO runner (MySQL CLI blocked by caching_sha2_password). 7 schema bugs fixed. Seeds: 5 roles + 1 super_admin verified. CSRF functions + require_id() + require_input() added. storage/.htaccess + all subdirs created. Skip-nav added. Deep audit in same session found and fixed 4 bugs: (a) login.php query used wrong column names (role_slug/theme/is_active — all non-existent, login was completely broken), (b) CSRF failure returned 200 not 403, (c) header.php + login.php duplicated CSRF generation instead of calling generate_csrf_token(), (d) logout.php queried non-existent user_remember_tokens table, leaving remember_me token live after logout. All bugs fixed. Login, audit_log, CSRF, StorageClient, Mailer all verified. |
+| S003 | 2026-04-01 | Remaining Seed Data + Dashboard Stub | Fixed Bug #9: settings_get() and generate_id() in functions.php used wrong column names (setting_key/setting_value/setting_group vs actual DB columns key/value/group_name — reserved words requiring backtick quoting). All 4 seed files created and applied: 003_permissions.sql (70 rows, 5×14 core modules, role_id resolved by slug JOIN), 004_settings.sql (42 default settings), 005_yard.sql (Surrey Yard), 006_tax_rates.sql (BC GST+PST, Ontario HST, Alberta GST). Dashboard stub at app/admin/dashboard/index.php — all 14 modules visible in sidebar, company name from settings_get() confirmed live. All 6 stop conditions passed. |
 
 ---
 
@@ -94,59 +95,73 @@
 | 6 | S002 | Auth — Security | login.php CSRF failure returned HTTP 200 (just set $error variable). Spec requires 403. Also: both login.php and header.php duplicated CSRF generation inline instead of calling generate_csrf_token(). | ✅ FIXED S002 deep audit — login.php now calls verify_csrf_token() + http_response_code(403). Both files now call generate_csrf_token(). |
 | 7 | S002 | Schema | FULLTEXT index count: PROGRESS.md stop condition says "Must return 5 rows" but S027 test queries information_schema.STATISTICS which returns 1 row per indexed column (not per index). Actual distinct FULLTEXT indexes = 6 (customers, equipment_units, invoices, leases, vendors + acc_accounts). Count of 5 was undercount. | ✅ NOTED — 6 distinct FULLTEXT indexes, all correct. STATISTICS query returns 18 rows (multi-column indexes). Test condition was misleading. |
 | 8 | S001–S002 | All PHP files | **Comment retrofit needed.** Global commenting standard established after S002: every file needs (1) top-of-file `/** */` block with path, description, dependencies, defined symbols, spec refs; (2) inline WHY comments on security/business-logic/bcmath/FOR UPDATE; (3) docblocks on every function. Files built in S001/S002 predate this standard and have partial or no comments. | Schedule a dedicated comment-retrofit session before Phase 3 (or batch into early Phase 3 sessions as files are touched). **All files built from S003 onward must include full comments from the start.** |
+| 9 | S003 | Functions | `settings_get()` and `generate_id()` in `includes/functions.php` used wrong column names (`setting_key`, `setting_value`, `setting_group`) against a DB whose actual columns are `key`, `value`, `group_name` (reserved SQL words, backtick-quoted). Both functions were silently catching PDOException and returning defaults, masking the bug entirely. `generate_id()` also used `db_insert()` which doesn't add backticks — fixed to use raw `db_execute()` with explicit backticks for the INSERT. | ✅ FIXED S003 — both functions corrected. Seeded settings now readable. generate_id() atomic counter now works correctly. |
 
 ---
 
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S003 — Seed Data (Remaining) + Dashboard Stub
+Session S004 — Customers Module (API + Admin UI)
+
+✅ S003 COMPLETE — all stop conditions passed:
+  user_permissions: 70 rows  |  settings: 42 rows  |  yards: 1  |  tax_rates: 3
+  Dashboard renders at /fleetforge/dashboard — 14 sidebar modules visible, no PHP errors
+  settings_get() confirmed live (returns "Mainland Truck & Trailer Sales")
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
-  Login at http://fleetforge.test/fleetforge/auth/login with admin@fleetforge.test / FleetForge2025!
-  → Must redirect to dashboard (404 is fine — just no PHP error)
+  curl http://fleetforge.test/fleetforge/dashboard (with auth cookie) → renders without errors
 
 READ ALL OF THESE FILES FIRST — in this order:
-  1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, signatures, traps (read this first, every session)
+  1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, signatures, traps (read first, every session)
   2. FLEETFORGE_PROGRESS.md               ← decisions + session assignment
-  3. FLEETFORGE_SPEC_FINAL.md             ← §8 Users/Roles + §7 Settings + §6 Yards + §5 Tax
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← sole schema source (94 tables) — reference only
-  5. FLEETFORGE_DESIGN_DETAILS.md         ← exact CSS hex values + component specs
+  3. FLEETFORGE_SPEC_FINAL.md             ← §3 Customers (full section)
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← customers, customer_notes, customer_tags, customer_contacts
+  5. FLEETFORGE_DESIGN_DETAILS.md         ← table/list component, form layout, badge styles
 
 DECISIONS TO CARRY FORWARD:
-  D5:  SOFT_DELETE_TABLES = 15 tables (includes payments)
-  D7:  FF_BASE_PATH = '/fleetforge' — LOCKED. Do not change.
-  D11: Tax rates looked up at invoice time — never frozen on lease.
+  D5:  SOFT_DELETE_TABLES = 15 (customers is one of them — always AND deleted_at IS NULL)
+  D7:  FF_BASE_PATH = '/fleetforge' — LOCKED.
+  D11: Tax rates looked up at invoice time.
+  D16: bcmath only for monetary fields (outstanding_balance, credit_limit).
   D17: PSR-4 — FleetForge\\ namespace → lib/
-  D25: function_exists() guards on all functions in functions.php + env() in config/app.php.
-  D26: /auth/ route in public/index.php router — KEEP IT before the admin catch-all.
-  D27: APP_URL in .env = origin only. base_url() appends FF_BASE_PATH. asset_url() has no prefix.
-  D28: .env must be edited with VS Code or nano only — NEVER TextEdit.
+  D19: Optimistic lock on all customer UPDATE endpoints (check updated_at).
+  D25: function_exists() guards in functions.php.
+  D26: /auth/ route in router — keep before admin catch-all.
+  D27: APP_URL origin-only. base_url() for routes, asset_url() for assets.
+  Settings columns: `key` and `value` (backtick-quoted reserved words) — Bug #9 fixed in S003.
+  Admin pages live at app/admin/{module}/. dirname depth = 3 from app/admin/{module}/ to project root.
+  API endpoints live at api/v1/{module}/. dirname depth = 3 from api/v1/{module}/ to project root.
 
-BUILD SCOPE (S003):
+BUILD SCOPE (S004):
+  API endpoints:
+    api/v1/customers/index.php      ← GET list (paginated, filtered, sorted)
+    api/v1/customers/show.php       ← GET single customer
+    api/v1/customers/create.php     ← POST create
+    api/v1/customers/update.php     ← POST update (optimistic lock)
+    api/v1/customers/delete.php     ← POST soft-delete (blocks if HAS_ACTIVE_LEASES)
+    api/v1/customers/notes/index.php  ← GET notes list
+    api/v1/customers/notes/create.php ← POST add note
 
-  PART A — Remaining Seed Data (S028 carry-over):
-    database/seeds/003_permissions.sql  ← 70 rows: 5 roles × 14 modules from config/permissions.php
-    database/seeds/004_settings.sql     ← default settings (company name, currency, late fee defaults, etc.)
-    database/seeds/005_yard.sql         ← 1 default yard: "Surrey Yard" or similar
-    database/seeds/006_tax_rates.sql    ← BC GST 5%, BC PST 7%, Ontario HST 13%
+  Admin UI:
+    app/admin/customers/index.php   ← list page (table + filters + pagination)
+    app/admin/customers/show.php    ← detail page (tabs: overview, notes, leases, invoices)
+    app/admin/customers/create.php  ← new customer form
+    app/admin/customers/edit.php    ← edit customer form
 
-  PART B — Dashboard Stub:
-    app/dashboard/index.php             ← authenticated page with header/footer
-    Must render without PHP errors for super_admin login
-    No real data needed — placeholders OK
+STOP CONDITIONS:
+  1. GET api/v1/customers → 200 JSON paginated (empty array OK)
+  2. POST api/v1/customers/create → creates customer, returns 201 with id
+  3. GET api/v1/customers/show?id={id} → returns correct customer record
+  4. POST api/v1/customers/update → updates customer, returns 200
+  5. POST api/v1/customers/update with stale updated_at → 409 STALE_DATA
+  6. POST api/v1/customers/delete → soft-deletes (deleted_at set, not hard delete)
+  7. Visit /fleetforge/customers → list page renders (empty state OK)
+  8. Visit /fleetforge/customers/create → form renders without PHP errors
+  9. No PHP errors or warnings anywhere
 
-STOP CONDITIONS — ALL MUST PASS:
-  1. SELECT COUNT(*) FROM user_permissions; → 70
-  2. SELECT COUNT(*) FROM settings; → > 0
-  3. SELECT COUNT(*) FROM yards; → 1
-  4. SELECT COUNT(*) FROM tax_rates; → 3 (or more)
-  5. Visit http://fleetforge.test/fleetforge/dashboard → page renders with sidebar + topbar (no PHP errors)
-  6. Sidebar: all 14 modules visible for super_admin
-  7. No PHP errors or warnings anywhere
-
-Do not write any code yet. Confirm you have read all files and summarize what S003 builds.
+Do not write any code yet. Confirm you have read all files and summarize what S004 builds.
 ```
 
 ---
