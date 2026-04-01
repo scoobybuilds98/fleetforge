@@ -1,0 +1,169 @@
+# ============================================================
+# FleetForge — Apache configuration for public/ (webroot)
+# This directory is the ONLY directory exposed to HTTP.
+# Everything else lives above this directory and is unreachable.
+# ============================================================
+
+# ============================================================
+# ENGINE & BASICS
+# ============================================================
+
+# Disable directory listings — never expose file trees
+Options -Indexes
+
+# Follow symlinks (required for mod_rewrite)
+Options +FollowSymLinks
+
+# Allow .htaccess to override settings
+AllowOverride All
+
+# ============================================================
+# SECURITY HEADERS [PASS-1:L4] [Section 4.39]
+# CSP: no Mapbox — removed per spec audit
+# ============================================================
+<IfModule mod_headers.c>
+    # Content Security Policy
+    # 'unsafe-inline' required for Alpine.js + inline styles (internal admin tool)
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'"
+
+    # Prevent MIME type sniffing
+    Header always set X-Content-Type-Options "nosniff"
+
+    # Deny all framing (clickjacking protection)
+    Header always set X-Frame-Options "DENY"
+
+    # Legacy XSS filter (belt-and-suspenders)
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Referrer policy — send origin only on cross-origin requests
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Permissions policy — disable browser features we don't use
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(self)"
+
+    # HSTS — only sent over HTTPS (env=HTTPS guard prevents breaking local HTTP dev)
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" env=HTTPS
+
+    # Remove server signature headers
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>
+
+# ============================================================
+# BLOCK SENSITIVE FILES — defence in depth
+# .env should be above the webroot, but block it here too.
+# ============================================================
+<FilesMatch "^\.">
+    # Block all dotfiles: .env, .git, .htpasswd, etc.
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block PHP execution in the assets directory (extra safety)
+<DirectoryMatch "^.*/public/assets/">
+    <FilesMatch "\.php$">
+        <IfModule mod_authz_core.c>
+            Require all denied
+        </IfModule>
+        <IfModule !mod_authz_core.c>
+            Order allow,deny
+            Deny from all
+        </IfModule>
+    </FilesMatch>
+</DirectoryMatch>
+
+# ============================================================
+# CUSTOM ERROR DOCUMENTS
+# error.php is a real file so mod_rewrite passes it through.
+# Apache sets REDIRECT_STATUS before invoking the handler.
+# ============================================================
+ErrorDocument 400 /fleetforge/error.php
+ErrorDocument 403 /fleetforge/error.php
+ErrorDocument 404 /fleetforge/error.php
+ErrorDocument 405 /fleetforge/error.php
+ErrorDocument 429 /fleetforge/error.php
+ErrorDocument 500 /fleetforge/error.php
+ErrorDocument 502 /fleetforge/error.php
+ErrorDocument 503 /fleetforge/error.php
+ErrorDocument 504 /fleetforge/error.php
+
+# ============================================================
+# MOD_REWRITE — route everything through index.php
+# ============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Set the base for rewrite rules
+    RewriteBase /
+
+    # --- Pass real files and directories through unchanged ---
+    # Static assets (CSS, JS, images, fonts, icons) are served directly.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # --- Route everything else to index.php ---
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# ============================================================
+# PHP SETTINGS (applied when using mod_php)
+# ============================================================
+<IfModule mod_php.c>
+    # Never expose PHP version in headers
+    php_flag expose_php Off
+
+    # Disable dangerous PHP functions
+    php_value disable_functions "exec,passthru,shell_exec,system,proc_open,popen,curl_multi_exec,parse_ini_file,show_source"
+</IfModule>
+
+# Same block for PHP 8.x module
+<IfModule mod_php8.c>
+    php_flag expose_php Off
+</IfModule>
+
+# ============================================================
+# MIME TYPES — ensure correct types for assets
+# ============================================================
+<IfModule mod_mime.c>
+    AddType image/svg+xml         .svg .svgz
+    AddType application/javascript .js .mjs
+    AddType text/css               .css
+    AddType font/woff2             .woff2
+    AddType font/woff              .woff
+</IfModule>
+
+# ============================================================
+# COMPRESSION — gzip static assets where supported
+# ============================================================
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css
+    AddOutputFilterByType DEFLATE application/javascript application/json
+    AddOutputFilterByType DEFLATE image/svg+xml font/woff2
+</IfModule>
+
+# ============================================================
+# CACHE CONTROL — assets versioned via ?v=X.X.X in PHP
+# Set a short cache time for HTML; longer for static assets.
+# ============================================================
+<IfModule mod_expires.c>
+    ExpiresActive On
+
+    # HTML — no cache (dynamic pages)
+    ExpiresByType text/html                    "access plus 0 seconds"
+
+    # Static assets — 1 year (cache-busted by ?v= in PHP)
+    ExpiresByType text/css                     "access plus 1 year"
+    ExpiresByType application/javascript       "access plus 1 year"
+    ExpiresByType image/svg+xml               "access plus 1 year"
+    ExpiresByType image/png                   "access plus 1 year"
+    ExpiresByType image/jpeg                  "access plus 1 year"
+    ExpiresByType image/webp                  "access plus 1 year"
+    ExpiresByType font/woff2                  "access plus 1 year"
+    ExpiresByType font/woff                   "access plus 1 year"
+</IfModule>

@@ -1,0 +1,58 @@
+# ============================================================
+# FleetForge — .gitignore
+# ============================================================
+
+# --- Secrets — NEVER commit ---
+.env
+*.pem
+*.key
+
+# --- Composer ---
+vendor/
+
+# --- Storage — user uploads and generated files (go to S3 in prod) ---
+storage/uploads/
+storage/generated/
+storage/maintenance.flag
+
+# --- Logs ---
+logs/*.log
+
+# --- Cache ---
+cache/*
+!cache/.gitkeep
+
+# --- PHP temp/bytecode ---
+*.cache
+opcache/
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Windows ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Linux ---
+*~
+
+# --- IDEs ---
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+nbproject/
+
+# --- PHPUnit / test artifacts ---
+.phpunit.result.cache
+coverage/
+
+# --- Backup files ---
+*.bak
+*.orig
+*.swp
+*.swo

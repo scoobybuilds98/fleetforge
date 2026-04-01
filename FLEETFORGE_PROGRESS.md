@@ -40,7 +40,8 @@
 |---|------|-------|---------|
 | 0 | Pre-build | Schema Audit | 28 schema issues found and corrected. gps_devices dropped. Billing engine architecture locked. AWS setup guide written. All decisions locked. |
 | 0.5 | Pre-build | 15-Pass Audit | Comprehensive 15-pass audit integrated. 17 indexes added to schema. Portal security hardened. Invoice/lease state machines corrected. Billing edge cases resolved. CRA compliance gaps addressed. Infrastructure decisions locked (S3, SES, Cloudflare). StorageClient + Mailer added to Session 1 scope. SOFT_DELETE_TABLES expanded to 15. Financial record immutability rules defined. |
-| 0.6 | Pre-build | Build Readiness | Cross-file consistency verified. Granular tax exemption pipeline completed (customers→leases→invoices→TaxCalculator). All billing class signatures updated to bcmath string types. Cross-currency payment rule added (D18). FOR UPDATE expanded to 4 operations (D20). Optimistic locking mandated (D19). Cron advisory locks mandated (D21). S028 dispatcher permission corrected. S027 table count updated for schema_migrations. 22 locked decisions total. |
+| 0.7 | Pre-build | Final File Audit | All 7 project files reviewed. D11 resolved (invoice-time tax rates). D23 added (invite token = 7 days). D24 added (AWS SDK in composer.json is correct). Stale "93 tables" references in spec noted — SQL file (94) is authoritative. Session opening updated to include all 7 files. Ready for Session S001. |
+| S001 | 2026-04-01 | Foundation Layer | 20 files built and verified locally. Login renders with full design system. Health endpoint returns db:true. PHP 8.2 confirmed. Covers original plan sessions S005–S013 + router + CSS/JS + error pages + API bootstrap. 4 deviations logged (D25–D28). Lightsail/infrastructure (original S001–S004) deferred to production deployment. |
 
 ---
 
@@ -58,7 +59,7 @@
 | D8 | Server | Lightsail to be provisioned in Session 1. Fresh AWS account. 🔒 | Follow AWS SETUP GUIDE in this file. $20/mo plan, us-west-2, Ubuntu 22.04. |
 | D9 | Storage | S3 via StorageClient abstraction [INFRA] | All files to S3 in production. Local driver for development. StorageClient built in Session 1. |
 | D10 | Email | AWS SES SMTP via Mailer.php [INFRA] | Mailer configured in Session 1. All email through lib/Notifications/Mailer.php. |
-| D11 | Tax rates | Pending Avi decision [INFRA:U19] | Frozen on lease vs looked up at invoice time. CRA recommends invoice-time lookup. |
+| D11 | Tax rates | **LOCKED: Look up at invoice time** — TaxCalculator reads current rate from tax_rates table when invoice is generated. [INFRA:U19 resolved] | CRA compliance. If BC PST changes mid-lease, new invoices use the new rate. Rates never frozen on lease. |
 | D12 | Invoice immutability | Sent invoices are frozen [PASS-13:F1] | Financial fields cannot be edited after status leaves 'draft'. Void + recreate for corrections. |
 | D13 | Payments soft-delete | Added to SOFT_DELETE_TABLES [PASS-13:F2] | Payments must NEVER be hard-deleted. 15 soft-delete tables total. |
 | D14 | Day counting | Inclusive: (end - start) + 1 [PASS-3:1A] | A lease from Mar 10 to Mar 10 = 1 billable day. |
@@ -70,6 +71,12 @@
 | D20 | Concurrency — FOR UPDATE | Required for: lease creation, lease close, payment allocation, credit application [PASS-8:4] | Not just lease creation — every operation that reads-then-writes financial state. |
 | D21 | Cron advisory locks | Every write-heavy cron uses MySQL GET_LOCK() [PASS-8:4B, PASS-15:C1] | Prevents duplicate runs. Applies to: invoice_generate_monthly, invoice_overdue, late_fee_apply, health_scores, risk_scores, compliance_alerts, reconcile_counters. |
 | D22 | Granular tax exemption | gst_exempt and pst_exempt are independent booleans on customer, lease, and invoice [PASS-13:T2] | A customer can be GST-exempt but PST-liable. TaxCalculator accepts both flags. |
+| D23 | Invite token expiry | **7 days** — resolves 3-way conflict in spec (lines 108/2388/3587 said 7 days/48 hours/1 hour respectively). 7 days is the correct value everywhere. | New employees may not check email immediately. Single-use, stored hashed. |
+| D24 | Composer dependencies | `composer.json` includes both `mpdf/mpdf` AND `aws/aws-sdk-php` — this is correct and intentional. Spec comment `vendor/ ← Composer (mPDF only)` is stale — do NOT remove AWS SDK. | StorageClient.php requires AWS SDK for S3 driver. Mailer.php uses it for SES. |
+| D25 | function_exists() guards | Every function in `includes/functions.php` and the `env()` function in `config/app.php` is wrapped with `if (!function_exists(...))`. | Laravel Herd uses symlinks — different `require_once` call paths resolved to different canonical paths, causing PHP to load files twice and fatal on redeclaration. Guards make both files safe to include any number of times. |
+| D26 | /auth/ route in router | `public/index.php` has an explicit `/auth/` route branch pointing to `app/auth/` — added BEFORE the admin catch-all. | Auth pages live at `app/auth/`, not `app/admin/auth/`. Without this, all auth URLs returned 404. |
+| D27 | Herd docroot + asset_url() | Laravel Herd auto-detects `public/` as the document root. `APP_URL` in `.env` is the origin only (`http://fleetforge.test`) — no `/fleetforge` suffix. `base_url()` now appends `FF_BASE_PATH` for app routes. New `asset_url()` function generates static asset URLs without the base path prefix so they resolve correctly under Herd. `FF_BASE_PATH = '/fleetforge'` remains locked (D7). | Herd's `try_files` resolves `/fleetforge/assets/css/app.css` to `public/fleetforge/assets/css/app.css` which does not exist. Assets must be served from the docroot directly. Production (Apache + Alias `/fleetforge` → `public/`) uses the same `APP_URL` origin-only pattern. |
+| D28 | .env editor warning | `.env` must be edited with VS Code, nano, or a plain-text editor ONLY. Never open with macOS TextEdit. | TextEdit silently replaces standard ASCII characters (quotes, hyphens, URLs) with Unicode "smart" equivalents that break PHP's env parser. Corrupts APP_URL and other values invisibly. |
 
 ---
 
@@ -77,46 +84,75 @@
 
 | # | Session | Module | Issue | Status |
 |---|---------|--------|-------|--------|
-| — | — | — | None yet | — |
+| 1 | S001 | Auth | `audit_log` inserts in login.php + logout.php are not yet written — table does not exist until DB schema is run in S002. Two ⬜ tasks remain in S013. | Carry to S002 — add after schema migration. |
+| 2 | S001 | Functions | `clean_url()`, `format_mileage()`, and named ID generators (`generate_invoice_number()` etc.) not yet implemented. Tracked as ⬜ in S008/S009. Generic `generate_id()` + `generate_random_code()` are built and sufficient until specific wrappers are needed. | Carry to respective module sessions. |
+| 3 | S001 | Auth/CSRF | `generate_csrf_token()` and `verify_csrf_token()` standalone functions not written. CSRF is implemented inline in `api/bootstrap.php` (header check) and `login.php` (session token). No standalone callable yet. | Add to S002 as part of completing S010. |
 
 ---
 
 ## NEXT SESSION STARTS WITH
 
 ```
-Session 1 — AWS Server Setup (if needed) + Foundation Layer
+Session S002 — Remaining Foundation + Database Schema + Seed Data
 
-READ FIRST:
-  FLEETFORGE_SPEC_FINAL.md
-  FLEETFORGE_PROGRESS.md
-  FLEETFORGE_DATABASE_MASTER.sql (v1.2 — sole schema source) [PASS-1:L7]
+VERIFY BEFORE STARTING:
+  curl http://fleetforge.test/fleetforge/api/v1/health   → { "success":true, "data":{"db":true} }
+  Visit http://fleetforge.test/fleetforge/auth/login      → login page renders with full CSS
 
-DECISIONS LOCKED:
-  D7: Base path = /fleetforge (existing spec is correct, no changes needed)
-  D8: Lightsail not yet provisioned → follow AWS SETUP GUIDE first
+READ ALL OF THESE FILES FIRST — in this order:
+  1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, signatures, traps (read this first, every session)
+  2. FLEETFORGE_PROGRESS.md               ← decisions + session assignment
+  3. FLEETFORGE_SPEC_FINAL.md             ← law — read sections relevant to this session
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← sole schema source (94 tables)
+  5. FLEETFORGE_DESIGN_DETAILS.md         ← exact CSS hex values + component specs (needed for sidebar/topbar)
+  6. FLEETFORGE_ACCOUNTING_SPEC.md        ← reference only — do not build accounting yet
 
-BUILD SCOPE (Phase 1 — Foundation):
-  .env.example (including AWS/S3/SES vars [INFRA]), .gitignore, composer.json (with PSR-4 autoload [PASS-8:6])
-  config/app.php (require vendor/autoload.php, FF_VERSION, FF_LOADED guard [PASS-8:1])
-  config/permissions.php, config/navigation.php
-  includes/db.php  ← SOFT_DELETE_TABLES must use 15-table list (D5+D13: payments added)
-                   ← PDO singleton via function-static pattern [PASS-8:1]
-                   ← db_transaction() with proper FOR UPDATE support
-  includes/functions.php (format_*, clean_*, bcmath monetary helpers [PASS-10:6])
-  includes/auth.php (hash_equals for token comparison [PASS-4:1.4])
-  includes/header.php (set_exception_handler for pages [PASS-8:2])
-  includes/sidebar.php, includes/topbar.php, includes/footer.php
-  lib/Storage/StorageClient.php ← LOCAL + S3 drivers, same interface [INFRA] *** CRITICAL ***
-  lib/Notifications/Mailer.php  ← AWS SES SMTP configured [INFRA] *** CRITICAL ***
-  public/index.php (router + maintenance mode check, resolve_*_route with file validation [PASS-7:G3])
-  public/.htaccess (security headers, CSP without Mapbox [PASS-1:L4], routing, block .env)
-  public/assets/css/app.css (full design system)
-  public/assets/js/app.js
-  app/auth/login.php, logout.php, forgot_password.php, reset_password.php, accept_invite.php
-  app/errors/ (403, 404, 500, maintenance)
-  public/error.php
-  api/bootstrap.php (with set_exception_handler [PASS-8:2], CSRF enforcement [PASS-7:W3])
-  api/v1/health.php (no auth — DB/disk health check [PASS-15:I1])
+DECISIONS TO CARRY FORWARD:
+  D5:  SOFT_DELETE_TABLES = 15 tables (includes payments)
+  D7:  FF_BASE_PATH = '/fleetforge' — LOCKED. Do not change.
+  D9:  StorageClient — LOCAL + S3 drivers, same interface. STORAGE_DRIVER=local for now.
+  D10: Mailer — AWS SES SMTP. .env keys left blank for now.
+  D17: PSR-4 — FleetForge\\ namespace → lib/
+  D25: function_exists() guards on all functions in functions.php + env() in config/app.php — KEEP THEM.
+  D26: /auth/ route in public/index.php router — KEEP IT before the admin catch-all.
+  D27: APP_URL in .env = origin only (http://fleetforge.test). base_url() appends FF_BASE_PATH.
+       asset_url() is for static files — no base path prefix. KEEP BOTH FUNCTIONS.
+  D28: .env must be edited with VS Code or nano only — NEVER TextEdit.
+
+BUILD SCOPE (S002):
+
+  PART A — Remaining Foundation Files (not yet built):
+    config/permissions.php     ← 5 roles × 14 modules permission matrix
+    config/navigation.php      ← sidebar nav items, single source of truth
+    includes/header.php        ← HTML head + set_exception_handler [PASS-8:2]
+    includes/sidebar.php       ← sidebar nav using config/navigation.php
+    includes/topbar.php        ← topbar: user name, theme toggle, notifications bell
+    includes/footer.php        ← closing tags + FF_ConfirmModal Alpine component
+    lib/Storage/StorageClient.php  ← LOCAL + S3 drivers [INFRA] *** CRITICAL ***
+    lib/Notifications/Mailer.php   ← AWS SES SMTP [INFRA] *** CRITICAL ***
+    .env.example               ← all keys documented (AWS/S3/SES vars included)
+    .gitignore                 ← .env, vendor/, storage/, logs/, cache/, *.sql
+
+  PART B — Database Schema:
+    Run FLEETFORGE_DATABASE_MASTER.sql against local MySQL
+    Verify all 94 tables created: SHOW TABLES; → count = 94
+    Verify foreign keys: SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE ...
+
+  PART C — Seed Data:
+    database/seeds/001_roles.sql     ← 5 roles: super_admin, manager, dispatcher, accountant, viewer
+    database/seeds/002_super_admin.sql ← 1 active super_admin user (email: admin@fleetforge.test, temp password)
+    Verify: SELECT * FROM user_roles; → 5 rows
+    Verify: SELECT id, email, role_id, is_active FROM users; → 1 row
+
+STOP CONDITIONS — ALL MUST PASS:
+  1. curl http://fleetforge.test/fleetforge/api/v1/health → db:true
+  2. mysql -u root -e "SHOW TABLES;" fleetforge | wc -l → 95 (94 tables + header row)
+  3. Login with admin@fleetforge.test credentials → redirects (even if dashboard 404s — just no PHP error)
+  4. Visit http://fleetforge.test/fleetforge/dashboard → header/sidebar render correctly (even if page is empty)
+  5. StorageClient::local()->put('test.txt', 'hello') → file appears in storage/uploads/
+  6. No PHP errors or warnings anywhere
+
+Do not write any code yet. Confirm you have read all files and summarize what S002 builds.
 ```
 
 ---
@@ -735,11 +771,11 @@ curl https://yourdomain.com/includes/db.php
 
 | Task | Status |
 |------|--------|
-| `config/app.php` — custom .env parser (no Composer dependency) | ⬜ |
-| All FF_ constants defined and accessible | ⬜ |
-| FF_ASSET_VERSION constant | ⬜ |
-| FF_ENV (production/development) | ⬜ |
-| FF_DEBUG (false in production) | ⬜ |
+| `config/app.php` — custom .env parser (no Composer dependency) | ✅ |
+| All FF_ constants defined and accessible | ✅ |
+| FF_ASSET_VERSION constant | ✅ |
+| FF_ENV (production/development) | ✅ |
+| FF_DEBUG (false in production) | ✅ |
 | `config/permissions.php` — 5 roles × 14 modules matrix | ⬜ |
 | `config/navigation.php` — sidebar nav, single source of truth | ⬜ |
 | `cron/README.md` — all crontab entries documented | ⬜ |
@@ -769,18 +805,18 @@ echo "Config OK\n";
 
 | Task | Status |
 |------|--------|
-| `includes/db.php` — PDO singleton | ⬜ |
-| Connection: charset=utf8mb4, emulate_prepares=false | ⬜ |
-| Connection: `SET time_zone = '+00:00'` on connect | ⬜ |
-| Connection: `SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci` | ⬜ |
-| `db_select(sql, params)` → array of rows | ⬜ |
-| `db_row(sql, params)` → single row or null | ⬜ |
-| `db_insert(table, data)` → last insert ID | ⬜ |
-| `db_update(table, data, where, whereParams)` → affected rows | ⬜ |
-| `db_execute(sql, params)` → affected rows | ⬜ |
-| `db_count(sql, params)` → int | ⬜ |
-| `db_exists(table, condition, params)` → bool | ⬜ |
-| All queries: parameterized — NEVER string interpolation | ⬜ |
+| `includes/db.php` — PDO singleton | ✅ |
+| Connection: charset=utf8mb4, emulate_prepares=false | ✅ |
+| Connection: `SET time_zone = '+00:00'` on connect | ✅ |
+| Connection: `SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci` | ✅ |
+| `db_select(sql, params)` → array of rows | ✅ |
+| `db_row(sql, params)` → single row or null | ✅ |
+| `db_insert(table, data)` → last insert ID | ✅ |
+| `db_update(table, data, where, whereParams)` → affected rows | ✅ |
+| `db_execute(sql, params)` → affected rows | ✅ |
+| `db_count(sql, params)` → int | ✅ |
+| `db_exists(table, condition, params)` → bool | ✅ |
+| All queries: parameterized — NEVER string interpolation | ✅ |
 
 **Stop conditions:**
 ```php
@@ -828,11 +864,11 @@ echo "ALL DB BASIC TESTS PASSED\n";
 
 | Task | Status |
 |------|--------|
-| `db_transaction(callable)` — wraps in BEGIN/COMMIT | ⬜ |
-| Auto-rollback on any exception thrown inside callable | ⬜ |
-| Re-throws exception after rollback | ⬜ |
-| Returns callable return value on success | ⬜ |
-| Nested transaction handling (savepoints) | ⬜ |
+| `db_transaction(callable)` — wraps in BEGIN/COMMIT | ✅ |
+| Auto-rollback on any exception thrown inside callable | ✅ |
+| Re-throws exception after rollback | ✅ |
+| Returns callable return value on success | ✅ |
+| Nested transaction handling (savepoints) | ✅ |
 
 **Stop conditions:**
 ```php
@@ -874,13 +910,13 @@ echo "ALL TRANSACTION TESTS PASSED\n";
 
 | Task | Status |
 |------|--------|
-| `includes/functions.php` (partial — sanitization only) | ⬜ |
-| `e($value)` — htmlspecialchars, ENT_QUOTES, UTF-8, null-safe | ⬜ |
-| `clean_string($val, $maxLen)` — trim, strip_tags, max length | ⬜ |
-| `clean_decimal($val)` — returns float or null, rejects formatted | ⬜ |
-| `clean_date($val)` — validates Y-m-d, rejects invalid dates | ⬜ |
-| `clean_int($val)` — returns int or null, rejects floats | ⬜ |
-| `clean_email($val)` — filter_var FILTER_VALIDATE_EMAIL | ⬜ |
+| `includes/functions.php` (partial — sanitization only) | ✅ |
+| `e($value)` — htmlspecialchars, ENT_QUOTES, UTF-8, null-safe | ✅ |
+| `clean_string($val, $maxLen)` — trim, strip_tags, max length | ✅ |
+| `clean_decimal($val)` — returns float or null, rejects formatted | ✅ |
+| `clean_date($val)` — validates Y-m-d, rejects invalid dates | ✅ |
+| `clean_int($val)` — returns int or null, rejects floats | ✅ |
+| `clean_email($val)` — filter_var FILTER_VALIDATE_EMAIL | ✅ |
 | `clean_url($val)` — filter_var FILTER_VALIDATE_URL | ⬜ |
 
 **Stop conditions:**
@@ -938,17 +974,17 @@ echo "ALL SANITIZATION TESTS PASSED\n";
 
 | Task | Status |
 |------|--------|
-| `format_currency(amount, symbol)` | ⬜ |
-| `format_date(value)` — DATE → display | ⬜ |
-| `format_datetime(value)` — UTC DATETIME → company timezone | ⬜ |
+| `format_currency(amount, symbol)` | ✅ |
+| `format_date(value)` — DATE → display | ✅ |
+| `format_datetime(value)` — UTC DATETIME → company timezone | ✅ |
 | `format_mileage(distance, unit)` | ⬜ |
-| `settings_get(key, default)` | ⬜ |
+| `settings_get(key, default)` | ✅ |
 | `generate_contract_number()` — CN-XXXXXX-YYYY | ⬜ |
 | `generate_invoice_number()` — INV-YYYY-NNNNN | ⬜ |
 | `generate_payment_number()` — PAY-YYYY-NNNNN | ⬜ |
 | `generate_wo_number()` — WO-YYYY-NNNNN | ⬜ |
 | `generate_claim_number()` — DC-YYYY-NNNNN | ⬜ |
-| ID charset: no 0, O, 1, I (confusable chars excluded) | ⬜ |
+| ID charset: no 0, O, 1, I (confusable chars excluded) | ✅ |
 
 **Stop conditions:**
 ```php
@@ -1003,9 +1039,9 @@ echo "ALL FORMAT + GENERATE TESTS PASSED\n";
 | `verify_csrf_token()` returns false for wrong token | ⬜ |
 | `verify_csrf_token()` returns false for empty/null | ⬜ |
 | `verify_csrf_token()` returns false if no session | ⬜ |
-| API bootstrap: POST requests verify CSRF header | ⬜ |
+| API bootstrap: POST requests verify CSRF header | ✅ |
 | HTML forms: hidden CSRF field auto-included in header.php | ⬜ |
-| `API.post()` in app.js: auto-sends CSRF token in X-CSRF-Token header | ⬜ |
+| `API.post()` in app.js: auto-sends CSRF token in X-CSRF-Token header | ✅ |
 
 **Stop conditions:**
 ```php
@@ -1048,15 +1084,15 @@ curl -X POST /api/v1/customers/create.php \
 
 | Task | Status |
 |------|--------|
-| `includes/auth.php` — permission functions only (no session/login yet) | ⬜ |
-| `can(module, action)` — reads from $_SESSION['ff_user']['permissions'] | ⬜ |
-| `can()` — super_admin always returns true | ⬜ |
-| `can()` — returns false if no session | ⬜ |
-| `is_super_admin()` — returns bool | ⬜ |
-| `current_user()` — returns session array or null | ⬜ |
-| `require_permission(module, action)` — calls http_response_code(403) + exit | ⬜ |
-| `require_auth_api()` — returns 401 JSON if no valid session | ⬜ |
-| `require_permission()` in API context — returns 403 JSON | ⬜ |
+| `includes/auth.php` — permission functions only (no session/login yet) | ✅ |
+| `can(module, action)` — reads from $_SESSION['ff_user']['permissions'] | ✅ |
+| `can()` — super_admin always returns true | ✅ |
+| `can()` — returns false if no session | ✅ |
+| `is_super_admin()` — returns bool | ✅ |
+| `current_user()` — returns session array or null | ✅ |
+| `require_permission(module, action)` — calls http_response_code(403) + exit | ✅ |
+| `require_auth_api()` — returns 401 JSON if no valid session | ✅ |
+| `require_permission()` in API context — returns 403 JSON | ✅ |
 
 **Stop conditions:**
 ```php
@@ -1101,13 +1137,13 @@ echo "ALL PERMISSION TESTS PASSED\n";
 
 | Task | Status |
 |------|--------|
-| Session configuration: HttpOnly, SameSite=Lax, Secure | ⬜ |
-| Session lifetime: 8 hours inactivity (from settings) | ⬜ |
-| `require_auth()` — redirect to login if no session | ⬜ |
-| `require_auth()` — redirect to login if session expired | ⬜ |
-| `require_auth()` — stores requested URL for post-login redirect | ⬜ |
-| Session regenerated on login (prevents session fixation) | ⬜ |
-| Session destroyed completely on logout | ⬜ |
+| Session configuration: HttpOnly, SameSite=Lax, Secure | ✅ |
+| Session lifetime: 8 hours inactivity (from settings) | ✅ |
+| `require_auth()` — redirect to login if no session | ✅ |
+| `require_auth()` — redirect to login if session expired | ✅ |
+| `require_auth()` — stores requested URL for post-login redirect | ✅ |
+| Session regenerated on login (prevents session fixation) | ✅ |
+| Session destroyed completely on logout | ✅ |
 
 **Stop conditions:**
 ```php
@@ -1154,19 +1190,19 @@ Failures:
 
 | Task | Status |
 |------|--------|
-| `app/auth/login.php` — form page + POST handler | ⬜ |
-| CSRF token verified on POST | ⬜ |
-| email + password from POST via clean_email() + clean_string() | ⬜ |
-| `password_verify()` with bcrypt | ⬜ |
-| login_attempts counter incremented on failure | ⬜ |
-| After 5 failures in 60 min → `locked_until` set to +15 min | ⬜ |
-| Locked account check runs BEFORE password check | ⬜ |
-| Generic error message always (never "wrong email" vs "wrong password") | ⬜ |
-| Successful login: session_regenerate_id(true) | ⬜ |
-| Successful login: $_SESSION['ff_user'] populated with permissions | ⬜ |
+| `app/auth/login.php` — form page + POST handler | ✅ |
+| CSRF token verified on POST | ✅ |
+| email + password from POST via clean_email() + clean_string() | ✅ |
+| `password_verify()` with bcrypt | ✅ |
+| login_attempts counter incremented on failure | ✅ |
+| After 5 failures in 60 min → `locked_until` set to +15 min | ✅ |
+| Locked account check runs BEFORE password check | ✅ |
+| Generic error message always (never "wrong email" vs "wrong password") | ✅ |
+| Successful login: session_regenerate_id(true) | ✅ |
+| Successful login: $_SESSION['ff_user'] populated with permissions | ✅ |
 | Successful login: audit_log entry (action=login) | ⬜ |
 | Failed login: audit_log entry (action=login, notes=failed) | ⬜ |
-| "Remember me": separate 30-day secure cookie | ⬜ |
+| "Remember me": separate 30-day secure cookie | ✅ |
 
 **Stop conditions:**
 ```
@@ -1909,5 +1945,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: Post build-readiness review*
-*Next session: S001 — Lightsail Instance + Domain + HTTPS*
+*Last updated: Post final file audit — all 7 files reviewed, D11/D23/D24 locked, 24 decisions total*
+*Next session: S001 — Foundation Layer (local build)*

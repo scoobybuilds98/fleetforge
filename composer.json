@@ -15,11 +15,7 @@
     "autoload": {
         "psr-4": {
             "FleetForge\\": "lib/"
-        },
-        "files": [
-            "includes/db.php",
-            "includes/functions.php"
-        ]
+        }
     },
     "config": {
         "optimize-autoloader": true,

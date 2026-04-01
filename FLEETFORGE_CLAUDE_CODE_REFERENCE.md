@@ -1,6 +1,37 @@
 # FLEETFORGE — CLAUDE CODE QUICK REFERENCE
 **Read this file FIRST in every session. Then read FLEETFORGE_PROGRESS.md for your session assignment.**
-**This file is ~450 lines. The spec is 3,841. This is your cheat sheet — the spec is the law.**
+**This file is ~500 lines. The spec is 3,841. This is your cheat sheet — the spec is the law.**
+
+---
+
+## ⚠️ BUILD STRATEGY — READ THIS BEFORE EVERY SESSION
+
+**We are building everything locally first. AWS Lightsail does not exist yet.**
+
+- All 150 sessions build and test on the local machine (Mac)
+- Local PHP: Laravel Herd — site runs at `http://fleetforge.test`
+- Local MySQL: Homebrew MySQL 8.0 — host 127.0.0.1, user root, pass fleetforge123, db fleetforge
+- Local files: `STORAGE_DRIVER=local` — uploads go to `storage/` folder on disk, NOT S3
+- Local email: SES keys are blank — Mailer writes to `logs/mail.log` instead of sending
+- `APP_ENV=development` — session cookies are HTTP-safe (cookie_secure=0)
+
+**What this means for your code:**
+- Never hardcode `/var/www/fleetforge/` paths — use `dirname(__DIR__, N)` always
+- Never hardcode `https://` in redirect or cookie logic — read from `APP_URL`
+- Always check `FF_ENV` before enabling production-only behaviour (cookie_secure, HSTS, etc.)
+- Build both drivers in StorageClient (local + S3) — but local is active now
+- Build Mailer with SES — but add a dev fallback that logs to file when keys are blank
+- The spec mentions AWS/Lightsail/S3/SES throughout — that is the production target.
+  Build toward it, but don't require it to work locally.
+
+**When we're ready to go live (after all sessions complete):**
+1. Provision Lightsail — follow AWS SETUP GUIDE in FLEETFORGE_PROGRESS.md
+2. Create S3 bucket + IAM user (15 min in AWS console)
+3. Configure AWS SES sending domain (30 min)
+4. `git pull` on server — code is identical, zero changes
+5. Fill in production `.env` — flip APP_ENV, STORAGE_DRIVER, add AWS keys
+6. Import local database to production
+7. Done — no code changes required, only `.env` changes
 
 ---
 
@@ -9,10 +40,13 @@
 | # | Decision | Value |
 |---|----------|-------|
 | D7 | **Base URL path** | **`/fleetforge`** subpath. URLs are `yourdomain.com/fleetforge/auth/login`, `yourdomain.com/fleetforge/portal/`, `yourdomain.com/fleetforge/api/v1/...` |
-| D8 | Server | AWS Lightsail $20/mo, us-west-2, Ubuntu 22.04. Provisioned in Session 1. |
+| D8 | Server | Building locally first (Laravel Herd + MySQL via Homebrew). Lightsail provisioned later when ready for live URL. |
 | D1 | Auth | Custom PHP (bcrypt/sessions) — NOT Auth0 |
 | D9 | Storage | S3 via `StorageClient.php` abstraction. `STORAGE_DRIVER=local` for dev, `s3` for prod. |
-| D10 | Email | AWS SES SMTP via `Mailer.php` |
+| D10 | Email | AWS SES SMTP via `Mailer.php`. SES keys blank locally — Mailer logs to file in development. |
+| D11 | Tax rates | **Looked up at invoice time** — TaxCalculator reads from tax_rates table. Never frozen on lease. |
+| D23 | Invite token | **7 days** expiry. Resolves 3-way conflict in spec. Single-use, stored hashed. |
+| D24 | Composer | `composer.json` has BOTH `mpdf/mpdf` AND `aws/aws-sdk-php`. Spec comment "mPDF only" is stale — do NOT remove AWS SDK. |
 | D14 | Day counting | Inclusive: `(end - start) + 1`. Mar 10 to Mar 10 = 1 day. |
 | D16 | Monetary math | bcmath only. Never float. Strings between functions. Scale=6 intermediate, 2 final. |
 | D17 | Autoloading | PSR-4 via Composer. `FleetForge\\` → `lib/`. |
@@ -36,14 +70,75 @@ else                                                  → app/admin/
 
 ---
 
-## 1. THE FOUR FILES (read order)
+## 1. THE SEVEN FILES (read order every session)
 
-1. **This file** — patterns, signatures, traps (5 min)
-2. **FLEETFORGE_PROGRESS.md** — find your session, read the contract (3 min)
+1. **This file** — patterns, signatures, traps (read first, every session)
+2. **FLEETFORGE_PROGRESS.md** — find your session, read the contract
 3. **FLEETFORGE_SPEC_FINAL.md** — read ONLY the sections relevant to your session
-4. **FLEETFORGE_DATABASE_MASTER.sql** — the sole schema source (reference as needed)
+4. **FLEETFORGE_DATABASE_MASTER.sql** — sole schema source (reference as needed)
+5. **FLEETFORGE_DESIGN_DETAILS.md** — exact CSS hex values, component specs (needed for any UI session)
+6. **FLEETFORGE_ACCOUNTING_SPEC.md** — reference only until accounting sessions (S111+)
+7. **composer.json** — do not modify without checking D24 first
 
 Never start coding before reading files 1 and 2.
+
+---
+
+## 1A. LOCAL DEVELOPMENT ENVIRONMENT
+
+**We build locally first. Lightsail is provisioned later when a live URL is needed.**
+
+```
+Local URL:      http://fleetforge.test     (via Laravel Herd)
+PHP:            8.2 via Laravel Herd
+MySQL:          8.0 via Homebrew
+DB host:        127.0.0.1
+DB port:        3306
+DB user:        root
+DB password:    fleetforge123
+DB name:        fleetforge
+Project folder: /Users/avi/Documents/fleetforge
+```
+
+**Local .env values (development):**
+```
+APP_ENV=development
+APP_URL=http://fleetforge.test/fleetforge
+APP_DEBUG=true
+APP_TIMEZONE=America/Vancouver
+STORAGE_DRIVER=local
+AWS keys: leave blank — StorageClient uses local driver
+SES keys: leave blank — Mailer logs to file in development
+```
+
+**⚠️ CRITICAL — session.cookie_secure must be environment-aware:**
+
+`session.cookie_secure = 1` breaks login on HTTP. Local dev uses HTTP, not HTTPS.
+`config/app.php` MUST set this dynamically — never hardcode 1:
+
+```php
+// In config/app.php — after loading .env:
+ini_set('session.cookie_secure',   FF_ENV === 'production' ? '1' : '0');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
+ini_set('session.gc_maxlifetime',  '28800');
+```
+
+Do NOT set `session.cookie_secure` in php.ini. Control it from code via FF_ENV.
+
+**StorageClient local driver** stores files in `storage/uploads/` on disk.
+Same interface as S3 driver — all code calls `StorageClient::upload()` regardless.
+
+**Mailer in development** — when SES keys are blank, log emails to `logs/mail.log` instead of sending. Never throw a fatal error for missing mail credentials in development.
+
+**Cron jobs** — do not set up crontab locally. Test cron scripts by running them manually:
+```bash
+php /Users/avi/Documents/fleetforge/cron/invoice_generate_monthly.php
+```
+
+**HTTPS-only features** (QR codes with https:// URLs, HSTS header) — build them with the production URL pattern. They'll reference `https://` but that's fine — it's just a string value from APP_URL.
 
 ---
 
@@ -563,4 +658,4 @@ audit            VCEDS        V        —           V           V
 
 ---
 
-*This file: ~400 lines. The spec: 3,841 lines. Read this first, every time.*
+*This file: ~500 lines. The spec: 3,841 lines. Read this first, every time.*
