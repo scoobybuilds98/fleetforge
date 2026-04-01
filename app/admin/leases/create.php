@@ -122,7 +122,7 @@ require_once FF_ROOT . '/includes/header.php';
                                     data-monthly-rate="<?= e($u['default_monthly_rate'] ?? '0.00') ?>"
                                     data-mileage-rate="<?= e($u['default_mileage_rate'] ?? '0.0000') ?>"
                                     data-currency="<?= e($u['default_currency'] ?? 'CAD') ?>"
-                                    data-mileage-unit="<?= e($u['default_mileage_unit'] ?? 'miles') ?>">
+                                    data-mileage-unit="<?= e($u['default_mileage_unit'] ?? 'km') ?>">
                                 <?= e($u['unit_number']) ?> — <?= e($u['template_name']) ?>
                             </option>
                             <?php endforeach; ?>
@@ -211,8 +211,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="mileage_unit">Mileage Unit</label>
                         <select id="mileage_unit" class="form-control form-select"
                                 x-model="form.mileage_unit">
+                            <option value="km">Kilometres</option>
                             <option value="miles">Miles</option>
-                            <option value="km">Km</option>
                         </select>
                     </div>
                 </div>
@@ -407,7 +407,7 @@ function FF_CreateLease() {
             minimum_end_date:   '',
             billing_cycle:      'monthly',
             currency:           'CAD',
-            mileage_unit:       'miles',
+            mileage_unit:       'km',
             daily_rate:         '',
             weekly_rate:        '',
             monthly_rate:       '',
@@ -442,7 +442,7 @@ function FF_CreateLease() {
 
             // Auto-fill customer defaults — rates come from unit template, but currency/cycle from customer
             this.form.currency      = opt.dataset.currency      || 'CAD';
-            this.form.mileage_unit  = opt.dataset.mileageUnit   || 'miles';
+            this.form.mileage_unit  = opt.dataset.mileageUnit   || 'km';
             this.form.billing_cycle = opt.dataset.billingCycle  || 'monthly';
             this.form.gst_exempt    = opt.dataset.gstExempt === '1';
             this.form.pst_exempt    = opt.dataset.pstExempt === '1';

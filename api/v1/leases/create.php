@@ -70,7 +70,7 @@ $mileageRate  = clean_decimal($body['mileage_rate'] ?? null) ?? '0.0000';
 // ── Optional fields ────────────────────────────────────────────
 $endDate        = clean_date($body['end_date'] ?? null);
 $currency       = in_array($body['currency'] ?? '', ['CAD','USD']) ? $body['currency'] : 'CAD';
-$mileageUnit    = in_array($body['mileage_unit'] ?? '', ['miles','km']) ? $body['mileage_unit'] : 'miles';
+$mileageUnit    = in_array($body['mileage_unit'] ?? '', ['km','miles']) ? $body['mileage_unit'] : 'km';
 $billingCycle   = in_array($body['billing_cycle'] ?? '', ['monthly','on_close_only']) ? $body['billing_cycle'] : 'monthly';
 $gstExempt      = isset($body['gst_exempt']) ? (bool) $body['gst_exempt'] : null;
 $pstExempt      = isset($body['pst_exempt']) ? (bool) $body['pst_exempt'] : null;
@@ -254,6 +254,23 @@ db_transaction(function () use (
         'mileage_at_start'         => $mileageAtStart,
         'created_by'               => current_user_id(),
         'updated_by'               => current_user_id(),
+    ]);
+
+    // ── FIX #16: Reserve unit — prevents a second pending lease ──
+    // Unit status: available → reserved. Activate moves it to on_lease.
+    // Cancel moves it back to available. This ensures UNIT_UNAVAILABLE
+    // fires on a second create attempt for the same unit.
+    db_execute(
+        "UPDATE equipment_units SET status = 'reserved', updated_by = ?, updated_at = NOW() WHERE id = ?",
+        [current_user_id(), $unitId]
+    );
+    db_insert('equipment_status_log', [
+        'equipment_unit_id'  => $unitId,
+        'old_status'         => 'available',
+        'new_status'         => 'reserved',
+        'reason'             => "Lease {$contractNumber} created — unit reserved pending activation",
+        'changed_by'         => current_user()['name'] ?? 'system',
+        'changed_by_user_id' => current_user_id(),
     ]);
 
     // ── lease_status_log: record initial status transition ─────

@@ -49,7 +49,7 @@ if (!$submittedUpdatedAt) {
 
 // ── Load existing record ────────────────────────────────────────
 $existing = db_row(
-    "SELECT id, company_name, email, updated_at FROM customers WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, company_name, email, status, updated_at FROM customers WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
 
@@ -126,6 +126,24 @@ $riskScore = array_key_exists('risk_score', $body)
     ? (in_array($body['risk_score'], $validRisk, true) ? $body['risk_score'] : null)
     : null;
 $riskNotes = array_key_exists('risk_notes', $body) ? clean_string($body['risk_notes'], 5000) : null;
+
+// FIX #30: Validate status transitions
+// Allowed transitions per spec — prevents invalid status jumps (e.g. suspended → pending)
+if ($status !== null && $status !== $existing['status']) {
+    $allowedTransitions = [
+        'active'      => ['inactive', 'suspended', 'credit_hold'],
+        'inactive'    => ['active'],
+        'pending'     => ['active', 'inactive'],
+        'suspended'   => ['active', 'inactive'],
+        'credit_hold' => ['active', 'suspended'],
+    ];
+    $currentStatus = $existing['status'];
+    $allowed = $allowedTransitions[$currentStatus] ?? [];
+    if (!in_array($status, $allowed, true)) {
+        json_error('INVALID_TRANSITION',
+            "Cannot change customer status from '{$currentStatus}' to '{$status}'.", 409);
+    }
+}
 
 // Tags
 $replaceTags = array_key_exists('tags', $body) && is_array($body['tags']);

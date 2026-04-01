@@ -129,25 +129,28 @@ if (empty($data)) {
 
 $data['updated_by'] = current_user_id();
 
-// ── Apply update ───────────────────────────────────────────────
-db_update('leases', $data, 'id = ?', [$id]);
+// FIX #20: wrap db_update + audit_log in transaction so both commit or rollback together
+$newUpdatedAt = null;
 
-// ── Fetch new updated_at ───────────────────────────────────────
-$newRow = db_row("SELECT updated_at FROM leases WHERE id = ?", [$id]);
+db_transaction(function () use ($id, $data, $existing, &$newUpdatedAt) {
+    db_update('leases', $data, 'id = ?', [$id]);
 
-// ── audit_log ──────────────────────────────────────────────────
-db_insert('audit_log', [
-    'user_id'      => current_user_id(),
-    'user_name'    => current_user()['name'] ?? 'system',
-    'action'       => 'update',
-    'module'       => 'leases',
-    'entity_type'  => 'lease',
-    'entity_id'    => $id,
-    'entity_label' => $existing['contract_number'],
-    'notes'        => "Lease {$existing['contract_number']} metadata updated",
-    'old_values'   => null,
-    'new_values'   => json_encode($data),
-    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-]);
+    $newRow = db_row("SELECT updated_at FROM leases WHERE id = ?", [$id]);
+    $newUpdatedAt = $newRow['updated_at'];
 
-json_success(['updated_at' => $newRow['updated_at']]);
+    db_insert('audit_log', [
+        'user_id'      => current_user_id(),
+        'user_name'    => current_user()['name'] ?? 'system',
+        'action'       => 'update',
+        'module'       => 'leases',
+        'entity_type'  => 'lease',
+        'entity_id'    => $id,
+        'entity_label' => $existing['contract_number'],
+        'notes'        => "Lease {$existing['contract_number']} metadata updated",
+        'old_values'   => null,
+        'new_values'   => json_encode($data),
+        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+    ]);
+});
+
+json_success(['updated_at' => $newUpdatedAt]);

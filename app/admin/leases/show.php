@@ -58,7 +58,7 @@ function leaseBadgeClass(string $status): string
 {
     return match($status) {
         'active'    => 'badge-success',
-        'pending'   => 'badge-warning',
+        'pending'   => 'badge-info',
         'completed' => 'badge-neutral',
         'cancelled' => 'badge-danger',
         default     => 'badge-neutral',
@@ -72,11 +72,15 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      Page header
      ============================================================ -->
+<nav class="breadcrumb">
+    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
+    <span class="breadcrumb-sep">/</span>
+    <a href="<?= base_url('leases') ?>">Leases</a>
+    <span class="breadcrumb-sep">/</span>
+    <span class="breadcrumb-current"><?= e($lease['contract_number']) ?></span>
+</nav>
 <div class="page-header">
     <div>
-        <a href="<?= base_url('leases') ?>" class="btn btn-ghost btn-sm" style="margin-bottom:0.5rem;">
-            ← Leases
-        </a>
         <h1 class="page-header-title h4">
             <?= e($lease['contract_number']) ?>
             <span class="badge badge-no-dot <?= leaseBadgeClass($lease['status']) ?>"
@@ -93,10 +97,11 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <div class="page-header-actions">
-        <?php if (can('leases', 'edit')): ?>
-        <?php if ($lease['status'] === 'pending'): ?>
+        <?php if (can('leases', 'edit') && $lease['status'] === 'pending'): ?>
         <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary btn-sm">Edit</a>
         <?php endif; ?>
+        <?php if (can('leases', 'delete') && $lease['status'] === 'pending'): ?>
+        <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this pending lease? This cannot be undone.')){FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(r=>{if(r.success)window.location.href='<?= base_url('leases') ?>';else alert(r.error?.message||'Failed to delete');})}">Delete</button>
         <?php endif; ?>
     </div>
 </div>
@@ -130,37 +135,20 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
 
-    <!-- ── TABS — inline styles; no tab CSS class exists in app.css ─────── -->
-    <div role="tablist"
-         style="display:flex; border-bottom:1px solid var(--border-color); margin-bottom:1.5rem; gap:0;">
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="{
-                    'border-bottom': '2px solid ' + (tab === 'overview' ? 'var(--color-primary)' : 'transparent'),
-                    'color': tab === 'overview' ? 'var(--color-primary)' : 'var(--text-secondary)',
-                    'margin-bottom': '-1px'
-                }"
-                @click="tab = 'overview'" :aria-selected="tab === 'overview'">Overview</button>
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="{
-                    'border-bottom': '2px solid ' + (tab === 'status_log' ? 'var(--color-primary)' : 'transparent'),
-                    'color': tab === 'status_log' ? 'var(--color-primary)' : 'var(--text-secondary)',
-                    'margin-bottom': '-1px'
-                }"
-                @click="tab = 'status_log'" :aria-selected="tab === 'status_log'">Status Log</button>
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="{
-                    'border-bottom': '2px solid ' + (tab === 'amendments' ? 'var(--color-primary)' : 'transparent'),
-                    'color': tab === 'amendments' ? 'var(--color-primary)' : 'var(--text-secondary)',
-                    'margin-bottom': '-1px'
-                }"
-                @click="tab = 'amendments'" :aria-selected="tab === 'amendments'">Amendments</button>
-
+    <!-- ── TABS ──────────────────────────────────────────────────── -->
+    <div class="tab-bar" role="tablist">
+        <button class="tab-btn" :class="{ 'is-active': tab === 'overview' }"
+                @click="tab = 'overview'" :aria-selected="tab === 'overview'" role="tab">Overview</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'status_log' }"
+                @click="tab = 'status_log'" :aria-selected="tab === 'status_log'" role="tab">
+            Status Log
+            <span class="tab-badge" x-show="lease && lease.status_log && lease.status_log.length > 0"
+                  x-text="lease && lease.status_log ? lease.status_log.length : ''"></span>
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'amendments' }"
+                @click="tab = 'amendments'" :aria-selected="tab === 'amendments'" role="tab">Amendments</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'invoices' }"
+                @click="tab = 'invoices'; loadInvoices()" :aria-selected="tab === 'invoices'" role="tab">Invoices</button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -332,6 +320,50 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </template>
 
+    <!-- ── TAB: INVOICES (FIX #40) ──────────────────────────────── -->
+    <template x-if="tab === 'invoices'">
+        <div class="card">
+            <div class="card-header"><div class="card-title">Invoices</div></div>
+            <div x-show="invoicesLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading invoices…</span>
+            </div>
+            <template x-if="!invoicesLoading && invoices.length === 0">
+                <div class="empty-state">
+                    <p class="empty-state-title">No invoices yet</p>
+                    <p class="empty-state-text">Invoices are generated automatically on activation and close.</p>
+                </div>
+            </template>
+            <template x-if="!invoicesLoading && invoices.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead><tr>
+                            <th>Invoice #</th>
+                            <th>Date</th>
+                            <th>Period</th>
+                            <th>Status</th>
+                            <th class="text-right">Total</th>
+                            <th class="text-right">Balance Due</th>
+                            <th></th>
+                        </tr></thead>
+                        <tbody>
+                            <template x-for="inv in invoices" :key="inv.id">
+                                <tr>
+                                    <td class="font-mono" x-text="inv.invoice_number"></td>
+                                    <td x-text="inv.invoice_date"></td>
+                                    <td x-text="inv.billing_period_start + ' → ' + inv.billing_period_end"></td>
+                                    <td><span class="badge" :class="invBadgeClass(inv.status)" x-text="inv.status"></span></td>
+                                    <td class="text-right font-mono" x-text="'$' + parseFloat(inv.total_amount).toFixed(2)"></td>
+                                    <td class="text-right font-mono" x-text="'$' + parseFloat(inv.balance_due).toFixed(2)"></td>
+                                    <td><a :href="'<?= base_url('invoices/show') ?>?id=' + inv.id" class="btn btn-sm btn-secondary">View</a></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+        </div>
+    </template>
+
     <!-- ── CLOSE LEASE MODAL ──────────────────────────────────── -->
     <template x-if="showCloseModal">
         <div class="modal-overlay" @click.self="showCloseModal = false">
@@ -384,6 +416,8 @@ function FF_LeaseDetail() {
         closing:         false,
         actionError:     null,
         showCloseModal:  false,
+        invoices:        [],
+        invoicesLoading: false,
         closeForm: {
             actual_return_date: new Date().toISOString().slice(0,10),
             mileage_at_end:     '',
@@ -392,6 +426,24 @@ function FF_LeaseDetail() {
 
         async init() {
             await this.loadLease();
+        },
+
+        // FIX #40: Load invoices for this lease
+        async loadInvoices() {
+            if (this.invoices.length > 0) return; // already loaded
+            this.invoicesLoading = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/invoices') ?>?lease_id=<?= $leaseId ?>&per_page=50&sort=created_at&dir=DESC');
+                if (r.success) this.invoices = r.data.items || [];
+            } catch(e) { /* non-fatal */ }
+            this.invoicesLoading = false;
+        },
+
+        invBadgeClass(status) {
+            const m = { draft:'badge-neutral', sent:'badge-info', paid:'badge-success',
+                        partially_paid:'badge-warning', overdue:'badge-danger',
+                        void:'badge-neutral line-through', written_off:'badge-danger' };
+            return m[status] || 'badge-neutral';
         },
 
         async loadLease() {

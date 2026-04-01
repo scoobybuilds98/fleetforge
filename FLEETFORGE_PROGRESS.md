@@ -48,6 +48,9 @@
 | S005 | 2026-04-01 | Customers Module (API + Admin UI) + Global Design Fixes | 11 files built and verified. API: api/v1/customers/index.php (paginated list, FULLTEXT search, filters), api/v1/customers/show.php (single customer + tags + contacts), api/v1/customers/create.php (with tags + initial note + audit_log, 422 on duplicate), api/v1/customers/update.php (D19 optimistic lock on updated_at, wholesale tag replace, audit_log), api/v1/customers/delete.php (soft-delete, blocks with HAS_ACTIVE_LEASES). Notes: api/v1/customers/notes/index.php (pinned first), api/v1/customers/notes/create.php. Admin UI: index.php (4 KPI tiles + filter bar + data table + pagination, Alpine.js), create.php (7-section form: Identity/Address/Regulatory/Billing Contact/Commercial/Tags/Notes), edit.php (pre-populated with server-side PHP, D19 optimistic lock, tags wholesale replace), show.php (4 quick-stat tiles, 4 tabs: Overview/Notes/Leases stub/Invoices stub, inline note add). Router note: file-based router requires /customers/show?id=1 URL pattern (not /customers/1 — no dynamic segment support). All stop conditions passed: list 200 ✅, create 201 ✅, show 200 ✅, update 200 ✅, stale 409 ✅, soft-delete 200 ✅, list page 200 ✅, create page 200 ✅, no PHP errors ✅. CLOSE-OUT FIXES (same session, second pass): (a) All 4 customer admin UI pages fully rewritten — original versions used ~60 invented CSS class names not present in app.css (Bugs #12); now use only confirmed classes. (b) Created all 32 Heroicons SVG files in public/assets/icons/ — directory was empty, causing theme toggle and sidebar to render as invisible spans (Bug #13). (c) app/admin/dashboard/index.php fixed: FF_API→FF_Api (3×, was ReferenceError silently killing all API fetches), empty-state-primary→empty-state-title and empty-state-secondary→empty-state-text (Bug #14). (d) public/assets/css/app.css: added Section 20 "Dashboard & Page-Specific Components" — 14 new classes: .stat-card--link, .stat-card--danger, .stat-card--warning, .stat-card--error, .stat-skeleton, .chart-skeleton, .grid-2-1, .activity-feed, .activity-item, .activity-dot, .activity-dot--{module}, .activity-body, .activity-desc, .activity-meta, .p-4, .text-muted, .link. Decisions D32–D33 added. All pages and dashboard verified: HTTP 200, no PHP errors, correct JS in rendered output. |
 | S007 | 2026-04-01 | Leases Module (API + Admin UI) | 11 files built and all 9 stop conditions passed. API (7): index (paginated, FULLTEXT search, status/customer/unit filters, created_at DESC), show (full lease + status_log, Trap 7 strips file paths), create (FOR UPDATE D20 on unit: checks status=available, snapshots customer+unit+template at creation, tax rates frozen from customer record D11, contract_number CN-XXXXXX-YYYY auto-generated), update (D19 optimistic lock, metadata-only — rates excluded require amendment), delete (soft-delete, blocks active leases with LEASE_NOT_ACTIVE), activate (FOR UPDATE D20: pending→active, unit→on_lease, next_billing_date set for monthly cycle, equipment_status_log + lease_status_log written), close (FOR UPDATE D20: active→completed, unit→available, actual_return_date + mileage_at_end captured, all logs written). Admin UI (4): leases/index.php (3-tab interface: Active+Pending / Closed / All, inline tab styles per D32, search + status filters), leases/show.php (server-side hero render with status badge, Activate/Close action buttons per status, Close modal with return date + mileage, 3 tabs: Overview / Status Log / Amendments stub), leases/create.php (customer dropdown auto-fills currency/billing cycle/tax exemptions, unit dropdown auto-fills template rates, 6 sections: Customer+Unit / Dates / Rates / Discounts+Addons / Tax / Notes), leases/edit.php (server pre-populated, D19 lock, rates read-only — require amendment, editable: dates/po/mileage/addons/notes). Bug fixed during stop-condition testing: equipment_units has no mileage_unit column (removed from queries). Audit_log schema mismatch: action ENUM values 'created'/'updated'/'deleted'/'status_changed' → corrected to 'create'/'update'/'delete'/'status_change'/'lease_closed'; description/entity_label/user_name columns also corrected. All 9 stop conditions passed: GET /leases ✅ 200 paginated, POST /leases/create ✅ 201 id+contract_number returned unit FOR UPDATE, GET /leases/show?id=N ✅ 200 with status_log, POST /leases/activate ✅ 200 pending→active unit→on_lease, POST /leases/create on on_lease unit ✅ 409 UNIT_UNAVAILABLE, POST /leases/close ✅ 200 active→completed unit→available, POST /leases/update stale ✅ 409 STALE_DATA, /leases page ✅ 200 no PHP errors, /leases/create page ✅ 200 no PHP errors. |
 | S006 | 2026-04-01 | Equipment Module (Templates + Units API + Admin UI) | 16 files built and all 9 stop conditions passed. API Templates (5): index (paginated, category filter, unit_count via LEFT JOIN), show (full field set), create (auto-slug de-dup, audit_log), update (D19 optimistic lock), delete (HAS_ACTIVE_UNITS block when unit_count > 0). API Units (5): index (FULLTEXT search, status/template/yard filters, unit_number ASC default sort per spec), show (full field set, Trap 7 — file paths stripped), create (transaction: unit + equipment_status_log "none→available" entry + audit_log), update (D19 optimistic lock, metadata-only — status changes deferred to dedicated endpoint), delete (LEASE_NOT_ACTIVE block when status=on_lease). Admin UI (6): equipment/index.php (4 KPI tiles: available/on_lease/maintenance/total, drilldown filter banner, status+template+search filters, health score + compliance warning columns, statusBadgeClass() maps all 6 statuses per design §9), equipment/show.php (server-side hero render, 6-tab Alpine component: Overview/Compliance/Lease History stub/Status Log/Maintenance stub/Documents stub, compliance expiry countdown with day calculation), equipment/create.php (server-loaded templates for dropdown, onTemplateChange() pre-fills defaults, 5 sections: Identity/Location+GPS/Physical/Compliance/Notes), equipment/edit.php (server pre-populated, D19 lock on submit, status field excluded — requires dedicated endpoint), equipment/templates/index.php (category filter, unit_count drilldown link, delete disabled when unit_count > 0), equipment/templates/create.php (all default fields incl. rates + compliance intervals). CSS: added .badge-purple per design §9 (reserved status). dirname depth: app/admin/equipment/templates/ uses dirname(__DIR__, 4). All stop conditions: GET units ✅, create 201 ✅, show correct ✅, update 200 ✅, stale 409 STALE_DATA ✅, soft-delete 200 ✅, list page 200 ✅, create page 200 ✅, all 6 pages zero PHP errors ✅. |
+| S008 | 2026-04-02 | Invoices Module (API + Admin UI + Billing Engine) | 13 files built and all 9 stop conditions passed. Billing engine (3): lib/Billing/ProRateCalculator.php (THE LAW formula — pure math, bcmath strings, 10 unit tests all pass: 0d=none, 1-5d=daily, 6-7d=weekly, 8-29d=weekly or capped, 30+=monthly), lib/Billing/TaxCalculator.php (D11 invoice-time lookup from tax_rates, D22 independent gst_exempt/pst_exempt, 7 unit tests pass: BC GST+PST, ON HST, exemptions suppress correctly, unknown province=zero), lib/Billing/InvoiceGenerator.php (orchestrator — creates invoice+line_items+billing_period in single transaction, gap-free invoice number via FOR UPDATE on settings row D15/D20, denormalized counters updated in same transaction Trap 6, handles discount/tax/add-ons per spec §9 calculation order). API (7): index (paginated, FULLTEXT search, status/customer_id/lease_id filters), show (full invoice + line items, pdf_path stripped Trap 7), create (manual creation via InvoiceGenerator, validates lease active/completed), update (draft only — D12 IMMUTABLE_RECORD on non-draft, D19 optimistic lock), delete (soft-delete draft only, reverses denormalized counters), send (draft→sent state transition, freezes financials D12), void (draft/sent→void with required reason, reverses counters). Admin UI (3): invoices/index.php (4 AR aging KPI tiles server-rendered: Current/1-30/31-60/60+ days, 3-tab Alpine component: Outstanding/Paid/All, search+status filter, paginated table), invoices/show.php (server-rendered detail: breadcrumb, status badge, 4 summary tiles, 2-col billing+financial cards, line items table, Send/Void action buttons via Alpine, void modal with reason), invoices/create.php (lease picker dropdown with rate data attributes, auto-fill rates on selection, period date pickers with D14 inclusive day counter, billing type + invoice type selects, PO/notes fields, Alpine submit to API). Bug found and fixed: TaxCalculator initially divided tax_rates by 100 — but DB stores rates as decimal fractions (0.0500 = 5%), not percentages. Fixed to multiply directly. Also changed mileage_unit default from 'miles' to 'km' across entire codebase (D34): schema (8 columns in 7 tables), 4 API endpoints, 5 admin UI pages, live DB altered. All 9 stop conditions passed: GET /invoices ✅ 200 paginated, POST /create ✅ 201 INV-2026-00001 sequential, GET /show ✅ 200 line_items+pdf_path stripped, POST /send ✅ 200 draft→sent, POST /update on sent ✅ 422 IMMUTABLE_RECORD, ProRateCalculator 10/10 ✅, TaxCalculator 7/7 ✅, /invoices page ✅ 200, /invoices/create page ✅ 200. |
+| AUDIT-1 | 2026-04-02 | Comprehensive QC Audit (S001–S008) | 69 issues found: 13 CRITICAL, 16 MAJOR, 40 MINOR. No files modified. Full findings in KNOWN ISSUES #16–#43 and NEXT SESSION contract for S008.5. Top 5 critical: (1) lease create doesn't reserve unit, (2) activate doesn't generate Invoice 1, (3) close doesn't generate final invoice, (4) 6 endpoints have audit_log outside transactions, (5) customer notes bypass soft-delete filter. Recommended: insert S008.5 fix session before S009 Payments. |
+| S008.5 | 2026-04-02 | Critical Fix Session — Audit Remediation (28 issues #16–#43) | All 28 AUDIT-1 findings resolved. Phase 1 critical (6): lease create now reserves unit; activate wires Invoice 1 via InvoiceGenerator; close wires final invoice with mileage overage extra_lines; all 5 invoice endpoints have audit_log inside transaction; lease update wrapped in transaction; customer notes soft-delete verified (db_exists() auto-handles). Phase 2 major (11): pending badge → badge-info (3 locations); cancel.php + reopen.php created with full state machine + FOR UPDATE + logs; update_status.php created (6 statuses, decommissioned terminal); equipment search fix ($_GET['search']); invoice BEM classes fixed (stat-label/stat-value); CSS aliases added for spec names (--bg-page, --bg-card, --color-accent, etc.); modal-md + modal-full added; customer status transition map with 409 INVALID_TRANSITION; customers/show.php SELECT * → explicit columns; invoices/send.php transaction added. Phase 2 resolved (2 no-ops): invoice search param and customer notes soft-delete both already correct. Phase 3 minor (11): font-mono on invoice tiles + .font-mono utility; .line-through + void badge updated; btn-xl added; units/update.php uniqueness fix; close appends internal_notes; error codes renamed (LEASE_IS_ACTIVE, UNIT_ON_LEASE); invoices/create.php wrapped in form; Invoices tab on lease show; dashboard CSS vars via getComputedStyle; equipment show delete button; InvoiceGenerator updated_by. Key infrastructure fix: includes/db.php db_transaction() nesting guard (inTransaction() check) required to allow InvoiceGenerator calls from within existing transactions. All 10 stop conditions passed. |
 
 ---
 
@@ -88,6 +91,7 @@
 | D31 | Session compression — dashboard delivered in one pass | Build sessions S004 covered all of the original plan's S029 (KPI backend), S030 (KPI UI + drilldowns), and the planned-but-not-detailed S031+ dashboard chart sessions (all 8 ApexCharts + activity feed). This is a session compression decision — the original ~3 sessions were merged into one because the work was tightly coupled (chart API + chart rendering + dashboard page are useless without each other). Session numbering: our build S001–S004 maps to original-plan S005–S028 (foundation) + S029–S030+ (dashboard). Customers originally queued at our S004 is now S005. | All dashboard data (KPIs, 8 charts, activity feed) is fetched in a single parallel burst on page load — separating backend from frontend would have required re-touching the same files twice. |
 | D32 | CSS class hygiene — only use confirmed classes | Every HTML class used in any PHP template MUST exist in public/assets/css/app.css. Invented class names produce silent layout breakage — pages render but look completely wrong. Before writing any new template, grep app.css to confirm each class exists. Do not invent classes; extend app.css with a new named section if a new component is genuinely needed. | S005 customer UI pages shipped with ~60 non-existent CSS classes. Silent breakage not caught until user visual review. |
 | D33 | Heroicon SVG files must be pre-created | public/assets/icons/ must contain an SVG file for every icon name passed to heroicon(). The function returns an invisible span placeholder when the file is missing — no error, no warning. All icons referenced in config/navigation.php and all theme-toggle icons (sun, moon) must exist as files. When adding a new icon to navigation, create the SVG file in the same session. | Theme toggle and sidebar icons were invisible for multiple sessions because public/assets/icons/ was empty. |
+| D34 | mileage_unit default = 'km' | All mileage_unit columns default to 'km' (not 'miles'). ENUM order is ('km','miles') across all 8 columns in 7 tables: customers, equipment_templates, rate_card_items, leases, customer_equipment_rates, customer_rate_history, invoice_line_items, mileage_logs. All API create endpoints and admin UI forms default to 'km'. | FleetForge is primarily used by Canadian companies — kilometres is the standard unit. Changed in S008 across schema, API, UI, and live DB. |
 
 ---
 
@@ -96,7 +100,7 @@
 | # | Session | Module | Issue | Status |
 |---|---------|--------|-------|--------|
 | 1 | S001 | Auth | `audit_log` inserts in login.php + logout.php are not yet written — table does not exist until DB schema is run in S002. Two ⬜ tasks remain in S013. | ✅ RESOLVED S002 — audit_log inserts added to both files. |
-| 2 | S001 | Functions | `clean_url()`, `format_mileage()`, and named ID generators (`generate_invoice_number()` etc.) not yet implemented. Tracked as ⬜ in S008/S009. Generic `generate_id()` + `generate_random_code()` are built and sufficient until specific wrappers are needed. | Carry to respective module sessions. |
+| 2 | S001 | Functions | `clean_url()`, `format_mileage()`, and named ID generators (`generate_invoice_number()` etc.) not yet implemented. `generate_invoice_number()` now lives in `lib/Billing/InvoiceGenerator.php` (not in functions.php). Generic `generate_id()` + `generate_random_code()` are built and sufficient until specific wrappers are needed. | Partially resolved S008 — invoice numbering built. Remaining: `clean_url()`, `format_mileage()`, other named generators. |
 | 3 | S001 | Auth/CSRF | `generate_csrf_token()` and `verify_csrf_token()` standalone functions not written. CSRF is implemented inline in `api/bootstrap.php` (header check) and `login.php` (session token). No standalone callable yet. | ✅ RESOLVED S002 — both functions added to includes/functions.php with function_exists() guards. |
 | 4 | S002 | Auth — CRITICAL | login.php SELECT query used non-existent columns `role_slug`, `theme`, `is_active` (actual: need JOIN for role_slug, `theme_preference`, `status`). Login was completely broken — PDO fatal error on every POST. | ✅ FIXED S002 deep audit — query rewritten with JOIN user_roles, correct column names, status check fixed. |
 | 5 | S002 | Auth — Security | logout.php queried non-existent `user_remember_tokens` table (silently swallowed by try/catch), leaving `users.remember_token` hash live in DB after logout. Captured cookie could replay after logout. | ✅ FIXED S002 deep audit — logout.php now clears users.remember_token directly. |
@@ -108,105 +112,139 @@
 | 11 | S004 | Dashboard — KPI field names differ from original S029 contract | Original contract (S029 in session map) named fields `fleet_utilization_pct`, `open_leases_count`, `overdue_invoices_count`, `overdue_invoices_amount`, `compliance_alerts_count`, `todays_pickups_count`. Implemented names are `fleet_utilization`, `on_lease_count`, `total_active_units`, `overdue_invoices: {count, total}`, `compliance_alerts`, `open_leases`, `todays_pickups`. The implemented shape is richer (nested overdue object, separate on_lease + total counts for utilization display). No consumers exist yet beyond the dashboard page itself. | Carry-forward: if a future session builds a separate KPI widget or external consumer, be aware of the actual field names. Not a bug — the dashboard page uses the actual field names correctly. |
 | 12 | S005 | Customer Admin UI — all 4 pages shipped with ~60 invented CSS class names | app/admin/customers/index.php, create.php, edit.php, show.php were written using class names that do not exist in app.css: form-input, filter-bar, data-table, badge-secondary, badge-xs, tab-nav, detail-list, note-card, stat-grid--4, form-grid, form-group--full, page-header-back, page-header-meta, and many more. Pages rendered but all layout/badge/table/form styles were completely broken. Silent failure — no PHP errors, no browser console errors. | ✅ FIXED S005 close-out — all 4 pages fully rewritten using only confirmed CSS classes. Verified HTTP 200 + no PHP errors. Decision D32 added to prevent recurrence. |
 | 13 | S005 | public/assets/icons/ was empty — no SVG files existed | heroicon() reads SVGs from public/assets/icons/{name}.svg. The directory existed but contained zero files. Every heroicon() call returned `<span aria-hidden="true" class="icon-missing">` — invisible placeholder. Theme toggle button had no sun/moon icons (invisible), sidebar had no nav icons, topbar had no bell/search icons. Persisted from S001 through S005 without detection. | ✅ FIXED S005 close-out — 32 Heroicons v2 outline SVG files created in public/assets/icons/. All icons verified non-empty. Theme toggle and sidebar icons confirmed rendering. Decision D33 added. |
+| 15 | S008 | Billing — TaxCalculator divide-by-100 bug | TaxCalculator initially did `bcdiv($rate, '100', 6)` before multiplying subtotal — but tax_rates DB stores rates as decimal fractions (0.0500 = 5%), not percentages (5.00). This produced near-zero tax on all invoices ($0 tax on a $2200 subtotal). | ✅ FIXED S008 — removed the division. Rates are already multipliers, multiply directly: `bcmul($subtotal, $rate, 6)`. |
 | 14 | S005 | dashboard/index.php — FF_API typo + non-existent empty-state class names | `FF_API.get(...)` used on 3 lines (fetchKpis, fetchCharts, fetchActivity). Object is `window.FF_Api` (mixed case). Caused `ReferenceError: FF_API is not defined` in browser console on every dashboard load — silently killed all 3 API fetches (no KPI data, no charts, no activity). Also: `empty-state-primary` and `empty-state-secondary` used throughout (correct classes: `empty-state-title` and `empty-state-text`). Additionally, dashboard used 14 CSS classes not present in app.css: stat-card--link, stat-card--danger, stat-card--warning, stat-card--error, stat-skeleton, chart-skeleton, grid-2-1, activity-feed, activity-item, activity-dot, activity-body, activity-desc, activity-meta, p-4, text-muted, link. | ✅ FIXED S005 close-out — FF_API→FF_Api (3×), empty-state class names corrected (4× each). All 14 missing CSS classes added to app.css Section 20. Dashboard verified: HTTP 200, correct FF_Api calls in rendered HTML. |
+| | | | | |
+| **—** | **—** | **— AUDIT-1 FINDINGS (2026-04-02) —** | **69 issues found across S001–S008. Grouped below by priority.** | **—** |
+| | | | | |
+| 16 | AUDIT-1 | **CRITICAL — Leases: unit not reserved on create** | `api/v1/leases/create.php` creates lease in `pending` but does NOT change unit status to `reserved`. Two sequential requests can create two pending leases for the same unit. FOR UPDATE only prevents concurrent, not sequential. Fix: set unit status=`reserved` + write `equipment_status_log` inside the create transaction. | ✅ FIXED S008.5 — unit reserved on lease create; equipment_status_log written. |
+| 17 | AUDIT-1 | **CRITICAL — Leases: activate does not generate Invoice 1** | `api/v1/leases/activate.php` lines 152-155 had only a `// TODO` comment. `InvoiceGenerator` class exists in `lib/Billing/` but was never wired in. Activating a lease produced zero invoices. Fix: call `InvoiceGenerator::createFromLease()` inside the activate transaction after status change. | ✅ FIXED S008.5 — Invoice 1 generated on activate; invoice_id returned in response. Also required nesting guard in db_transaction() (includes/db.php). |
+| 18 | AUDIT-1 | **CRITICAL — Leases: close does not generate final invoice** | `api/v1/leases/close.php` lines 167-169 had only a `// TODO` comment. Final billing (mileage reconciliation, pro-rate) not wired. Fix: call `InvoiceGenerator` for final period + mileage inside close transaction. | ✅ FIXED S008.5 — Final invoice generated on close with mileage overage extra_lines; invoice_id returned. |
+| 19 | AUDIT-1 | **CRITICAL — Invoices: 5 endpoints have audit_log OUTSIDE transaction** | `api/v1/invoices/create.php`, `update.php`, `send.php`, `void.php`, `delete.php` — all had `db_insert('audit_log')` outside `db_transaction()`. Fix: move all audit_log inserts inside the transaction closure. | ✅ FIXED S008.5 — all 5 endpoints: audit_log moved inside transaction. send.php wrapped in new db_transaction(). |
+| 20 | AUDIT-1 | **CRITICAL — Leases: update has no transaction** | `api/v1/leases/update.php` lines 133-151 — `db_update` and `audit_log` were separate unprotected statements. Fix: wrap in transaction. | ✅ FIXED S008.5 — both db_update and audit_log wrapped in db_transaction(). |
+| 21 | AUDIT-1 | **CRITICAL — Customer notes: missing soft-delete filter** | `api/v1/customers/notes/index.php` (ln 36) and `notes/create.php` (ln 51) use `db_exists('customers', 'id = ?', ...)` without `deleted_at IS NULL`. Allows fetching/creating notes for soft-deleted customers. | ✅ RESOLVED S008.5 — db_exists() already auto-appends AND deleted_at IS NULL for all SOFT_DELETE_TABLES. Verified in includes/db.php. No code change needed. |
+| 22 | AUDIT-1 | **MAJOR — Leases: pending badge wrong color** | `app/admin/leases/index.php` and `show.php` both mapped `pending` to `badge-warning`. Design spec §9 says pending=`badge-info`. Also summary strip dot used `var(--color-warning)`. | ✅ FIXED S008.5 — all three locations changed: index.php JS map + summary dot, show.php PHP match + JS map. |
+| 23 | AUDIT-1 | **MAJOR — Leases: missing cancel + reopen endpoints** | No `api/v1/leases/cancel.php` or `reopen.php`. State machine required pending→cancelled, active→cancelled, completed→active(reopen). | ✅ FIXED S008.5 — both endpoints created. cancel.php: pending→cancelled or active→cancelled (Manager required for active). reopen.php: completed→active (Manager required). Full transaction + FOR UPDATE + all logs. |
+| 24 | AUDIT-1 | **MAJOR — Equipment: no status-change endpoint** | Cannot put units into `maintenance`, `inactive`, `decommissioned`, or `reserved` via API. Only implicit changes happen via lease activate/close. | ✅ FIXED S008.5 — api/v1/equipment/units/update_status.php created with full state machine (6 statuses, decommissioned terminal). FOR UPDATE, equipment_status_log, audit_log all in transaction. |
+| 25 | AUDIT-1 | **MAJOR — Equipment: search filter copy-paste bug** | `app/admin/equipment/index.php` ln 347: search field initialized from `$_GET['status']` instead of `$_GET['search']`. Search was broken. | ✅ FIXED S008.5 — changed to $_GET['search']. |
+| 26 | AUDIT-1 | **MAJOR — Invoices: BEM class mismatch** | `app/admin/invoices/index.php` and `show.php` used `stat-card__label` / `stat-card__value` (BEM) — classes don't exist in app.css → unstyled. | ✅ FIXED S008.5 — changed to stat-label / stat-value / stat-delta in both files. |
+| 27 | AUDIT-1 | **MAJOR — Invoices: search param mismatch** | `app/admin/invoices/index.php` ln 304 sends search as `q` param. | ✅ RESOLVED S008.5 — verified API also uses 'q'. Both sides match. No code change needed. |
+| 28 | AUDIT-1 | **MAJOR — CSS: variable names diverge from spec** | `app.css` uses different names than spec: `--bg-body` vs `--bg-page`, etc. | ✅ FIXED S008.5 — spec-name aliases added in :root: --bg-page, --bg-card, --color-accent, --color-accent-hover, --text-muted, --text-inverse, --border-strong, --bg-selected. |
+| 29 | AUDIT-1 | **MAJOR — CSS: modal-md and modal-full missing** | Only `modal-sm` and `modal-lg` existed. Spec defines 4 sizes. | ✅ FIXED S008.5 — .modal-md (560px) and .modal-full (min(90vw,1100px)) added to app.css. |
+| 30 | AUDIT-1 | **MAJOR — Customers: no status transition validation** | `api/v1/customers/update.php` allowed any status→any status with no state machine checks. | ✅ FIXED S008.5 — allowed transitions map added: active→inactive/suspended/credit_hold; inactive→active; pending→active/inactive; suspended→active/inactive; credit_hold→active/suspended. Returns 409 INVALID_TRANSITION. |
+| 31 | AUDIT-1 | **MAJOR — Customers: SELECT * in show endpoint** | `api/v1/customers/show.php` used `SELECT *` — exposes all internal columns. | ✅ FIXED S008.5 — replaced with explicit ~30-column list. |
+| 32 | AUDIT-1 | **MAJOR — Invoices: send has no status_log + no transaction** | `api/v1/invoices/send.php` had status update + audit_log outside a transaction. | ✅ FIXED S008.5 — wrapped in db_transaction() (covered under FIX #19). |
+| 33 | AUDIT-1 | **MINOR — font-mono missing on amounts/dates** | ~15 locations across 6 files lacked `font-mono` class. | ✅ FIXED S008.5 — font-mono class added to stat-value elements in invoices/index.php and invoices/show.php. .font-mono utility class added to app.css. |
+| 34 | AUDIT-1 | **MINOR — Invoice void badge lacks strikethrough** | `invoices/index.php` and `show.php` — void uses `badge-neutral` without line-through. | ✅ FIXED S008.5 — .line-through utility class added to app.css; void badge now uses badge-neutral line-through. |
+| 35 | AUDIT-1 | **MINOR — CSS: btn-xl and --bg-selected missing** | `btn-xl` size class and `--bg-selected` variable not in app.css. | ✅ FIXED S008.5 — .btn-xl added (font-size:1rem, padding:12px 24px, height:54px). --bg-selected added as alias in :root (covered under FIX #28). |
+| 36 | AUDIT-1 | **MINOR — Equipment: slug/unit_number uniqueness includes soft-deleted** | `units/create.php`, `units/update.php`, `templates/create.php` — uniqueness checks included soft-deleted rows. | ✅ FIXED S008.5 — units/update.php direct query updated with AND deleted_at IS NULL. Other files use db_exists() which auto-filters. |
+| 37 | AUDIT-1 | **MINOR — Lease close overwrites internal_notes** | `api/v1/leases/close.php` replaced `internal_notes` with `close_notes` instead of appending. | ✅ FIXED S008.5 — reads existing internal_notes then appends with "---\nClose notes:" separator. |
+| 38 | AUDIT-1 | **MINOR — Error code naming** | `leases/delete.php` and `equipment/units/delete.php` used `LEASE_NOT_ACTIVE` for opposite meanings. | ✅ FIXED S008.5 — leases/delete.php → LEASE_IS_ACTIVE; equipment/units/delete.php → UNIT_ON_LEASE. |
+| 39 | AUDIT-1 | **MINOR — Invoices: create.php not in <form> tag** | Uses bare `<button @click>` instead of `<form @submit.prevent>` — Enter-to-submit broken. | ✅ FIXED S008.5 — outer div changed to form with @submit.prevent; button type="submit". |
+| 40 | AUDIT-1 | **MINOR — Leases: no Invoices tab on show page** | `leases/show.php` had Overview/Status Log/Amendments tabs but no Invoices tab. | ✅ FIXED S008.5 — Invoices tab added: button + panel + Alpine loadInvoices() + invBadgeClass(). |
+| 41 | AUDIT-1 | **MINOR — Dashboard: hardcoded hex in ApexCharts** | `dashboard/index.php` — chart palette used hardcoded hex instead of CSS vars. | ✅ FIXED S008.5 — palette reads via getComputedStyle(document.documentElement) + cssVar() helper. |
+| 42 | AUDIT-1 | **MINOR — Equipment show: no delete button** | `equipment/show.php` had Edit button but no Delete button. | ✅ FIXED S008.5 — Delete Unit button added (hidden when status=on_lease); deleteUnit() JS function added. |
+| 43 | AUDIT-1 | **MINOR — InvoiceGenerator missing updated_by** | `lib/Billing/InvoiceGenerator.php` invoice insert set `created_by` but not `updated_by`. | ✅ FIXED S008.5 — 'updated_by' => $params['created_by'] ?? null added to invoice insert. |
 
 ---
 
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S008 — Invoices Module (API + Admin UI)
+Session S009 — Payments Module (API + Admin UI)
 
-✅ S007 COMPLETE — all stop conditions passed:
-  GET api/v1/leases → 200 paginated ✅
-  POST api/v1/leases/create → 201 id + contract_number (CN-XXXXXX-YYYY), FOR UPDATE on unit ✅
-  GET api/v1/leases/show?id=N → 200 full lease + status_log ✅
-  POST api/v1/leases/activate → 200 pending→active, unit→on_lease ✅
-  POST api/v1/leases/create on on_lease unit → 409 UNIT_UNAVAILABLE ✅
-  POST api/v1/leases/close → 200 active→completed, unit→available ✅
-  POST api/v1/leases/update stale updated_at → 409 STALE_DATA ✅
-  /fleetforge/leases → 200 no PHP errors ✅
-  /fleetforge/leases/create → 200 no PHP errors ✅
-  /fleetforge/leases/show?id=N → 200 no PHP errors ✅
-  /fleetforge/leases/edit?id=N → 200 no PHP errors ✅
+S008.5 is complete. All 28 AUDIT-1 issues fixed. All 10 stop conditions passed.
+Billing engine is fully wired: Invoice 1 on activate, final invoice on close.
+Proceed with Payments.
 
-S007 NOTES FOR S008:
-  - Invoice generation is STUBBED in activate.php and close.php (TODO comments).
-    Invoice 1 on activate + final invoice on close must be wired in S008 once
-    InvoiceGenerator is built.
-  - Lease amendments tab is STUB — shows "coming soon". Build in a future session.
-  - audit_log schema uses: action ENUM ('create','update','delete','status_change',
-    'lease_closed','cron',...), user_name VARCHAR, entity_label VARCHAR, notes TEXT.
-    NOT: 'created'/'updated'/'deleted'/'description'. Confirmed from DB schema.
-  - equipment_units has NO mileage_unit column. mileage_unit lives on customers/leases/templates.
-  - Tab UI in all admin pages: no tab CSS classes exist — use inline styles per customers/show.php pattern.
-  - current_user()['name'] is the correct field (not 'full_name', not 'email').
+═══════════════════════════════════════════════════════════════════
+CONTEXT — READ BEFORE WRITING ANY CODE
+═══════════════════════════════════════════════════════════════════
+
+READ IN THIS ORDER:
+  1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, all helper signatures, Trap list
+  2. FLEETFORGE_PROGRESS.md               ← SESSION LOG, DECISIONS, KNOWN ISSUES
+  3. FLEETFORGE_SPEC_FINAL.md §8 Payments, §12 Invoice State Machine
+  4. FLEETFORGE_DESIGN_DETAILS.md §9 badge colors, §10 payment UI patterns
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
   Login: admin@fleetforge.test / FleetForge2025!
-  curl -b <cookie> "http://fleetforge.test/fleetforge/api/v1/leases?per_page=1" → 200 paginated
 
-READ ALL OF THESE FILES FIRST — in this order:
-  1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, signatures, traps (read first, every session)
-  2. FLEETFORGE_PROGRESS.md               ← decisions + session assignment
-  3. FLEETFORGE_SPEC_FINAL.md             ← §7.7 Invoices Module + §12 billing formulas (full)
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← invoices, invoice_line_items, invoice_status_log
-  5. FLEETFORGE_DESIGN_DETAILS.md         ← invoice status badges, form layout
-  6. FLEETFORGE_ACCOUNTING_SPEC.md        ← invoice numbering, line items, PDF generation
+═══════════════════════════════════════════════════════════════════
+CRITICAL CARRY-FORWARD FROM S008 + S008.5
+═══════════════════════════════════════════════════════════════════
 
-DECISIONS TO CARRY FORWARD (all previous + new S007):
-  D5:  SOFT_DELETE_TABLES — invoices in the list
-  D7:  FF_BASE_PATH = '/fleetforge' — LOCKED.
-  D11: Tax rates looked up at invoice creation time — NEVER frozen at lease time for invoice
-  D12: Sent invoices are frozen — financial fields immutable after status leaves 'draft'
-  D14: Day counting inclusive: (end - start) + 1
-  D15: Invoice numbers strictly sequential, gap-free — atomic counter in settings
-  D16: bcmath only for all monetary fields
-  D19: Optimistic lock on all UPDATE endpoints
-  D20: FOR UPDATE row lock on payment allocation, credit application
-  D22: Granular tax: gst_exempt + pst_exempt independent booleans (frozen from lease)
-  D27/D30: asset_url() for assets, base_url() for routes
-  D32: Only use CSS classes that exist in app.css (no tab-bar/tab-btn — use inline styles)
-  D33: heroicon() requires SVG file in public/assets/icons/
-  Router: query string IDs always (/invoices/show?id=1)
-  Trap 7: never return pdf_path or file paths in API output
-  audit_log: action ENUM values are 'create','update','delete','status_change','lease_closed'
-  current_user()['name'] — correct field (not full_name or email)
-  equipment_units has NO mileage_unit column
-  dirname depth: api/v1/invoices/ → dirname(__DIR__, 3); app/admin/invoices/ → dirname(__DIR__, 3)
+BILLING ENGINE (lib/Billing/ — D3):
+  - ProRateCalculator.php  — pure math, bcmath strings only, no DB
+  - TaxCalculator.php      — 1 DB read (tax_rates), D11 invoice-time lookup
+  - InvoiceGenerator.php   — ONLY class that writes to DB
+    Signature: $generator->createFromLease(array $params): array{invoice_id: int, ...}
+    Required params: lease_id, period_start, period_end, billing_type, invoice_type, created_by
+    Optional: notes, auto_generated, generation_source, extra_lines
+    generation_source ENUM (DB enforced): 'cron' | 'manual' | 'lease_close' | 'late_fee_cron'
+    db_transaction() nesting is SAFE — includes/db.php has inTransaction() guard (added S008.5)
 
-BUILD SCOPE (S008):
-  API endpoints:
-    api/v1/invoices/index.php    ← GET list (paginated, filters: status, customer_id, lease_id)
-    api/v1/invoices/show.php     ← GET single invoice + line items
-    api/v1/invoices/create.php   ← POST manual creation (ProRateCalculator for line items)
-    api/v1/invoices/update.php   ← POST update draft (D19 lock, blocks if sent)
-    api/v1/invoices/delete.php   ← POST soft-delete (draft only)
-    api/v1/invoices/send.php     ← POST draft→sent (freezes financial fields)
-    api/v1/invoices/void.php     ← POST → void status
+INVOICE STATE MACHINE:
+  draft → sent → partially_paid | paid | overdue | void | written_off
+  Payments module drives: sent → partially_paid, partially_paid → paid transitions.
+  Void and written_off are set by staff actions, not payment flow.
 
-  lib/Billing/ProRateCalculator.php  ← Pure math class, no DB
-  lib/Billing/TaxCalculator.php      ← Pure math + 1 DB read for tax rate
-  lib/Billing/InvoiceGenerator.php   ← DB write class, calls ProRateCalculator + TaxCalculator
+PAYMENTS MODULE CONSTRAINTS:
+  - D18: payment currency MUST match invoice currency → 422 CURRENCY_MISMATCH if differ
+  - D20: FOR UPDATE on invoice row required during payment allocation (concurrent payment race)
+  - D13/D5: payments in SOFT_DELETE_TABLES — NEVER hard-delete (15 tables total)
+  - Trap 6 (Denormalized counters): customer.outstanding_balance AND lease.total_paid
+    must be updated in the SAME transaction as any payment insert/soft-delete
+  - D16: bcmath only for all monetary arithmetic — never use float operators
+  - D15: payment reference numbers gap-free (if needed) — check schema for counter pattern
 
-  Admin UI:
-    app/admin/invoices/index.php  ← list with AR aging tiles
-    app/admin/invoices/show.php   ← invoice detail + line items + status actions
-    app/admin/invoices/create.php ← new invoice form
+ROUTER / FILE STRUCTURE:
+  - API:   api/v1/payments/   → dirname(__DIR__, 3) for bootstrap include
+  - UI:    app/admin/payments/ → dirname(__DIR__, 3) for bootstrap include
+  - URL pattern: query string IDs only — /payments/show?id=1 (file router, no dynamic segments)
 
-STOP CONDITIONS (S008):
-  1. GET api/v1/invoices → 200 paginated
-  2. POST api/v1/invoices/create → 201, invoice_number generated sequentially (INV-2026-00001)
-  3. GET api/v1/invoices/show?id=N → 200, line items included, pdf_path stripped (Trap 7)
-  4. POST api/v1/invoices/send → 200, status draft→sent, financial fields frozen
-  5. POST api/v1/invoices/update on sent invoice → 422 IMMUTABLE_RECORD
-  6. ProRateCalculator unit test: 1 day = daily_rate; 6-7 days = weekly_rate; 30+ = monthly_rate
-  7. TaxCalculator unit test: gst_exempt suppresses gst; pst_exempt suppresses pst
-  8. /fleetforge/invoices → list page 200, no PHP errors
-  9. /fleetforge/invoices/create → form 200, no PHP errors
+═══════════════════════════════════════════════════════════════════
+S009 DELIVERABLES
+═══════════════════════════════════════════════════════════════════
 
-Do not write any code yet. Confirm you have read all files and summarize what S008 builds.
+API (target: 6 endpoints):
+  1. api/v1/payments/index.php   — paginated list; filter by invoice_id, customer_id, status
+  2. api/v1/payments/show.php    — single payment with allocation detail
+  3. api/v1/payments/create.php  — record payment; FOR UPDATE on invoice; update counters;
+                                   transition invoice status; write audit_log — all in 1 transaction
+  4. api/v1/payments/update.php  — metadata only (reference, notes); D19 optimistic lock
+  5. api/v1/payments/delete.php  — soft-delete; reverse denormalized counters; re-check invoice
+                                   status (may revert paid → partially_paid → sent)
+  6. api/v1/payments/allocate.php — optional: allocate unapplied credit to invoice
+
+Admin UI (target: 4 pages):
+  1. app/admin/payments/index.php  — list with KPI tiles (total collected, outstanding, overdue)
+  2. app/admin/payments/show.php   — payment detail + invoice link + customer link
+  3. app/admin/payments/create.php — form: select invoice, amount, method, date, reference
+  4. app/admin/invoices/show.php   — extend existing page with Payments tab (payment history)
+     (invoices/show.php already has tabs structure — add Payments tab as done for leases in S008.5)
+
+═══════════════════════════════════════════════════════════════════
+STOP CONDITIONS (session not complete until ALL pass)
+═══════════════════════════════════════════════════════════════════
+
+1. POST payment create for invoice X → 201, invoice status transitions to partially_paid or paid
+2. POST payment create with wrong currency → 422 CURRENCY_MISMATCH
+3. POST payment create concurrently (same invoice, two requests) — only one succeeds or both total correctly (FOR UPDATE prevents race)
+4. GET payments/index → 200 paginated list
+5. GET payments/show?id=N → 200 with full detail
+6. POST payment delete → soft-deleted, invoice status reverted correctly, counters updated
+7. POST payment update (metadata only) → 200, D19 optimistic lock 409 on stale
+8. /admin/payments page → 200 no PHP errors
+9. /admin/payments/create page → 200 no PHP errors
+10. Invoice show page Payments tab → loads payment history for invoice
+
+END-OF-SESSION CHECKLIST:
+  - Mark all new items ✅ in KNOWN ISSUES (if any bugs logged)
+  - Add S009 row to SESSION LOG
+  - Rewrite NEXT SESSION STARTS WITH for S010 (Monthly Billing Cron or Damage Claims)
+  - Deep audit: run curl tests for all 10 stop conditions before writing ✅
 ```
 
 ---
@@ -2008,4 +2046,4 @@ When a session is about to start, Claude Code will:
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
 *Last updated: 2026-04-01 — S007 complete. Leases Module fully built: 7 API endpoints + 4 Admin UI pages. FOR UPDATE row locking on create/activate/close (D20). D19 optimistic lock on update. Contract numbers CN-XXXXXX-YYYY auto-generated. Tax rates frozen from customer record at creation (D11). Snapshots (customer/unit/template) frozen on lease. Status machine: pending→active→completed. All status changes write lease_status_log + equipment_status_log + audit_log. Bugs fixed: equipment_units has no mileage_unit column; audit_log action ENUM values corrected (create/update/delete/status_change/lease_closed). Invoice generation stubbed in activate + close (wired in S008). Tab UI uses inline styles (no tab CSS classes in app.css). 33 decisions total. 14 known issues (11 resolved). Next: S008.*
-*Next session: S008 — Invoices Module (API + Admin UI + ProRateCalculator + TaxCalculator + InvoiceGenerator)*
+*Next session: S009 — Payments Module (API + Admin UI)*

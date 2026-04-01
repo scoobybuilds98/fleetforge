@@ -174,8 +174,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="default_mileage_unit">Mileage Unit</label>
                         <select id="default_mileage_unit" class="form-control form-select"
                                 x-model="form.default_mileage_unit">
+                            <option value="km">Kilometres</option>
                             <option value="miles">Miles</option>
-                            <option value="km">KM</option>
                         </select>
                     </div>
                 </div>
@@ -304,7 +304,7 @@ function FF_CreateTemplate() {
             default_monthly_rate:            '',
             default_mileage_rate:            '',
             default_currency:                'CAD',
-            default_mileage_unit:            'miles',
+            default_mileage_unit:            'km',
             is_active:                       true,
         },
         errors:      {},

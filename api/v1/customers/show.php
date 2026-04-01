@@ -31,9 +31,28 @@ if (!$id || $id <= 0) {
     json_error('INVALID_ID', 'A valid customer ID is required.', 400);
 }
 
-// ── Fetch customer ─────────────────────────────────────────────
+// ── Fetch customer — FIX #31: explicit column list (no SELECT *) ──
+// Explicit columns prevent leaking internal fields if schema changes.
 $customer = db_row(
-    "SELECT * FROM customers WHERE id = ? AND deleted_at IS NULL",
+    "SELECT
+        id, company_name, contact_name, email, phone, alt_phone, website,
+        address, city, state, province, postal_code, country,
+        status, risk_score, risk_notes,
+        tax_id, dot_number, mc_number, gst_number, pst_number,
+        gst_exempt, pst_exempt, tax_exempt,
+        gst_exempt_number, pst_exempt_number, gst_exempt_expiry, pst_exempt_expiry,
+        tax_rate_id,
+        billing_contact_name, billing_email, billing_phone, billing_address,
+        invoice_delivery, invoice_email, invoice_cc_emails,
+        currency, billing_cycle, mileage_unit,
+        payment_terms, po_required, default_po_number, credit_limit,
+        discount_type, discount_value,
+        outstanding_balance, total_invoiced, total_paid,
+        active_lease_count, lease_count,
+        late_fee_enabled, late_fee_rate, late_fee_grace_days,
+        notes, internal_notes,
+        created_at, updated_at, created_by, updated_by
+     FROM customers WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
 

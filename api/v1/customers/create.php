@@ -87,11 +87,11 @@ $taxRateId       = clean_int($body['tax_rate_id'] ?? null);
 
 // Commercial fields
 $rawCurrency     = $body['currency']         ?? 'CAD';
-$rawMileage      = $body['mileage_unit']    ?? 'miles';
+$rawMileage      = $body['mileage_unit']    ?? 'km';
 $rawCycle        = $body['billing_cycle']   ?? 'monthly';
 $rawDelivery     = $body['invoice_delivery'] ?? 'email';
 $currency        = in_array($rawCurrency, ['CAD', 'USD'], true)                              ? $rawCurrency : 'CAD';
-$mileageUnit     = in_array($rawMileage, ['miles', 'km'], true)                              ? $rawMileage  : 'miles';
+$mileageUnit     = in_array($rawMileage, ['km', 'miles'], true)                              ? $rawMileage  : 'km';
 $billingCycle    = in_array($rawCycle, ['monthly', 'on_close_only'], true)                   ? $rawCycle    : 'monthly';
 $invoiceDelivery = in_array($rawDelivery, ['email', 'mail', 'portal', 'none'], true)         ? $rawDelivery : 'email';
 $invoiceEmail   = clean_email($body['invoice_email'] ?? null);

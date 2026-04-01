@@ -46,7 +46,8 @@ if (!$lease) {
 
 // Active leases cannot be deleted — unit is on_lease; must close first
 if ($lease['status'] === 'active') {
-    json_error('LEASE_NOT_ACTIVE',
+    // FIX #38: LEASE_IS_ACTIVE is semantically correct (lease IS active, blocking delete)
+    json_error('LEASE_IS_ACTIVE',
         "Cannot delete lease {$lease['contract_number']}: it is currently active. Close the lease first.", 409);
 }
 

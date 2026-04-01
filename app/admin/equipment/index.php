@@ -344,7 +344,7 @@ function FF_Equipment() {
         loadError:  null,
         pagination: {},
         filters: {
-            search:      '<?= htmlspecialchars($_GET['status'] ?? '', ENT_QUOTES) ?>',
+            search:      '<?= htmlspecialchars($_GET['search'] ?? '', ENT_QUOTES) ?>',
             status:      '<?= htmlspecialchars($_GET['status'] ?? '', ENT_QUOTES) ?>',
             template_id: '',
             sort:        'unit_number',

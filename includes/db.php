@@ -183,6 +183,11 @@ function db_exists(string $table, string $condition, array $params = []): bool
 // Returns whatever the callable returns.
 // On exception: rolls back and re-throws — caller decides how to handle.
 //
+// Nesting: if already inside a transaction (e.g., InvoiceGenerator called
+// from within activate.php's transaction), the callable runs in the outer
+// transaction — no COMMIT/ROLLBACK is issued. This preserves atomicity:
+// if the inner work throws, the outer transaction still rolls back.
+//
 // FOR UPDATE usage (D20):
 //   db_transaction(function() use ($id) {
 //       $row = db_row("SELECT * FROM table WHERE id = ? FOR UPDATE", [$id]);
@@ -191,15 +196,23 @@ function db_exists(string $table, string $condition, array $params = []): bool
 // ============================================================
 function db_transaction(callable $fn): mixed
 {
-    $pdo = db_pdo();
-    $pdo->beginTransaction();
+    $pdo    = db_pdo();
+    $nested = $pdo->inTransaction(); // true when called inside an outer transaction
+
+    if (!$nested) {
+        $pdo->beginTransaction();
+    }
 
     try {
         $result = $fn();
-        $pdo->commit();
+        if (!$nested) {
+            $pdo->commit();
+        }
         return $result;
     } catch (Throwable $e) {
-        $pdo->rollBack();
+        if (!$nested) {
+            $pdo->rollBack();
+        }
         throw $e;
     }
 }

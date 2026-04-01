@@ -57,7 +57,8 @@ db_transaction(function () use ($id, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     $lease = db_row(
         "SELECT id, status, contract_number, company_name_snapshot,
-                equipment_unit_id, start_date, billing_cycle, unit_number_snapshot
+                equipment_unit_id, start_date, billing_cycle, unit_number_snapshot,
+                last_billed_date
          FROM leases WHERE id = ? AND deleted_at IS NULL",
         [$id]
     );
@@ -86,9 +87,11 @@ db_transaction(function () use ($id, &$result) {
         json_error('NOT_FOUND', 'Equipment unit not found.', 404);
     }
 
-    if ($unit['status'] !== 'available') {
+    // After FIX #16, lease create reserves the unit (available → reserved).
+    // Activate expects reserved status — on_lease/maintenance/etc means conflict.
+    if ($unit['status'] !== 'reserved') {
         json_error('UNIT_UNAVAILABLE',
-            "Cannot activate: unit {$unit['unit_number']} is no longer available (status: {$unit['status']}).", 409);
+            "Cannot activate: unit {$unit['unit_number']} is not in reserved status (status: {$unit['status']}).", 409);
     }
 
     // ── Update lease status → active ───────────────────────────
@@ -117,7 +120,7 @@ db_transaction(function () use ($id, &$result) {
 
     db_insert('equipment_status_log', [
         'equipment_unit_id' => $lease['equipment_unit_id'],
-        'old_status'        => 'available',
+        'old_status'        => 'reserved',  // unit was reserved on lease create (FIX #16)
         'new_status'        => 'on_lease',
         'reason'            => "Lease {$lease['contract_number']} activated",
         'changed_by'        => $changedBy,
@@ -149,12 +152,30 @@ db_transaction(function () use ($id, &$result) {
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
-    // ── TODO (S009+): Trigger Invoice 1 generation ─────────────
-    // Per spec §12 [PASS-3:1F]: Invoice 1 is generated on activation, not creation.
-    // InvoiceGenerator::generateActivationInvoice($id) will be called here
-    // once lib/Billing/InvoiceGenerator.php is built in the invoices session.
+    // ── FIX #17: Generate Invoice 1 on activation ─────────────
+    // Per spec §12 [PASS-3:1F]: Invoice 1 created at activation time, not lease creation.
+    // Period: start_date → last day of that month.
+    // billing_type='full_month' if start is the 1st, else 'partial_start' (pro-rate).
+    // db_transaction() nesting is safe — InvoiceGenerator calls db_transaction() too,
+    // but the nesting guard in db.php means it runs in this outer transaction.
+    $startDate       = $lease['start_date'];
+    $lastDayOfMonth  = date('Y-m-t', strtotime($startDate));
+    $firstDayOfMonth = date('Y-m-01', strtotime($startDate));
+    $billingType     = ($startDate === $firstDayOfMonth) ? 'full_month' : 'partial_start';
 
-    $result = ['id' => $id, 'status' => 'active'];
+    $generator     = new \FleetForge\Billing\InvoiceGenerator();
+    $invoiceResult = $generator->createFromLease([
+        'lease_id'          => $id,
+        'period_start'      => $startDate,
+        'period_end'        => $lastDayOfMonth,
+        'billing_type'      => $billingType,
+        'invoice_type'      => 'regular',
+        'created_by'        => current_user_id(),
+        'auto_generated'    => 1,
+        'generation_source' => 'manual',  // ENUM: cron|manual|lease_close|late_fee_cron
+    ]);
+
+    $result = ['id' => $id, 'status' => 'active', 'invoice_id' => $invoiceResult['invoice_id']];
 });
 
 json_success($result);

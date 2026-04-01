@@ -44,8 +44,9 @@ if (!$unit) {
 // ── Block if unit is currently on lease ────────────────────────
 // WHY: soft-deleting a unit on active lease would orphan the lease mid-term
 if ($unit['status'] === 'on_lease') {
+    // FIX #38: UNIT_ON_LEASE is semantically correct (unit IS on_lease, blocking delete)
     json_error(
-        'LEASE_NOT_ACTIVE',
+        'UNIT_ON_LEASE',
         "Cannot delete unit {$unit['unit_number']}: it is currently on active lease. Close the lease first.",
         422
     );

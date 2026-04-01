@@ -7,7 +7,7 @@ declare(strict_types=1);
  * @file        app/admin/leases/index.php
  * @description Leases list with three tabs: Active+Pending, Closed (completed+cancelled), All.
  *              Filter bar: search, status, customer filter.
- *              Status badges: active=badge-success, pending=badge-warning,
+ *              Status badges: active=badge-success, pending=badge-info,
  *              completed=badge-neutral, cancelled=badge-danger (design §9).
  *              Links to show, create pages.
  *
@@ -32,6 +32,11 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      Page header
      ============================================================ -->
+<nav class="breadcrumb">
+    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
+    <span class="breadcrumb-sep">/</span>
+    <span class="breadcrumb-current">Leases</span>
+</nav>
 <div class="page-header">
     <div>
         <h1 class="page-header-title h4">Leases</h1>
@@ -50,46 +55,45 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <div x-data="FF_Leases()" x-init="init()">
 
-    <!-- ── TAB BAR — inline styles; no tab CSS class exists in app.css ───── -->
-    <div role="tablist"
-         style="display:flex; border-bottom:1px solid var(--border-color); margin-bottom:1.5rem; gap:0; overflow-x:auto;">
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="{
-                    'border-bottom': '2px solid ' + (activeTab === 'open' ? 'var(--color-primary)' : 'transparent'),
-                    'color': activeTab === 'open' ? 'var(--color-primary)' : 'var(--text-secondary)',
-                    'margin-bottom': '-1px'
-                }"
-                @click="setTab('open')"
-                :aria-selected="activeTab === 'open'">
+    <!-- ── TAB BAR ──────────────────────────────────────────────── -->
+    <div class="tab-bar" role="tablist">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'open' }"
+                @click="setTab('open')" :aria-selected="activeTab === 'open'" role="tab">
             Active &amp; Pending
+            <span class="tab-badge" x-show="counts.active !== null"
+                  x-text="(counts.active || 0) + (counts.pending || 0)"></span>
         </button>
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="{
-                    'border-bottom': '2px solid ' + (activeTab === 'closed' ? 'var(--color-primary)' : 'transparent'),
-                    'color': activeTab === 'closed' ? 'var(--color-primary)' : 'var(--text-secondary)',
-                    'margin-bottom': '-1px'
-                }"
-                @click="setTab('closed')"
-                :aria-selected="activeTab === 'closed'">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'closed' }"
+                @click="setTab('closed')" :aria-selected="activeTab === 'closed'" role="tab">
             Closed
         </button>
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="{
-                    'border-bottom': '2px solid ' + (activeTab === 'all' ? 'var(--color-primary)' : 'transparent'),
-                    'color': activeTab === 'all' ? 'var(--color-primary)' : 'var(--text-secondary)',
-                    'margin-bottom': '-1px'
-                }"
-                @click="setTab('all')"
-                :aria-selected="activeTab === 'all'">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'all' }"
+                @click="setTab('all')" :aria-selected="activeTab === 'all'" role="tab">
             All
         </button>
+    </div>
 
+    <!-- ── SUMMARY STRIP ─────────────────────────────────────────── -->
+    <div class="summary-strip" x-show="!loading && leases.length > 0">
+        <div class="summary-strip__item">
+            <span class="summary-strip__dot" style="background:var(--color-success);"></span>
+            <span class="summary-strip__value" x-text="counts.active ?? '—'"></span>
+            <span class="summary-strip__label">Active</span>
+        </div>
+        <div class="summary-strip__item">
+            <span class="summary-strip__dot" style="background:var(--color-info);"></span>
+            <span class="summary-strip__value" x-text="counts.pending ?? '—'"></span>
+            <span class="summary-strip__label">Pending</span>
+        </div>
+        <div class="summary-strip__item">
+            <span class="summary-strip__dot" style="background:var(--text-tertiary);"></span>
+            <span class="summary-strip__value" x-text="counts.completed ?? '—'"></span>
+            <span class="summary-strip__label">Completed</span>
+        </div>
+        <div class="summary-strip__item">
+            <span class="summary-strip__value font-mono" x-text="totalRate ? '$' + totalRate + '/mo' : '—'"></span>
+            <span class="summary-strip__label">Active rate total</span>
+        </div>
     </div>
 
     <!-- ── FILTER TOOLBAR ────────────────────────────────────── -->
@@ -260,7 +264,8 @@ function FF_Leases() {
         loadError:   null,
         pagination:  {},
         activeTab:   'open',
-        counts:      { open: null, closed: null },
+        counts:      { active: null, pending: null, completed: null },
+        totalRate:   null,
         filters:     { search: '', status: '' },
         currentPage: 1,
 
@@ -316,6 +321,19 @@ function FF_Leases() {
 
                     this.leases     = items;
                     this.pagination = r.data.pagination;
+
+                    // Compute summary counts from all returned items (before tab filter)
+                    const all = r.data.items;
+                    this.counts.active    = all.filter(l => l.status === 'active').length;
+                    this.counts.pending   = all.filter(l => l.status === 'pending').length;
+                    this.counts.completed = all.filter(l => l.status === 'completed').length;
+                    // Total monthly rate of active leases on this page
+                    const rateSum = all
+                        .filter(l => l.status === 'active' && parseFloat(l.monthly_rate) > 0)
+                        .reduce((sum, l) => sum + parseFloat(l.monthly_rate), 0);
+                    this.totalRate = rateSum > 0
+                        ? rateSum.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                        : null;
                 } else {
                     this.loadError = r.message || 'Failed to load leases.';
                 }
@@ -331,7 +349,7 @@ function FF_Leases() {
         statusBadgeClass(status) {
             const map = {
                 active:    'badge-success',
-                pending:   'badge-warning',
+                pending:   'badge-info',
                 completed: 'badge-neutral',
                 cancelled: 'badge-danger',
             };

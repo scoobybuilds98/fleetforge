@@ -90,8 +90,8 @@ $mileageRate  = isset($body['default_mileage_rate']) ? clean_decimal($body['defa
 
 $rawCurrency  = $body['default_currency'] ?? 'CAD';
 $currency     = in_array($rawCurrency, ['CAD','USD'], true) ? $rawCurrency : 'CAD';
-$rawMileage   = $body['default_mileage_unit'] ?? 'miles';
-$mileageUnit  = in_array($rawMileage, ['miles','km'], true) ? $rawMileage : 'miles';
+$rawMileage   = $body['default_mileage_unit'] ?? 'km';
+$mileageUnit  = in_array($rawMileage, ['km','miles'], true) ? $rawMileage : 'km';
 
 // ── Duplicate name check ───────────────────────────────────────
 if (db_exists('equipment_templates', 'name = ? AND deleted_at IS NULL', [$name])) {

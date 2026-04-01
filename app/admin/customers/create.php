@@ -327,8 +327,8 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label" for="mileage_unit">Mileage Unit</label>
                         <select id="mileage_unit" class="form-select" x-model="form.mileage_unit">
-                            <option value="miles">Miles</option>
                             <option value="km">Kilometres</option>
+                            <option value="miles">Miles</option>
                         </select>
                     </div>
 
@@ -475,7 +475,7 @@ function FF_CustomerForm() {
             gst_exempt_expiry:     '',
             pst_exempt_expiry:     '',
             currency:              'CAD',
-            mileage_unit:          'miles',
+            mileage_unit:          'km',
             billing_cycle:         'monthly',
             discount_type:         'none',
             discount_value:        '',

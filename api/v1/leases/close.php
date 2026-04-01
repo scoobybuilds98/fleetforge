@@ -62,7 +62,8 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
     $lease = db_row(
         "SELECT id, status, contract_number, company_name_snapshot,
                 equipment_unit_id, unit_number_snapshot, mileage_at_start,
-                mileage_rate, estimated_mileage, mileage_precharge_amount
+                mileage_rate, mileage_unit, estimated_mileage, mileage_precharge_amount,
+                start_date, last_billed_date
          FROM leases WHERE id = ? AND deleted_at IS NULL",
         [$id]
     );
@@ -118,7 +119,12 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         }
     }
     if ($closeNotes) {
-        $leaseUpdate['internal_notes'] = $closeNotes;
+        // FIX #37: append close_notes to internal_notes instead of replacing
+        $existing = db_row("SELECT internal_notes FROM leases WHERE id = ?", [$id]);
+        $prior = $existing['internal_notes'] ?? '';
+        $leaseUpdate['internal_notes'] = $prior
+            ? $prior . "\n---\nClose notes: " . $closeNotes
+            : 'Close notes: ' . $closeNotes;
     }
 
     db_update('leases', $leaseUpdate, 'id = ?', [$id]);
@@ -164,11 +170,53 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
-    // ── TODO (S009+): Trigger final invoice generation ─────────
-    // Per spec §12 [PASS-3:2C]: check if return = last day of month and draft exists.
-    // InvoiceGenerator::generateCloseInvoice($id, $actualReturnDate) called here.
+    // ── FIX #18: Generate final invoice on close ───────────────
+    // Per spec §12 [PASS-3:2C]: final period = day after last_billed_date (or
+    // start_date if never billed) through actual_return_date. Pro-rated.
+    // Mileage overage passed as extra_lines if mileage_rate > 0 and actual > estimated.
+    $periodStart = $lease['last_billed_date']
+        ? date('Y-m-d', strtotime($lease['last_billed_date'] . ' +1 day'))
+        : $lease['start_date'];
 
-    $result = ['id' => $id, 'status' => 'completed'];
+    $extraLines = [];
+    if ($mileageAtEnd !== null && $lease['mileage_at_start'] !== null
+        && bccomp((string)$lease['mileage_rate'], '0', 4) > 0)
+    {
+        $actualMileage    = (string)($mileageAtEnd - (int)$lease['mileage_at_start']);
+        $includedMileage  = (string)($lease['estimated_mileage'] ?? '0');
+        $overageMileage   = bcsub($actualMileage, $includedMileage, 4);
+        if (bccomp($overageMileage, '0', 4) > 0) {
+            $mileageCharge = bcround(bcmul($overageMileage, (string)$lease['mileage_rate'], 6), 2);
+            if (bccomp($mileageCharge, '0', 2) > 0) {
+                $extraLines[] = [
+                    'item_type'   => 'mileage',
+                    'description' => "Mileage overage: {$overageMileage} km × \${$lease['mileage_rate']}/km",
+                    'quantity'    => $overageMileage,
+                    'unit'        => $lease['mileage_unit'] ?? 'km',
+                    'unit_price'  => (string)$lease['mileage_rate'],
+                    'amount'      => $mileageCharge,
+                    'is_credit'   => 0,
+                    'taxable'     => 1,
+                ];
+            }
+        }
+    }
+
+    $generator     = new \FleetForge\Billing\InvoiceGenerator();
+    $invoiceResult = $generator->createFromLease([
+        'lease_id'          => $id,
+        'period_start'      => $periodStart,
+        'period_end'        => $actualReturnDate,
+        'billing_type'      => 'partial_end',
+        'invoice_type'      => 'final',
+        'notes'             => $closeNotes,
+        'created_by'        => current_user_id(),
+        'auto_generated'    => 1,
+        'generation_source' => 'lease_close',  // ENUM: cron|manual|lease_close|late_fee_cron
+        'extra_lines'       => $extraLines,
+    ]);
+
+    $result = ['id' => $id, 'status' => 'completed', 'invoice_id' => $invoiceResult['invoice_id']];
 });
 
 json_success($result);

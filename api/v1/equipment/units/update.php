@@ -63,9 +63,9 @@ $updates = [];
 if (isset($body['unit_number'])) {
     $un = clean_string($body['unit_number'], 100);
     if (!$un) json_error('VALIDATION_ERROR', 'unit_number cannot be empty.', 422);
-    // Check for conflict with OTHER units
+    // FIX #36: filter soft-deleted units so deleted unit_numbers can be reused
     $conflict = db_row(
-        "SELECT id FROM equipment_units WHERE unit_number = ? AND id != ?",
+        "SELECT id FROM equipment_units WHERE unit_number = ? AND id != ? AND deleted_at IS NULL",
         [$un, $id]
     );
     if ($conflict) json_error('ALREADY_EXISTS', 'Another unit with this unit number already exists.', 409);

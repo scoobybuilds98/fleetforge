@@ -107,6 +107,9 @@ function daysUntil(?string $date): ?int {
             Edit Unit
         </a>
         <?php endif; ?>
+        <?php if (can('equipment', 'delete') && $unit['status'] !== 'on_lease'): ?>
+        <button class="btn btn-danger btn-sm" onclick="deleteUnit()">Delete Unit</button>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -497,6 +500,19 @@ function FF_UnitDetail() {
             return dt.toLocaleString('en-CA', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
         },
     };
+}
+
+// FIX #42: delete button handler
+function deleteUnit() {
+    if (!confirm('Delete this unit? This action cannot be undone.')) return;
+    FF_Api.post('<?= base_url('api/v1/equipment/units/delete') ?>', { id: <?= $unitId ?> })
+        .then(r => {
+            if (r.success) {
+                window.location.href = '<?= base_url('equipment') ?>';
+            } else {
+                alert(r.error?.message || 'Failed to delete unit.');
+            }
+        });
 }
 </script>
 

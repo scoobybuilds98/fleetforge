@@ -77,11 +77,15 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      Page header
      ============================================================ -->
+<nav class="breadcrumb">
+    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
+    <span class="breadcrumb-sep">/</span>
+    <a href="<?= base_url('customers') ?>">Customers</a>
+    <span class="breadcrumb-sep">/</span>
+    <span class="breadcrumb-current"><?= e($customer['company_name']) ?></span>
+</nav>
 <div class="page-header">
     <div>
-        <div style="margin-bottom:8px;">
-            <a href="<?= base_url('customers') ?>" class="btn btn-ghost btn-sm">← Customers</a>
-        </div>
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <h1 class="page-header-title h4" style="margin:0;"><?= e($customer['company_name']) ?></h1>
             <span class="badge <?= $statusBadgeClass ?>">
@@ -148,54 +152,26 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <div x-data="FF_CustomerProfile()" x-init="init()">
 
-    <!-- Tab nav — inline styles since no tab CSS classes exist in app.css -->
-    <div role="tablist"
-         style="display:flex; border-bottom:1px solid var(--border-color); margin-bottom:24px; gap:0; overflow-x:auto;">
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="activeTab === 'overview'
-                    ? 'border-bottom-color:var(--color-primary); color:var(--color-primary); margin-bottom:-1px;'
-                    : 'color:var(--text-secondary); margin-bottom:-1px;'"
-                @click="activeTab = 'overview'"
-                :aria-selected="activeTab === 'overview'">
+    <!-- Tab nav -->
+    <div class="tab-bar" role="tablist">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'overview' }"
+                @click="activeTab = 'overview'" :aria-selected="activeTab === 'overview'" role="tab">
             Overview
         </button>
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="activeTab === 'notes'
-                    ? 'border-bottom-color:var(--color-primary); color:var(--color-primary); margin-bottom:-1px;'
-                    : 'color:var(--text-secondary); margin-bottom:-1px;'"
-                @click="activeTab = 'notes'; loadNotes()"
-                :aria-selected="activeTab === 'notes'">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'notes' }"
+                @click="activeTab = 'notes'; loadNotes()" :aria-selected="activeTab === 'notes'" role="tab">
             Notes
-            <span x-show="noteCount > 0"
-                  x-text="'(' + noteCount + ')'"
-                  style="margin-left:4px; font-size:0.8125rem; opacity:0.75;"></span>
+            <span class="tab-badge" x-show="noteCount > 0" x-text="noteCount"></span>
         </button>
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="activeTab === 'leases'
-                    ? 'border-bottom-color:var(--color-primary); color:var(--color-primary); margin-bottom:-1px;'
-                    : 'color:var(--text-secondary); margin-bottom:-1px;'"
-                @click="activeTab = 'leases'"
-                :aria-selected="activeTab === 'leases'">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'leases' }"
+                @click="activeTab = 'leases'" :aria-selected="activeTab === 'leases'" role="tab">
             Leases
-            <span style="margin-left:4px; font-size:0.8125rem; opacity:0.75;">(<?= e($customer['lease_count']) ?>)</span>
+            <span class="tab-badge"><?= e($customer['lease_count']) ?></span>
         </button>
-
-        <button role="tab"
-                style="padding:10px 20px; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; font-size:0.875rem; font-weight:500; white-space:nowrap; transition:color 0.15s, border-color 0.15s;"
-                :style="activeTab === 'invoices'
-                    ? 'border-bottom-color:var(--color-primary); color:var(--color-primary); margin-bottom:-1px;'
-                    : 'color:var(--text-secondary); margin-bottom:-1px;'"
-                @click="activeTab = 'invoices'"
-                :aria-selected="activeTab === 'invoices'">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'invoices' }"
+                @click="activeTab = 'invoices'" :aria-selected="activeTab === 'invoices'" role="tab">
             Invoices
         </button>
-
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->

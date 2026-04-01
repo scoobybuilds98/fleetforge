@@ -124,7 +124,7 @@ if (isset($body['default_currency'])) {
 }
 if (isset($body['default_mileage_unit'])) {
     $v = clean_string($body['default_mileage_unit']);
-    $updates['default_mileage_unit'] = in_array($v, ['miles','km'], true) ? $v : 'miles';
+    $updates['default_mileage_unit'] = in_array($v, ['km','miles'], true) ? $v : 'km';
 }
 if (isset($body['is_active'])) {
     $updates['is_active'] = (bool) $body['is_active'] ? 1 : 0;
