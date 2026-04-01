@@ -676,6 +676,9 @@ function FF_Dashboard() {
             const d = this.charts;
             const c = this._chartInstances;
 
+            // WHY: isLight must be derived from FF_Theme — no global exists
+            const isLight = FF_Theme.current() === 'light';
+
             // FIX #41: read chart colours from CSS vars so they follow the theme
             const cs      = getComputedStyle(document.documentElement);
             const cssVar  = (v) => cs.getPropertyValue(v).trim();

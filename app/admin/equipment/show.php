@@ -6,8 +6,8 @@ declare(strict_types=1);
  *
  * Equipment unit detail (command center) page. Shows hero section with unit
  * number, status badge, and health score. Tab navigation: Overview (specs),
- * Compliance (expiry dates), Lease History (stub), Status Log.
- * GPS, Maintenance, Documents, Analytics tabs are stubbed for future sessions.
+ * Compliance (expiry dates), Lease History (lazy-loaded from API), Status Log.
+ * Maintenance and Documents tabs are placeholders for future sessions.
  * Status lock: if unit is on_lease the status dropdown shows a warning.
  *
  * @depends config/app.php, includes/auth.php, includes/header.php,
@@ -318,14 +318,63 @@ function daysUntil(?string $date): ?int {
         </div>
     </div>
 
-    <!-- ── TAB: Lease History (stub for future session) ──────── -->
+    <!-- ── TAB: Lease History ────────────────────────────────────── -->
     <div x-show="activeTab === 'leases'">
-        <div class="card card-body empty-state">
-            <div class="empty-state-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Lease History</div>
             </div>
-            <p class="empty-state-title">Lease history coming in S008</p>
-            <p class="empty-state-text">Full lease history timeline will be built during the Leases module session.</p>
+
+            <div x-show="leasesLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading lease history…</span>
+            </div>
+
+            <template x-if="!leasesLoading && leaseHistory.length === 0">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <p class="empty-state-title">No lease history</p>
+                        <p class="empty-state-text">This unit has not been leased yet.</p>
+                    </div>
+                </div>
+            </template>
+
+            <template x-if="!leasesLoading && leaseHistory.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Contract #</th>
+                                <th>Customer</th>
+                                <th>Status</th>
+                                <th>Start</th>
+                                <th>End</th>
+                                <th class="text-right">Monthly Rate</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="ls in leaseHistory" :key="ls.id">
+                                <tr>
+                                    <td class="font-mono" x-text="ls.contract_number"></td>
+                                    <td x-text="ls.customer_display_name || ls.company_name_snapshot || '—'"></td>
+                                    <td>
+                                        <span class="badge badge-no-dot"
+                                              :class="leaseBadgeClass(ls.status)"
+                                              x-text="ls.status.charAt(0).toUpperCase() + ls.status.slice(1)"></span>
+                                    </td>
+                                    <td x-text="formatDate(ls.start_date)"></td>
+                                    <td x-text="ls.end_date ? formatDate(ls.end_date) : 'Open'"></td>
+                                    <td class="text-right font-mono" x-text="'$' + parseFloat(ls.monthly_rate).toFixed(2)"></td>
+                                    <td>
+                                        <a :href="'<?= base_url('leases/show') ?>?id=' + ls.id"
+                                           class="btn btn-sm btn-secondary">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
         </div>
     </div>
 
@@ -411,11 +460,14 @@ function daysUntil(?string $date): ?int {
 <script>
 function FF_UnitDetail() {
     return {
-        unit:       null,
-        statusLog:  [],
-        loading:    true,
-        loadingLog: false,
-        activeTab:  'overview',
+        unit:          null,
+        statusLog:     [],
+        loading:       true,
+        loadingLog:    false,
+        activeTab:     'overview',
+        leaseHistory:  [],
+        leasesLoading: false,
+        leasesLoaded:  false,
 
         async init() {
             await this.loadUnit();
@@ -430,10 +482,13 @@ function FF_UnitDetail() {
             } catch(e) { /* page already rendered server-side */ }
             this.loading = false;
 
-            // Load status log when tab is first activated
+            // Lazy-load data when tabs are first activated
             this.$watch('activeTab', (tab) => {
                 if (tab === 'status_log' && !this.statusLog.length) {
                     this.loadStatusLog();
+                }
+                if (tab === 'leases' && !this.leasesLoaded) {
+                    this.loadLeaseHistory();
                 }
             });
         },
@@ -445,8 +500,27 @@ function FF_UnitDetail() {
                     '<?= base_url('api/v1/equipment/units/status-log') ?>?unit_id=<?= $unitId ?>'
                 );
                 if (r.success) this.statusLog = r.data.items ?? r.data;
-            } catch(e) { /* stub endpoint — silently ignore */ }
+            } catch(e) { /* non-fatal */ }
             this.loadingLog = false;
+        },
+
+        async loadLeaseHistory() {
+            this.leasesLoading = true;
+            try {
+                const r = await FF_Api.get(
+                    '<?= base_url('api/v1/leases') ?>?unit_id=<?= $unitId ?>&per_page=50&sort=start_date&dir=DESC'
+                );
+                if (r.success) {
+                    this.leaseHistory  = r.data.items || [];
+                    this.leasesLoaded  = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.leasesLoading = false;
+        },
+
+        leaseBadgeClass(status) {
+            const m = { active:'badge-success', pending:'badge-info', completed:'badge-neutral', cancelled:'badge-danger' };
+            return m[status] || 'badge-neutral';
         },
 
         complianceDocs() {

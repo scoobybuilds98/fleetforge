@@ -7,7 +7,7 @@ declare(strict_types=1);
  * @file        app/admin/leases/show.php
  * @description Lease detail view. Server-side hero render (contract number, status,
  *              customer, unit). Three-tab Alpine.js component: Overview (all fields),
- *              Amendments (list — stub for S008+), Status Log (from lease.status_log).
+ *              Amendments (placeholder — requires amendments table), Status Log (from lease.status_log).
  *              Activate and Close buttons shown based on current status and permissions.
  *              Alpine component: FF_LeaseDetail().
  *

@@ -7,9 +7,9 @@ declare(strict_types=1);
  * @file        app/admin/customers/show.php
  * @description Customer profile page. Header shows key summary (name, status,
  *              risk, tags). Body has 4 tabs: Overview (detail cards), Notes
- *              (pinned + all), Leases (stub), Invoices (stub). Notes are loaded
- *              via Alpine.js from the notes API. Delete button fires soft-delete
- *              via confirm modal.
+ *              (pinned + all), Leases (lazy-loaded from API), Invoices
+ *              (lazy-loaded from API). Notes are loaded via Alpine.js from the
+ *              notes API. Delete button fires soft-delete via confirm modal.
  *
  * @depends     config/app.php, includes/auth.php, includes/header.php,
  *              includes/footer.php, api/v1/customers/show.php,
@@ -396,37 +396,133 @@ require_once FF_ROOT . '/includes/header.php';
 
     </div><!-- /notes tab -->
 
-    <!-- ── TAB: LEASES (stub) ─────────────────────────────────── -->
+    <!-- ── TAB: LEASES ──────────────────────────────────────────── -->
     <div x-show="activeTab === 'leases'" role="tabpanel">
         <div class="card">
-            <div class="card-body">
-                <div class="empty-state">
-                    <div class="empty-state-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/></svg>
-                    </div>
-                    <p class="empty-state-title">Leases</p>
-                    <p class="empty-state-text">Lease list for this customer will be available in S006.</p>
-                    <a href="<?= base_url('leases') ?>?customer_id=<?= $customerId ?>"
-                       class="btn btn-secondary btn-sm">View All Leases</a>
-                </div>
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">Leases</span>
+                <a href="<?= base_url('leases') ?>?customer_id=<?= $customerId ?>"
+                   class="btn btn-secondary btn-sm">View All</a>
             </div>
+
+            <!-- Loading skeleton -->
+            <div x-show="leasesLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading leases…</span>
+            </div>
+
+            <!-- Empty state -->
+            <template x-if="!leasesLoading && leases.length === 0">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <p class="empty-state-title">No leases</p>
+                        <p class="empty-state-text">This customer has no leases on record.</p>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Lease table -->
+            <template x-if="!leasesLoading && leases.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Contract #</th>
+                                <th>Unit</th>
+                                <th>Status</th>
+                                <th>Start</th>
+                                <th>End</th>
+                                <th class="text-right">Monthly Rate</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="ls in leases" :key="ls.id">
+                                <tr>
+                                    <td class="font-mono" x-text="ls.contract_number"></td>
+                                    <td class="font-mono" x-text="ls.unit_display_number || ls.unit_number_snapshot || '—'"></td>
+                                    <td>
+                                        <span class="badge badge-no-dot"
+                                              :class="leaseBadgeClass(ls.status)"
+                                              x-text="ls.status.charAt(0).toUpperCase() + ls.status.slice(1)"></span>
+                                    </td>
+                                    <td x-text="formatDate(ls.start_date)"></td>
+                                    <td x-text="ls.end_date ? formatDate(ls.end_date) : 'Open'"></td>
+                                    <td class="text-right font-mono" x-text="'$' + parseFloat(ls.monthly_rate).toFixed(2)"></td>
+                                    <td>
+                                        <a :href="'<?= base_url('leases/show') ?>?id=' + ls.id"
+                                           class="btn btn-sm btn-secondary">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
         </div>
     </div>
 
-    <!-- ── TAB: INVOICES (stub) ───────────────────────────────── -->
+    <!-- ── TAB: INVOICES ─────────────────────────────────────────── -->
     <div x-show="activeTab === 'invoices'" role="tabpanel">
         <div class="card">
-            <div class="card-body">
-                <div class="empty-state">
-                    <div class="empty-state-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"/></svg>
-                    </div>
-                    <p class="empty-state-title">Invoices</p>
-                    <p class="empty-state-text">Invoice list for this customer will be available in a later session.</p>
-                    <a href="<?= base_url('invoices') ?>?customer_id=<?= $customerId ?>"
-                       class="btn btn-secondary btn-sm">View All Invoices</a>
-                </div>
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">Invoices</span>
+                <a href="<?= base_url('invoices') ?>?customer_id=<?= $customerId ?>"
+                   class="btn btn-secondary btn-sm">View All</a>
             </div>
+
+            <!-- Loading skeleton -->
+            <div x-show="invoicesLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading invoices…</span>
+            </div>
+
+            <!-- Empty state -->
+            <template x-if="!invoicesLoading && invoices.length === 0">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <p class="empty-state-title">No invoices</p>
+                        <p class="empty-state-text">This customer has no invoices on record.</p>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Invoice table -->
+            <template x-if="!invoicesLoading && invoices.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Invoice #</th>
+                                <th>Period</th>
+                                <th>Status</th>
+                                <th>Due Date</th>
+                                <th class="text-right">Total</th>
+                                <th class="text-right">Balance Due</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="inv in invoices" :key="inv.id">
+                                <tr>
+                                    <td class="font-mono" x-text="inv.invoice_number"></td>
+                                    <td x-text="inv.billing_period_start + ' → ' + inv.billing_period_end"></td>
+                                    <td>
+                                        <span class="badge badge-no-dot"
+                                              :class="invoiceBadgeClass(inv.status)"
+                                              x-text="inv.status.replace('_',' ')"></span>
+                                    </td>
+                                    <td x-text="formatDate(inv.due_date)"></td>
+                                    <td class="text-right font-mono" x-text="'$' + parseFloat(inv.total_amount).toFixed(2)"></td>
+                                    <td class="text-right font-mono" x-text="'$' + parseFloat(inv.balance_due).toFixed(2)"></td>
+                                    <td>
+                                        <a :href="'<?= base_url('invoices/show') ?>?id=' + inv.id"
+                                           class="btn btn-sm btn-secondary">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
         </div>
     </div>
 
@@ -435,18 +531,30 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function FF_CustomerProfile() {
     return {
-        activeTab:     'overview',
-        notes:         [],
-        noteCount:     0,
-        notesLoaded:   false,
-        notesLoading:  false,
-        newNote:       '',
-        newNotePinned: false,
-        savingNote:    false,
+        activeTab:       'overview',
+        notes:           [],
+        noteCount:       0,
+        notesLoaded:     false,
+        notesLoading:    false,
+        newNote:         '',
+        newNotePinned:   false,
+        savingNote:      false,
+        leases:          [],
+        leasesLoaded:    false,
+        leasesLoading:   false,
+        invoices:        [],
+        invoicesLoaded:  false,
+        invoicesLoading: false,
 
         init() {
             // Pre-load note count for tab badge without loading full content
             this.loadNoteCount();
+
+            // Lazy-load leases and invoices when their tabs are activated
+            this.$watch('activeTab', (tab) => {
+                if (tab === 'leases' && !this.leasesLoaded) this.loadLeases();
+                if (tab === 'invoices' && !this.invoicesLoaded) this.loadInvoices();
+            });
         },
 
         async loadNoteCount() {
@@ -530,6 +638,44 @@ function FF_CustomerProfile() {
             } finally {
                 this.savingNote = false;
             }
+        },
+
+        async loadLeases() {
+            this.leasesLoading = true;
+            try {
+                const res  = await fetch('<?= base_url('api/v1/leases') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=created_at&dir=DESC');
+                const json = await res.json();
+                if (json.success) {
+                    this.leases      = json.data.items || [];
+                    this.leasesLoaded = true;
+                }
+            } catch (e) { /* silent */ }
+            this.leasesLoading = false;
+        },
+
+        async loadInvoices() {
+            this.invoicesLoading = true;
+            try {
+                const res  = await fetch('<?= base_url('api/v1/invoices') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=created_at&dir=DESC');
+                const json = await res.json();
+                if (json.success) {
+                    this.invoices       = json.data.items || [];
+                    this.invoicesLoaded = true;
+                }
+            } catch (e) { /* silent */ }
+            this.invoicesLoading = false;
+        },
+
+        leaseBadgeClass(status) {
+            const m = { active:'badge-success', pending:'badge-info', completed:'badge-neutral', cancelled:'badge-danger' };
+            return m[status] || 'badge-neutral';
+        },
+
+        invoiceBadgeClass(status) {
+            const m = { draft:'badge-neutral', sent:'badge-info', paid:'badge-success',
+                        partially_paid:'badge-warning', overdue:'badge-danger',
+                        void:'badge-neutral', written_off:'badge-danger' };
+            return m[status] || 'badge-neutral';
         },
 
         formatDate(dt) {
