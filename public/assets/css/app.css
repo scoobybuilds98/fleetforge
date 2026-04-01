@@ -2577,3 +2577,26 @@ html.is-mac .non-mac-only { display: none; }
 /* ── Utility classes ──────────────────────────────────────────── */
 .line-through { text-decoration: line-through; }            /* FIX #34: void badges */
 .font-mono    { font-family: 'DM Mono', monospace; }        /* FIX #33: amounts/dates */
+
+/* ── Detail grid — labelled key/value pairs in cards (S009) ─── */
+/* Used on payment show, lease show, customer show detail cards.  */
+dl.detail-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+dl.detail-grid dt {
+    color: var(--text-secondary);
+    font-weight: 500;
+    padding: 2px 0;
+    white-space: nowrap;
+}
+dl.detail-grid dd {
+    margin: 0;
+    color: var(--text-primary);
+    padding: 2px 0;
+    word-break: break-word;
+}

@@ -323,6 +323,120 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ============================================================
+     Payments History (S009) — server-rendered for correct per-invoice allocation amounts
+     ============================================================ -->
+<?php
+// Load all payment allocations for this invoice, with payment detail
+$invoicePayments = db_select(
+    "SELECT
+        pa.id AS allocation_id,
+        pa.amount AS applied_amount,
+        pa.allocation_type,
+        pa.created_at AS allocated_at,
+        p.id AS payment_id,
+        p.payment_number,
+        p.payment_method,
+        p.reference_number,
+        p.payment_date,
+        p.status AS payment_status,
+        p.currency
+     FROM payment_allocations pa
+     JOIN payments p ON p.id = pa.payment_id AND p.deleted_at IS NULL
+     WHERE pa.invoice_id = ?
+     ORDER BY p.payment_date ASC, pa.created_at ASC",
+    [$invoiceId]
+);
+
+$totalApplied = array_reduce($invoicePayments, function($sum, $row) {
+    return bcadd($sum, (string)$row['applied_amount'], 6);
+}, '0');
+
+$methodLabels = [
+    'check' => 'Cheque', 'ach' => 'ACH', 'wire' => 'Wire',
+    'credit_card' => 'Credit Card', 'cash' => 'Cash',
+    'e_transfer' => 'e-Transfer', 'account_credit' => 'Acct Credit', 'other' => 'Other',
+];
+?>
+<div class="card" style="margin-bottom:24px;">
+    <div class="card-header" style="display:flex; align-items:center; gap:12px;">
+        <h3 class="card-title">Payment History</h3>
+        <span class="badge badge-neutral"><?= count($invoicePayments) ?> payment<?= count($invoicePayments) !== 1 ? 's' : '' ?></span>
+        <?php if (in_array($invoice['status'], ['sent', 'partially_paid', 'overdue']) && can('payments', 'create')): ?>
+            <a href="<?= base_url('/payments/create') ?>?invoice_id=<?= (int)$invoiceId ?>"
+               class="btn btn-primary btn-sm" style="margin-left:auto;">
+                <?= heroicon('plus', 'icon-sm') ?>
+                Record Payment
+            </a>
+        <?php endif; ?>
+    </div>
+    <div class="card-body" style="padding:0; overflow-x:auto;">
+
+        <?php if (empty($invoicePayments)): ?>
+            <div class="empty-state" style="padding:32px;">
+                <p class="empty-state-title">No payments recorded</p>
+                <p class="empty-state-text">No payments have been applied to this invoice yet.</p>
+                <?php if (in_array($invoice['status'], ['sent', 'partially_paid', 'overdue']) && can('payments', 'create')): ?>
+                    <a href="<?= base_url('/payments/create') ?>?invoice_id=<?= (int)$invoiceId ?>"
+                       class="btn btn-primary btn-sm">Record First Payment</a>
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+            <table class="table" style="width:100%;">
+                <thead>
+                    <tr>
+                        <th>Payment #</th>
+                        <th>Date</th>
+                        <th>Method</th>
+                        <th>Reference</th>
+                        <th style="text-align:right;">Applied Amount</th>
+                        <th>Status</th>
+                        <th>Type</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($invoicePayments as $pay):
+                        $payBadge = match($pay['payment_status']) {
+                            'cleared'  => 'badge-success',
+                            'pending'  => 'badge-info',
+                            'failed'   => 'badge-danger',
+                            'refunded' => 'badge-warning',
+                            'void'     => 'badge-neutral',
+                            'returned' => 'badge-warning',
+                            default    => 'badge-neutral',
+                        };
+                    ?>
+                        <tr>
+                            <td>
+                                <a href="<?= base_url('/payments/show') ?>?id=<?= (int)$pay['payment_id'] ?>"
+                                   class="link font-mono"><?= e($pay['payment_number']) ?></a>
+                            </td>
+                            <td class="font-mono"><?= e($pay['payment_date']) ?></td>
+                            <td><?= e($methodLabels[$pay['payment_method']] ?? $pay['payment_method']) ?></td>
+                            <td class="font-mono"><?= e($pay['reference_number'] ?? '—') ?></td>
+                            <td class="font-mono" style="text-align:right; color:var(--color-success);">
+                                <?= format_currency($pay['applied_amount']) ?> <?= e($pay['currency']) ?>
+                            </td>
+                            <td><span class="badge <?= $payBadge ?>"><?= e($pay['payment_status']) ?></span></td>
+                            <td><span class="badge badge-neutral" style="font-size:0.75rem;"><?= e($pay['allocation_type']) ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+                <tfoot>
+                    <tr style="background:var(--bg-muted);">
+                        <td colspan="4" style="padding:10px 14px; font-weight:600; font-size:0.9rem;">Total Applied</td>
+                        <td class="font-mono" style="text-align:right; font-weight:700; color:var(--color-success); padding:10px 14px;">
+                            <?= format_currency(bcround($totalApplied, 2)) ?> <?= e($invoice['currency']) ?>
+                        </td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        <?php endif; ?>
+
+    </div>
+</div>
+
+<!-- ============================================================
      Notes
      ============================================================ -->
 <?php if ($invoice['notes'] || $invoice['internal_notes'] || $invoice['void_reason']): ?>
@@ -428,5 +542,6 @@ function FF_InvoiceActions() {
     };
 }
 </script>
+
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

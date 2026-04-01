@@ -51,6 +51,7 @@
 | S008 | 2026-04-02 | Invoices Module (API + Admin UI + Billing Engine) | 13 files built and all 9 stop conditions passed. Billing engine (3): lib/Billing/ProRateCalculator.php (THE LAW formula — pure math, bcmath strings, 10 unit tests all pass: 0d=none, 1-5d=daily, 6-7d=weekly, 8-29d=weekly or capped, 30+=monthly), lib/Billing/TaxCalculator.php (D11 invoice-time lookup from tax_rates, D22 independent gst_exempt/pst_exempt, 7 unit tests pass: BC GST+PST, ON HST, exemptions suppress correctly, unknown province=zero), lib/Billing/InvoiceGenerator.php (orchestrator — creates invoice+line_items+billing_period in single transaction, gap-free invoice number via FOR UPDATE on settings row D15/D20, denormalized counters updated in same transaction Trap 6, handles discount/tax/add-ons per spec §9 calculation order). API (7): index (paginated, FULLTEXT search, status/customer_id/lease_id filters), show (full invoice + line items, pdf_path stripped Trap 7), create (manual creation via InvoiceGenerator, validates lease active/completed), update (draft only — D12 IMMUTABLE_RECORD on non-draft, D19 optimistic lock), delete (soft-delete draft only, reverses denormalized counters), send (draft→sent state transition, freezes financials D12), void (draft/sent→void with required reason, reverses counters). Admin UI (3): invoices/index.php (4 AR aging KPI tiles server-rendered: Current/1-30/31-60/60+ days, 3-tab Alpine component: Outstanding/Paid/All, search+status filter, paginated table), invoices/show.php (server-rendered detail: breadcrumb, status badge, 4 summary tiles, 2-col billing+financial cards, line items table, Send/Void action buttons via Alpine, void modal with reason), invoices/create.php (lease picker dropdown with rate data attributes, auto-fill rates on selection, period date pickers with D14 inclusive day counter, billing type + invoice type selects, PO/notes fields, Alpine submit to API). Bug found and fixed: TaxCalculator initially divided tax_rates by 100 — but DB stores rates as decimal fractions (0.0500 = 5%), not percentages. Fixed to multiply directly. Also changed mileage_unit default from 'miles' to 'km' across entire codebase (D34): schema (8 columns in 7 tables), 4 API endpoints, 5 admin UI pages, live DB altered. All 9 stop conditions passed: GET /invoices ✅ 200 paginated, POST /create ✅ 201 INV-2026-00001 sequential, GET /show ✅ 200 line_items+pdf_path stripped, POST /send ✅ 200 draft→sent, POST /update on sent ✅ 422 IMMUTABLE_RECORD, ProRateCalculator 10/10 ✅, TaxCalculator 7/7 ✅, /invoices page ✅ 200, /invoices/create page ✅ 200. |
 | AUDIT-1 | 2026-04-02 | Comprehensive QC Audit (S001–S008) | 69 issues found: 13 CRITICAL, 16 MAJOR, 40 MINOR. No files modified. Full findings in KNOWN ISSUES #16–#43 and NEXT SESSION contract for S008.5. Top 5 critical: (1) lease create doesn't reserve unit, (2) activate doesn't generate Invoice 1, (3) close doesn't generate final invoice, (4) 6 endpoints have audit_log outside transactions, (5) customer notes bypass soft-delete filter. Recommended: insert S008.5 fix session before S009 Payments. |
 | S008.5 | 2026-04-02 | Critical Fix Session — Audit Remediation (28 issues #16–#43) | All 28 AUDIT-1 findings resolved. Phase 1 critical (6): lease create now reserves unit; activate wires Invoice 1 via InvoiceGenerator; close wires final invoice with mileage overage extra_lines; all 5 invoice endpoints have audit_log inside transaction; lease update wrapped in transaction; customer notes soft-delete verified (db_exists() auto-handles). Phase 2 major (11): pending badge → badge-info (3 locations); cancel.php + reopen.php created with full state machine + FOR UPDATE + logs; update_status.php created (6 statuses, decommissioned terminal); equipment search fix ($_GET['search']); invoice BEM classes fixed (stat-label/stat-value); CSS aliases added for spec names (--bg-page, --bg-card, --color-accent, etc.); modal-md + modal-full added; customer status transition map with 409 INVALID_TRANSITION; customers/show.php SELECT * → explicit columns; invoices/send.php transaction added. Phase 2 resolved (2 no-ops): invoice search param and customer notes soft-delete both already correct. Phase 3 minor (11): font-mono on invoice tiles + .font-mono utility; .line-through + void badge updated; btn-xl added; units/update.php uniqueness fix; close appends internal_notes; error codes renamed (LEASE_IS_ACTIVE, UNIT_ON_LEASE); invoices/create.php wrapped in form; Invoices tab on lease show; dashboard CSS vars via getComputedStyle; equipment show delete button; InvoiceGenerator updated_by. Key infrastructure fix: includes/db.php db_transaction() nesting guard (inTransaction() check) required to allow InvoiceGenerator calls from within existing transactions. All 10 stop conditions passed. |
+| S009 | 2026-04-02 | Payments Module (API + Admin UI) | 10 files built and all 10 stop conditions passed. API (6): index (paginated list, filters: customer_id/invoice_id/status/reference search via LIKE — no FULLTEXT needed, sort by payment_date DESC), show (full payment + allocations[] with invoice detail), create (gap-free PAY-YYYY-NNNNN number via FOR UPDATE on settings row D15; D18 currency match enforced; D20 FOR UPDATE on invoice prevents concurrent over-allocation race; auto-allocates to invoice; drives invoice state machine sent→partially_paid→paid; updates all 4 denormalized counters — invoices.amount_paid/balance_due + leases.total_paid + customers.outstanding_balance — in single transaction; overpayment tracked on payment row; audit_log inside transaction), update (metadata-only: reference_number/bank_name/notes; D19 optimistic lock; D12 financial fields immutable), delete (soft-delete D5/D13; reverses all allocations: per-invoice bcmath counter reversal, invoice status revert paid→partially_paid→sent depending on remaining applied amount, leases.total_paid reversed, customers.outstanding_balance restored; audit_log inside transaction; returns invoice_statuses_reverted array), allocate (manual allocation of unapplied payment to different invoice; D18/D20/ALLOCATION_EXCEEDS_BALANCE guards; updates counters in same transaction). Admin UI (3 pages): payments/index.php (4 KPI tiles server-rendered: collected this month/total AR outstanding/overdue AR/today count; Alpine.js table with status filter + reference search + sortable columns; status badges per §9 design: cleared=success/failed=danger/refunded=warning/pending=info; formatMethod() label map), payments/show.php (full detail: 4 summary tiles, 2-col detail card + financial notes card, allocation table with invoice links, edit-metadata inline form + delete modal with reason — all via Alpine.js), payments/create.php (outstanding invoice picker with balance pre-fill; amount field with quick-fill-balance button; currency auto-locks to invoice currency D18; method-conditional fields: check#/bank/card-last-4; submit→redirect to show page). Invoice extension: invoices/show.php now has server-rendered Payments History section — queries payment_allocations JOIN payments for this invoice, shows applied_amount (not total payment amount), total applied footer row, Record Payment button when invoice is payable. CSS additions: dl.detail-grid added to app.css (key-value pair layout for detail cards). Bug found and fixed during stop conditions: api_url() function does not exist — all 3 UI pages used api_url() incorrectly; fixed to base_url('api/v1/payments/...'); CSS class audit: data-table→table, stats-grid→stat-grid, page-title→page-header-title, page-subtitle→inline style (D32 verified classes only). All 10 stop conditions passed: POST create → 201 PAY-2026-00001 sent→partially_paid ✅; currency mismatch → 422 CURRENCY_MISMATCH ✅; concurrent FOR UPDATE test — one succeeds/one ALLOCATION_EXCEEDS_BALANCE, invoice balance exact ✅; GET index → 200 paginated ✅; GET show?id=1 → 200 with allocations ✅; POST delete → soft-deleted invoice paid→partially_paid balance restored ✅; POST update → 200 + stale → 409 STALE_DATA ✅; /payments page → 200 no PHP errors ✅; /payments/create page → 200 no PHP errors ✅; /invoices/show?id=1 → 200 Payment History section with PAY-2026 entries ✅. |
 
 ---
 
@@ -151,11 +152,12 @@
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S009 — Payments Module (API + Admin UI)
+Session S010 — Monthly Billing Cron + Late Fee Engine
 
-S008.5 is complete. All 28 AUDIT-1 issues fixed. All 10 stop conditions passed.
-Billing engine is fully wired: Invoice 1 on activate, final invoice on close.
-Proceed with Payments.
+S009 is complete. All 10 stop conditions passed.
+Payments module fully built: 6 API endpoints + 3 admin pages + invoice/show Payments section.
+Payment number counter (PAY-YYYY-NNNNN) live in settings table.
+Invoice state machine fully wired: sent → partially_paid → paid (driven by payments).
 
 ═══════════════════════════════════════════════════════════════════
 CONTEXT — READ BEFORE WRITING ANY CODE
@@ -164,87 +166,71 @@ CONTEXT — READ BEFORE WRITING ANY CODE
 READ IN THIS ORDER:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, all helper signatures, Trap list
   2. FLEETFORGE_PROGRESS.md               ← SESSION LOG, DECISIONS, KNOWN ISSUES
-  3. FLEETFORGE_SPEC_FINAL.md §8 Payments, §12 Invoice State Machine
-  4. FLEETFORGE_DESIGN_DETAILS.md §9 badge colors, §10 payment UI patterns
+  3. FLEETFORGE_SPEC_FINAL.md §9 Billing Cron, §13 Late Fees
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep lease_billing_periods, late_fee_rules, invoices
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
   Login: admin@fleetforge.test / FleetForge2025!
 
 ═══════════════════════════════════════════════════════════════════
-CRITICAL CARRY-FORWARD FROM S008 + S008.5
+CRITICAL CARRY-FORWARD FROM S009
 ═══════════════════════════════════════════════════════════════════
 
-BILLING ENGINE (lib/Billing/ — D3):
-  - ProRateCalculator.php  — pure math, bcmath strings only, no DB
-  - TaxCalculator.php      — 1 DB read (tax_rates), D11 invoice-time lookup
+BILLING ENGINE (lib/Billing/ — all built, all pure functions):
+  - ProRateCalculator.php  — THE LAW formula for partial periods
+  - TaxCalculator.php      — D11 invoice-time lookup
   - InvoiceGenerator.php   — ONLY class that writes to DB
-    Signature: $generator->createFromLease(array $params): array{invoice_id: int, ...}
-    Required params: lease_id, period_start, period_end, billing_type, invoice_type, created_by
-    Optional: notes, auto_generated, generation_source, extra_lines
-    generation_source ENUM (DB enforced): 'cron' | 'manual' | 'lease_close' | 'late_fee_cron'
-    db_transaction() nesting is SAFE — includes/db.php has inTransaction() guard (added S008.5)
+    Accepts generation_source ENUM: 'cron' | 'manual' | 'lease_close' | 'late_fee_cron'
+    db_transaction() nesting is SAFE — nesting guard in includes/db.php
 
-INVOICE STATE MACHINE:
-  draft → sent → partially_paid | paid | overdue | void | written_off
-  Payments module drives: sent → partially_paid, partially_paid → paid transitions.
-  Void and written_off are set by staff actions, not payment flow.
+PAYMENTS MODULE (S009 — fully built):
+  - api/v1/payments/{index,show,create,update,delete,allocate}.php — all live
+  - app/admin/payments/{index,show,create}.php — all live
+  - payment number counter: PAY-YYYY-NNNNN stored in settings table key 'payment.next_number.YYYY'
+  - D18 currency lock, D20 FOR UPDATE, Trap 6 all implemented
 
-PAYMENTS MODULE CONSTRAINTS:
-  - D18: payment currency MUST match invoice currency → 422 CURRENCY_MISMATCH if differ
-  - D20: FOR UPDATE on invoice row required during payment allocation (concurrent payment race)
-  - D13/D5: payments in SOFT_DELETE_TABLES — NEVER hard-delete (15 tables total)
-  - Trap 6 (Denormalized counters): customer.outstanding_balance AND lease.total_paid
-    must be updated in the SAME transaction as any payment insert/soft-delete
-  - D16: bcmath only for all monetary arithmetic — never use float operators
-  - D15: payment reference numbers gap-free (if needed) — check schema for counter pattern
+CRON ARCHITECTURE DECISIONS:
+  - D21: All write-heavy crons use MySQL GET_LOCK() advisory lock
+  - Template: cron/invoice_generate_monthly.php (already in reference file)
+  - Cron jobs are NOT scheduled locally — test by running manually:
+    php /Users/avi/Documents/fleetforge/cron/invoice_generate_monthly.php
 
-ROUTER / FILE STRUCTURE:
-  - API:   api/v1/payments/   → dirname(__DIR__, 3) for bootstrap include
-  - UI:    app/admin/payments/ → dirname(__DIR__, 3) for bootstrap include
-  - URL pattern: query string IDs only — /payments/show?id=1 (file router, no dynamic segments)
+CSS LESSONS LEARNED (S009 — check before writing any new CSS class):
+  - Table class is .table (not .data-table)
+  - Grid is .stat-grid (not .stats-grid)
+  - Page heading is .page-header-title (not .page-title)
+  - API URL helper is base_url('api/v1/...') (api_url() does NOT exist)
+  - Detail list: dl.detail-grid now in app.css (added S009)
 
 ═══════════════════════════════════════════════════════════════════
-S009 DELIVERABLES
+S010 DELIVERABLES (proposed)
 ═══════════════════════════════════════════════════════════════════
 
-API (target: 6 endpoints):
-  1. api/v1/payments/index.php   — paginated list; filter by invoice_id, customer_id, status
-  2. api/v1/payments/show.php    — single payment with allocation detail
-  3. api/v1/payments/create.php  — record payment; FOR UPDATE on invoice; update counters;
-                                   transition invoice status; write audit_log — all in 1 transaction
-  4. api/v1/payments/update.php  — metadata only (reference, notes); D19 optimistic lock
-  5. api/v1/payments/delete.php  — soft-delete; reverse denormalized counters; re-check invoice
-                                   status (may revert paid → partially_paid → sent)
-  6. api/v1/payments/allocate.php — optional: allocate unapplied credit to invoice
+Cron jobs:
+  1. cron/invoice_generate_monthly.php — runs 1st of each month; finds all active leases
+     with next_billing_date = today; generates full_month invoice via InvoiceGenerator;
+     updates lease.next_billing_date +1 month; advisory lock D21; audit_log
+  2. cron/invoice_overdue.php — daily; marks sent invoices past due_date as 'overdue'
+  3. cron/late_fee_apply.php — daily/weekly; reads late_fee_rules per customer/lease;
+     generates late fee line items on overdue invoices; LateFeeEngine (already stubbed in lib/)
 
-Admin UI (target: 4 pages):
-  1. app/admin/payments/index.php  — list with KPI tiles (total collected, outstanding, overdue)
-  2. app/admin/payments/show.php   — payment detail + invoice link + customer link
-  3. app/admin/payments/create.php — form: select invoice, amount, method, date, reference
-  4. app/admin/invoices/show.php   — extend existing page with Payments tab (payment history)
-     (invoices/show.php already has tabs structure — add Payments tab as done for leases in S008.5)
+Billing library:
+  4. lib/Billing/LateFeeEngine.php — pure math, no DB; calculate(invoiceBalance, rule): array
+
+Admin UI:
+  5. Confirm InvoiceGenerator is invoked correctly from cron (no UI needed for cron itself)
 
 ═══════════════════════════════════════════════════════════════════
-STOP CONDITIONS (session not complete until ALL pass)
+STOP CONDITIONS (proposed for S010)
 ═══════════════════════════════════════════════════════════════════
 
-1. POST payment create for invoice X → 201, invoice status transitions to partially_paid or paid
-2. POST payment create with wrong currency → 422 CURRENCY_MISMATCH
-3. POST payment create concurrently (same invoice, two requests) — only one succeeds or both total correctly (FOR UPDATE prevents race)
-4. GET payments/index → 200 paginated list
-5. GET payments/show?id=N → 200 with full detail
-6. POST payment delete → soft-deleted, invoice status reverted correctly, counters updated
-7. POST payment update (metadata only) → 200, D19 optimistic lock 409 on stale
-8. /admin/payments page → 200 no PHP errors
-9. /admin/payments/create page → 200 no PHP errors
-10. Invoice show page Payments tab → loads payment history for invoice
-
-END-OF-SESSION CHECKLIST:
-  - Mark all new items ✅ in KNOWN ISSUES (if any bugs logged)
-  - Add S009 row to SESSION LOG
-  - Rewrite NEXT SESSION STARTS WITH for S010 (Monthly Billing Cron or Damage Claims)
-  - Deep audit: run curl tests for all 10 stop conditions before writing ✅
+1. Run monthly cron manually → generates invoice for active lease with next_billing_date = today
+2. Monthly cron with advisory lock held → exits silently (no duplicate)
+3. Overdue cron → sent invoice with due_date in past → status = 'overdue'
+4. Late fee cron → overdue invoice → late fee line item added + invoice total updated
+5. LateFeeEngine unit test: flat fee + percentage fee + minimum/maximum bounds
+6. Monthly cron: invoice_number sequential (no gaps) after multiple runs
 ```
 
 ---
