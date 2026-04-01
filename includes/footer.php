@@ -122,7 +122,8 @@
 <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
 
 <!-- FleetForge application JS -->
-<script src="<?= base_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+<!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
+<script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
 
 <!-- Alpine.js v3 — loaded last, defer ensures it initialises after DOM is ready -->
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
