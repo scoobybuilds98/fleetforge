@@ -149,6 +149,10 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="tab = 'amendments'" :aria-selected="tab === 'amendments'" role="tab">Amendments</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'invoices' }"
                 @click="tab = 'invoices'; loadInvoices()" :aria-selected="tab === 'invoices'" role="tab">Invoices</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'damage_claims' }"
+                @click="tab = 'damage_claims'; loadDamageClaims()" :aria-selected="tab === 'damage_claims'" role="tab">Damage Claims</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'mileage_logs' }"
+                @click="tab = 'mileage_logs'; loadMileageLogs()" :aria-selected="tab === 'mileage_logs'" role="tab">Mileage Log</button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -364,6 +368,128 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </template>
 
+    <!-- ── TAB: DAMAGE CLAIMS ──────────────────────────────────── -->
+    <template x-if="tab === 'damage_claims'">
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="card-title">Damage Claims</div>
+                <?php if (can('maintenance', 'create')): ?>
+                <a href="<?= base_url('damage_claims/create') ?>?lease_id=<?= $leaseId ?>"
+                   class="btn btn-primary btn-sm">+ New Claim</a>
+                <?php endif; ?>
+            </div>
+
+            <div x-show="damageClaimsLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading damage claims…</span>
+            </div>
+
+            <template x-if="!damageClaimsLoading && damageClaims.length === 0">
+                <div class="empty-state">
+                    <p class="empty-state-title">No damage claims</p>
+                    <p class="empty-state-text">No damage claims have been filed against this lease.</p>
+                </div>
+            </template>
+
+            <template x-if="!damageClaimsLoading && damageClaims.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Claim #</th>
+                                <th>Severity</th>
+                                <th>Status</th>
+                                <th style="text-align:right;">Est. Cost</th>
+                                <th>Reported</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="dc in damageClaims" :key="dc.id">
+                                <tr>
+                                    <td class="font-mono" x-text="dc.claim_number"></td>
+                                    <td>
+                                        <span class="badge" :class="dcSeverityBadge(dc.severity)"
+                                              x-text="dcSeverityLabel(dc.severity)"></span>
+                                    </td>
+                                    <td>
+                                        <span class="badge" :class="dcStatusBadge(dc.status)"
+                                              x-text="dcStatusLabel(dc.status)"></span>
+                                    </td>
+                                    <td class="font-mono" style="text-align:right;"
+                                        x-text="dc.estimated_repair_cost ? '$' + parseFloat(dc.estimated_repair_cost).toLocaleString('en-CA', {minimumFractionDigits:2}) : '—'"></td>
+                                    <td x-text="dc.created_at ? dc.created_at.substring(0,10) : '—'"></td>
+                                    <td>
+                                        <a :href="'<?= base_url('damage_claims/show') ?>?id=' + dc.id"
+                                           class="btn btn-sm btn-secondary">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    <!-- ── TAB: MILEAGE LOG ───────────────────────────────────── -->
+    <template x-if="tab === 'mileage_logs'">
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="card-title">Mileage Log</div>
+                <?php if (can('maintenance', 'create')): ?>
+                <a href="<?= base_url('mileage_logs/create') ?>?lease_id=<?= $leaseId ?>"
+                   class="btn btn-primary btn-sm">+ Record Mileage</a>
+                <?php endif; ?>
+            </div>
+
+            <div x-show="mileageLogsLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading mileage log…</span>
+            </div>
+
+            <template x-if="!mileageLogsLoading && mileageLogs.length === 0">
+                <div class="empty-state">
+                    <p class="empty-state-title">No mileage entries</p>
+                    <p class="empty-state-text">No odometer readings have been recorded for this lease.</p>
+                </div>
+            </template>
+
+            <template x-if="!mileageLogsLoading && mileageLogs.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Odometer</th>
+                                <th>Type</th>
+                                <th>Recorded By</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="ml in mileageLogs" :key="ml.id">
+                                <tr>
+                                    <td x-text="ml.log_date"></td>
+                                    <td class="font-mono"
+                                        x-text="Number(ml.odometer_reading).toLocaleString('en-CA') + ' ' + (ml.mileage_unit === 'miles' ? 'mi' : 'km')">
+                                    </td>
+                                    <td>
+                                        <span class="badge" :class="mlTypeBadge(ml.log_type)"
+                                              x-text="mlTypeLabel(ml.log_type)"></span>
+                                    </td>
+                                    <td x-text="ml.recorded_by_name || '—'"></td>
+                                    <td>
+                                        <a :href="'<?= base_url('mileage_logs/show') ?>?id=' + ml.id"
+                                           class="btn btn-sm btn-secondary">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+        </div>
+    </template>
+
     <!-- ── CLOSE LEASE MODAL ──────────────────────────────────── -->
     <template x-if="showCloseModal">
         <div class="modal-overlay" @click.self="showCloseModal = false">
@@ -408,16 +534,22 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function FF_LeaseDetail() {
     return {
-        lease:           null,
-        loading:         true,
-        tab:             'overview',
-        actionInProgress: false,
-        activating:      false,
-        closing:         false,
-        actionError:     null,
-        showCloseModal:  false,
-        invoices:        [],
-        invoicesLoading: false,
+        lease:               null,
+        loading:             true,
+        tab:                 'overview',
+        actionInProgress:    false,
+        activating:          false,
+        closing:             false,
+        actionError:         null,
+        showCloseModal:      false,
+        invoices:            [],
+        invoicesLoading:     false,
+        damageClaims:        [],
+        damageClaimsLoading: false,
+        damageClaimsLoaded:  false,
+        mileageLogs:         [],
+        mileageLogsLoading:  false,
+        mileageLogsLoaded:   false,
         closeForm: {
             actual_return_date: new Date().toISOString().slice(0,10),
             mileage_at_end:     '',
@@ -437,6 +569,63 @@ function FF_LeaseDetail() {
                 if (r.success) this.invoices = r.data.items || [];
             } catch(e) { /* non-fatal */ }
             this.invoicesLoading = false;
+        },
+
+        // S013: Load mileage logs for this lease
+        async loadMileageLogs() {
+            if (this.mileageLogsLoaded) return;
+            this.mileageLogsLoading = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/mileage_logs/index') ?>?lease_id=<?= $leaseId ?>&per_page=50&sort=log_date&dir=DESC');
+                if (r.success) {
+                    this.mileageLogs       = r.data?.items ?? [];
+                    this.mileageLogsLoaded = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.mileageLogsLoading = false;
+        },
+
+        mlTypeBadge(t) {
+            return { manual:'badge badge-info', gps_sync:'badge badge-success',
+                     lease_start:'badge badge-neutral', lease_end:'badge badge-neutral',
+                     service:'badge badge-warning' }[t] ?? 'badge badge-neutral';
+        },
+
+        mlTypeLabel(t) {
+            return { manual:'Manual', gps_sync:'GPS Sync', lease_start:'Lease Start',
+                     lease_end:'Lease End', service:'Service' }[t] ?? t;
+        },
+
+        // FIX S012: Load damage claims for this lease
+        async loadDamageClaims() {
+            if (this.damageClaimsLoaded) return;
+            this.damageClaimsLoading = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/damage_claims') ?>?lease_id=<?= $leaseId ?>&per_page=50&sort=created_at&dir=DESC');
+                if (r.success) {
+                    this.damageClaims       = r.data?.items ?? [];
+                    this.damageClaimsLoaded = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.damageClaimsLoading = false;
+        },
+
+        dcSeverityBadge(s) {
+            return { minor:'badge badge-info', moderate:'badge badge-warning', major:'badge badge-danger', total_loss:'badge badge-danger' }[s] ?? 'badge badge-neutral';
+        },
+
+        dcSeverityLabel(s) {
+            return { minor:'Minor', moderate:'Moderate', major:'Major', total_loss:'Total Loss' }[s] ?? s;
+        },
+
+        dcStatusBadge(s) {
+            return { reported:'badge badge-info', assessed:'badge badge-warning', repair_ordered:'badge badge-warning',
+                     invoiced:'badge badge-purple', resolved:'badge badge-success', written_off:'badge badge-neutral' }[s] ?? 'badge badge-neutral';
+        },
+
+        dcStatusLabel(s) {
+            return { reported:'Reported', assessed:'Assessed', repair_ordered:'Repair Ordered',
+                     invoiced:'Invoiced', resolved:'Resolved', written_off:'Written Off' }[s] ?? s;
         },
 
         invBadgeClass(status) {

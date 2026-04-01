@@ -98,6 +98,13 @@ return [
         'badge'  => 'open_damage_claims',
     ],
     [
+        'label'  => 'Mileage Logs',
+        'icon'   => 'chart-bar-square',
+        'url'    => '/mileage_logs',
+        'module' => 'maintenance',    // same permission group as maintenance (§12 matrix)
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Compliance',
         'icon'   => 'shield-check',
         'url'    => '/compliance',

@@ -382,3 +382,29 @@ function verify_csrf_token(?string $submitted): bool
     return hash_equals($sessionToken, $submitted);
 }
 }
+
+// ============================================================
+// MILEAGE HELPERS — D34 (km default for Canadian fleets)
+// ============================================================
+
+// format_mileage() — format an odometer reading for display
+//
+// Appends unit label: 'km' or 'mi' (short form for miles).
+// Returns em dash if value is null or empty.
+//
+// Examples:
+//   format_mileage(84200, 'km')    → '84,200 km'
+//   format_mileage(84200, 'miles') → '84,200 mi'
+//   format_mileage(null, 'km')     → '—'
+if (!function_exists('format_mileage')) {
+function format_mileage(mixed $distance, string $unit = 'km'): string
+{
+    if ($distance === null || $distance === '') return '—';
+
+    $formatted = number_format((int) $distance);
+    // D34: 'miles' unit displays as 'mi' (short label matches industry convention)
+    $label = ($unit === 'miles') ? 'mi' : 'km';
+
+    return $formatted . ' ' . $label;
+}
+}
