@@ -44,6 +44,7 @@
 | S001 | 2026-04-01 | Foundation Layer | 20 files built and verified locally. Login renders with full design system. Health endpoint returns db:true. PHP 8.2 confirmed. Covers original plan sessions S005–S013 + router + CSS/JS + error pages + API bootstrap. 4 deviations logged (D25–D28). Lightsail/infrastructure (original S001–S004) deferred to production deployment. |
 | S002 | 2026-04-01 | Database Schema + Seed Data + Foundation Carry-overs | 94-table schema applied via PHP PDO runner (MySQL CLI blocked by caching_sha2_password). 7 schema bugs fixed. Seeds: 5 roles + 1 super_admin verified. CSRF functions + require_id() + require_input() added. storage/.htaccess + all subdirs created. Skip-nav added. Deep audit in same session found and fixed 4 bugs: (a) login.php query used wrong column names (role_slug/theme/is_active — all non-existent, login was completely broken), (b) CSRF failure returned 200 not 403, (c) header.php + login.php duplicated CSRF generation instead of calling generate_csrf_token(), (d) logout.php queried non-existent user_remember_tokens table, leaving remember_me token live after logout. All bugs fixed. Login, audit_log, CSRF, StorageClient, Mailer all verified. |
 | S003 | 2026-04-01 | Remaining Seed Data + Dashboard Stub | Fixed Bug #9: settings_get() and generate_id() in functions.php used wrong column names (setting_key/setting_value/setting_group vs actual DB columns key/value/group_name — reserved words requiring backtick quoting). All 4 seed files created and applied: 003_permissions.sql (70 rows, 5×14 core modules, role_id resolved by slug JOIN), 004_settings.sql (42 default settings), 005_yard.sql (Surrey Yard), 006_tax_rates.sql (BC GST+PST, Ontario HST, Alberta GST). Dashboard stub at app/admin/dashboard/index.php — all 14 modules visible in sidebar, company name from settings_get() confirmed live. All 6 stop conditions passed. Fixed Bug #10: header.php + footer.php used base_url() for static assets (app.css, app.js, favicon) — produces /fleetforge/assets/... (404 under Herd). Corrected to asset_url() per D27. Dashboard confirmed fully styled after fix. |
+| S004 | 2026-04-01 | Dashboard KPIs + Charts API | 3 new API endpoints + dashboard page wired. api/v1/dashboard/kpis.php: 6 KPI tiles (active revenue, fleet utilization, overdue invoices, compliance alerts, open leases, today's pickups) with 5-min report_cache. api/v1/dashboard/charts.php: 8 ApexCharts datasets (revenue trend, fleet status donut, AR aging, top customers, leases trend, utilization trend, revenue by type, weekly heatmap) with 15-min cache, individual ?chart= param supported. api/v1/dashboard/activity_feed.php: 20 most recent audit_log events, noise-filtered, time_ago computed. app/admin/dashboard/index.php: all stubs replaced — Alpine.js FF_Dashboard() component fetches all 3 APIs in parallel on mount, ApexCharts rendered after data arrives, skeleton loaders + error states + empty states + drilldown links on every KPI tile. All stop conditions passed: kpis 200 ✅, charts 200 ✅, ?chart=fleet_status single ✅, ?chart=bogus 404 ✅, activity_feed 200 ✅, dashboard page 200 no PHP errors ✅. NOTE: session assignment in PROGRESS.md said S004=Customers — overridden by user instruction to build Dashboard KPIs first (matches spec Phase 3 order). Customers moved to S005. |
 
 ---
 
@@ -104,21 +105,25 @@
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S004 — Customers Module (API + Admin UI)
+Session S005 — Customers Module (API + Admin UI)
 
-✅ S003 COMPLETE — all stop conditions passed:
-  user_permissions: 70 rows  |  settings: 42 rows  |  yards: 1  |  tax_rates: 3
-  Dashboard renders at /fleetforge/dashboard — 14 sidebar modules visible, no PHP errors
-  settings_get() confirmed live (returns "Mainland Truck & Trailer Sales")
+✅ S004 COMPLETE — all stop conditions passed:
+  GET api/v1/dashboard/kpis → 200, 6 KPI fields, cached in report_cache
+  GET api/v1/dashboard/charts → 200, 8 chart datasets returned
+  GET api/v1/dashboard/charts?chart=fleet_status → 200, single chart
+  GET api/v1/dashboard/charts?chart=bogus → 404 NOT_FOUND
+  GET api/v1/dashboard/activity_feed → 200, items array
+  Dashboard page → 200, no PHP errors, FF_Dashboard() + ApexCharts wired
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
-  curl http://fleetforge.test/fleetforge/dashboard (with auth cookie) → renders without errors
+  Login: admin@fleetforge.test / FleetForge2025!
+  curl -b <cookie> http://fleetforge.test/fleetforge/api/v1/dashboard/kpis → 200
 
 READ ALL OF THESE FILES FIRST — in this order:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, signatures, traps (read first, every session)
   2. FLEETFORGE_PROGRESS.md               ← decisions + session assignment
-  3. FLEETFORGE_SPEC_FINAL.md             ← §3 Customers (full section)
+  3. FLEETFORGE_SPEC_FINAL.md             ← §7.2 Customers (full section)
   4. FLEETFORGE_DATABASE_MASTER.sql       ← customers, customer_notes, customer_tags, customer_contacts
   5. FLEETFORGE_DESIGN_DETAILS.md         ← table/list component, form layout, badge styles
 
@@ -137,13 +142,13 @@ DECISIONS TO CARRY FORWARD:
   Admin pages live at app/admin/{module}/. dirname depth = 3 from app/admin/{module}/ to project root.
   API endpoints live at api/v1/{module}/. dirname depth = 3 from api/v1/{module}/ to project root.
 
-BUILD SCOPE (S004):
+BUILD SCOPE (S005):
   API endpoints:
-    api/v1/customers/index.php      ← GET list (paginated, filtered, sorted)
-    api/v1/customers/show.php       ← GET single customer
-    api/v1/customers/create.php     ← POST create
-    api/v1/customers/update.php     ← POST update (optimistic lock)
-    api/v1/customers/delete.php     ← POST soft-delete (blocks if HAS_ACTIVE_LEASES)
+    api/v1/customers/index.php        ← GET list (paginated, filtered, sorted)
+    api/v1/customers/show.php         ← GET single customer
+    api/v1/customers/create.php       ← POST create
+    api/v1/customers/update.php       ← POST update (optimistic lock)
+    api/v1/customers/delete.php       ← POST soft-delete (blocks if HAS_ACTIVE_LEASES)
     api/v1/customers/notes/index.php  ← GET notes list
     api/v1/customers/notes/create.php ← POST add note
 
@@ -164,7 +169,7 @@ STOP CONDITIONS:
   8. Visit /fleetforge/customers/create → form renders without PHP errors
   9. No PHP errors or warnings anywhere
 
-Do not write any code yet. Confirm you have read all files and summarize what S004 builds.
+Do not write any code yet. Confirm you have read all files and summarize what S005 builds.
 ```
 
 ---
