@@ -1962,5 +1962,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: 2026-04-01 — S002 complete (deep audit). 94-table schema live. 5 roles + super_admin seeded. Login verified (4 critical bugs found and fixed in deep audit — login query, remember-me logout, CSRF 200→403, duplicated token generation). CSRF, audit_log, require_id/require_input, StorageClient, skip-nav all verified. 20/20 tests pass. 29 decisions total (D29 added). 7 known issues logged (3 resolved). Next: S003.*
-*Next session: S003 — Remaining Seed Data (permissions 70 rows, settings, yard, tax rates) + Dashboard Stub*
+*Last updated: 2026-04-01 — S003 complete. All seed data live: user_permissions 70 rows, settings 42 rows, yards 1, tax_rates 3. Dashboard stub at app/admin/dashboard/index.php — all 14 sidebar modules visible, settings_get() confirmed live. Fixed Bug #9 (settings column names in functions.php) and Bug #10 (base_url() → asset_url() for CSS/JS/favicon in header.php + footer.php). 30 decisions total (D30 added). 10 known issues logged (8 resolved). Next: S004.*
+*Next session: S004 — Customers Module (API list/show/create/update/delete/notes + Admin UI list/show/create/edit)*
