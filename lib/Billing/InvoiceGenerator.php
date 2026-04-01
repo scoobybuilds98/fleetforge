@@ -5,17 +5,21 @@ declare(strict_types=1);
  * lib/Billing/InvoiceGenerator.php
  *
  * Invoice orchestrator — the ONLY billing class that reads/writes the database.
- * Calls ProRateCalculator for rental math and TaxCalculator for tax computation.
- * Handles invoice number generation (D15: gap-free, sequential, FOR UPDATE lock D20).
+ * Calls ProRateCalculator for rental math, TaxCalculator for tax, and LateFeeEngine
+ * for late fee math. Handles invoice number generation (D15: gap-free, sequential,
+ * FOR UPDATE lock D20).
  *
- * Required by: api/v1/invoices/create.php, cron/invoice_generate_monthly.php
- * Requires: includes/db.php, lib/Billing/ProRateCalculator.php, lib/Billing/TaxCalculator.php
+ * Required by: api/v1/invoices/create.php, cron/invoice_generate_monthly.php,
+ *              cron/late_fee_apply.php
+ * Requires: includes/db.php, lib/Billing/ProRateCalculator.php,
+ *           lib/Billing/TaxCalculator.php, lib/Billing/LateFeeEngine.php
  * Defines: FleetForge\Billing\InvoiceGenerator
  *
- * Decisions: D11 (tax at invoice time), D12 (immutability after send), D14 (inclusive days),
+ * Decisions: D3 (only DB writer in billing), D11 (tax at invoice time),
+ *            D12 (immutability after send), D14 (inclusive days),
  *            D15 (sequential invoice numbers), D16 (bcmath), D20 (FOR UPDATE),
  *            D22 (granular tax exemptions)
- * Spec ref: §9 Invoice Generation Flow, §9 Invoice Calculation Order
+ * Spec ref: §9 Invoice Generation Flow, §9 Invoice Calculation Order, §9 Late Fees
  */
 
 namespace FleetForge\Billing;
@@ -23,12 +27,14 @@ namespace FleetForge\Billing;
 class InvoiceGenerator
 {
     private ProRateCalculator $proRate;
-    private TaxCalculator $taxCalc;
+    private TaxCalculator     $taxCalc;
+    private LateFeeEngine     $lateFee;
 
     public function __construct()
     {
         $this->proRate = new ProRateCalculator();
         $this->taxCalc = new TaxCalculator();
+        $this->lateFee = new LateFeeEngine();
     }
 
     /**
@@ -352,6 +358,244 @@ class InvoiceGenerator
                 'invoice_number' => $invoiceNumber,
                 'total_amount'   => $totalAmount,
                 'balance_due'    => $balanceDue,
+            ];
+        });
+    }
+
+    /**
+     * Generate a late-fee invoice for an overdue invoice.
+     *
+     * Called by cron/late_fee_apply.php. Handles the full flow:
+     * 1. Load and FOR UPDATE lock the original invoice
+     * 2. Find the applicable late_fee_rule (customer-specific, then global)
+     * 3. Check grace period: skip if days overdue <= grace_days
+     * 4. Delegate math to LateFeeEngine (D3: pure math lives there)
+     * 5. Apply tax using same exemption snapshots as original invoice
+     * 6. Create the late-fee invoice + line item in a single transaction
+     * 7. Mark original invoice late_fee_applied=1 and update denormalized counters
+     *
+     * Returns a 'skipped' array (not an exception) for all non-error skip reasons
+     * (no rule, grace period, already applied) — cron handles skips gracefully.
+     *
+     * D3:  InvoiceGenerator is the ONLY billing class that writes to DB.
+     * D16: All monetary values stay as bcmath strings.
+     * D20: FOR UPDATE on original invoice prevents concurrent double-fee.
+     *
+     * @param  int   $invoiceId  ID of the overdue invoice to charge a late fee on
+     * @return array{invoice_id?: int, invoice_number?: string, fee_amount?: string,
+     *               total_amount?: string, skipped: bool, reason?: string}
+     */
+    public function generateLateFeeInvoice(int $invoiceId): array
+    {
+        return db_transaction(function () use ($invoiceId) {
+
+            // FOR UPDATE: prevents two concurrent cron runs from double-charging (D20)
+            $orig = db_row(
+                "SELECT * FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                [$invoiceId]
+            );
+            if (!$orig) {
+                return ['skipped' => true, 'reason' => 'Invoice not found'];
+            }
+            // Already processed in a previous run
+            if ($orig['late_fee_applied']) {
+                return ['skipped' => true, 'reason' => 'Late fee already applied'];
+            }
+            if ($orig['status'] !== 'overdue') {
+                return ['skipped' => true, 'reason' => 'Invoice is not overdue'];
+            }
+
+            // Find the applicable rule: customer-specific wins over global (NULL customer_id)
+            $rule = db_row(
+                "SELECT * FROM late_fee_rules
+                 WHERE (customer_id = ? OR customer_id IS NULL)
+                   AND is_active = 1
+                 ORDER BY customer_id DESC
+                 LIMIT 1",
+                [$orig['customer_id']]
+            );
+            if (!$rule) {
+                return ['skipped' => true, 'reason' => 'No active late fee rule'];
+            }
+
+            // Grace period: skip if invoice has not been overdue long enough
+            // (grace_days = 0 means apply immediately once overdue)
+            $daysOverdue = (int)floor(
+                (strtotime(date('Y-m-d')) - strtotime($orig['due_date'])) / 86400
+            );
+            if ($daysOverdue <= (int)$rule['grace_days']) {
+                return ['skipped' => true, 'reason' => 'Within grace period'];
+            }
+
+            // Delegate to LateFeeEngine (D3: pure math lives there, not here)
+            $feeResult = $this->lateFee->calculate(
+                (string)$orig['balance_due'],
+                [
+                    'fee_type'       => $rule['fee_type'],
+                    'fee_value'      => (string)$rule['fee_value'],
+                    'max_fee_amount' => $rule['max_fee_amount'] !== null
+                        ? (string)$rule['max_fee_amount']
+                        : null,
+                ]
+            );
+
+            if (bccomp($feeResult['fee_amount'], '0.00', 2) <= 0) {
+                return ['skipped' => true, 'reason' => 'Calculated fee is zero'];
+            }
+
+            // Determine province for tax lookup — from lease → customer join
+            $province = 'BC'; // WHY: default to BC (company location) if no data
+            if ($orig['lease_id']) {
+                $leaseRow = db_row(
+                    "SELECT c.province FROM leases l
+                     LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
+                     WHERE l.id = ? AND l.deleted_at IS NULL",
+                    [$orig['lease_id']]
+                );
+                if ($leaseRow && !empty($leaseRow['province'])) {
+                    $province = $leaseRow['province'];
+                }
+            }
+
+            // Tax: use same exemption snapshots frozen on the original invoice (D22)
+            $gstExempt = (bool)$orig['gst_exempt_snapshot'];
+            $pstExempt = (bool)$orig['pst_exempt_snapshot'];
+            $tax       = $this->taxCalc->calculate(
+                $feeResult['fee_amount'],
+                $province,
+                $gstExempt,
+                $pstExempt
+            );
+
+            $subtotal    = $feeResult['fee_amount'];
+            $totalAmount = bcadd($subtotal, $tax['total'], 2);
+            $today       = date('Y-m-d');
+            $dueDays     = (int)(settings_get('invoice.due_days_default', '30') ?? 30);
+            $dueDate     = date('Y-m-d', strtotime("+{$dueDays} days"));
+
+            // Gap-free invoice number (D15, D20 — called inside this transaction)
+            $invoiceNumber = $this->generateInvoiceNumber();
+
+            // Describe the fee type in the line item for human readability
+            $feeDesc = $rule['fee_type'] === 'percentage'
+                ? sprintf(
+                    'Late fee on %s (%.4f%% of $%s balance)',
+                    $orig['invoice_number'],
+                    (float)$rule['fee_value'] * 100,
+                    number_format((float)$orig['balance_due'], 2)
+                  )
+                : sprintf(
+                    'Late fee on %s (flat $%s)',
+                    $orig['invoice_number'],
+                    number_format((float)$rule['fee_value'], 2)
+                  );
+
+            // Insert the late-fee invoice — copy all snapshots from original (no DB joins needed)
+            $newInvoiceId = db_insert('invoices', [
+                'invoice_number'                => $invoiceNumber,
+                'invoice_type'                  => 'late_fee',
+                'customer_id'                   => $orig['customer_id'],
+                'lease_id'                      => $orig['lease_id'],
+                'customer_name_snapshot'         => $orig['customer_name_snapshot'],
+                'company_name_snapshot'          => $orig['company_name_snapshot'],
+                'contract_number_snapshot'       => $orig['contract_number_snapshot'],
+                'unit_number_invoice_snapshot'   => $orig['unit_number_invoice_snapshot'],
+                'billing_address_snapshot'       => $orig['billing_address_snapshot'],
+                'customer_email_snapshot'        => $orig['customer_email_snapshot'],
+                'gst_exempt_snapshot'            => $orig['gst_exempt_snapshot'],
+                'pst_exempt_snapshot'            => $orig['pst_exempt_snapshot'],
+                'tax_exempt_snapshot'            => $orig['tax_exempt_snapshot'],
+                'currency'                       => $orig['currency'],
+                'exchange_rate_to_cad'           => $orig['exchange_rate_to_cad'],
+                'billing_period_start'           => $today,
+                'billing_period_end'             => $today,
+                'billing_period_days'            => 1,
+                'billing_type'                   => 'adjustment',
+                'rate_method_used'               => 'none',
+                'invoice_date'                   => $today,
+                'due_date'                       => $dueDate,
+                'status'                         => 'draft',
+                'subtotal'                       => $subtotal,
+                'discount_type'                  => 'none',
+                'discount_value'                 => '0.0000',
+                'discount_amount'                => '0.00',
+                'subtotal_after_discount'        => $subtotal,
+                'tax_gst_rate'                   => $tax['gst_rate'],
+                'tax_pst_rate'                   => $tax['pst_rate'],
+                'tax_hst_rate'                   => $tax['hst_rate'],
+                'tax_gst_amount'                 => $tax['gst'],
+                'tax_pst_amount'                 => $tax['pst'],
+                'tax_hst_amount'                 => $tax['hst'],
+                'tax_total'                      => $tax['total'],
+                'total_amount'                   => $totalAmount,
+                'amount_paid'                    => '0.00',
+                'credits_applied'                => '0.00',
+                'balance_due'                    => $totalAmount,
+                'notes'                          => "Late fee on invoice {$orig['invoice_number']}",
+                'auto_generated'                 => 1,
+                'generation_source'              => 'late_fee_cron',
+                'created_by'                     => null,
+                'updated_by'                     => null,
+            ]);
+
+            // Single line item for the late fee charge
+            db_insert('invoice_line_items', [
+                'invoice_id'     => $newInvoiceId,
+                'sort_order'     => 0,
+                'item_type'      => 'late_fee',
+                'description'    => $feeDesc,
+                'quantity'       => '1.0000',
+                'unit'           => null,
+                'unit_price'     => $subtotal,
+                'amount'         => $subtotal,
+                'is_credit'      => 0,
+                'taxable'        => 1,
+                'tax_gst_amount' => $tax['gst'],
+                'tax_pst_amount' => $tax['pst'],
+                'tax_hst_amount' => $tax['hst'],
+            ]);
+
+            // Mark the original invoice — prevents re-processing in future cron runs
+            db_execute(
+                "UPDATE invoices
+                 SET late_fee_applied = 1,
+                     late_fee_amount  = ?,
+                     late_fee_date    = ?,
+                     late_fee_invoice_id = ?,
+                     updated_at       = NOW()
+                 WHERE id = ?",
+                [$feeResult['fee_amount'], $today, $newInvoiceId, $invoiceId]
+            );
+
+            // Update denormalized counters on the lease (Trap 6: same transaction)
+            if ($orig['lease_id']) {
+                db_execute(
+                    "UPDATE leases
+                     SET total_invoiced       = total_invoiced + ?,
+                         outstanding_balance  = outstanding_balance + ?,
+                         updated_at           = NOW()
+                     WHERE id = ?",
+                    [$totalAmount, $totalAmount, $orig['lease_id']]
+                );
+            }
+
+            // Update denormalized counter on the customer (Trap 6: same transaction)
+            if ($orig['customer_id']) {
+                db_execute(
+                    "UPDATE customers
+                     SET outstanding_balance = outstanding_balance + ?,
+                         updated_at          = NOW()
+                     WHERE id = ?",
+                    [$totalAmount, $orig['customer_id']]
+                );
+            }
+
+            return [
+                'invoice_id'     => $newInvoiceId,
+                'invoice_number' => $invoiceNumber,
+                'fee_amount'     => $feeResult['fee_amount'],
+                'total_amount'   => $totalAmount,
+                'skipped'        => false,
             ];
         });
     }

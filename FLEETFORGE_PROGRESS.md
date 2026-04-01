@@ -52,6 +52,7 @@
 | AUDIT-1 | 2026-04-02 | Comprehensive QC Audit (S001–S008) | 69 issues found: 13 CRITICAL, 16 MAJOR, 40 MINOR. No files modified. Full findings in KNOWN ISSUES #16–#43 and NEXT SESSION contract for S008.5. Top 5 critical: (1) lease create doesn't reserve unit, (2) activate doesn't generate Invoice 1, (3) close doesn't generate final invoice, (4) 6 endpoints have audit_log outside transactions, (5) customer notes bypass soft-delete filter. Recommended: insert S008.5 fix session before S009 Payments. |
 | S008.5 | 2026-04-02 | Critical Fix Session — Audit Remediation (28 issues #16–#43) | All 28 AUDIT-1 findings resolved. Phase 1 critical (6): lease create now reserves unit; activate wires Invoice 1 via InvoiceGenerator; close wires final invoice with mileage overage extra_lines; all 5 invoice endpoints have audit_log inside transaction; lease update wrapped in transaction; customer notes soft-delete verified (db_exists() auto-handles). Phase 2 major (11): pending badge → badge-info (3 locations); cancel.php + reopen.php created with full state machine + FOR UPDATE + logs; update_status.php created (6 statuses, decommissioned terminal); equipment search fix ($_GET['search']); invoice BEM classes fixed (stat-label/stat-value); CSS aliases added for spec names (--bg-page, --bg-card, --color-accent, etc.); modal-md + modal-full added; customer status transition map with 409 INVALID_TRANSITION; customers/show.php SELECT * → explicit columns; invoices/send.php transaction added. Phase 2 resolved (2 no-ops): invoice search param and customer notes soft-delete both already correct. Phase 3 minor (11): font-mono on invoice tiles + .font-mono utility; .line-through + void badge updated; btn-xl added; units/update.php uniqueness fix; close appends internal_notes; error codes renamed (LEASE_IS_ACTIVE, UNIT_ON_LEASE); invoices/create.php wrapped in form; Invoices tab on lease show; dashboard CSS vars via getComputedStyle; equipment show delete button; InvoiceGenerator updated_by. Key infrastructure fix: includes/db.php db_transaction() nesting guard (inTransaction() check) required to allow InvoiceGenerator calls from within existing transactions. All 10 stop conditions passed. |
 | S009 | 2026-04-02 | Payments Module (API + Admin UI) | 10 files built and all 10 stop conditions passed. API (6): index (paginated list, filters: customer_id/invoice_id/status/reference search via LIKE — no FULLTEXT needed, sort by payment_date DESC), show (full payment + allocations[] with invoice detail), create (gap-free PAY-YYYY-NNNNN number via FOR UPDATE on settings row D15; D18 currency match enforced; D20 FOR UPDATE on invoice prevents concurrent over-allocation race; auto-allocates to invoice; drives invoice state machine sent→partially_paid→paid; updates all 4 denormalized counters — invoices.amount_paid/balance_due + leases.total_paid + customers.outstanding_balance — in single transaction; overpayment tracked on payment row; audit_log inside transaction), update (metadata-only: reference_number/bank_name/notes; D19 optimistic lock; D12 financial fields immutable), delete (soft-delete D5/D13; reverses all allocations: per-invoice bcmath counter reversal, invoice status revert paid→partially_paid→sent depending on remaining applied amount, leases.total_paid reversed, customers.outstanding_balance restored; audit_log inside transaction; returns invoice_statuses_reverted array), allocate (manual allocation of unapplied payment to different invoice; D18/D20/ALLOCATION_EXCEEDS_BALANCE guards; updates counters in same transaction). Admin UI (3 pages): payments/index.php (4 KPI tiles server-rendered: collected this month/total AR outstanding/overdue AR/today count; Alpine.js table with status filter + reference search + sortable columns; status badges per §9 design: cleared=success/failed=danger/refunded=warning/pending=info; formatMethod() label map), payments/show.php (full detail: 4 summary tiles, 2-col detail card + financial notes card, allocation table with invoice links, edit-metadata inline form + delete modal with reason — all via Alpine.js), payments/create.php (outstanding invoice picker with balance pre-fill; amount field with quick-fill-balance button; currency auto-locks to invoice currency D18; method-conditional fields: check#/bank/card-last-4; submit→redirect to show page). Invoice extension: invoices/show.php now has server-rendered Payments History section — queries payment_allocations JOIN payments for this invoice, shows applied_amount (not total payment amount), total applied footer row, Record Payment button when invoice is payable. CSS additions: dl.detail-grid added to app.css (key-value pair layout for detail cards). Bug found and fixed during stop conditions: api_url() function does not exist — all 3 UI pages used api_url() incorrectly; fixed to base_url('api/v1/payments/...'); CSS class audit: data-table→table, stats-grid→stat-grid, page-title→page-header-title, page-subtitle→inline style (D32 verified classes only). All 10 stop conditions passed: POST create → 201 PAY-2026-00001 sent→partially_paid ✅; currency mismatch → 422 CURRENCY_MISMATCH ✅; concurrent FOR UPDATE test — one succeeds/one ALLOCATION_EXCEEDS_BALANCE, invoice balance exact ✅; GET index → 200 paginated ✅; GET show?id=1 → 200 with allocations ✅; POST delete → soft-deleted invoice paid→partially_paid balance restored ✅; POST update → 200 + stale → 409 STALE_DATA ✅; /payments page → 200 no PHP errors ✅; /payments/create page → 200 no PHP errors ✅; /invoices/show?id=1 → 200 Payment History section with PAY-2026 entries ✅. |
+| S010 | 2026-04-02 | Monthly Billing Cron + Late Fee Engine | 5 files built and all 6 stop conditions passed. New directory: cron/ created. lib/Billing/LateFeeEngine.php (pure math, no DB; calculate(balance, rule): percentage 2% of $1356=$27.12 ✅, flat $50=$50 ✅, max_fee_amount cap $100 ✅, zero balance=$0 ✅, fee_type returned ✅ — 7/7 unit tests pass). InvoiceGenerator.php extended: added generateLateFeeInvoice(int $invoiceId) method — loads original invoice with FOR UPDATE (D20), finds late_fee_rule (customer-specific wins over global NULL), checks grace period, delegates math to LateFeeEngine (D3), applies same tax exemption snapshots (D22), generates late_fee invoice + single line item in transaction, marks original late_fee_applied=1, updates all denormalized counters in same transaction (Trap 6), returns ['skipped'=>bool] for non-error skips. cron/invoice_generate_monthly.php: advisory lock ff_cron_invoice_generate_monthly (D21); queries active+monthly leases WHERE next_billing_date=PHP_date(); outer db_transaction wraps createFromLease(billing_type=full_month, generation_source=cron) + DATE_ADD(next_billing_date, INTERVAL 1 MONTH); per-invoice audit_log + cron_completed entry; continue-on-error per lease. cron/invoice_overdue.php: advisory lock ff_cron_invoice_overdue; flips sent/partially_paid invoices past due_date to 'overdue'; audit_log inside transaction per invoice (FIX #19 pattern). cron/late_fee_apply.php: advisory lock ff_cron_late_fee_apply; finds overdue+late_fee_applied=0 invoices; calls InvoiceGenerator::generateLateFeeInvoice() per invoice; skips logged at debug level; audit_log on apply. Bug found and fixed: cron template in CLAUDE_CODE_REFERENCE.md uses 'description' field and 'cron_completed'/'cron_failed' action values — actual audit_log schema uses 'notes' and ENUM 'cron'; all 3 cron files corrected. Also: PHP date() returned 2026-04-01 while MySQL CURDATE() returned 2026-04-02 (timezone offset) — test data inserted with PHP date. All 6 stop conditions passed: monthly cron manual run → INV-2026-00005 generated for lease with next_billing_date=today ✅; advisory lock held → exit 0 + zero output ✅; overdue cron → INV-2026-00010 sent→overdue (due 2026-03-15) ✅; late fee cron → INV-2026-00006/00007 late_fee invoices created, originals late_fee_applied=1 ✅; LateFeeEngine 7/7 unit tests ✅; second monthly cron run → INV-2026-00008 sequential, counter=9 ✅. |
 | S009-EXT | 2026-04-02 | Topbar Enhancement (UX — all pages) | includes/topbar.php fully rewritten; public/assets/css/app.css extended with 17 new classes. Three features added to the right-side topbar cluster: (1) Quick-create "+" dropdown — pill-shaped "New" button; opens a permission-gated dropdown with shortcuts for New Customer / New Lease / New Invoice / Record Payment; each entry only rendered if current user's role has create permission on that module; uses icons confirmed on disk (users, clipboard-document-list, document-text, credit-card). (2) Theme toggle button — `.btn-icon .topbar-theme-btn`; shows moon in light mode / sun in dark mode; Alpine.js `x-data` initialises `dark` from `document.documentElement.getAttribute('data-theme')` and tracks state locally so icon flips instantly; calls existing `FF_Theme.toggle()` from app.js — no app.js changes needed. (3) User avatar dropdown — circular initials button (first char of first + last name word, e.g. "AV"); opens panel with large avatar + full name + role badge (role_slug → human label map) + email; Settings link (rendered only if `can('settings', 'view')`); My Profile link (always shown); Sign Out (links to `base_url('auth/logout')` via GET; logout.php accepts GET, no CSRF required per D29); Sign Out has danger-tint hover. Right-cluster order: [New ▾] [Search ⌘K] [🌙] [🔔] [avatar ▾]. New CSS classes added to app.css: `.topbar-theme-btn`, `.topbar-create`, `.topbar-create-btn`, `.topbar-create-dropdown`, `.topbar-dropdown-label`, `.topbar-create-item`, `.topbar-user`, `.user-avatar`, `.user-avatar--lg`, `.user-dropdown`, `.user-dropdown-header`, `.user-dropdown-identity`, `.user-dropdown-name`, `.user-dropdown-meta`, `.user-dropdown-email`, `.user-dropdown-divider`, `.user-dropdown-item`, `.user-dropdown-item--danger`. Implementation notes: heroicon() accepts only 2 params — no third attr arg; caches by $name only (nav-icon class used consistently throughout). Icons for quick-create verified against public/assets/icons/ directory listing before use. |
 
 ---
@@ -153,11 +154,9 @@
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S010 — Monthly Billing Cron + Late Fee Engine
+Session S011 — Credit Notes Module (API + Admin UI)
 
-S009 is complete (Payments module + Topbar enhancement). All 10 S009 stop conditions passed.
-S009-EXT complete: topbar fully enhanced with quick-create dropdown, theme toggle, user avatar
-dropdown (profile, settings, sign out). includes/topbar.php + app.css updated.
+S010 is complete (Monthly Billing Cron + Late Fee Engine). All 6 S010 stop conditions passed.
 
 ═══════════════════════════════════════════════════════════════════
 CONTEXT — READ BEFORE WRITING ANY CODE
@@ -166,47 +165,35 @@ CONTEXT — READ BEFORE WRITING ANY CODE
 READ IN THIS ORDER:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, all helper signatures, Trap list
   2. FLEETFORGE_PROGRESS.md               ← SESSION LOG, DECISIONS, KNOWN ISSUES
-  3. FLEETFORGE_SPEC_FINAL.md §9 Billing Cron, §13 Late Fees
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep lease_billing_periods, late_fee_rules, invoices
+  3. FLEETFORGE_SPEC_FINAL.md §10 Credit Notes
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep credit_notes, credit_note_applications
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
   Login: admin@fleetforge.test / FleetForge2025!
 
 ═══════════════════════════════════════════════════════════════════
-CRITICAL CARRY-FORWARD FROM S009 / S009-EXT
+CRITICAL CARRY-FORWARD FROM S010
 ═══════════════════════════════════════════════════════════════════
 
-BILLING ENGINE (lib/Billing/ — all built, all pure functions):
+CRON FILES (S010 — all built and tested):
+  - cron/invoice_generate_monthly.php  — advisory lock ff_cron_invoice_generate_monthly
+  - cron/invoice_overdue.php           — advisory lock ff_cron_invoice_overdue
+  - cron/late_fee_apply.php            — advisory lock ff_cron_late_fee_apply
+
+BILLING ENGINE (lib/Billing/ — now 4 pure-math files):
   - ProRateCalculator.php  — THE LAW formula for partial periods
   - TaxCalculator.php      — D11 invoice-time lookup
+  - LateFeeEngine.php      — calculate(balance, rule) → fee_amount; 7 unit tests pass
   - InvoiceGenerator.php   — ONLY class that writes to DB
-    Accepts generation_source ENUM: 'cron' | 'manual' | 'lease_close' | 'late_fee_cron'
+    Methods: createFromLease(), generateLateFeeInvoice(), generateInvoiceNumber()
     db_transaction() nesting is SAFE — nesting guard in includes/db.php
 
-PAYMENTS MODULE (S009 — fully built):
-  - api/v1/payments/{index,show,create,update,delete,allocate}.php — all live
-  - app/admin/payments/{index,show,create}.php — all live
-  - payment number counter: PAY-YYYY-NNNNN stored in settings table key 'payment.next_number.YYYY'
-  - D18 currency lock, D20 FOR UPDATE, Trap 6 all implemented
-
-TOPBAR (S009-EXT — fully built):
-  - includes/topbar.php — rewritten; 3 new right-side features:
-      · Quick-create "+" dropdown (permission-gated: customers/leases/invoices/payments)
-      · Theme toggle button (moon/sun, calls FF_Theme.toggle() from app.js — no app.js changes)
-      · User avatar dropdown (initials → name/role badge/email → Settings/Profile/Sign Out)
-  - app.css — 17 new classes added (topbar-create-*, user-avatar, user-dropdown-*, etc.)
-  - heroicon() takes ONLY 2 params (name, class) — no third arg, caches by $name only
-  - Icon names verified on disk: users, clipboard-document-list, document-text, credit-card,
-    cog-6-tooth, arrow-right-on-rectangle, moon, sun (all in public/assets/icons/)
-  - Settings link: only rendered for roles with can('settings','view')
-  - Sign Out: base_url('auth/logout') GET — no CSRF needed (D29)
-
-CRON ARCHITECTURE DECISIONS:
-  - D21: All write-heavy crons use MySQL GET_LOCK() advisory lock
-  - Template: cron/invoice_generate_monthly.php (already in reference file)
-  - Cron jobs are NOT scheduled locally — test by running manually:
-    php /Users/avi/Documents/fleetforge/cron/invoice_generate_monthly.php
+AUDIT_LOG SCHEMA — VERIFIED COLUMN NAMES (NOT the reference file template):
+  ⚠️  Reference file template is WRONG — uses 'description' and 'cron_completed' which don't exist.
+  Actual columns: user_name (required, default 'system'), notes (not description),
+  entity_label (not description), action ENUM includes 'cron' (not 'cron_completed'/'cron_failed').
+  Always use: user_name='system', action='cron'/'create'/'status_change', notes='...'.
 
 CSS LESSONS LEARNED (confirmed good patterns — use these):
   - Table class: .table (not .data-table)
@@ -214,36 +201,7 @@ CSS LESSONS LEARNED (confirmed good patterns — use these):
   - Page heading: .page-header-title (not .page-title)
   - API URL helper: base_url('api/v1/...') — api_url() does NOT exist
   - Detail list: dl.detail-grid (added S009)
-  - Topbar new classes all in app.css (added S009-EXT — grep before adding more)
-
-═══════════════════════════════════════════════════════════════════
-S010 DELIVERABLES (proposed)
-═══════════════════════════════════════════════════════════════════
-
-Cron jobs:
-  1. cron/invoice_generate_monthly.php — runs 1st of each month; finds all active leases
-     with next_billing_date = today; generates full_month invoice via InvoiceGenerator;
-     updates lease.next_billing_date +1 month; advisory lock D21; audit_log
-  2. cron/invoice_overdue.php — daily; marks sent invoices past due_date as 'overdue'
-  3. cron/late_fee_apply.php — daily/weekly; reads late_fee_rules per customer/lease;
-     generates late fee line items on overdue invoices; LateFeeEngine (already stubbed in lib/)
-
-Billing library:
-  4. lib/Billing/LateFeeEngine.php — pure math, no DB; calculate(invoiceBalance, rule): array
-
-Admin UI:
-  5. Confirm InvoiceGenerator is invoked correctly from cron (no UI needed for cron itself)
-
-═══════════════════════════════════════════════════════════════════
-STOP CONDITIONS (proposed for S010)
-═══════════════════════════════════════════════════════════════════
-
-1. Run monthly cron manually → generates invoice for active lease with next_billing_date = today
-2. Monthly cron with advisory lock held → exits silently (no duplicate)
-3. Overdue cron → sent invoice with due_date in past → status = 'overdue'
-4. Late fee cron → overdue invoice → late fee line item added + invoice total updated
-5. LateFeeEngine unit test: flat fee + percentage fee + minimum/maximum bounds
-6. Monthly cron: invoice_number sequential (no gaps) after multiple runs
+  - Topbar classes all in app.css (added S009-EXT — grep before adding more)
 ```
 
 ---
@@ -2044,5 +2002,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: 2026-04-02 — S009-EXT complete. Sessions completed to date: S001 (Foundation), S002 (Schema + Seeds), S003 (Dashboard Stub + Remaining Seeds), S004 (Dashboard KPIs + Charts), S005 (Customers), S006 (Equipment), S007 (Leases), S008 (Invoices + Billing Engine), AUDIT-1 (69-issue QC audit), S008.5 (Critical Fix — 28 audit remediation items), S009 (Payments Module — 6 API endpoints + 3 admin pages + invoice Payments History section), S009-EXT (Topbar Enhancement — quick-create dropdown + theme toggle + user avatar dropdown). 34 decisions locked. SOFT_DELETE_TABLES: 15 (payments added). All known audit issues resolved. Next: S010 — Monthly Billing Cron + Late Fee Engine.*
-*Next session: S010 — Monthly Billing Cron + Late Fee Engine (cron/invoice_generate_monthly.php, cron/invoice_overdue.php, cron/late_fee_apply.php, lib/Billing/LateFeeEngine.php)*
+*Last updated: 2026-04-02 — S010 complete. Sessions completed to date: S001 (Foundation), S002 (Schema + Seeds), S003 (Dashboard Stub + Remaining Seeds), S004 (Dashboard KPIs + Charts), S005 (Customers), S006 (Equipment), S007 (Leases), S008 (Invoices + Billing Engine), AUDIT-1 (69-issue QC audit), S008.5 (Critical Fix — 28 audit remediation items), S009 (Payments Module — 6 API endpoints + 3 admin pages + invoice Payments History section), S009-EXT (Topbar Enhancement — quick-create dropdown + theme toggle + user avatar dropdown), S010 (Monthly Billing Cron + Late Fee Engine — 3 cron files + LateFeeEngine.php + InvoiceGenerator::generateLateFeeInvoice()). 34 decisions locked. SOFT_DELETE_TABLES: 15. All known audit issues resolved. Next: S011 — Credit Notes Module.*
+*Next session: S011 — Credit Notes Module (api/v1/credit_notes/, app/admin/credit_notes/, CreditEngine.php integration)*
