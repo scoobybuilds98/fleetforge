@@ -78,19 +78,22 @@ $pageTitle = e($vendor['name']);
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
+<!-- ── Main component — wraps everything so buttons access state directly ── -->
+<div x-data="vendorShow()"
+     x-init="init()">
+
 <div class="page-header">
     <a href="<?= base_url('vendors') ?>" class="btn btn-secondary btn-sm">← Vendors</a>
     <h1 class="page-header-title"><?= e($vendor['name']) ?></h1>
     <div style="display:flex;gap:8px;margin-left:auto;">
         <?php if (can('maintenance', 'edit')): ?>
         <button class="btn btn-secondary btn-sm"
-                x-data
-                @click="$dispatch('vendor-edit-toggle')">Edit</button>
+                @click="editing = !editing"
+                x-text="editing ? 'Cancel Edit' : 'Edit'">Edit</button>
         <?php endif; ?>
         <?php if (can('maintenance', 'delete')): ?>
         <button class="btn btn-danger btn-sm"
-                x-data
-                @click="$dispatch('vendor-delete-open')">Delete</button>
+                @click="deleteModalOpen = true">Delete</button>
         <?php endif; ?>
     </div>
 </div>
@@ -123,12 +126,6 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
 </div>
-
-<!-- ── Main component ─────────────────────────────────────────────────────── -->
-<div x-data="vendorShow()"
-     x-init="init()"
-     @vendor-edit-toggle.window="editing = !editing"
-     @vendor-delete-open.window="deleteModalOpen = true">
 
     <!-- ── View / Edit card ─────────────────────────────────────────────── -->
     <div class="card" style="margin-bottom:24px;">
