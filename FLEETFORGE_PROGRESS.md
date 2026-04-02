@@ -57,6 +57,8 @@
 | S011 | 2026-04-02 | Credit Notes Module (API + Admin UI) | 10 files built and all 15 stop conditions passed. lib/Billing/CreditEngine.php (pure math, no DB; apply(invoiceTotal, credits[]) → [credits_applied, balance_due, applied_per_credit]; 4/4 unit tests pass: full coverage, partial coverage, multi-credit with early exit, zero balance). API (6): index (paginated list, filters: customer_id/status/currency/source/date range, sort allowlist), show (full CN detail + applications[] with invoice links), create (gap-free CN-CR-YYYY-NNNNN via FOR UPDATE on settings row; customer/lease/invoice/payment cross-ownership validation; D18 currency; D16 bcmath; audit inside transaction), update (metadata-only: reason/internal_notes/expires_at; D19 optimistic lock; D12 financial fields immutable; void CN → IMMUTABLE_RECORD), void (active/partially_used only; FOR UPDATE D20 prevents concurrent void+apply race; zeroes amount_remaining; appends void reason to internal_notes; INVALID_TRANSITION on wrong status), apply (D18 CURRENCY_MISMATCH; same-customer guard; D20 FOR UPDATE on BOTH credit_note AND invoice — consistent lock order prevents deadlock; CREDIT_EXCEEDS_BALANCE on both invoice.balance_due and cn.amount_remaining; 5 counters in one transaction: cn.amount_remaining, cn.status active→partially_used→fully_used, invoices.credits_applied, invoices.balance_due, customers.outstanding_balance; invoice state machine sent/overdue→partially_paid→paid; credit_note_applications row; audit inside transaction). Admin UI (3 pages): index.php (4 KPI server-rendered tiles: outstanding balance/issued this month/fully applied this month/voided this month; Alpine.js table with status/currency/source filters + sortable columns; status badges active=success/partially_used=warning/fully_used=neutral/void=neutral+line-through), show.php (4 summary tiles; detail card; apply-to-invoice form shown when active/partially_used; edit-metadata form when status is non-applicable and non-void; void modal with required reason; applications history table with invoice links and total footer), create.php (customer dropdown pre-filtered to active customers; source type selector; amount/currency fields; reason textarea; optional expiry date; collapsible optional links section for lease_id/source_invoice_id/source_payment_id; internal notes; submit→redirect to show page). All stop conditions passed: POST create → 201 CN-CR-2026-00001 ✅; GET index → 200 total=1 ✅; GET show?id=1 → 200 with applications[] ✅; CURRENCY_MISMATCH USD→CAD → 422 ✅; apply $100 to invoice → balance 1200→1100, credits_applied 0→100, CN remaining 150→50, status partially_used ✅; CREDIT_EXCEEDS_BALANCE $60 on $50 remaining → 422 ✅; void partially_used → status=void remaining=0.00 ✅; apply voided CN → INVALID_TRANSITION ✅; STALE_DATA wrong updated_at → 409 ✅; sequential CN-CR-2026-00003 ✅; /credit_notes page 200 no PHP errors ✅; /credit_notes/create page 200 no PHP errors ✅; /credit_notes/show?id=2 page 200 no PHP errors ✅; CreditEngine 4/4 unit tests ✅; all 10 files PHP -l clean ✅. |
 | S009-EXT | 2026-04-02 | Topbar Enhancement (UX — all pages) | includes/topbar.php fully rewritten; public/assets/css/app.css extended with 17 new classes. Three features added to the right-side topbar cluster: (1) Quick-create "+" dropdown — pill-shaped "New" button; opens a permission-gated dropdown with shortcuts for New Customer / New Lease / New Invoice / Record Payment; each entry only rendered if current user's role has create permission on that module; uses icons confirmed on disk (users, clipboard-document-list, document-text, credit-card). (2) Theme toggle button — `.btn-icon .topbar-theme-btn`; shows moon in light mode / sun in dark mode; Alpine.js `x-data` initialises `dark` from `document.documentElement.getAttribute('data-theme')` and tracks state locally so icon flips instantly; calls existing `FF_Theme.toggle()` from app.js — no app.js changes needed. (3) User avatar dropdown — circular initials button (first char of first + last name word, e.g. "AV"); opens panel with large avatar + full name + role badge (role_slug → human label map) + email; Settings link (rendered only if `can('settings', 'view')`); My Profile link (always shown); Sign Out (links to `base_url('auth/logout')` via GET; logout.php accepts GET, no CSRF required per D29); Sign Out has danger-tint hover. Right-cluster order: [New ▾] [Search ⌘K] [🌙] [🔔] [avatar ▾]. New CSS classes added to app.css: `.topbar-theme-btn`, `.topbar-create`, `.topbar-create-btn`, `.topbar-create-dropdown`, `.topbar-dropdown-label`, `.topbar-create-item`, `.topbar-user`, `.user-avatar`, `.user-avatar--lg`, `.user-dropdown`, `.user-dropdown-header`, `.user-dropdown-identity`, `.user-dropdown-name`, `.user-dropdown-meta`, `.user-dropdown-email`, `.user-dropdown-divider`, `.user-dropdown-item`, `.user-dropdown-item--danger`. Implementation notes: heroicon() accepts only 2 params — no third attr arg; caches by $name only (nav-icon class used consistently throughout). Icons for quick-create verified against public/assets/icons/ directory listing before use. |
 | S013 | 2026-04-02 | Mileage Logs Module (API + Admin UI + GPS + Cron) | 12 new files built, 5 existing files modified, 1 bug fixed during stop conditions. All 17 stop conditions passed. **format_mileage()** added to includes/functions.php (Known Issue #2 resolved): 4/4 assertions pass. **lib/GPS/SamsaraClient.php** (FleetForge\GPS): getMileageForLease()→?float (km driven), getOdometerReading()→?int (current odometer km); 10s HTTP timeout; logs all failures to logs/gps.log; dev-safe (blank keys → null, no HTTP). **API (5 endpoints in api/v1/mileage_logs/)**: index (paginated; filters: equipment_unit_id/lease_id/log_type/date_from/date_to; JOINs equipment_units+templates+users for labels), show (full detail + linked lease context), create (log_type coerced to manual/service only; date not future; updates equipment_units.mileage in same transaction; audit inside transaction), update (blocks gps_sync/lease_start/lease_end → 422 IMMUTABLE_RECORD; optimistic lock on created_at — no updated_at on this table), delete (hard delete; blocks lease_start/lease_end → 422 IMMUTABLE_RECORD). **api/v1/gps/mileage.php**: called from close-lease form; uses l.mileage_unit not eu.mileage_unit (equipment_units has no mileage_unit — bug caught+fixed mid-session); returns distance_km + odometer_estimate or source=no_device/unavailable; never blocks close flow. **cron/gps_mileage_sync.php**: advisory lock ff_cron_gps_mileage_sync (D21); queries active leases with gps_device_id; calls getOdometerReading() per unit; skips already-synced units; updates equipment_units.mileage + inserts gps_sync rows; dev mode: 0 processed, exit 0. **Admin UI (3 pages)**: index.php (4 KPI tiles; Alpine table with type/date/unit-search filters; type badges; client-side unit search), create.php (unit+lease dropdowns; log_type restricted to manual/service; submit→redirect), show.php (4 summary tiles; edit mode for manual/service; D19 lock via created_at; delete modal blocks lease_start/lease_end). **Navigation**: Mileage Logs added after Damage Claims (module=maintenance; chart-bar-square.svg created). **Integration**: Mileage Log tab added to equipment/show.php and leases/show.php with lazy-load pattern matching existing tabs. All 17 stop conditions: POST create → 201 ✅; GET index total=1 ✅; GET show ✅; POST update → 200 ✅; STALE_DATA wrong created_at → 409 ✅; POST create id=2 ✅; DELETE service → 200 ✅; show deleted → 404 ✅; gps/mileage no_device → 200 ✅; gps/mileage missing lease_id → 422 ✅; /mileage_logs → 200 ✅; /mileage_logs/create → 200 ✅; /mileage_logs/show?id=1 → 200 ✅; GPS cron dev mode exit 0 ✅; equipment/show → 200 ✅; leases/show → 200 ✅; format_mileage 4/4 ✅. All 12 new PHP files php -l clean ✅. |
+| S014 | 2026-04-02 | Vendors Module (API + Admin UI) | 8 new files built. All 19 stop conditions passed. **API (5 endpoints in api/v1/vendors/)**: index (paginated; filters: vendor_type ENUM, is_preferred bool, q FULLTEXT on name+contact_name; sort allowlist: name/total_spent/rating/created_at; default name ASC; work_order_count via subquery; specializations JSON decoded per row), show (full vendor detail + work_order_count + recent_work_orders[] last 5; LEFT JOIN users for created_by_name), create (vendor_type ENUM validation; name uniqueness among non-deleted; rating 1–5 or null; specializations as JSON array of strings; hourly_rate via clean_decimal() D16; total_spent always starts 0.00 — owned by work order module; audit inside transaction), update (D19 optimistic lock on updated_at; name uniqueness excludes self; specializations replaces entire array; audit old_values/new_values; returns fresh updated_at), delete (soft delete; blocks if active WOs in open/in_progress/waiting_parts; ON DELETE SET NULL only fires on hard DELETE — soft delete preserves mwo.vendor_id history). **Admin UI (3 pages)**: index.php (4 KPI tiles: total/preferred/active WOs/top vendor by spend; Alpine filterable table with vendor_type+is_preferred+q search filters; typeBadge() helper for 6 vendor types), create.php (name+type required; contact/location/rates/rating sections; specializations multi-select with 10 options; is_preferred checkbox; FF_Api.post() → redirect to show), show.php (4 KPI tiles: total_spent/active WOs/completed/total; view+edit mode; D19 lock via updated_at in save(); specializations multi-select with server-pre-selected options; Work Orders tab server-rendered with last 20 WOs; delete modal blocks on active WO error message from API). **Navigation**: Vendors added to config/navigation.php after Mileage Logs (module: maintenance); building-storefront.svg Heroicon created. **FK confirmed**: maintenance_work_orders.vendor_id nullable FK → vendors(id) ON DELETE SET NULL — soft delete preserves history. **Permission module**: maintenance. All 19 stop conditions: GET list empty total=0 ✅; POST create id=1 ✅; GET list total=1 ✅; GET show wo_count=0 ✅; POST update 200 ✅; STALE_DATA wrong updated_at → 409 ✅; create id=2 (second vendor) ✅; duplicate name → 409 ALREADY_EXISTS ✅; rating=6 → 422 VALIDATION_ERROR ✅; soft delete id=2 → 200 deleted=true ✅; show deleted → 404 NOT_FOUND ✅; vendor_type filter repair → total=1 ✅; is_preferred filter → total=1 ✅; /vendors 200 ✅; /vendors/create 200 ✅; /vendors/show?id=1 200 ✅; UNAUTHORIZED no session ✅; missing vendor_type → 422 ✅; specializations round-trip JSON ✅; sort injection guard → safe fallback ✅; php -l all 8 files clean ✅. |
+| S013-EXT | 2026-04-02 | Mileage Logs Post-Session Fixes + Stress Test | 3 bugs fixed, 1 API filter added, 49-test stress test run. **Bug 1 — empty black page on /mileage_logs:** root cause was `<?= icon('plus') ?>` call — no such function exists; changed to plain string `+ Record Mileage` matching codebase pattern. **Bug 2 — "Delete failed." modal on show.php:** root cause was all three raw `fetch()` calls in show.php (edit form + confirmDelete()) and create.php sent `X-Requested-With` but omitted `X-CSRF-Token` header — FF_Api does this automatically; raw fetch does not. Fixed by adding `'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? ''` to all three fetch headers. **Bug 3 — unit filter was text input:** replaced `unit_search` text input + client-side filter loop with server-rendered `<select>` dropdown (same `$filterUnits` query as create.php); changed Alpine filter state from `unit_search` to `equipment_unit_id`; filter now sent as API query param (no more client-side loop). **New feature — customer_id filter on mileage_logs API:** added to api/v1/mileage_logs/index.php via subquery `ml.lease_id IN (SELECT id FROM leases WHERE customer_id = ? AND deleted_at IS NULL)` — handles the fact that mileage_logs has no direct customer_id column. **Mileage Logs tab on customers/show.php:** added tab button + tab panel + `mileageLogs[]`/`mileageLogsLoaded`/`mileageLogsLoading` state + `loadMileageLogs()` method + `mlTypeBadge()`/`mlTypeLabel()` helpers + `$watch` handler — matches lazy-load pattern on equipment/show and leases/show. **Stress test (49 tests, all pass):** CRUD ✅, validation (future date/negative odo/missing fields) ✅, immutability guards (lease_start/lease_end block both; gps_sync blocks edit only) ✅, STALE_DATA optimistic lock ✅, CSRF enforcement ✅, auth guard (UNAUTHORIZED) ✅, method enforcement ✅, all filters (unit/log_type/date/customer_id) ✅, SQL injection via sort/dir/log_type/unit_id (all neutralized) ✅, XSS in notes (clean_string strips on input; e() escapes on output) ✅, lower-odometer-does-not-overwrite-higher ✅, GPS edge cases ✅, pagination caps (min 10, max 100) ✅, all 3 admin pages HTTP 200 ✅. |
 | S012-EXT | 2026-04-02 | Damage Claims Integration + UI Fixes | 6 files changed. **Bug fixes:** (1) create.php form was squished/unstyled — root cause: `.form-input`, `textarea.form-input`, `.form-input-sm`, `.form-select-sm`, and all `.alert`/`.alert-danger`/`.alert-success`/`.alert-warning`/`.alert-info` classes were missing from app.css. Added all as confirmed aliases; rewrote create.php form HTML to use `.form-control` directly + `.form-row-2` for Equipment Unit+Customer and Severity+Damage Location pairs + `.form-row-3` for three financial fields + styled submit row with border-top. (2) index.php table showed 0 rows despite KPI showing 1 claim — root cause: Alpine read `d.data` (an object) instead of `d.data?.items` (array) and `d.meta` instead of `d.data?.pagination`; fixed to `d.data?.items ?? []`, `d.data?.pagination?.total`, `d.data?.pagination?.total_pages`. **Cross-module integration:** Damage Claims tab added to three profile pages — equipment/show.php (between Lease History and Status Log; filtered by equipment_unit_id; columns: Claim #, Customer, Severity, Status, Est. Cost, Reported, View), leases/show.php (after Invoices tab; filtered by lease_id; columns: Claim #, Severity, Status, Est. Cost, Reported, View), customers/show.php (after Invoices tab; filtered by customer_id; columns: Claim #, Unit, Severity, Status, Est. Cost, Reported, View). All three: lazy-load on first tab activation; `+ New Claim` button pre-populates query string with the relevant ID; `can('maintenance','create')` permission-gated. Badge helpers (dcSeverityBadge/Label, dcStatusBadge/Label) added inline to each page's JS component. **Topbar home icon:** `home.svg` already existed in public/assets/icons/; added `<a class="btn-icon topbar-home-btn" href="dashboard">` between hamburger toggle and page title in topbar.php; added `.topbar-home-btn` rule to app.css (color: --text-secondary, text-decoration: none, hover: --text-primary + --bg-surface-2). |
 | STUB-1 | 2026-04-02 | Stub Replacement — Cross-Module Tab Fix | 3 files fixed, 5 stub tabs replaced with real data. Full codebase search performed (10 grep patterns). **Files fixed:** (1) app/admin/customers/show.php — Leases tab: stub "will be available in S006" replaced with Alpine.js lazy-loaded table (contract_number, unit, status badge, start/end dates, monthly_rate, View action) via existing GET /api/v1/leases?customer_id=N; Invoices tab: stub "will be available in a later session" replaced with Alpine.js lazy-loaded table (invoice_number, billing_period, status badge, due_date, total_amount, balance_due, View action) via existing GET /api/v1/invoices?customer_id=N; Alpine state extended with leases/invoices arrays + loading flags + $watch lazy-load on tab activation; leaseBadgeClass() + invoiceBadgeClass() helpers added; docblock updated to remove stub references. (2) app/admin/equipment/show.php — Lease History tab: stub "Lease history coming in S008" replaced with Alpine.js lazy-loaded table (contract_number, customer, status badge, start/end dates, monthly_rate, View action) via existing GET /api/v1/leases?unit_id=N; leaseHistory[] + leasesLoading/leasesLoaded state added; $watch extended; leaseBadgeClass() + loadLeaseHistory() methods added; docblock updated. (3) app/admin/leases/show.php — docblock updated: "stub for S008+" → "placeholder — requires amendments table". **Remaining stubs that CANNOT be fixed (missing dependencies):** (a) leases/show.php Amendments tab — requires amendments table + API (not yet built); (b) equipment/show.php Maintenance tab — requires maintenance_work_orders module (planned S016); (c) equipment/show.php Documents tab — requires documents module (planned S021); (d) leases/edit.php rate editing — requires amendment workflow. **Not stubs (verified OK):** login.php placeholder hash is a security constant-time pattern; form field HTML placeholder attributes are legitimate UX; dashboard/index.php "stubs replaced" is historical docblock. **HTTP checks:** PHP not available locally — code reviewed manually for syntax correctness. |
 
@@ -159,10 +161,10 @@
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S014 — Vendors Module (API + Admin UI)
+Session S015 — Maintenance Work Orders Module (API + Admin UI)
 
-S013 — Mileage Logs Module — is complete. format_mileage() is live.
-SamsaraClient built. GPS cron built. Mileage Logs tabs on equipment and lease profiles.
+S014 — Vendors Module — fully complete and tested (19/19 stop conditions pass).
+api/v1/vendors/ (5 endpoints) + app/admin/vendors/ (3 pages) + navigation entry.
 
 ═══════════════════════════════════════════════════════════════════
 CONTEXT — READ BEFORE WRITING ANY CODE
@@ -171,68 +173,71 @@ CONTEXT — READ BEFORE WRITING ANY CODE
 READ IN THIS ORDER:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, all helper signatures, Trap list
   2. FLEETFORGE_PROGRESS.md               ← SESSION LOG, DECISIONS, KNOWN ISSUES
-  3. FLEETFORGE_SPEC_FINAL.md             ← grep "vendor" for relevant sections
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep "vendors"
+  3. FLEETFORGE_SPEC_FINAL.md             ← grep "work_order\|maintenance" for relevant sections
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep "maintenance_work_orders\|maintenance_line_items"
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
-  Login: admin@fleetforge.test / FleetForge2025!
+  Login: admin@fleetforge.test / password
 
 ═══════════════════════════════════════════════════════════════════
-CRITICAL CARRY-FORWARD FROM S013
+CRITICAL CARRY-FORWARD FROM S014
 ═══════════════════════════════════════════════════════════════════
+
+VENDORS MODULE (S014 — built, tested):
+  - api/v1/vendors/{index,show,create,update,delete}.php
+  - app/admin/vendors/{index,create,show}.php
+  - Permission module: maintenance
+  - vendors.total_spent is a denormalized sum — update it in the same transaction
+    when work order costs change (S015 owns this: UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?)
+  - vendor_id on maintenance_work_orders is nullable — vendor is optional on a WO
+  - Soft-delete vendors: blocked if active WOs (open/in_progress/waiting_parts) exist
+  - building-storefront.svg icon created in public/assets/icons/
 
 SCHEMA TRAP: equipment_units has NO make/model columns.
   brand/model are on equipment_templates. Always JOIN:
     LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
   Use et.brand (not eu.make) and et.model.
 
-MILEAGE LOGS MODULE (S013 — all built and tested):
-  - api/v1/mileage_logs/{index,show,create,update,delete}.php
-  - api/v1/gps/mileage.php  ← GPS pre-fill at lease close (uses l.mileage_unit not eu.mileage_unit)
-  - app/admin/mileage_logs/{index,create,show}.php
-  - cron/gps_mileage_sync.php  ← daily 7AM, advisory lock ff_cron_gps_mileage_sync
-  - lib/GPS/SamsaraClient.php  ← getMileageForLease() + getOdometerReading()
-  - format_mileage() in includes/functions.php  ← Known Issue #2 RESOLVED
-  - mileage_logs has NO deleted_at — hard delete is correct
-  - mileage_logs has NO updated_at — optimistic lock uses created_at (D19 adapted)
-  - log_type lease_start/lease_end are IMMUTABLE_RECORD (billing-critical, cannot edit or delete)
-  - log_type gps_sync is IMMUTABLE_RECORD for update (can delete)
-  - Permission module: maintenance (same as damage_claims)
-  - Mileage Log tab live on equipment/show.php and leases/show.php
+CSRF TRAP (confirmed in S013-EXT): Raw fetch() calls MUST include both headers:
+  'X-Requested-With': 'XMLHttpRequest'
+  'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? ''
+  FF_Api does this automatically. Raw fetch() does NOT.
 
-DAMAGE CLAIMS MODULE (S012 — all built and tested):
-  - api/v1/damage_claims/{index,show,create,update,delete,upload_photo,delete_photo}.php
-  - app/admin/damage_claims/{index,show,create}.php
-  - Claim number format: DMG-YYYY-NNNNN (settings key: damage_claim.next_number.{year})
-  - Storage path for photos: damage/{claim_id}/{claim_id}_photo_{timestamp}.{ext}
-  - State machine: reported→assessed→repair_ordered→invoiced→resolved (terminal); written_off (terminal from any)
-  - Permission module: maintenance
-  - Damage Claims tab is now live on equipment/show, leases/show, and customers/show (S012-EXT)
+WORK ORDER STATE MACHINE (§6 in reference file):
+  open → in_progress, cancelled
+  in_progress → waiting_parts, completed
+  waiting_parts → in_progress
+  completed → [TERMINAL]
+  cancelled → [TERMINAL]
+  Every transition: validate → 409 INVALID_TRANSITION if not allowed → write status_log → audit_log.
 
-STORAGE CLIENT (D9 — confirmed working):
-  - lib/Storage/StorageClient.php — upload(), url(), delete() all tested
-  - For photo uploads use FormData (multipart), not JSON — FF_Api.post() sends JSON
-  - MIME detection: finfo_file() on tmp_name (Trap 5)
-  - Never return file_path in API responses (Trap 7) — always StorageClient::url()
+MAINTENANCE LINE ITEMS: maintenance_line_items table has no deleted_at (no soft delete).
+  item_type ENUM: labor, part, sublet, other.
+  total_cost = quantity × unit_cost (bcmath, D16).
+  When line items change, recalculate mwo.labor_cost/parts_cost/total_cost in same transaction.
+  Also update vendors.total_spent when work order is completed.
+
+EQUIPMENT SHOW PAGE STUB: app/admin/equipment/show.php has a Maintenance tab stub
+  ("Maintenance tab coming in S016" or similar). S015 should replace it with the real tab
+  lazy-loading from the new work orders API.
 
 AUDIT_LOG SCHEMA — VERIFIED COLUMN NAMES (NOT the reference file template):
-  ⚠️  Reference file template is WRONG — uses 'description' and 'cron_completed' which don't exist.
   Actual columns: user_name (required, default 'system'), notes (not description),
-  entity_label (not description), action ENUM includes 'cron'/'create'/'status_change'/'update'/'delete'.
-  Always use: user_name='system' for cron, current_user()['name'] for user actions.
+  entity_label (not description), action ENUM includes 'create'/'update'/'delete'/'status_change'.
+  Always use: user_name=current_user()['name'] for user actions, 'system' for cron.
 
 CSS LESSONS LEARNED (confirmed good patterns — use these):
   - Table class: .table (not .data-table)
   - Grid: .stat-grid (not .stats-grid)
   - Page heading: .page-header-title (not .page-title)
   - API URL helper: base_url('api/v1/...') — api_url() does NOT exist
-  - Detail list: dl.detail-grid (added S009)
-  - Topbar classes all in app.css (added S009-EXT — grep before adding more)
-  - Status badges: badge-success/warning/danger/info/neutral (+ line-through for void)
-  - Input class: .form-control (NOT .form-input — .form-input is a CSS alias only, added S012-EXT)
-  - Alert/error banner: .alert .alert-danger (added S012-EXT — confirmed in app.css)
-  - customers/show.php uses raw fetch() (not FF_Api) — match the existing pattern when extending it
+  - Detail list: dl.detail-grid
+  - Status badges: badge-success/warning/danger/info/neutral
+  - Input class: .form-control (NOT .form-input)
+  - Alert/error banner: .alert .alert-danger
+  - icon() function does NOT exist — use plain text like "+ New Work Order"
+  - FF_Api.post() sends JSON. For multipart (photo uploads) use raw fetch() with both CSRF headers.
 ```
 
 ---
@@ -2033,5 +2038,5 @@ When a session is about to start, Claude Code will:
 *- Missing sessions added: audit_log helper (S008), file upload helper (before Phase 5), pagination helper (before S031), mailer setup (before S015), exchange rate CRUD (before Phase 7) [PASS-7:M1-M12]*
 *- Dispatcher invoice permission: can_view=1 per spec permission matrix [PASS-7:W7]*
 
-*Last updated: 2026-04-02 — S013 complete. Sessions completed to date: S001 (Foundation), S002 (Schema + Seeds), S003 (Dashboard Stub + Remaining Seeds), S004 (Dashboard KPIs + Charts), S005 (Customers), S006 (Equipment), S007 (Leases), S008 (Invoices + Billing Engine), AUDIT-1 (69-issue QC audit), S008.5 (Critical Fix — 28 audit remediation items), S009 (Payments Module — 6 API endpoints + 3 admin pages), S009-EXT (Topbar Enhancement), S010 (Monthly Billing Cron + Late Fee Engine), S011 (Credit Notes Module — 6 API endpoints + 3 admin pages + CreditEngine.php), S012 (Damage Claims Module — 7 API endpoints + 3 admin pages + StorageClient photo upload), S013 (Mileage Logs Module — 5 API endpoints + GPS endpoint + 3 admin pages + SamsaraClient + GPS cron + format_mileage()). 34 decisions locked. SOFT_DELETE_TABLES: 15. lib/Billing/ 5 files. lib/GPS/ 1 file. Next: S014 — Vendors Module.*
-*Next session: S014 — Vendors Module (api/v1/vendors/, app/admin/vendors/, linked from maintenance work orders)*
+*Last updated: 2026-04-02 — S014 complete. Sessions completed to date: S001 (Foundation), S002 (Schema + Seeds), S003 (Dashboard Stub + Remaining Seeds), S004 (Dashboard KPIs + Charts), S005 (Customers), S006 (Equipment), S007 (Leases), S008 (Invoices + Billing Engine), AUDIT-1 (69-issue QC audit), S008.5 (Critical Fix — 28 audit remediation items), S009 (Payments Module — 6 API endpoints + 3 admin pages), S009-EXT (Topbar Enhancement), S010 (Monthly Billing Cron + Late Fee Engine), S011 (Credit Notes Module — 6 API endpoints + 3 admin pages + CreditEngine.php), S012 (Damage Claims Module — 7 API endpoints + 3 admin pages + StorageClient photo upload), S013 (Mileage Logs Module — 5 API endpoints + GPS endpoint + 3 admin pages + SamsaraClient + GPS cron + format_mileage()), S014 (Vendors Module — 5 API endpoints + 3 admin pages + navigation). 34 decisions locked. SOFT_DELETE_TABLES: 15. lib/Billing/ 5 files. lib/GPS/ 1 file. Next: S015 — Maintenance Work Orders Module.*
+*Next session: S015 — Maintenance Work Orders Module (api/v1/maintenance_work_orders/, app/admin/maintenance/, line items, state machine, vendor total_spent update, equipment show tab)*

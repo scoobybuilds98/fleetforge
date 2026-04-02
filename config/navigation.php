@@ -105,6 +105,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'Vendors',
+        'icon'   => 'building-storefront',
+        'url'    => '/vendors',
+        'module' => 'maintenance',    // same permission group as maintenance (§12 matrix)
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Compliance',
         'icon'   => 'shield-check',
         'url'    => '/compliance',
