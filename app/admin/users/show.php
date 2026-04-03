@@ -311,6 +311,51 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
 
+    <?php if (is_super_admin() && !$isSelf): ?>
+    <!-- Set Password — super_admin only, non-self users -->
+    <div class="card">
+        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Set Password</div>
+        <div class="card-body" style="padding:16px;"
+             x-data="setPasswordForm()">
+            <div class="form-group">
+                <label class="form-label">New Password</label>
+                <input type="password" class="form-control" x-model="pwd"
+                       placeholder="Min. 10 characters" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Confirm Password</label>
+                <input type="password" class="form-control" x-model="confirmPwd"
+                       placeholder="Repeat password" autocomplete="new-password">
+            </div>
+            <div x-show="msg" x-text="msg"
+                 :style="isError ? 'color:var(--color-danger)' : 'color:var(--color-success)'"
+                 style="font-size:0.8125rem;margin-bottom:8px;display:none;"></div>
+            <button class="btn btn-secondary w-full"
+                    @click="submit()"
+                    :disabled="saving">
+                <span x-show="!saving">Set Password</span>
+                <span x-show="saving">Saving…</span>
+            </button>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if (is_super_admin() && !$isSelf): ?>
+    <!-- Delete User — super_admin only, non-self users -->
+    <div class="card">
+        <div class="card-body" style="padding:16px;">
+            <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 10px;">
+                Permanently removes this user from the system. This action cannot be undone.
+            </p>
+            <button class="btn btn-danger w-full"
+                    onclick="confirmDeleteUser()">
+                Delete User
+            </button>
+            <div id="delete-user-msg" style="font-size:0.8125rem;margin-top:8px;display:none;"></div>
+        </div>
+    </div>
+    <?php endif; ?>
+
 </div><!-- /actions panel -->
 
 </div><!-- /grid -->
@@ -491,6 +536,73 @@ async function sendPasswordReset() {
     }
 }
 
+// ── Set password (Alpine component) ──────────────────────────────────────────
+function setPasswordForm() {
+    return {
+        pwd: '',
+        confirmPwd: '',
+        saving: false,
+        msg: '',
+        isError: false,
+
+        async submit() {
+            this.msg = '';
+            if (this.pwd.length < 10) {
+                this.msg = 'Password must be at least 10 characters.';
+                this.isError = true;
+                return;
+            }
+            if (this.pwd !== this.confirmPwd) {
+                this.msg = 'Passwords do not match.';
+                this.isError = true;
+                return;
+            }
+            this.saving = true;
+            try {
+                await FF_Api.post('<?= base_url('api/v1/users/set_password.php') ?>', {
+                    id:               <?= (int)$userId ?>,
+                    new_password:     this.pwd,
+                    confirm_password: this.confirmPwd,
+                });
+                this.msg = '✓ Password updated.';
+                this.isError = false;
+                this.pwd = '';
+                this.confirmPwd = '';
+            } catch (err) {
+                this.msg = err?.data?.message ?? 'Failed to set password.';
+                this.isError = true;
+            } finally {
+                this.saving = false;
+            }
+        },
+    };
+}
+
+// ── Delete user ───────────────────────────────────────────────────────────────
+function confirmDeleteUser() {
+    document.getElementById('delete-user-modal').style.display = 'flex';
+}
+function closeDeleteModal() {
+    document.getElementById('delete-user-modal').style.display = 'none';
+}
+async function executeDelete() {
+    const btn = document.getElementById('btn-confirm-delete');
+    const msg = document.getElementById('delete-user-msg');
+    btn.disabled = true;
+    btn.textContent = 'Deleting…';
+    try {
+        await FF_Api.post('<?= base_url('api/v1/users/delete.php') ?>', { id: <?= (int)$userId ?> });
+        window.location.href = '<?= base_url('users') ?>?flash=User+deleted+successfully.';
+    } catch (err) {
+        closeDeleteModal();
+        msg.textContent = err?.data?.message ?? 'Delete failed.';
+        msg.style.color = 'var(--color-danger)';
+        msg.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+    }
+}
+
 // ── Change status ─────────────────────────────────────────────────────────────
 async function changeStatus(newStatus) {
     const msg = document.getElementById('status-msg');
@@ -508,5 +620,28 @@ async function changeStatus(newStatus) {
     }
 }
 </script>
+
+<!-- Delete User Confirmation Modal -->
+<div id="delete-user-modal"
+     class="modal-backdrop"
+     style="display:none;"
+     role="dialog" aria-modal="true" aria-labelledby="del-modal-title">
+    <div class="modal-dialog modal-md">
+        <div class="modal-header">
+            <span class="modal-title" id="del-modal-title">Delete User</span>
+        </div>
+        <div class="modal-body">
+            <p>Are you sure you want to delete <strong><?= e($user['name']) ?></strong>?</p>
+            <p style="color:var(--text-secondary);font-size:0.875rem;">
+                This user will be soft-deleted and will no longer be able to log in.
+                This action cannot be undone via the UI.
+            </p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary btn-md" onclick="closeDeleteModal()">Cancel</button>
+            <button class="btn btn-danger btn-md" id="btn-confirm-delete" onclick="executeDelete()">Delete</button>
+        </div>
+    </div>
+</div>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

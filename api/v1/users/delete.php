@@ -8,7 +8,8 @@ declare(strict_types=1);
  *
  * Business rules:
  *   - Cannot delete yourself (compare to current_user_id()).
- *   - Cannot delete an active user — must deactivate (status='inactive') first.
+ *   - Cannot delete an active user — must deactivate first (non-super_admin only).
+ *   - super_admin may delete active users directly.
  *   - Soft delete: SET deleted_at = NOW().
  *   - Audit log: action='delete'.
  *
@@ -58,8 +59,10 @@ if (!$user) {
 
 // -----------------------------------------------------------------------
 // 4. Block deletion of active users — must deactivate first
+//    WHY: super_admin can bypass this gate to allow direct deletion of active
+//         accounts; all other roles must deactivate the user first
 // -----------------------------------------------------------------------
-if ($user['status'] === 'active') {
+if ($user['status'] === 'active' && !is_super_admin()) {
     json_error('VALIDATION_ERROR', 'Active users cannot be deleted. Deactivate the user first.', 422);
 }
 
