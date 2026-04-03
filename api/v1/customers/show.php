@@ -47,9 +47,9 @@ $customer = db_row(
         currency, billing_cycle, mileage_unit,
         payment_terms, po_required, default_po_number, credit_limit,
         discount_type, discount_value,
-        outstanding_balance, total_invoiced, total_paid,
+        outstanding_balance, total_revenue, account_credit_balance,
         active_lease_count, lease_count,
-        late_fee_enabled, late_fee_rate, late_fee_grace_days,
+        late_fee_enabled, late_fee_value, late_fee_grace_days,
         notes, internal_notes,
         created_at, updated_at, created_by, updated_by
      FROM customers WHERE id = ? AND deleted_at IS NULL",
