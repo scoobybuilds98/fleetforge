@@ -49,6 +49,14 @@ $customers = db_select(
      ORDER BY company_name ASC"
 );
 
+// Load vendors for dropdown
+$vendors = db_select(
+    "SELECT id, name, vendor_type
+     FROM vendors
+     WHERE deleted_at IS NULL
+     ORDER BY name ASC"
+);
+
 $pageTitle = 'New Damage Claim';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -58,172 +66,177 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title">New Damage Claim</h1>
 </div>
 
-<div class="card"
-     x-data="damageClaimCreate()"
-     style="max-width:720px;">
+<div class="card" x-data="damageClaimCreate()" style="max-width:760px;">
 
     <div class="card-header">
         <h2 class="card-title">Claim Details</h2>
     </div>
+
     <div class="card-body">
 
         <!-- Error banner -->
-        <template x-if="error">
-            <div class="alert alert-danger" style="margin-bottom:16px;" x-text="error"></div>
-        </template>
+        <div x-show="error" class="alert alert-danger" style="margin-bottom:20px;" x-text="error"></div>
 
         <form @submit.prevent="submit()">
 
-            <!-- Equipment Unit (required) -->
-            <div class="form-group" style="margin-bottom:16px;">
-                <label class="form-label" for="equipment_unit_id">
-                    Equipment Unit <span style="color:var(--color-danger)">*</span>
-                </label>
-                <select id="equipment_unit_id"
-                        class="form-select"
-                        x-model="form.equipment_unit_id"
-                        :class="{ 'is-invalid': errors.equipment_unit_id }"
-                        required>
-                    <option value="">— Select unit —</option>
-                    <?php foreach ($units as $u): ?>
-                    <option value="<?= e($u['id']) ?>">
-                        <?= e($u['unit_number']) ?><?= $u['year'] ? ' · ' . e($u['year']) : '' ?><?= $u['brand'] ? ' ' . e($u['brand']) : '' ?><?= $u['model'] ? ' ' . e($u['model']) : '' ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-                <template x-if="errors.equipment_unit_id">
-                    <p class="form-error" x-text="errors.equipment_unit_id"></p>
-                </template>
+            <!-- Section: Who / What -->
+            <div class="form-row form-row-2" style="margin-bottom:0;">
+                <div class="form-group">
+                    <label class="form-label" for="equipment_unit_id">
+                        Equipment Unit <span class="form-label .required" style="color:var(--color-danger)">*</span>
+                    </label>
+                    <select id="equipment_unit_id"
+                            class="form-select"
+                            x-model="form.equipment_unit_id"
+                            :class="{ 'is-invalid': errors.equipment_unit_id }"
+                            required>
+                        <option value="">— Select unit —</option>
+                        <?php foreach ($units as $u): ?>
+                        <option value="<?= e($u['id']) ?>">
+                            <?= e($u['unit_number']) ?><?= $u['year'] ? ' · ' . e($u['year']) : '' ?><?= $u['brand'] ? ' · ' . e($u['brand']) : '' ?><?= $u['model'] ? ' ' . e($u['model']) : '' ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-error" x-show="errors.equipment_unit_id" x-text="errors.equipment_unit_id"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Customer</label>
+                    <select class="form-select" x-model="form.customer_id"
+                            @change="if(form.customer_id) form.customer_name = ''">
+                        <option value="">— Select existing —</option>
+                        <?php foreach ($customers as $c): ?>
+                        <option value="<?= e($c['id']) ?>"><?= e($c['company_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input type="text" class="form-control" style="margin-top:6px;"
+                           placeholder="Or type customer name…"
+                           x-model="form.customer_name"
+                           maxlength="255"
+                           @input="if(form.customer_name) form.customer_id = ''">
+                </div>
             </div>
 
-            <!-- Customer (optional) -->
-            <div class="form-group" style="margin-bottom:16px;">
-                <label class="form-label" for="customer_id">Customer</label>
-                <select id="customer_id"
-                        class="form-select"
-                        x-model="form.customer_id">
-                    <option value="">— None / unknown —</option>
-                    <?php foreach ($customers as $c): ?>
-                    <option value="<?= e($c['id']) ?>"><?= e($c['company_name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
+            <div class="form-row form-row-2" style="margin-bottom:0;">
+                <div class="form-group">
+                    <label class="form-label" for="vendor_id">Vendor Sent To</label>
+                    <select id="vendor_id" class="form-select" x-model="form.vendor_id">
+                        <option value="">— None —</option>
+                        <?php foreach ($vendors as $v): ?>
+                        <option value="<?= e($v['id']) ?>"><?= e($v['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group"><!-- intentionally blank --></div>
             </div>
 
-            <!-- Lease ID (optional, freeform) -->
-            <div class="form-group" style="margin-bottom:16px;">
-                <label class="form-label" for="lease_id">Lease ID</label>
+            <div class="form-row form-row-2">
+                <div class="form-group">
+                    <label class="form-label" for="severity">
+                        Severity <span style="color:var(--color-danger)">*</span>
+                    </label>
+                    <select id="severity"
+                            class="form-select"
+                            x-model="form.severity"
+                            :class="{ 'is-invalid': errors.severity }"
+                            required>
+                        <option value="">— Select —</option>
+                        <option value="minor">Minor</option>
+                        <option value="moderate">Moderate</option>
+                        <option value="major">Major</option>
+                        <option value="total_loss">Total Loss</option>
+                    </select>
+                    <div class="form-error" x-show="errors.severity" x-text="errors.severity"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="damage_location">Damage Location</label>
+                    <input type="text"
+                           id="damage_location"
+                           class="form-control"
+                           placeholder="e.g. Front bumper, driver-side door…"
+                           x-model="form.damage_location"
+                           maxlength="255">
+                </div>
+            </div>
+
+            <!-- Optional: Lease link -->
+            <div class="form-group">
+                <label class="form-label" for="lease_id">Linked Lease ID <span class="form-hint" style="display:inline;font-size:0.8rem;">(optional)</span></label>
                 <input type="number"
                        id="lease_id"
-                       class="form-input"
-                       placeholder="Optional — link to a lease"
+                       class="form-control"
+                       style="max-width:200px;"
+                       placeholder="Lease ID"
                        x-model.number="form.lease_id"
                        min="1">
             </div>
 
-            <!-- Severity (required) -->
-            <div class="form-group" style="margin-bottom:16px;">
-                <label class="form-label" for="severity">
-                    Severity <span style="color:var(--color-danger)">*</span>
-                </label>
-                <select id="severity"
-                        class="form-select"
-                        x-model="form.severity"
-                        :class="{ 'is-invalid': errors.severity }"
-                        required>
-                    <option value="">— Select severity —</option>
-                    <option value="minor">Minor</option>
-                    <option value="moderate">Moderate</option>
-                    <option value="major">Major</option>
-                    <option value="total_loss">Total Loss</option>
-                </select>
-                <template x-if="errors.severity">
-                    <p class="form-error" x-text="errors.severity"></p>
-                </template>
-            </div>
-
-            <!-- Damage Location (optional) -->
-            <div class="form-group" style="margin-bottom:16px;">
-                <label class="form-label" for="damage_location">Damage Location</label>
-                <input type="text"
-                       id="damage_location"
-                       class="form-input"
-                       placeholder="e.g. Front bumper, driver-side door…"
-                       x-model="form.damage_location"
-                       maxlength="255">
-            </div>
-
-            <!-- Description (required) -->
-            <div class="form-group" style="margin-bottom:16px;">
+            <!-- Description -->
+            <div class="form-group">
                 <label class="form-label" for="description">
                     Description <span style="color:var(--color-danger)">*</span>
                 </label>
                 <textarea id="description"
-                          class="form-textarea"
+                          class="form-control"
                           rows="4"
                           placeholder="Describe the damage in detail…"
                           x-model="form.description"
                           :class="{ 'is-invalid': errors.description }"
                           required></textarea>
-                <template x-if="errors.description">
-                    <p class="form-error" x-text="errors.description"></p>
-                </template>
+                <div class="form-error" x-show="errors.description" x-text="errors.description"></div>
             </div>
 
-            <!-- Cost fields -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <!-- Financial estimates -->
+            <div class="form-row form-row-3">
                 <div class="form-group">
-                    <label class="form-label" for="estimated_repair_cost">Est. Repair Cost</label>
+                    <label class="form-label" for="estimated_repair_cost">Est. Repair Cost ($)</label>
                     <input type="number"
                            id="estimated_repair_cost"
-                           class="form-input"
+                           class="form-control"
                            placeholder="0.00"
                            step="0.01"
                            min="0"
                            x-model="form.estimated_repair_cost">
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="customer_liable_amount">Customer Liable</label>
+                    <label class="form-label" for="customer_liable_amount">Customer Liable ($)</label>
                     <input type="number"
                            id="customer_liable_amount"
-                           class="form-input"
+                           class="form-control"
                            placeholder="0.00"
                            step="0.01"
                            min="0"
                            x-model="form.customer_liable_amount">
                 </div>
+                <div class="form-group">
+                    <label class="form-label" for="insurance_claim_amount">Insurance Claim ($)</label>
+                    <input type="number"
+                           id="insurance_claim_amount"
+                           class="form-control"
+                           placeholder="0.00"
+                           step="0.01"
+                           min="0"
+                           x-model="form.insurance_claim_amount">
+                </div>
             </div>
 
-            <div class="form-group" style="margin-bottom:16px;">
-                <label class="form-label" for="insurance_claim_amount">Insurance Claim Amount</label>
-                <input type="number"
-                       id="insurance_claim_amount"
-                       class="form-input"
-                       style="max-width:240px;"
-                       placeholder="0.00"
-                       step="0.01"
-                       min="0"
-                       x-model="form.insurance_claim_amount">
-            </div>
-
-            <!-- Notes (optional) -->
-            <div class="form-group" style="margin-bottom:24px;">
-                <label class="form-label" for="notes">Notes</label>
+            <!-- Internal notes -->
+            <div class="form-group">
+                <label class="form-label" for="notes">Internal Notes <span class="form-hint" style="display:inline;font-size:0.8rem;">(optional)</span></label>
                 <textarea id="notes"
-                          class="form-textarea"
+                          class="form-control"
                           rows="3"
-                          placeholder="Internal notes…"
+                          placeholder="Internal notes visible only to staff…"
                           x-model="form.notes"></textarea>
             </div>
 
-            <!-- Actions -->
-            <div style="display:flex;gap:12px;">
-                <button type="submit"
-                        class="btn btn-primary"
-                        :disabled="submitting">
+            <!-- Submit row -->
+            <div style="display:flex;gap:12px;padding-top:8px;border-top:1px solid var(--border-color);margin-top:8px;">
+                <button type="submit" class="btn btn-primary" :disabled="submitting">
                     <span x-text="submitting ? 'Creating…' : 'Create Claim'"></span>
                 </button>
-                <a href="<?= base_url('damage_claims') ?>"
-                   class="btn btn-secondary">Cancel</a>
+                <a href="<?= base_url('damage_claims') ?>" class="btn btn-secondary">Cancel</a>
             </div>
 
         </form>
@@ -239,7 +252,9 @@ function damageClaimCreate() {
         form: {
             equipment_unit_id:     <?= $preUnitId     ? $preUnitId     : 'null' ?>,
             customer_id:           <?= $preCustomerId ? $preCustomerId : 'null' ?>,
+            customer_name:         '',
             lease_id:              <?= $preLeaseId    ? $preLeaseId    : 'null' ?>,
+            vendor_id:             null,
             severity:              '',
             damage_location:       '',
             description:           '',
@@ -269,7 +284,9 @@ function damageClaimCreate() {
             const payload = {
                 equipment_unit_id:      this.form.equipment_unit_id ? parseInt(this.form.equipment_unit_id) : null,
                 customer_id:            this.form.customer_id        ? parseInt(this.form.customer_id)       : null,
+                customer_name:          this.form.customer_name.trim() || null,
                 lease_id:               this.form.lease_id           ? parseInt(this.form.lease_id)          : null,
+                vendor_id:              this.form.vendor_id          ? parseInt(this.form.vendor_id)         : null,
                 severity:               this.form.severity,
                 damage_location:        this.form.damage_location  || null,
                 description:            this.form.description,
@@ -279,7 +296,7 @@ function damageClaimCreate() {
                 insurance_claim_amount: this.form.insurance_claim_amount ? String(this.form.insurance_claim_amount) : null,
             };
 
-            FF_Api.post('api/v1/damage_claims/create.php', payload)
+            FF_Api.post('<?= base_url('api/v1/damage_claims/create.php') ?>', payload)
                 .then(d => {
                     window.location = '<?= base_url('damage_claims/show') ?>?id=' + d.data.id;
                 })

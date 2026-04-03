@@ -62,12 +62,10 @@ $conditions = ['u.deleted_at IS NULL', 't.deleted_at IS NULL'];
 $params     = [];
 
 if ($search !== null && $search !== '') {
-    $safeSearch = preg_replace('/[+\-><()~*"@]+/', ' ', $search);
-    $safeSearch = trim($safeSearch);
-    if ($safeSearch !== '') {
-        $conditions[] = 'MATCH(u.unit_number, u.vin, u.gps_device_id, u.license_plate) AGAINST (? IN BOOLEAN MODE)';
-        $params[]     = $safeSearch . '*';
-    }
+    // LIKE-based substring search — supports partial matches
+    $like         = '%' . $search . '%';
+    $conditions[] = '(u.unit_number LIKE ? OR u.vin LIKE ? OR u.gps_device_id LIKE ? OR u.license_plate LIKE ?)';
+    array_push($params, $like, $like, $like, $like);
 }
 
 if ($status !== null) {

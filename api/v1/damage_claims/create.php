@@ -58,7 +58,14 @@ if (!$severity || !in_array($severity, $validSeverities, true)) {
 
 // Optional fields
 $customerId            = clean_int($body['customer_id'] ?? null);
+$customerName          = clean_string($body['customer_name'] ?? null, 255);   // free-text fallback
 $leaseId               = clean_int($body['lease_id'] ?? null);
+$vendorId              = clean_int($body['vendor_id'] ?? null);
+
+// customer_id and customer_name are mutually exclusive — clear name when ID is set
+if ($customerId) {
+    $customerName = null;
+}
 $damageLocation        = clean_string($body['damage_location'] ?? null);
 $notes                 = clean_string($body['notes'] ?? null, 5000);
 
@@ -119,16 +126,28 @@ if ($leaseId) {
     }
 }
 
+if ($vendorId) {
+    $vendor = db_row(
+        "SELECT id, name FROM vendors WHERE id = ? AND deleted_at IS NULL",
+        [$vendorId]
+    );
+    if (!$vendor) {
+        json_error('NOT_FOUND', 'Vendor not found.', 404);
+    }
+} else {
+    $vendor = null;
+}
+
 // -----------------------------------------------------------------------
 // 3. Transaction: generate gap-free number, insert row, audit
 // -----------------------------------------------------------------------
 $result = null;
 
 db_transaction(function () use (
-    $unitId, $customerId, $leaseId, $description, $severity,
+    $unitId, $customerId, $customerName, $leaseId, $vendorId, $description, $severity,
     $damageLocation, $notes,
     $estimatedRepairCost, $customerLiableAmount, $insuranceClaimAmount,
-    $unit, $customer, &$result
+    $unit, $customer, $vendor, &$result
 ) {
     // ------------------------------------------------------------------
     // 3a. Gap-free claim number via FOR UPDATE on settings row
@@ -163,7 +182,9 @@ db_transaction(function () use (
         'claim_number'          => $claimNumber,
         'equipment_unit_id'     => $unitId,
         'customer_id'           => $customerId,
+        'customer_name'         => $customerName,
         'lease_id'              => $leaseId,
+        'vendor_id'             => $vendorId,
         'description'           => $description,
         'damage_location'       => $damageLocation,
         'severity'              => $severity,
@@ -178,7 +199,10 @@ db_transaction(function () use (
     // ------------------------------------------------------------------
     // 3c. Audit log — inside transaction (FIX #19 pattern)
     // ------------------------------------------------------------------
-    $customerDesc = $customer ? " for {$customer['company_name']}" : '';
+    $customerDesc = $customer
+        ? " for {$customer['company_name']}"
+        : ($customerName ? " for {$customerName}" : '');
+    $vendorDesc   = $vendor   ? ", vendor: {$vendor['name']}"      : '';
     db_insert('audit_log', [
         'user_id'      => current_user_id(),
         'user_name'    => current_user()['name'] ?? 'System',
@@ -187,7 +211,7 @@ db_transaction(function () use (
         'entity_type'  => 'damage_claim',
         'entity_id'    => $claimId,
         'entity_label' => $claimNumber,
-        'notes'        => "Damage claim {$claimNumber} ({$severity}) created for unit {$unit['unit_number']}{$customerDesc}.",
+        'notes'        => "Damage claim {$claimNumber} ({$severity}) created for unit {$unit['unit_number']}{$customerDesc}{$vendorDesc}.",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 

@@ -128,6 +128,29 @@ if (array_key_exists('damage_location', $body)) {
     $updates['damage_location'] = clean_string($body['damage_location'] ?? null);
 }
 
+// Customer: either FK or free-text name — mutually exclusive
+if (array_key_exists('customer_id', $body)) {
+    $cId = clean_int($body['customer_id'] ?? null);
+    if ($cId) {
+        $cCheck = db_row("SELECT id FROM customers WHERE id = ? AND deleted_at IS NULL", [$cId]);
+        if (!$cCheck) {
+            json_error('NOT_FOUND', 'Customer not found.', 404);
+        }
+        $updates['customer_id']   = $cId;
+        $updates['customer_name'] = null; // clear free-text when FK is set
+    } else {
+        $updates['customer_id'] = null;
+    }
+}
+if (array_key_exists('customer_name', $body) && !array_key_exists('customer_id', $body)) {
+    // Only apply free-text name when customer_id is not being set in the same request
+    $cName = clean_string($body['customer_name'] ?? null, 255);
+    $updates['customer_name'] = $cName ?: null;
+    if ($cName) {
+        $updates['customer_id'] = null; // clear FK when free-text is set
+    }
+}
+
 if (array_key_exists('notes', $body)) {
     $updates['notes'] = clean_string($body['notes'] ?? null, 5000);
 }
@@ -172,6 +195,17 @@ if (array_key_exists('invoice_id', $body)) {
         }
     }
     $updates['invoice_id'] = $invId;
+}
+
+if (array_key_exists('vendor_id', $body)) {
+    $vId = clean_int($body['vendor_id'] ?? null);
+    if ($vId) {
+        $vCheck = db_row("SELECT id FROM vendors WHERE id = ? AND deleted_at IS NULL", [$vId]);
+        if (!$vCheck) {
+            json_error('NOT_FOUND', 'Vendor not found.', 404);
+        }
+    }
+    $updates['vendor_id'] = $vId;
 }
 
 if (empty($updates)) {

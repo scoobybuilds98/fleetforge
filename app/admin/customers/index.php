@@ -105,8 +105,8 @@ require_once FF_ROOT . '/includes/header.php';
             <input type="search"
                    class="form-control form-control-sm"
                    placeholder="Search company, contact, email, DOT#, MC#…"
-                   x-model.debounce.400ms="filters.search"
-                   @input="resetPage()"
+                   x-model="filters.search"
+                   @input.debounce.400ms="resetPage()"
                    maxlength="255"
                    style="min-width:260px;"
                    aria-label="Search customers">

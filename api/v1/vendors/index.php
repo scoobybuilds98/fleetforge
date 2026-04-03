@@ -47,13 +47,11 @@ if (isset($_GET['is_preferred']) && $_GET['is_preferred'] !== '') {
     $params[] = (int)(bool)$_GET['is_preferred'];
 }
 
-// Full-text search on name + contact_name (FULLTEXT index idx_ft_vendors)
-// Fall back to LIKE if the search term is too short for FULLTEXT (< 3 chars)
+// LIKE-based substring search — supports partial matches
 if ($q = clean_string($_GET['q'] ?? null)) {
-    // Strip MySQL boolean operators to prevent injection
-    $safe     = preg_replace('/[+\-<>()~*\"@]/', '', $q);
-    $where[]  = 'MATCH(v.name, v.contact_name) AGAINST(? IN BOOLEAN MODE)';
-    $params[] = $safe . '*';
+    $like     = '%' . $q . '%';
+    $where[]  = '(v.name LIKE ? OR v.contact_name LIKE ?)';
+    array_push($params, $like, $like);
 }
 
 // -----------------------------------------------------------------------

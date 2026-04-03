@@ -172,7 +172,10 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
         const res  = await fetch('<?= base_url('api/v1/mileage_logs/create') ?>', {
             method: 'POST',
             body: form,
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+            },
         });
         const data = await res.json();
 

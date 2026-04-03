@@ -1,0 +1,367 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * app/admin/maintenance_work_orders/index.php
+ *
+ * Maintenance Work Orders list page.
+ * Server-renders 4 KPI tiles, then Alpine.js loads the filterable table.
+ *
+ * KPI tiles: Total WOs, Open, In Progress / Waiting Parts, Completed This Month.
+ * Filters: status, work_type, priority, date_from, date_to, q (search).
+ * Default sort: requested_date DESC.
+ *
+ * URL target for navigation entry 'url => /maintenance'.
+ *
+ * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
+ *           api/v1/maintenance_work_orders/index.php
+ * @decisions D5/D7/D30/D32
+ * @session  S015
+ */
+
+require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
+require_once FF_ROOT . '/includes/auth.php';
+
+require_auth();
+require_permission('maintenance', 'view');
+
+// ── KPI tiles (server-rendered) ──────────────────────────────────────────────
+$kpiTotal      = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE deleted_at IS NULL");
+$kpiOpen       = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE status = 'open' AND deleted_at IS NULL");
+$kpiActive     = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE status IN ('in_progress','waiting_parts') AND deleted_at IS NULL");
+$kpiCompleted  = db_count(
+    "SELECT COUNT(*) FROM maintenance_work_orders
+     WHERE status = 'completed' AND deleted_at IS NULL
+       AND completed_date >= DATE_FORMAT(NOW(), '%Y-%m-01')"
+);
+
+$pageTitle = 'Work Orders';
+require_once FF_ROOT . '/includes/header.php';
+?>
+
+<div class="page-header">
+    <h1 class="page-header-title">Maintenance Work Orders</h1>
+    <?php if (can('maintenance', 'create')): ?>
+    <a href="<?= base_url('maintenance_work_orders/create') ?>" class="btn btn-primary btn-sm">
+        + New Work Order
+    </a>
+    <?php endif; ?>
+</div>
+
+<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<div class="stat-grid" style="margin-bottom:24px;">
+
+    <div class="stat-card" style="cursor:pointer;" onclick="setFilter('status','')">
+        <div class="stat-label">Total Work Orders</div>
+        <div class="stat-value font-mono"><?= e($kpiTotal) ?></div>
+        <div class="stat-delta">all time</div>
+    </div>
+
+    <div class="stat-card" style="cursor:pointer;" onclick="setFilter('status','open')">
+        <div class="stat-label">Open</div>
+        <div class="stat-value font-mono"><?= e($kpiOpen) ?></div>
+        <div class="stat-delta">awaiting start</div>
+    </div>
+
+    <div class="stat-card" style="cursor:pointer;" onclick="setFilter('status','in_progress')">
+        <div class="stat-label">Active</div>
+        <div class="stat-value font-mono"><?= e($kpiActive) ?></div>
+        <div class="stat-delta">in progress / waiting parts</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Completed This Month</div>
+        <div class="stat-value font-mono"><?= e($kpiCompleted) ?></div>
+        <div class="stat-delta">closed out</div>
+    </div>
+
+</div>
+
+<!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
+<div class="card"
+     x-data="woList()"
+     x-init="init()"
+     id="wo-table-card">
+
+    <!-- Filter bar -->
+    <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+
+        <select class="form-select form-select-sm" x-model="filters.status" @change="goPage(1)">
+            <option value="">All Statuses</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="waiting_parts">Waiting Parts</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+        </select>
+
+        <select class="form-select form-select-sm" x-model="filters.work_type" @change="goPage(1)">
+            <option value="">All Types</option>
+            <option value="scheduled_service">Scheduled Service</option>
+            <option value="repair">Repair</option>
+            <option value="inspection">Inspection</option>
+            <option value="tire">Tire</option>
+            <option value="electrical">Electrical</option>
+            <option value="body_damage">Body Damage</option>
+            <option value="breakdown">Breakdown</option>
+            <option value="other">Other</option>
+        </select>
+
+        <select class="form-select form-select-sm" x-model="filters.priority" @change="goPage(1)">
+            <option value="">All Priorities</option>
+            <option value="emergency">Emergency</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+        </select>
+
+        <input type="text"
+               class="form-control"
+               style="max-width:220px;height:32px;font-size:0.875rem;"
+               placeholder="Search title or WO#…"
+               x-model="filters.q"
+               @input.debounce.400ms="goPage(1)">
+
+        <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
+
+        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
+              x-text="total > 0 ? total + ' work order' + (total === 1 ? '' : 's') : ''"></span>
+    </div>
+
+    <!-- Loading -->
+    <div class="card-body" x-show="loading" style="text-align:center;padding:32px;">
+        <span class="text-secondary">Loading…</span>
+    </div>
+
+    <!-- Empty state -->
+    <template x-if="!loading && rows.length === 0">
+        <div class="card-body">
+            <div class="empty-state">
+                <p class="empty-state-title">No work orders found</p>
+                <p class="empty-state-text">
+                    <?php if (can('maintenance', 'create')): ?>
+                        <a href="<?= base_url('maintenance_work_orders/create') ?>">Create a work order</a> to track repairs and maintenance.
+                    <?php else: ?>
+                        No work orders match your filters.
+                    <?php endif; ?>
+                </p>
+            </div>
+        </div>
+    </template>
+
+    <!-- Table -->
+    <template x-if="!loading && rows.length > 0">
+        <div class="table-wrapper">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th @click="setSort('work_order_number')" style="cursor:pointer;">
+                            WO # <span x-text="sortIcon('work_order_number')"></span>
+                        </th>
+                        <th>Unit</th>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th @click="setSort('priority')" style="cursor:pointer;">
+                            Priority <span x-text="sortIcon('priority')"></span>
+                        </th>
+                        <th @click="setSort('status')" style="cursor:pointer;">
+                            Status <span x-text="sortIcon('status')"></span>
+                        </th>
+                        <th @click="setSort('requested_date')" style="cursor:pointer;">
+                            Requested <span x-text="sortIcon('requested_date')"></span>
+                        </th>
+                        <th style="text-align:right;" @click="setSort('total_cost')" style="cursor:pointer;">
+                            Cost <span x-text="sortIcon('total_cost')"></span>
+                        </th>
+                        <th>Vendor</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="row in rows" :key="row.id">
+                        <tr class="table-row-link"
+                            @click="window.location = '<?= base_url('maintenance_work_orders/show') ?>?id=' + row.id"
+                            style="cursor:pointer;">
+                            <td class="font-mono" x-text="row.work_order_number"></td>
+                            <td>
+                                <a :href="'<?= base_url('equipment/show') ?>?id=' + row.equipment_unit_id"
+                                   @click.stop
+                                   class="text-accent"
+                                   x-text="row.unit_number"></a>
+                                <div class="text-secondary" style="font-size:0.75rem;"
+                                     x-text="[row.unit_year, row.brand, row.model].filter(Boolean).join(' ')"></div>
+                            </td>
+                            <td x-text="row.title" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></td>
+                            <td>
+                                <span class="badge" :class="typeBadge(row.work_type)"
+                                      x-text="typeLabel(row.work_type)"></span>
+                            </td>
+                            <td>
+                                <span class="badge" :class="priorityBadge(row.priority)"
+                                      x-text="priorityLabel(row.priority)"></span>
+                            </td>
+                            <td>
+                                <span class="badge" :class="statusBadge(row.status)"
+                                      x-text="statusLabel(row.status)"></span>
+                            </td>
+                            <td x-text="row.requested_date ?? '—'"></td>
+                            <td class="font-mono" style="text-align:right;"
+                                x-text="row.total_cost > 0 ? '$' + parseFloat(row.total_cost).toLocaleString('en-CA', {minimumFractionDigits:2}) : '—'"></td>
+                            <td x-text="row.vendor_name || '—'"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </template>
+
+    <!-- Pagination -->
+    <template x-if="!loading && totalPages > 1">
+        <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
+            <button class="btn btn-secondary btn-sm"
+                    :disabled="page <= 1"
+                    @click="goPage(page - 1)">← Prev</button>
+            <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
+                  x-text="'Page ' + page + ' of ' + totalPages"></span>
+            <button class="btn btn-secondary btn-sm"
+                    :disabled="page >= totalPages"
+                    @click="goPage(page + 1)">Next →</button>
+        </div>
+    </template>
+
+</div><!-- /card -->
+
+<script>
+// Allow KPI tiles to set filters from outside Alpine component
+function setFilter(key, val) {
+    const el = document.getElementById('wo-table-card');
+    if (!el || !el._x_dataStack) return;
+    const comp = Alpine.$data(el);
+    if (!comp) return;
+    comp.filters[key] = val;
+    comp.page = 1;
+    comp.fetch();
+}
+
+function woList() {
+    return {
+        rows:       [],
+        total:      0,
+        page:       1,
+        perPage:    25,
+        totalPages: 1,
+        loading:    false,
+        sort:       'requested_date',
+        dir:        'DESC',
+        filters: {
+            status:    '',
+            work_type: '',
+            priority:  '',
+            q:         '',
+        },
+
+        init() { this.fetch(); },
+
+        fetch() {
+            this.loading = true;
+            const p = new URLSearchParams({
+                page:     this.page,
+                per_page: this.perPage,
+                sort:     this.sort,
+                dir:      this.dir,
+            });
+            if (this.filters.status)    p.set('status', this.filters.status);
+            if (this.filters.work_type) p.set('work_type', this.filters.work_type);
+            if (this.filters.priority)  p.set('priority', this.filters.priority);
+            if (this.filters.q)         p.set('q', this.filters.q);
+
+            FF_Api.get('<?= base_url('api/v1/maintenance_work_orders/index.php') ?>?' + p.toString())
+                .then(d => {
+                    if (d && d.error) { this.rows = []; return; }
+                    this.rows       = d.data?.items ?? [];
+                    this.total      = d.data?.pagination?.total ?? 0;
+                    this.totalPages = d.data?.pagination?.total_pages ?? 1;
+                })
+                .catch(() => { this.rows = []; })
+                .finally(() => { this.loading = false; });
+        },
+
+        goPage(n) { this.page = n; this.fetch(); },
+
+        setSort(col) {
+            if (this.sort === col) { this.dir = this.dir === 'ASC' ? 'DESC' : 'ASC'; }
+            else { this.sort = col; this.dir = 'DESC'; }
+            this.page = 1;
+            this.fetch();
+        },
+
+        sortIcon(col) { return this.sort === col ? (this.dir === 'ASC' ? ' ↑' : ' ↓') : ''; },
+
+        resetFilters() {
+            this.filters = { status: '', work_type: '', priority: '', q: '' };
+            this.page = 1;
+            this.fetch();
+        },
+
+        statusBadge(s) {
+            return {
+                open:          'badge badge-info',
+                in_progress:   'badge badge-warning',
+                waiting_parts: 'badge badge-warning',
+                completed:     'badge badge-success',
+                cancelled:     'badge badge-neutral',
+            }[s] ?? 'badge badge-neutral';
+        },
+
+        statusLabel(s) {
+            return {
+                open:          'Open',
+                in_progress:   'In Progress',
+                waiting_parts: 'Waiting Parts',
+                completed:     'Completed',
+                cancelled:     'Cancelled',
+            }[s] ?? s;
+        },
+
+        priorityBadge(p) {
+            return {
+                emergency: 'badge badge-danger',
+                high:      'badge badge-warning',
+                medium:    'badge badge-info',
+                low:       'badge badge-neutral',
+            }[p] ?? 'badge badge-neutral';
+        },
+
+        priorityLabel(p) {
+            return { emergency: 'Emergency', high: 'High', medium: 'Medium', low: 'Low' }[p] ?? p;
+        },
+
+        typeBadge(t) {
+            return {
+                scheduled_service: 'badge badge-info',
+                repair:            'badge badge-warning',
+                inspection:        'badge badge-neutral',
+                tire:              'badge badge-neutral',
+                electrical:        'badge badge-warning',
+                body_damage:       'badge badge-danger',
+                breakdown:         'badge badge-danger',
+                other:             'badge badge-neutral',
+            }[t] ?? 'badge badge-neutral';
+        },
+
+        typeLabel(t) {
+            return {
+                scheduled_service: 'Scheduled',
+                repair:            'Repair',
+                inspection:        'Inspection',
+                tire:              'Tire',
+                electrical:        'Electrical',
+                body_damage:       'Body Damage',
+                breakdown:         'Breakdown',
+                other:             'Other',
+            }[t] ?? t;
+        },
+    };
+}
+</script>
+
+<?php require_once FF_ROOT . '/includes/footer.php'; ?>

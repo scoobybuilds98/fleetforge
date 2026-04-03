@@ -132,8 +132,8 @@ require_once FF_ROOT . '/includes/header.php';
                class="form-input form-input-sm"
                style="max-width:200px;"
                placeholder="Search claim # or unit…"
-               x-model.debounce.400ms="filters.q"
-               @input="goPage(1)">
+               x-model="filters.q"
+               @input.debounce.400ms="goPage(1)">
 
         <button class="btn btn-secondary btn-sm"
                 @click="resetFilters()">Reset</button>
@@ -258,9 +258,9 @@ function damageClaimsList() {
 
             FF_Api.get('api/v1/damage_claims/index.php?' + p.toString())
                 .then(d => {
-                    this.rows       = d.data ?? [];
-                    this.total      = d.meta?.total ?? 0;
-                    this.totalPages = d.meta?.last_page ?? 1;
+                    this.rows       = d.data?.items ?? [];
+                    this.total      = d.data?.pagination?.total ?? 0;
+                    this.totalPages = d.data?.pagination?.total_pages ?? 1;
                 })
                 .catch(() => { this.rows = []; })
                 .finally(() => { this.loading = false; });

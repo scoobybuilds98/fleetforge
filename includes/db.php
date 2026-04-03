@@ -232,5 +232,6 @@ function db_sanitize_column(string $col): string
             "db_sanitize_column: invalid column name '{$col}'."
         );
     }
-    return $col;
+    // Backtick-quote every column name so reserved words (e.g. `condition`) are safe.
+    return "`{$col}`";
 }

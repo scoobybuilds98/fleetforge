@@ -242,7 +242,10 @@ document.getElementById('edit-form').addEventListener('submit', async function(e
         const res  = await fetch('<?= base_url('api/v1/mileage_logs/update') ?>', {
             method: 'POST',
             body: new FormData(this),
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+            },
         });
         const data = await res.json();
         if (!data.success) {
@@ -299,7 +302,10 @@ async function confirmDelete() {
         form.append('id', '<?= e($id) ?>');
         const res  = await fetch('<?= base_url('api/v1/mileage_logs/delete') ?>', {
             method: 'POST', body: form,
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+            },
         });
         const data = await res.json();
         if (!data.success) {

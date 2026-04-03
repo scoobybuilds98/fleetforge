@@ -67,14 +67,10 @@ $conditions = ['c.deleted_at IS NULL'];
 $params     = [];
 
 if ($search !== null && $search !== '') {
-    // Strip FULLTEXT boolean operators to avoid syntax errors
-    $safeSearch = preg_replace('/[+\-><()~*"@]+/', ' ', $search);
-    $safeSearch = trim($safeSearch);
-
-    if ($safeSearch !== '') {
-        $conditions[] = 'MATCH(c.company_name, c.contact_name, c.email, c.dot_number, c.mc_number) AGAINST (? IN BOOLEAN MODE)';
-        $params[]     = $safeSearch . '*';
-    }
+    // LIKE-based substring search — supports partial matches (e.g. "Smit" finds "Smith Trucking")
+    $like         = '%' . $search . '%';
+    $conditions[] = '(c.company_name LIKE ? OR c.contact_name LIKE ? OR c.email LIKE ? OR c.dot_number LIKE ? OR c.mc_number LIKE ?)';
+    array_push($params, $like, $like, $like, $like, $like);
 }
 
 if ($status !== null) {

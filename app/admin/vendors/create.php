@@ -280,7 +280,7 @@ function vendorCreate() {
             this.saving = true;
 
             // FF_Api sends JSON + X-CSRF-Token + X-Requested-With automatically
-            FF_Api.post('api/v1/vendors/create.php', payload)
+            FF_Api.post('<?= base_url('api/v1/vendors/create.php') ?>', payload)
                 .then(d => {
                     window.location = '<?= base_url('vendors/show') ?>?id=' + d.data.id;
                 })

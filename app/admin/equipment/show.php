@@ -7,7 +7,8 @@ declare(strict_types=1);
  * Equipment unit detail (command center) page. Shows hero section with unit
  * number, status badge, and health score. Tab navigation: Overview (specs),
  * Compliance (expiry dates), Lease History (lazy-loaded from API), Status Log.
- * Maintenance and Documents tabs are placeholders for future sessions.
+ * Maintenance tab: lazy-loads work orders from api/v1/maintenance_work_orders (S015).
+ * Documents tab: placeholder for future session.
  * Status lock: if unit is on_lease the status dropdown shows a warning.
  *
  * @depends config/app.php, includes/auth.php, includes/header.php,
@@ -176,6 +177,7 @@ function daysUntil(?string $date): ?int {
             ['key' => 'mileage_logs',   'label' => 'Mileage Log'],
             ['key' => 'status_log',     'label' => 'Status Log'],
             ['key' => 'maintenance',    'label' => 'Maintenance'],
+            ['key' => 'inspections',    'label' => 'Inspections'],
             ['key' => 'documents',      'label' => 'Documents'],
         ];
         foreach ($tabs as $tab):
@@ -573,15 +575,125 @@ function daysUntil(?string $date): ?int {
         </div>
     </div>
 
-    <!-- ── TAB: Maintenance (stub) ───────────────────────────── -->
+    <!-- ── TAB: Maintenance ──────────────────────────────────── -->
     <div x-show="activeTab === 'maintenance'">
-        <div class="card card-body empty-state">
-            <div class="empty-state-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z"/></svg>
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-weight:600;">Work Order History</span>
+                <?php if (can('maintenance', 'create')): ?>
+                <a href="<?= base_url('maintenance_work_orders/create') ?>?unit_id=<?= $unitId ?>"
+                   class="btn btn-primary btn-sm">+ New Work Order</a>
+                <?php endif; ?>
             </div>
-            <p class="empty-state-title">Maintenance history coming in S016</p>
-            <p class="empty-state-text">Work order history and maintenance cost tracking will be built during the Fleet Operations session.</p>
+
+            <div x-show="workOrdersLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading work orders…</span>
+            </div>
+
+            <template x-if="!workOrdersLoading && workOrders.length === 0">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <p class="empty-state-title">No work orders</p>
+                        <p class="empty-state-text">No maintenance work orders have been created for this unit.</p>
+                    </div>
+                </div>
+            </template>
+
+            <template x-if="!workOrdersLoading && workOrders.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>WO #</th>
+                                <th>Title</th>
+                                <th>Type</th>
+                                <th>Priority</th>
+                                <th>Status</th>
+                                <th>Requested</th>
+                                <th style="text-align:right;">Total Cost</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="wo in workOrders" :key="wo.id">
+                                <tr>
+                                    <td class="font-mono" x-text="wo.work_order_number"></td>
+                                    <td x-text="wo.title" style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></td>
+                                    <td>
+                                        <span class="badge badge-neutral"
+                                              x-text="wo.work_type ? wo.work_type.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()) : '—'"></span>
+                                    </td>
+                                    <td>
+                                        <span class="badge"
+                                              :class="woPriorityBadge(wo.priority)"
+                                              x-text="wo.priority ? wo.priority.charAt(0).toUpperCase()+wo.priority.slice(1) : '—'"></span>
+                                    </td>
+                                    <td>
+                                        <span class="badge"
+                                              :class="woStatusBadge(wo.status)"
+                                              x-text="woStatusLabel(wo.status)"></span>
+                                    </td>
+                                    <td x-text="wo.requested_date ?? '—'"></td>
+                                    <td class="font-mono" style="text-align:right;"
+                                        x-text="wo.total_cost > 0 ? '$' + parseFloat(wo.total_cost).toLocaleString('en-CA',{minimumFractionDigits:2}) : '—'"></td>
+                                    <td>
+                                        <a :href="'<?= base_url('maintenance_work_orders/show') ?>?id=' + wo.id"
+                                           class="btn btn-secondary btn-sm">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
         </div>
+    </div>
+
+    <!-- ── TAB: Inspections ──────────────────────────────────── -->
+    <div x-show="activeTab === 'inspections'">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-weight:600;">Inspections</span>
+            <?php if (can('inspections', 'create')): ?>
+            <a href="<?= base_url('inspections/create') ?>?unit_id=<?= $unitId ?>" class="btn btn-primary btn-sm">+ New Inspection</a>
+            <?php endif; ?>
+        </div>
+        <div x-show="inspectionsLoading" class="card-body" style="text-align:center;padding:32px;">Loading...</div>
+        <template x-if="!inspectionsLoading && inspections.length === 0">
+            <div class="card-body empty-state">
+                <p class="empty-state-title">No inspections recorded</p>
+                <p class="empty-state-text">Pre-lease and post-lease inspections will appear here.</p>
+            </div>
+        </template>
+        <template x-if="!inspectionsLoading && inspections.length > 0">
+            <div class="table-wrapper">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Inspection #</th>
+                            <th>Type</th>
+                            <th>Date</th>
+                            <th>Inspector</th>
+                            <th>Condition</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="ins in inspections" :key="ins.id">
+                            <tr>
+                                <td class="font-mono" x-text="ins.inspection_number || ('#'+ins.id)"></td>
+                                <td><span class="badge" :class="inspTypeBadge(ins.inspection_type)" x-text="inspTypeLabel(ins.inspection_type)"></span></td>
+                                <td class="font-mono" x-text="ins.inspection_date"></td>
+                                <td x-text="ins.inspected_by || '—'"></td>
+                                <td x-text="ins.overall_condition ? ins.overall_condition.charAt(0).toUpperCase()+ins.overall_condition.slice(1) : '—'"></td>
+                                <td><span class="badge" :class="inspStatusBadge(ins.status)" x-text="inspStatusLabel(ins.status)"></span></td>
+                                <td><a :href="'<?= base_url('inspections/show') ?>?id='+ins.id" class="btn btn-xs btn-ghost">View</a></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
     </div>
 
     <!-- ── TAB: Documents (stub) ─────────────────────────────── -->
@@ -614,6 +726,12 @@ function FF_UnitDetail() {
         mileageLogs:         [],
         mileageLogsLoading:  false,
         mileageLogsLoaded:   false,
+        workOrders:          [],
+        workOrdersLoading:   false,
+        workOrdersLoaded:    false,
+        inspections:         [],
+        inspectionsLoading:  false,
+        inspectionsLoaded:   false,
 
         async init() {
             await this.loadUnit();
@@ -641,6 +759,12 @@ function FF_UnitDetail() {
                 }
                 if (tab === 'mileage_logs' && !this.mileageLogsLoaded) {
                     this.loadMileageLogs();
+                }
+                if (tab === 'maintenance' && !this.workOrdersLoaded) {
+                    this.loadWorkOrders();
+                }
+                if (tab === 'inspections' && !this.inspectionsLoaded) {
+                    this.loadInspections();
                 }
             });
         },
@@ -698,6 +822,35 @@ function FF_UnitDetail() {
             this.mileageLogsLoading = false;
         },
 
+        async loadWorkOrders() {
+            this.workOrdersLoading = true;
+            try {
+                const r = await FF_Api.get(
+                    '<?= base_url('api/v1/maintenance_work_orders/index.php') ?>?equipment_unit_id=<?= $unitId ?>&per_page=50&sort=requested_date&dir=DESC'
+                );
+                if (r.success) {
+                    this.workOrders       = r.data?.items ?? [];
+                    this.workOrdersLoaded = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.workOrdersLoading = false;
+        },
+
+        woStatusBadge(s) {
+            return { open:'badge badge-info', in_progress:'badge badge-warning', waiting_parts:'badge badge-warning',
+                     completed:'badge badge-success', cancelled:'badge badge-neutral' }[s] ?? 'badge badge-neutral';
+        },
+
+        woStatusLabel(s) {
+            return { open:'Open', in_progress:'In Progress', waiting_parts:'Waiting Parts',
+                     completed:'Completed', cancelled:'Cancelled' }[s] ?? s;
+        },
+
+        woPriorityBadge(p) {
+            return { emergency:'badge badge-danger', high:'badge badge-warning',
+                     medium:'badge badge-info', low:'badge badge-neutral' }[p] ?? 'badge badge-neutral';
+        },
+
         mlTypeBadge(t) {
             return { manual:'badge badge-info', gps_sync:'badge badge-success',
                      lease_start:'badge badge-neutral', lease_end:'badge badge-neutral',
@@ -725,6 +878,35 @@ function FF_UnitDetail() {
         dcStatusLabel(s) {
             return { reported:'Reported', assessed:'Assessed', repair_ordered:'Repair Ordered',
                      invoiced:'Invoiced', resolved:'Resolved', written_off:'Written Off' }[s] ?? s;
+        },
+
+        async loadInspections() {
+            this.inspectionsLoading = true;
+            try {
+                const r = await FF_Api.get(
+                    '<?= base_url('api/v1/inspections/index.php') ?>?equipment_unit_id=<?= $unitId ?>&per_page=50&sort=inspection_date&dir=DESC'
+                );
+                if (r.success) {
+                    this.inspections       = r.data?.items ?? [];
+                    this.inspectionsLoaded = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.inspectionsLoading = false;
+        },
+
+        inspTypeBadge(t) {
+            return { pre_lease:'badge badge-info', post_lease:'badge badge-warning', periodic:'badge badge-neutral',
+                     damage:'badge badge-danger', compliance:'badge badge-success' }[t] ?? 'badge badge-neutral';
+        },
+        inspTypeLabel(t) {
+            return { pre_lease:'Pre-Lease', post_lease:'Post-Lease', periodic:'Periodic',
+                     damage:'Damage', compliance:'Compliance' }[t] ?? t;
+        },
+        inspStatusBadge(s) {
+            return { draft:'badge badge-warning', complete:'badge badge-info', signed:'badge badge-success' }[s] ?? 'badge badge-neutral';
+        },
+        inspStatusLabel(s) {
+            return { draft:'Draft', complete:'Complete', signed:'Signed' }[s] ?? s;
         },
 
         leaseBadgeClass(status) {

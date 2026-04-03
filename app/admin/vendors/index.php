@@ -121,8 +121,8 @@ require_once FF_ROOT . '/includes/header.php';
                class="form-control"
                style="max-width:220px;height:32px;font-size:0.875rem;"
                placeholder="Search name or contact…"
-               x-model.debounce.400ms="filters.q"
-               @input="goPage(1)">
+               x-model="filters.q"
+               @input.debounce.400ms="goPage(1)">
 
         <button class="btn btn-secondary btn-sm"
                 @click="resetFilters()">Reset</button>
@@ -239,7 +239,7 @@ function vendorsList() {
             if (this.filters.is_preferred) p.set('is_preferred', this.filters.is_preferred);
             if (this.filters.q)            p.set('q', this.filters.q);
 
-            FF_Api.get('api/v1/vendors/index.php?' + p.toString())
+            FF_Api.get('<?= base_url('api/v1/vendors/index.php') ?>?' + p.toString())
                 .then(d => {
                     this.rows       = d.data?.items ?? [];
                     this.total      = d.data?.pagination?.total ?? 0;

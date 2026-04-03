@@ -27,6 +27,16 @@ $lastGpsSync  = db_row(
 );
 $lastGpsSyncDate = $lastGpsSync ? format_date($lastGpsSync['log_date']) : '—';
 
+// ── Load units for filter dropdown (same query as create.php)
+$filterUnits = db_select(
+    "SELECT eu.id, eu.unit_number, et.brand, et.model
+     FROM equipment_units eu
+     JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     WHERE eu.deleted_at IS NULL
+     ORDER BY eu.unit_number ASC",
+    []
+);
+
 $pageTitle = 'Mileage Logs';
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
@@ -39,7 +49,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <?php if (can('maintenance', 'create')): ?>
     <div>
         <a href="<?= base_url('mileage_logs/create') ?>" class="btn btn-primary">
-            <?= icon('plus') ?> Record Mileage
+            + Record Mileage
         </a>
     </div>
     <?php endif; ?>
@@ -72,11 +82,15 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <div class="card-header" style="flex-wrap:wrap;gap:.75rem;">
         <div class="card-title">Log Entries</div>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-left:auto;">
-            <input type="text" class="form-control form-control-sm"
-                   style="width:180px;"
-                   placeholder="Unit number…"
-                   x-model="filters.unit_search"
-                   @input.debounce.400ms="load()">
+            <select class="form-control form-control-sm" style="width:200px;"
+                    x-model="filters.equipment_unit_id" @change="load()">
+                <option value="">All Units</option>
+                <?php foreach ($filterUnits as $u): ?>
+                <option value="<?= e($u['id']) ?>">
+                    <?= e($u['unit_number']) ?> — <?= e($u['brand']) ?> <?= e($u['model']) ?>
+                </option>
+                <?php endforeach; ?>
+            </select>
             <select class="form-control form-control-sm" style="width:160px;"
                     x-model="filters.log_type" @change="load()">
                 <option value="">All Types</option>
@@ -198,7 +212,7 @@ function FF_MileageLogs() {
     return {
         items:      [],
         pagination: { page: 1, per_page: 25, total: 0, total_pages: 1 },
-        filters:    { log_type: '', date_from: '', date_to: '', unit_search: '' },
+        filters:    { log_type: '', date_from: '', date_to: '', equipment_unit_id: '' },
         loading:    true,
         error:      false,
 
@@ -207,27 +221,16 @@ function FF_MileageLogs() {
             this.error   = false;
             try {
                 const params = new URLSearchParams({ page, per_page: 25 });
-                if (this.filters.log_type)    params.set('log_type',  this.filters.log_type);
-                if (this.filters.date_from)   params.set('date_from', this.filters.date_from);
-                if (this.filters.date_to)     params.set('date_to',   this.filters.date_to);
+                if (this.filters.equipment_unit_id) params.set('equipment_unit_id', this.filters.equipment_unit_id);
+                if (this.filters.log_type)          params.set('log_type',          this.filters.log_type);
+                if (this.filters.date_from)         params.set('date_from',         this.filters.date_from);
+                if (this.filters.date_to)           params.set('date_to',           this.filters.date_to);
 
                 const res  = await fetch(`<?= base_url('api/v1/mileage_logs/index') ?>?${params}`);
                 const data = await res.json();
                 if (!data.success) throw new Error(data.message || 'API error');
 
-                let rows = data.data?.items ?? [];
-
-                // Client-side unit number filter (no FULLTEXT on this table)
-                if (this.filters.unit_search) {
-                    const q = this.filters.unit_search.toLowerCase();
-                    rows = rows.filter(r =>
-                        (r.unit_number || '').toLowerCase().includes(q) ||
-                        (r.brand       || '').toLowerCase().includes(q) ||
-                        (r.model       || '').toLowerCase().includes(q)
-                    );
-                }
-
-                this.items      = rows;
+                this.items      = data.data?.items ?? [];
                 this.pagination = data.data?.pagination ?? this.pagination;
             } catch (e) {
                 console.error('MileageLogs load error:', e);
@@ -240,7 +243,7 @@ function FF_MileageLogs() {
         changePage(p) { this.load(p); },
 
         clearFilters() {
-            this.filters = { log_type: '', date_from: '', date_to: '', unit_search: '' };
+            this.filters = { log_type: '', date_from: '', date_to: '', equipment_unit_id: '' };
             this.load();
         },
 

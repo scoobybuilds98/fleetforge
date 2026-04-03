@@ -52,7 +52,8 @@ $claim = db_row(
         dc.lease_id,
         l.contract_number,
         dc.customer_id,
-        c.company_name        AS customer_name,
+        dc.customer_name,
+        c.company_name        AS customer_company_name,
         dc.inspection_id,
         dc.work_order_id,
         dc.invoice_id,
@@ -66,6 +67,9 @@ $claim = db_row(
         dc.status,
         dc.notes,
         dc.resolution_notes,
+        dc.vendor_id,
+        v.name                AS vendor_name,
+        v.vendor_type         AS vendor_type,
         dc.reported_by,
         u.name                AS reported_by_name,
         dc.created_at,
@@ -74,7 +78,8 @@ $claim = db_row(
      LEFT JOIN equipment_units     eu ON eu.id = dc.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id        AND et.deleted_at IS NULL
      LEFT JOIN customers c            ON c.id  = dc.customer_id        AND c.deleted_at  IS NULL
-     LEFT JOIN leases l           ON l.id  = dc.lease_id          AND l.deleted_at  IS NULL
+     LEFT JOIN leases l            ON l.id  = dc.lease_id          AND l.deleted_at  IS NULL
+     LEFT JOIN vendors v            ON v.id  = dc.vendor_id         AND v.deleted_at  IS NULL
      LEFT JOIN users u            ON u.id  = dc.reported_by
      WHERE dc.id = ? AND dc.deleted_at IS NULL",
     [$id]
@@ -84,6 +89,16 @@ if (!$claim) {
     http_response_code(404);
     die('Damage claim not found.');
 }
+
+// Vendors list for edit form dropdown
+$vendorsList = db_select(
+    "SELECT id, name FROM vendors WHERE deleted_at IS NULL ORDER BY name ASC"
+);
+
+// Customers list for edit form dropdown
+$customersList = db_select(
+    "SELECT id, company_name FROM customers WHERE status = 'active' AND deleted_at IS NULL ORDER BY company_name ASC"
+);
 
 // Load photos — serve signed URLs, never raw file_path
 $photos = db_select(
@@ -207,8 +222,10 @@ require_once FF_ROOT . '/includes/header.php';
             <?php if ($claim['customer_id']): ?>
             <a href="<?= base_url('customers/show') ?>?id=<?= e($claim['customer_id']) ?>"
                class="link">
-                <?= e($claim['customer_name'] ?? 'Customer #' . $claim['customer_id']) ?>
+                <?= e($claim['customer_company_name'] ?? 'Customer #' . $claim['customer_id']) ?>
             </a>
+            <?php elseif ($claim['customer_name']): ?>
+            <?= e($claim['customer_name']) ?>
             <?php else: ?>
             —
             <?php endif; ?>
@@ -318,6 +335,14 @@ require_once FF_ROOT . '/includes/header.php';
                     <?php else: ?>—<?php endif; ?>
                 </dd>
 
+                <dt>Vendor Sent To</dt>
+                <dd>
+                    <?php if ($claim['vendor_id']): ?>
+                    <a href="<?= base_url('vendors/show') ?>?id=<?= e($claim['vendor_id']) ?>"
+                       class="link"><?= e($claim['vendor_name']) ?></a>
+                    <?php else: ?>—<?php endif; ?>
+                </dd>
+
                 <dt>Reported By</dt>
                 <dd><?= $claim['reported_by_name'] ? e($claim['reported_by_name']) : '—' ?></dd>
 
@@ -372,6 +397,22 @@ require_once FF_ROOT . '/includes/header.php';
                     <textarea class="form-textarea" rows="4" x-model="editForm.description"></textarea>
                 </div>
 
+                <div class="form-group" style="margin-bottom:16px;">
+                    <label class="form-label">Customer</label>
+                    <select class="form-select" x-model="editForm.customer_id"
+                            @change="if(editForm.customer_id) editForm.customer_name = ''">
+                        <option value="">— Select existing —</option>
+                        <?php foreach ($customersList as $c): ?>
+                        <option value="<?= e($c['id']) ?>"><?= e($c['company_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input type="text" class="form-input" style="margin-top:6px;"
+                           placeholder="Or type customer name…"
+                           x-model="editForm.customer_name"
+                           maxlength="255"
+                           @input="if(editForm.customer_name) editForm.customer_id = ''">
+                </div>
+
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
                     <div class="form-group">
                         <label class="form-label">Est. Repair Cost</label>
@@ -382,7 +423,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="number" class="form-input" step="0.01" min="0" x-model="editForm.actual_repair_cost">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Customer Liable</label>
+                        <label class="form-label">Liable Amount ($)</label>
                         <input type="number" class="form-input" step="0.01" min="0" x-model="editForm.customer_liable_amount">
                     </div>
                     <div class="form-group">
@@ -399,6 +440,16 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-group" style="margin-bottom:16px;">
                     <label class="form-label">Resolution Notes</label>
                     <textarea class="form-textarea" rows="3" x-model="editForm.resolution_notes"></textarea>
+                </div>
+
+                <div class="form-group" style="margin-bottom:16px;">
+                    <label class="form-label">Vendor Sent To</label>
+                    <select class="form-select" x-model="editForm.vendor_id">
+                        <option value="">— None —</option>
+                        <?php foreach ($vendorsList as $v): ?>
+                        <option value="<?= e($v['id']) ?>"><?= e($v['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
 
                 <div style="display:flex;gap:12px;">
@@ -549,12 +600,15 @@ function damageClaimShow() {
             severity:               <?= json_encode($claim['severity']) ?>,
             damage_location:        <?= json_encode($claim['damage_location'] ?? '') ?>,
             description:            <?= json_encode($claim['description']) ?>,
+            customer_id:            <?= json_encode($claim['customer_id'] ? (string)$claim['customer_id'] : '') ?>,
+            customer_name:          <?= json_encode($claim['customer_name'] ?? '') ?>,
             notes:                  <?= json_encode($claim['notes'] ?? '') ?>,
             resolution_notes:       <?= json_encode($claim['resolution_notes'] ?? '') ?>,
             estimated_repair_cost:  <?= json_encode($claim['estimated_repair_cost'] ?? '') ?>,
             actual_repair_cost:     <?= json_encode($claim['actual_repair_cost'] ?? '') ?>,
             customer_liable_amount: <?= json_encode($claim['customer_liable_amount'] ?? '') ?>,
             insurance_claim_amount: <?= json_encode($claim['insurance_claim_amount'] ?? '') ?>,
+            vendor_id:              <?= json_encode($claim['vendor_id'] ? (string)$claim['vendor_id'] : '') ?>,
         },
         editSaving: false,
         editError:  '',
@@ -586,15 +640,19 @@ function damageClaimShow() {
             this.statusSaving = true;
             this.statusError  = '';
 
-            FF_Api.post('api/v1/damage_claims/update.php', {
+            FF_Api.post('<?= base_url('api/v1/damage_claims/update.php') ?>', {
                 id:         <?= (int)$claim['id'] ?>,
                 updated_at: this.updatedAt,
                 status:     this.newStatus,
             }).then(d => {
-                // Full reload so PHP re-renders badges, transitions panel
-                window.location.reload();
+                if (d && d.error) {
+                    this.statusError  = d.message ?? d.data?.message ?? 'Failed to change status.';
+                    this.statusSaving = false;
+                } else {
+                    window.location.reload();
+                }
             }).catch(err => {
-                this.statusError  = err.message ?? 'Failed to change status.';
+                this.statusError  = err?.message ?? 'Failed to change status.';
                 this.statusSaving = false;
             });
         },
@@ -616,11 +674,23 @@ function damageClaimShow() {
             fields.forEach(f => {
                 payload[f] = this.editForm[f] !== '' ? this.editForm[f] : null;
             });
+            // Integer FK fields + free-text customer name
+            payload.customer_id   = this.editForm.customer_id   ? parseInt(this.editForm.customer_id)   : null;
+            payload.customer_name = this.editForm.customer_name ? this.editForm.customer_name.trim() || null : null;
+            payload.vendor_id     = this.editForm.vendor_id     ? parseInt(this.editForm.vendor_id)     : null;
 
-            FF_Api.post('api/v1/damage_claims/update.php', payload)
-                .then(() => { window.location.reload(); })
+            // FF_Api.post always resolves — check response body for errors
+            FF_Api.post('<?= base_url('api/v1/damage_claims/update.php') ?>', payload)
+                .then(d => {
+                    if (d && d.error) {
+                        this.editError  = d.message ?? d.data?.message ?? 'Save failed.';
+                        this.editSaving = false;
+                    } else {
+                        window.location.reload();
+                    }
+                })
                 .catch(err => {
-                    this.editError  = err.message ?? 'Save failed.';
+                    this.editError  = err?.message ?? 'Save failed.';
                     this.editSaving = false;
                 });
         },
@@ -638,7 +708,7 @@ function damageClaimShow() {
             fd.append('caption',    this.uploadCaption);
 
             // Use native fetch for multipart (FF_Api.post sends JSON)
-            fetch(FF_Config.baseUrl + '/api/v1/damage_claims/upload_photo.php', {
+            fetch('<?= base_url('api/v1/damage_claims/upload_photo.php') ?>', {
                 method:      'POST',
                 credentials: 'same-origin',
                 body:        fd,
@@ -663,13 +733,17 @@ function damageClaimShow() {
         deletePhoto(photoId) {
             if (!confirm('Delete this photo?')) return;
 
-            FF_Api.post('api/v1/damage_claims/delete_photo.php', {
+            FF_Api.post('<?= base_url('api/v1/damage_claims/delete_photo.php') ?>', {
                 photo_id: photoId,
                 claim_id: <?= (int)$claim['id'] ?>,
-            }).then(() => {
-                this.photos = this.photos.filter(p => p.id !== photoId);
+            }).then(d => {
+                if (d && d.error) {
+                    alert(d.message ?? d.data?.message ?? 'Failed to delete photo.');
+                } else {
+                    this.photos = this.photos.filter(p => p.id !== photoId);
+                }
             }).catch(err => {
-                alert(err.message ?? 'Failed to delete photo.');
+                alert(err?.message ?? 'Failed to delete photo.');
             });
         },
 
@@ -678,12 +752,17 @@ function damageClaimShow() {
             this.deleting    = true;
             this.deleteError = '';
 
-            FF_Api.post('api/v1/damage_claims/delete.php', {
+            FF_Api.post('<?= base_url('api/v1/damage_claims/delete.php') ?>', {
                 id: <?= (int)$claim['id'] ?>,
-            }).then(() => {
-                window.location = '<?= base_url('damage_claims') ?>';
+            }).then(d => {
+                if (d && d.error) {
+                    this.deleteError = d.message ?? d.data?.message ?? 'Delete failed.';
+                    this.deleting    = false;
+                } else {
+                    window.location = '<?= base_url('damage_claims') ?>';
+                }
             }).catch(err => {
-                this.deleteError = err.message ?? 'Delete failed.';
+                this.deleteError = err?.message ?? 'Delete failed.';
                 this.deleting    = false;
             });
         },

@@ -86,8 +86,15 @@ return [
     [
         'label'  => 'Maintenance',
         'icon'   => 'wrench-screwdriver',
-        'url'    => '/maintenance',
+        'url'    => '/maintenance_work_orders',
         'module' => 'maintenance',
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'Inspections',
+        'icon'   => 'clipboard-document-check',
+        'url'    => '/inspections',
+        'module' => 'inspections',
         'badge'  => null,
     ],
     [

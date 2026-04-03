@@ -172,6 +172,14 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="activeTab = 'invoices'" :aria-selected="activeTab === 'invoices'" role="tab">
             Invoices
         </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'damage_claims' }"
+                @click="activeTab = 'damage_claims'" :aria-selected="activeTab === 'damage_claims'" role="tab">
+            Damage Claims
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'mileage_logs' }"
+                @click="activeTab = 'mileage_logs'" :aria-selected="activeTab === 'mileage_logs'" role="tab">
+            Mileage Logs
+        </button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -526,34 +534,172 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ── TAB: DAMAGE CLAIMS ─────────────────────────────────────── -->
+    <div x-show="activeTab === 'damage_claims'" role="tabpanel">
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">Damage Claims</span>
+                <?php if (can('maintenance', 'create')): ?>
+                <a href="<?= base_url('damage_claims/create') ?>?customer_id=<?= $customerId ?>"
+                   class="btn btn-primary btn-sm">+ New Claim</a>
+                <?php endif; ?>
+            </div>
+
+            <!-- Loading skeleton -->
+            <div x-show="damageClaimsLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading damage claims…</span>
+            </div>
+
+            <!-- Empty state -->
+            <template x-if="!damageClaimsLoading && damageClaims.length === 0">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <p class="empty-state-title">No damage claims</p>
+                        <p class="empty-state-text">No damage claims are on record for this customer.</p>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Claims table -->
+            <template x-if="!damageClaimsLoading && damageClaims.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Claim #</th>
+                                <th>Unit</th>
+                                <th>Severity</th>
+                                <th>Status</th>
+                                <th style="text-align:right;">Est. Cost</th>
+                                <th>Reported</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="dc in damageClaims" :key="dc.id">
+                                <tr>
+                                    <td class="font-mono" x-text="dc.claim_number"></td>
+                                    <td class="font-mono" x-text="dc.unit_number ?? '—'"></td>
+                                    <td>
+                                        <span class="badge" :class="dcSeverityBadge(dc.severity)"
+                                              x-text="dcSeverityLabel(dc.severity)"></span>
+                                    </td>
+                                    <td>
+                                        <span class="badge" :class="dcStatusBadge(dc.status)"
+                                              x-text="dcStatusLabel(dc.status)"></span>
+                                    </td>
+                                    <td class="font-mono" style="text-align:right;"
+                                        x-text="dc.estimated_repair_cost ? '$' + parseFloat(dc.estimated_repair_cost).toLocaleString('en-CA', {minimumFractionDigits:2}) : '—'"></td>
+                                    <td x-text="dc.created_at ? dc.created_at.substring(0,10) : '—'"></td>
+                                    <td>
+                                        <a :href="'<?= base_url('damage_claims/show') ?>?id=' + dc.id"
+                                           class="btn btn-sm btn-secondary">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- ── TAB: MILEAGE LOGS ─────────────────────────────────────── -->
+    <div x-show="activeTab === 'mileage_logs'" role="tabpanel">
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">Mileage Logs</span>
+                <a href="<?= base_url('mileage_logs') ?>"
+                   class="btn btn-secondary btn-sm">View All</a>
+            </div>
+
+            <!-- Loading skeleton -->
+            <div x-show="mileageLogsLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading mileage logs…</span>
+            </div>
+
+            <!-- Empty state -->
+            <template x-if="!mileageLogsLoading && mileageLogs.length === 0">
+                <div class="card-body">
+                    <div class="empty-state">
+                        <p class="empty-state-title">No mileage logs</p>
+                        <p class="empty-state-text">No mileage records are linked to this customer's leases.</p>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Mileage table -->
+            <template x-if="!mileageLogsLoading && mileageLogs.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Unit</th>
+                                <th>Odometer</th>
+                                <th>Type</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="ml in mileageLogs" :key="ml.id">
+                                <tr>
+                                    <td x-text="formatDate(ml.log_date)"></td>
+                                    <td class="font-mono" x-text="ml.unit_number"></td>
+                                    <td class="font-mono" x-text="Number(ml.odometer_reading).toLocaleString('en-CA') + ' ' + (ml.mileage_unit === 'miles' ? 'mi' : 'km')"></td>
+                                    <td>
+                                        <span class="badge" :class="mlTypeBadge(ml.log_type)"
+                                              x-text="mlTypeLabel(ml.log_type)"></span>
+                                    </td>
+                                    <td>
+                                        <a :href="'<?= base_url('mileage_logs/show') ?>?id=' + ml.id"
+                                           class="btn btn-sm btn-secondary">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+        </div>
+    </div><!-- /mileage_logs tab -->
+
 </div><!-- /x-data -->
 
 <script>
 function FF_CustomerProfile() {
     return {
-        activeTab:       'overview',
-        notes:           [],
-        noteCount:       0,
-        notesLoaded:     false,
-        notesLoading:    false,
-        newNote:         '',
-        newNotePinned:   false,
-        savingNote:      false,
-        leases:          [],
-        leasesLoaded:    false,
-        leasesLoading:   false,
-        invoices:        [],
-        invoicesLoaded:  false,
-        invoicesLoading: false,
+        activeTab:           'overview',
+        notes:               [],
+        noteCount:           0,
+        notesLoaded:         false,
+        notesLoading:        false,
+        newNote:             '',
+        newNotePinned:       false,
+        savingNote:          false,
+        leases:              [],
+        leasesLoaded:        false,
+        leasesLoading:       false,
+        invoices:            [],
+        invoicesLoaded:      false,
+        invoicesLoading:     false,
+        damageClaims:        [],
+        damageClaimsLoaded:  false,
+        damageClaimsLoading: false,
+        mileageLogs:         [],
+        mileageLogsLoaded:   false,
+        mileageLogsLoading:  false,
 
         init() {
             // Pre-load note count for tab badge without loading full content
             this.loadNoteCount();
 
-            // Lazy-load leases and invoices when their tabs are activated
+            // Lazy-load leases, invoices, and damage claims when their tabs are activated
             this.$watch('activeTab', (tab) => {
                 if (tab === 'leases' && !this.leasesLoaded) this.loadLeases();
                 if (tab === 'invoices' && !this.invoicesLoaded) this.loadInvoices();
+                if (tab === 'damage_claims' && !this.damageClaimsLoaded) this.loadDamageClaims();
+                if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)  this.loadMileageLogs();
             });
         },
 
@@ -664,6 +810,60 @@ function FF_CustomerProfile() {
                 }
             } catch (e) { /* silent */ }
             this.invoicesLoading = false;
+        },
+
+        async loadDamageClaims() {
+            this.damageClaimsLoading = true;
+            try {
+                const res  = await fetch('<?= base_url('api/v1/damage_claims') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=created_at&dir=DESC');
+                const json = await res.json();
+                if (json.success) {
+                    this.damageClaims       = json.data?.items ?? [];
+                    this.damageClaimsLoaded = true;
+                }
+            } catch (e) { /* silent */ }
+            this.damageClaimsLoading = false;
+        },
+
+        async loadMileageLogs() {
+            this.mileageLogsLoading = true;
+            try {
+                const res  = await fetch('<?= base_url('api/v1/mileage_logs/index') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=log_date&dir=DESC');
+                const json = await res.json();
+                if (json.success) {
+                    this.mileageLogs       = json.data?.items ?? [];
+                    this.mileageLogsLoaded = true;
+                }
+            } catch (e) { /* silent */ }
+            this.mileageLogsLoading = false;
+        },
+
+        mlTypeBadge(type) {
+            const m = { manual:'badge-info', gps_sync:'badge-success', lease_start:'badge-neutral', lease_end:'badge-neutral', service:'badge-warning' };
+            return 'badge ' + (m[type] ?? 'badge-neutral');
+        },
+
+        mlTypeLabel(type) {
+            const m = { manual:'Manual', gps_sync:'GPS Sync', lease_start:'Lease Start', lease_end:'Lease End', service:'Service' };
+            return m[type] ?? type;
+        },
+
+        dcSeverityBadge(s) {
+            return { minor:'badge badge-info', moderate:'badge badge-warning', major:'badge badge-danger', total_loss:'badge badge-danger' }[s] ?? 'badge badge-neutral';
+        },
+
+        dcSeverityLabel(s) {
+            return { minor:'Minor', moderate:'Moderate', major:'Major', total_loss:'Total Loss' }[s] ?? s;
+        },
+
+        dcStatusBadge(s) {
+            return { reported:'badge badge-info', assessed:'badge badge-warning', repair_ordered:'badge badge-warning',
+                     invoiced:'badge badge-purple', resolved:'badge badge-success', written_off:'badge badge-neutral' }[s] ?? 'badge badge-neutral';
+        },
+
+        dcStatusLabel(s) {
+            return { reported:'Reported', assessed:'Assessed', repair_ordered:'Repair Ordered',
+                     invoiced:'Invoiced', resolved:'Resolved', written_off:'Written Off' }[s] ?? s;
         },
 
         leaseBadgeClass(status) {

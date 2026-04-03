@@ -34,6 +34,7 @@ if (!$leaseId) {
 // Server-side pre-load for hero render and page title
 $lease = db_row(
     "SELECT l.id, l.contract_number, l.status, l.start_date, l.end_date,
+            l.equipment_unit_id,
             l.company_name_snapshot, l.customer_name_snapshot,
             l.unit_number_snapshot, l.template_name_snapshot,
             l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
@@ -153,6 +154,8 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="tab = 'damage_claims'; loadDamageClaims()" :aria-selected="tab === 'damage_claims'" role="tab">Damage Claims</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'mileage_logs' }"
                 @click="tab = 'mileage_logs'; loadMileageLogs()" :aria-selected="tab === 'mileage_logs'" role="tab">Mileage Log</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'inspections' }"
+                @click="tab = 'inspections'; loadInspections()" :aria-selected="tab === 'inspections'" role="tab">Inspections</button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -529,6 +532,60 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </template>
 
+    <!-- ── TAB: INSPECTIONS ───────────────────────────────────── -->
+    <template x-if="tab === 'inspections'">
+        <div>
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                <div class="card-title">Inspections</div>
+                <div style="display:flex;gap:8px;">
+                    <?php if (can('inspections', 'create')): ?>
+                    <a href="<?= base_url('inspections/create') ?>?lease_id=<?= $leaseId ?>&unit_id=<?= (int)($lease['equipment_unit_id'] ?? 0) ?>&type=pre_lease"
+                       class="btn btn-sm btn-primary">+ Pre-Lease Inspection</a>
+                    <a href="<?= base_url('inspections/create') ?>?lease_id=<?= $leaseId ?>&unit_id=<?= (int)($lease['equipment_unit_id'] ?? 0) ?>&type=post_lease"
+                       class="btn btn-sm btn-secondary">+ Post-Lease Inspection</a>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div x-show="inspectionsLoading" class="card-body" style="text-align:center;padding:32px;">Loading...</div>
+            <template x-if="!inspectionsLoading && inspections.length === 0">
+                <div class="card-body empty-state">
+                    <p class="empty-state-title">No inspections for this lease</p>
+                    <p class="empty-state-text">Create a pre-lease inspection before the unit leaves the yard, and a post-lease inspection when it returns.</p>
+                </div>
+            </template>
+            <template x-if="!inspectionsLoading && inspections.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Inspection #</th>
+                                <th>Type</th>
+                                <th>Date</th>
+                                <th>Inspector</th>
+                                <th>Condition</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="ins in inspections" :key="ins.id">
+                                <tr>
+                                    <td class="font-mono" x-text="ins.inspection_number || ('#'+ins.id)"></td>
+                                    <td><span class="badge" :class="inspTypeBadge(ins.inspection_type)" x-text="inspTypeLabel(ins.inspection_type)"></span></td>
+                                    <td class="font-mono" x-text="ins.inspection_date"></td>
+                                    <td x-text="ins.inspected_by || '—'"></td>
+                                    <td x-text="ins.overall_condition ? ins.overall_condition.charAt(0).toUpperCase()+ins.overall_condition.slice(1) : '—'"></td>
+                                    <td><span class="badge" :class="inspStatusBadge(ins.status)" x-text="inspStatusLabel(ins.status)"></span></td>
+                                    <td><a :href="'<?= base_url('inspections/show') ?>?id='+ins.id" class="btn btn-xs btn-ghost">View</a></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+        </div>
+    </template>
+
 </div><!-- /x-data -->
 
 <script>
@@ -550,6 +607,9 @@ function FF_LeaseDetail() {
         mileageLogs:         [],
         mileageLogsLoading:  false,
         mileageLogsLoaded:   false,
+        inspections:         [],
+        inspectionsLoading:  false,
+        inspectionsLoaded:   false,
         closeForm: {
             actual_return_date: new Date().toISOString().slice(0,10),
             mileage_at_end:     '',
@@ -583,6 +643,35 @@ function FF_LeaseDetail() {
                 }
             } catch(e) { /* non-fatal */ }
             this.mileageLogsLoading = false;
+        },
+
+        // S016: Load inspections for this lease
+        async loadInspections() {
+            if (this.inspectionsLoaded) return;
+            this.inspectionsLoading = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/inspections/index.php') ?>?lease_id=<?= $leaseId ?>&per_page=50&sort=inspection_date&dir=ASC');
+                if (r.success) {
+                    this.inspections       = r.data?.items ?? [];
+                    this.inspectionsLoaded = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.inspectionsLoading = false;
+        },
+
+        inspTypeBadge(t) {
+            return { pre_lease:'badge badge-info', post_lease:'badge badge-warning', periodic:'badge badge-neutral',
+                     damage:'badge badge-danger', compliance:'badge badge-success' }[t] ?? 'badge badge-neutral';
+        },
+        inspTypeLabel(t) {
+            return { pre_lease:'Pre-Lease', post_lease:'Post-Lease', periodic:'Periodic',
+                     damage:'Damage', compliance:'Compliance' }[t] ?? t;
+        },
+        inspStatusBadge(s) {
+            return { draft:'badge badge-warning', complete:'badge badge-info', signed:'badge badge-success' }[s] ?? 'badge badge-neutral';
+        },
+        inspStatusLabel(s) {
+            return { draft:'Draft', complete:'Complete', signed:'Signed' }[s] ?? s;
         },
 
         mlTypeBadge(t) {

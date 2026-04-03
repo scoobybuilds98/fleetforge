@@ -58,11 +58,11 @@ if ($unitId = clean_int($_GET['unit_id'] ?? null)) {
     $params[] = $unitId;
 }
 
-// FULLTEXT search on contract_number, company_name_snapshot, unit_number_snapshot
+// LIKE-based substring search — supports partial matches
 if ($search = clean_string($_GET['search'] ?? null)) {
-    $safe     = preg_replace('/[+\-<>()~*\"@]/', '', $search); // strip boolean operators
-    $where[]  = "MATCH(l.contract_number, l.company_name_snapshot, l.unit_number_snapshot) AGAINST(? IN BOOLEAN MODE)";
-    $params[] = $safe . '*';
+    $like    = '%' . $search . '%';
+    $where[] = '(l.contract_number LIKE ? OR l.company_name_snapshot LIKE ? OR l.unit_number_snapshot LIKE ?)';
+    array_push($params, $like, $like, $like);
 }
 
 $whereSQL = implode(' AND ', $where);

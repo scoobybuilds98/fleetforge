@@ -769,6 +769,7 @@ CREATE TABLE maintenance_line_items (
 -- 018_inspections.sql
 CREATE TABLE inspections (
     id                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    inspection_number       VARCHAR(50) NULL UNIQUE,             -- INSP-YYYY-NNNNN; added S016
     inspection_type         ENUM('pre_lease','post_lease','periodic','damage','compliance') NOT NULL,
     equipment_unit_id       INT UNSIGNED NOT NULL,
     lease_id                INT UNSIGNED NULL,
@@ -779,6 +780,10 @@ CREATE TABLE inspections (
     inspected_by_user_id    INT UNSIGNED NULL,
     inspection_date         DATE NOT NULL,
     mileage_at_inspection   INT UNSIGNED NULL,
+    reefer_hours            INT UNSIGNED NULL,                   -- trailer reefer engine hours; added S016
+    fuel_level              ENUM('empty','quarter','half','three_quarter','full') NULL,  -- tank level at inspection; added S016
+    cvi_expiry              DATE NULL,                           -- Commercial Vehicle Inspection expiry; added S016
+    is_clean                TINYINT(1) NULL,                     -- 1=clean 0=dirty; added S016
     customer_signature      VARCHAR(500) NULL,
     signed_at               DATETIME NULL,
     pdf_path                VARCHAR(500) NULL,
@@ -798,6 +803,7 @@ CREATE TABLE inspection_sections (
     section_name    VARCHAR(100) NOT NULL,
     `condition`     ENUM('ok','fair','damaged','missing','na') NOT NULL DEFAULT 'ok',
     notes           TEXT NULL,
+    section_data    JSON NULL,   -- structured data: Tires section = per-position {brakes,tread,brand,org,wheels}; Trailer Condition = checklist items {mud_flaps,lights,canlocks,landing_gear,inflation,tray_skirts,rub_rail}; added S016
     sort_order      TINYINT UNSIGNED NOT NULL DEFAULT 0,
     INDEX idx_inspection (inspection_id),
     FOREIGN KEY (inspection_id) REFERENCES inspections(id) ON DELETE CASCADE
@@ -1164,9 +1170,11 @@ CREATE TABLE damage_claims (
     equipment_unit_id       INT UNSIGNED NOT NULL,
     lease_id                INT UNSIGNED NULL,
     customer_id             INT UNSIGNED NULL,
+    customer_name           VARCHAR(255) NULL,        -- free-text fallback when customer not in system
     inspection_id           INT UNSIGNED NULL,
     work_order_id           INT UNSIGNED NULL,
     invoice_id              INT UNSIGNED NULL,
+    vendor_id               INT UNSIGNED NULL,
     description             TEXT NOT NULL,
     damage_location         VARCHAR(255) NULL,
     severity                ENUM('minor','moderate','major','total_loss') NOT NULL DEFAULT 'minor',
@@ -1187,12 +1195,14 @@ CREATE TABLE damage_claims (
     INDEX idx_customer (customer_id),
     INDEX idx_status (status),
     INDEX idx_customer_created (customer_id, created_at),      -- [PASS-5:1H] risk score nightly calculation
+    INDEX idx_vendor (vendor_id),
     FOREIGN KEY (equipment_unit_id) REFERENCES equipment_units(id) ON DELETE RESTRICT,
     FOREIGN KEY (lease_id) REFERENCES leases(id) ON DELETE SET NULL,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
     FOREIGN KEY (inspection_id) REFERENCES inspections(id) ON DELETE SET NULL,
     FOREIGN KEY (work_order_id) REFERENCES maintenance_work_orders(id) ON DELETE SET NULL,
     FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
     FOREIGN KEY (reported_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -45,6 +45,12 @@ if ($leaseId = clean_int($_GET['lease_id'] ?? null)) {
     $params[] = $leaseId;
 }
 
+// WHY: customer_id has no direct column — filter via lease ownership
+if ($customerId = clean_int($_GET['customer_id'] ?? null)) {
+    $where[]  = 'ml.lease_id IN (SELECT id FROM leases WHERE customer_id = ? AND deleted_at IS NULL)';
+    $params[] = $customerId;
+}
+
 if ($logType = clean_string($_GET['log_type'] ?? null)) {
     $validTypes = ['manual', 'gps_sync', 'lease_start', 'lease_end', 'service'];
     if (in_array($logType, $validTypes, true)) {

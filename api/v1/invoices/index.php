@@ -45,8 +45,9 @@ if ($leaseId = clean_int($_GET['lease_id'] ?? null)) {
     $params[] = $leaseId;
 }
 if ($search = clean_string($_GET['q'] ?? null)) {
-    $where[] = "MATCH(i.invoice_number, i.company_name_snapshot) AGAINST(? IN BOOLEAN MODE)";
-    $params[] = preg_replace('/[+\-<>()~*\"@]/', '', $search);
+    $like    = '%' . $search . '%';
+    $where[] = '(i.invoice_number LIKE ? OR i.company_name_snapshot LIKE ?)';
+    array_push($params, $like, $like);
 }
 
 $whereSQL = implode(' AND ', $where);
