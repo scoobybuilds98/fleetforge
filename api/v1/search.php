@@ -33,9 +33,10 @@ require_auth_api();
 // ── Input validation ──────────────────────────────────────────────────────────
 // WHY min 2: single-character searches return too many results to be useful and
 // are expensive without a FULLTEXT index.
-$q = clean_string($_GET['q'] ?? '', 255);
+// WHY ?? null not '': clean_string returns null for empty/whitespace strings
+$q = clean_string($_GET['q'] ?? null, 255);
 
-if (strlen(trim($q)) < 2) {
+if ($q === null || strlen($q) < 2) {
     json_error('QUERY_TOO_SHORT', 'Search query must be at least 2 characters.', 400);
 }
 
@@ -120,19 +121,21 @@ foreach ($leases as $row) {
 }
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
-// Searches invoice_number and customer name (live join + snapshot fallback).
+// Searches invoice_number and company name (live join + snapshot fallback).
+// WHY company_name_snapshot not customer_name_snapshot: that is the column name
+// on the invoices table (mirrors the leases table snapshot naming convention).
 $invoices = db_select(
     "SELECT i.id,
             i.invoice_number,
             i.status,
             i.total_amount,
-            COALESCE(c.company_name, i.customer_name_snapshot) AS customer_name
+            COALESCE(c.company_name, i.company_name_snapshot) AS customer_name
        FROM invoices i
        LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
       WHERE i.deleted_at IS NULL
         AND (
             i.invoice_number LIKE ?
-            OR COALESCE(c.company_name, i.customer_name_snapshot) LIKE ?
+            OR COALESCE(c.company_name, i.company_name_snapshot) LIKE ?
         )
       ORDER BY i.created_at DESC
       LIMIT 5",

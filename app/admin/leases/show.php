@@ -38,7 +38,7 @@ $lease = db_row(
             l.company_name_snapshot, l.customer_name_snapshot,
             l.unit_number_snapshot, l.template_name_snapshot,
             l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
-            l.outstanding_balance, l.total_invoiced, l.po_number,
+            l.outstanding_balance, l.total_invoiced, l.total_paid, l.po_number,
             l.created_at, l.closed_at,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
             COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number
@@ -108,6 +108,34 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ============================================================
+     STATS ROW — server-rendered so tiles are always visible
+     across all tabs, not just Overview.
+     ============================================================ -->
+<div class="stat-grid" style="margin-bottom:24px;">
+
+    <div class="stat-card">
+        <div class="stat-label">Total Invoiced</div>
+        <div class="stat-value currency"><?= e(format_currency($lease['total_invoiced'] ?? 0)) ?></div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Total Paid</div>
+        <div class="stat-value currency"><?= e(format_currency($lease['total_paid'] ?? 0)) ?></div>
+    </div>
+
+    <div class="stat-card<?= (float)($lease['outstanding_balance'] ?? 0) > 0 ? ' stat-card--danger' : '' ?>">
+        <div class="stat-label">Outstanding</div>
+        <div class="stat-value currency"><?= e(format_currency($lease['outstanding_balance'] ?? 0)) ?></div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Currency</div>
+        <div class="stat-value"><?= e($lease['currency']) ?></div>
+    </div>
+
+</div>
+
+<!-- ============================================================
      LEASE DETAIL — Alpine component
      ============================================================ -->
 <div x-data="FF_LeaseDetail()" x-init="init()">
@@ -166,30 +194,6 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
             <template x-if="!loading && lease">
                 <div>
-                    <!-- Quick stats — stat-grid is defined in app.css (auto-fit minmax 200px) -->
-                    <div class="stat-grid">
-                        <div class="stat-card">
-                            <div class="stat-label">Total Invoiced</div>
-                            <div class="stat-value font-mono"
-                                 x-text="'$' + parseFloat(lease.total_invoiced || 0).toFixed(2)"></div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-label">Total Paid</div>
-                            <div class="stat-value font-mono"
-                                 x-text="'$' + parseFloat(lease.total_paid || 0).toFixed(2)"></div>
-                        </div>
-                        <div class="stat-card"
-                             :class="parseFloat(lease.outstanding_balance) > 0 ? 'stat-card--danger' : ''">
-                            <div class="stat-label">Outstanding</div>
-                            <div class="stat-value font-mono"
-                                 x-text="'$' + parseFloat(lease.outstanding_balance || 0).toFixed(2)"></div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-label">Currency</div>
-                            <div class="stat-value" x-text="lease.currency"></div>
-                        </div>
-                    </div>
-
                     <!-- Lease details grid — grid-2 is defined in app.css -->
                     <div class="grid-2">
 
