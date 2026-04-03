@@ -100,6 +100,10 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             <?= heroicon('bars-3', 'nav-icon') ?>
         </button>
 
+        <a href="<?= base_url('dashboard') ?>" class="btn-icon topbar-home-btn" aria-label="Dashboard">
+            <?= heroicon('home', 'nav-icon') ?>
+        </a>
+
         <?php if ($_topbarTitle !== ''): ?>
             <h1 class="topbar-title"><?= e($_topbarTitle) ?></h1>
         <?php endif; ?>
@@ -178,7 +182,13 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
         <!-- the icon flips immediately without waiting for a DOM read.    -->
         <div x-data="{
                 dark: document.documentElement.getAttribute('data-theme') === 'dark',
-                toggle() { FF_Theme.toggle(); this.dark = !this.dark; }
+                toggle() {
+                    FF_Theme.toggle();
+                    this.dark = !this.dark;
+                    // WHY: persist preference to DB so it survives logout/login (S017-B)
+                    const newTheme = this.dark ? 'dark' : 'light';
+                    FF_Api.post('<?= base_url('api/v1/users/save_preference.php') ?>', { theme: newTheme }).catch(() => {});
+                }
              }">
             <button class="btn-icon topbar-theme-btn"
                     @click="toggle()"

@@ -61,6 +61,16 @@ $isSelf     = (current_user_id() === $userId);
 $canEdit    = can('users', 'edit');
 $canCreate  = can('users', 'create');
 
+// ── Load last 10 login history entries from audit_log ────────────────────────
+$loginHistory = db_select(
+    "SELECT created_at, ip_address, user_agent, notes
+     FROM audit_log
+     WHERE action = 'login' AND user_id = ?
+     ORDER BY created_at DESC
+     LIMIT 10",
+    [$userId]
+);
+
 // Status badge map
 $statusBadges = [
     'active'    => 'badge-success',
@@ -248,6 +258,23 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
 
+    <?php if (is_super_admin() && $user['status'] === 'active' && !$isSelf): ?>
+    <!-- Send Password Reset Email — super_admin only, active non-self users -->
+    <div class="card">
+        <div class="card-body" style="padding:16px;">
+            <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 12px;">
+                Send a password reset link to this user's email address. The link expires in 2 hours.
+            </p>
+            <button id="btn-send-reset"
+                    class="btn btn-secondary w-full"
+                    onclick="sendPasswordReset()">
+                Send Password Reset Email
+            </button>
+            <div id="reset-msg" style="font-size:0.8125rem;margin-top:8px;display:none;"></div>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <?php if ($canEdit && !$isSelf): ?>
     <!-- Status actions -->
     <div class="card">
@@ -287,6 +314,61 @@ require_once FF_ROOT . '/includes/header.php';
 </div><!-- /actions panel -->
 
 </div><!-- /grid -->
+
+<!-- ══════════════════════════════════════════════════════════════
+     Login History — last 10 login attempts for this user
+     ══════════════════════════════════════════════════════════════ -->
+<div class="card" style="margin-top:20px;">
+    <div class="card-header">
+        <span style="font-weight:600;">Login History</span>
+        <span class="text-muted" style="font-size:0.8125rem;margin-left:8px;">Last 10 attempts</span>
+    </div>
+    <div class="card-body" style="padding:0;">
+        <?php if (empty($loginHistory)): ?>
+        <div class="empty-state" style="padding:32px;">
+            <div class="empty-state-title">No login history recorded yet.</div>
+        </div>
+        <?php else: ?>
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Date / Time</th>
+                    <th>IP Address</th>
+                    <th>User Agent</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($loginHistory as $entry): ?>
+                <?php
+                    // WHY: check notes for failure/lock keywords to determine result badge
+                    $notes  = strtolower($entry['notes'] ?? '');
+                    $failed = str_contains($notes, 'fail') || str_contains($notes, 'lock') || str_contains($notes, 'invalid');
+                ?>
+                <tr>
+                    <td class="font-mono" style="font-size:0.8125rem;white-space:nowrap;">
+                        <?= e(format_datetime($entry['created_at'])) ?>
+                    </td>
+                    <td class="font-mono" style="font-size:0.8125rem;">
+                        <?= $entry['ip_address'] ? e($entry['ip_address']) : '—' ?>
+                    </td>
+                    <td style="font-size:0.8125rem;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        <?= $entry['user_agent'] ? e(substr($entry['user_agent'], 0, 60)) : '—' ?>
+                    </td>
+                    <td>
+                        <?php if ($failed): ?>
+                            <span class="badge badge-danger">Failed</span>
+                        <?php else: ?>
+                            <span class="badge badge-success">Success</span>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php endif; ?>
+    </div>
+</div>
 
 <style>
 @media (max-width: 768px) {
@@ -383,6 +465,29 @@ async function resendInvite() {
         msg.style.display = 'block';
         btn.disabled = false;
         btn.textContent = 'Resend Invitation';
+    }
+}
+
+// ── Send password reset email ─────────────────────────────────────────────────
+async function sendPasswordReset() {
+    const btn = document.getElementById('btn-send-reset');
+    const msg = document.getElementById('reset-msg');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    msg.style.display = 'none';
+    try {
+        const res = await FF_Api.post('<?= base_url('api/v1/users/send_password_reset.php') ?>', { id: <?= $userId ?> });
+        msg.textContent = res?.data?.message ?? '✓ Password reset email sent.';
+        msg.style.color = 'var(--color-success)';
+        msg.style.display = 'block';
+        btn.textContent = 'Email Sent';
+    } catch (err) {
+        msg.textContent = err?.data?.message ?? 'Failed to send reset email.';
+        msg.style.color = 'var(--color-danger)';
+        msg.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Send Password Reset Email';
     }
 }
 
