@@ -20,7 +20,7 @@ declare(strict_types=1);
  *                overdue_invoices:    { count: int, total: string }
  *                compliance_alerts:   int      (units with any expiry ≤ 30 days from today)
  *                open_leases:         int      (status IN active, pending)
- *                todays_pickups:      int      (leases with start_date = today)
+ *                todays_pickups:      int      (reservations with pickup_date = today, status pending/confirmed)
  *              }
  *
  * @depends     api/bootstrap.php, includes/auth.php, includes/functions.php
@@ -134,15 +134,17 @@ $openLeasesRow = db_row(
 $openLeases = (int) $openLeasesRow['cnt'];
 
 // ── KPI 6: Today's Pickups ────────────────────────────────────
-// Leases whose start_date is today (pending or active), not deleted.
-// A "pickup" is any lease scheduled to start today, regardless of whether
-// it has been activated yet.
+// Reservations with pickup_date = today in pending or confirmed status.
+// WHY reservations not leases: the "Today's Pickups" dashboard tile was
+// originally wired to leases.start_date (S004). S018 corrects this — the
+// reservations module owns the pickup workflow. Pending + confirmed means
+// the unit is expected to leave the yard today.
 $today          = date('Y-m-d');
 $pickupsRow     = db_row(
     "SELECT COUNT(*) AS cnt
-       FROM leases
-      WHERE start_date = ?
-        AND status IN ('pending', 'active')
+       FROM reservations
+      WHERE pickup_date = ?
+        AND status IN ('pending', 'confirmed')
         AND deleted_at IS NULL",
     [$today]
 );

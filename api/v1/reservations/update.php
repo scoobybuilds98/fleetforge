@@ -1,0 +1,156 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * FleetForge — Reservation Update API
+ *
+ * @file        api/v1/reservations/update.php
+ * @description Updates editable fields on an existing reservation.
+ *              Editable only when status is 'pending' or 'confirmed'.
+ *              Completed and cancelled reservations are immutable.
+ *
+ *              D19 optimistic lock: caller must supply updated_at from the
+ *              GET /show response; 409 STALE_DATA if another user saved first.
+ *
+ *              Does NOT change status (use update_status.php) or add/remove
+ *              reservation_units (units are set at creation — show page can
+ *              display them but editing units post-creation is out of scope
+ *              for S018; show.php provides delete-and-recreate guidance).
+ *
+ * @method      POST
+ * @body        JSON — id (req), updated_at (req for D19 lock),
+ *              contact_name, company_name, contact_phone, contact_email,
+ *              quantity, pickup_date, pickup_time, yard_location, purpose,
+ *              priority, notes, internal_notes, customer_id
+ * @auth        Session required; require_permission('reservations','edit')
+ * @returns     200 { id, updated_at } | 409 STALE_DATA | 422 VALIDATION_ERROR | 404 NOT_FOUND
+ *
+ * @depends     api/bootstrap.php
+ * @spec        FLEETFORGE_SPEC_FINAL.md §7.6 Reservations
+ * @decisions   D19 (optimistic lock), D5 (soft-delete)
+ * @session     S018
+ */
+
+require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
+
+require_method('POST');
+require_auth_api();
+require_permission('reservations', 'edit');
+
+$body = json_body();
+
+$id          = clean_int($body['id'] ?? null);
+$submittedAt = clean_string($body['updated_at'] ?? null, 30);
+
+if (!$id)          json_error('MISSING_REQUIRED', 'id is required.', 422);
+if (!$submittedAt) json_error('MISSING_REQUIRED', 'updated_at is required for concurrency check.', 422);
+
+// ── Fetch current record ───────────────────────────────────────
+$existing = db_row(
+    "SELECT id, status, updated_at FROM reservations
+     WHERE id = ? AND deleted_at IS NULL",
+    [$id]
+);
+if (!$existing) {
+    json_error('NOT_FOUND', 'Reservation not found.', 404);
+}
+
+// ── Immutability check ────────────────────────────────────────
+if (in_array($existing['status'], ['completed', 'cancelled'])) {
+    json_error('IMMUTABLE_RECORD',
+        "Reservation #{$id} is {$existing['status']} and cannot be edited.", 422);
+}
+
+// ── Optimistic lock (D19) ──────────────────────────────────────
+if ($existing['updated_at'] !== $submittedAt) {
+    json_error('STALE_DATA',
+        'This reservation was modified by another user. Refresh and try again.', 409);
+}
+
+// ── Validate + collect updatable fields ───────────────────────
+$errors = [];
+
+$contactName = clean_string($body['contact_name'] ?? null, 255);
+$companyName = clean_string($body['company_name'] ?? null, 255);
+if (!$contactName) $errors['contact_name'] = 'Contact name is required.';
+if (!$companyName) $errors['company_name'] = 'Company name is required.';
+
+$pickupDate = clean_date($body['pickup_date'] ?? null);
+if (!$pickupDate) $errors['pickup_date'] = 'Pickup date is required.';
+
+$quantity = clean_int($body['quantity'] ?? null);
+if (!$quantity || $quantity < 1) $errors['quantity'] = 'Quantity must be at least 1.';
+
+if ($errors) {
+    json_error('VALIDATION_ERROR', 'Validation failed.', 422, ['errors' => $errors]);
+}
+
+$allowedPriorities = ['low', 'medium', 'high', 'urgent'];
+$priority     = in_array($body['priority'] ?? '', $allowedPriorities) ? $body['priority'] : 'medium';
+$customerId   = clean_int($body['customer_id'] ?? null) ?: null;
+$contactPhone = clean_string($body['contact_phone'] ?? null, 50);
+$contactEmail = clean_email($body['contact_email'] ?? null);
+$pickupTime   = clean_string($body['pickup_time'] ?? null, 8);
+$yardLocation = clean_string($body['yard_location'] ?? null, 100);
+$purpose      = clean_string($body['purpose'] ?? null, 500);
+$notes        = clean_string($body['notes'] ?? null, 65535);
+$internalNotes = clean_string($body['internal_notes'] ?? null, 65535);
+
+// ── Validate customer if supplied ─────────────────────────────
+if ($customerId) {
+    $customer = db_row("SELECT id FROM customers WHERE id = ? AND deleted_at IS NULL", [$customerId]);
+    if (!$customer) json_error('NOT_FOUND', 'Customer not found.', 404);
+}
+
+// ── Capture old values for audit ──────────────────────────────
+$oldValues = db_row(
+    "SELECT contact_name, company_name, pickup_date, quantity, status, priority
+     FROM reservations WHERE id = ?",
+    [$id]
+);
+
+// ── Perform update ─────────────────────────────────────────────
+$affected = db_update('reservations', [
+    'customer_id'    => $customerId,
+    'contact_name'   => $contactName,
+    'company_name'   => $companyName,
+    'contact_phone'  => $contactPhone,
+    'contact_email'  => $contactEmail,
+    'quantity'       => $quantity,
+    'pickup_date'    => $pickupDate,
+    'pickup_time'    => $pickupTime,
+    'yard_location'  => $yardLocation,
+    'purpose'        => $purpose,
+    'priority'       => $priority,
+    'notes'          => $notes,
+    'internal_notes' => $internalNotes,
+    'updated_by'     => current_user_id(),
+], 'id = ?', [$id]);
+
+// ── Audit log ──────────────────────────────────────────────────
+if ($affected > 0) {
+    db_insert('audit_log', [
+        'user_id'      => current_user_id(),
+        'user_name'    => current_user()['name'] ?? 'system',
+        'action'       => 'update',
+        'module'       => 'reservations',
+        'entity_type'  => 'reservation',
+        'entity_id'    => $id,
+        'entity_label' => "#{$id} — {$companyName}",
+        'notes'        => "Reservation #{$id} updated — {$companyName}",
+        'old_values'   => json_encode($oldValues),
+        'new_values'   => json_encode([
+            'contact_name' => $contactName,
+            'company_name' => $companyName,
+            'pickup_date'  => $pickupDate,
+            'quantity'     => $quantity,
+            'priority'     => $priority,
+        ]),
+        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+    ]);
+}
+
+// ── Return fresh updated_at ────────────────────────────────────
+$fresh = db_row("SELECT updated_at FROM reservations WHERE id = ?", [$id]);
+
+json_success(['id' => $id, 'updated_at' => $fresh['updated_at']]);

@@ -6,7 +6,8 @@ declare(strict_types=1);
  *
  * @file        app/admin/dashboard/index.php
  * @description Main dashboard page. Loads KPI tiles, 8 ApexCharts, activity feed,
- *              compliance alerts widget, and today's pickups widget via Alpine.js
+ *              compliance alerts widget, and today's pickups widget via Alpine.js.
+ *              S018: Today's Pickups tile now links to /reservations (was /leases?start_date=today).
  *              fetch calls to the api/v1/dashboard/* endpoints.
  *              No module permission required — dashboard is accessible to all
  *              authenticated staff users.
@@ -131,10 +132,10 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
         </a>
 
-        <!-- Today's Pickups -->
-        <a href="<?= base_url('leases') ?>?start_date=today"
+        <!-- Today's Pickups — links to reservations module (S018) -->
+        <a href="<?= base_url('reservations') ?>?pickup_date=<?= date('Y-m-d') ?>"
            class="stat-card stat-card--link"
-           aria-label="Today's Pickups — click to view today's lease starts">
+           aria-label="Today's Pickups — click to view today's reservations">
             <div class="stat-card__header">
                 <div class="stat-label">Today's Pickups</div>
                 <div class="stat-card__icon stat-card__icon--info">
@@ -142,7 +143,7 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
             <div class="stat-value" x-text="kpisLoaded ? kpis.todays_pickups : '—'">—</div>
-            <div class="stat-delta text-secondary" x-show="kpisLoaded">Starting today</div>
+            <div class="stat-delta text-secondary" x-show="kpisLoaded">Reservations today</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
         </a>
 
