@@ -1,5 +1,21 @@
 <?php declare(strict_types=1); ?>
 
+        <!-- ── Page footer ── -->
+        <footer style="
+            margin-top: auto;
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        ">
+            <span>&copy; <?= date('Y') ?> Avi Nanda. All rights reserved.</span>
+            <span>FleetForge <?= e(FF_VERSION) ?></span>
+        </footer>
+
         </main>
         <!-- /page-content -->
 
