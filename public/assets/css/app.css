@@ -1082,10 +1082,29 @@ kbd {
 
 .page-content {
     flex: 1;
-    padding: 28px 32px;
+    padding: 28px 32px 0;   /* bottom padding removed — app-footer provides spacing */
     min-width: 0;
+}
+
+/* ── App footer ──────────────────────────────────────────────────────────────
+   Sits outside <main> as the last child of .app-main (display:flex column).
+   position:sticky + bottom:0 keeps it pinned to the viewport bottom while
+   scrolling; on short pages it sits naturally at the end of the content.
+   WHY outside <main>: inside <main> it scrolls away with the page content.
+*/
+.app-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    flex-shrink: 0;
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 32px;
+    background-color: var(--bg-surface);
+    border-top: 1px solid var(--border-color);
+    font-size: 0.6875rem;
+    color: var(--text-muted);
 }
 
 /* Page header (title + actions row) */
