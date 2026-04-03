@@ -616,6 +616,26 @@ document.addEventListener('DOMContentLoaded', function () {
     // Apply stored theme preference (may override server-rendered attribute)
     FF_Theme.init();
 
+    // ── Sidebar scroll persistence ─────────────────────────
+    // WHY: the sidebar is a full-height scrollable element. Without this,
+    // every page load resets scrollTop to 0, losing the user's position
+    // when they click a link while scrolled down the nav.
+    (function () {
+        const KEY = 'ff-sidebar-scroll';
+        const el  = document.getElementById('ff-sidebar');
+        if (!el) return;
+
+        // Restore saved position immediately on load
+        const saved = sessionStorage.getItem(KEY);
+        if (saved) el.scrollTop = parseInt(saved, 10) || 0;
+
+        // Save position just before the page unloads (navigation or close)
+        window.addEventListener('pagehide', function () {
+            sessionStorage.setItem(KEY, String(el.scrollTop));
+        });
+    })();
+    // ──────────────────────────────────────────────────────
+
     // ── Global keyboard shortcuts ──────────────────────────
 
     document.addEventListener('keydown', function (e) {
