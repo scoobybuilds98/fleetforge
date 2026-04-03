@@ -44,20 +44,22 @@ $_csrfToken = $_SESSION['csrf_token'];
 // ── Validate the invite token ───────────────────────────────
 function find_valid_invite(string $plainToken): ?array
 {
+    // Token must be exactly 64 hex chars (32 bytes from bin2hex)
     if ($plainToken === '' || strlen($plainToken) !== 64) {
         return null;
     }
 
+    // Hash the plain token to compare against the stored SHA-256 digest
     $tokenHash = hash('sha256', $plainToken);
 
     try {
         $row = db_row(
-            "SELECT ui.id AS invite_id, ui.user_id, ui.expires_at,
-                    u.name, u.email, u.role_slug, u.is_active
-             FROM user_invitations ui
-             JOIN users u ON u.id = ui.user_id
-             WHERE ui.token_hash = ?
-               AND ui.expires_at > NOW()
+            "SELECT u.id AS user_id, u.name, u.email, u.status,
+                    ur.slug AS role_slug
+             FROM users u
+             JOIN user_roles ur ON ur.id = u.role_id
+             WHERE u.invite_token = ?
+               AND u.invite_token_expiry > NOW()
                AND u.deleted_at IS NULL",
             [$tokenHash]
         );
@@ -65,8 +67,8 @@ function find_valid_invite(string $plainToken): ?array
         return null;
     }
 
-    // If account was already activated (e.g. link clicked twice), reject
-    if ($row && (int) $row['is_active'] === 1) {
+    // Reject if account was already activated (link clicked twice or resent)
+    if ($row && $row['status'] !== 'invited') {
         return null;
     }
 
@@ -111,23 +113,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newHash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
 
                 db_transaction(function () use ($invite, $newHash, $nameVal) {
-                    // Activate the account
+                    // Activate account: set status=active, clear token columns
                     db_execute(
                         "UPDATE users
-                         SET name          = ?,
-                             password_hash = ?,
-                             is_active     = 1,
-                             login_attempts = 0,
-                             locked_until   = NULL
+                         SET name                = ?,
+                             password_hash        = ?,
+                             status               = 'active',
+                             invite_token         = NULL,
+                             invite_token_expiry  = NULL,
+                             login_attempts       = 0,
+                             locked_until         = NULL
                          WHERE id = ?",
                         [$nameVal, $newHash, $invite['user_id']]
                     );
 
-                    // Delete the used invite token
-                    db_execute(
-                        "DELETE FROM user_invitations WHERE id = ?",
-                        [$invite['invite_id']]
-                    );
+                    // Audit log — account activation via invite link
+                    db_insert('audit_log', [
+                        'user_id'      => $invite['user_id'],
+                        'user_name'    => $nameVal,
+                        'action'       => 'status_change',
+                        'module'       => 'users',
+                        'entity_type'  => 'user',
+                        'entity_id'    => $invite['user_id'],
+                        'entity_label' => $invite['email'],
+                        'old_values'   => json_encode(['status' => 'invited']),
+                        'new_values'   => json_encode(['status' => 'active']),
+                        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                        'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                        'notes'        => 'Account activated via invite link',
+                    ]);
                 });
 
                 $appName = settings_get('company.name', 'FleetForge');
@@ -145,13 +159,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Friendly role label for display
+// Friendly role label for display — matches seeded user_roles slugs
 $_roleLabels = [
-    'super_admin'  => 'Administrator',
-    'manager'      => 'Manager',
-    'dispatcher'   => 'Dispatcher',
-    'accountant'   => 'Accountant',
-    'readonly'     => 'Read-only',
+    'super_admin'      => 'Administrator',
+    'manager'          => 'Manager',
+    'dispatcher'       => 'Dispatcher',
+    'accountant'       => 'Accountant',
+    'read_only'        => 'Read-only',
+    'maintenance_tech' => 'Maintenance Tech',
 ];
 $_roleLabel = $_roleLabels[$invite['role_slug'] ?? ''] ?? ucfirst($invite['role_slug'] ?? '');
 ?>
@@ -268,7 +283,7 @@ $_roleLabel = $_roleLabels[$invite['role_slug'] ?? ''] ?? ucfirst($invite['role_
             <?php endif; ?>
 
             <form method="post"
-                  action="<?= e(base_url('auth/accept-invite')) ?>?token=<?= urlencode($plainToken) ?>"
+                  action="<?= e(base_url('auth/accept_invite')) ?>?token=<?= urlencode($plainToken) ?>"
                   novalidate>
 
                 <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
