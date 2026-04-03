@@ -413,24 +413,45 @@ require_once FF_ROOT . '/includes/header.php';
                    class="btn btn-secondary btn-sm">View All</a>
             </div>
 
-            <!-- Loading skeleton -->
-            <div x-show="leasesLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="leasesFilters.status" @change="applyLeasesFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="active">Active</option>
+                    <option value="pending">Pending</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="leasesFilters.sort" @change="applyLeasesFilters()">
+                    <option value="created_at">Sort: Date Created</option>
+                    <option value="start_date">Sort: Start Date</option>
+                    <option value="monthly_rate">Sort: Monthly Rate</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="leasesFilters.dir" @change="applyLeasesFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="leasesLoading && leases.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading leases…</span>
             </div>
 
             <!-- Empty state -->
-            <template x-if="!leasesLoading && leases.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No leases</p>
-                        <p class="empty-state-text">This customer has no leases on record.</p>
-                    </div>
+            <div x-show="leasesLoaded && !leasesLoading && leases.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No leases found</p>
+                    <p class="empty-state-text">No leases match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <!-- Lease table -->
-            <template x-if="!leasesLoading && leases.length > 0">
-                <div class="table-wrapper">
+            <!-- Table + footer -->
+            <div x-show="leases.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -465,7 +486,16 @@ require_once FF_ROOT . '/includes/header.php';
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${leases.length} of ${leasesTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="leases.length < leasesTotal"
+                            :disabled="leasesLoading"
+                            @click="loadMoreLeases()"
+                            x-text="leasesLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -478,24 +508,48 @@ require_once FF_ROOT . '/includes/header.php';
                    class="btn btn-secondary btn-sm">View All</a>
             </div>
 
-            <!-- Loading skeleton -->
-            <div x-show="invoicesLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="invoicesFilters.status" @change="applyInvoicesFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="draft">Draft</option>
+                    <option value="sent">Sent</option>
+                    <option value="paid">Paid</option>
+                    <option value="partially_paid">Partially Paid</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="void">Void</option>
+                    <option value="written_off">Written Off</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="invoicesFilters.sort" @change="applyInvoicesFilters()">
+                    <option value="created_at">Sort: Date Created</option>
+                    <option value="due_date">Sort: Due Date</option>
+                    <option value="total_amount">Sort: Amount</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="invoicesFilters.dir" @change="applyInvoicesFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="invoicesLoading && invoices.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading invoices…</span>
             </div>
 
             <!-- Empty state -->
-            <template x-if="!invoicesLoading && invoices.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No invoices</p>
-                        <p class="empty-state-text">This customer has no invoices on record.</p>
-                    </div>
+            <div x-show="invoicesLoaded && !invoicesLoading && invoices.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No invoices found</p>
+                    <p class="empty-state-text">No invoices match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <!-- Invoice table -->
-            <template x-if="!invoicesLoading && invoices.length > 0">
-                <div class="table-wrapper">
+            <!-- Table + footer -->
+            <div x-show="invoices.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -530,7 +584,16 @@ require_once FF_ROOT . '/includes/header.php';
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${invoices.length} of ${invoicesTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="invoices.length < invoicesTotal"
+                            :disabled="invoicesLoading"
+                            @click="loadMoreInvoices()"
+                            x-text="invoicesLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -545,24 +608,54 @@ require_once FF_ROOT . '/includes/header.php';
                 <?php endif; ?>
             </div>
 
-            <!-- Loading skeleton -->
-            <div x-show="damageClaimsLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="damageClaimsFilters.severity" @change="applyDamageClaimsFilters()">
+                    <option value="">All Severities</option>
+                    <option value="minor">Minor</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="major">Major</option>
+                    <option value="total_loss">Total Loss</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="damageClaimsFilters.status" @change="applyDamageClaimsFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="reported">Reported</option>
+                    <option value="assessed">Assessed</option>
+                    <option value="repair_ordered">Repair Ordered</option>
+                    <option value="invoiced">Invoiced</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="written_off">Written Off</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="damageClaimsFilters.sort" @change="applyDamageClaimsFilters()">
+                    <option value="created_at">Sort: Date Reported</option>
+                    <option value="estimated_repair_cost">Sort: Est. Cost</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="damageClaimsFilters.dir" @change="applyDamageClaimsFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="damageClaimsLoading && damageClaims.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading damage claims…</span>
             </div>
 
             <!-- Empty state -->
-            <template x-if="!damageClaimsLoading && damageClaims.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No damage claims</p>
-                        <p class="empty-state-text">No damage claims are on record for this customer.</p>
-                    </div>
+            <div x-show="damageClaimsLoaded && !damageClaimsLoading && damageClaims.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No damage claims found</p>
+                    <p class="empty-state-text">No claims match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <!-- Claims table -->
-            <template x-if="!damageClaimsLoading && damageClaims.length > 0">
-                <div class="table-wrapper">
+            <!-- Table + footer -->
+            <div x-show="damageClaims.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -600,7 +693,16 @@ require_once FF_ROOT . '/includes/header.php';
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${damageClaims.length} of ${damageClaimsTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="damageClaims.length < damageClaimsTotal"
+                            :disabled="damageClaimsLoading"
+                            @click="loadMoreDamageClaims()"
+                            x-text="damageClaimsLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -613,24 +715,40 @@ require_once FF_ROOT . '/includes/header.php';
                    class="btn btn-secondary btn-sm">View All</a>
             </div>
 
-            <!-- Loading skeleton -->
-            <div x-show="mileageLogsLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="mileageLogsFilters.log_type" @change="applyMileageLogsFilters()">
+                    <option value="">All Types</option>
+                    <option value="manual">Manual</option>
+                    <option value="gps_sync">GPS Sync</option>
+                    <option value="lease_start">Lease Start</option>
+                    <option value="lease_end">Lease End</option>
+                    <option value="service">Service</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="mileageLogsFilters.dir" @change="applyMileageLogsFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="mileageLogsLoading && mileageLogs.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading mileage logs…</span>
             </div>
 
             <!-- Empty state -->
-            <template x-if="!mileageLogsLoading && mileageLogs.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No mileage logs</p>
-                        <p class="empty-state-text">No mileage records are linked to this customer's leases.</p>
-                    </div>
+            <div x-show="mileageLogsLoaded && !mileageLogsLoading && mileageLogs.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No mileage logs found</p>
+                    <p class="empty-state-text">No records match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <!-- Mileage table -->
-            <template x-if="!mileageLogsLoading && mileageLogs.length > 0">
-                <div class="table-wrapper">
+            <!-- Table + footer -->
+            <div x-show="mileageLogs.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -660,7 +778,16 @@ require_once FF_ROOT . '/includes/header.php';
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${mileageLogs.length} of ${mileageLogsTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="mileageLogs.length < mileageLogsTotal"
+                            :disabled="mileageLogsLoading"
+                            @click="loadMoreMileageLogs()"
+                            x-text="mileageLogsLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div><!-- /mileage_logs tab -->
 
@@ -677,46 +804,61 @@ function FF_CustomerProfile() {
         newNote:             '',
         newNotePinned:       false,
         savingNote:          false,
+
+        // ── Leases ────────────────────────────────────────────────
         leases:              [],
+        leasesTotal:         0,
+        leasesPage:          1,
         leasesLoaded:        false,
         leasesLoading:       false,
+        leasesFilters:       { status: '', sort: 'created_at', dir: 'DESC' },
+
+        // ── Invoices ──────────────────────────────────────────────
         invoices:            [],
+        invoicesTotal:       0,
+        invoicesPage:        1,
         invoicesLoaded:      false,
         invoicesLoading:     false,
+        invoicesFilters:     { status: '', sort: 'created_at', dir: 'DESC' },
+
+        // ── Damage Claims ─────────────────────────────────────────
         damageClaims:        [],
+        damageClaimsTotal:   0,
+        damageClaimsPage:    1,
         damageClaimsLoaded:  false,
         damageClaimsLoading: false,
+        damageClaimsFilters: { severity: '', status: '', sort: 'created_at', dir: 'DESC' },
+
+        // ── Mileage Logs ──────────────────────────────────────────
         mileageLogs:         [],
+        mileageLogsTotal:    0,
+        mileageLogsPage:     1,
         mileageLogsLoaded:   false,
         mileageLogsLoading:  false,
+        mileageLogsFilters:  { log_type: '', sort: 'log_date', dir: 'DESC' },
 
         init() {
-            // Pre-load note count for tab badge without loading full content
             this.loadNoteCount();
-
-            // Lazy-load leases, invoices, and damage claims when their tabs are activated
             this.$watch('activeTab', (tab) => {
-                if (tab === 'leases' && !this.leasesLoaded) this.loadLeases();
-                if (tab === 'invoices' && !this.invoicesLoaded) this.loadInvoices();
+                if (tab === 'leases'        && !this.leasesLoaded)       this.loadLeases();
+                if (tab === 'invoices'      && !this.invoicesLoaded)     this.loadInvoices();
                 if (tab === 'damage_claims' && !this.damageClaimsLoaded) this.loadDamageClaims();
                 if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)  this.loadMileageLogs();
             });
         },
 
+        // ── Notes ──────────────────────────────────────────────────
         async loadNoteCount() {
             try {
                 const res  = await fetch('<?= base_url('api/v1/customers/notes') ?>?customer_id=<?= $customerId ?>');
                 const json = await res.json();
-                if (json.success) {
-                    this.noteCount = json.data.notes.length;
-                }
+                if (json.success) this.noteCount = json.data.notes.length;
             } catch (e) { /* silent */ }
         },
 
         async loadNotes() {
             if (this.notesLoaded) return;
             this.notesLoading = true;
-
             try {
                 const res  = await fetch('<?= base_url('api/v1/customers/notes') ?>?customer_id=<?= $customerId ?>');
                 const json = await res.json();
@@ -725,34 +867,21 @@ function FF_CustomerProfile() {
                     this.noteCount   = this.notes.length;
                     this.notesLoaded = true;
                 }
-            } catch (e) {
-                /* silent — empty state shown */
-            } finally {
-                this.notesLoading = false;
-            }
+            } catch (e) { /* silent */ }
+            finally { this.notesLoading = false; }
         },
 
         async saveNote() {
             if (!this.newNote.trim()) return;
             this.savingNote = true;
-
             try {
                 const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
                 const res  = await fetch('<?= base_url('api/v1/customers/notes/create') ?>', {
                     method:  'POST',
-                    headers: {
-                        'Content-Type':     'application/json',
-                        'X-CSRF-Token':     csrf,
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body: JSON.stringify({
-                        customer_id: <?= $customerId ?>,
-                        note:        this.newNote.trim(),
-                        is_pinned:   this.newNotePinned,
-                    }),
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ customer_id: <?= $customerId ?>, note: this.newNote.trim(), is_pinned: this.newNotePinned }),
                 });
                 const json = await res.json();
-
                 if (res.ok && json.success) {
                     const newItem = {
                         id:              json.data.id,
@@ -763,7 +892,6 @@ function FF_CustomerProfile() {
                         created_by_name: '<?= e(addslashes(current_user()['name'] ?? '')) ?>',
                         created_at:      json.data.created_at,
                     };
-
                     // WHY: insert after last pinned so pinned notes stay at top
                     if (newItem.is_pinned) {
                         this.notes.unshift(newItem);
@@ -771,7 +899,6 @@ function FF_CustomerProfile() {
                         const lastPinned = this.notes.findLastIndex(n => n.is_pinned);
                         this.notes.splice(lastPinned + 1, 0, newItem);
                     }
-
                     this.noteCount     = this.notes.length;
                     this.newNote       = '';
                     this.newNotePinned = false;
@@ -786,106 +913,122 @@ function FF_CustomerProfile() {
             }
         },
 
-        async loadLeases() {
+        // ── Leases ─────────────────────────────────────────────────
+        async loadLeases(append = false) {
             this.leasesLoading = true;
             try {
-                const res  = await fetch('<?= base_url('api/v1/leases') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=created_at&dir=DESC');
-                const json = await res.json();
+                const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 50, page: this.leasesPage, sort: this.leasesFilters.sort, dir: this.leasesFilters.dir });
+                if (this.leasesFilters.status) p.set('status', this.leasesFilters.status);
+                const json = await (await fetch('<?= base_url('api/v1/leases') ?>?' + p)).json();
                 if (json.success) {
-                    this.leases      = json.data.items || [];
+                    const items      = json.data.items || [];
+                    this.leases      = append ? [...this.leases, ...items] : items;
+                    this.leasesTotal = json.data.pagination?.total ?? items.length;
                     this.leasesLoaded = true;
                 }
             } catch (e) { /* silent */ }
             this.leasesLoading = false;
         },
+        loadMoreLeases()     { this.leasesPage++; this.loadLeases(true); },
+        applyLeasesFilters() { this.leases = []; this.leasesPage = 1; this.leasesTotal = 0; this.leasesLoaded = false; this.loadLeases(); },
 
-        async loadInvoices() {
+        // ── Invoices ───────────────────────────────────────────────
+        async loadInvoices(append = false) {
             this.invoicesLoading = true;
             try {
-                const res  = await fetch('<?= base_url('api/v1/invoices') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=created_at&dir=DESC');
-                const json = await res.json();
+                const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 50, page: this.invoicesPage, sort: this.invoicesFilters.sort, dir: this.invoicesFilters.dir });
+                if (this.invoicesFilters.status) p.set('status', this.invoicesFilters.status);
+                const json = await (await fetch('<?= base_url('api/v1/invoices') ?>?' + p)).json();
                 if (json.success) {
-                    this.invoices       = json.data.items || [];
+                    const items       = json.data.items || [];
+                    this.invoices     = append ? [...this.invoices, ...items] : items;
+                    this.invoicesTotal = json.data.pagination?.total ?? items.length;
                     this.invoicesLoaded = true;
                 }
             } catch (e) { /* silent */ }
             this.invoicesLoading = false;
         },
+        loadMoreInvoices()     { this.invoicesPage++; this.loadInvoices(true); },
+        applyInvoicesFilters() { this.invoices = []; this.invoicesPage = 1; this.invoicesTotal = 0; this.invoicesLoaded = false; this.loadInvoices(); },
 
-        async loadDamageClaims() {
+        // ── Damage Claims ──────────────────────────────────────────
+        async loadDamageClaims(append = false) {
             this.damageClaimsLoading = true;
             try {
-                const res  = await fetch('<?= base_url('api/v1/damage_claims') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=created_at&dir=DESC');
-                const json = await res.json();
+                const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 50, page: this.damageClaimsPage, sort: this.damageClaimsFilters.sort, dir: this.damageClaimsFilters.dir });
+                if (this.damageClaimsFilters.severity) p.set('severity', this.damageClaimsFilters.severity);
+                if (this.damageClaimsFilters.status)   p.set('status',   this.damageClaimsFilters.status);
+                const json = await (await fetch('<?= base_url('api/v1/damage_claims') ?>?' + p)).json();
                 if (json.success) {
-                    this.damageClaims       = json.data?.items ?? [];
+                    const items          = json.data?.items ?? [];
+                    this.damageClaims    = append ? [...this.damageClaims, ...items] : items;
+                    this.damageClaimsTotal  = json.data.pagination?.total ?? items.length;
                     this.damageClaimsLoaded = true;
                 }
             } catch (e) { /* silent */ }
             this.damageClaimsLoading = false;
         },
+        loadMoreDamageClaims()     { this.damageClaimsPage++; this.loadDamageClaims(true); },
+        applyDamageClaimsFilters() { this.damageClaims = []; this.damageClaimsPage = 1; this.damageClaimsTotal = 0; this.damageClaimsLoaded = false; this.loadDamageClaims(); },
 
-        async loadMileageLogs() {
+        // ── Mileage Logs ───────────────────────────────────────────
+        async loadMileageLogs(append = false) {
             this.mileageLogsLoading = true;
             try {
-                const res  = await fetch('<?= base_url('api/v1/mileage_logs/index') ?>?customer_id=<?= $customerId ?>&per_page=50&sort=log_date&dir=DESC');
-                const json = await res.json();
+                const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 50, page: this.mileageLogsPage, sort: this.mileageLogsFilters.sort, dir: this.mileageLogsFilters.dir });
+                if (this.mileageLogsFilters.log_type) p.set('log_type', this.mileageLogsFilters.log_type);
+                const json = await (await fetch('<?= base_url('api/v1/mileage_logs/index') ?>?' + p)).json();
                 if (json.success) {
-                    this.mileageLogs       = json.data?.items ?? [];
+                    const items          = json.data?.items ?? [];
+                    this.mileageLogs     = append ? [...this.mileageLogs, ...items] : items;
+                    this.mileageLogsTotal  = json.data.pagination?.total ?? items.length;
                     this.mileageLogsLoaded = true;
                 }
             } catch (e) { /* silent */ }
             this.mileageLogsLoading = false;
         },
+        loadMoreMileageLogs()     { this.mileageLogsPage++; this.loadMileageLogs(true); },
+        applyMileageLogsFilters() { this.mileageLogs = []; this.mileageLogsPage = 1; this.mileageLogsTotal = 0; this.mileageLogsLoaded = false; this.loadMileageLogs(); },
 
+        // ── Badge / format helpers (unchanged) ────────────────────
         mlTypeBadge(type) {
             const m = { manual:'badge-info', gps_sync:'badge-success', lease_start:'badge-neutral', lease_end:'badge-neutral', service:'badge-warning' };
             return 'badge ' + (m[type] ?? 'badge-neutral');
         },
-
         mlTypeLabel(type) {
             const m = { manual:'Manual', gps_sync:'GPS Sync', lease_start:'Lease Start', lease_end:'Lease End', service:'Service' };
             return m[type] ?? type;
         },
-
         dcSeverityBadge(s) {
             return { minor:'badge badge-info', moderate:'badge badge-warning', major:'badge badge-danger', total_loss:'badge badge-danger' }[s] ?? 'badge badge-neutral';
         },
-
         dcSeverityLabel(s) {
             return { minor:'Minor', moderate:'Moderate', major:'Major', total_loss:'Total Loss' }[s] ?? s;
         },
-
         dcStatusBadge(s) {
             return { reported:'badge badge-info', assessed:'badge badge-warning', repair_ordered:'badge badge-warning',
                      invoiced:'badge badge-purple', resolved:'badge badge-success', written_off:'badge badge-neutral' }[s] ?? 'badge badge-neutral';
         },
-
         dcStatusLabel(s) {
             return { reported:'Reported', assessed:'Assessed', repair_ordered:'Repair Ordered',
                      invoiced:'Invoiced', resolved:'Resolved', written_off:'Written Off' }[s] ?? s;
         },
-
         leaseBadgeClass(status) {
             const m = { active:'badge-success', pending:'badge-info', completed:'badge-neutral', cancelled:'badge-danger' };
             return m[status] || 'badge-neutral';
         },
-
         invoiceBadgeClass(status) {
             const m = { draft:'badge-neutral', sent:'badge-info', paid:'badge-success',
                         partially_paid:'badge-warning', overdue:'badge-danger',
                         void:'badge-neutral', written_off:'badge-danger' };
             return m[status] || 'badge-neutral';
         },
-
         formatDate(dt) {
             if (!dt) return '';
             try {
                 return new Date(dt.replace(' ', 'T') + 'Z')
                     .toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
-            } catch (e) {
-                return dt;
-            }
+            } catch (e) { return dt; }
         },
     };
 }
@@ -896,15 +1039,10 @@ async function deleteCustomer(id) {
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
         const res  = await fetch('<?= base_url('api/v1/customers/delete') ?>', {
             method:  'POST',
-            headers: {
-                'Content-Type':     'application/json',
-                'X-CSRF-Token':     csrf,
-                'X-Requested-With': 'XMLHttpRequest',
-            },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Requested-With': 'XMLHttpRequest' },
             body: JSON.stringify({ id }),
         });
         const json = await res.json();
-
         if (res.ok && json.success) {
             window.location.href = '<?= base_url('customers') ?>';
         } else {

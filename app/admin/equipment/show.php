@@ -329,21 +329,41 @@ function daysUntil(?string $date): ?int {
                 <div class="card-title">Lease History</div>
             </div>
 
-            <div x-show="leasesLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="leasesFilters.status" @change="applyLeasesFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="active">Active</option>
+                    <option value="pending">Pending</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="leasesFilters.sort" @change="applyLeasesFilters()">
+                    <option value="start_date">Sort: Start Date</option>
+                    <option value="monthly_rate">Sort: Monthly Rate</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="leasesFilters.dir" @change="applyLeasesFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <div x-show="leasesLoading && leaseHistory.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading lease history…</span>
             </div>
 
-            <template x-if="!leasesLoading && leaseHistory.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No lease history</p>
-                        <p class="empty-state-text">This unit has not been leased yet.</p>
-                    </div>
+            <div x-show="leasesLoaded && !leasesLoading && leaseHistory.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No lease history found</p>
+                    <p class="empty-state-text">No leases match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <template x-if="!leasesLoading && leaseHistory.length > 0">
-                <div class="table-wrapper">
+            <div x-show="leaseHistory.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -378,7 +398,16 @@ function daysUntil(?string $date): ?int {
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${leaseHistory.length} of ${leasesTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="leaseHistory.length < leasesTotal"
+                            :disabled="leasesLoading"
+                            @click="loadMoreLeaseHistory()"
+                            x-text="leasesLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -393,21 +422,46 @@ function daysUntil(?string $date): ?int {
                 <?php endif; ?>
             </div>
 
-            <div x-show="damageClaimsLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="damageClaimsFilters.severity" @change="applyDamageClaimsFilters()">
+                    <option value="">All Severities</option>
+                    <option value="minor">Minor</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="major">Major</option>
+                    <option value="total_loss">Total Loss</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="damageClaimsFilters.status" @change="applyDamageClaimsFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="reported">Reported</option>
+                    <option value="assessed">Assessed</option>
+                    <option value="repair_ordered">Repair Ordered</option>
+                    <option value="invoiced">Invoiced</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="written_off">Written Off</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="damageClaimsFilters.dir" @change="applyDamageClaimsFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <div x-show="damageClaimsLoading && damageClaims.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading damage claims…</span>
             </div>
 
-            <template x-if="!damageClaimsLoading && damageClaims.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No damage claims</p>
-                        <p class="empty-state-text">No damage claims have been filed for this unit.</p>
-                    </div>
+            <div x-show="damageClaimsLoaded && !damageClaimsLoading && damageClaims.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No damage claims found</p>
+                    <p class="empty-state-text">No claims match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <template x-if="!damageClaimsLoading && damageClaims.length > 0">
-                <div class="table-wrapper">
+            <div x-show="damageClaims.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -445,7 +499,16 @@ function daysUntil(?string $date): ?int {
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${damageClaims.length} of ${damageClaimsTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="damageClaims.length < damageClaimsTotal"
+                            :disabled="damageClaimsLoading"
+                            @click="loadMoreDamageClaims()"
+                            x-text="damageClaimsLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -460,21 +523,37 @@ function daysUntil(?string $date): ?int {
                 <?php endif; ?>
             </div>
 
-            <div x-show="mileageLogsLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="mileageLogsFilters.log_type" @change="applyMileageLogsFilters()">
+                    <option value="">All Types</option>
+                    <option value="manual">Manual</option>
+                    <option value="gps_sync">GPS Sync</option>
+                    <option value="lease_start">Lease Start</option>
+                    <option value="lease_end">Lease End</option>
+                    <option value="service">Service</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="mileageLogsFilters.dir" @change="applyMileageLogsFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <div x-show="mileageLogsLoading && mileageLogs.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading mileage log…</span>
             </div>
 
-            <template x-if="!mileageLogsLoading && mileageLogs.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No mileage entries</p>
-                        <p class="empty-state-text">No odometer readings have been recorded for this unit.</p>
-                    </div>
+            <div x-show="mileageLogsLoaded && !mileageLogsLoading && mileageLogs.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No mileage entries found</p>
+                    <p class="empty-state-text">No records match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <template x-if="!mileageLogsLoading && mileageLogs.length > 0">
-                <div class="table-wrapper">
+            <div x-show="mileageLogs.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -516,7 +595,16 @@ function daysUntil(?string $date): ?int {
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${mileageLogs.length} of ${mileageLogsTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="mileageLogs.length < mileageLogsTotal"
+                            :disabled="mileageLogsLoading"
+                            @click="loadMoreMileageLogs()"
+                            x-text="mileageLogsLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -536,7 +624,7 @@ function daysUntil(?string $date): ?int {
                     <div class="text-secondary text-sm">No status changes recorded.</div>
                 </template>
                 <template x-if="!loadingLog && statusLog.length > 0">
-                    <div class="table-wrapper">
+                    <div class="tab-table-container">
                         <table class="table">
                             <thead>
                                 <tr>
@@ -586,21 +674,51 @@ function daysUntil(?string $date): ?int {
                 <?php endif; ?>
             </div>
 
-            <div x-show="workOrdersLoading" class="card-body" style="text-align:center;padding:32px;">
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="workOrdersFilters.status" @change="applyWorkOrdersFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="open">Open</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="waiting_parts">Waiting Parts</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="workOrdersFilters.work_type" @change="applyWorkOrdersFilters()">
+                    <option value="">All Types</option>
+                    <option value="repair">Repair</option>
+                    <option value="preventive">Preventive</option>
+                    <option value="inspection">Inspection</option>
+                    <option value="emergency">Emergency</option>
+                    <option value="other">Other</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="workOrdersFilters.sort" @change="applyWorkOrdersFilters()">
+                    <option value="requested_date">Sort: Requested Date</option>
+                    <option value="total_cost">Sort: Total Cost</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="workOrdersFilters.dir" @change="applyWorkOrdersFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <div x-show="workOrdersLoading && workOrders.length === 0" class="card-body" style="text-align:center;padding:32px;">
                 <span class="text-secondary">Loading work orders…</span>
             </div>
 
-            <template x-if="!workOrdersLoading && workOrders.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No work orders</p>
-                        <p class="empty-state-text">No maintenance work orders have been created for this unit.</p>
-                    </div>
+            <div x-show="workOrdersLoaded && !workOrdersLoading && workOrders.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No work orders found</p>
+                    <p class="empty-state-text">No work orders match the current filters.</p>
                 </div>
-            </template>
+            </div>
 
-            <template x-if="!workOrdersLoading && workOrders.length > 0">
-                <div class="table-wrapper">
+            <div x-show="workOrders.length > 0">
+                <div class="tab-table-container">
                     <table class="table">
                         <thead>
                             <tr>
@@ -645,55 +763,103 @@ function daysUntil(?string $date): ?int {
                         </tbody>
                     </table>
                 </div>
-            </template>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${workOrders.length} of ${workOrdersTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="workOrders.length < workOrdersTotal"
+                            :disabled="workOrdersLoading"
+                            @click="loadMoreWorkOrders()"
+                            x-text="workOrdersLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- ── TAB: Inspections ──────────────────────────────────── -->
     <div x-show="activeTab === 'inspections'">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-weight:600;">Inspections</span>
-            <?php if (can('inspections', 'create')): ?>
-            <a href="<?= base_url('inspections/create') ?>?unit_id=<?= $unitId ?>" class="btn btn-primary btn-sm">+ New Inspection</a>
-            <?php endif; ?>
-        </div>
-        <div x-show="inspectionsLoading" class="card-body" style="text-align:center;padding:32px;">Loading...</div>
-        <template x-if="!inspectionsLoading && inspections.length === 0">
-            <div class="card-body empty-state">
-                <p class="empty-state-title">No inspections recorded</p>
-                <p class="empty-state-text">Pre-lease and post-lease inspections will appear here.</p>
+        <div class="card">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-weight:600;">Inspections</span>
+                <?php if (can('inspections', 'create')): ?>
+                <a href="<?= base_url('inspections/create') ?>?unit_id=<?= $unitId ?>" class="btn btn-primary btn-sm">+ New Inspection</a>
+                <?php endif; ?>
             </div>
-        </template>
-        <template x-if="!inspectionsLoading && inspections.length > 0">
-            <div class="table-wrapper">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Inspection #</th>
-                            <th>Type</th>
-                            <th>Date</th>
-                            <th>Inspector</th>
-                            <th>Condition</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="ins in inspections" :key="ins.id">
+
+            <!-- Filter bar -->
+            <div class="tab-filter-bar">
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="inspectionsFilters.inspection_type" @change="applyInspectionsFilters()">
+                    <option value="">All Types</option>
+                    <option value="pre_lease">Pre-Lease</option>
+                    <option value="post_lease">Post-Lease</option>
+                    <option value="periodic">Periodic</option>
+                    <option value="damage">Damage</option>
+                    <option value="compliance">Compliance</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="inspectionsFilters.status" @change="applyInspectionsFilters()">
+                    <option value="">All Statuses</option>
+                    <option value="draft">Draft</option>
+                    <option value="complete">Complete</option>
+                    <option value="signed">Signed</option>
+                </select>
+                <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                        x-model="inspectionsFilters.dir" @change="applyInspectionsFilters()">
+                    <option value="DESC">Newest First</option>
+                    <option value="ASC">Oldest First</option>
+                </select>
+            </div>
+
+            <div x-show="inspectionsLoading && inspections.length === 0" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading inspections…</span>
+            </div>
+
+            <div x-show="inspectionsLoaded && !inspectionsLoading && inspections.length === 0" class="card-body empty-state">
+                <p class="empty-state-title">No inspections found</p>
+                <p class="empty-state-text">No inspections match the current filters.</p>
+            </div>
+
+            <div x-show="inspections.length > 0">
+                <div class="tab-table-container">
+                    <table class="table">
+                        <thead>
                             <tr>
-                                <td class="font-mono" x-text="ins.inspection_number || ('#'+ins.id)"></td>
-                                <td><span class="badge" :class="inspTypeBadge(ins.inspection_type)" x-text="inspTypeLabel(ins.inspection_type)"></span></td>
-                                <td class="font-mono" x-text="ins.inspection_date"></td>
-                                <td x-text="ins.inspected_by || '—'"></td>
-                                <td x-text="ins.overall_condition ? ins.overall_condition.charAt(0).toUpperCase()+ins.overall_condition.slice(1) : '—'"></td>
-                                <td><span class="badge" :class="inspStatusBadge(ins.status)" x-text="inspStatusLabel(ins.status)"></span></td>
-                                <td><a :href="'<?= base_url('inspections/show') ?>?id='+ins.id" class="btn btn-xs btn-ghost">View</a></td>
+                                <th>Inspection #</th>
+                                <th>Type</th>
+                                <th>Date</th>
+                                <th>Inspector</th>
+                                <th>Condition</th>
+                                <th>Status</th>
+                                <th></th>
                             </tr>
-                        </template>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <template x-for="ins in inspections" :key="ins.id">
+                                <tr>
+                                    <td class="font-mono" x-text="ins.inspection_number || ('#'+ins.id)"></td>
+                                    <td><span class="badge" :class="inspTypeBadge(ins.inspection_type)" x-text="inspTypeLabel(ins.inspection_type)"></span></td>
+                                    <td class="font-mono" x-text="ins.inspection_date"></td>
+                                    <td x-text="ins.inspected_by || '—'"></td>
+                                    <td x-text="ins.overall_condition ? ins.overall_condition.charAt(0).toUpperCase()+ins.overall_condition.slice(1) : '—'"></td>
+                                    <td><span class="badge" :class="inspStatusBadge(ins.status)" x-text="inspStatusLabel(ins.status)"></span></td>
+                                    <td><a :href="'<?= base_url('inspections/show') ?>?id='+ins.id" class="btn btn-xs btn-ghost">View</a></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${inspections.length} of ${inspectionsTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="inspections.length < inspectionsTotal"
+                            :disabled="inspectionsLoading"
+                            @click="loadMoreInspections()"
+                            x-text="inspectionsLoading ? 'Loading…' : 'Load more'">
+                    </button>
+                </div>
             </div>
-        </template>
+        </div>
     </div>
 
     <!-- ── TAB: Documents (stub) ─────────────────────────────── -->
@@ -717,21 +883,46 @@ function FF_UnitDetail() {
         loading:             true,
         loadingLog:          false,
         activeTab:           'overview',
+
+        // ── Lease History ─────────────────────────────────────────
         leaseHistory:        [],
+        leasesTotal:         0,
+        leasesPage:          1,
         leasesLoading:       false,
         leasesLoaded:        false,
+        leasesFilters:       { status: '', sort: 'start_date', dir: 'DESC' },
+
+        // ── Damage Claims ─────────────────────────────────────────
         damageClaims:        [],
+        damageClaimsTotal:   0,
+        damageClaimsPage:    1,
         damageClaimsLoading: false,
         damageClaimsLoaded:  false,
+        damageClaimsFilters: { severity: '', status: '', sort: 'created_at', dir: 'DESC' },
+
+        // ── Mileage Logs ──────────────────────────────────────────
         mileageLogs:         [],
+        mileageLogsTotal:    0,
+        mileageLogsPage:     1,
         mileageLogsLoading:  false,
         mileageLogsLoaded:   false,
+        mileageLogsFilters:  { log_type: '', sort: 'log_date', dir: 'DESC' },
+
+        // ── Work Orders ───────────────────────────────────────────
         workOrders:          [],
+        workOrdersTotal:     0,
+        workOrdersPage:      1,
         workOrdersLoading:   false,
         workOrdersLoaded:    false,
+        workOrdersFilters:   { status: '', work_type: '', sort: 'requested_date', dir: 'DESC' },
+
+        // ── Inspections ───────────────────────────────────────────
         inspections:         [],
+        inspectionsTotal:    0,
+        inspectionsPage:     1,
         inspectionsLoading:  false,
         inspectionsLoaded:   false,
+        inspectionsFilters:  { inspection_type: '', status: '', sort: 'inspection_date', dir: 'DESC' },
 
         async init() {
             await this.loadUnit();
@@ -740,101 +931,106 @@ function FF_UnitDetail() {
         async loadUnit() {
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/show') ?>?id=<?= $unitId ?>');
-                if (r.success) {
-                    this.unit = r.data;
-                }
+                if (r.success) this.unit = r.data;
             } catch(e) { /* page already rendered server-side */ }
             this.loading = false;
 
-            // Lazy-load data when tabs are first activated
             this.$watch('activeTab', (tab) => {
-                if (tab === 'status_log' && !this.statusLog.length) {
-                    this.loadStatusLog();
-                }
-                if (tab === 'leases' && !this.leasesLoaded) {
-                    this.loadLeaseHistory();
-                }
-                if (tab === 'damage_claims' && !this.damageClaimsLoaded) {
-                    this.loadDamageClaims();
-                }
-                if (tab === 'mileage_logs' && !this.mileageLogsLoaded) {
-                    this.loadMileageLogs();
-                }
-                if (tab === 'maintenance' && !this.workOrdersLoaded) {
-                    this.loadWorkOrders();
-                }
-                if (tab === 'inspections' && !this.inspectionsLoaded) {
-                    this.loadInspections();
-                }
+                if (tab === 'status_log'    && !this.statusLog.length)       this.loadStatusLog();
+                if (tab === 'leases'        && !this.leasesLoaded)           this.loadLeaseHistory();
+                if (tab === 'damage_claims' && !this.damageClaimsLoaded)     this.loadDamageClaims();
+                if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)      this.loadMileageLogs();
+                if (tab === 'maintenance'   && !this.workOrdersLoaded)       this.loadWorkOrders();
+                if (tab === 'inspections'   && !this.inspectionsLoaded)      this.loadInspections();
             });
         },
 
         async loadStatusLog() {
             this.loadingLog = true;
             try {
-                const r = await FF_Api.get(
-                    '<?= base_url('api/v1/equipment/units/status-log') ?>?unit_id=<?= $unitId ?>'
-                );
+                const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/status-log') ?>?unit_id=<?= $unitId ?>');
                 if (r.success) this.statusLog = r.data.items ?? r.data;
             } catch(e) { /* non-fatal */ }
             this.loadingLog = false;
         },
 
-        async loadLeaseHistory() {
+        // ── Lease History ─────────────────────────────────────────
+        async loadLeaseHistory(append = false) {
             this.leasesLoading = true;
             try {
-                const r = await FF_Api.get(
-                    '<?= base_url('api/v1/leases') ?>?unit_id=<?= $unitId ?>&per_page=50&sort=start_date&dir=DESC'
-                );
+                const p = new URLSearchParams({ unit_id: <?= $unitId ?>, per_page: 50, page: this.leasesPage, sort: this.leasesFilters.sort, dir: this.leasesFilters.dir });
+                if (this.leasesFilters.status) p.set('status', this.leasesFilters.status);
+                const r = await FF_Api.get('<?= base_url('api/v1/leases') ?>?' + p);
                 if (r.success) {
-                    this.leaseHistory  = r.data.items || [];
-                    this.leasesLoaded  = true;
+                    const items      = r.data.items || [];
+                    this.leaseHistory = append ? [...this.leaseHistory, ...items] : items;
+                    this.leasesTotal  = r.data.pagination?.total ?? items.length;
+                    this.leasesLoaded = true;
                 }
             } catch(e) { /* non-fatal */ }
             this.leasesLoading = false;
         },
+        loadMoreLeaseHistory()  { this.leasesPage++; this.loadLeaseHistory(true); },
+        applyLeasesFilters()    { this.leaseHistory = []; this.leasesPage = 1; this.leasesTotal = 0; this.leasesLoaded = false; this.loadLeaseHistory(); },
 
-        async loadDamageClaims() {
+        // ── Damage Claims ─────────────────────────────────────────
+        async loadDamageClaims(append = false) {
             this.damageClaimsLoading = true;
             try {
-                const r = await FF_Api.get(
-                    '<?= base_url('api/v1/damage_claims') ?>?equipment_unit_id=<?= $unitId ?>&per_page=50&sort=created_at&dir=DESC'
-                );
+                const p = new URLSearchParams({ equipment_unit_id: <?= $unitId ?>, per_page: 50, page: this.damageClaimsPage, sort: this.damageClaimsFilters.sort, dir: this.damageClaimsFilters.dir });
+                if (this.damageClaimsFilters.severity) p.set('severity', this.damageClaimsFilters.severity);
+                if (this.damageClaimsFilters.status)   p.set('status',   this.damageClaimsFilters.status);
+                const r = await FF_Api.get('<?= base_url('api/v1/damage_claims') ?>?' + p);
                 if (r.success) {
-                    this.damageClaims       = r.data?.items ?? [];
+                    const items          = r.data?.items ?? [];
+                    this.damageClaims    = append ? [...this.damageClaims, ...items] : items;
+                    this.damageClaimsTotal  = r.data.pagination?.total ?? items.length;
                     this.damageClaimsLoaded = true;
                 }
             } catch(e) { /* non-fatal */ }
             this.damageClaimsLoading = false;
         },
+        loadMoreDamageClaims()     { this.damageClaimsPage++; this.loadDamageClaims(true); },
+        applyDamageClaimsFilters() { this.damageClaims = []; this.damageClaimsPage = 1; this.damageClaimsTotal = 0; this.damageClaimsLoaded = false; this.loadDamageClaims(); },
 
-        async loadMileageLogs() {
+        // ── Mileage Logs ──────────────────────────────────────────
+        async loadMileageLogs(append = false) {
             this.mileageLogsLoading = true;
             try {
-                const r = await FF_Api.get(
-                    '<?= base_url('api/v1/mileage_logs/index') ?>?equipment_unit_id=<?= $unitId ?>&per_page=50&sort=log_date&dir=DESC'
-                );
+                const p = new URLSearchParams({ equipment_unit_id: <?= $unitId ?>, per_page: 50, page: this.mileageLogsPage, sort: this.mileageLogsFilters.sort, dir: this.mileageLogsFilters.dir });
+                if (this.mileageLogsFilters.log_type) p.set('log_type', this.mileageLogsFilters.log_type);
+                const r = await FF_Api.get('<?= base_url('api/v1/mileage_logs/index') ?>?' + p);
                 if (r.success) {
-                    this.mileageLogs       = r.data?.items ?? [];
+                    const items          = r.data?.items ?? [];
+                    this.mileageLogs     = append ? [...this.mileageLogs, ...items] : items;
+                    this.mileageLogsTotal  = r.data.pagination?.total ?? items.length;
                     this.mileageLogsLoaded = true;
                 }
             } catch(e) { /* non-fatal */ }
             this.mileageLogsLoading = false;
         },
+        loadMoreMileageLogs()     { this.mileageLogsPage++; this.loadMileageLogs(true); },
+        applyMileageLogsFilters() { this.mileageLogs = []; this.mileageLogsPage = 1; this.mileageLogsTotal = 0; this.mileageLogsLoaded = false; this.loadMileageLogs(); },
 
-        async loadWorkOrders() {
+        // ── Work Orders ───────────────────────────────────────────
+        async loadWorkOrders(append = false) {
             this.workOrdersLoading = true;
             try {
-                const r = await FF_Api.get(
-                    '<?= base_url('api/v1/maintenance_work_orders/index.php') ?>?equipment_unit_id=<?= $unitId ?>&per_page=50&sort=requested_date&dir=DESC'
-                );
+                const p = new URLSearchParams({ equipment_unit_id: <?= $unitId ?>, per_page: 50, page: this.workOrdersPage, sort: this.workOrdersFilters.sort, dir: this.workOrdersFilters.dir });
+                if (this.workOrdersFilters.status)    p.set('status',    this.workOrdersFilters.status);
+                if (this.workOrdersFilters.work_type) p.set('work_type', this.workOrdersFilters.work_type);
+                const r = await FF_Api.get('<?= base_url('api/v1/maintenance_work_orders/index.php') ?>?' + p);
                 if (r.success) {
-                    this.workOrders       = r.data?.items ?? [];
+                    const items       = r.data?.items ?? [];
+                    this.workOrders   = append ? [...this.workOrders, ...items] : items;
+                    this.workOrdersTotal  = r.data.pagination?.total ?? items.length;
                     this.workOrdersLoaded = true;
                 }
             } catch(e) { /* non-fatal */ }
             this.workOrdersLoading = false;
         },
+        loadMoreWorkOrders()     { this.workOrdersPage++; this.loadWorkOrders(true); },
+        applyWorkOrdersFilters() { this.workOrders = []; this.workOrdersPage = 1; this.workOrdersTotal = 0; this.workOrdersLoaded = false; this.loadWorkOrders(); },
 
         woStatusBadge(s) {
             return { open:'badge badge-info', in_progress:'badge badge-warning', waiting_parts:'badge badge-warning',
@@ -880,19 +1076,25 @@ function FF_UnitDetail() {
                      invoiced:'Invoiced', resolved:'Resolved', written_off:'Written Off' }[s] ?? s;
         },
 
-        async loadInspections() {
+        // ── Inspections ───────────────────────────────────────────
+        async loadInspections(append = false) {
             this.inspectionsLoading = true;
             try {
-                const r = await FF_Api.get(
-                    '<?= base_url('api/v1/inspections/index.php') ?>?equipment_unit_id=<?= $unitId ?>&per_page=50&sort=inspection_date&dir=DESC'
-                );
+                const p = new URLSearchParams({ equipment_unit_id: <?= $unitId ?>, per_page: 50, page: this.inspectionsPage, sort: this.inspectionsFilters.sort, dir: this.inspectionsFilters.dir });
+                if (this.inspectionsFilters.inspection_type) p.set('inspection_type', this.inspectionsFilters.inspection_type);
+                if (this.inspectionsFilters.status)          p.set('status',          this.inspectionsFilters.status);
+                const r = await FF_Api.get('<?= base_url('api/v1/inspections/index.php') ?>?' + p);
                 if (r.success) {
-                    this.inspections       = r.data?.items ?? [];
+                    const items       = r.data?.items ?? [];
+                    this.inspections  = append ? [...this.inspections, ...items] : items;
+                    this.inspectionsTotal  = r.data.pagination?.total ?? items.length;
                     this.inspectionsLoaded = true;
                 }
             } catch(e) { /* non-fatal */ }
             this.inspectionsLoading = false;
         },
+        loadMoreInspections()     { this.inspectionsPage++; this.loadInspections(true); },
+        applyInspectionsFilters() { this.inspections = []; this.inspectionsPage = 1; this.inspectionsTotal = 0; this.inspectionsLoaded = false; this.loadInspections(); },
 
         inspTypeBadge(t) {
             return { pre_lease:'badge badge-info', post_lease:'badge badge-warning', periodic:'badge badge-neutral',

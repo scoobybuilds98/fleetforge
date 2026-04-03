@@ -90,18 +90,8 @@ $leaseExposure = db_select(
     [$vendorId]
 );
 
-// Recent 20 work orders for the work orders section (S015 adds full module)
-$recentWo = db_select(
-    "SELECT mwo.id, mwo.work_order_number, mwo.work_type, mwo.status,
-            mwo.title, mwo.total_cost, mwo.scheduled_date, mwo.completed_date,
-            eu.unit_number
-     FROM maintenance_work_orders mwo
-     LEFT JOIN equipment_units eu ON eu.id = mwo.equipment_unit_id AND eu.deleted_at IS NULL
-     WHERE mwo.vendor_id = ? AND mwo.deleted_at IS NULL
-     ORDER BY mwo.created_at DESC
-     LIMIT 20",
-    [$vendorId]
-);
+// WHY: Work orders section converted to Alpine.js (paginated + filtered) in S018-UX.
+//      $woTotal already loaded above for KPI tiles. No PHP pre-load needed.
 
 // Vendor type label/badge maps — used in view mode
 $typeLabels = [
@@ -381,76 +371,115 @@ require_once FF_ROOT . '/includes/header.php';
 
 </div><!-- /card -->
 
-<!-- ── Work Orders ───────────────────────────────────────────────────────── -->
-<div class="card">
-    <div class="card-header" style="font-weight:600;">
-        Work Orders
-        <span class="badge badge-neutral" style="margin-left:8px;"><?= e($woTotal) ?></span>
+<!-- ── Work Orders (Alpine — paginated + filtered) ────────────────────────── -->
+<div class="card" x-data="FF_VendorWorkOrders()" x-init="init()">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-weight:600;">
+            Work Orders
+            <span class="badge badge-neutral" style="margin-left:8px;"><?= e($woTotal) ?></span>
+        </span>
+        <?php if (can('maintenance', 'create')): ?>
+        <a href="<?= base_url('maintenance_work_orders/create') ?>?vendor_id=<?= $vendorId ?>"
+           class="btn btn-primary btn-sm">+ New Work Order</a>
+        <?php endif; ?>
     </div>
 
-    <?php if (empty($recentWo)): ?>
-    <div class="card-body">
+    <!-- Filter bar -->
+    <div class="tab-filter-bar">
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.status" @change="applyFilters()">
+            <option value="">All Statuses</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="waiting_parts">Waiting Parts</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+        </select>
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.work_type" @change="applyFilters()">
+            <option value="">All Types</option>
+            <option value="repair">Repair</option>
+            <option value="preventive">Preventive</option>
+            <option value="inspection">Inspection</option>
+            <option value="emergency">Emergency</option>
+            <option value="other">Other</option>
+        </select>
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.sort" @change="applyFilters()">
+            <option value="created_at">Sort: Date Added</option>
+            <option value="requested_date">Sort: Requested Date</option>
+            <option value="total_cost">Sort: Total Cost</option>
+        </select>
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.dir" @change="applyFilters()">
+            <option value="DESC">Newest First</option>
+            <option value="ASC">Oldest First</option>
+        </select>
+    </div>
+
+    <!-- Loading -->
+    <div x-show="loading && items.length === 0" class="card-body" style="text-align:center;padding:32px;">
+        <span class="text-secondary">Loading work orders…</span>
+    </div>
+
+    <!-- Empty state -->
+    <div x-show="loaded && !loading && items.length === 0" class="card-body">
         <div class="empty-state">
-            <p class="empty-state-title">No work orders yet</p>
-            <p class="empty-state-text">Work orders assigned to this vendor will appear here.</p>
+            <p class="empty-state-title">No work orders found</p>
+            <p class="empty-state-text">No work orders match the current filters.</p>
         </div>
     </div>
-    <?php else: ?>
-    <div class="table-wrapper">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Work Order #</th>
-                    <th>Unit</th>
-                    <th>Type</th>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th style="text-align:right;">Total Cost</th>
-                    <th>Scheduled</th>
-                    <th>Completed</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($recentWo as $wo): ?>
-                <?php
-                $woBadge = match($wo['status']) {
-                    'open'          => 'badge-info',
-                    'in_progress'   => 'badge-warning',
-                    'waiting_parts' => 'badge-warning',
-                    'completed'     => 'badge-success',
-                    'cancelled'     => 'badge-neutral',
-                    default         => 'badge-neutral',
-                };
-                $woLabel = match($wo['status']) {
-                    'open'          => 'Open',
-                    'in_progress'   => 'In Progress',
-                    'waiting_parts' => 'Waiting Parts',
-                    'completed'     => 'Completed',
-                    'cancelled'     => 'Cancelled',
-                    default         => $wo['status'],
-                };
-                ?>
-                <tr>
-                    <td class="font-mono"><?= e($wo['work_order_number']) ?></td>
-                    <td><?= $wo['unit_number'] ? e($wo['unit_number']) : '—' ?></td>
-                    <td><?= e(ucwords(str_replace('_', ' ', $wo['work_type']))) ?></td>
-                    <td><?= e($wo['title']) ?></td>
-                    <td><span class="badge <?= e($woBadge) ?>"><?= e($woLabel) ?></span></td>
-                    <td class="font-mono" style="text-align:right;"><?= format_currency($wo['total_cost']) ?></td>
-                    <td><?= $wo['scheduled_date'] ? format_date($wo['scheduled_date']) : '—' ?></td>
-                    <td><?= $wo['completed_date'] ? format_date($wo['completed_date']) : '—' ?></td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+
+    <!-- Table + footer -->
+    <div x-show="items.length > 0">
+        <div class="tab-table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Work Order #</th>
+                        <th>Unit</th>
+                        <th>Type</th>
+                        <th>Title</th>
+                        <th>Status</th>
+                        <th style="text-align:right;">Total Cost</th>
+                        <th>Requested</th>
+                        <th>Completed</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="wo in items" :key="wo.id">
+                        <tr>
+                            <td class="font-mono" x-text="wo.work_order_number"></td>
+                            <td class="font-mono" x-text="wo.unit_number || '—'"></td>
+                            <td x-text="wo.work_type ? wo.work_type.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()) : '—'"></td>
+                            <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="wo.title"></td>
+                            <td>
+                                <span class="badge" :class="woBadge(wo.status)" x-text="woLabel(wo.status)"></span>
+                            </td>
+                            <td class="font-mono" style="text-align:right;"
+                                x-text="wo.total_cost > 0 ? '$' + parseFloat(wo.total_cost).toLocaleString('en-CA',{minimumFractionDigits:2}) : '—'"></td>
+                            <td x-text="wo.requested_date || '—'"></td>
+                            <td x-text="wo.completed_date || '—'"></td>
+                            <td>
+                                <a :href="'<?= base_url('maintenance_work_orders/show') ?>?id=' + wo.id"
+                                   class="btn btn-secondary btn-sm">View</a>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        <div class="tab-table-footer">
+            <span x-text="`Showing ${items.length} of ${total}`"></span>
+            <button class="btn btn-secondary btn-sm"
+                    x-show="items.length < total"
+                    :disabled="loading"
+                    @click="loadMore()"
+                    x-text="loading ? 'Loading…' : 'Load more'">
+            </button>
+        </div>
     </div>
-    <?php if ($woTotal > 20): ?>
-    <div class="card-footer text-secondary" style="padding:12px 16px;font-size:0.875rem;">
-        Showing 20 of <?= e($woTotal) ?> work orders.
-        Full work orders module coming in S015.
-    </div>
-    <?php endif; ?>
-    <?php endif; ?>
 </div><!-- /work orders card -->
 
 <!-- ── Equipment Worked On ───────────────────────────────────────────────── -->
@@ -468,7 +497,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <?php else: ?>
-    <div class="table-wrapper">
+    <div class="tab-table-container">
         <table class="table">
             <thead>
                 <tr>
@@ -519,7 +548,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <?php else: ?>
-    <div class="table-wrapper">
+    <div class="tab-table-container">
         <table class="table">
             <thead>
                 <tr>
@@ -590,6 +619,49 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
+// ── Work Orders Alpine component ─────────────────────────────────────────────
+function FF_VendorWorkOrders() {
+    return {
+        items:   [],
+        total:   0,
+        page:    1,
+        loading: false,
+        loaded:  false,
+        filters: { status: '', work_type: '', sort: 'created_at', dir: 'DESC' },
+
+        init() { this.load(); },
+
+        async load(append = false) {
+            this.loading = true;
+            try {
+                const p = new URLSearchParams({ vendor_id: <?= $vendorId ?>, per_page: 50, page: this.page, sort: this.filters.sort, dir: this.filters.dir });
+                if (this.filters.status)    p.set('status',    this.filters.status);
+                if (this.filters.work_type) p.set('work_type', this.filters.work_type);
+                const r    = await FF_Api.get('<?= base_url('api/v1/maintenance_work_orders/index.php') ?>?' + p);
+                if (r.success) {
+                    const rows  = r.data?.items ?? [];
+                    this.items  = append ? [...this.items, ...rows] : rows;
+                    this.total  = r.data.pagination?.total ?? rows.length;
+                    this.loaded = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.loading = false;
+        },
+
+        loadMore()    { this.page++; this.load(true); },
+        applyFilters(){ this.items = []; this.page = 1; this.total = 0; this.loaded = false; this.load(); },
+
+        woBadge(s) {
+            return { open:'badge badge-info', in_progress:'badge badge-warning', waiting_parts:'badge badge-warning',
+                     completed:'badge badge-success', cancelled:'badge badge-neutral' }[s] ?? 'badge badge-neutral';
+        },
+        woLabel(s) {
+            return { open:'Open', in_progress:'In Progress', waiting_parts:'Waiting Parts',
+                     completed:'Completed', cancelled:'Cancelled' }[s] ?? s;
+        },
+    };
+}
+
 // ── Edit / Cancel ────────────────────────────────────────────────────────────
 function showEdit() {
     document.getElementById('vendor-view-section').style.display = 'none';

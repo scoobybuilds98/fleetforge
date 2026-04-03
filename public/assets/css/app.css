@@ -1086,6 +1086,43 @@ kbd {
     min-width: 0;
 }
 
+/* ── Tab table scroll containers ────────────────────────────────────────────
+   WHY: Keeps show-page sub-tables within the viewport height so the page
+   header and action buttons stay visible. Sticky thead pins column headers
+   while scrolling. .tab-filter-bar holds filter/sort controls above the table.
+   .tab-table-footer shows row count + optional Load more button below.
+*/
+.tab-table-container {
+    max-height: calc(100vh - 320px);
+    overflow-y: auto;
+}
+.tab-table-container thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-surface);
+    box-shadow: 0 1px 0 var(--border-color);
+}
+.tab-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+    background: var(--bg-surface);
+}
+.tab-table-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-surface);
+}
+
 /* ── App footer ──────────────────────────────────────────────────────────────
    Normal flow element at the end of .app-main. Visible only when the user
    scrolls to the bottom of the page — not sticky, not fixed.
