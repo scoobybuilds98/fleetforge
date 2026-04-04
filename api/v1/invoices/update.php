@@ -37,8 +37,8 @@ if (!$invoice) {
     json_error('NOT_FOUND', 'Invoice not found.', 404);
 }
 
-// D12: Only draft invoices are editable
-if ($invoice['status'] !== 'draft') {
+// D12: Only draft invoices are editable — super_admin may edit any status
+if ($invoice['status'] !== 'draft' && !is_super_admin()) {
     json_error('IMMUTABLE_RECORD', 'Only draft invoices can be edited. Void and recreate for corrections.', 422);
 }
 

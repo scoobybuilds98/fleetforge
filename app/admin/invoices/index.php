@@ -85,52 +85,56 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      AR Aging KPI Tiles
      ============================================================ -->
+<div x-data="invoicesKpis()" x-init="loadKpis()">
 <div class="stat-grid">
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--blue"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'current' }"
+         @click="activeTile = activeTile === 'current' ? '' : 'current'; setFilter('status', activeTile ? 'sent' : '')">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Current</div>
-        <div class="stat-value currency"><?= format_currency($arCurrent['total'] ?? 0) ?></div>
-        <div class="stat-delta text-secondary">
-            <?= (int)($arCurrent['cnt'] ?? 0) ?> invoice<?= (int)($arCurrent['cnt'] ?? 0) !== 1 ? 's' : '' ?>
-        </div>
+        <div class="stat-value currency" x-text="fmt(kpis.current_total)"></div>
+        <div class="stat-delta text-secondary" x-text="kpis.current_cnt + ' invoice' + (kpis.current_cnt !== 1 ? 's' : '')"></div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--amber"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'ar30' }"
+         @click="activeTile = activeTile === 'ar30' ? '' : 'ar30'; setFilter('status', activeTile ? 'overdue' : '')">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">1–30 Days Overdue</div>
-        <div class="stat-value currency" style="color:var(--color-warning);">
-            <?= format_currency($ar30['total'] ?? 0) ?>
-        </div>
-        <div class="stat-delta text-secondary">
-            <?= (int)($ar30['cnt'] ?? 0) ?> overdue
-        </div>
+        <div class="stat-value currency" style="color:var(--color-warning);" x-text="fmt(kpis.ar30_total)"></div>
+        <div class="stat-delta text-secondary" x-text="kpis.ar30_cnt + ' overdue'"></div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--red"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'ar60' }"
+         @click="activeTile = activeTile === 'ar60' ? '' : 'ar60'; setFilter('status', activeTile ? 'overdue' : '')">
+        <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">31–60 Days Overdue</div>
-        <div class="stat-value currency" style="color:var(--color-danger);">
-            <?= format_currency($ar60['total'] ?? 0) ?>
-        </div>
-        <div class="stat-delta text-secondary">
-            <?= (int)($ar60['cnt'] ?? 0) ?> overdue
-        </div>
+        <div class="stat-value currency" style="color:var(--color-danger);" x-text="fmt(kpis.ar60_total)"></div>
+        <div class="stat-delta text-secondary" x-text="kpis.ar60_cnt + ' overdue'"></div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--red"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'ar90' }"
+         @click="activeTile = activeTile === 'ar90' ? '' : 'ar90'; setFilter('status', activeTile ? 'overdue' : '')">
+        <span class="stat-icon stat-icon--red"><svg><use href="#icon-fire"/></svg></span>
         <div class="stat-label">60+ Days Overdue</div>
-        <div class="stat-value currency" style="color:var(--color-danger);">
-            <?= format_currency($ar90['total'] ?? 0) ?>
-        </div>
-        <div class="stat-delta text-secondary">
-            <?= (int)($ar90['cnt'] ?? 0) ?> overdue
-        </div>
+        <div class="stat-value currency" style="color:var(--color-danger);" x-text="fmt(kpis.ar90_total)"></div>
+        <div class="stat-delta text-secondary" x-text="kpis.ar90_cnt + ' overdue'"></div>
     </div>
 
+</div>
 </div>
 
 <!-- ============================================================
      INVOICES ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Invoices()" x-init="init()">
+<div id="invoices-table-card" x-data="FF_Invoices()" x-init="init()">
 
     <!-- ── TAB BAR ───────────────────────────────────────────────── -->
     <div class="tab-bar" role="tablist">
@@ -365,7 +369,48 @@ require_once FF_ROOT . '/includes/header.php';
 
 </div><!-- /x-data -->
 
+<style>
+.stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }
+.stat-card.ring-active { box-shadow: 0 0 0 2px var(--color-primary); }
+</style>
+
 <script>
+function invoicesKpis() {
+    return {
+        activeTile: '',
+        kpis: {
+            current_total: <?= json_encode($arCurrent['total'] ?? '0.00') ?>,
+            current_cnt:   <?= json_encode((int)($arCurrent['cnt'] ?? 0)) ?>,
+            ar30_total:    <?= json_encode($ar30['total'] ?? '0.00') ?>,
+            ar30_cnt:      <?= json_encode((int)($ar30['cnt'] ?? 0)) ?>,
+            ar60_total:    <?= json_encode($ar60['total'] ?? '0.00') ?>,
+            ar60_cnt:      <?= json_encode((int)($ar60['cnt'] ?? 0)) ?>,
+            ar90_total:    <?= json_encode($ar90['total'] ?? '0.00') ?>,
+            ar90_cnt:      <?= json_encode((int)($ar90['cnt'] ?? 0)) ?>,
+        },
+        fmt(n) { return '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+
+        /**
+         * Cross-component filter: targets the FF_Invoices table via DOM id.
+         * Toggle behavior: clicking the same tile again clears the filter.
+         */
+        setFilter(key, val) {
+            const el = document.getElementById('invoices-table-card');
+            if (!el) return;
+            const d = Alpine.$data(el);
+            d.filters[key] = d.filters[key] === val ? '' : val;
+            d.activeTab = 'all';
+            d.currentPage = 1;
+            d.load();
+        },
+
+        async loadKpis() {
+            const r = await FF_Api.get('<?= base_url('api/v1/invoices/kpis') ?>');
+            if (r.success) Object.assign(this.kpis, r.data);
+        },
+    };
+}
+
 function FF_Invoices() {
     return {
         invoices:    [],

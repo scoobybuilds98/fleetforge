@@ -58,7 +58,10 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── KPI TILES ─────────────────────────────────────────────── -->
     <div class="stat-grid">
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--green" style="cursor:pointer"
+             :class="{ 'ring-active': filters.status === 'active' }"
+             @click="filters.status = filters.status === 'active' ? '' : 'active'; activeTab = 'all'; currentPage = 1; load()">
+            <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
             <div class="stat-label">Active</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -72,7 +75,10 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--amber" style="cursor:pointer"
+             :class="{ 'ring-active': filters.status === 'pending' }"
+             @click="filters.status = filters.status === 'pending' ? '' : 'pending'; activeTab = 'all'; currentPage = 1; load()">
+            <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
             <div class="stat-label">Pending</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.pending"></div>
@@ -82,7 +88,10 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--teal" style="cursor:pointer"
+             :class="{ 'ring-active': filters.status === 'completed' }"
+             @click="filters.status = filters.status === 'completed' ? '' : 'completed'; activeTab = 'all'; currentPage = 1; load()">
+            <span class="stat-icon stat-icon--teal"><svg><use href="#icon-check-circle"/></svg></span>
             <div class="stat-label">Completed</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -96,7 +105,8 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--green">
+            <span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span>
             <div class="stat-label">Active Revenue</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -340,6 +350,11 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
 </div><!-- /x-data -->
+
+<style>
+.stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }
+.stat-card.ring-active { box-shadow: 0 0 0 2px var(--color-primary); }
+</style>
 
 <script>
 function FF_Leases() {

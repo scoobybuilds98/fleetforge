@@ -266,7 +266,7 @@ function priorityBadgeClass(string $p): string {
                     <dt>Unit</dt>
                     <dd>
                         <a href="<?= base_url('equipment/show') ?>?id=<?= e($wo['equipment_unit_id']) ?>"
-                           class="text-accent">
+                           class="link font-mono">
                             <?= e($wo['unit_number']) ?>
                         </a>
                         <?php if ($wo['unit_year'] || $wo['brand'] || $wo['model']): ?>
@@ -280,7 +280,7 @@ function priorityBadgeClass(string $p): string {
                     <dt>Vendor</dt>
                     <dd>
                         <?php if ($wo['vendor_id']): ?>
-                        <a href="<?= base_url('vendors/show') ?>?id=<?= e($wo['vendor_id']) ?>" class="text-accent">
+                        <a href="<?= base_url('vendors/show') ?>?id=<?= e($wo['vendor_id']) ?>" class="link">
                             <?= e($wo['vendor_name']) ?>
                         </a>
                         <?php if ($wo['vendor_contact']): ?>

@@ -91,31 +91,48 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- KPI tiles -->
+<div x-data="creditNotesKpis()" x-init="loadKpis()">
 <div class="stat-grid" style="margin-bottom:1.5rem;">
-    <div class="stat-card">
+    <div class="stat-card stat-card--blue" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'active' ? '' : 'active'; drill('status', activeTile === 'active' ? 'active' : '')"
+         :class="{ 'ring-active': activeTile === 'active' }">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-credit-card"/></svg></span>
         <div class="stat-label">Outstanding Balance</div>
-        <div class="stat-value font-mono"><?= format_currency($activeBalance['total']) ?></div>
-        <div class="stat-delta"><?= (int)$activeBalance['cnt'] ?> active note<?= (int)$activeBalance['cnt'] !== 1 ? 's' : '' ?></div>
+        <div class="stat-value font-mono" x-text="fmt(kpis.active_balance)"></div>
+        <div class="stat-delta" x-text="kpis.active_cnt + ' active note' + (kpis.active_cnt !== 1 ? 's' : '')"></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card stat-card--teal">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-arrow-up-tray"/></svg></span>
         <div class="stat-label">Issued This Month</div>
-        <div class="stat-value font-mono"><?= format_currency($issuedThisMonth['total']) ?></div>
-        <div class="stat-delta"><?= (int)$issuedThisMonth['cnt'] ?> note<?= (int)$issuedThisMonth['cnt'] !== 1 ? 's' : '' ?></div>
+        <div class="stat-value font-mono" x-text="fmt(kpis.issued_total)"></div>
+        <div class="stat-delta" x-text="kpis.issued_cnt + ' note' + (kpis.issued_cnt !== 1 ? 's' : '')"></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card stat-card--green" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'applied' ? '' : 'applied'; drill('status', activeTile === 'applied' ? 'fully_applied' : '')"
+         :class="{ 'ring-active': activeTile === 'applied' }">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Fully Applied This Month</div>
-        <div class="stat-value"><?= (int)$fullyUsedThisMonth['cnt'] ?></div>
+        <div class="stat-value" x-text="kpis.fully_used_cnt"></div>
         <div class="stat-delta">notes fully consumed</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card stat-card--red" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'expired' ? '' : 'expired'; drill('status', activeTile === 'expired' ? 'expired' : '')"
+         :class="{ 'ring-active': activeTile === 'expired' }">
+        <span class="stat-icon stat-icon--red"><svg><use href="#icon-x-circle"/></svg></span>
         <div class="stat-label">Voided / Expired This Month</div>
-        <div class="stat-value"><?= (int)$expiredThisMonth['cnt'] ?></div>
+        <div class="stat-value" x-text="kpis.expired_cnt"></div>
         <div class="stat-delta">notes cancelled</div>
     </div>
 </div>
+</div>
+
+<style>
+.stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }
+.stat-card.ring-active { box-shadow: 0 0 0 2px var(--color-primary); }
+</style>
 
 <!-- Credit notes table — Alpine.js -->
-<div class="card" x-data="creditNotesList()" x-init="init()">
+<div class="card" id="credit-notes-table" x-data="creditNotesList()" x-init="init()">
 
     <!-- Filters -->
     <div class="card-header" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
@@ -223,6 +240,33 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
+function creditNotesKpis() {
+    return {
+        kpis: {
+            active_balance:  <?= json_encode($activeBalance['total'] ?? '0.00') ?>,
+            active_cnt:      <?= json_encode((int)($activeBalance['cnt'] ?? 0)) ?>,
+            issued_total:    <?= json_encode($issuedThisMonth['total'] ?? '0.00') ?>,
+            issued_cnt:      <?= json_encode((int)($issuedThisMonth['cnt'] ?? 0)) ?>,
+            fully_used_cnt:  <?= json_encode((int)($fullyUsedThisMonth['cnt'] ?? 0)) ?>,
+            expired_cnt:     <?= json_encode((int)($expiredThisMonth['cnt'] ?? 0)) ?>,
+        },
+        activeTile: '',
+        fmt(n) { return '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+        drill(filter, val) {
+            const el = document.getElementById('credit-notes-table');
+            if (!el) return;
+            const d = Alpine.$data(el);
+            d.filters[filter] = d.filters[filter] === val ? '' : val;
+            d.page = 1;
+            d.fetchRows();
+        },
+        async loadKpis() {
+            const r = await FF_Api.get('<?= base_url('api/v1/credit_notes/kpis') ?>');
+            if (r.success) Object.assign(this.kpis, r.data);
+        },
+    };
+}
+
 function creditNotesList() {
     return {
         rows: [],

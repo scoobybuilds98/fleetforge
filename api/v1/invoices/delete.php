@@ -38,8 +38,8 @@ if (!$invoice) {
     json_error('NOT_FOUND', 'Invoice not found.', 404);
 }
 
-// Only draft invoices can be deleted
-if ($invoice['status'] !== 'draft') {
+// Only draft invoices can be deleted — super_admin may delete any status
+if ($invoice['status'] !== 'draft' && !is_super_admin()) {
     json_error('IMMUTABLE_RECORD', 'Only draft invoices can be deleted. Use void for sent invoices.', 422);
 }
 
@@ -70,7 +70,7 @@ db_transaction(function () use ($id, $invoice) {
         'entity_type'  => 'invoice',
         'entity_id'    => $id,
         'entity_label' => $invoice['invoice_number'],
-        'notes'        => "Invoice {$invoice['invoice_number']} soft-deleted (was draft)",
+        'notes'        => "Invoice {$invoice['invoice_number']} soft-deleted (was {$invoice['status']})",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 });

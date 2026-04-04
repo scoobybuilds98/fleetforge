@@ -1,0 +1,239 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * cron/compliance_alerts.php
+ *
+ * Compliance alerts cron — runs nightly at 6:00 AM.
+ *
+ * Scans all active (non-deleted, non-inactive/decommissioned) equipment units
+ * and creates in-app notifications for:
+ *   - Expired documents (past today)
+ *   - Documents expiring within 7 days  → critical severity
+ *   - Documents expiring within 30 days → warning severity
+ *
+ * Multiple expiring docs on the same unit are grouped into a single notification.
+ * Deduplication: does not create a new notification for a unit+type combination
+ * that was already notified within the past 24 hours (checks notification_log).
+ *
+ * Notifications are written to the `notifications` table (in-app only — email
+ * notifications are handled by a future notifications module).
+ *
+ * Crontab (production): 0 6 * * * php /var/www/fleetforge/cron/compliance_alerts.php
+ * Local test:           php /Users/avi/Documents/fleetforge/cron/compliance_alerts.php
+ *
+ * Requires: config/app.php, includes/db.php
+ * Decisions: D21 (GET_LOCK advisory lock prevents duplicate runs)
+ * Spec ref: §7.9 Compliance & Expiry, §Notifications (nightly compliance alerts)
+ * Session: S020
+ */
+
+require_once dirname(__DIR__) . '/config/app.php';
+
+// D21: Advisory lock prevents overlapping runs from creating duplicate notifications
+$lock = db_row("SELECT GET_LOCK('ff_cron_compliance', 0) AS ok", []);
+if (!$lock || (int)$lock['ok'] !== 1) {
+    exit(0); // Another instance is running — exit silently
+}
+
+$notified = 0;
+$skipped  = 0;   // deduplication skips
+$errors   = 0;
+
+try {
+    $today  = date('Y-m-d');
+    $in7    = date('Y-m-d', strtotime('+7 days'));
+    $in30   = date('Y-m-d', strtotime('+30 days'));
+
+    // -----------------------------------------------------------------------
+    // Fetch all units that have at least one expiry within 30 days OR already expired.
+    // Indexes idx_cvi_expiry / idx_reg_expiry / idx_mvi_expiry / idx_ins_expiry
+    // make these comparisons efficient (created in PASS-10 schema migration).
+    // -----------------------------------------------------------------------
+    $units = db_select(
+        "SELECT
+             eu.id,
+             eu.unit_number,
+             eu.status,
+             eu.cvi_expiry,
+             eu.registration_expiry,
+             eu.mvi_expiry,
+             eu.insurance_expiry
+         FROM equipment_units eu
+         WHERE eu.deleted_at IS NULL
+           AND eu.status NOT IN ('inactive','decommissioned')
+           AND (
+               (eu.cvi_expiry IS NOT NULL          AND eu.cvi_expiry          <= ?)
+               OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= ?)
+               OR (eu.mvi_expiry IS NOT NULL          AND eu.mvi_expiry          <= ?)
+               OR (eu.insurance_expiry IS NOT NULL     AND eu.insurance_expiry     <= ?)
+           )
+         ORDER BY eu.unit_number ASC",
+        [$in30, $in30, $in30, $in30]
+    );
+
+    foreach ($units as $unit) {
+        $unitId     = (int)$unit['id'];
+        $unitNumber = $unit['unit_number'];
+
+        // -----------------------------------------------------------------------
+        // Build the list of expiring/expired documents for this unit
+        // -----------------------------------------------------------------------
+        $docChecks = [
+            'CVI'          => $unit['cvi_expiry'],
+            'Registration' => $unit['registration_expiry'],
+            'MVI'          => $unit['mvi_expiry'],
+            'Insurance'    => $unit['insurance_expiry'],
+        ];
+
+        $alertDocs = [];    // ['doc' => 'CVI', 'expiry' => '2026-01-15', 'urgency' => 'expired|critical|warning']
+        $maxSeverity = 'info';
+
+        foreach ($docChecks as $docName => $expiryDate) {
+            if ($expiryDate === null) continue;
+            if ($expiryDate > $in30) continue;   // Only care about ≤30d or already expired
+
+            if ($expiryDate <= $today) {
+                $urgency     = 'expired';
+                $maxSeverity = 'critical';
+            } elseif ($expiryDate <= $in7) {
+                $urgency     = 'critical';
+                if ($maxSeverity !== 'critical') $maxSeverity = 'critical';
+            } else {
+                $urgency     = 'warning';
+                if ($maxSeverity === 'info') $maxSeverity = 'warning';
+            }
+            $alertDocs[] = ['doc' => $docName, 'expiry' => $expiryDate, 'urgency' => $urgency];
+        }
+
+        if (empty($alertDocs)) continue;   // Nothing actionable for this unit
+
+        // -----------------------------------------------------------------------
+        // Deduplication: skip if we already notified for this unit+type within 24h.
+        // notification_type = 'compliance_alert', entity_type = 'equipment_unit', entity_id = unit id.
+        // -----------------------------------------------------------------------
+        $recentLog = db_row(
+            "SELECT id FROM notification_log
+             WHERE entity_type = 'equipment_unit'
+               AND entity_id = ?
+               AND notification_type = 'compliance_alert'
+               AND created_at >= NOW() - INTERVAL 24 HOUR
+             LIMIT 1",
+            [$unitId]
+        );
+
+        if ($recentLog) {
+            $skipped++;
+            continue;
+        }
+
+        // -----------------------------------------------------------------------
+        // Build notification message — groups all affected docs for this unit
+        // -----------------------------------------------------------------------
+        $docLines = [];
+        foreach ($alertDocs as $ad) {
+            $tag = match($ad['urgency']) {
+                'expired'  => '[EXPIRED]',
+                'critical' => '[CRITICAL]',
+                default    => '[WARNING]',
+            };
+            $docLines[] = "{$tag} {$ad['doc']}: {$ad['expiry']}";
+        }
+
+        $docCount = count($alertDocs);
+        $title    = "Compliance: Unit {$unitNumber} — {$docCount} doc" . ($docCount > 1 ? 's' : '') . " require attention";
+        $message  = "Unit {$unitNumber} has the following compliance document(s) requiring action:\n" . implode("\n", $docLines);
+        $url      = '/compliance?q=' . urlencode($unitNumber);
+
+        // -----------------------------------------------------------------------
+        // Write notification + notification_log inside a transaction
+        // -----------------------------------------------------------------------
+        try {
+            db_transaction(function() use ($unitId, $unitNumber, $title, $message, $url, $maxSeverity) {
+                // Write in-app notification (user_id = null broadcasts to all staff;
+                // a future notification rules module will target specific users/roles)
+                db_insert('notifications', [
+                    'user_id'     => null,
+                    'rule_id'     => null,
+                    'title'       => $title,
+                    'message'     => $message,
+                    'url'         => $url,
+                    'entity_type' => 'equipment_unit',
+                    'entity_id'   => $unitId,
+                    'severity'    => $maxSeverity,
+                    'is_read'     => 0,
+                ]);
+
+                // Write deduplication log entry so we don't re-alert within 24h
+                db_insert('notification_log', [
+                    'rule_id'           => null,
+                    'channel'           => 'in_app',
+                    'recipient'         => 'all_staff',
+                    'subject'           => $title,
+                    'body'              => $message,
+                    'entity_type'       => 'equipment_unit',
+                    'entity_id'         => $unitId,
+                    'notification_type' => 'compliance_alert',
+                    'status'            => 'sent',
+                    'sent_at'           => date('Y-m-d H:i:s'),
+                ]);
+            });
+
+            $notified++;
+
+        } catch (\Throwable $e) {
+            $errors++;
+            error_log("[CRON compliance_alerts] Unit #{$unitId} ({$unitNumber}): " . $e->getMessage());
+
+            // Per-unit failure should not abort the rest of the run
+            db_insert('audit_log', [
+                'user_id'      => null,
+                'user_name'    => 'system',
+                'action'       => 'cron',
+                'module'       => 'compliance',
+                'entity_type'  => 'equipment_unit',
+                'entity_id'    => $unitId,
+                'entity_label' => $unitNumber,
+                'notes'        => "compliance_alerts failed for unit #{$unitId}: " . $e->getMessage(),
+                'ip_address'   => '127.0.0.1',
+            ]);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Summary audit log entry
+    // -----------------------------------------------------------------------
+    $summary = "compliance_alerts completed: {$notified} notified, {$skipped} skipped (dedup), {$errors} errors";
+    error_log("[CRON] {$summary}");
+
+    db_insert('audit_log', [
+        'user_id'      => null,
+        'user_name'    => 'system',
+        'action'       => 'cron',
+        'module'       => 'compliance',
+        'entity_type'  => 'cron',
+        'entity_id'    => null,
+        'entity_label' => 'compliance_alerts',
+        'notes'        => $summary,
+        'ip_address'   => '127.0.0.1',
+    ]);
+
+} catch (\Throwable $e) {
+    error_log("[CRON compliance_alerts] Fatal: " . $e->getMessage());
+
+    db_insert('audit_log', [
+        'user_id'      => null,
+        'user_name'    => 'system',
+        'action'       => 'cron',
+        'module'       => 'compliance',
+        'entity_type'  => 'cron',
+        'entity_id'    => null,
+        'entity_label' => 'compliance_alerts',
+        'notes'        => 'compliance_alerts fatal error: ' . $e->getMessage(),
+        'ip_address'   => '127.0.0.1',
+    ]);
+    exit(1);
+
+} finally {
+    db_execute("SELECT RELEASE_LOCK('ff_cron_compliance')", []);
+}

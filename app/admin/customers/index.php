@@ -227,8 +227,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <tr>
                                 <td>
                                     <a :href="'<?= base_url('customers/show') ?>?id=' + c.id"
-                                       class="font-medium"
-                                       style="color:var(--color-primary);text-decoration:none;"
+                                       class="link font-medium"
                                        x-text="c.company_name"></a>
                                     <div class="text-xs text-secondary" x-text="c.email || ''"></div>
                                 </td>

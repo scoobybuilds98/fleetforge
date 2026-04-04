@@ -184,6 +184,10 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="tab = 'mileage_logs'; loadMileageLogs()" :aria-selected="tab === 'mileage_logs'" role="tab">Mileage Log</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'inspections' }"
                 @click="tab = 'inspections'; loadInspections()" :aria-selected="tab === 'inspections'" role="tab">Inspections</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'documents' }"
+                @click="tab = 'documents'; loadDocuments()" :aria-selected="tab === 'documents'" role="tab">Documents
+            <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
+        </button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -670,6 +674,120 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ── TAB: DOCUMENTS ──────────────────────────────────────── -->
+    <template x-if="tab === 'documents'">
+        <div>
+            <template x-if="docsLoading && documents.length === 0">
+                <div class="skeleton skeleton-row"></div>
+            </template>
+
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                    <h3 class="card-title">Lease Documents</h3>
+                    <button class="btn btn-sm btn-primary" @click="openLeaseDocModal()">+ Upload Document</button>
+                </div>
+
+                <template x-if="!docsLoading && documents.length === 0">
+                    <div class="empty-state">No documents uploaded yet.</div>
+                </template>
+
+                <template x-if="documents.length > 0">
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>File</th>
+                                    <th>Size</th>
+                                    <th>Expiry</th>
+                                    <th>Uploaded</th>
+                                    <th>By</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="doc in documents" :key="doc.id">
+                                    <tr>
+                                        <td><span :class="leaseDocTypeBadge(doc.document_type)" x-text="leaseDocTypeLabel(doc.document_type)"></span></td>
+                                        <td><span class="font-mono text-sm" x-text="doc.file_name"></span></td>
+                                        <td x-text="doc.file_size_kb + ' KB'"></td>
+                                        <td x-text="doc.expiration_date ? formatDate(doc.expiration_date) : '—'"></td>
+                                        <td x-text="formatDate(doc.uploaded_at)"></td>
+                                        <td x-text="doc.uploaded_by_name || '—'"></td>
+                                        <td style="white-space:nowrap;">
+                                            <a :href="doc.url" target="_blank" class="btn btn-xs btn-ghost">View PDF</a>
+                                            <button class="btn btn-xs btn-outline-danger" @click="confirmDeleteDoc(doc.id)">Remove</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Upload Document Modal -->
+            <template x-if="leaseDocUploadModal.open">
+                <div class="modal-overlay" @click.self="leaseDocUploadModal.open = false">
+                    <div class="modal" style="max-width:480px;">
+                        <div class="modal-header">
+                            <h3>Upload Document</h3>
+                            <button class="modal-close" @click="leaseDocUploadModal.open = false">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <template x-if="leaseDocUploadModal.error">
+                                <div class="alert alert-danger" x-text="leaseDocUploadModal.error"></div>
+                            </template>
+
+                            <div class="form-group">
+                                <label class="form-label">Document Type</label>
+                                <select class="form-control" x-model="leaseDocUploadModal.docType">
+                                    <option value="">Select type…</option>
+                                    <option value="contract">Lease Contract</option>
+                                    <option value="inspection_in">Pre-Lease Inspection</option>
+                                    <option value="inspection_out">Post-Lease Inspection</option>
+                                    <option value="amendment">Lease Amendment</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">File <span class="text-muted">(PDF, JPEG, or PNG — max 20 MB)</span></label>
+                                <input type="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png"
+                                       @change="leaseDocUploadModal.file = $event.target.files[0]">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Title <span class="text-muted">(optional)</span></label>
+                                <input type="text" class="form-control" x-model="leaseDocUploadModal.title"
+                                       placeholder="Leave blank to use default">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Expiration Date <span class="text-muted">(optional)</span></label>
+                                <input type="date" class="form-control" x-model="leaseDocUploadModal.expiryDate">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Notes <span class="text-muted">(optional)</span></label>
+                                <textarea class="form-control" rows="2" x-model="leaseDocUploadModal.notes"></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-ghost" @click="leaseDocUploadModal.open = false"
+                                    :disabled="leaseDocUploadModal.uploading">Cancel</button>
+                            <button class="btn btn-primary" @click="submitLeaseDocUpload()"
+                                    :disabled="leaseDocUploadModal.uploading || !leaseDocUploadModal.docType || !leaseDocUploadModal.file">
+                                <span x-show="!leaseDocUploadModal.uploading">Upload</span>
+                                <span x-show="leaseDocUploadModal.uploading">Uploading…</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </template>
+
 </div><!-- /x-data -->
 
 <script>
@@ -711,6 +829,15 @@ function FF_LeaseDetail() {
         inspectionsTotal:    0,
         inspectionsPage:     1,
         inspectionsFilters:  { inspection_type: '', status: '', dir: 'ASC' },
+
+        // Documents tab state
+        documents:           [],
+        docsLoading:         false,
+        docsLoaded:          false,
+        leaseDocUploadModal: {
+            open: false, docType: '', title: '', file: null,
+            expiryDate: '', notes: '', uploading: false, error: '',
+        },
 
         closeForm: {
             actual_return_date: new Date().toISOString().slice(0,10),
@@ -824,6 +951,97 @@ function FF_LeaseDetail() {
         },
         loadMoreInspections()    { this.inspectionsPage++; this.loadInspections(true); },
         applyInspectionsFilters() { this.inspections = []; this.inspectionsPage = 1; this.inspectionsTotal = 0; this.loadInspections(); },
+
+        // ── Documents ─────────────────────────────────────────────
+        // WHY docsLoaded guard: load once on first tab visit; in-place updates
+        // after upload/delete mean we never need to re-fetch the full list.
+        async loadDocuments() {
+            if (this.docsLoaded) return;
+            this.docsLoading = true;
+            try {
+                const r = await FF_Api.get(
+                    '<?= base_url('api/v1/documents/index') ?>?entity_type=lease&entity_id=<?= $leaseId ?>'
+                );
+                if (r.success) this.documents = r.data.items || [];
+                this.docsLoaded = true;
+            } catch(e) { /* non-fatal */ }
+            this.docsLoading = false;
+        },
+
+        openLeaseDocModal() {
+            this.leaseDocUploadModal = {
+                open: true, docType: '', title: '', file: null,
+                expiryDate: '', notes: '', uploading: false, error: '',
+            };
+        },
+
+        async submitLeaseDocUpload() {
+            const m = this.leaseDocUploadModal;
+            if (!m.docType || !m.file) return;
+            m.uploading = true;
+            m.error     = '';
+            try {
+                const fd = new FormData();
+                fd.append('entity_type',   'lease');
+                fd.append('entity_id',     '<?= $leaseId ?>');
+                fd.append('document_type', m.docType);
+                fd.append('document',      m.file);
+                if (m.title)      fd.append('title',           m.title);
+                if (m.expiryDate) fd.append('expiration_date', m.expiryDate);
+                if (m.notes)      fd.append('notes',           m.notes);
+
+                // WHY: FF_Api.upload() handles multipart FormData — sends no
+                // Content-Type so the browser sets the correct boundary,
+                // and attaches X-CSRF-Token automatically.
+                const data = await FF_Api.upload('<?= base_url('api/v1/documents/upload') ?>', fd);
+                if (data.success) {
+                    // WHY prepend: multiple docs per type are valid for leases
+                    // (e.g. multiple amendments); keep full history visible.
+                    this.documents.unshift(data.data);
+                    m.open = false;
+                } else {
+                    // WHY: API error envelope is { error: { message } } not top-level message.
+                    m.error = data.error?.message || 'Upload failed. Please try again.';
+                }
+            } catch(e) {
+                m.error = 'Network error. Please try again.';
+            }
+            m.uploading = false;
+        },
+
+        async confirmDeleteDoc(id) {
+            if (!confirm('Remove this document? This cannot be undone.')) return;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/documents/delete') ?>', { id });
+                if (r.success) {
+                    this.documents = this.documents.filter(d => d.id !== id);
+                } else {
+                    alert(r.message || 'Delete failed.');
+                }
+            } catch(e) {
+                alert('Network error. Please try again.');
+            }
+        },
+
+        leaseDocTypeBadge(t) {
+            return {
+                contract:       'badge badge-info',
+                inspection_in:  'badge badge-neutral',
+                inspection_out: 'badge badge-neutral',
+                amendment:      'badge badge-warning',
+                other:          'badge badge-neutral',
+            }[t] ?? 'badge badge-neutral';
+        },
+
+        leaseDocTypeLabel(t) {
+            return {
+                contract:       'Contract',
+                inspection_in:  'Pre-Lease Insp.',
+                inspection_out: 'Post-Lease Insp.',
+                amendment:      'Amendment',
+                other:          'Other',
+            }[t] ?? t;
+        },
 
         inspTypeBadge(t) {
             return { pre_lease:'badge badge-info', post_lease:'badge badge-warning', periodic:'badge badge-neutral',

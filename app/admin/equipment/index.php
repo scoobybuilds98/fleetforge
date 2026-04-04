@@ -58,9 +58,11 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- Spec §4.1: each tile drills down to filtered view -->
     <div class="stat-grid">
 
-        <div class="stat-card stat-card--link" style="cursor:pointer;"
+        <div class="stat-card stat-card--link stat-card--green" style="cursor:pointer;"
              @click="drilldown('available')"
+             :class="{ 'ring-active': filters.status === 'available' }"
              title="Show available units">
+            <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
             <div class="stat-label">Available</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono text-success" x-text="kpis.available"></div>
@@ -70,9 +72,11 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card stat-card--link" style="cursor:pointer;"
+        <div class="stat-card stat-card--link stat-card--blue" style="cursor:pointer;"
              @click="drilldown('on_lease')"
+             :class="{ 'ring-active': filters.status === 'on_lease' }"
              title="Show units on lease">
+            <span class="stat-icon stat-icon--blue"><svg><use href="#icon-key"/></svg></span>
             <div class="stat-label">On Lease</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.on_lease"></div>
@@ -82,9 +86,11 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card stat-card--link" style="cursor:pointer;"
+        <div class="stat-card stat-card--link stat-card--amber" style="cursor:pointer;"
              @click="drilldown('maintenance')"
+             :class="{ 'ring-active': filters.status === 'maintenance' }"
              title="Show units in maintenance">
+            <span class="stat-icon stat-icon--amber"><svg><use href="#icon-wrench"/></svg></span>
             <div class="stat-label">In Maintenance</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono text-warning" x-text="kpis.maintenance"></div>
@@ -94,7 +100,8 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--slate">
+            <span class="stat-icon stat-icon--slate"><svg><use href="#icon-truck"/></svg></span>
             <div class="stat-label">Total Fleet</div>
             <template x-if="kpisLoaded">
                 <div>

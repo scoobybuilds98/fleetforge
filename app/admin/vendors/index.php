@@ -60,38 +60,49 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<div x-data="vendorsKpis()" x-init="loadKpis()">
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--blue"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'total' }"
+         @click="activeTile = activeTile === 'total' ? '' : 'total'; drill('is_preferred', '')">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-building"/></svg></span>
         <div class="stat-label">Total Vendors</div>
-        <div class="stat-value font-mono"><?= e($kpis['total']) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.total"></div>
         <div class="stat-delta">active in system</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--amber"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'preferred' }"
+         @click="activeTile = activeTile === 'preferred' ? '' : 'preferred'; drill('is_preferred', activeTile === 'preferred' ? '1' : '')">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-star"/></svg></span>
         <div class="stat-label">Preferred Vendors</div>
-        <div class="stat-value font-mono"><?= e($kpis['preferred']) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.preferred"></div>
         <div class="stat-delta">marked preferred</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--teal">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-wrench"/></svg></span>
         <div class="stat-label">Active Work Orders</div>
-        <div class="stat-value font-mono"><?= e($kpis['active_wo']) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.active_wo"></div>
         <div class="stat-delta">open / in progress / waiting parts</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--purple">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-trophy"/></svg></span>
         <div class="stat-label">Top Vendor by Spend</div>
-        <div class="stat-value font-mono"><?= format_currency($kpis['top_vendor_spent']) ?></div>
-        <div class="stat-delta">
-            <?= $kpis['top_vendor_name'] ? e($kpis['top_vendor_name']) : 'No spend recorded' ?>
-        </div>
+        <div class="stat-value font-mono" x-text="fmt(kpis.top_vendor_spent)"></div>
+        <div class="stat-delta" x-text="kpis.top_vendor_name || 'No spend recorded'"></div>
     </div>
 
+</div>
 </div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
 <div class="card"
+     id="vendors-table"
      x-data="vendorsList()"
      x-init="init()">
 
@@ -209,6 +220,32 @@ require_once FF_ROOT . '/includes/header.php';
 </div><!-- /card -->
 
 <script>
+function vendorsKpis() {
+    return {
+        kpis: {
+            total:            <?= json_encode($kpis['total']) ?>,
+            preferred:        <?= json_encode($kpis['preferred']) ?>,
+            active_wo:        <?= json_encode($kpis['active_wo']) ?>,
+            top_vendor_name:  <?= json_encode($kpis['top_vendor_name']) ?>,
+            top_vendor_spent: <?= json_encode($kpis['top_vendor_spent']) ?>,
+        },
+        activeTile: '',
+        fmt(n) { return '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+        drill(filter, val) {
+            const el = document.getElementById('vendors-table');
+            if (!el) return;
+            const d = Alpine.$data(el);
+            d.filters[filter] = d.filters[filter] === val ? '' : val;
+            d.page = 1;
+            d.fetch();
+        },
+        async loadKpis() {
+            const r = await FF_Api.get('<?= base_url('api/v1/vendors/kpis') ?>');
+            if (r.success) Object.assign(this.kpis, r.data);
+        },
+    };
+}
+
 function vendorsList() {
     return {
         rows:       [],
@@ -291,5 +328,10 @@ function vendorsList() {
     };
 }
 </script>
+
+<style>
+.stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }
+.stat-card.ring-active { box-shadow: 0 0 0 2px var(--color-primary); }
+</style>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

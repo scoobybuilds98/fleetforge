@@ -70,36 +70,49 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<div x-data="damageClaimsKpis()" x-init="loadKpis()">
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--amber"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'open' }"
+         @click="activeTile = activeTile === 'open' ? '' : 'open'; setFilter('status', activeTile === 'open' ? 'open' : '')">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">Open Claims</div>
-        <div class="stat-value font-mono"><?= e($kpis['open']) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.open"></div>
         <div class="stat-delta">reported / assessed / repair ordered</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--blue"
+         style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'invoiced' }"
+         @click="activeTile = activeTile === 'invoiced' ? '' : 'invoiced'; setFilter('status', activeTile === 'invoiced' ? 'invoiced' : '')">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-clipboard"/></svg></span>
         <div class="stat-label">Awaiting Invoice</div>
-        <div class="stat-value font-mono"><?= e($kpis['invoiced']) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.invoiced"></div>
         <div class="stat-delta">invoiced status</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--teal">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-arrow-trending-up"/></svg></span>
         <div class="stat-label">Claims This Year</div>
-        <div class="stat-value font-mono"><?= e($kpis['year_total']) ?></div>
-        <div class="stat-delta"><?= date('Y') ?></div>
+        <div class="stat-value font-mono" x-text="kpis.year_total"></div>
+        <div class="stat-delta" x-text="new Date().getFullYear()"></div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--purple">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-currency-dollar"/></svg></span>
         <div class="stat-label">Avg Repair Cost</div>
-        <div class="stat-value font-mono"><?= format_currency($kpis['avg_repair']) ?></div>
+        <div class="stat-value font-mono" x-text="fmt(kpis.avg_repair)"></div>
         <div class="stat-delta">estimated, this year</div>
     </div>
 
 </div>
+</div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
 <div class="card"
+     id="damage-claims-table"
      x-data="damageClaimsList()"
      x-init="init()">
 
@@ -226,7 +239,38 @@ require_once FF_ROOT . '/includes/header.php';
 
 </div><!-- /card -->
 
+<style>
+.stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }
+.stat-card.ring-active { box-shadow: 0 0 0 2px var(--color-primary); }
+</style>
+
 <script>
+function damageClaimsKpis() {
+    return {
+        activeTile: '',
+        kpis: {
+            open:       <?= json_encode($kpis['open']) ?>,
+            invoiced:   <?= json_encode($kpis['invoiced']) ?>,
+            year_total: <?= json_encode($kpis['year_total']) ?>,
+            avg_repair: <?= json_encode(number_format((float)($kpis['avg_repair'] ?? 0), 2, '.', '')) ?>,
+        },
+        fmt(n) { return '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+        /* Cross-component filter: push filter to the table component via DOM id */
+        setFilter(key, val) {
+            const el = document.getElementById('damage-claims-table');
+            if (!el) return;
+            const d = Alpine.$data(el);
+            d.filters[key] = d.filters[key] === val ? '' : val;
+            d.page = 1;
+            d.fetch();
+        },
+        async loadKpis() {
+            const r = await FF_Api.get('<?= base_url('api/v1/damage_claims/kpis') ?>');
+            if (r.success) Object.assign(this.kpis, r.data);
+        },
+    };
+}
+
 function damageClaimsList() {
     return {
         rows:       [],

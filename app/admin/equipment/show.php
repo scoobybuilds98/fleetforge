@@ -119,7 +119,8 @@ function daysUntil(?string $date): ?int {
      ============================================================ -->
 <div class="stat-grid" style="margin-bottom:1.5rem;">
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--green">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-heart"/></svg></span>
         <div class="stat-label">Health Score</div>
         <?php if ($unit['health_score'] !== null): ?>
         <div class="stat-value font-mono">
@@ -133,12 +134,14 @@ function daysUntil(?string $date): ?int {
         <?php endif; ?>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-map-pin"/></svg></span>
         <div class="stat-label">Mileage</div>
         <div class="stat-value font-mono"><?= number_format((int)$unit['mileage']) ?> <span class="text-sm text-secondary">mi</span></div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--<?= ($unit['cvi_expiry'] && daysUntil($unit['cvi_expiry']) < 0) ? 'red' : (($unit['cvi_expiry'] && daysUntil($unit['cvi_expiry']) <= 30) ? 'amber' : 'teal') ?>">
+        <span class="stat-icon stat-icon--<?= ($unit['cvi_expiry'] && daysUntil($unit['cvi_expiry']) < 0) ? 'red' : (($unit['cvi_expiry'] && daysUntil($unit['cvi_expiry']) <= 30) ? 'amber' : 'teal') ?>"><svg><use href="#icon-shield-check"/></svg></span>
         <div class="stat-label">CVI Expiry</div>
         <?php
         $cviDays = daysUntil($unit['cvi_expiry']);
@@ -154,7 +157,8 @@ function daysUntil(?string $date): ?int {
         <?php endif; ?>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-tag"/></svg></span>
         <div class="stat-label">VIN</div>
         <div class="stat-value font-mono text-sm"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
     </div>
@@ -166,8 +170,8 @@ function daysUntil(?string $date): ?int {
      ============================================================ -->
 <div x-data="FF_UnitDetail()" x-init="init()">
 
-    <!-- Tab bar -->
-    <div style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:1.5rem;">
+    <!-- Tab bar — modern segmented-pill style -->
+    <div class="tab-bar" role="tablist">
         <?php
         $tabs = [
             ['key' => 'overview',       'label' => 'Overview'],
@@ -182,11 +186,11 @@ function daysUntil(?string $date): ?int {
         ];
         foreach ($tabs as $tab):
         ?>
-        <button class="btn btn-ghost btn-sm"
-                :class="activeTab === '<?= $tab['key'] ?>' ? 'is-active' : ''"
+        <button class="tab-btn"
+                :class="{ 'is-active': activeTab === '<?= $tab['key'] ?>' }"
                 @click="activeTab = '<?= $tab['key'] ?>'"
-                style="border-radius:0;border-bottom:2px solid transparent;margin-bottom:-2px;"
-                :style="activeTab === '<?= $tab['key'] ?>' ? 'border-bottom-color:var(--color-accent);color:var(--color-accent);font-weight:600;' : ''">
+                :aria-selected="activeTab === '<?= $tab['key'] ?>'"
+                role="tab">
             <?= $tab['label'] ?>
         </button>
         <?php endforeach; ?>
@@ -194,84 +198,104 @@ function daysUntil(?string $date): ?int {
 
     <!-- ── TAB: Overview ──────────────────────────────────────── -->
     <div x-show="activeTab === 'overview'">
-        <div class="card">
-            <div class="card-header">
-                <div class="card-title">Unit Specifications</div>
+        <template x-if="loading">
+            <div class="card"><div class="card-body">
+                <template x-for="n in 6" :key="n">
+                    <div class="skeleton skeleton-row" style="margin-bottom:0.5rem;"></div>
+                </template>
+            </div></div>
+        </template>
+        <template x-if="!loading && unit">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+                <!-- ── Identity & Classification ── -->
+                <div class="card spec-card" style="margin-bottom:0;">
+                    <div class="card-header" style="padding:12px 16px;">
+                        <div class="card-title">Identity</div>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <table class="spec-table">
+                            <tr>
+                                <td class="spec-label">Template</td>
+                                <td>
+                                    <span class="font-medium" x-text="unit.template_name"></span>
+                                    <span class="text-secondary text-sm" x-text="unit.template_category ? ' · ' + unit.template_category.replace('_',' ') : ''" style="text-transform:capitalize;"></span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">License Plate</td>
+                                <td><span class="font-mono" x-text="unit.license_plate ? unit.license_plate + (unit.license_state ? ' (' + unit.license_state + ')' : '') : '—'"></span></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Ownership</td>
+                                <td><span x-text="unit.ownership_type || '—'" style="text-transform:capitalize;"></span></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Tracking</td>
+                                <td><span x-text="unit.tracking_provider || 'None'" style="text-transform:capitalize;"></span></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Acquired</td>
+                                <td><span x-text="unit.acquired_date ? formatDate(unit.acquired_date) : '—'"></span></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ── Physical Specifications ── -->
+                <div class="card spec-card" style="margin-bottom:0;">
+                    <div class="card-header" style="padding:12px 16px;">
+                        <div class="card-title">Specifications</div>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <table class="spec-table">
+                            <tr>
+                                <td class="spec-label">Dimensions</td>
+                                <td>
+                                    <span class="font-mono" x-text="
+                                        [unit.length_ft ? unit.length_ft + 'L' : null,
+                                         unit.width_ft  ? unit.width_ft  + 'W' : null,
+                                         unit.height_ft ? unit.height_ft + 'H' : null]
+                                        .filter(Boolean).join(' × ') || '—'
+                                    "></span>
+                                    <span x-show="unit.length_ft || unit.width_ft || unit.height_ft"
+                                          class="text-secondary text-sm"> ft</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Weight Capacity</td>
+                                <td><span class="font-mono" x-text="unit.weight_capacity_lbs ? unit.weight_capacity_lbs.toLocaleString() + ' lbs' : '—'"></span></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Axles</td>
+                                <td><span class="font-mono" x-text="unit.axle_count || '—'"></span></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Tire Size</td>
+                                <td><span class="font-mono" x-text="unit.tire_size || '—'"></span></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Wheel Size</td>
+                                <td><span class="font-mono" x-text="unit.wheel_size || '—'"></span></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ── Notes (spans full width if present) ── -->
+                <template x-if="unit.notes">
+                    <div class="card spec-card" style="margin-bottom:0;grid-column:1/-1;">
+                        <div class="card-header" style="padding:12px 16px;">
+                            <div class="card-title">Notes</div>
+                        </div>
+                        <div class="card-body" style="padding:12px 16px;">
+                            <div x-text="unit.notes" class="text-secondary" style="white-space:pre-line;line-height:1.6;"></div>
+                        </div>
+                    </div>
+                </template>
+
             </div>
-            <div class="card-body">
-                <template x-if="loading">
-                    <div>
-                        <template x-for="n in 6" :key="n">
-                            <div class="skeleton skeleton-row" style="margin-bottom:0.5rem;"></div>
-                        </template>
-                    </div>
-                </template>
-                <template x-if="!loading && unit">
-                    <div class="form-row-3" style="gap:1.5rem 2rem;">
-
-                        <div>
-                            <div class="form-label">Template</div>
-                            <div class="font-medium" x-text="unit.template_name"></div>
-                            <div class="text-secondary text-sm" x-text="unit.template_category ? unit.template_category.replace('_',' ') : ''" style="text-transform:capitalize;"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Ownership</div>
-                            <div x-text="unit.ownership_type || '—'" style="text-transform:capitalize;"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Tracking</div>
-                            <div x-text="unit.tracking_provider || 'none'" style="text-transform:capitalize;"></div>
-                        </div>
-
-                        <div>
-                            <div class="form-label">Length</div>
-                            <div x-text="unit.length_ft ? unit.length_ft + ' ft' : '—'" class="font-mono"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Width</div>
-                            <div x-text="unit.width_ft ? unit.width_ft + ' ft' : '—'" class="font-mono"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Height</div>
-                            <div x-text="unit.height_ft ? unit.height_ft + ' ft' : '—'" class="font-mono"></div>
-                        </div>
-
-                        <div>
-                            <div class="form-label">Axle Count</div>
-                            <div x-text="unit.axle_count || '—'" class="font-mono"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Tire Size</div>
-                            <div x-text="unit.tire_size || '—'" class="font-mono"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Wheel Size</div>
-                            <div x-text="unit.wheel_size || '—'" class="font-mono"></div>
-                        </div>
-
-                        <div>
-                            <div class="form-label">License Plate</div>
-                            <div x-text="unit.license_plate ? unit.license_plate + (unit.license_state ? ' (' + unit.license_state + ')' : '') : '—'" class="font-mono"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Weight Capacity</div>
-                            <div x-text="unit.weight_capacity_lbs ? unit.weight_capacity_lbs.toLocaleString() + ' lbs' : '—'" class="font-mono"></div>
-                        </div>
-                        <div>
-                            <div class="form-label">Acquired</div>
-                            <div x-text="unit.acquired_date ? formatDate(unit.acquired_date) : '—'"></div>
-                        </div>
-
-                    </div>
-                </template>
-                <template x-if="!loading && unit && unit.notes">
-                    <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border-color);">
-                        <div class="form-label">Notes</div>
-                        <div x-text="unit.notes" class="text-secondary"></div>
-                    </div>
-                </template>
-            </div>
-        </div>
+        </template>
     </div>
 
     <!-- ── TAB: Compliance ────────────────────────────────────── -->
@@ -862,18 +886,163 @@ function daysUntil(?string $date): ?int {
         </div>
     </div>
 
-    <!-- ── TAB: Documents (stub) ─────────────────────────────── -->
+    <!-- ── TAB: Documents ────────────────────────────────────── -->
     <div x-show="activeTab === 'documents'">
-        <div class="card card-body empty-state">
-            <div class="empty-state-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"/></svg>
+
+        <!-- Loading -->
+        <template x-if="docsLoading">
+            <div style="padding:2rem; text-align:center; color:var(--text-secondary);">Loading documents…</div>
+        </template>
+
+        <template x-if="!docsLoading">
+            <div>
+                <!-- One card per compliance document type -->
+                <?php foreach (['cvi' => 'CVI Certificate', 'registration' => 'Registration Document', 'insurance' => 'Insurance Certificate'] as $docKey => $docLabel): ?>
+                <div class="card" style="margin-bottom:1rem;">
+                    <div class="card-header" style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem;">
+                        <h3 style="margin:0; font-size:1rem; font-weight:600;"><?= $docLabel ?></h3>
+                        <?php if (can('equipment', 'edit')): ?>
+                        <button class="btn btn-secondary btn-sm"
+                                @click="openUploadModal('<?= $docKey ?>', '<?= $docLabel ?>')">
+                            <span x-show="!getDoc('<?= $docKey ?>')">Upload</span>
+                            <span x-show="getDoc('<?= $docKey ?>')">Replace</span>
+                        </button>
+                        <?php endif; ?>
+                    </div>
+                    <div class="card-body">
+                        <template x-if="!getDoc('<?= $docKey ?>')">
+                            <p style="color:var(--text-secondary); font-size:0.875rem; margin:0;">
+                                No document uploaded yet.
+                            </p>
+                        </template>
+                        <template x-if="getDoc('<?= $docKey ?>')">
+                            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
+                                <div>
+                                    <div class="font-mono" style="font-size:0.875rem;"
+                                         x-text="getDoc('<?= $docKey ?>').file_name"></div>
+                                    <div style="font-size:0.8rem; color:var(--text-secondary); margin-top:0.2rem;">
+                                        <span x-text="getDoc('<?= $docKey ?>').file_size_kb + ' KB'"></span>
+                                        &nbsp;&middot;&nbsp;Uploaded
+                                        <span x-text="formatDate(getDoc('<?= $docKey ?>').uploaded_at)"></span>
+                                        <template x-if="getDoc('<?= $docKey ?>').uploaded_by_name">
+                                            &nbsp;by
+                                            <span x-text="getDoc('<?= $docKey ?>').uploaded_by_name"></span>
+                                        </template>
+                                        <template x-if="getDoc('<?= $docKey ?>').expiration_date">
+                                            &nbsp;&middot;&nbsp;Expires
+                                            <span x-text="formatDate(getDoc('<?= $docKey ?>').expiration_date)"></span>
+                                        </template>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:0.5rem; align-items:center;">
+                                    <a :href="getDoc('<?= $docKey ?>').url"
+                                       target="_blank" rel="noopener"
+                                       class="btn btn-sm btn-secondary">View PDF</a>
+                                    <?php if (can('equipment', 'edit')): ?>
+                                    <button class="btn btn-sm btn-outline-danger"
+                                            @click="confirmDeleteDoc(getDoc('<?= $docKey ?>').id)">
+                                        Remove
+                                    </button>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <?php endforeach; ?>
             </div>
-            <p class="empty-state-title">Document uploads coming in S021</p>
-            <p class="empty-state-text">CVI, registration, and insurance document uploads will be built during the Documents session.</p>
-        </div>
+        </template>
+
+        <!-- Upload Modal -->
+        <template x-if="uploadModal.open">
+            <div class="modal-backdrop" @click.self="uploadModal.open = false">
+                <div class="modal" style="max-width:480px;">
+                    <div class="modal-header">
+                        <h2 class="modal-title"
+                            x-text="(getDoc(uploadModal.docType) ? 'Replace ' : 'Upload ') + uploadModal.docLabel"></h2>
+                        <button class="modal-close" @click="uploadModal.open = false">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <template x-if="uploadModal.error">
+                            <div class="alert alert-danger" style="margin-bottom:1rem;"
+                                 x-text="uploadModal.error"></div>
+                        </template>
+                        <div style="margin-bottom:1rem;">
+                            <label class="form-label">
+                                Document File <span style="color:var(--color-danger);">*</span>
+                            </label>
+                            <input type="file" class="form-control"
+                                   accept=".pdf,application/pdf"
+                                   @change="uploadModal.file = $event.target.files[0]"
+                                   :disabled="uploadModal.uploading">
+                            <p style="font-size:0.8rem; color:var(--text-secondary); margin-top:0.25rem;">
+                                PDF only &middot; Max 20 MB
+                            </p>
+                        </div>
+                        <div>
+                            <label class="form-label">
+                                Expiry Date
+                                <span style="color:var(--text-secondary); font-weight:400;">(optional)</span>
+                            </label>
+                            <input type="date" class="form-control"
+                                   x-model="uploadModal.expiryDate"
+                                   :disabled="uploadModal.uploading">
+                            <p style="font-size:0.8rem; color:var(--text-secondary); margin-top:0.25rem;">
+                                Also updates the compliance grid expiry date.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary"
+                                @click="uploadModal.open = false"
+                                :disabled="uploadModal.uploading">Cancel</button>
+                        <button class="btn btn-primary"
+                                @click="submitUpload()"
+                                :disabled="uploadModal.uploading || !uploadModal.file">
+                            <span x-show="!uploadModal.uploading">Upload Document</span>
+                            <span x-show="uploadModal.uploading">Uploading…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </template>
+
     </div>
 
 </div><!-- /x-data -->
+
+<style>
+/* Unit spec cards — elevated card style for visual separation from page bg */
+.spec-card {
+    border: 1px solid var(--border-color-strong);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.03);
+}
+.spec-card .card-header {
+    background: var(--color-primary);
+    border-bottom: none;
+}
+.spec-card .card-header .card-title {
+    color: #fff;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+/* Key-value table — alternating rows for readability */
+.spec-table { width:100%; border-collapse:collapse; }
+.spec-table tr { border-bottom:1px solid var(--border-color); }
+.spec-table tr:last-child { border-bottom:none; }
+.spec-table tr:nth-child(even) { background:var(--bg-surface-2); }
+.spec-table td { padding:11px 16px; font-size:0.875rem; vertical-align:baseline; }
+.spec-table .spec-label {
+    width:140px;
+    color:var(--text-tertiary);
+    font-size:0.8125rem;
+    font-weight:500;
+    white-space:nowrap;
+}
+.spec-table .spec-value { color:var(--text-primary); font-weight:500; }
+</style>
 
 <script>
 function FF_UnitDetail() {
@@ -924,6 +1093,13 @@ function FF_UnitDetail() {
         inspectionsLoaded:   false,
         inspectionsFilters:  { inspection_type: '', status: '', sort: 'inspection_date', dir: 'DESC' },
 
+        // ── Documents ─────────────────────────────────────────────
+        documents:    [],
+        docsLoading:  false,
+        docsLoaded:   false,
+        uploadModal:  { open: false, docType: '', docLabel: '', file: null,
+                        expiryDate: '', uploading: false, error: '' },
+
         async init() {
             await this.loadUnit();
         },
@@ -942,6 +1118,7 @@ function FF_UnitDetail() {
                 if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)      this.loadMileageLogs();
                 if (tab === 'maintenance'   && !this.workOrdersLoaded)       this.loadWorkOrders();
                 if (tab === 'inspections'   && !this.inspectionsLoaded)      this.loadInspections();
+                if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
             });
         },
 
@@ -1146,6 +1323,79 @@ function FF_UnitDetail() {
             if (days <= 7)  return 'Critical';
             if (days <= 30) return 'Expiring Soon';
             return 'OK';
+        },
+
+        // ── Documents tab methods ─────────────────────────────────
+        async loadDocuments() {
+            this.docsLoading = true;
+            try {
+                const r = await FF_Api.get(
+                    '<?= base_url('api/v1/documents') ?>?entity_type=equipment_unit&entity_id=<?= $unitId ?>'
+                );
+                if (r.success) {
+                    this.documents = r.data.items || [];
+                    this.docsLoaded = true;
+                }
+            } catch(e) { /* non-fatal */ }
+            this.docsLoading = false;
+        },
+
+        // Return the most recent document for a given type, or null.
+        getDoc(docType) {
+            return this.documents.find(d => d.document_type === docType) || null;
+        },
+
+        openUploadModal(docType, docLabel) {
+            this.uploadModal = {
+                open: true, docType, docLabel,
+                file: null, expiryDate: '', uploading: false, error: '',
+            };
+        },
+
+        async submitUpload() {
+            if (!this.uploadModal.file) return;
+            this.uploadModal.uploading = true;
+            this.uploadModal.error = '';
+            try {
+                const fd = new FormData();
+                fd.append('entity_type',   'equipment_unit');
+                fd.append('entity_id',     '<?= $unitId ?>');
+                fd.append('document_type', this.uploadModal.docType);
+                if (this.uploadModal.expiryDate) {
+                    fd.append('expiration_date', this.uploadModal.expiryDate);
+                }
+                fd.append('document', this.uploadModal.file);
+
+                // WHY: FF_Api.upload() handles multipart FormData — sends no
+                // Content-Type so the browser sets the correct boundary,
+                // and attaches X-CSRF-Token automatically.
+                const r = await FF_Api.upload('<?= base_url('api/v1/documents/upload') ?>', fd);
+                if (r.success) {
+                    // Replace existing or push new — keeps the list in sync without reload.
+                    const idx = this.documents.findIndex(
+                        d => d.document_type === this.uploadModal.docType
+                    );
+                    if (idx >= 0) this.documents[idx] = r.data;
+                    else          this.documents.push(r.data);
+                    this.uploadModal.open = false;
+                } else {
+                    // WHY: API error envelope is { error: { message } } not top-level message.
+                    this.uploadModal.error = r.error?.message || 'Upload failed. Please try again.';
+                }
+            } catch(e) {
+                this.uploadModal.error = 'Network error. Please try again.';
+            }
+            this.uploadModal.uploading = false;
+        },
+
+        async confirmDeleteDoc(id) {
+            if (!confirm('Remove this document? The file will be unlinked from this unit.')) return;
+            const r = await FF_Api.post('<?= base_url('api/v1/documents/delete') ?>', { id });
+            if (r.success) {
+                this.documents = this.documents.filter(d => d.id !== id);
+            } else {
+                alert(r.message || 'Could not remove document.');
+            }
         },
 
         statusBadgeClass(status) {

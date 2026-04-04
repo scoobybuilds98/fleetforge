@@ -79,38 +79,52 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      KPI tiles
      ============================================================ -->
+<div x-data="paymentsKpis()" x-init="loadKpis()">
 <div class="stat-grid" style="grid-template-columns: repeat(4,1fr); gap:16px; margin-bottom:24px;">
 
-    <div class="stat-card">
+    <!-- Collected This Month — filters table by status=cleared -->
+    <div class="stat-card stat-card--green"
+         :class="{ 'ring-active': activeTile === 'cleared' }"
+         style="cursor:pointer;"
+         title="Click to filter payments by Cleared status"
+         @click="activeTile = activeTile === 'cleared' ? '' : 'cleared'; drill('status', 'cleared')">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span>
         <div class="stat-label">Collected This Month</div>
-        <div class="stat-value font-mono"><?= format_currency($collectedThisMonth['total']) ?></div>
-        <div class="stat-delta"><?= e($collectedThisMonth['cnt']) ?> payments</div>
+        <div class="stat-value font-mono" x-text="fmt(kpis.collected_total)"></div>
+        <div class="stat-delta" x-text="kpis.collected_cnt + ' payments'"></div>
     </div>
 
-    <div class="stat-card">
+    <!-- Total AR Outstanding — aggregate from invoices table, display-only -->
+    <div class="stat-card stat-card--blue" title="Outstanding AR across all invoices (display only)">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-chart-bar"/></svg></span>
         <div class="stat-label">Total AR Outstanding</div>
-        <div class="stat-value font-mono"><?= format_currency($arOutstanding['total']) ?></div>
-        <div class="stat-delta"><?= e($arOutstanding['cnt']) ?> invoices</div>
+        <div class="stat-value font-mono" x-text="fmt(kpis.ar_outstanding_total)"></div>
+        <div class="stat-delta" x-text="kpis.ar_outstanding_cnt + ' invoices'"></div>
     </div>
 
-    <div class="stat-card stat-card--danger">
+    <!-- Overdue AR — aggregate from invoices table, display-only -->
+    <div class="stat-card stat-card--red" title="Overdue AR across invoices past due date (display only)">
+        <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">Overdue AR</div>
-        <div class="stat-value font-mono"><?= format_currency($arOverdue['total']) ?></div>
-        <div class="stat-delta"><?= e($arOverdue['cnt']) ?> invoices past due</div>
+        <div class="stat-value font-mono" x-text="fmt(kpis.ar_overdue_total)"></div>
+        <div class="stat-delta" x-text="kpis.ar_overdue_cnt + ' invoices past due'"></div>
     </div>
 
-    <div class="stat-card">
+    <!-- Recorded Today — all payments created today, display-only -->
+    <div class="stat-card stat-card--slate" title="All payments recorded today (display only)">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-pencil-square"/></svg></span>
         <div class="stat-label">Recorded Today</div>
-        <div class="stat-value font-mono"><?= e($today['cnt']) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.recorded_today_cnt"></div>
         <div class="stat-delta">payments</div>
     </div>
 
+</div>
 </div>
 
 <!-- ============================================================
      Filter bar + table — Alpine.js component
      ============================================================ -->
-<div class="card" x-data="FF_Payments()">
+<div class="card" x-data="FF_Payments()" id="payments-table">
 
     <!-- Filter bar -->
     <div class="card-header" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -234,6 +248,37 @@ require_once FF_ROOT . '/includes/header.php';
 </div><!-- /card -->
 
 <script>
+function paymentsKpis() {
+    return {
+        activeTile: '',
+        kpis: {
+            collected_total:      <?= json_encode($collectedThisMonth['total'] ?? '0.00') ?>,
+            collected_cnt:        <?= json_encode((int)($collectedThisMonth['cnt'] ?? 0)) ?>,
+            ar_outstanding_total: <?= json_encode($arOutstanding['total'] ?? '0.00') ?>,
+            ar_outstanding_cnt:   <?= json_encode((int)($arOutstanding['cnt'] ?? 0)) ?>,
+            ar_overdue_total:     <?= json_encode($arOverdue['total'] ?? '0.00') ?>,
+            ar_overdue_cnt:       <?= json_encode((int)($arOverdue['cnt'] ?? 0)) ?>,
+            recorded_today_cnt:   <?= json_encode((int)($today['cnt'] ?? 0)) ?>,
+        },
+        fmt(n) { return '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+
+        /** Cross-component drill: toggle a filter on the payments table */
+        drill(filter, val) {
+            const el = document.getElementById('payments-table');
+            if (!el) return;
+            const d = Alpine.$data(el);
+            d.filters[filter] = d.filters[filter] === val ? '' : val;
+            d.pagination.page = 1;
+            d.load();
+        },
+
+        async loadKpis() {
+            const r = await FF_Api.get('<?= base_url('api/v1/payments/kpis') ?>');
+            if (r.success) Object.assign(this.kpis, r.data);
+        },
+    };
+}
+
 function FF_Payments() {
     return {
         rows:       [],

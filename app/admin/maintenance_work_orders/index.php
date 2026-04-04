@@ -49,32 +49,44 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<div x-data="woKpis()" x-init="loadKpis()">
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card" style="cursor:pointer;" onclick="setFilter('status','')">
+    <div class="stat-card stat-card--blue" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'total' ? '' : 'total'; setFilter('status','')"
+         :class="{ 'ring-active': activeTile === 'total' }">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-clipboard"/></svg></span>
         <div class="stat-label">Total Work Orders</div>
-        <div class="stat-value font-mono"><?= e($kpiTotal) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.total"></div>
         <div class="stat-delta">all time</div>
     </div>
 
-    <div class="stat-card" style="cursor:pointer;" onclick="setFilter('status','open')">
+    <div class="stat-card stat-card--amber" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'open' ? '' : 'open'; setFilter('status', activeTile === 'open' ? 'open' : '')"
+         :class="{ 'ring-active': activeTile === 'open' }">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-lock-open"/></svg></span>
         <div class="stat-label">Open</div>
-        <div class="stat-value font-mono"><?= e($kpiOpen) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.open"></div>
         <div class="stat-delta">awaiting start</div>
     </div>
 
-    <div class="stat-card" style="cursor:pointer;" onclick="setFilter('status','in_progress')">
+    <div class="stat-card stat-card--teal" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'active' ? '' : 'active'; setFilter('status', activeTile === 'active' ? 'in_progress' : '')"
+         :class="{ 'ring-active': activeTile === 'active' }">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-bolt"/></svg></span>
         <div class="stat-label">Active</div>
-        <div class="stat-value font-mono"><?= e($kpiActive) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.active"></div>
         <div class="stat-delta">in progress / waiting parts</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--green">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Completed This Month</div>
-        <div class="stat-value font-mono"><?= e($kpiCompleted) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.completed_this_month"></div>
         <div class="stat-delta">closed out</div>
     </div>
 
+</div>
 </div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
@@ -185,7 +197,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <td>
                                 <a :href="'<?= base_url('equipment/show') ?>?id=' + row.equipment_unit_id"
                                    @click.stop
-                                   class="text-accent"
+                                   class="link font-mono"
                                    x-text="row.unit_number"></a>
                                 <div class="text-secondary" style="font-size:0.75rem;"
                                      x-text="[row.unit_year, row.brand, row.model].filter(Boolean).join(' ')"></div>
@@ -231,6 +243,22 @@ require_once FF_ROOT . '/includes/header.php';
 </div><!-- /card -->
 
 <script>
+function woKpis() {
+    return {
+        activeTile: '',
+        kpis: {
+            total:                <?= json_encode($kpiTotal) ?>,
+            open:                 <?= json_encode($kpiOpen) ?>,
+            active:               <?= json_encode($kpiActive) ?>,
+            completed_this_month: <?= json_encode($kpiCompleted) ?>,
+        },
+        async loadKpis() {
+            const r = await FF_Api.get('<?= base_url('api/v1/maintenance_work_orders/kpis') ?>');
+            if (r.success) Object.assign(this.kpis, r.data);
+        },
+    };
+}
+
 // Allow KPI tiles to set filters from outside Alpine component
 function setFilter(key, val) {
     const el = document.getElementById('wo-table-card');

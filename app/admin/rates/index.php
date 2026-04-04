@@ -180,7 +180,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <tr>
                                     <td>
                                         <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
-                                           class="text-primary" x-text="row.name"></a>
+                                           class="link font-medium" x-text="row.name"></a>
                                     </td>
                                     <td class="font-mono" x-text="row.item_count ?? 0"></td>
                                     <td class="font-mono" x-text="row.effective_from || '—'"></td>
@@ -199,7 +199,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
                                            class="btn btn-secondary btn-sm">Edit</a>
                                         <?php if (can('rates', 'delete')): ?>
-                                        <button class="btn btn-danger btn-sm"
+                                        <button class="btn btn-outline-danger btn-sm"
                                                 @click.stop="confirmDeleteCard(row)"
                                                 :disabled="row.is_default">Delete</button>
                                         <?php endif; ?>
@@ -286,7 +286,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <tr>
                                     <td>
                                         <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id"
-                                           class="text-primary" x-text="row.customer_name"></a>
+                                           class="link" x-text="row.customer_name"></a>
                                     </td>
                                     <td x-text="row.equipment_type"></td>
                                     <td class="font-mono" style="text-align:right;"

@@ -1220,7 +1220,7 @@ kbd {
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
-    padding: 20px 20px 20px 24px;
+    padding: 20px 60px 20px 28px;  /* right padding makes room for icon */
     box-shadow: var(--shadow-sm);
     position: relative;
     overflow: hidden;
@@ -1228,22 +1228,61 @@ kbd {
                 transform var(--transition-base);
 }
 
+/* Left accent bar — uses per-card --stat-accent or defaults to primary */
 .stat-card::before {
     content: '';
     position: absolute;
     left: 0;
     top: 0;
     bottom: 0;
-    width: 3px;
-    background: var(--color-primary);
+    width: 4px;
+    background: linear-gradient(
+        to bottom,
+        var(--stat-accent, var(--color-primary)),
+        color-mix(in srgb, var(--stat-accent, var(--color-primary)) 50%, transparent)
+    );
     border-radius: var(--radius-xl) 0 0 var(--radius-xl);
 }
 
 .stat-card:hover {
     box-shadow: var(--shadow-md);
     border-color: var(--border-color-strong);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
 }
+
+/* Per-card accent color variants */
+.stat-card--green  { --stat-accent: #22c55e; }
+.stat-card--blue   { --stat-accent: #3b82f6; }
+.stat-card--amber  { --stat-accent: #f59e0b; }
+.stat-card--red    { --stat-accent: #ef4444; }
+.stat-card--purple { --stat-accent: #8b5cf6; }
+.stat-card--teal   { --stat-accent: #14b8a6; }
+.stat-card--slate  { --stat-accent: #64748b; }
+
+/* Decorative icon container — positioned top-right */
+.stat-icon {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.stat-icon svg {
+    width: 20px;
+    height: 20px;
+}
+.stat-icon--green  { background: rgba(34,197,94,0.12); }
+.stat-icon--blue   { background: rgba(59,130,246,0.12); }
+.stat-icon--amber  { background: rgba(245,158,11,0.12); }
+.stat-icon--red    { background: rgba(239,68,68,0.12); }
+.stat-icon--purple { background: rgba(139,92,246,0.12); }
+.stat-icon--teal   { background: rgba(20,184,166,0.12); }
+.stat-icon--slate  { background: rgba(100,116,139,0.12); }
 
 .stat-label {
     font-size: 0.75rem;
@@ -1266,6 +1305,16 @@ kbd {
 .stat-delta {
     font-size: 0.8125rem;
     color: var(--text-tertiary);
+}
+
+/* Clickable stat-card KPI tiles — active ring + pointer affordance */
+.stat-card[style*="cursor:pointer"],
+.stat-card.stat-card--link {
+    cursor: pointer;
+}
+.stat-card.ring-active {
+    box-shadow: 0 0 0 2px var(--stat-accent, var(--color-primary)), var(--shadow-md);
+    border-color: var(--stat-accent, var(--color-primary));
 }
 
 
@@ -1410,11 +1459,26 @@ kbd {
 .btn-ghost {
     background: transparent;
     color: var(--text-secondary);
-    border-color: transparent;
+    border-color: var(--border-color);
 }
 .btn-ghost:hover {
     background: var(--bg-surface-2);
     color: var(--text-primary);
+    border-color: var(--border-color-strong);
+    text-decoration: none;
+}
+
+/* Soft-danger outline for inline table destructive actions —
+   less aggressive than solid .btn-danger, appropriate for row-level Remove/Delete */
+.btn-outline-danger {
+    background: transparent;
+    color: var(--color-danger);
+    border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+.btn-outline-danger:hover {
+    background: var(--color-danger-light);
+    border-color: var(--color-danger);
+    color: var(--color-danger);
     text-decoration: none;
 }
 
@@ -2686,19 +2750,27 @@ html.is-mac .non-mac-only { display: none; }
 /* Utility: muted text color */
 .text-muted { color: var(--text-tertiary); }
 
-/* Inline hyperlink style */
+/* Inline hyperlink style — subtle underline so links are obvious in tables */
 .link {
     color: var(--color-primary);
-    text-decoration: none;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+    text-underline-offset: 2px;
+    text-decoration-thickness: 1px;
+    transition: text-decoration-color 0.15s;
 }
 .link:hover {
-    text-decoration: underline;
+    text-decoration-color: var(--color-primary);
 }
 
-/* ── Tab bar ─────────────────────────────────────────────── */
+/* ── Tab bar — modern segmented-pill style ───────────────── */
 .tab-bar {
-    display: flex;
-    border-bottom: 1px solid var(--border-color);
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
     margin-bottom: 1.5rem;
     overflow-x: auto;
     scrollbar-width: none;
@@ -2706,27 +2778,37 @@ html.is-mac .non-mac-only { display: none; }
 .tab-bar::-webkit-scrollbar { display: none; }
 
 .tab-btn {
-    padding: 10px 20px;
-    background: none;
+    padding: 8px 18px;
+    background: transparent;
     border: none;
-    border-bottom: 2px solid transparent;
+    border-radius: calc(var(--radius-lg) - 3px);
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     font-weight: 500;
     white-space: nowrap;
     color: var(--text-secondary);
-    transition: color var(--transition-fast), border-color var(--transition-fast);
-    margin-bottom: -1px;
+    transition: color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
     font-family: inherit;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    position: relative;
 }
-.tab-btn:hover { color: var(--text-primary); }
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-surface-hover);
+}
 .tab-btn.is-active,
 .tab-btn[aria-selected="true"] {
-    border-bottom-color: var(--color-primary);
-    color: var(--color-primary);
+    background: var(--color-primary);
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+}
+.tab-btn.is-active:hover,
+.tab-btn[aria-selected="true"]:hover {
+    background: var(--color-primary);
+    color: #fff;
 }
 .tab-badge {
     display: inline-flex;
@@ -2735,7 +2817,7 @@ html.is-mac .non-mac-only { display: none; }
     min-width: 18px;
     height: 18px;
     padding: 0 5px;
-    background: var(--bg-surface-2);
+    background: var(--bg-surface);
     border-radius: var(--radius-full);
     font-size: 0.6875rem;
     font-weight: 600;
@@ -2744,8 +2826,8 @@ html.is-mac .non-mac-only { display: none; }
 }
 .tab-btn.is-active .tab-badge,
 .tab-btn[aria-selected="true"] .tab-badge {
-    background: var(--color-primary-light);
-    color: var(--color-primary-text);
+    background: rgba(255,255,255,0.2);
+    color: #fff;
 }
 
 /* ── Breadcrumb ──────────────────────────────────────────── */

@@ -47,36 +47,49 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<div x-data="inspectionsKpis()" x-init="loadKpis()">
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card" style="cursor:pointer;" @click="setFilter('status','')">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         @click="activeTile = activeTile === 'total' ? '' : 'total'; drill('status', '')"
+         :class="{ 'ring-active': activeTile === 'total' }">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-magnifying-glass"/></svg></span>
         <div class="stat-label">Total Inspections</div>
-        <div class="stat-value font-mono"><?= e($kpiTotal) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.total"></div>
         <div class="stat-delta">all time</div>
     </div>
 
-    <div class="stat-card" style="cursor:pointer;" @click="setFilter('status','draft')">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         @click="activeTile = activeTile === 'draft' ? '' : 'draft'; drill('status', activeTile === 'draft' ? 'draft' : '')"
+         :class="{ 'ring-active': activeTile === 'draft' }">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-pencil"/></svg></span>
         <div class="stat-label">Draft</div>
-        <div class="stat-value font-mono"><?= e($kpiDraft) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.draft"></div>
         <div class="stat-delta">in progress</div>
     </div>
 
-    <div class="stat-card" style="cursor:pointer;" @click="setFilter('status','complete')">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         @click="activeTile = activeTile === 'complete' ? '' : 'complete'; drill('status', activeTile === 'complete' ? 'complete' : '')"
+         :class="{ 'ring-active': activeTile === 'complete' }">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Complete</div>
-        <div class="stat-value font-mono"><?= e($kpiComplete) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.complete"></div>
         <div class="stat-delta">awaiting signature</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card stat-card--teal">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-pencil-square"/></svg></span>
         <div class="stat-label">Signed This Month</div>
-        <div class="stat-value font-mono"><?= e($kpiSigned) ?></div>
+        <div class="stat-value font-mono" x-text="kpis.signed_this_month"></div>
         <div class="stat-delta">finalized</div>
     </div>
 
 </div>
+</div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
 <div class="card"
+     id="inspections-table"
      x-data="inspectionList()"
      x-init="loadInspections()">
 
@@ -174,7 +187,36 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
+<style>
+.stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }
+.stat-card.ring-active { box-shadow: 0 0 0 2px var(--color-primary); }
+</style>
+
 <script>
+function inspectionsKpis() {
+    return {
+        activeTile: '',
+        kpis: {
+            total:              <?= json_encode($kpiTotal) ?>,
+            draft:              <?= json_encode($kpiDraft) ?>,
+            complete:           <?= json_encode($kpiComplete) ?>,
+            signed_this_month:  <?= json_encode($kpiSigned) ?>,
+        },
+        async loadKpis() {
+            const r = await FF_Api.get('<?= base_url('api/v1/inspections/kpis') ?>');
+            if (r.success) Object.assign(this.kpis, r.data);
+        },
+        drill(filter, val) {
+            const el = document.getElementById('inspections-table');
+            if (!el) return;
+            const d = Alpine.$data(el);
+            d.filters[filter] = d.filters[filter] === val ? '' : val;
+            d.page = 1;
+            d.loadInspections();
+        },
+    };
+}
+
 function inspectionList() {
     return {
         inspections: [],
