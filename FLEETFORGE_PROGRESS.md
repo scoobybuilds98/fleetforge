@@ -177,6 +177,7 @@
 
 | S020-UX | 2026-04-04 | UX Polish — Modern Tabs, Spec Cards, KPI Tile Icons & Clickable Drilldowns | Comprehensive visual upgrade across all modules. **20+ files modified.** (1) **Modern tab navigation**: `.tab-bar` + `.tab-btn` CSS in app.css completely rewritten from underline-based to modern segmented-pill style — `inline-flex` container with subtle background, `border-radius`, 4px padding; active tab gets solid `--color-primary` fill with white text + shadow; `.tab-badge` on active tabs gets translucent white background. equipment/show.php inline-styled tabs converted to standard `.tab-bar` + `.tab-btn` classes matching leases/show.php + customers/show.php. (2) **Unit spec cards contrast**: `.spec-card` class added to equipment/show.php — card headers use `--color-primary` background with white text (strong visual anchor); stronger border + elevated shadow; alternating row stripes on `.spec-table` via `nth-child(even)`. (3) **All module KPI tiles clickable**: 10 modules now have functional tile-to-table filtering with toggle behavior + visual `ring-active` feedback. Cross-component modules (invoices, payments, credit_notes, damage_claims, vendors, inspections) use `Alpine.$data(document.getElementById('id'))` pattern; same-component modules (leases, equipment, compliance) use direct filter manipulation. Table root elements given IDs for cross-component targeting. Each module's KPI function got `activeTile` tracking + `drill()`/`setFilter()` methods. Display-only tiles (revenue, monetary aggregates) left without click handlers. (4) **KPI tile visual redesign**: Each stat-card gets a unique accent color variant (`stat-card--green/blue/amber/red/purple/teal/slate`) controlling the left gradient bar and active ring color. SVG icon sprite (25 Heroicons outline symbols) added to `includes/footer.php` — defined once, referenced via `<svg><use href="#icon-name"/></svg>`. Each tile gets a 42×42px rounded-square icon container (`.stat-icon`) with color-tinted background in the top-right corner. Icons are contextual: check-circle (available/complete), key (on-lease), wrench (maintenance), truck (fleet), shield-check (compliance), clock (pending/expiring), exclamation-triangle (expired/overdue), fire (critical), currency-dollar (revenue), document-text (invoices), chart-bar (metrics), star (preferred), building (vendors), trophy (top vendor), bolt (active), magnifying-glass (inspections), clipboard (work orders), lock-open (open), pencil (draft). Equipment show page hero tiles also updated with contextual icons (heart/map-pin/shield-check/tag). All 20+ files pass php -l. |
 
+| S022 | 2026-04-05 | Documents Module (Phase 13) | **3 files built/modified.** **(1) api/v1/documents/index.php extended** — added Mode B (global paginated list, no entity_id). Mode B joins customers/equipment_units/leases via entity-type-guarded LEFT JOINs to produce entity_label per row. Supports entity_type filter, title/file_name LIKE search, sort (uploaded_at/title/document_type/file_size_kb/expiration_date), dir, page, per_page. Mode A (entity_id present) behavior unchanged. **(2) app/admin/documents/index.php (NEW)** — global documents list page. Alpine `FF_Documents()` component: entity_type filter dropdown (All/Customer/Equipment/Lease/Inspection/Damage Claim), text search with 400ms debounce, sortable column headers with ↑↓ indicators, load-more pagination. Table shows: type badge, title+filename, entity type badge + entity_label link to show page, size, expiry (color-coded: red=expired, amber=expiring<30d), uploaded date, uploader, View (signed URL in new tab) + Remove actions. Upload modal: entity_type selector → document_type select (options driven by Alpine x-if per type), entity ID input, title/expiry/notes, file picker. On success reloads list. On delete removes row from local array and decrements total. entityUrl() builds link to /customers/show, /equipment/show, /leases/show etc. Trap 7: file_path never exposed. **(3) app/admin/customers/show.php patched** — Documents tab added (8th tab, after Rates). Tab button shows count badge when documents.length > 0. x-show panel with ff-tab-enter transition matching all other customer tabs. Lazy-loads on first activation via $watch. Table: type badge, title + file_name, size, expiry (color-coded), uploaded date, uploader, View + Remove. Upload modal: tax_exemption/credit_agreement/other document types. submitDocUpload() POSTs to upload API via FormData, prepends new doc to array on success. confirmDeleteDoc() soft-deletes via API, filters from array. customerDocTypeBadge/Label helpers. docExpiryClass() for color cues. **SC passed**: SC1 php -l all 3 files clean ✅; SC2 /documents page 200 + FF_Documents component present ✅; SC3 customers/show 200 + Documents tab present ✅; SC4 global API mode B returns items with entity_label ✅; SC5 entity-specific mode A (customer&entity_id=1) returns items array ✅; SC6 entity_type=equipment_unit filter returns 6 items ✅; SC7 upload to customer → 201 + signed URL in response ✅; SC8 Trap 7 — file_path not in any API response ✅; SC9/SC10 uploaded doc in global+entity-specific lists ✅; SC11 serve endpoint 200 application/pdf ✅; SC12 delete 200 {deleted:true} ✅; SC13 deleted doc no longer in list ✅; SC14 equipment/show + leases/show 200 (no regressions) ✅. |
 | S021-UX | 2026-04-05 | UX Fix — Scroll-to-top bug + tab flash + smooth transitions | **8 files modified.** (1) **Reports scroll-to-top fix**: Converted 12 `<template x-if>` to `<div x-show>` with optional chaining across all 4 report tabs (Financial/Fleet/Customer/Compliance) — KPI tiles, loading skeletons, and viewLoading placeholders. `x-if` was removing DOM nodes on toggle, collapsing page height and resetting scroll position. `x-show` keeps elements in DOM with `display:none`. (2) **Reports flash elimination**: Added `x-cloak` to root Alpine element to prevent FOUC (all `x-show` content briefly visible before Alpine init). Made `setPreset`/`runReport`/`setCompWindow` keep old KPIs visible on current tab during data refresh — old values stay until API response replaces them atomically. No more skeleton→content blink on cached responses. (3) **Smooth 120ms tab transitions across entire app (52 panels)**: CSS `.ff-tab-enter` classes + `@keyframes ff-tab-fade-in` animation in app.css. `x-show` tab panels get Alpine `x-transition:enter` (reports 24, equipment/show 9, customers/show 7, leases/show 4, rates/index 2). `x-if` tab panels get `.ff-tab-animated` CSS animation class (leases/show 4, profile/index 2). Old tab hides instantly, new tab fades in — masks content swap. (4) **Tab active class fix**: All 23 report tab buttons changed from `{active:...}` to `{'is-active':...}` to match `.tab-btn.is-active` CSS rule used by every other page. |
 
 ---
@@ -184,16 +185,18 @@
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S022 — Documents Module (Phase 13)
+Session S023 — Analytics Module (Phase 14)
 
-S021 + S021-EXT + S021-UX — Reports Module — complete.
-  7 core files: lib/Reports/ReportBuilder.php,
-  api/v1/reports/{revenue,fleet,customer,compliance}.php,
-  app/admin/reports/index.php, database/seed_reports_data.php.
-  4 tabs / 20 views / 15 charts / CSV export / 15-min cache.
-  Charts redesigned for 1000+ unit scale (histograms, top/bottom 10, row capping).
-  Seed data: ~95 invoices, 13 customers, ~40 payments, ~40 WOs, compliance dates.
-  UX: smooth 120ms tab transitions across all 52 tab panels in the entire app.
+S022 — Documents Module — complete.
+  3 files: api/v1/documents/index.php (extended — global + entity mode),
+  app/admin/documents/index.php (NEW — global list + upload modal),
+  app/admin/customers/show.php (Documents tab added, 8th tab).
+  All entity show pages now have working Documents tabs:
+    equipment/show.php ✅ (compliance cards — CVI/Reg/Ins)
+    leases/show.php ✅ (table view + upload modal)
+    customers/show.php ✅ (table view + upload modal — added S022)
+  API: polymorphic index (mode A/B), upload (finfo MIME, StorageClient),
+  delete (soft), serve (HMAC-signed local URLs with auth gate).
   Login: admin@fleetforge.test / admin123
 
 ═══════════════════════════════════════════════════════════════════
@@ -203,8 +206,8 @@ CONTEXT — READ BEFORE WRITING ANY CODE
 READ IN THIS ORDER:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, all helper signatures, Trap list
   2. FLEETFORGE_PROGRESS.md               ← SESSION LOG, DECISIONS, KNOWN ISSUES
-  3. FLEETFORGE_SPEC_FINAL.md             ← grep "documents\|document\|upload\|attachment"
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep "documents"
+  3. FLEETFORGE_SPEC_FINAL.md             ← grep "analytics\|Analytics"
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep "CREATE TABLE"
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
@@ -214,33 +217,14 @@ VERIFY BEFORE STARTING:
 ROADMAP — REMAINING MODULES (priority order)
 ═══════════════════════════════════════════════════════════════════
 
-S021 — Reports Module (Phase 12)
-  WHY: /reports in sidebar. Financial visibility and export capability.
-  SCOPE:
-    - api/v1/reports/{revenue,fleet,customer,compliance}.php — query-based reports with date range
-    - app/admin/reports/index.php — 4-tab report center (Financial / Fleet / Customer / Compliance)
-    - Each report: date range picker, chart (ApexCharts), summary table, Export CSV button
-    - Financial: revenue by month, AR aging, top customers by revenue
-    - Fleet: utilization rate, idle units, maintenance cost vs revenue per unit
-    - Customer: lease frequency, payment behavior, lifetime value
-    - Compliance: expiry timeline, units needing renewal by month
-    - report_cache table used for 15-min cache
-    - Permission module: reports
-    - Stop conditions: all 4 report tabs render, date filter works, CSV export, cache hit path
+S022 — Documents Module (Phase 13) ✅ COMPLETE
 
-S022 — Documents Module (Phase 13)
-  WHY: /documents in sidebar. Equipment Documents tab already has a stub.
-  SCOPE:
-    - documents table: id, entity_type ENUM(customer,equipment_unit,lease,inspection,damage_claim), entity_id, name, file_path, mime_type, file_size, uploaded_by, deleted_at
-    - api/v1/documents/{index,upload,delete}.php — polymorphic entity attachment
-    - app/admin/documents/index.php — global document list with entity_type filter
-    - Patch equipment/show.php Documents tab (currently "coming soon" stub)
-    - Patch leases/show.php, customers/show.php with Documents tab
-    - StorageClient upload (Trap 5 finfo_file MIME, Trap 7 no file_path in API)
-    - Permission module: documents (visible to all logged-in users per nav config)
-    - Stop conditions: upload to customer, upload to lease, download URL, delete, entity filter
+S023 — Analytics Module (Phase 14)
+  WHY: /analytics in sidebar. KPI trends, predictive maintenance indicators,
+       customer health scores, fleet performance dashboards.
+  SCOPE: TBD — read spec §Analytics before starting
 
-After S022: S023 — Analytics, S024 — Customer Portal, S025+ — Accounting Module
+After S023: S024 — Customer Portal, S025+ — Accounting Module
 
 ═══════════════════════════════════════════════════════════════════
 CRITICAL CARRY-FORWARD (all sessions)
@@ -2200,3 +2184,5 @@ When a session is about to start, Claude Code will:
 *S020-EXT2 complete: Compliance from/to dates switched to direct DB columns (cvi_from_date etc.); compliance modal shows both from/to fields; compliance tiles auto-refresh via api/v1/compliance/kpis.php; super_admin can edit/delete invoices of any status; invoice edit button now scrolls to notes section; 7 new KPI API endpoints + 7 module index pages converted to Alpine-driven tiles. All php -l pass. Next: S021 — Reports Module.*
 
 *S021 complete: Reports Module — 6 files: lib/Reports/ReportBuilder.php (utility class: presets/cache/CSV/math), api/v1/reports/revenue.php (6 views), fleet.php (5 views), customer.php (5 views), compliance.php (4 views), app/admin/reports/index.php (4-tab Alpine UI with 15 ApexCharts). 3 bugs fixed: (1) MySQL only_full_group_by — dual GROUP BY for period_label, ANY_VALUE() for non-deterministic columns; (2) credit_notes.balance → amount_remaining; (3) cache expires_at PHP/MySQL timezone mismatch → DATE_ADD(NOW(), INTERVAL ? MINUTE). All 8 stop conditions passed. Next: S022 — Documents Module.*
+
+*S022 complete: Documents Module — 3 files: api/v1/documents/index.php (extended — Mode B global paginated list with entity_label joins; Mode A entity-specific unchanged), app/admin/documents/index.php (NEW — global list with filter/search/sort/paginate, upload modal, View+Remove), app/admin/customers/show.php (Documents tab added — 8th tab, lazy-load, upload modal, expiry color-coding). All entity show pages now have real Documents tabs: equipment ✅ leases ✅ customers ✅. All 14 stop conditions passed. Next: S023 — Analytics Module.*
