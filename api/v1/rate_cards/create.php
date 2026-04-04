@@ -98,13 +98,18 @@ if (!empty($body['items']) && is_array($body['items'])) {
         $monthlyRate = null;
         $mileageRate = null;
 
-        foreach (['daily_rate', 'weekly_rate', 'monthly_rate', 'mileage_rate'] as $field) {
+        foreach ([
+            'daily_rate'   => 'dailyRate',
+            'weekly_rate'  => 'weeklyRate',
+            'monthly_rate' => 'monthlyRate',
+            'mileage_rate' => 'mileageRate',
+        ] as $field => $varName) {
             if (!empty($item[$field])) {
                 $val = clean_decimal($item[$field]);
                 if ($val === null) {
                     json_error('VALIDATION_ERROR', "items[$idx].$field must be a valid decimal.", 422);
                 }
-                $$field = $val;  // assign to $daily_rate, $weekly_rate, etc.
+                $$varName = $val;
             }
         }
 

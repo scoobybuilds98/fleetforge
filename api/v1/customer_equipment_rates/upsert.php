@@ -106,20 +106,28 @@ $monthlyRate   = null;
 $mileageRate   = null;
 $minimumCharge = null;
 
-foreach (['daily_rate', 'weekly_rate', 'monthly_rate', 'mileage_rate', 'minimum_charge'] as $field) {
-    $bodyField = $field;
-    if (array_key_exists($bodyField, $body)) {
-        if ($body[$bodyField] === null || $body[$bodyField] === '') {
-            $$field = null;
+// Map snake_case field name → camelCase variable name for clarity
+$rateFieldMap = [
+    'daily_rate'     => 'dailyRate',
+    'weekly_rate'    => 'weeklyRate',
+    'monthly_rate'   => 'monthlyRate',
+    'mileage_rate'   => 'mileageRate',
+    'minimum_charge' => 'minimumCharge',
+];
+
+foreach ($rateFieldMap as $field => $varName) {
+    if (array_key_exists($field, $body)) {
+        if ($body[$field] === null || $body[$field] === '') {
+            $$varName = null;
         } else {
-            $val = clean_decimal($body[$bodyField]);
+            $val = clean_decimal($body[$field]);
             if ($val === null) {
                 json_error('VALIDATION_ERROR', "$field must be a valid decimal number.", 422);
             }
-            $$field = $val;
+            $$varName = $val;
         }
     } elseif ($isUpdate && $existing) {
-        $$field = $existing[$field];
+        $$varName = $existing[$field];
     }
 }
 
