@@ -177,6 +177,7 @@
 
 | S020-UX | 2026-04-04 | UX Polish — Modern Tabs, Spec Cards, KPI Tile Icons & Clickable Drilldowns | Comprehensive visual upgrade across all modules. **20+ files modified.** (1) **Modern tab navigation**: `.tab-bar` + `.tab-btn` CSS in app.css completely rewritten from underline-based to modern segmented-pill style — `inline-flex` container with subtle background, `border-radius`, 4px padding; active tab gets solid `--color-primary` fill with white text + shadow; `.tab-badge` on active tabs gets translucent white background. equipment/show.php inline-styled tabs converted to standard `.tab-bar` + `.tab-btn` classes matching leases/show.php + customers/show.php. (2) **Unit spec cards contrast**: `.spec-card` class added to equipment/show.php — card headers use `--color-primary` background with white text (strong visual anchor); stronger border + elevated shadow; alternating row stripes on `.spec-table` via `nth-child(even)`. (3) **All module KPI tiles clickable**: 10 modules now have functional tile-to-table filtering with toggle behavior + visual `ring-active` feedback. Cross-component modules (invoices, payments, credit_notes, damage_claims, vendors, inspections) use `Alpine.$data(document.getElementById('id'))` pattern; same-component modules (leases, equipment, compliance) use direct filter manipulation. Table root elements given IDs for cross-component targeting. Each module's KPI function got `activeTile` tracking + `drill()`/`setFilter()` methods. Display-only tiles (revenue, monetary aggregates) left without click handlers. (4) **KPI tile visual redesign**: Each stat-card gets a unique accent color variant (`stat-card--green/blue/amber/red/purple/teal/slate`) controlling the left gradient bar and active ring color. SVG icon sprite (25 Heroicons outline symbols) added to `includes/footer.php` — defined once, referenced via `<svg><use href="#icon-name"/></svg>`. Each tile gets a 42×42px rounded-square icon container (`.stat-icon`) with color-tinted background in the top-right corner. Icons are contextual: check-circle (available/complete), key (on-lease), wrench (maintenance), truck (fleet), shield-check (compliance), clock (pending/expiring), exclamation-triangle (expired/overdue), fire (critical), currency-dollar (revenue), document-text (invoices), chart-bar (metrics), star (preferred), building (vendors), trophy (top vendor), bolt (active), magnifying-glass (inspections), clipboard (work orders), lock-open (open), pencil (draft). Equipment show page hero tiles also updated with contextual icons (heart/map-pin/shield-check/tag). All 20+ files pass php -l. |
 
+| S023 | 2026-04-05 | Analytics Module (Phase 14) | **2 new files.** **(1) api/v1/analytics/index.php** — 8 views dispatched by ?view= param. No caching. Permission: analytics/view. Views: revenue_forecast (historical monthly revenue + PHP linear regression on last 6 months → 3-month projection + ±10% confidence band); utilization_matrix (scatter: each unit as utilization_pct × revenue_per_day, series = category; GREATEST/LEAST to clamp lease periods to 12m window); concentration_risk (pie: top-5 customers by 12m revenue + Other slice); seasonal_pattern (radar: all-time avg revenue by month-of-year Jan–Dec); cohort_revenue (stacked area: monthly revenue pivoted by lease start year); fleet_optimizer (grouped bar: current unit count vs recommended = ceil(peak_concurrent × 1.15) per category; sweep algorithm for peak concurrent — sort start/end events, compute running max per category); lead_time (line: avg days created_at → activated_at per month via lease_status_log subquery); avg_lease_value (line: avg invoice total per month with trend direction). All return { chart_data, kpis, view, date_from, date_to }. **(2) app/admin/analytics/index.php** — FF_Analytics() Alpine component. Revenue forecast spans full width; 7 other panels in 2-column grid (1-column mobile). Each panel: date range inputs (revenue_forecast/cohort_revenue/lead_time/avg_lease_value have selectors; fixed-window views do not), KPI strip, ApexCharts canvas, skeleton loader, error state. D41 enforced: all chart colors via cssVar()/getComputedStyle — no hardcoded hex. Refresh All button. revenue_forecast uses 4 series (Historical solid, Projected dashed dashArray:6, Upper/Lower band opacity 0.15). utilization_matrix uses custom tooltip showing unit_number. Refresh All destroys existing chart instances before re-render (prevents duplicate chart error). **Bug fixed**: lead_time SQL — DATE_FORMAT(MIN(...), ...) in GROUP BY = invalid use of aggregate — fixed with subquery JOIN (SELECT lease_id, MIN(changed_at) AS activated_at FROM lease_status_log WHERE new_status='active' GROUP BY lease_id) fa before outer GROUP BY. **SC passed**: SC1 php -l both files ✅; SC2 /analytics page HTTP 200 ✅; SC3 revenue_forecast returns chart_data with categories/historical/projected ✅; SC4 concentration_risk returns labels + series (6 slices) ✅; SC5 utilization_matrix returns 5 series / 13 scatter points ✅; SC6 all 8 views return success:true ✅; SC7 page HTML contains all 8 chart divs ✅. |
 | S022 | 2026-04-05 | Documents Module (Phase 13) | **3 files built/modified.** **(1) api/v1/documents/index.php extended** — added Mode B (global paginated list, no entity_id). Mode B joins customers/equipment_units/leases via entity-type-guarded LEFT JOINs to produce entity_label per row. Supports entity_type filter, title/file_name LIKE search, sort (uploaded_at/title/document_type/file_size_kb/expiration_date), dir, page, per_page. Mode A (entity_id present) behavior unchanged. **(2) app/admin/documents/index.php (NEW)** — global documents list page. Alpine `FF_Documents()` component: entity_type filter dropdown (All/Customer/Equipment/Lease/Inspection/Damage Claim), text search with 400ms debounce, sortable column headers with ↑↓ indicators, load-more pagination. Table shows: type badge, title+filename, entity type badge + entity_label link to show page, size, expiry (color-coded: red=expired, amber=expiring<30d), uploaded date, uploader, View (signed URL in new tab) + Remove actions. Upload modal: entity_type selector → document_type select (options driven by Alpine x-if per type), entity ID input, title/expiry/notes, file picker. On success reloads list. On delete removes row from local array and decrements total. entityUrl() builds link to /customers/show, /equipment/show, /leases/show etc. Trap 7: file_path never exposed. **(3) app/admin/customers/show.php patched** — Documents tab added (8th tab, after Rates). Tab button shows count badge when documents.length > 0. x-show panel with ff-tab-enter transition matching all other customer tabs. Lazy-loads on first activation via $watch. Table: type badge, title + file_name, size, expiry (color-coded), uploaded date, uploader, View + Remove. Upload modal: tax_exemption/credit_agreement/other document types. submitDocUpload() POSTs to upload API via FormData, prepends new doc to array on success. confirmDeleteDoc() soft-deletes via API, filters from array. customerDocTypeBadge/Label helpers. docExpiryClass() for color cues. **SC passed**: SC1 php -l all 3 files clean ✅; SC2 /documents page 200 + FF_Documents component present ✅; SC3 customers/show 200 + Documents tab present ✅; SC4 global API mode B returns items with entity_label ✅; SC5 entity-specific mode A (customer&entity_id=1) returns items array ✅; SC6 entity_type=equipment_unit filter returns 6 items ✅; SC7 upload to customer → 201 + signed URL in response ✅; SC8 Trap 7 — file_path not in any API response ✅; SC9/SC10 uploaded doc in global+entity-specific lists ✅; SC11 serve endpoint 200 application/pdf ✅; SC12 delete 200 {deleted:true} ✅; SC13 deleted doc no longer in list ✅; SC14 equipment/show + leases/show 200 (no regressions) ✅. |
 | S021-UX | 2026-04-05 | UX Fix — Scroll-to-top bug + tab flash + smooth transitions | **8 files modified.** (1) **Reports scroll-to-top fix**: Converted 12 `<template x-if>` to `<div x-show>` with optional chaining across all 4 report tabs (Financial/Fleet/Customer/Compliance) — KPI tiles, loading skeletons, and viewLoading placeholders. `x-if` was removing DOM nodes on toggle, collapsing page height and resetting scroll position. `x-show` keeps elements in DOM with `display:none`. (2) **Reports flash elimination**: Added `x-cloak` to root Alpine element to prevent FOUC (all `x-show` content briefly visible before Alpine init). Made `setPreset`/`runReport`/`setCompWindow` keep old KPIs visible on current tab during data refresh — old values stay until API response replaces them atomically. No more skeleton→content blink on cached responses. (3) **Smooth 120ms tab transitions across entire app (52 panels)**: CSS `.ff-tab-enter` classes + `@keyframes ff-tab-fade-in` animation in app.css. `x-show` tab panels get Alpine `x-transition:enter` (reports 24, equipment/show 9, customers/show 7, leases/show 4, rates/index 2). `x-if` tab panels get `.ff-tab-animated` CSS animation class (leases/show 4, profile/index 2). Old tab hides instantly, new tab fades in — masks content swap. (4) **Tab active class fix**: All 23 report tab buttons changed from `{active:...}` to `{'is-active':...}` to match `.tab-btn.is-active` CSS rule used by every other page. |
 
@@ -185,18 +186,14 @@
 ## NEXT SESSION STARTS WITH
 
 ```
-Session S023 — Analytics Module (Phase 14)
+Session S024 — Customer Portal (Phase 15)
 
-S022 — Documents Module — complete.
-  3 files: api/v1/documents/index.php (extended — global + entity mode),
-  app/admin/documents/index.php (NEW — global list + upload modal),
-  app/admin/customers/show.php (Documents tab added, 8th tab).
-  All entity show pages now have working Documents tabs:
-    equipment/show.php ✅ (compliance cards — CVI/Reg/Ins)
-    leases/show.php ✅ (table view + upload modal)
-    customers/show.php ✅ (table view + upload modal — added S022)
-  API: polymorphic index (mode A/B), upload (finfo MIME, StorageClient),
-  delete (soft), serve (HMAC-signed local URLs with auth gate).
+S023 — Analytics Module — complete.
+  2 files: api/v1/analytics/index.php (8 views: revenue_forecast,
+  utilization_matrix, concentration_risk, seasonal_pattern, cohort_revenue,
+  fleet_optimizer, lead_time, avg_lease_value — all return chart_data+kpis),
+  app/admin/analytics/index.php (FF_Analytics() — 8 panels, cssVar() theme,
+  date range selectors, skeleton loaders, Refresh All).
   Login: admin@fleetforge.test / admin123
 
 ═══════════════════════════════════════════════════════════════════
@@ -206,7 +203,7 @@ CONTEXT — READ BEFORE WRITING ANY CODE
 READ IN THIS ORDER:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, all helper signatures, Trap list
   2. FLEETFORGE_PROGRESS.md               ← SESSION LOG, DECISIONS, KNOWN ISSUES
-  3. FLEETFORGE_SPEC_FINAL.md             ← grep "analytics\|Analytics"
+  3. FLEETFORGE_SPEC_FINAL.md             ← grep "portal\|Portal"
   4. FLEETFORGE_DATABASE_MASTER.sql       ← grep "CREATE TABLE"
 
 VERIFY BEFORE STARTING:
@@ -218,53 +215,17 @@ ROADMAP — REMAINING MODULES (priority order)
 ═══════════════════════════════════════════════════════════════════
 
 S022 — Documents Module (Phase 13) ✅ COMPLETE
+S023 — Analytics Module (Phase 14) ✅ COMPLETE
 
-S023 — Analytics Module (Phase 14)
-  WHY: /analytics in sidebar. Spec §7.11: "AI-powered analysis page."
-       8 distinct charts, all ApexCharts. Different from Reports (historical
-       data views already built in S021) — Analytics is forecasting + patterns.
-  SCOPE:
-    - api/v1/analytics/index.php — 8 chart data endpoints in one file (views):
-        1. revenue_forecast  — historical monthly revenue (12m back) + projected
-                               3-month trend line using simple linear regression
-                               on last 6 months; confidence band as ±10% range
-        2. utilization_matrix — scatter: each unit plotted (utilization_pct,
-                                revenue_per_day); template category as series
-        3. concentration_risk — pie: top 5 customers by % of total 12m revenue,
-                                "Other" slice for remainder
-        4. seasonal_pattern   — radar: avg monthly revenue per month-of-year
-                                (Jan–Dec) from all-time data
-        5. cohort_revenue     — stacked area: monthly revenue cohorted by
-                                lease start year (2024/2025/2026 series)
-        6. fleet_optimizer    — grouped bar: current count vs "recommended"
-                                count per equipment category
-                                (recommended = ceil(active_leases × 1.15) for
-                                headroom; categories with zero leases flagged)
-        7. lead_time          — line: avg days from lease created_at to
-                                activated_at per month (last 12 months)
-        8. avg_lease_value    — line: avg invoice total per month (last 12m)
-      All views return { chart_data, kpis{} }. No caching (analytics is fast).
-    - app/admin/analytics/index.php — single-page Alpine component.
-      8 chart panels in 2-column grid (full-width on mobile). Each panel:
-      card with title, KPI stat strip, ApexCharts instance, skeleton loader.
-      One "Refresh All" button. Permission: analytics / view.
-  DECISIONS FOR THIS SESSION:
-    - Revenue forecast: pure SQL linear regression (no AI yet — AI is S025+)
-    - fleet_optimizer "recommended" count: ceil(peak_concurrent_leases × 1.15)
-      per category, where peak = max(active leases on any single day last 12m)
-    - All chart data returned as arrays ready for ApexCharts series format
-    - Permission: analytics (see matrix — super_admin/manager/accountant/read_only)
-      dispatcher has no analytics access
-  STOP CONDITIONS:
-    SC1: php -l all new files clean
-    SC2: /analytics page HTTP 200
-    SC3: api/v1/analytics?view=revenue_forecast returns chart_data with series
-    SC4: api/v1/analytics?view=concentration_risk returns labels + series
-    SC5: api/v1/analytics?view=utilization_matrix returns scatter points
-    SC6: all 8 views return success:true
-    SC7: page renders all 8 chart panels (check HTML for 8 canvas/svg elements)
+S024 — Customer Portal (Phase 15)
+  WHY: /portal in sidebar for customers to log in and view their own data.
+       portal_users table, portal_service_requests table already in schema.
+  SCOPE: See spec §7.x Portal section. Login, dashboard, leases, invoices,
+         documents, service requests. Separate auth from admin (portal_users,
+         not users table). Session isolation — all queries filter by customer_id.
+         Trap 8: portal queries MUST filter by logged-in customer_id.
 
-After S023: S024 — Customer Portal, S025+ — Accounting Module
+After S024: S025+ — Accounting Module
 
 ═══════════════════════════════════════════════════════════════════
 CRITICAL CARRY-FORWARD (all sessions)
@@ -2226,3 +2187,5 @@ When a session is about to start, Claude Code will:
 *S021 complete: Reports Module — 6 files: lib/Reports/ReportBuilder.php (utility class: presets/cache/CSV/math), api/v1/reports/revenue.php (6 views), fleet.php (5 views), customer.php (5 views), compliance.php (4 views), app/admin/reports/index.php (4-tab Alpine UI with 15 ApexCharts). 3 bugs fixed: (1) MySQL only_full_group_by — dual GROUP BY for period_label, ANY_VALUE() for non-deterministic columns; (2) credit_notes.balance → amount_remaining; (3) cache expires_at PHP/MySQL timezone mismatch → DATE_ADD(NOW(), INTERVAL ? MINUTE). All 8 stop conditions passed. Next: S022 — Documents Module.*
 
 *S022 complete: Documents Module — 3 files: api/v1/documents/index.php (extended — Mode B global paginated list with entity_label joins; Mode A entity-specific unchanged), app/admin/documents/index.php (NEW — global list with filter/search/sort/paginate, upload modal, View+Remove), app/admin/customers/show.php (Documents tab added — 8th tab, lazy-load, upload modal, expiry color-coding). All entity show pages now have real Documents tabs: equipment ✅ leases ✅ customers ✅. All 14 stop conditions passed. Next: S023 — Analytics Module.*
+
+*S023 complete: Analytics Module — 2 files: api/v1/analytics/index.php (8 views: revenue_forecast/utilization_matrix/concentration_risk/seasonal_pattern/cohort_revenue/fleet_optimizer/lead_time/avg_lease_value — each returns chart_data+kpis, no caching, permission analytics/view), app/admin/analytics/index.php (FF_Analytics() Alpine component — revenue forecast full-width, 7 other panels 2-column grid, cssVar() D41-safe chart colors, date range selectors on applicable views, Refresh All, skeleton loaders). Bug fixed: lead_time SQL invalid GROUP BY aggregate — fixed with lease_status_log subquery. All 7 stop conditions passed. Next: S024 — Customer Portal.*
