@@ -198,7 +198,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
-    <div x-show="activeTab === 'overview'" role="tabpanel">
+    <div x-show="activeTab === 'overview'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
         <div class="grid-2">
 
             <!-- Contact Info -->
@@ -347,7 +347,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /overview tab -->
 
     <!-- ── TAB: NOTES ─────────────────────────────────────────── -->
-    <div x-show="activeTab === 'notes'" role="tabpanel">
+    <div x-show="activeTab === 'notes'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
 
         <?php if (can('customers', 'create')): ?>
         <!-- Add note form -->
@@ -420,7 +420,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /notes tab -->
 
     <!-- ── TAB: LEASES ──────────────────────────────────────────── -->
-    <div x-show="activeTab === 'leases'" role="tabpanel">
+    <div x-show="activeTab === 'leases'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span class="card-title">Leases</span>
@@ -515,7 +515,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── TAB: INVOICES ─────────────────────────────────────────── -->
-    <div x-show="activeTab === 'invoices'" role="tabpanel">
+    <div x-show="activeTab === 'invoices'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span class="card-title">Invoices</span>
@@ -613,7 +613,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── TAB: DAMAGE CLAIMS ─────────────────────────────────────── -->
-    <div x-show="activeTab === 'damage_claims'" role="tabpanel">
+    <div x-show="activeTab === 'damage_claims'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span class="card-title">Damage Claims</span>
@@ -722,7 +722,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── TAB: MILEAGE LOGS ─────────────────────────────────────── -->
-    <div x-show="activeTab === 'mileage_logs'" role="tabpanel">
+    <div x-show="activeTab === 'mileage_logs'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span class="card-title">Mileage Logs</span>
@@ -808,7 +808,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── TAB: RATES ────────────────────────────────────────── -->
     <?php if (can('rates', 'view')): ?>
-    <div x-show="activeTab === 'rates'" role="tabpanel">
+    <div x-show="activeTab === 'rates'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span class="card-title">Custom Rate Overrides</span>

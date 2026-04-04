@@ -197,7 +197,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Overview ──────────────────────────────────────── -->
-    <div x-show="activeTab === 'overview'">
+    <div x-show="activeTab === 'overview'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <template x-if="loading">
             <div class="card"><div class="card-body">
                 <template x-for="n in 6" :key="n">
@@ -299,7 +299,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Compliance ────────────────────────────────────── -->
-    <div x-show="activeTab === 'compliance'">
+    <div x-show="activeTab === 'compliance'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-header">
                 <div class="card-title">Compliance Documents & Expiry</div>
@@ -347,7 +347,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Lease History ────────────────────────────────────── -->
-    <div x-show="activeTab === 'leases'">
+    <div x-show="activeTab === 'leases'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-header">
                 <div class="card-title">Lease History</div>
@@ -436,7 +436,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Damage Claims ──────────────────────────────────── -->
-    <div x-show="activeTab === 'damage_claims'">
+    <div x-show="activeTab === 'damage_claims'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <div class="card-title">Damage Claims</div>
@@ -537,7 +537,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Mileage Log ──────────────────────────────────── -->
-    <div x-show="activeTab === 'mileage_logs'">
+    <div x-show="activeTab === 'mileage_logs'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <div class="card-title">Mileage Log</div>
@@ -633,7 +633,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Status Log ────────────────────────────────────── -->
-    <div x-show="activeTab === 'status_log'">
+    <div x-show="activeTab === 'status_log'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-header">
                 <div class="card-title">Status History</div>
@@ -688,7 +688,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Maintenance ──────────────────────────────────── -->
-    <div x-show="activeTab === 'maintenance'">
+    <div x-show="activeTab === 'maintenance'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">Work Order History</span>
@@ -801,7 +801,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Inspections ──────────────────────────────────── -->
-    <div x-show="activeTab === 'inspections'">
+    <div x-show="activeTab === 'inspections'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
                 <span style="font-weight:600;">Inspections</span>
@@ -887,7 +887,7 @@ function daysUntil(?string $date): ?int {
     </div>
 
     <!-- ── TAB: Documents ────────────────────────────────────── -->
-    <div x-show="activeTab === 'documents'">
+    <div x-show="activeTab === 'documents'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
         <!-- Loading -->
         <template x-if="docsLoading">

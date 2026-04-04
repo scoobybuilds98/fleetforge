@@ -2509,10 +2509,17 @@ textarea.form-input {
 /* Hide elements until Alpine initialises — prevents flash */
 [x-cloak] { display: none !important; }
 
-/* Smooth tab/panel transitions — used by Alpine x-transition:enter */
+/* Smooth tab/panel transitions — used by Alpine x-transition:enter (x-show)
+   and .ff-tab-animated keyframe animation (x-if template insertion) */
 .ff-tab-enter        { transition: opacity 120ms ease-out; }
 .ff-tab-enter-from   { opacity: 0; }
 .ff-tab-enter-to     { opacity: 1; }
+
+@keyframes ff-tab-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+.ff-tab-animated { animation: ff-tab-fade-in 120ms ease-out; }
 
 /* Icon placeholder when SVG file not found */
 .icon-missing {

@@ -106,7 +106,7 @@ require_once FF_ROOT . '/includes/header.php';
          TAB 1 — Profile (view + edit)
          ══════════════════════════════════════════════════════ -->
     <template x-if="tab === 'profile'">
-        <div class="card">
+        <div class="card ff-tab-animated">
 
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">Profile Details</span>
@@ -195,7 +195,7 @@ require_once FF_ROOT . '/includes/header.php';
          TAB 2 — Login History (server-rendered, read-only)
          ══════════════════════════════════════════════════════ -->
     <template x-if="tab === 'login_history'">
-        <div class="card">
+        <div class="card ff-tab-animated">
             <div class="card-header">
                 <span style="font-weight:600;">Login History</span>
                 <span class="text-muted" style="font-size:0.8125rem;margin-left:8px;">Last 20 attempts</span>

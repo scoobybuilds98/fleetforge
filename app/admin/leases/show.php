@@ -192,7 +192,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
     <template x-if="tab === 'overview'">
-        <div>
+        <div class="ff-tab-animated">
             <template x-if="loading">
                 <div class="skeleton skeleton-row"></div>
             </template>
@@ -289,7 +289,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── TAB: STATUS LOG ────────────────────────────────────── -->
     <template x-if="tab === 'status_log'">
-        <div class="card">
+        <div class="card ff-tab-animated">
             <div class="card-header"><div class="card-title">Status Log</div></div>
             <template x-if="!lease || !lease.status_log || lease.status_log.length === 0">
                 <div class="empty-state">
@@ -327,7 +327,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── TAB: AMENDMENTS ────────────────────────────────────── -->
     <template x-if="tab === 'amendments'">
-        <div class="card">
+        <div class="card ff-tab-animated">
             <div class="empty-state">
                 <p class="empty-state-title">Amendments coming soon</p>
                 <p class="empty-state-text">Rate change and date extension amendments will be available in a future session.</p>
@@ -336,7 +336,7 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- ── TAB: INVOICES ─────────────────────────────────────────── -->
-    <div x-show="tab === 'invoices'" class="card">
+    <div x-show="tab === 'invoices'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" class="card">
         <div class="card-header"><div class="card-title">Invoices</div></div>
 
         <!-- Filter bar -->
@@ -402,7 +402,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── TAB: DAMAGE CLAIMS ────────────────────────────────────── -->
-    <div x-show="tab === 'damage_claims'" class="card">
+    <div x-show="tab === 'damage_claims'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <div class="card-title">Damage Claims</div>
             <?php if (can('maintenance', 'create')): ?>
@@ -486,7 +486,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── TAB: MILEAGE LOG ──────────────────────────────────────── -->
-    <div x-show="tab === 'mileage_logs'" class="card">
+    <div x-show="tab === 'mileage_logs'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <div class="card-title">Mileage Log</div>
             <?php if (can('maintenance', 'create')): ?>
@@ -597,7 +597,7 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- ── TAB: INSPECTIONS ──────────────────────────────────────── -->
-    <div x-show="tab === 'inspections'" class="card">
+    <div x-show="tab === 'inspections'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" class="card">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div class="card-title">Inspections</div>
             <div style="display:flex;gap:8px;">
@@ -676,7 +676,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── TAB: DOCUMENTS ──────────────────────────────────────── -->
     <template x-if="tab === 'documents'">
-        <div>
+        <div class="ff-tab-animated">
             <template x-if="docsLoading && documents.length === 0">
                 <div class="skeleton skeleton-row"></div>
             </template>

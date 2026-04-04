@@ -102,7 +102,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ──── TAB 1: Rate Cards ──────────────────────────────────────────── -->
-    <div x-show="tab === 'cards'">
+    <div x-show="tab === 'cards'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card" style="border-top:none;border-radius:0 0 8px 8px;">
 
             <!-- Filter bar -->
@@ -229,7 +229,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ──── TAB 2: Customer Overrides ─────────────────────────────────── -->
-    <div x-show="tab === 'overrides'">
+    <div x-show="tab === 'overrides'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card" style="border-top:none;border-radius:0 0 8px 8px;">
 
             <!-- Filter bar -->
