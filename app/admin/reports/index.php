@@ -1208,7 +1208,7 @@ function FF_Reports() {
 
         apiBase(tab) {
             const map = {financial:'revenue', fleet:'fleet', customer:'customer', compliance:'compliance'};
-            return base_url('api/v1/reports/' + (map[tab]||tab) + '.php');
+            return (window.FF_BASE_PATH||'') + '/api/v1/reports/' + (map[tab]||tab) + '.php';
         },
 
         loadTab(tab) {
@@ -1247,12 +1247,12 @@ function FF_Reports() {
 
         exportCsv(endpoint, view) {
             const p = this.buildParams(this.mainTab, view);
-            window.location = base_url('api/v1/reports/' + endpoint + '.php') + '?' + p + '&format=csv';
+            window.location = (window.FF_BASE_PATH||'') + '/api/v1/reports/' + endpoint + '.php?' + p + '&format=csv';
         },
 
         exportCompCsv(view) {
             const p = new URLSearchParams({ view, window_days: this.compWindow, format: 'csv' });
-            window.location = base_url('api/v1/reports/compliance.php') + '?' + p.toString();
+            window.location = (window.FF_BASE_PATH||'') + '/api/v1/reports/compliance.php?' + p.toString();
         },
 
         // ── Chart initialization router ──────────────────────────────────────
