@@ -39,7 +39,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="FF_Reports()" x-init="init()" id="reports-root">
+<div x-data="FF_Reports()" x-init="init()" x-cloak id="reports-root">
 
     <!-- ── Date range bar ── -->
     <div class="card rpt-toolbar no-print" id="date-range-bar">
@@ -65,10 +65,10 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 
     <!-- ── Main tab bar ── -->
     <div class="tab-bar no-print" style="margin-bottom:20px;">
-        <button class="tab-btn" :class="{active:mainTab==='financial'}"  @click="switchMainTab('financial')"><svg width="14" height="14"><use href="#icon-banknotes"/></svg> Financial</button>
-        <button class="tab-btn" :class="{active:mainTab==='fleet'}"      @click="switchMainTab('fleet')"><svg width="14" height="14"><use href="#icon-truck"/></svg> Fleet</button>
-        <button class="tab-btn" :class="{active:mainTab==='customer'}"   @click="switchMainTab('customer')"><svg width="14" height="14"><use href="#icon-user-group"/></svg> Customers</button>
-        <button class="tab-btn" :class="{active:mainTab==='compliance'}" @click="switchMainTab('compliance')"><svg width="14" height="14"><use href="#icon-shield-check"/></svg> Compliance</button>
+        <button class="tab-btn" :class="{'is-active':mainTab==='financial'}"  @click="switchMainTab('financial')"><svg width="14" height="14"><use href="#icon-banknotes"/></svg> Financial</button>
+        <button class="tab-btn" :class="{'is-active':mainTab==='fleet'}"      @click="switchMainTab('fleet')"><svg width="14" height="14"><use href="#icon-truck"/></svg> Fleet</button>
+        <button class="tab-btn" :class="{'is-active':mainTab==='customer'}"   @click="switchMainTab('customer')"><svg width="14" height="14"><use href="#icon-user-group"/></svg> Customers</button>
+        <button class="tab-btn" :class="{'is-active':mainTab==='compliance'}" @click="switchMainTab('compliance')"><svg width="14" height="14"><use href="#icon-shield-check"/></svg> Compliance</button>
     </div>
 
     <!-- ════════════════════════════════════════════════════════════
@@ -89,12 +89,12 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <!-- Sub-view tabs -->
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;" class="no-print">
             <div class="tab-bar" style="margin-bottom:0;">
-                <button class="tab-btn" :class="{active:tabs.financial.view==='period'}"         @click="switchView('financial','period')">By Period</button>
-                <button class="tab-btn" :class="{active:tabs.financial.view==='customer'}"        @click="switchView('financial','customer')">By Customer</button>
-                <button class="tab-btn" :class="{active:tabs.financial.view==='equipment_type'}"  @click="switchView('financial','equipment_type')">By Type</button>
-                <button class="tab-btn" :class="{active:tabs.financial.view==='ar_aging'}"        @click="switchView('financial','ar_aging')">AR Aging</button>
-                <button class="tab-btn" :class="{active:tabs.financial.view==='collection'}"      @click="switchView('financial','collection')">Collection Rate</button>
-                <button class="tab-btn" :class="{active:tabs.financial.view==='status'}"          @click="switchView('financial','status')">Invoice Status</button>
+                <button class="tab-btn" :class="{'is-active':tabs.financial.view==='period'}"         @click="switchView('financial','period')">By Period</button>
+                <button class="tab-btn" :class="{'is-active':tabs.financial.view==='customer'}"        @click="switchView('financial','customer')">By Customer</button>
+                <button class="tab-btn" :class="{'is-active':tabs.financial.view==='equipment_type'}"  @click="switchView('financial','equipment_type')">By Type</button>
+                <button class="tab-btn" :class="{'is-active':tabs.financial.view==='ar_aging'}"        @click="switchView('financial','ar_aging')">AR Aging</button>
+                <button class="tab-btn" :class="{'is-active':tabs.financial.view==='collection'}"      @click="switchView('financial','collection')">Collection Rate</button>
+                <button class="tab-btn" :class="{'is-active':tabs.financial.view==='status'}"          @click="switchView('financial','status')">Invoice Status</button>
             </div>
             <button class="btn btn-secondary btn-sm" @click="exportCsv('revenue',tabs.financial.view)"><svg width="14" height="14"><use href="#icon-arrow-down-tray"/></svg> CSV</button>
         </div>
@@ -180,11 +180,11 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;" class="no-print">
             <div class="tab-bar" style="margin-bottom:0;">
-                <button class="tab-btn" :class="{active:tabs.fleet.view==='utilization'}"  @click="switchView('fleet','utilization')">Utilization</button>
-                <button class="tab-btn" :class="{active:tabs.fleet.view==='roi'}"           @click="switchView('fleet','roi')">ROI Ranking</button>
-                <button class="tab-btn" :class="{active:tabs.fleet.view==='idle'}"          @click="switchView('fleet','idle')">Idle Units</button>
-                <button class="tab-btn" :class="{active:tabs.fleet.view==='maintenance'}"   @click="switchView('fleet','maintenance')">Maintenance</button>
-                <button class="tab-btn" :class="{active:tabs.fleet.view==='yard'}"          @click="switchView('fleet','yard')">By Yard</button>
+                <button class="tab-btn" :class="{'is-active':tabs.fleet.view==='utilization'}"  @click="switchView('fleet','utilization')">Utilization</button>
+                <button class="tab-btn" :class="{'is-active':tabs.fleet.view==='roi'}"           @click="switchView('fleet','roi')">ROI Ranking</button>
+                <button class="tab-btn" :class="{'is-active':tabs.fleet.view==='idle'}"          @click="switchView('fleet','idle')">Idle Units</button>
+                <button class="tab-btn" :class="{'is-active':tabs.fleet.view==='maintenance'}"   @click="switchView('fleet','maintenance')">Maintenance</button>
+                <button class="tab-btn" :class="{'is-active':tabs.fleet.view==='yard'}"          @click="switchView('fleet','yard')">By Yard</button>
             </div>
             <button class="btn btn-secondary btn-sm" @click="exportCsv('fleet',tabs.fleet.view)"><svg width="14" height="14"><use href="#icon-arrow-down-tray"/></svg> CSV</button>
         </div>
@@ -262,11 +262,11 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;" class="no-print">
             <div class="tab-bar" style="margin-bottom:0;">
-                <button class="tab-btn" :class="{active:tabs.customer.view==='ltv'}"              @click="switchView('customer','ltv')">Lifetime Value</button>
-                <button class="tab-btn" :class="{active:tabs.customer.view==='payment_behavior'}"  @click="switchView('customer','payment_behavior')">Payment Behavior</button>
-                <button class="tab-btn" :class="{active:tabs.customer.view==='new_returning'}"     @click="switchView('customer','new_returning')">New vs Returning</button>
-                <button class="tab-btn" :class="{active:tabs.customer.view==='frequency'}"         @click="switchView('customer','frequency')">Lease Frequency</button>
-                <button class="tab-btn" :class="{active:tabs.customer.view==='credit_notes'}"      @click="switchView('customer','credit_notes')">Credit Notes</button>
+                <button class="tab-btn" :class="{'is-active':tabs.customer.view==='ltv'}"              @click="switchView('customer','ltv')">Lifetime Value</button>
+                <button class="tab-btn" :class="{'is-active':tabs.customer.view==='payment_behavior'}"  @click="switchView('customer','payment_behavior')">Payment Behavior</button>
+                <button class="tab-btn" :class="{'is-active':tabs.customer.view==='new_returning'}"     @click="switchView('customer','new_returning')">New vs Returning</button>
+                <button class="tab-btn" :class="{'is-active':tabs.customer.view==='frequency'}"         @click="switchView('customer','frequency')">Lease Frequency</button>
+                <button class="tab-btn" :class="{'is-active':tabs.customer.view==='credit_notes'}"      @click="switchView('customer','credit_notes')">Credit Notes</button>
             </div>
             <button class="btn btn-secondary btn-sm" @click="exportCsv('customer',tabs.customer.view)"><svg width="14" height="14"><use href="#icon-arrow-down-tray"/></svg> CSV</button>
         </div>
@@ -351,10 +351,10 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;" class="no-print">
             <div class="tab-bar" style="margin-bottom:0;">
-                <button class="tab-btn" :class="{active:tabs.compliance.view==='timeline'}" @click="switchView('compliance','timeline')">Timeline</button>
-                <button class="tab-btn" :class="{active:tabs.compliance.view==='status'}"   @click="switchView('compliance','status')">Status</button>
-                <button class="tab-btn" :class="{active:tabs.compliance.view==='expired'}"  @click="switchView('compliance','expired')">Expired</button>
-                <button class="tab-btn" :class="{active:tabs.compliance.view==='upcoming'}" @click="switchView('compliance','upcoming')">Upcoming</button>
+                <button class="tab-btn" :class="{'is-active':tabs.compliance.view==='timeline'}" @click="switchView('compliance','timeline')">Timeline</button>
+                <button class="tab-btn" :class="{'is-active':tabs.compliance.view==='status'}"   @click="switchView('compliance','status')">Status</button>
+                <button class="tab-btn" :class="{'is-active':tabs.compliance.view==='expired'}"  @click="switchView('compliance','expired')">Expired</button>
+                <button class="tab-btn" :class="{'is-active':tabs.compliance.view==='upcoming'}" @click="switchView('compliance','upcoming')">Upcoming</button>
             </div>
             <button class="btn btn-secondary btn-sm" @click="exportCompCsv(tabs.compliance.view)"><svg width="14" height="14"><use href="#icon-arrow-down-tray"/></svg> CSV</button>
         </div>
@@ -514,7 +514,17 @@ function FF_Reports() {
         setPreset(p) {
             this.preset = p;
             if (p !== 'custom') {
-                for (const t in this.tabs) { this.tabs[t].viewData={}; this.tabs[t].kpis=null; this.tabs[t].chartsRendered={}; }
+                for (const t in this.tabs) {
+                    if (t === this.mainTab) {
+                        // Current tab: keep old KPIs + view data visible during refresh
+                        this.tabs[t].chartsRendered = {};
+                    } else {
+                        // Other tabs: clear so they re-fetch when visited
+                        this.tabs[t].viewData = {};
+                        this.tabs[t].kpis = null;
+                        this.tabs[t].chartsRendered = {};
+                    }
+                }
                 this.expandedTables = {};
                 this.loadTab(this.mainTab);
             }
@@ -535,15 +545,21 @@ function FF_Reports() {
         },
 
         runReport() {
-            for (const t in this.tabs) { this.tabs[t].viewData={}; this.tabs[t].kpis=null; this.tabs[t].chartsRendered={}; }
+            for (const t in this.tabs) {
+                if (t === this.mainTab) {
+                    this.tabs[t].chartsRendered = {};
+                } else {
+                    this.tabs[t].viewData = {};
+                    this.tabs[t].kpis = null;
+                    this.tabs[t].chartsRendered = {};
+                }
+            }
             this.expandedTables = {};
             this.loadTab(this.mainTab);
         },
 
         setCompWindow(days) {
             this.compWindow = days;
-            this.tabs.compliance.viewData = {};
-            this.tabs.compliance.kpis = null;
             this.tabs.compliance.chartsRendered = {};
             this.expandedTables = {};
             if (this.mainTab === 'compliance') this.loadTab('compliance');
