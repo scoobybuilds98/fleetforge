@@ -220,9 +220,49 @@ ROADMAP — REMAINING MODULES (priority order)
 S022 — Documents Module (Phase 13) ✅ COMPLETE
 
 S023 — Analytics Module (Phase 14)
-  WHY: /analytics in sidebar. KPI trends, predictive maintenance indicators,
-       customer health scores, fleet performance dashboards.
-  SCOPE: TBD — read spec §Analytics before starting
+  WHY: /analytics in sidebar. Spec §7.11: "AI-powered analysis page."
+       8 distinct charts, all ApexCharts. Different from Reports (historical
+       data views already built in S021) — Analytics is forecasting + patterns.
+  SCOPE:
+    - api/v1/analytics/index.php — 8 chart data endpoints in one file (views):
+        1. revenue_forecast  — historical monthly revenue (12m back) + projected
+                               3-month trend line using simple linear regression
+                               on last 6 months; confidence band as ±10% range
+        2. utilization_matrix — scatter: each unit plotted (utilization_pct,
+                                revenue_per_day); template category as series
+        3. concentration_risk — pie: top 5 customers by % of total 12m revenue,
+                                "Other" slice for remainder
+        4. seasonal_pattern   — radar: avg monthly revenue per month-of-year
+                                (Jan–Dec) from all-time data
+        5. cohort_revenue     — stacked area: monthly revenue cohorted by
+                                lease start year (2024/2025/2026 series)
+        6. fleet_optimizer    — grouped bar: current count vs "recommended"
+                                count per equipment category
+                                (recommended = ceil(active_leases × 1.15) for
+                                headroom; categories with zero leases flagged)
+        7. lead_time          — line: avg days from lease created_at to
+                                activated_at per month (last 12 months)
+        8. avg_lease_value    — line: avg invoice total per month (last 12m)
+      All views return { chart_data, kpis{} }. No caching (analytics is fast).
+    - app/admin/analytics/index.php — single-page Alpine component.
+      8 chart panels in 2-column grid (full-width on mobile). Each panel:
+      card with title, KPI stat strip, ApexCharts instance, skeleton loader.
+      One "Refresh All" button. Permission: analytics / view.
+  DECISIONS FOR THIS SESSION:
+    - Revenue forecast: pure SQL linear regression (no AI yet — AI is S025+)
+    - fleet_optimizer "recommended" count: ceil(peak_concurrent_leases × 1.15)
+      per category, where peak = max(active leases on any single day last 12m)
+    - All chart data returned as arrays ready for ApexCharts series format
+    - Permission: analytics (see matrix — super_admin/manager/accountant/read_only)
+      dispatcher has no analytics access
+  STOP CONDITIONS:
+    SC1: php -l all new files clean
+    SC2: /analytics page HTTP 200
+    SC3: api/v1/analytics?view=revenue_forecast returns chart_data with series
+    SC4: api/v1/analytics?view=concentration_risk returns labels + series
+    SC5: api/v1/analytics?view=utilization_matrix returns scatter points
+    SC6: all 8 views return success:true
+    SC7: page renders all 8 chart panels (check HTML for 8 canvas/svg elements)
 
 After S023: S024 — Customer Portal, S025+ — Accounting Module
 
