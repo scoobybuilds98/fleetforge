@@ -69,7 +69,8 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      Form — Alpine.js component submits to API
      ============================================================ -->
-<form @submit.prevent="submitPayment()" x-data="FF_CreatePayment()" novalidate>
+<div x-data="FF_CreatePayment()">
+<form @submit.prevent="submitPayment()" novalidate>
 
     <div style="display:grid; grid-template-columns:2fr 1fr; gap:20px; align-items:start;">
 
@@ -291,6 +292,14 @@ require_once FF_ROOT . '/includes/header.php';
 
 </form>
 
+<?php
+$overlayTitle    = 'Payment Recorded!';
+$overlaySubtitle = 'Redirecting to payment details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /x-data wrapper -->
+
 <script>
 function FF_CreatePayment() {
     // Build invoice data map from PHP-rendered options
@@ -342,9 +351,10 @@ function FF_CreatePayment() {
                 'due'      => $preInv['due_date'],
             ]) : '{}';
         ?>,
-        errors:     {},
-        apiError:   '',
-        submitting: false,
+        errors:             {},
+        apiError:           '',
+        submitting:         false,
+        showSuccessOverlay: false,
 
         onInvoiceChange() {
             const id = parseInt(this.form.invoice_id, 10);
@@ -407,8 +417,10 @@ function FF_CreatePayment() {
             this.submitting = false;
 
             if (res.success) {
-                // Redirect to the new payment's detail page
-                window.location.href = '<?= base_url('/payments/show') ?>?id=' + res.data.id;
+                // Show success overlay then redirect to the new payment's detail page
+                this.showSuccessOverlay = true;
+                const _newId = res.data.id;
+                setTimeout(() => { window.location.href = '<?= base_url('/payments/show') ?>?id=' + _newId; }, 3500);
             } else {
                 this.apiError = res.message ?? 'Failed to record payment. Please try again.';
             }

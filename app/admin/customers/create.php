@@ -442,7 +442,8 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function FF_CustomerForm() {
     return {
-        submitting:  false,
+        submitting:         false,
+        showSuccessOverlay: false,
         submitError: null,
         errors:      {},
         form: {
@@ -524,7 +525,9 @@ function FF_CustomerForm() {
                 const json = await res.json();
 
                 if (res.ok && json.success) {
-                    window.location.href = '<?= base_url('customers/show') ?>?id=' + json.data.id;
+                    this.showSuccessOverlay = true;
+                    const _newId = json.data.id;
+                    setTimeout(() => { window.location.href = '<?= base_url('customers/show') ?>?id=' + _newId; }, 3500);
                     return;
                 }
 
@@ -543,5 +546,11 @@ function FF_CustomerForm() {
     };
 }
 </script>
+
+<?php
+$overlayTitle    = 'Customer Created!';
+$overlaySubtitle = 'Redirecting to customer profile…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

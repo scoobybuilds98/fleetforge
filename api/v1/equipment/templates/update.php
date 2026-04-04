@@ -71,6 +71,23 @@ if (isset($body['name'])) {
     );
     if ($conflict) json_error('ALREADY_EXISTS', 'Another template with this name already exists.', 409);
     $updates['name'] = $name;
+
+    // FIX #42: regenerate slug when name changes so URL references stay consistent
+    if (!function_exists('make_template_slug')) {
+        function make_template_slug(string $n): string {
+            $s = strtolower(trim($n));
+            $s = preg_replace('/[^a-z0-9]+/', '-', $s);
+            return trim($s, '-');
+        }
+    }
+    $baseSlug = make_template_slug($name);
+    $newSlug  = $baseSlug;
+    $suffix   = 2;
+    while (db_exists('equipment_templates', 'slug = ? AND id != ? AND deleted_at IS NULL', [$newSlug, $id])) {
+        $newSlug = $baseSlug . '-' . $suffix;
+        $suffix++;
+    }
+    $updates['slug'] = $newSlug;
 }
 
 if (isset($body['category'])) {
@@ -91,23 +108,38 @@ foreach ($stringFields as $field) {
     }
 }
 
-$decimalFields = ['default_length_ft','default_height_ft','default_width_ft',
-                  'default_daily_rate','default_weekly_rate','default_monthly_rate',
-                  'default_mileage_rate'];
-foreach ($decimalFields as $field) {
+// FIX #35: dimensions must be positive (zero or negative dimensions are nonsensical)
+foreach (['default_length_ft','default_height_ft','default_width_ft'] as $field) {
     if (array_key_exists($field, $body)) {
-        $updates[$field] = clean_decimal($body[$field]);
+        $updates[$field] = clean_positive_decimal($body[$field]);
     }
 }
 
-$intFields = ['default_weight_capacity_lbs','default_axle_count',
-              'default_cvi_interval_days','default_mvi_interval_days',
-              'default_registration_interval_days','default_insurance_interval_days',
-              'sort_order'];
-foreach ($intFields as $field) {
+// FIX #34: rates must be >= 0 (a rate of zero is valid, e.g. free-of-charge period)
+foreach (['default_daily_rate','default_weekly_rate','default_monthly_rate','default_mileage_rate'] as $field) {
     if (array_key_exists($field, $body)) {
-        $updates[$field] = clean_int($body[$field]);
+        $updates[$field] = clean_non_negative_decimal($body[$field]);
     }
+}
+
+// FIX #35 / #36: weight and axle count must be positive
+foreach (['default_weight_capacity_lbs','default_axle_count'] as $field) {
+    if (array_key_exists($field, $body)) {
+        $updates[$field] = clean_positive_int($body[$field]);
+    }
+}
+
+// FIX #36: interval days must be positive (an interval of 0 would mean daily — use 1)
+foreach (['default_cvi_interval_days','default_mvi_interval_days',
+          'default_registration_interval_days','default_insurance_interval_days'] as $field) {
+    if (array_key_exists($field, $body)) {
+        $updates[$field] = clean_positive_int($body[$field]);
+    }
+}
+
+// FIX #37: sort_order must be >= 0 (negative ordering positions make no sense)
+if (array_key_exists('sort_order', $body)) {
+    $updates['sort_order'] = clean_non_negative_int($body['sort_order']) ?? 0;
 }
 
 if (isset($body['default_ownership_type'])) {

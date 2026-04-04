@@ -71,6 +71,11 @@ function clean_string(?string $val, int $maxLen = 255): ?string
 
     $val = trim(strip_tags($val));
 
+    // FIX #41: strip NUL bytes and non-printable control characters that can
+    // cause truncated DB writes, header injection, or log poisoning.
+    // Keeps tab (0x09), LF (0x0A), CR (0x0D) as they are valid in text bodies.
+    $val = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $val) ?? $val;
+
     if ($val === '') return null;
 
     // Truncate to maxLen (multibyte-safe)
@@ -104,6 +109,28 @@ function clean_int(mixed $val): ?int
 }
 }
 
+// clean_positive_int() — return a validated integer > 0, or null
+// Rejects zero, negatives, floats and non-numeric strings.
+// Use for quantities, counts, IDs, measurements that must be positive.
+if (!function_exists('clean_positive_int')) {
+function clean_positive_int(mixed $val): ?int
+{
+    $int = clean_int($val);
+    return ($int !== null && $int > 0) ? $int : null;
+}
+}
+
+// clean_non_negative_int() — return a validated integer >= 0, or null
+// Rejects negatives, floats and non-numeric strings.
+// Use for odometer/mileage readings, counts that may be zero.
+if (!function_exists('clean_non_negative_int')) {
+function clean_non_negative_int(mixed $val): ?int
+{
+    $int = clean_int($val);
+    return ($int !== null && $int >= 0) ? $int : null;
+}
+}
+
 // clean_decimal() — return a validated decimal string for bcmath, or null
 // Rejects formatted values: "$1,234.56", "1,234", "1 234", etc.
 // Accepts: "1234.56", "1234", "-1234.56", "0", "0.00"
@@ -120,6 +147,46 @@ function clean_decimal(mixed $val): ?string
     if (!preg_match('/^-?\d+(\.\d+)?$/', $str)) return null;
 
     return $str;
+}
+}
+
+// clean_positive_decimal() — return a validated decimal string > 0, or null
+// Rejects zero, negatives, and non-numeric strings.
+// Use for rates, costs, prices that must be strictly positive.
+if (!function_exists('clean_positive_decimal')) {
+function clean_positive_decimal(mixed $val): ?string
+{
+    $d = clean_decimal($val);
+    if ($d === null) return null;
+    // Use bccomp to compare — avoids float precision issues (D16)
+    return bccomp($d, '0', 6) > 0 ? $d : null;
+}
+}
+
+// clean_non_negative_decimal() — return a validated decimal string >= 0, or null
+// Rejects negatives and non-numeric strings.
+// Use for costs and amounts that may legitimately be zero.
+if (!function_exists('clean_non_negative_decimal')) {
+function clean_non_negative_decimal(mixed $val): ?string
+{
+    $d = clean_decimal($val);
+    if ($d === null) return null;
+    return bccomp($d, '0', 6) >= 0 ? $d : null;
+}
+}
+
+// clean_time() — return a validated HH:MM or HH:MM:SS time string, or null
+// Validates that the value is a real time (00:00–23:59).
+if (!function_exists('clean_time')) {
+function clean_time(?string $val): ?string
+{
+    if ($val === null || $val === '') return null;
+    $val = trim($val);
+    // Match HH:MM or HH:MM:SS
+    if (!preg_match('/^(\d{2}):(\d{2})(?::(\d{2}))?$/', $val, $m)) return null;
+    $h = (int) $m[1]; $min = (int) $m[2]; $sec = isset($m[3]) ? (int) $m[3] : 0;
+    if ($h > 23 || $min > 59 || $sec > 59) return null;
+    return $val;
 }
 }
 
@@ -334,16 +401,24 @@ function generate_random_code(int $length = 6): string
 // ============================================================
 
 // bcround() — round a bcmath decimal string to $scale decimal places
-// Uses "round half away from zero" (standard rounding).
-// Formula from FLEETFORGE_CLAUDE_CODE_REFERENCE.md §8
+// Uses "round half away from zero" (standard rounding for financial math).
+// For positive numbers, adds 0.005 and truncates.
+// For negative numbers, subtracts 0.005 and truncates — this correctly
+// rounds -2.345 to -2.35 (away from zero), not -2.34.
 //
-//   bcround('2.345', 2)  → '2.35'
-//   bcround('2.344', 2)  → '2.34'
-//   bcround('-2.345', 2) → '-2.34'  (away from zero)
+//   bcround('2.345',  2) → '2.35'
+//   bcround('2.344',  2) → '2.34'
+//   bcround('-2.345', 2) → '-2.35'  (away from zero — FIX #40)
+//   bcround('-2.344', 2) → '-2.34'
 if (!function_exists('bcround')) {
 function bcround(string $val, int $scale = 2): string
 {
     $half = '0.' . str_repeat('0', $scale) . '5';
+    // WHY: for negative numbers we must subtract (not add) the half value so
+    // that -2.345 rounds to -2.35 (away from zero) rather than -2.34 (toward zero).
+    if (bccomp($val, '0', $scale + 1) < 0) {
+        return bcadd(bcsub($val, $half, $scale + 1), '0', $scale);
+    }
     return bcsub(bcadd($val, $half, $scale + 1), '0', $scale);
 }
 }

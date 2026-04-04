@@ -49,13 +49,18 @@ if (!$newStatus) {
 }
 
 // ── Valid transitions (spec §11) ───────────────────────────────
-// Keyed by current status → array of allowed target statuses
+// Keyed by current status → array of allowed target statuses.
+// FIX #11: 'decommissioned' was unreachable — add it as a target from
+//          maintenance and inactive (the two states where a unit is out of service).
+// FIX #17: removed 'on_lease' from the 'available' transition — on_lease should only
+//          be set implicitly via lease/activate.php, not via manual status change.
+//          Manual assignment to on_lease without a lease record creates data inconsistency.
 const UNIT_STATUS_TRANSITIONS = [
-    'available'      => ['reserved', 'on_lease', 'maintenance', 'inactive'],
-    'reserved'       => ['on_lease', 'available'],
+    'available'      => ['reserved', 'maintenance', 'inactive'],
+    'reserved'       => ['available'],
     'on_lease'       => ['available', 'maintenance'],
-    'maintenance'    => ['available', 'inactive'],
-    'inactive'       => ['available'],
+    'maintenance'    => ['available', 'inactive', 'decommissioned'],
+    'inactive'       => ['available', 'decommissioned'],
     'decommissioned' => [], // TERMINAL
 ];
 

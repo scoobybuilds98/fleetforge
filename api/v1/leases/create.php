@@ -61,11 +61,23 @@ if ($errors) {
     json_error('VALIDATION_ERROR', 'Validation failed.', 422, ['errors' => $errors]);
 }
 
-// ── Optional rate fields ───────────────────────────────────────
-$dailyRate    = clean_decimal($body['daily_rate'] ?? null) ?? '0.00';
-$weeklyRate   = clean_decimal($body['weekly_rate'] ?? null) ?? '0.00';
-$monthlyRate  = clean_decimal($body['monthly_rate'] ?? null) ?? '0.00';
-$mileageRate  = clean_decimal($body['mileage_rate'] ?? null) ?? '0.0000';
+// ── Rate fields — at least one must be > 0; negatives rejected ────
+// FIX #1 (negative rates), FIX #2 (all-zero rates), FIX #6 (discount bounds)
+$dailyRate    = clean_non_negative_decimal($body['daily_rate']   ?? null) ?? '0.00';
+$weeklyRate   = clean_non_negative_decimal($body['weekly_rate']  ?? null) ?? '0.00';
+$monthlyRate  = clean_non_negative_decimal($body['monthly_rate'] ?? null) ?? '0.00';
+$mileageRate  = clean_non_negative_decimal($body['mileage_rate'] ?? null) ?? '0.0000';
+// Enforce: at least one rate must be positive (spec §7.5 docblock)
+if (
+    bccomp($dailyRate, '0', 4) <= 0 &&
+    bccomp($weeklyRate, '0', 4) <= 0 &&
+    bccomp($monthlyRate, '0', 4) <= 0 &&
+    bccomp($mileageRate, '0', 4) <= 0
+) {
+    json_error('VALIDATION_ERROR',
+        'At least one rate (daily, weekly, monthly, or mileage) must be greater than zero.', 422,
+        ['errors' => ['daily_rate' => 'At least one rate must be greater than zero.']]);
+}
 
 // ── Optional fields ────────────────────────────────────────────
 $endDate        = clean_date($body['end_date'] ?? null);
@@ -75,23 +87,37 @@ $billingCycle   = in_array($body['billing_cycle'] ?? '', ['monthly','on_close_on
 $gstExempt      = isset($body['gst_exempt']) ? (bool) $body['gst_exempt'] : null;
 $pstExempt      = isset($body['pst_exempt']) ? (bool) $body['pst_exempt'] : null;
 $discountType   = in_array($body['discount_type'] ?? '', ['none','percentage','flat']) ? $body['discount_type'] : 'none';
-$discountValue  = clean_decimal($body['discount_value'] ?? null) ?? '0.0000';
+// FIX #5 / #6: discount must be >= 0; percentage capped at 100
+$discountValue  = clean_non_negative_decimal($body['discount_value'] ?? null) ?? '0.0000';
+if ($discountType === 'percentage' && bccomp($discountValue, '100', 4) > 0) {
+    json_error('VALIDATION_ERROR',
+        'Percentage discount cannot exceed 100%.', 422,
+        ['errors' => ['discount_value' => 'Percentage discount cannot exceed 100%.']]);
+}
 $insuranceOptIn = isset($body['insurance_opt_in']) ? (bool) $body['insurance_opt_in'] : false;
-$insuranceCost  = clean_decimal($body['insurance_cost'] ?? null) ?? '0.00';
+// FIX #7: insurance/warranty costs must be >= 0
+$insuranceCost  = clean_non_negative_decimal($body['insurance_cost'] ?? null) ?? '0.00';
 $warrantyOptIn  = isset($body['warranty_opt_in']) ? (bool) $body['warranty_opt_in'] : false;
-$warrantyCost   = clean_decimal($body['warranty_cost'] ?? null) ?? '0.00';
+$warrantyCost   = clean_non_negative_decimal($body['warranty_cost'] ?? null) ?? '0.00';
 $poNumber       = clean_string($body['po_number'] ?? null, 100);
 $notes          = clean_string($body['notes'] ?? null, 5000);
 $internalNotes  = clean_string($body['internal_notes'] ?? null, 5000);
 $rateNotes      = clean_string($body['rate_notes'] ?? null, 5000);
-$estimatedMileage  = clean_decimal($body['estimated_mileage'] ?? null) ?? '0.00';
-$mileageAtStart    = clean_int($body['mileage_at_start'] ?? null);
+// FIX #4: estimated_mileage must be >= 0
+$estimatedMileage  = clean_non_negative_decimal($body['estimated_mileage'] ?? null) ?? '0.00';
+// FIX #3: mileage_at_start must be >= 0
+$mileageAtStart    = clean_non_negative_int($body['mileage_at_start'] ?? null);
 $minimumEndDate    = clean_date($body['minimum_end_date'] ?? null);
 
-// ── Date validation ────────────────────────────────────────────
+// ── Date validation ─────────────────────────────────────────────
 if ($endDate && $endDate < $startDate) {
     json_error('VALIDATION_ERROR', 'end_date must be on or after start_date.', 422,
         ['errors' => ['end_date' => 'End date must be on or after start date.']]);
+}
+// FIX #8: minimum_end_date must be >= start_date
+if ($minimumEndDate && $minimumEndDate < $startDate) {
+    json_error('VALIDATION_ERROR', 'minimum_end_date must be on or after start_date.', 422,
+        ['errors' => ['minimum_end_date' => 'Minimum end date must be on or after start date.']]);
 }
 
 // ── Fetch customer (for snapshot + tax defaults) ───────────────
@@ -111,11 +137,12 @@ if (!$customer) {
 // D22: gst_exempt and pst_exempt are independent, frozen on lease at creation
 $gstExemptFinal = $gstExempt ?? (bool) $customer['gst_exempt'];
 $pstExemptFinal = $pstExempt ?? (bool) $customer['pst_exempt'];
-// Honor expiry dates from customer record
-if ($customer['gst_exempt_expiry'] && $customer['gst_exempt_expiry'] < date('Y-m-d')) {
-    $gstExemptFinal = false; // D22: expired exemption = not exempt
+// FIX #10: check exemption expiry against start_date (not today), because the
+// exemption must still be valid when the lease actually starts, not just today.
+if ($customer['gst_exempt_expiry'] && $customer['gst_exempt_expiry'] < $startDate) {
+    $gstExemptFinal = false; // D22: expired by lease start date = not exempt
 }
-if ($customer['pst_exempt_expiry'] && $customer['pst_exempt_expiry'] < date('Y-m-d')) {
+if ($customer['pst_exempt_expiry'] && $customer['pst_exempt_expiry'] < $startDate) {
     $pstExemptFinal = false;
 }
 

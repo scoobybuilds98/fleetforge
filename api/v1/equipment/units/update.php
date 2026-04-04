@@ -93,21 +93,53 @@ foreach ($stringFields as $field => $maxLen) {
     }
 }
 
-// Decimal fields
-foreach (['length_ft','height_ft','width_ft','acquisition_cost'] as $f) {
+// FIX #20: dimensions must be positive — zero or negative dimensions are nonsensical
+foreach (['length_ft','height_ft','width_ft'] as $f) {
     if (array_key_exists($f, $body)) {
-        $updates[$f] = clean_decimal($body[$f]);
+        $updates[$f] = clean_positive_decimal($body[$f]);
     }
 }
 
-// Int fields
-foreach (['year','weight_capacity_lbs','axle_count','mileage',
-          'cvi_interval_days','mvi_interval_days',
-          'registration_interval_days','insurance_interval_days',
-          'owner_company_id'] as $f) {
-    if (array_key_exists($f, $body)) {
-        $updates[$f] = clean_int($body[$f]);
+// FIX #19: acquisition_cost must be >= 0
+if (array_key_exists('acquisition_cost', $body)) {
+    $updates['acquisition_cost'] = clean_non_negative_decimal($body['acquisition_cost']);
+}
+
+// FIX #17: year must be a realistic vehicle model year (1900 – current year + 2)
+if (array_key_exists('year', $body)) {
+    $yearRaw     = clean_int($body['year']);
+    $currentYear = (int) date('Y');
+    if ($yearRaw !== null && ($yearRaw < 1900 || $yearRaw > $currentYear + 2)) {
+        json_error('VALIDATION_ERROR',
+            "year must be between 1900 and " . ($currentYear + 2) . ".", 422,
+            ['errors' => ['year' => "Year must be between 1900 and " . ($currentYear + 2) . "."]]);
     }
+    $updates['year'] = $yearRaw;
+}
+
+// FIX #21 / #22: weight and axle count must be positive
+foreach (['weight_capacity_lbs','axle_count'] as $f) {
+    if (array_key_exists($f, $body)) {
+        $updates[$f] = clean_positive_int($body[$f]);
+    }
+}
+
+// FIX #18: mileage must be >= 0
+if (array_key_exists('mileage', $body)) {
+    $updates['mileage'] = clean_non_negative_int($body['mileage']) ?? 0;
+}
+
+// FIX #23: interval days must be positive
+foreach (['cvi_interval_days','mvi_interval_days',
+          'registration_interval_days','insurance_interval_days'] as $f) {
+    if (array_key_exists($f, $body)) {
+        $updates[$f] = clean_positive_int($body[$f]);
+    }
+}
+
+// owner_company_id: any valid int (FK reference — can be null to clear)
+if (array_key_exists('owner_company_id', $body)) {
+    $updates['owner_company_id'] = clean_int($body['owner_company_id']);
 }
 
 // Date fields

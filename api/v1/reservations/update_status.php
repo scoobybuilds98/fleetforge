@@ -112,24 +112,26 @@ db_transaction(function () use ($id, $targetStatus, $cancelReason, &$result) {
     // ── Conflict re-check for pending→confirmed ────────────────
     // Even though create.php checked, we re-check here under FOR UPDATE so
     // that two concurrent confirm requests cannot both succeed (D20).
+    // FIX #3 / #6: match create.php's model exactly — check for ANY active
+    // (pending OR confirmed) reservation on the unit, with no date filter.
+    // One unit can only be in one active reservation at a time regardless of date.
     if ($currentStatus === 'pending' && $targetStatus === 'confirmed') {
         foreach ($units as $u) {
             $conflict = db_row(
-                "SELECT r.id, r.company_name
+                "SELECT r.id, r.company_name, r.pickup_date
                  FROM reservation_units ru
                  JOIN reservations r ON r.id = ru.reservation_id
                  WHERE ru.equipment_unit_id = ?
-                   AND r.pickup_date = ?
-                   AND r.status IN ('confirmed')
+                   AND r.status IN ('pending', 'confirmed')
                    AND r.id != ?
                    AND r.deleted_at IS NULL",
-                [$u['equipment_unit_id'], $reservation['pickup_date'], $id]
+                [$u['equipment_unit_id'], $id]
             );
             if ($conflict) {
                 json_error('CONFLICT',
-                    "Unit {$u['unit_number']} is already confirmed for " .
-                    date('M j, Y', strtotime($reservation['pickup_date'])) .
-                    " (Reservation #{$conflict['id']} — {$conflict['company_name']}).",
+                    "Unit {$u['unit_number']} is already in an active reservation " .
+                    "(Res #{$conflict['id']} — {$conflict['company_name']} — " .
+                    date('M j, Y', strtotime($conflict['pickup_date'])) . ").",
                     409
                 );
             }

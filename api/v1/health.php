@@ -75,21 +75,29 @@ if (is_dir($cacheDir)) {
 $status = ($dbOk && $diskOk) ? 'ok' : 'degraded';
 
 // ── Build response ───────────────────────────────────────────
+// FIX #39: unauthenticated callers (load balancers, uptime monitors) only need
+// status / db / time. Version string and disk metrics are omitted unless the
+// request comes from an authenticated session — leaking them to the public
+// can aid fingerprinting and targeted exploits.
+$isAuthed = (bool) current_user_id();
+
 $data = [
-    'status'  => $status,
-    'version' => FF_VERSION,
-    'db'      => $dbOk,
-    'disk'    => [
+    'status' => $status,
+    'db'     => $dbOk,
+    'time'   => date('c'),  // ISO 8601 with timezone offset
+];
+
+if ($isAuthed) {
+    $data['version'] = FF_VERSION;
+    $data['disk']    = [
         'free_gb'  => $diskFreeGb,
         'total_gb' => $diskTotalGb,
         'ok'       => $diskOk,
-    ],
-    'time'    => date('c'),  // ISO 8601 with timezone offset
-];
-
-// Include cache status only when applicable
-if ($cacheOk !== null) {
-    $data['cache'] = ['ok' => $cacheOk];
+    ];
+    // Include cache status only when applicable
+    if ($cacheOk !== null) {
+        $data['cache'] = ['ok' => $cacheOk];
+    }
 }
 
 json_success($data);

@@ -167,15 +167,23 @@ require_once FF_ROOT . '/includes/header.php';
                                           x-text="tpl.is_active ? 'Active' : 'Inactive'">
                                     </span>
                                 </td>
-                                <td style="text-align:right;">
-                                    <?php if (can('equipment', 'delete')): ?>
-                                    <button class="btn btn-ghost btn-sm text-danger"
-                                            :disabled="tpl.unit_count > 0"
-                                            :title="tpl.unit_count > 0 ? 'Cannot delete: ' + tpl.unit_count + ' units use this template' : 'Delete template'"
-                                            @click="deleteTemplate(tpl)">
-                                        Delete
-                                    </button>
-                                    <?php endif; ?>
+                                <td style="text-align:right;white-space:nowrap;">
+                                    <div style="display:flex;gap:6px;justify-content:flex-end;">
+                                        <?php if (can('equipment', 'edit')): ?>
+                                        <a :href="'<?= base_url('equipment/templates/edit') ?>?id=' + tpl.id"
+                                           class="btn btn-secondary btn-sm">
+                                            Edit
+                                        </a>
+                                        <?php endif; ?>
+                                        <?php if (can('equipment', 'delete')): ?>
+                                        <button class="btn btn-ghost btn-sm text-danger"
+                                                :disabled="tpl.unit_count > 0"
+                                                :title="tpl.unit_count > 0 ? 'Cannot delete: ' + tpl.unit_count + ' units use this template' : 'Delete template'"
+                                                @click="deleteTemplate(tpl)">
+                                            Delete
+                                        </button>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                             </tr>
                         </template>

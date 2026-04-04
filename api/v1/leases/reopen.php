@@ -47,8 +47,9 @@ if (!$reopenReason) {
 }
 
 // Manager role required — reopening is a high-stakes override
+// FIX: was checking $user['role'] which doesn't exist; correct key is 'role_slug'
 $user = current_user();
-$role = $user['role'] ?? '';
+$role = $user['role_slug'] ?? '';
 if (!in_array($role, ['super_admin', 'manager'])) {
     json_error('FORBIDDEN', 'Reopening a completed lease requires Manager role.', 403);
 }
@@ -93,10 +94,24 @@ db_transaction(function () use ($id, $reopenReason, &$result) {
     $changedBy = current_user()['name'] ?? 'system';
 
     // ── Update lease → active ──────────────────────────────────
+    // FIX #30: reset next_billing_date to first day of next month so the billing
+    //           cron doesn't immediately invoice a stale past date.
+    // FIX #31: clear mileage_at_end and actual_mileage — stale from previous close;
+    //           these will be re-captured at the next close.
+    $nextBillingDate = date('Y-m-d', strtotime('first day of next month'));
     db_execute(
-        "UPDATE leases SET status = 'active', actual_return_date = NULL, closed_at = NULL,
-         closed_by_user_id = NULL, updated_by = ?, updated_at = NOW() WHERE id = ?",
-        [current_user_id(), $id]
+        "UPDATE leases
+         SET status = 'active',
+             actual_return_date = NULL,
+             closed_at = NULL,
+             closed_by_user_id = NULL,
+             mileage_at_end = NULL,
+             actual_mileage = 0,
+             next_billing_date = ?,
+             updated_by = ?,
+             updated_at = NOW()
+         WHERE id = ?",
+        [$nextBillingDate, current_user_id(), $id]
     );
 
     // ── Update unit → on_lease ─────────────────────────────────

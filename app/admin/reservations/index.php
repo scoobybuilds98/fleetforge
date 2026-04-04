@@ -112,6 +112,63 @@ require_once FF_ROOT . '/includes/header.php';
 
     </div><!-- /stat-grid -->
 
+    <!-- ── CHARTS ──────────────────────────────────────────────────
+         Shown after chart data loads (status donut + 7-day pickups bar).
+         WHY x-show not x-if: canvases must exist in DOM for Chart.js
+         to find them; x-if would remove/recreate them on each filter.
+         ─────────────────────────────────────────────────────────── -->
+    <div class="ff-charts-grid" x-show="chartData.loaded"
+         x-transition:enter="transition ease-out duration-500"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         style="display:none;"><!-- hidden until x-show activates -->
+
+        <!-- Status donut -->
+        <div class="card">
+            <div class="card-header" style="padding:12px 16px;">
+                <span class="card-title" style="margin:0;font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">
+                    Status Breakdown
+                </span>
+            </div>
+            <div class="card-body" style="padding:16px;display:flex;flex-direction:column;align-items:center;gap:14px;">
+                <canvas id="ff-donut-chart" width="150" height="150"
+                        style="max-width:150px;max-height:150px;"></canvas>
+                <!-- Legend -->
+                <div style="width:100%;display:flex;flex-direction:column;gap:6px;font-size:0.8125rem;">
+                    <div style="display:flex;align-items:center;gap:7px;">
+                        <span style="width:9px;height:9px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>
+                        <span class="text-secondary">Pending</span>
+                        <span class="font-mono font-medium" style="margin-left:auto;" x-text="chartData.statuses.pending"></span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:7px;">
+                        <span style="width:9px;height:9px;border-radius:50%;background:#22c55e;flex-shrink:0;"></span>
+                        <span class="text-secondary">Confirmed</span>
+                        <span class="font-mono font-medium" style="margin-left:auto;" x-text="chartData.statuses.confirmed"></span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:7px;">
+                        <span style="width:9px;height:9px;border-radius:50%;background:#3b82f6;flex-shrink:0;"></span>
+                        <span class="text-secondary">Completed</span>
+                        <span class="font-mono font-medium" style="margin-left:auto;" x-text="chartData.statuses.completed"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 7-day pickups bar chart -->
+        <div class="card">
+            <div class="card-header" style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+                <span class="card-title" style="margin:0;font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">
+                    Pickups — Past 7 Days
+                </span>
+                <span class="badge badge-no-dot badge-info" style="font-size:0.7rem;">Today highlighted</span>
+            </div>
+            <div class="card-body" style="padding:12px 16px 16px;height:190px;">
+                <canvas id="ff-bar-chart" style="width:100%;height:100%;"></canvas>
+            </div>
+        </div>
+
+    </div><!-- /ff-charts-grid -->
+
     <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
     <div class="toolbar" style="margin-bottom:16px;">
         <div class="toolbar-left" style="flex-wrap:wrap;gap:8px;">
@@ -181,6 +238,203 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ================================================================
+         FLEET AVAILABILITY HEAT MAP
+         Forward-looking 4-week calendar. Each cell = one day; color
+         intensity = how many reservations are booked on that day.
+         ================================================================ -->
+    <div class="card" style="margin-bottom:16px;" x-show="heatmapData.loaded">
+
+        <!-- Header with toggle -->
+        <div class="card-header" style="display:flex;align-items:center;gap:10px;cursor:pointer;"
+             @click="heatmapOpen = !heatmapOpen">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                 stroke-width="1.5" stroke="currentColor"
+                 style="width:16px;height:16px;color:var(--color-primary);flex-shrink:0;">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
+            </svg>
+            <span class="card-title h6" style="margin:0;font-size:0.8125rem;">
+                Fleet Booking Density — Next 4 Weeks
+            </span>
+            <!-- Color legend -->
+            <div style="display:flex;align-items:center;gap:5px;margin-left:auto;font-size:0.7rem;color:var(--text-muted);">
+                <span>Low</span>
+                <span style="width:14px;height:14px;border-radius:3px;background:rgba(59,130,246,0.1);border:1px solid var(--border-color);display:inline-block;"></span>
+                <span style="width:14px;height:14px;border-radius:3px;background:rgba(59,130,246,0.35);display:inline-block;"></span>
+                <span style="width:14px;height:14px;border-radius:3px;background:rgba(59,130,246,0.65);display:inline-block;"></span>
+                <span style="width:14px;height:14px;border-radius:3px;background:rgba(59,130,246,0.9);display:inline-block;"></span>
+                <span>High</span>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-left:8px;transition:transform .2s;"
+                     :style="heatmapOpen ? 'transform:rotate(180deg)' : ''">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+                </svg>
+            </div>
+        </div>
+
+        <!-- Calendar grid (collapses/expands) -->
+        <div x-show="heatmapOpen" x-transition style="padding:16px 20px;">
+
+            <!-- Weekday headers -->
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;">
+                <template x-for="wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']">
+                    <div style="text-align:center;font-size:0.7rem;font-weight:600;
+                                color:var(--text-muted);padding:2px 0;"
+                         x-text="wd"></div>
+                </template>
+            </div>
+
+            <!-- Day cells — padded so day 0 falls on its correct weekday -->
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">
+
+                <!-- Padding cells before first day -->
+                <template x-for="pad in heatmapData.days[0].weekday">
+                    <div style="height:52px;border-radius:5px;background:transparent;"></div>
+                </template>
+
+                <!-- Actual day cells -->
+                <template x-for="cell in heatmapData.days" :key="cell.date">
+                    <div class="ff-heatmap-cell"
+                         :title="cell.date + ': ' + cell.count + ' reservation' + (cell.count !== 1 ? 's' : '')"
+                         :style="'background:rgba(59,130,246,' + (cell.count === 0
+                             ? (cell.isWeekend ? '0.03' : '0.06')
+                             : Math.min(0.92, cell.count / heatmapData.max * 0.85 + 0.18).toFixed(2)
+                         ) + ');' + (cell.isToday ? 'outline:2px solid #3b82f6;outline-offset:1px;' : '')">
+                        <div class="ff-heatmap-day"
+                             :style="cell.count > 0 ? 'color:' + (cell.count / heatmapData.max > 0.5 ? 'white' : 'var(--text-primary)') : ''"
+                             x-text="cell.dayNum"></div>
+                        <div class="ff-heatmap-month"
+                             x-show="cell.dayNum === 1"
+                             x-text="cell.monthLabel"></div>
+                        <div class="ff-heatmap-count"
+                             x-show="cell.count > 0"
+                             :style="cell.count / heatmapData.max > 0.5 ? 'color:rgba(255,255,255,0.85)' : ''"
+                             x-text="cell.count"></div>
+                    </div>
+                </template>
+
+            </div>
+
+        </div>
+    </div><!-- /heat map card -->
+
+    <!-- ================================================================
+         VIEW TOGGLE + GANTT TIMELINE
+         Toggle between Table view (default) and Timeline (Gantt) view.
+         Gantt data is lazy-loaded on first open.
+         ================================================================ -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <!-- View toggle buttons -->
+        <div style="display:flex;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">
+            <button type="button"
+                    class="btn btn-sm"
+                    :class="!ganttView ? 'btn-primary' : 'btn-ghost'"
+                    @click="ganttView = false"
+                    style="border-radius:0;border:none;display:flex;align-items:center;gap:5px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                     stroke-width="1.5" stroke="currentColor" style="width:14px;height:14px;">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/>
+                </svg>
+                Table
+            </button>
+            <button type="button"
+                    class="btn btn-sm"
+                    :class="ganttView ? 'btn-primary' : 'btn-ghost'"
+                    @click="toggleGantt()"
+                    style="border-radius:0;border:none;border-left:1px solid var(--border-color);display:flex;align-items:center;gap:5px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                     stroke-width="1.5" stroke="currentColor" style="width:14px;height:14px;">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125"/>
+                </svg>
+                Timeline
+            </button>
+        </div>
+        <span class="text-secondary text-sm" x-show="ganttView">
+            Active reservations — next 14 days
+        </span>
+    </div>
+
+    <!-- ── GANTT TIMELINE CARD (shown when ganttView = true) ──────── -->
+    <div class="card" style="margin-bottom:24px;" x-show="ganttView">
+
+        <!-- Loading state -->
+        <template x-if="ganttView && !ganttLoaded">
+            <div style="padding:32px;text-align:center;">
+                <div class="skeleton skeleton-text" style="width:100%;height:40px;margin-bottom:8px;"></div>
+                <div class="skeleton skeleton-text" style="width:90%;height:36px;margin-bottom:8px;"></div>
+                <div class="skeleton skeleton-text" style="width:80%;height:36px;"></div>
+            </div>
+        </template>
+
+        <!-- Empty state -->
+        <template x-if="ganttView && ganttLoaded && ganttRows.length === 0">
+            <div class="empty-state" style="padding:40px;">
+                <p class="empty-state-title">No active reservations in the next 14 days</p>
+                <p class="empty-state-text">Pending and confirmed reservations with upcoming pickup dates will appear here.</p>
+            </div>
+        </template>
+
+        <!-- Gantt grid -->
+        <template x-if="ganttView && ganttLoaded && ganttRows.length > 0">
+            <div style="overflow-x:auto;">
+                <table class="ff-gantt-table">
+                    <thead>
+                        <tr>
+                            <!-- Unit column header -->
+                            <th class="ff-gantt-unit-header">Unit #</th>
+                            <!-- Date column headers -->
+                            <template x-for="day in ganttDays" :key="day">
+                                <th class="ff-gantt-day-header"
+                                    :class="isGanttToday(day) ? 'ff-gantt-today-col' : ''">
+                                    <div x-text="ganttDayLabel(day)"></div>
+                                    <div style="font-size:0.65rem;font-weight:400;opacity:0.75;"
+                                         x-text="ganttDateLabel(day)"></div>
+                                </th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="row in ganttRows" :key="row.unitNum">
+                            <tr class="ff-gantt-row">
+                                <td class="ff-gantt-unit-cell font-mono"
+                                    x-text="row.unitNum"></td>
+                                <template x-for="day in ganttDays" :key="day">
+                                    <td class="ff-gantt-cell"
+                                        :class="isGanttToday(day) ? 'ff-gantt-today-col' : ''">
+                                        <template x-if="row.dates[day]">
+                                            <a :href="'<?= base_url('reservations/show') ?>?id=' + row.dates[day].id"
+                                               class="ff-gantt-block"
+                                               :class="row.dates[day].status === 'confirmed' ? 'ff-gantt-confirmed' : 'ff-gantt-pending'"
+                                               :title="row.dates[day].company_name + ' — #' + row.dates[day].id + ' (' + row.dates[day].status + ')'"
+                                               x-text="row.dates[day].company_name">
+                                            </a>
+                                        </template>
+                                    </td>
+                                </template>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <!-- Legend -->
+                <div style="padding:10px 16px;display:flex;gap:16px;font-size:0.75rem;color:var(--text-muted);border-top:1px solid var(--border-color);">
+                    <div style="display:flex;align-items:center;gap:5px;">
+                        <span style="width:12px;height:12px;border-radius:2px;background:#22c55e;display:inline-block;"></span> Confirmed
+                    </div>
+                    <div style="display:flex;align-items:center;gap:5px;">
+                        <span style="width:12px;height:12px;border-radius:2px;background:#f59e0b;display:inline-block;"></span> Pending
+                    </div>
+                    <div style="margin-left:auto;" x-text="ganttRows.length + ' units · ' + ganttDays.length + ' days'"></div>
+                </div>
+            </div>
+        </template>
+
+    </div><!-- /Gantt card -->
+
+    <!-- ── CHASSIS IN (pending + confirmed) — hidden when Gantt active -->
+    <div x-show="!ganttView">
     <!-- ── CHASSIS IN (pending + confirmed) ───────────────────────── -->
     <div class="card" style="margin-bottom:24px;">
         <div class="card-header" style="display:flex;align-items:center;gap:10px;">
@@ -256,7 +510,12 @@ require_once FF_ROOT . '/includes/header.php';
                     <tbody>
                         <template x-for="r in inRows" :key="r.id">
                             <tr :class="r.priority === 'urgent' ? 'row-highlight-danger' : (r.priority === 'high' ? 'row-highlight-warning' : '')">
-                                <td class="font-mono text-sm">
+                                <td class="font-mono text-sm"
+                                    :style="r.priority === 'urgent'
+                                        ? 'border-left:3px solid var(--color-danger);padding-left:10px;'
+                                        : r.priority === 'high'
+                                        ? 'border-left:3px solid var(--color-warning);padding-left:10px;'
+                                        : 'border-left:3px solid transparent;padding-left:10px;'">
                                     <a :href="'<?= base_url('reservations/show') ?>?id=' + r.id"
                                        class="link font-medium"
                                        x-text="'#' + r.id"></a>
@@ -271,11 +530,18 @@ require_once FF_ROOT . '/includes/header.php';
                                 <td class="text-sm">
                                     <template x-if="r.units && r.units.length > 0">
                                         <div>
-                                            <div class="font-mono text-xs"
-                                                 x-text="r.units[0].template_name || '—'"></div>
+                                            <!-- Show unit# + type for first unit -->
+                                            <div style="display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;">
+                                                <span class="font-mono text-xs font-medium"
+                                                      x-text="r.units[0].unit_number_snapshot || r.units[0].unit_number || '—'"></span>
+                                                <span class="text-xs text-secondary"
+                                                      x-show="r.units[0].template_name"
+                                                      x-text="'· ' + r.units[0].template_name"></span>
+                                            </div>
+                                            <!-- Additional units -->
                                             <div class="text-xs text-secondary"
                                                  x-show="r.units.length > 1"
-                                                 x-text="'+ ' + (r.units.length - 1) + ' more'"></div>
+                                                 x-text="'+ ' + (r.units.length - 1) + ' more unit' + (r.units.length - 1 > 1 ? 's' : '')"></div>
                                         </div>
                                     </template>
                                     <template x-if="!r.units || r.units.length === 0">
@@ -433,9 +699,20 @@ require_once FF_ROOT . '/includes/header.php';
                                 <td x-text="r.company_name"></td>
                                 <td class="text-sm">
                                     <template x-if="r.units && r.units.length > 0">
-                                        <span class="font-mono text-xs"
-                                              x-text="r.units.map(u => u.template_name || u.unit_number).filter(Boolean).join(', ')">
-                                        </span>
+                                        <div>
+                                            <template x-for="(u, i) in r.units.slice(0, 2)" :key="i">
+                                                <div style="display:flex;align-items:baseline;gap:4px;">
+                                                    <span class="font-mono text-xs font-medium"
+                                                          x-text="u.unit_number_snapshot || u.unit_number || '—'"></span>
+                                                    <span class="text-xs text-secondary"
+                                                          x-show="u.template_name"
+                                                          x-text="'· ' + u.template_name"></span>
+                                                </div>
+                                            </template>
+                                            <div class="text-xs text-secondary"
+                                                 x-show="r.units.length > 2"
+                                                 x-text="'+ ' + (r.units.length - 2) + ' more'"></div>
+                                        </div>
                                     </template>
                                     <template x-if="!r.units || r.units.length === 0">
                                         <span class="text-secondary">—</span>
@@ -490,6 +767,7 @@ require_once FF_ROOT . '/includes/header.php';
         </template>
 
     </div><!-- /Chassis Out card -->
+    </div><!-- /x-show !ganttView wrapper -->
 
     <!-- ── CANCEL MODAL ───────────────────────────────────────────── -->
     <div x-show="cancelModal.open"
@@ -567,6 +845,27 @@ function FF_Reservations() {
         inPage:  1,
         outPage: 1,
 
+        // ── Chart data ───────────────────────────────────────────
+        // WHY separate state: chart data is fetched independently of the
+        // table data so that charts load and animate without blocking the table.
+        chartData: {
+            loaded:   false,
+            statuses: { pending: 0, confirmed: 0, completed: 0 },
+            weekly:   { labels: [], counts: [] },
+        },
+        _donutChart: null,  // Chart.js instance refs for destroy/recreate on refresh
+        _barChart:   null,
+
+        // ── Heat map state ───────────────────────────────────────
+        heatmapData: { loaded: false, days: [], max: 1 },
+        heatmapOpen: false,  // collapsed by default; user toggles it open
+
+        // ── Gantt (timeline) view ─────────────────────────────────
+        ganttView:  false,   // false = table view, true = timeline view
+        ganttRows:  [],      // [{unitNum, dates:{date→reservation}}]
+        ganttDays:  [],      // array of date strings (next 14 days)
+        ganttLoaded: false,
+
         cancelModal: {
             open:         false,
             reservation:  null,
@@ -579,6 +878,7 @@ function FF_Reservations() {
         init() {
             this.loadAll();
             this.loadKpis();
+            this.loadHeatmap();
         },
 
         // ── Load both tables ─────────────────────────────────────
@@ -677,7 +977,261 @@ function FF_Reservations() {
                     today:     todr.data?.pagination?.total || 0,
                 };
                 this.kpisLoaded = true;
+                this.loadChartData();   // charts draw after kpis are ready
             } catch {}
+        },
+
+        // ── Load chart data (status donut + 7-day bar) ────────────
+        // WHY separate method: keeps loadKpis() focused; chart data
+        // needs one extra API call (completed count) + 7 date calls.
+        async loadChartData() {
+            try {
+                // Completed count (pending + confirmed already in this.kpis)
+                const cRes  = await fetch(`<?= base_url('api/v1/reservations/index.php') ?>?status=completed&per_page=1`);
+                const cData = await cRes.json();
+                this.chartData.statuses = {
+                    pending:   this.kpis.pending,
+                    confirmed: this.kpis.confirmed,
+                    completed: cData.data?.pagination?.total || 0,
+                };
+
+                // Pickup counts for each of the past 7 days
+                const days = [], labels = [];
+                for (let i = 6; i >= 0; i--) {
+                    const d = new Date();
+                    d.setDate(d.getDate() - i);
+                    days.push(d.toISOString().slice(0, 10));
+                    labels.push(d.toLocaleDateString('en-US', {
+                        weekday: 'short', month: 'short', day: 'numeric',
+                    }));
+                }
+
+                const counts = await Promise.all(
+                    days.map(day =>
+                        fetch(`<?= base_url('api/v1/reservations/index.php') ?>?pickup_date=${day}&per_page=1`)
+                            .then(r => r.json())
+                            .then(d => d.data?.pagination?.total || 0)
+                            .catch(() => 0)
+                    )
+                );
+
+                this.chartData.weekly = { labels, counts };
+                this.chartData.loaded = true;
+
+                // WHY setTimeout 50ms: x-show="chartData.loaded" must update the
+                // DOM (unhide canvases) before Chart.js can measure their dimensions.
+                setTimeout(() => this.renderCharts(), 50);
+            } catch (e) {
+                console.warn('FF charts: data load failed', e);
+            }
+        },
+
+        // ── Draw / redraw Chart.js charts ─────────────────────────
+        renderCharts() {
+            if (typeof Chart === 'undefined') return;
+
+            // ── Status donut ──────────────────────────────────────
+            const donutEl = document.getElementById('ff-donut-chart');
+            if (donutEl) {
+                if (this._donutChart) this._donutChart.destroy();
+                this._donutChart = new Chart(donutEl, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Pending', 'Confirmed', 'Completed'],
+                        datasets: [{
+                            data: [
+                                this.chartData.statuses.pending,
+                                this.chartData.statuses.confirmed,
+                                this.chartData.statuses.completed,
+                            ],
+                            backgroundColor: ['#f59e0b', '#22c55e', '#3b82f6'],
+                            borderWidth: 0,
+                            hoverOffset: 8,
+                        }],
+                    },
+                    options: {
+                        responsive: false,
+                        cutout: '68%',
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: ctx => `  ${ctx.label}: ${ctx.parsed}`,
+                                },
+                            },
+                        },
+                        animation: { animateRotate: true, duration: 700 },
+                    },
+                });
+            }
+
+            // ── 7-day pickups bar chart ───────────────────────────
+            const barEl = document.getElementById('ff-bar-chart');
+            if (barEl) {
+                if (this._barChart) this._barChart.destroy();
+                // Detect dark mode for grid + label colors
+                const dark      = document.documentElement.getAttribute('data-theme') === 'dark'
+                               || window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const gridColor = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+                const textColor = dark ? '#94a3b8' : '#64748b';
+
+                // Highlight today's bar (last element)
+                const bgColors = this.chartData.weekly.counts.map((_, i) =>
+                    i === 6 ? '#2563eb' : '#3b82f6'
+                );
+
+                this._barChart = new Chart(barEl, {
+                    type: 'bar',
+                    data: {
+                        labels: this.chartData.weekly.labels,
+                        datasets: [{
+                            label: 'Pickups',
+                            data:  this.chartData.weekly.counts,
+                            backgroundColor: bgColors,
+                            borderRadius: 5,
+                            borderSkipped: false,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: ctx => `  ${ctx.parsed.y} pickup${ctx.parsed.y !== 1 ? 's' : ''}`,
+                                },
+                            },
+                        },
+                        scales: {
+                            x: {
+                                grid:  { display: false },
+                                ticks: { color: textColor, font: { size: 11 } },
+                            },
+                            y: {
+                                beginAtZero: true,
+                                ticks: { color: textColor, font: { size: 11 }, stepSize: 1, precision: 0 },
+                                grid:  { color: gridColor },
+                            },
+                        },
+                        animation: { duration: 600 },
+                    },
+                });
+            }
+        },
+
+        // ── Load heat map — next 28 days pickup density ───────────
+        // WHY 28 parallel calls: each is a lightweight per_page=1 request;
+        // together they paint a full 4-week forward-looking calendar so
+        // dispatchers can spot busy vs open days at a glance.
+        async loadHeatmap() {
+            const days = [], meta = [];
+            const today = new Date();
+            for (let i = 0; i < 28; i++) {
+                const d = new Date(today);
+                d.setDate(d.getDate() + i);
+                const iso = d.toISOString().slice(0, 10);
+                days.push(iso);
+                meta.push({
+                    date:       iso,
+                    dayNum:     d.getDate(),
+                    weekday:    d.getDay(),            // 0=Sun
+                    monthLabel: d.toLocaleDateString('en-US', { month: 'short' }),
+                    isToday:    i === 0,
+                    isWeekend:  d.getDay() === 0 || d.getDay() === 6,
+                });
+            }
+
+            const counts = await Promise.all(
+                days.map(date =>
+                    fetch(`<?= base_url('api/v1/reservations/index.php') ?>?pickup_date=${date}&per_page=1`)
+                        .then(r => r.json())
+                        .then(d => d.data?.pagination?.total || 0)
+                        .catch(() => 0)
+                )
+            );
+
+            const max = Math.max(...counts, 1);
+            this.heatmapData = {
+                loaded: true,
+                days:   meta.map((m, i) => ({ ...m, count: counts[i] })),
+                max,
+            };
+        },
+
+        // ── Load Gantt data — all active reservations for next 14 days
+        // WHY separate from loadAll: Gantt needs per_page=200 to get a
+        // full picture; the table uses per_page=25 for performance.
+        async loadGanttData() {
+            if (this.ganttLoaded) return;
+            try {
+                const [pendRes, confRes] = await Promise.all([
+                    fetch(`<?= base_url('api/v1/reservations/index.php') ?>?status=pending&per_page=200&sort=pickup_date&dir=ASC`),
+                    fetch(`<?= base_url('api/v1/reservations/index.php') ?>?status=confirmed&per_page=200&sort=pickup_date&dir=ASC`),
+                ]);
+                const [pd, cd] = await Promise.all([pendRes.json(), confRes.json()]);
+                const allRes = [
+                    ...(pd.data?.items || []),
+                    ...(cd.data?.items || []),
+                ];
+
+                // Build 14-day window starting today
+                const today = new Date();
+                const days = [];
+                for (let i = 0; i < 14; i++) {
+                    const d = new Date(today);
+                    d.setDate(d.getDate() + i);
+                    days.push(d.toISOString().slice(0, 10));
+                }
+                this.ganttDays = days;
+
+                // Map: unitNumber → { date → reservation }
+                const unitMap = {};
+                for (const r of allRes) {
+                    const units = r.units || [];
+                    if (!units.length) {
+                        // Reservation with no linked units — put in "Unassigned" row
+                        const key = '(Unassigned)';
+                        if (!unitMap[key]) unitMap[key] = {};
+                        unitMap[key][r.pickup_date] = r;
+                        continue;
+                    }
+                    for (const u of units) {
+                        const key = u.unit_number_snapshot || ('Unit #' + (u.equipment_unit_id || '?'));
+                        if (!unitMap[key]) unitMap[key] = {};
+                        unitMap[key][r.pickup_date] = r;
+                    }
+                }
+
+                this.ganttRows = Object.entries(unitMap)
+                    .map(([unitNum, dates]) => ({ unitNum, dates }))
+                    .sort((a, b) => a.unitNum.localeCompare(b.unitNum));
+
+                this.ganttLoaded = true;
+            } catch (e) {
+                console.warn('Gantt load failed', e);
+            }
+        },
+
+        // ── Toggle Gantt view (lazy-loads data on first open) ─────
+        async toggleGantt() {
+            this.ganttView = !this.ganttView;
+            if (this.ganttView && !this.ganttLoaded) {
+                await this.loadGanttData();
+            }
+        },
+
+        // ── Gantt day label helpers ───────────────────────────────
+        ganttDayLabel(dateStr) {
+            const d = new Date(dateStr + 'T00:00:00');
+            return d.toLocaleDateString('en-US', { weekday: 'short' });
+        },
+        ganttDateLabel(dateStr) {
+            const d = new Date(dateStr + 'T00:00:00');
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        },
+        isGanttToday(dateStr) {
+            return dateStr === new Date().toISOString().slice(0, 10);
         },
 
         // ── Apply filters (reset to page 1) ──────────────────────
@@ -837,5 +1391,126 @@ function FF_Reservations() {
     };
 }
 </script>
+
+<!-- Chart.js (loaded deferred so it doesn't block table render) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+
+<style>
+/* ── Charts grid: donut (narrow) + bar (wide) side by side ─── */
+.ff-charts-grid {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+    align-items: start;
+}
+@media (max-width: 640px) {
+    .ff-charts-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Heat map calendar cells ─────────────────────────────────── */
+.ff-heatmap-cell {
+    border-radius: 5px;
+    padding: 5px 6px;
+    min-height: 52px;
+    cursor: default;
+    transition: filter .15s;
+    position: relative;
+}
+.ff-heatmap-cell:hover { filter: brightness(1.08); }
+.ff-heatmap-day {
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-primary);
+}
+.ff-heatmap-month {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--color-primary);
+    letter-spacing: .04em;
+    line-height: 1.2;
+}
+.ff-heatmap-count {
+    position: absolute;
+    bottom: 5px;
+    right: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    line-height: 1;
+}
+
+/* ── Gantt table ─────────────────────────────────────────────── */
+.ff-gantt-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+.ff-gantt-unit-header {
+    position: sticky;
+    left: 0;
+    background: var(--bg-surface);
+    z-index: 2;
+    white-space: nowrap;
+    padding: 8px 14px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-muted);
+    border-bottom: 2px solid var(--border-color);
+    min-width: 110px;
+}
+.ff-gantt-day-header {
+    padding: 6px 4px;
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    border-bottom: 2px solid var(--border-color);
+    min-width: 80px;
+    white-space: nowrap;
+}
+.ff-gantt-today-col {
+    background: rgba(59,130,246,0.05);
+}
+.ff-gantt-row:hover { background: var(--bg-muted); }
+.ff-gantt-unit-cell {
+    position: sticky;
+    left: 0;
+    background: var(--bg-surface);
+    z-index: 1;
+    padding: 5px 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+.ff-gantt-row:hover .ff-gantt-unit-cell { background: var(--bg-muted); }
+.ff-gantt-cell {
+    padding: 4px 3px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+.ff-gantt-block {
+    display: block;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 76px;
+    text-decoration: none;
+    color: white;
+    transition: opacity .15s;
+}
+.ff-gantt-block:hover { opacity: 0.85; color: white; }
+.ff-gantt-confirmed { background: #22c55e; }
+.ff-gantt-pending   { background: #f59e0b; }
+</style>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

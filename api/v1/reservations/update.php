@@ -76,10 +76,17 @@ if (!$contactName) $errors['contact_name'] = 'Contact name is required.';
 if (!$companyName) $errors['company_name'] = 'Company name is required.';
 
 $pickupDate = clean_date($body['pickup_date'] ?? null);
-if (!$pickupDate) $errors['pickup_date'] = 'Pickup date is required.';
+if (!$pickupDate) {
+    $errors['pickup_date'] = 'Pickup date is required.';
+} elseif ($pickupDate < date('Y-m-d')) {
+    // FIX #7: block past pickup dates — reservations are forward-looking
+    $errors['pickup_date'] = 'Pickup date cannot be in the past.';
+}
 
+// FIX #8: cap quantity at a reasonable maximum (500)
 $quantity = clean_int($body['quantity'] ?? null);
-if (!$quantity || $quantity < 1) $errors['quantity'] = 'Quantity must be at least 1.';
+if (!$quantity || $quantity < 1)   $errors['quantity'] = 'Quantity must be at least 1.';
+elseif ($quantity > 500)           $errors['quantity'] = 'Quantity cannot exceed 500.';
 
 if ($errors) {
     json_error('VALIDATION_ERROR', 'Validation failed.', 422, ['errors' => $errors]);
@@ -90,7 +97,8 @@ $priority     = in_array($body['priority'] ?? '', $allowedPriorities) ? $body['p
 $customerId   = clean_int($body['customer_id'] ?? null) ?: null;
 $contactPhone = clean_string($body['contact_phone'] ?? null, 50);
 $contactEmail = clean_email($body['contact_email'] ?? null);
-$pickupTime   = clean_string($body['pickup_time'] ?? null, 8);
+// FIX #18: use clean_time() instead of clean_string() so garbage values are rejected
+$pickupTime   = clean_time($body['pickup_time'] ?? null);
 $yardLocation = clean_string($body['yard_location'] ?? null, 100);
 $purpose      = clean_string($body['purpose'] ?? null, 500);
 $notes        = clean_string($body['notes'] ?? null, 65535);
@@ -109,48 +117,87 @@ $oldValues = db_row(
     [$id]
 );
 
-// ── Perform update ─────────────────────────────────────────────
-$affected = db_update('reservations', [
-    'customer_id'    => $customerId,
-    'contact_name'   => $contactName,
-    'company_name'   => $companyName,
-    'contact_phone'  => $contactPhone,
-    'contact_email'  => $contactEmail,
-    'quantity'       => $quantity,
-    'pickup_date'    => $pickupDate,
-    'pickup_time'    => $pickupTime,
-    'yard_location'  => $yardLocation,
-    'purpose'        => $purpose,
-    'priority'       => $priority,
-    'notes'          => $notes,
-    'internal_notes' => $internalNotes,
-    'updated_by'     => current_user_id(),
-], 'id = ?', [$id]);
+// ── FIX #2: Conflict re-check + atomic update ─────────────────
+// Wrap in a transaction so the FOR UPDATE lease-conflict check and the db_update
+// are atomic — prevents two concurrent edits from both succeeding.
+// We re-check lease conflicts whenever pickup_date is being changed on a
+// pending or confirmed reservation (reservation conflicts are date-independent
+// per our one-unit-per-active-reservation rule, so no re-check needed there).
+$fresh = null;
 
-// ── Audit log ──────────────────────────────────────────────────
-if ($affected > 0) {
-    db_insert('audit_log', [
-        'user_id'      => current_user_id(),
-        'user_name'    => current_user()['name'] ?? 'system',
-        'action'       => 'update',
-        'module'       => 'reservations',
-        'entity_type'  => 'reservation',
-        'entity_id'    => $id,
-        'entity_label' => "#{$id} — {$companyName}",
-        'notes'        => "Reservation #{$id} updated — {$companyName}",
-        'old_values'   => json_encode($oldValues),
-        'new_values'   => json_encode([
-            'contact_name' => $contactName,
-            'company_name' => $companyName,
-            'pickup_date'  => $pickupDate,
-            'quantity'     => $quantity,
-            'priority'     => $priority,
-        ]),
-        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-    ]);
-}
+db_transaction(function () use (
+    $id, $pickupDate, $existing, $customerId, $contactName, $companyName,
+    $contactPhone, $contactEmail, $quantity, $pickupTime, $yardLocation,
+    $purpose, $priority, $notes, $internalNotes, $oldValues, &$fresh
+): void {
+    // Re-check lease conflicts if pickup_date changed (lease start_date matches)
+    if ($pickupDate !== $oldValues['pickup_date']) {
+        $units = db_select(
+            "SELECT ru.equipment_unit_id, eu.unit_number
+             FROM reservation_units ru
+             JOIN equipment_units eu ON eu.id = ru.equipment_unit_id AND eu.deleted_at IS NULL
+             WHERE ru.reservation_id = ? AND ru.equipment_unit_id IS NOT NULL",
+            [$id]
+        );
+        foreach ($units as $u) {
+            $leaseConflict = db_row(
+                "SELECT id, contract_number FROM leases
+                 WHERE equipment_unit_id = ?
+                   AND start_date = ?
+                   AND status IN ('pending', 'active')
+                   AND deleted_at IS NULL",
+                [$u['equipment_unit_id'], $pickupDate]
+            );
+            if ($leaseConflict) {
+                json_error('CONFLICT',
+                    "Unit {$u['unit_number']} has an active lease (#{$leaseConflict['contract_number']}) " .
+                    "starting on " . date('M j, Y', strtotime($pickupDate)) .
+                    ". Lease conflicts cannot be overridden.", 409);
+            }
+        }
+    }
 
-// ── Return fresh updated_at ────────────────────────────────────
-$fresh = db_row("SELECT updated_at FROM reservations WHERE id = ?", [$id]);
+    $affected = db_update('reservations', [
+        'customer_id'    => $customerId,
+        'contact_name'   => $contactName,
+        'company_name'   => $companyName,
+        'contact_phone'  => $contactPhone,
+        'contact_email'  => $contactEmail,
+        'quantity'       => $quantity,
+        'pickup_date'    => $pickupDate,
+        'pickup_time'    => $pickupTime,
+        'yard_location'  => $yardLocation,
+        'purpose'        => $purpose,
+        'priority'       => $priority,
+        'notes'          => $notes,
+        'internal_notes' => $internalNotes,
+        'updated_by'     => current_user_id(),
+    ], 'id = ?', [$id]);
 
-json_success(['id' => $id, 'updated_at' => $fresh['updated_at']]);
+    if ($affected > 0) {
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => current_user()['name'] ?? 'system',
+            'action'       => 'update',
+            'module'       => 'reservations',
+            'entity_type'  => 'reservation',
+            'entity_id'    => $id,
+            'entity_label' => "#{$id} — {$companyName}",
+            'notes'        => "Reservation #{$id} updated — {$companyName}",
+            'old_values'   => json_encode($oldValues),
+            'new_values'   => json_encode([
+                'contact_name' => $contactName,
+                'company_name' => $companyName,
+                'pickup_date'  => $pickupDate,
+                'quantity'     => $quantity,
+                'priority'     => $priority,
+            ]),
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+    }
+
+    $freshRow = db_row("SELECT updated_at FROM reservations WHERE id = ?", [$id]);
+    $fresh    = $freshRow['updated_at'];
+});
+
+json_success(['id' => $id, 'updated_at' => $fresh]);

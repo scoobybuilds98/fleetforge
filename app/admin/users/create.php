@@ -38,8 +38,9 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title">Invite New User</h1>
 </div>
 
-<div class="card" style="max-width:640px;"
-     x-data="userCreate()">
+<div x-data="userCreate()">
+
+<div class="card" style="max-width:640px;">
 
     <div class="card-body">
 
@@ -136,11 +137,20 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /card-body -->
 </div><!-- /card -->
 
+<?php
+$overlayTitle    = 'User Created!';
+$overlaySubtitle = 'Redirecting to user profile…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /x-data wrapper -->
+
 <script>
 function userCreate() {
     return {
-        saving: false,
-        error:  null,
+        saving:             false,
+        showSuccessOverlay: false,
+        error:              null,
         form: {
             name:     '',
             email:    '',
@@ -178,10 +188,13 @@ function userCreate() {
 
             FF_Api.post('<?= base_url('api/v1/users/create.php') ?>', payload)
                 .then(d => {
-                    // Redirect to show page with flash message
-                    const email = encodeURIComponent(payload.email);
-                    window.location = '<?= base_url('users/show') ?>?id=' + d.data.id
-                        + '&flash=' + encodeURIComponent('Invitation sent to ' + payload.email);
+                    // Show success overlay then redirect to show page with flash message
+                    this.showSuccessOverlay = true;
+                    const _newId = d.data.id;
+                    const _flash = encodeURIComponent('Invitation sent to ' + payload.email);
+                    setTimeout(() => {
+                        window.location = '<?= base_url('users/show') ?>?id=' + _newId + '&flash=' + _flash;
+                    }, 3500);
                 })
                 .catch(err => {
                     this.error = err?.data?.message ?? 'Save failed. Please try again.';

@@ -101,6 +101,10 @@ $taxRateId       = array_key_exists('tax_rate_id', $body)      ? clean_int($body
 $currency = array_key_exists('currency', $body)
     ? (in_array($body['currency'], ['CAD', 'USD'], true) ? $body['currency'] : null)
     : null;
+// FIX #11: mileage_unit was missing from update — add it
+$mileageUnit = array_key_exists('mileage_unit', $body)
+    ? (in_array($body['mileage_unit'], ['km', 'miles'], true) ? $body['mileage_unit'] : null)
+    : null;
 $billingCycle = array_key_exists('billing_cycle', $body)
     ? (in_array($body['billing_cycle'], ['monthly', 'on_close_only'], true) ? $body['billing_cycle'] : null)
     : null;
@@ -111,11 +115,18 @@ $invoiceEmail    = array_key_exists('invoice_email', $body)    ? clean_email($bo
 $poRequired      = array_key_exists('po_required', $body)      ? (bool) $body['po_required'] : null;
 $defaultPoNumber = array_key_exists('default_po_number', $body)? clean_string($body['default_po_number'], 100) : null;
 $paymentTerms    = array_key_exists('payment_terms', $body)    ? clean_string($body['payment_terms'], 100) : null;
-$creditLimit     = array_key_exists('credit_limit', $body)     ? clean_decimal($body['credit_limit']) : null;
+// FIX #7: credit_limit must be >= 0
+$creditLimit     = array_key_exists('credit_limit', $body)     ? clean_non_negative_decimal($body['credit_limit']) : null;
 $discountType    = array_key_exists('discount_type', $body)
     ? (in_array($body['discount_type'], ['none', 'percentage', 'flat'], true) ? $body['discount_type'] : null)
     : null;
-$discountValue   = array_key_exists('discount_value', $body)   ? clean_decimal($body['discount_value']) : null;
+// FIX #8: discount must be >= 0
+$discountValue   = array_key_exists('discount_value', $body)   ? clean_non_negative_decimal($body['discount_value']) : null;
+// FIX #8: percentage discount capped at 100
+if ($discountType === 'percentage' && $discountValue !== null && bccomp($discountValue, '100', 4) > 0) {
+    json_error('VALIDATION_ERROR', 'Percentage discount cannot exceed 100%.', 422,
+        ['errors' => ['discount_value' => 'Percentage discount cannot exceed 100%.']]);
+}
 
 $validStatuses = ['active', 'inactive', 'pending', 'suspended', 'credit_hold'];
 $status = array_key_exists('status', $body)
@@ -126,6 +137,17 @@ $riskScore = array_key_exists('risk_score', $body)
     ? (in_array($body['risk_score'], $validRisk, true) ? $body['risk_score'] : null)
     : null;
 $riskNotes = array_key_exists('risk_notes', $body) ? clean_string($body['risk_notes'], 5000) : null;
+
+// FIX #10: check for duplicate company_name when it's being changed
+if (array_key_exists('company_name', $body) && $companyName !== $existing['company_name']) {
+    // Use the email being set (or the existing email from DB) for the dupe check
+    $checkEmail = $email ?? $existing['email'];
+    if (db_exists('customers', 'company_name = ? AND email = ? AND id != ?', [$companyName, $checkEmail, $id])) {
+        json_error('DUPLICATE',
+            'Another customer with this company name and email already exists.', 422,
+            ['errors' => ['company_name' => 'Duplicate company name + email combination.']]);
+    }
+}
 
 // FIX #30: Validate status transitions
 // Allowed transitions per spec — prevents invalid status jumps (e.g. suspended → pending)
@@ -186,6 +208,7 @@ $optionals = [
     'pst_exempt_expiry'   => $pstExemptExpiry,
     'tax_rate_id'         => $taxRateId,
     'currency'            => $currency,
+    'mileage_unit'        => $mileageUnit,  // FIX #11
     'billing_cycle'       => $billingCycle,
     'invoice_delivery'    => $invoiceDelivery,
     'invoice_email'       => $invoiceEmail,

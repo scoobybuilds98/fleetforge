@@ -59,14 +59,22 @@ if (!$template) {
 }
 
 // ── Unique unit_number check ───────────────────────────────────
-// WHY: unit_number has a UNIQUE index — clean error better than PDO exception
-if (db_exists('equipment_units', 'unit_number = ?', [$unitNumber])) {
+// FIX #25: exclude soft-deleted units so a deleted unit_number can be reused
+if (db_exists('equipment_units', 'unit_number = ? AND deleted_at IS NULL', [$unitNumber])) {
     json_error('ALREADY_EXISTS', 'A unit with this unit number already exists.', 409);
 }
 
 // ── Optional fields ────────────────────────────────────────────
 $vin             = clean_string($body['vin'] ?? null, 50);
-$year            = clean_int($body['year'] ?? null);
+// FIX #17: year must be a realistic vehicle model year (1900 – current year + 2)
+$yearRaw         = clean_int($body['year'] ?? null);
+$currentYear     = (int) date('Y');
+if ($yearRaw !== null && ($yearRaw < 1900 || $yearRaw > $currentYear + 2)) {
+    json_error('VALIDATION_ERROR',
+        "year must be between 1900 and " . ($currentYear + 2) . ".", 422,
+        ['errors' => ['year' => "Year must be between 1900 and " . ($currentYear + 2) . "."]]);
+}
+$year            = $yearRaw;
 $gpsDeviceId     = clean_string($body['gps_device_id'] ?? null, 100);
 $samsaraUrl      = clean_string($body['samsara_vehicle_url'] ?? null, 500);
 
@@ -75,13 +83,15 @@ $trackingProvider = in_array($rawTracking, ['samsara','none'], true) ? $rawTrack
 
 $ownerCompanyId  = clean_int($body['owner_company_id'] ?? null);
 $yardLocation    = clean_string($body['yard_location'] ?? null, 100);
-$lengthFt        = isset($body['length_ft'])  ? clean_decimal($body['length_ft'])  : null;
-$heightFt        = isset($body['height_ft'])  ? clean_decimal($body['height_ft'])  : null;
-$widthFt         = isset($body['width_ft'])   ? clean_decimal($body['width_ft'])   : null;
-$weightCap       = clean_int($body['weight_capacity_lbs'] ?? null);
+// FIX #20: dimensions must be positive (not negative or zero)
+$lengthFt        = isset($body['length_ft'])  ? clean_positive_decimal($body['length_ft'])  : null;
+$heightFt        = isset($body['height_ft'])  ? clean_positive_decimal($body['height_ft'])  : null;
+$widthFt         = isset($body['width_ft'])   ? clean_positive_decimal($body['width_ft'])   : null;
+// FIX #21 / #22: weight and axle count must be positive
+$weightCap       = isset($body['weight_capacity_lbs']) ? clean_positive_int($body['weight_capacity_lbs']) : null;
 $wheelSize       = clean_string($body['wheel_size'] ?? null, 50);
 $tireSize        = clean_string($body['tire_size'] ?? null, 50);
-$axleCount       = clean_int($body['axle_count'] ?? null);
+$axleCount       = isset($body['axle_count']) ? clean_positive_int($body['axle_count']) : null;
 $licensePlate    = clean_string($body['license_plate'] ?? null, 50);
 $licenseState    = clean_string($body['license_state'] ?? null, 50);
 
@@ -90,12 +100,14 @@ $regExpiry       = clean_date($body['registration_expiry'] ?? null);
 $mviExpiry       = clean_date($body['mvi_expiry'] ?? null);
 $insExpiry       = clean_date($body['insurance_expiry'] ?? null);
 
-$cviInterval     = clean_int($body['cvi_interval_days'] ?? null);
-$mviInterval     = clean_int($body['mvi_interval_days'] ?? null);
-$regInterval     = clean_int($body['registration_interval_days'] ?? null);
-$insInterval     = clean_int($body['insurance_interval_days'] ?? null);
+// FIX #23: interval days must be positive
+$cviInterval     = isset($body['cvi_interval_days'])          ? clean_positive_int($body['cvi_interval_days'])          : null;
+$mviInterval     = isset($body['mvi_interval_days'])          ? clean_positive_int($body['mvi_interval_days'])          : null;
+$regInterval     = isset($body['registration_interval_days']) ? clean_positive_int($body['registration_interval_days']) : null;
+$insInterval     = isset($body['insurance_interval_days'])    ? clean_positive_int($body['insurance_interval_days'])    : null;
 
-$mileage         = clean_int($body['mileage'] ?? null) ?? 0;
+// FIX #18: mileage must be >= 0
+$mileage         = clean_non_negative_int($body['mileage'] ?? null) ?? 0;
 $notes           = clean_string($body['notes'] ?? null, 5000);
 $inspNotes       = clean_string($body['inspection_notes'] ?? null, 5000);
 $internalNotes   = clean_string($body['internal_notes'] ?? null, 5000);
@@ -106,7 +118,8 @@ $tags      = array_values(array_filter($tagsInput, fn($t) => is_string($t) && $t
 $tagsJson  = !empty($tags) ? json_encode($tags) : null;
 
 $acquiredDate    = clean_date($body['acquired_date'] ?? null);
-$acquisitionCost = isset($body['acquisition_cost']) ? clean_decimal($body['acquisition_cost']) : null;
+// FIX #19: acquisition cost must be >= 0
+$acquisitionCost = isset($body['acquisition_cost']) ? clean_non_negative_decimal($body['acquisition_cost']) : null;
 
 $userId = current_user_id();
 $newId  = null;

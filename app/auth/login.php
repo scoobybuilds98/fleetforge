@@ -110,10 +110,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 "UPDATE users SET login_attempts = ? WHERE id = ?",
                                 [$attempts, $user['id']]
                             );
-                            $remaining = 5 - $attempts;
-                            $error = 'Invalid email or password. '
-                                   . $remaining . ' attempt' . ($remaining === 1 ? '' : 's')
-                                   . ' remaining before lockout.';
+                            // FIX #35: don't leak remaining attempt count — it reveals
+                            // that the email address is valid (timing-safe message).
+                            $error = 'Invalid email or password.';
                         }
 
                         db_insert('audit_log', [

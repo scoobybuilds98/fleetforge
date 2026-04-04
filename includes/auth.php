@@ -185,6 +185,11 @@ function auth_login(array $user, bool $rememberMe = false): void
 
     $_SESSION['ff_last_activity'] = time();
 
+    // FIX #36: always generate a fresh CSRF token when a session is established.
+    // Without this, remember-me restoration would leave csrf_token empty, bypassing
+    // the CSRF check in bootstrap.php for the entire window until a page load.
+    generate_csrf_token();
+
     // --- Remember-me cookie (30 days) ---
     if ($rememberMe) {
         $token       = bin2hex(random_bytes(32)); // 64-char hex, cryptographically random

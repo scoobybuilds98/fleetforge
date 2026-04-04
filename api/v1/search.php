@@ -40,7 +40,10 @@ if ($q === null || strlen($q) < 2) {
     json_error('QUERY_TOO_SHORT', 'Search query must be at least 2 characters.', 400);
 }
 
-$like    = '%' . $q . '%';
+// FIX #37: escape LIKE metacharacters so a search for "50%" doesn't match
+// everything, and "unit_1" doesn't wildcard-match "unit01".
+$escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q);
+$like    = '%' . $escaped . '%';
 $results = [];
 
 // ── Customers ─────────────────────────────────────────────────────────────────

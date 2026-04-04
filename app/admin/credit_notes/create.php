@@ -42,7 +42,9 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- Form -->
-<div class="card" style="max-width:680px;" x-data="createCreditNote()" x-init="init()">
+<div x-data="createCreditNote()" x-init="init()">
+
+<div class="card" style="max-width:680px;">
     <div class="card-body">
 
         <div x-show="error" class="alert alert-danger" x-text="error" style="margin-bottom:1.25rem;"></div>
@@ -154,7 +156,15 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
 
     </div>
-</div>
+</div><!-- /card -->
+
+<?php
+$overlayTitle    = 'Credit Note Created!';
+$overlaySubtitle = 'Redirecting to credit note details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /x-data wrapper -->
 
 <script>
 function createCreditNote() {
@@ -171,8 +181,9 @@ function createCreditNote() {
             source_payment_id: '',
             internal_notes:    '',
         },
-        showLinks: false,
-        submitting: false,
+        showLinks:          false,
+        submitting:         false,
+        showSuccessOverlay: false,
         error: '',
 
         init() {
@@ -211,8 +222,10 @@ function createCreditNote() {
 
             FF_Api.post('<?= base_url('api/v1/credit_notes/create') ?>', payload)
                 .then(data => {
-                    // Redirect to the new credit note's detail page
-                    window.location.href = '<?= base_url('credit_notes/show') ?>?id=' + data.data.id;
+                    // Show success overlay then redirect to the new credit note's detail page
+                    this.showSuccessOverlay = true;
+                    const _newId = data.data.id;
+                    setTimeout(() => { window.location.href = '<?= base_url('credit_notes/show') ?>?id=' + _newId; }, 3500);
                 })
                 .catch(err => {
                     this.error = err.message || 'Failed to create credit note.';

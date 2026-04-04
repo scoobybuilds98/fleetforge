@@ -57,8 +57,13 @@ if (!$existing) {
     json_error('NOT_FOUND', 'Lease not found.', 404);
 }
 
+// FIX #15: completed and cancelled leases are read-only; prevent post-hoc editing
+if (in_array($existing['status'], ['completed', 'cancelled'])) {
+    json_error('IMMUTABLE_RECORD',
+        "Lease {$existing['contract_number']} is {$existing['status']} and cannot be edited.", 422);
+}
+
 // ── D19 Optimistic lock check ──────────────────────────────────
-// Compare the submitted updated_at with the current DB value
 if ($existing['updated_at'] !== $updatedAt) {
     json_error('STALE_DATA',
         'This lease was modified by another user. Reload the page to get the latest version.', 409);
@@ -85,26 +90,28 @@ if (array_key_exists('notes', $body))
 if (array_key_exists('internal_notes', $body))
     $data['internal_notes'] = clean_string($body['internal_notes'], 5000);
 
+// FIX #12: mileage readings must be >= 0
 if (array_key_exists('mileage_at_start', $body))
-    $data['mileage_at_start'] = clean_int($body['mileage_at_start']);
+    $data['mileage_at_start'] = clean_non_negative_int($body['mileage_at_start']);
 
 if (array_key_exists('mileage_at_end', $body))
-    $data['mileage_at_end'] = clean_int($body['mileage_at_end']);
+    $data['mileage_at_end'] = clean_non_negative_int($body['mileage_at_end']);
 
+// FIX #14: estimated mileage and costs must be >= 0
 if (array_key_exists('estimated_mileage', $body))
-    $data['estimated_mileage'] = clean_decimal($body['estimated_mileage']) ?? '0.00';
+    $data['estimated_mileage'] = clean_non_negative_decimal($body['estimated_mileage']) ?? '0.00';
 
 if (array_key_exists('insurance_opt_in', $body))
     $data['insurance_opt_in'] = (bool) $body['insurance_opt_in'] ? 1 : 0;
 
 if (array_key_exists('insurance_cost', $body))
-    $data['insurance_cost'] = clean_decimal($body['insurance_cost']) ?? '0.00';
+    $data['insurance_cost'] = clean_non_negative_decimal($body['insurance_cost']) ?? '0.00';
 
 if (array_key_exists('warranty_opt_in', $body))
     $data['warranty_opt_in'] = (bool) $body['warranty_opt_in'] ? 1 : 0;
 
 if (array_key_exists('warranty_cost', $body))
-    $data['warranty_cost'] = clean_decimal($body['warranty_cost']) ?? '0.00';
+    $data['warranty_cost'] = clean_non_negative_decimal($body['warranty_cost']) ?? '0.00';
 
 // D22: gst_exempt and pst_exempt can be changed via amendment (allow here for now)
 if (array_key_exists('gst_exempt', $body)) {
@@ -114,12 +121,31 @@ if (array_key_exists('pst_exempt', $body)) {
     $data['pst_exempt'] = (bool) $body['pst_exempt'] ? 1 : 0;
 }
 
-// Validate end_date >= start_date if being updated
+// Validate end_date and mileage cross-field rules
+$currentLease = db_row("SELECT start_date, mileage_at_start FROM leases WHERE id = ?", [$id]);
+
 if (isset($data['end_date']) && $data['end_date']) {
-    $currentStart = db_row("SELECT start_date FROM leases WHERE id = ?", [$id])['start_date'];
-    if ($data['end_date'] < $currentStart) {
+    if ($data['end_date'] < $currentLease['start_date']) {
         json_error('VALIDATION_ERROR', 'end_date must be on or after start_date.', 422,
             ['errors' => ['end_date' => 'End date must be on or after start date.']]);
+    }
+}
+
+// FIX #16: minimum_end_date must be >= start_date
+if (array_key_exists('minimum_end_date', $data) && $data['minimum_end_date']) {
+    if ($data['minimum_end_date'] < $currentLease['start_date']) {
+        json_error('VALIDATION_ERROR', 'minimum_end_date must be on or after start_date.', 422,
+            ['errors' => ['minimum_end_date' => 'Minimum end date must be on or after start date.']]);
+    }
+}
+
+// FIX #13: mileage_at_end must be >= mileage_at_start
+if (array_key_exists('mileage_at_end', $data) && $data['mileage_at_end'] !== null) {
+    $startMileage = (int) ($data['mileage_at_start'] ?? $currentLease['mileage_at_start'] ?? 0);
+    if ((int) $data['mileage_at_end'] < $startMileage) {
+        json_error('VALIDATION_ERROR',
+            'mileage_at_end cannot be less than mileage_at_start.', 422,
+            ['errors' => ['mileage_at_end' => 'End mileage must be greater than or equal to start mileage.']]);
     }
 }
 

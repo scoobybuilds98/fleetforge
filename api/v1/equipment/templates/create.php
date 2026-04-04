@@ -54,18 +54,20 @@ if (!$category || !in_array($category, $validCategories, true)) {
 $description   = clean_string($body['description'] ?? null, 5000);
 $brand         = clean_string($body['brand'] ?? null, 100);
 $model         = clean_string($body['model'] ?? null, 100);
-$lengthFt      = isset($body['default_length_ft']) ? clean_decimal($body['default_length_ft']) : null;
-$heightFt      = isset($body['default_height_ft']) ? clean_decimal($body['default_height_ft']) : null;
-$widthFt       = isset($body['default_width_ft'])  ? clean_decimal($body['default_width_ft'])  : null;
-$weightCap     = clean_int($body['default_weight_capacity_lbs'] ?? null);
+// FIX #35: dimensions must be positive; FIX #35 / #36: intervals must be positive
+$lengthFt      = isset($body['default_length_ft']) ? clean_positive_decimal($body['default_length_ft']) : null;
+$heightFt      = isset($body['default_height_ft']) ? clean_positive_decimal($body['default_height_ft']) : null;
+$widthFt       = isset($body['default_width_ft'])  ? clean_positive_decimal($body['default_width_ft'])  : null;
+$weightCap     = isset($body['default_weight_capacity_lbs']) ? clean_positive_int($body['default_weight_capacity_lbs']) : null;
 $wheelSize     = clean_string($body['default_wheel_size'] ?? null, 50);
 $tireSize      = clean_string($body['default_tire_size'] ?? null, 50);
-$axleCount     = clean_int($body['default_axle_count'] ?? null);
+$axleCount     = isset($body['default_axle_count']) ? clean_positive_int($body['default_axle_count']) : null;
 $yardLocation  = clean_string($body['default_yard_location'] ?? null, 100);
 $notes         = clean_string($body['default_notes'] ?? null, 5000);
 $inspNotes     = clean_string($body['default_inspection_notes'] ?? null, 5000);
 $isActive      = isset($body['is_active']) ? (bool) $body['is_active'] : true;
-$sortOrder     = clean_int($body['sort_order'] ?? null) ?? 0;
+// FIX #37: sort_order must be >= 0
+$sortOrder     = clean_non_negative_int($body['sort_order'] ?? null) ?? 0;
 
 // Ownership type
 $validOwnership = ['owned','leased','brokered'];
@@ -76,17 +78,17 @@ $ownershipType  = ($rawOwnership && in_array($rawOwnership, $validOwnership, tru
 $rawTracking = $body['default_tracking_provider'] ?? 'none';
 $trackingProvider = in_array($rawTracking, ['samsara','none'], true) ? $rawTracking : 'none';
 
-// Interval fields (smallint unsigned)
-$cviInterval  = clean_int($body['default_cvi_interval_days'] ?? null);
-$mviInterval  = clean_int($body['default_mvi_interval_days'] ?? null);
-$regInterval  = clean_int($body['default_registration_interval_days'] ?? null);
-$insInterval  = clean_int($body['default_insurance_interval_days'] ?? null);
+// Interval fields (smallint unsigned) — FIX #36: must be positive
+$cviInterval  = isset($body['default_cvi_interval_days'])          ? clean_positive_int($body['default_cvi_interval_days'])          : null;
+$mviInterval  = isset($body['default_mvi_interval_days'])          ? clean_positive_int($body['default_mvi_interval_days'])          : null;
+$regInterval  = isset($body['default_registration_interval_days']) ? clean_positive_int($body['default_registration_interval_days']) : null;
+$insInterval  = isset($body['default_insurance_interval_days'])    ? clean_positive_int($body['default_insurance_interval_days'])    : null;
 
-// Rate fields (bcmath strings — D16)
-$dailyRate    = isset($body['default_daily_rate'])   ? clean_decimal($body['default_daily_rate'])   : null;
-$weeklyRate   = isset($body['default_weekly_rate'])  ? clean_decimal($body['default_weekly_rate'])  : null;
-$monthlyRate  = isset($body['default_monthly_rate']) ? clean_decimal($body['default_monthly_rate']) : null;
-$mileageRate  = isset($body['default_mileage_rate']) ? clean_decimal($body['default_mileage_rate']) : null;
+// Rate fields (bcmath strings — D16) — FIX #34: rates must be >= 0
+$dailyRate    = isset($body['default_daily_rate'])   ? clean_non_negative_decimal($body['default_daily_rate'])   : null;
+$weeklyRate   = isset($body['default_weekly_rate'])  ? clean_non_negative_decimal($body['default_weekly_rate'])  : null;
+$monthlyRate  = isset($body['default_monthly_rate']) ? clean_non_negative_decimal($body['default_monthly_rate']) : null;
+$mileageRate  = isset($body['default_mileage_rate']) ? clean_non_negative_decimal($body['default_mileage_rate']) : null;
 
 $rawCurrency  = $body['default_currency'] ?? 'CAD';
 $currency     = in_array($rawCurrency, ['CAD','USD'], true) ? $rawCurrency : 'CAD';
@@ -100,16 +102,20 @@ if (db_exists('equipment_templates', 'name = ? AND deleted_at IS NULL', [$name])
 
 // ── Generate unique slug ───────────────────────────────────────
 // WHY: slug is used for URL-friendly references — must be unique
-function make_template_slug(string $name): string {
-    $slug = strtolower(trim($name));
-    $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
-    return trim($slug, '-');
+// FIX #39: guard against redeclaration if file is somehow included more than once
+if (!function_exists('make_template_slug')) {
+    function make_template_slug(string $name): string {
+        $slug = strtolower(trim($name));
+        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+        return trim($slug, '-');
+    }
 }
 
 $baseSlug = make_template_slug($name);
 $slug     = $baseSlug;
 $suffix   = 2;
-while (db_exists('equipment_templates', 'slug = ?', [$slug])) {
+// FIX #38: exclude soft-deleted rows so a deleted slug can be reused
+while (db_exists('equipment_templates', 'slug = ? AND deleted_at IS NULL', [$slug])) {
     $slug = $baseSlug . '-' . $suffix;
     $suffix++;
 }

@@ -49,12 +49,30 @@ if (!$customer) {
 }
 
 // ── Block if active leases exist ────────────────────────────────
-// WHY: deleting a customer with active leases would orphan financial records.
-// The denormalized active_lease_count column is used here for a fast check.
-if ((int) $customer['active_lease_count'] > 0) {
+// FIX #14: also run a direct count query as a safety net in case the
+// denormalized active_lease_count is stale (e.g., due to a failed transaction).
+$activeLeasesActual = db_count(
+    "SELECT COUNT(*) FROM leases WHERE customer_id = ? AND status = 'active' AND deleted_at IS NULL",
+    [$id]
+);
+if ((int) $customer['active_lease_count'] > 0 || $activeLeasesActual > 0) {
     json_error(
         'HAS_ACTIVE_LEASES',
         'This customer has active leases and cannot be deleted. Close or transfer all active leases first.',
+        409
+    );
+}
+
+// FIX #15: also block if customer has pending or confirmed reservations
+$activeReservations = db_count(
+    "SELECT COUNT(*) FROM reservations
+     WHERE customer_id = ? AND status IN ('pending','confirmed') AND deleted_at IS NULL",
+    [$id]
+);
+if ($activeReservations > 0) {
+    json_error(
+        'HAS_ACTIVE_RESERVATIONS',
+        'This customer has active reservations and cannot be deleted. Cancel or complete all reservations first.',
         409
     );
 }

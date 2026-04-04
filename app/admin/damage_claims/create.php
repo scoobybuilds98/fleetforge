@@ -66,7 +66,9 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title">New Damage Claim</h1>
 </div>
 
-<div class="card" x-data="damageClaimCreate()" style="max-width:760px;">
+<div x-data="damageClaimCreate()">
+
+<div class="card" style="max-width:760px;">
 
     <div class="card-header">
         <h2 class="card-title">Claim Details</h2>
@@ -241,12 +243,21 @@ require_once FF_ROOT . '/includes/header.php';
 
         </form>
     </div>
-</div>
+</div><!-- /card -->
+
+<?php
+$overlayTitle    = 'Damage Claim Created!';
+$overlaySubtitle = 'Redirecting to claim details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /x-data wrapper -->
 
 <script>
 function damageClaimCreate() {
     return {
-        submitting: false,
+        submitting:         false,
+        showSuccessOverlay: false,
         error: '',
         errors: {},
         form: {
@@ -298,7 +309,9 @@ function damageClaimCreate() {
 
             FF_Api.post('<?= base_url('api/v1/damage_claims/create.php') ?>', payload)
                 .then(d => {
-                    window.location = '<?= base_url('damage_claims/show') ?>?id=' + d.data.id;
+                    this.showSuccessOverlay = true;
+                    const _newId = d.data.id;
+                    setTimeout(() => { window.location = '<?= base_url('damage_claims/show') ?>?id=' + _newId; }, 3500);
                 })
                 .catch(err => {
                     this.error = err.message ?? 'An error occurred. Please try again.';

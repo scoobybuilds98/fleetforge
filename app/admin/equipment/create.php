@@ -364,9 +364,10 @@ function FF_CreateUnit() {
             notes:              '',
             internal_notes:     '',
         },
-        errors:      {},
-        globalError: null,
-        submitting:  false,
+        errors:             {},
+        globalError:        null,
+        submitting:         false,
+        showSuccessOverlay: false,
 
         init() {},
 
@@ -413,7 +414,9 @@ function FF_CreateUnit() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/units/create') ?>', payload);
                 if (r.success) {
-                    window.location.href = '<?= base_url('equipment/show') ?>?id=' + r.data.id;
+                    this.showSuccessOverlay = true;
+                    const _newId = r.data.id;
+                    setTimeout(() => { window.location.href = '<?= base_url('equipment/show') ?>?id=' + _newId; }, 3500);
                 } else {
                     this.globalError = r.message || 'Failed to create unit.';
                     if (r.errors) this.errors = r.errors;
@@ -426,5 +429,11 @@ function FF_CreateUnit() {
     };
 }
 </script>
+
+<?php
+$overlayTitle    = 'Unit Added!';
+$overlaySubtitle = 'Redirecting to equipment details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

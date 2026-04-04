@@ -54,6 +54,8 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
 </div>
 
+<div id="mileage-page-wrapper" x-data="{ showSuccessOverlay: false }">
+
 <div class="card" style="max-width:640px;">
     <div class="card-header">
         <div class="card-title">New Mileage Entry</div>
@@ -152,7 +154,15 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </form>
 
     </div>
-</div>
+</div><!-- /card -->
+
+<?php
+$overlayTitle    = 'Mileage Log Created!';
+$overlaySubtitle = 'Redirecting to log details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /mileage-page-wrapper -->
 
 <script>
 document.getElementById('mileage-form').addEventListener('submit', async function(e) {
@@ -191,8 +201,10 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
             return;
         }
 
-        // Redirect to the new entry
-        window.location.href = '<?= base_url('mileage_logs/show') ?>?id=' + data.data.id;
+        // Show success overlay then redirect to the new entry
+        const _newId = data.data.id;
+        Alpine.$data(document.getElementById('mileage-page-wrapper')).showSuccessOverlay = true;
+        setTimeout(() => { window.location.href = '<?= base_url('mileage_logs/show') ?>?id=' + _newId; }, 3500);
 
     } catch (err) {
         errEl.textContent = 'Network error. Please try again.';

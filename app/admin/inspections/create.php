@@ -63,9 +63,9 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title">New Inspection</h1>
 </div>
 
-<div class="card" style="max-width:720px;"
-     x-data="createInspection()"
-     x-init="init()">
+<div x-data="createInspection()" x-init="init()">
+
+<div class="card" style="max-width:720px;">
 
     <div class="card-header">
         <h2 class="card-title">Inspection Details</h2>
@@ -202,13 +202,22 @@ require_once FF_ROOT . '/includes/header.php';
         </button>
         <a href="<?= base_url('inspections') ?>" class="btn btn-secondary">Cancel</a>
     </div>
-</div>
+</div><!-- /card -->
+
+<?php
+$overlayTitle    = 'Inspection Created!';
+$overlaySubtitle = 'Redirecting to inspection details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /x-data wrapper -->
 
 <script>
 function createInspection() {
     return {
-        submitting: false,
-        error:      '',
+        submitting:         false,
+        showSuccessOverlay: false,
+        error:              '',
         form: {
             equipment_unit_id:     <?= $preUnitId  ? (int)$preUnitId  : 'null' ?>,
             inspection_type:       '<?= e($preType) ?>',
@@ -247,10 +256,12 @@ function createInspection() {
             FF_Api.post('<?= base_url('api/v1/inspections/create.php') ?>', payload)
                 .then(d => {
                     if (d && d.error) {
-                        this.error     = d.message ?? 'Failed to create inspection.';
+                        this.error      = d.message ?? 'Failed to create inspection.';
                         this.submitting = false;
                     } else {
-                        window.location.href = '<?= base_url('inspections/show') ?>?id=' + d.data.id;
+                        this.showSuccessOverlay = true;
+                        const _newId = d.data.id;
+                        setTimeout(() => { window.location.href = '<?= base_url('inspections/show') ?>?id=' + _newId; }, 3500);
                     }
                 });
         },

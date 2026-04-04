@@ -98,12 +98,18 @@ $invoiceEmail   = clean_email($body['invoice_email'] ?? null);
 $poRequired     = isset($body['po_required']) ? (bool) $body['po_required'] : false;
 $defaultPoNumber = clean_string($body['default_po_number'] ?? null, 100);
 $paymentTerms   = clean_string($body['payment_terms'] ?? null, 100);
-$creditLimit    = clean_decimal($body['credit_limit'] ?? null);
+// FIX #1: credit_limit must be >= 0 (a negative limit is nonsensical)
+$creditLimit    = clean_non_negative_decimal($body['credit_limit'] ?? null);
 
 // Discount
 $rawDiscountType = $body['discount_type'] ?? 'none';
 $discountType    = in_array($rawDiscountType, ['none', 'percentage', 'flat'], true) ? $rawDiscountType : 'none';
-$discountValue = clean_decimal($body['discount_value'] ?? null) ?? '0.0000';
+// FIX #2 / #3: discount must be >= 0; percentage type capped at 100
+$discountValue   = clean_non_negative_decimal($body['discount_value'] ?? null) ?? '0.0000';
+if ($discountType === 'percentage' && bccomp($discountValue, '100', 4) > 0) {
+    json_error('VALIDATION_ERROR', 'Percentage discount cannot exceed 100%.', 422,
+        ['errors' => ['discount_value' => 'Percentage discount cannot exceed 100%.']]);
+}
 
 // Status / risk
 $validStatuses = ['active', 'inactive', 'pending', 'suspended', 'credit_hold'];

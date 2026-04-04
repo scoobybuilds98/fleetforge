@@ -266,8 +266,18 @@ function json_body(): array
     try {
         $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         $parsed  = is_array($decoded) ? $decoded : [];
-    } catch (\JsonException) {
-        $parsed = [];
+    } catch (\JsonException $e) {
+        // FIX #43: return 400 INVALID_JSON instead of silently returning [] so callers
+        // get a useful error rather than a confusing "field is required" cascade.
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'error'   => [
+                'code'    => 'INVALID_JSON',
+                'message' => 'Request body is not valid JSON.',
+            ],
+        ]);
+        exit;
     }
 
     return $parsed;
@@ -287,8 +297,8 @@ function require_id(mixed $val): int
     $id = clean_int($val);
 
     if ($id === null || $id <= 0) {
-        json_error('Invalid or missing ID.', 400);
-        exit;
+        // FIX #42: arguments were swapped (code/message); correct order is code then message.
+        json_error('INVALID_ID', 'Invalid or missing ID. Must be a positive integer.', 400);
     }
 
     return $id;

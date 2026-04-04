@@ -134,6 +134,128 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ================================================================
+         STATUS TIMELINE STEPPER
+         Shows the reservation lifecycle: Pending → Confirmed → Completed.
+         Cancelled reservations show a dedicated banner instead.
+         WHY x-show (not x-if): avoids flicker on fast loads; the stepper
+         is always in the DOM but hidden until the reservation loads.
+         ================================================================ -->
+    <div x-show="!loading && !notFound" style="margin-bottom:16px;">
+
+        <!-- Cancelled banner (shown instead of stepper) -->
+        <template x-if="res.status === 'cancelled'">
+            <div style="background:var(--badge-danger-bg);border:1px solid rgba(239,68,68,0.22);
+                        border-radius:8px;padding:14px 20px;
+                        display:flex;align-items:center;gap:14px;">
+                <div style="width:40px;height:40px;border-radius:50%;background:#ef4444;flex-shrink:0;
+                            display:flex;align-items:center;justify-content:center;">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                         stroke="white" stroke-width="2.5" stroke-linecap="round"
+                         style="width:20px;height:20px;">
+                        <path d="M6 18 18 6M6 6l12 12"/>
+                    </svg>
+                </div>
+                <div>
+                    <div style="font-weight:700;color:var(--badge-danger-text);font-size:0.9375rem;
+                                letter-spacing:.03em;">
+                        CANCELLED
+                    </div>
+                    <div class="text-secondary text-sm"
+                         x-show="res.cancel_reason"
+                         x-text="res.cancel_reason"></div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Lifecycle stepper (pending / confirmed / completed) -->
+        <template x-if="res.status !== 'cancelled'">
+            <div class="card">
+                <div class="card-body" style="padding:18px 28px;">
+                    <div class="ff-stepper-track">
+
+                        <!-- Step 1 — Pending -->
+                        <div class="ff-step"
+                             :class="res.status === 'pending' ? 'ff-step-active' : 'ff-step-done'">
+                            <div class="ff-step-circle">
+                                <template x-if="res.status !== 'pending'">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                         stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+                                         style="width:14px;height:14px;">
+                                        <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                </template>
+                                <template x-if="res.status === 'pending'">
+                                    <span>1</span>
+                                </template>
+                            </div>
+                            <div class="ff-step-label">Pending</div>
+                            <div class="ff-step-sublabel" x-show="res.status === 'pending'">
+                                Current
+                            </div>
+                        </div>
+
+                        <!-- Connector 1→2 -->
+                        <div class="ff-connector"
+                             :class="['confirmed','completed'].includes(res.status) ? 'ff-connector-done' : ''">
+                        </div>
+
+                        <!-- Step 2 — Confirmed -->
+                        <div class="ff-step"
+                             :class="res.status === 'confirmed' ? 'ff-step-active'
+                                   : res.status === 'completed' ? 'ff-step-done'
+                                   : 'ff-step-future'">
+                            <div class="ff-step-circle">
+                                <template x-if="res.status === 'completed'">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                         stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+                                         style="width:14px;height:14px;">
+                                        <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                </template>
+                                <template x-if="res.status !== 'completed'">
+                                    <span>2</span>
+                                </template>
+                            </div>
+                            <div class="ff-step-label">Confirmed</div>
+                            <div class="ff-step-sublabel" x-show="res.status === 'confirmed'">
+                                Current
+                            </div>
+                        </div>
+
+                        <!-- Connector 2→3 -->
+                        <div class="ff-connector"
+                             :class="res.status === 'completed' ? 'ff-connector-done' : ''">
+                        </div>
+
+                        <!-- Step 3 — Completed -->
+                        <div class="ff-step"
+                             :class="res.status === 'completed' ? 'ff-step-done' : 'ff-step-future'">
+                            <div class="ff-step-circle">
+                                <template x-if="res.status === 'completed'">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                         stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+                                         style="width:14px;height:14px;">
+                                        <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                </template>
+                                <template x-if="res.status !== 'completed'">
+                                    <span>3</span>
+                                </template>
+                            </div>
+                            <div class="ff-step-label">Completed</div>
+                            <div class="ff-step-sublabel" x-show="res.status === 'completed'"
+                                 x-text="res.marked_out_at ? formatDate(res.marked_out_at) : 'Chassis Out'">
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </template>
+
+    </div><!-- /stepper -->
+
     <!-- ── Loading skeleton ──────────────────────────────────────── -->
     <template x-if="loading">
         <div class="card">
@@ -286,10 +408,27 @@ require_once FF_ROOT . '/includes/header.php';
 
                             <!-- Yard Location -->
                             <div class="form-group">
-                                <label class="form-label" :for="editing ? 'edit-yard' : ''">Yard Location</label>
+                                <label class="form-label" :for="editing ? 'edit-yard' : ''">Pickup Yard</label>
                                 <div x-show="!editing" class="field-value" x-text="res.yard_location || '—'"></div>
-                                <input x-show="editing" id="edit-yard" type="text"
-                                       class="form-input" x-model="editForm.yard_location">
+                                <!-- WHY select: yard_location is now driven by the yards table.
+                                     Value stored is yard.name to match historical snapshots. -->
+                                <select x-show="editing" id="edit-yard"
+                                        class="form-select" x-model="editForm.yard_location">
+                                    <option value="">— Select yard —</option>
+                                    <template x-for="y in yards" :key="y.id">
+                                        <option :value="y.name"
+                                                x-text="y.name + (y.city ? ' (' + y.city + ')' : '')">
+                                        </option>
+                                    </template>
+                                    <!-- WHY: if the saved yard_location doesn't match any active yard
+                                         (e.g. old free-text entry or deactivated yard), show it as
+                                         a fallback option so the field isn't silently cleared. -->
+                                    <template x-if="editForm.yard_location && !yards.some(y => y.name === editForm.yard_location)">
+                                        <option :value="editForm.yard_location"
+                                                x-text="editForm.yard_location + ' (inactive/legacy)'">
+                                        </option>
+                                    </template>
+                                </select>
                             </div>
 
                             <!-- Purpose -->
@@ -661,6 +800,7 @@ function FF_ReservationShow(resId) {
         actionBusy:    false,
         actionError:   '',
         actionSuccess: '',
+        yards:         [],   // active yards for Pickup Yard dropdown in edit mode
 
         editForm:   {},
         editErrors: {},
@@ -674,7 +814,20 @@ function FF_ReservationShow(resId) {
 
         // ── Init ─────────────────────────────────────────────────
         async init() {
-            await this.loadReservation();
+            // Load reservation and yards in parallel for faster render
+            await Promise.all([this.loadReservation(), this.loadYards()]);
+        },
+
+        // ── Load active yards for Pickup Yard dropdown ────────────
+        // WHY: yards are needed only when editing — but we load them
+        // upfront (lightweight call, <20 rows) so the select is ready
+        // immediately when the user clicks Edit.
+        async loadYards() {
+            try {
+                const res  = await fetch('<?= base_url('api/v1/yards/index.php') ?>');
+                const data = await res.json();
+                this.yards = data.data?.yards ?? [];
+            } catch {}
         },
 
         // ── Load reservation from API ─────────────────────────────
@@ -905,5 +1058,77 @@ function FF_ReservationShow(resId) {
     };
 }
 </script>
+
+<!-- ============================================================
+     STATUS TIMELINE STEPPER — CSS
+     ============================================================ -->
+<style>
+/* ── Track: flex row containing steps + connectors ──── */
+.ff-stepper-track {
+    display: flex;
+    align-items: center;
+}
+
+/* ── Each step: circle above, label below ────────────── */
+.ff-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.ff-step-circle {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    font-weight: 700;
+    border: 2px solid;
+    transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+
+/* Active (current step) — blue pulse ring */
+.ff-step-active .ff-step-circle {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: white;
+    box-shadow: 0 0 0 5px rgba(59,130,246,0.15);
+}
+.ff-step-active .ff-step-label { color: #3b82f6; font-weight: 600; }
+
+/* Done (past step) — green checkmark */
+.ff-step-done .ff-step-circle {
+    background: #22c55e;
+    border-color: #22c55e;
+    color: white;
+}
+.ff-step-done .ff-step-label { color: var(--text-primary); font-weight: 600; }
+
+/* Future (upcoming step) — muted empty circle */
+.ff-step-future .ff-step-circle {
+    background: transparent;
+    border-color: var(--border-color);
+    color: var(--text-muted);
+}
+.ff-step-future .ff-step-label { color: var(--text-muted); }
+
+.ff-step-label    { font-size: 0.8125rem; white-space: nowrap; }
+.ff-step-sublabel { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; min-height: 14px; }
+
+/* ── Connector line between steps ────────────────────── */
+.ff-connector {
+    flex: 1;
+    height: 2px;
+    background: var(--border-color);
+    margin: 0 10px;
+    margin-bottom: 28px;   /* visually aligns with circle centers */
+    transition: background 0.5s ease;
+}
+.ff-connector-done { background: #22c55e; }
+</style>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

@@ -191,11 +191,12 @@ function FF_InvoiceCreate() {
             notes:          '',
             internal_notes: '',
         },
-        selectedLease: null,
-        days:          0,
-        submitting:    false,
-        error:         null,
-        result:        null,
+        selectedLease:      null,
+        days:               0,
+        submitting:         false,
+        showSuccessOverlay: false,
+        error:              null,
+        result:             null,
 
         onLeaseChange() {
             const sel = this.$el.closest('[x-data]').querySelector('select');
@@ -238,10 +239,12 @@ function FF_InvoiceCreate() {
                 const r = await FF_Api.post('<?= base_url('api/v1/invoices/create') ?>', this.form);
                 if (r.success) {
                     this.result = r.data;
-                    // Redirect to invoice detail after short delay
+                    this.showSuccessOverlay = true;
+                    const _newId = r.data.id;
+                    // Redirect to invoice detail after overlay animation
                     setTimeout(() => {
-                        window.location.href = '<?= base_url('invoices/show') ?>?id=' + r.data.id;
-                    }, 1500);
+                        window.location.href = '<?= base_url('invoices/show') ?>?id=' + _newId;
+                    }, 3500);
                 } else {
                     this.error = r.error?.message || 'Failed to create invoice.';
                 }
@@ -253,5 +256,11 @@ function FF_InvoiceCreate() {
     };
 }
 </script>
+
+<?php
+$overlayTitle    = 'Invoice Created!';
+$overlaySubtitle = 'Redirecting to invoice details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

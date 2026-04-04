@@ -63,6 +63,14 @@ return [
         'badge'  => null,
     ],
     [
+        // Yards is a configuration table for reservations — manager+ only
+        'label'  => 'Yards',
+        'icon'   => 'map-pin',
+        'url'    => '/yards',
+        'module' => 'settings',
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Invoices',
         'icon'   => 'banknotes',
         'url'    => '/invoices',

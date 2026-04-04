@@ -56,7 +56,9 @@ require_once FF_ROOT . '/includes/header.php';
     </a>
 </div>
 
-<div class="card" x-data="woCreate()" x-init="init()">
+<div x-data="woCreate()" x-init="init()">
+
+<div class="card">
     <div class="card-body">
 
         <!-- Error banner -->
@@ -242,11 +244,20 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /card-body -->
 </div><!-- /card -->
 
+<?php
+$overlayTitle    = 'Work Order Created!';
+$overlaySubtitle = 'Redirecting to work order details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /x-data wrapper -->
+
 <script>
 function woCreate() {
     return {
-        saving: false,
-        error:  null,
+        saving:             false,
+        showSuccessOverlay: false,
+        error:              null,
         form: {
             equipment_unit_id: '<?= e((string)($prefilledUnitId ?? '')) ?>',
             vendor_id:         '',
@@ -296,8 +307,10 @@ function woCreate() {
                         this.error = d.message ?? 'Failed to create work order.';
                         return;
                     }
-                    // Redirect to the new work order's show page
-                    window.location.href = '<?= base_url('maintenance_work_orders/show') ?>?id=' + d.data.id;
+                    // Show success overlay then redirect to the new work order's show page
+                    this.showSuccessOverlay = true;
+                    const _newId = d.data.id;
+                    setTimeout(() => { window.location.href = '<?= base_url('maintenance_work_orders/show') ?>?id=' + _newId; }, 3500);
                 })
                 .catch(() => { this.error = 'Network error. Please try again.'; })
                 .finally(() => { this.saving = false; });

@@ -307,9 +307,10 @@ function FF_CreateTemplate() {
             default_mileage_unit:            'km',
             is_active:                       true,
         },
-        errors:      {},
-        globalError: null,
-        submitting:  false,
+        errors:             {},
+        globalError:        null,
+        submitting:         false,
+        showSuccessOverlay: false,
 
         init() {},
 
@@ -338,7 +339,8 @@ function FF_CreateTemplate() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/create') ?>', payload);
                 if (r.success) {
-                    window.location.href = '<?= base_url('equipment/templates') ?>';
+                    this.showSuccessOverlay = true;
+                    setTimeout(() => { window.location.href = '<?= base_url('equipment/templates') ?>'; }, 3500);
                 } else {
                     this.globalError = r.message || 'Failed to create template.';
                     if (r.errors) this.errors = r.errors;
@@ -351,5 +353,11 @@ function FF_CreateTemplate() {
     };
 }
 </script>
+
+<?php
+$overlayTitle    = 'Template Created!';
+$overlaySubtitle = 'Redirecting to template details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

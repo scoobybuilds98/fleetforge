@@ -41,13 +41,19 @@ if (!$unit) {
     json_error('NOT_FOUND', 'Equipment unit not found.', 404);
 }
 
-// ── Block if unit is currently on lease ────────────────────────
-// WHY: soft-deleting a unit on active lease would orphan the lease mid-term
+// ── Block if unit is active or reserved ───────────────────────
+// FIX #5: also block 'reserved' — deleting a reserved unit orphans the reservation
 if ($unit['status'] === 'on_lease') {
-    // FIX #38: UNIT_ON_LEASE is semantically correct (unit IS on_lease, blocking delete)
     json_error(
         'UNIT_ON_LEASE',
         "Cannot delete unit {$unit['unit_number']}: it is currently on active lease. Close the lease first.",
+        422
+    );
+}
+if ($unit['status'] === 'reserved') {
+    json_error(
+        'UNIT_RESERVED',
+        "Cannot delete unit {$unit['unit_number']}: it is reserved for an active reservation. Cancel the reservation first.",
         422
     );
 }
@@ -55,10 +61,21 @@ if ($unit['status'] === 'on_lease') {
 $userId = current_user_id();
 
 db_transaction(function () use ($id, $userId, $unit): void {
+    // FIX #32: include updated_by so the audit trail knows who deleted it
     db_execute(
-        "UPDATE equipment_units SET deleted_at = NOW() WHERE id = ?",
-        [$id]
+        "UPDATE equipment_units SET deleted_at = NOW(), updated_by = ? WHERE id = ?",
+        [$userId, $id]
     );
+
+    // FIX #33: write a status log entry on deletion for full history
+    db_insert('equipment_status_log', [
+        'equipment_unit_id'  => $id,
+        'old_status'         => $unit['status'],
+        'new_status'         => 'deleted',
+        'reason'             => "Unit soft-deleted by {$userId}",
+        'changed_by'         => current_user()['name'] ?? 'system',
+        'changed_by_user_id' => $userId,
+    ]);
 
     db_insert('audit_log', [
         'user_id'      => $userId,

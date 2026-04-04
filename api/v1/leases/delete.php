@@ -35,7 +35,7 @@ if (!$id) {
 }
 
 $lease = db_row(
-    "SELECT id, status, contract_number, company_name_snapshot
+    "SELECT id, status, contract_number, company_name_snapshot, equipment_unit_id
      FROM leases WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -46,17 +46,41 @@ if (!$lease) {
 
 // Active leases cannot be deleted — unit is on_lease; must close first
 if ($lease['status'] === 'active') {
-    // FIX #38: LEASE_IS_ACTIVE is semantically correct (lease IS active, blocking delete)
     json_error('LEASE_IS_ACTIVE',
         "Cannot delete lease {$lease['contract_number']}: it is currently active. Close the lease first.", 409);
 }
 
-// ── Soft-delete + audit ────────────────────────────────────────
+// ── Soft-delete + audit + unit release ────────────────────────
 db_transaction(function () use ($id, $lease) {
     db_execute(
         "UPDATE leases SET deleted_at = NOW(), updated_by = ? WHERE id = ?",
         [current_user_id(), $id]
     );
+
+    // FIX #25: when a pending lease is deleted, the equipment unit was set to
+    // 'reserved' at lease creation. Release it back to 'available' so it can
+    // be leased or reserved again — otherwise it gets permanently locked.
+    if ($lease['status'] === 'pending' && $lease['equipment_unit_id']) {
+        $unit = db_row(
+            "SELECT id, status FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
+            [$lease['equipment_unit_id']]
+        );
+        if ($unit && $unit['status'] === 'reserved') {
+            db_execute(
+                "UPDATE equipment_units SET status = 'available', updated_by = ?, updated_at = NOW()
+                 WHERE id = ?",
+                [current_user_id(), $lease['equipment_unit_id']]
+            );
+            db_insert('equipment_status_log', [
+                'equipment_unit_id'  => $lease['equipment_unit_id'],
+                'old_status'         => 'reserved',
+                'new_status'         => 'available',
+                'reason'             => "Lease {$lease['contract_number']} deleted — unit released",
+                'changed_by'         => current_user()['name'] ?? 'system',
+                'changed_by_user_id' => current_user_id(),
+            ]);
+        }
+    }
 
     db_insert('audit_log', [
         'user_id'      => current_user_id(),

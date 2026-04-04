@@ -8,7 +8,9 @@ declare(strict_types=1);
  * @description New lease form. Customer dropdown auto-fills default rates and
  *              tax exemption from customer record. Equipment unit dropdown shows
  *              only 'available' units by default. Contract number is auto-suggested
- *              but editable. Rates section pre-fills from customer defaults.
+ *              but editable. Rates section pre-fills via S019 priority lookup:
+ *              1st customer_equipment_rates, 2nd rate_cards, 3rd template defaults.
+ *              A source banner indicates which tier provided the rates.
  *              Submits to api/v1/leases/create → redirects to show page.
  *              Alpine component: FF_CreateLease().
  *
@@ -17,7 +19,8 @@ declare(strict_types=1);
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases
  * @decisions   D16 (bcmath — rates as strings), D20 (FOR UPDATE on create),
  *              D30 (asset_url), D32 (CSS classes only from app.css)
- * @session     S007
+ *              S019 rate priority: customer_equipment_rates → rate_cards → template
+ * @session     S007, S019 (rate pre-fill upgrade)
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -40,8 +43,9 @@ $customers = db_select(
 
 // Load available equipment units with template info
 // equipment_units has no mileage_unit — use template's default_mileage_unit instead
+// S019: include u.template_id so JS can call lookup_rates with equipment_template_id
 $availableUnits = db_select(
-    "SELECT u.id, u.unit_number, u.status,
+    "SELECT u.id, u.unit_number, u.status, u.template_id,
             t.name AS template_name, t.category,
             t.default_daily_rate, t.default_weekly_rate,
             t.default_monthly_rate, t.default_mileage_rate,
@@ -115,6 +119,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="">— Select available unit —</option>
                             <?php foreach ($availableUnits as $u): ?>
                             <option value="<?= $u['id'] ?>"
+                                    data-template-id="<?= (int)$u['template_id'] ?>"
                                     data-template="<?= e($u['template_name']) ?>"
                                     data-category="<?= e($u['category']) ?>"
                                     data-daily-rate="<?= e($u['default_daily_rate'] ?? '0.00') ?>"
@@ -197,6 +202,30 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="card" style="margin-bottom:1.5rem;">
             <div class="card-header"><div class="card-title">Rental Rates</div></div>
             <div class="card-body">
+
+                <!-- S019: Rate source banner — shown when rates are auto-filled -->
+                <!-- green = customer override, blue = rate card, grey = template default -->
+                <div x-show="rateSource === 'customer'"
+                     style="padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:0.875rem;
+                            background:var(--color-success-bg,#d1fae5);color:var(--color-success,#065f46);
+                            border:1px solid var(--color-success-border,#6ee7b7);"
+                     x-cloak>
+                    ✓ <span x-text="rateSourceLabel"></span>
+                </div>
+                <div x-show="rateSource === 'rate_card'"
+                     style="padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:0.875rem;
+                            background:var(--color-info-bg,#dbeafe);color:var(--color-info,#1e40af);
+                            border:1px solid var(--color-info-border,#93c5fd);"
+                     x-cloak>
+                    ℹ <span x-text="rateSourceLabel"></span>
+                </div>
+                <div x-show="rateSource === 'template'"
+                     style="padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:0.875rem;
+                            background:var(--bg-elevated,#f8fafc);color:var(--text-secondary,#64748b);
+                            border:1px solid var(--border-color,#e2e8f0);"
+                     x-cloak>
+                    <span x-text="rateSourceLabel"></span>
+                </div>
 
                 <div class="form-row-2" style="margin-bottom:1rem;">
                     <div class="form-group">
@@ -426,9 +455,14 @@ function FF_CreateLease() {
             notes:              '',
             internal_notes:     '',
         },
-        errors:      {},
-        globalError: null,
-        submitting:  false,
+        errors:             {},
+        globalError:        null,
+        submitting:         false,
+        showSuccessOverlay: false,
+
+        // S019: rate source tracking for banner display
+        rateSource:      null,   // 'customer' | 'rate_card' | 'template' | null
+        rateSourceLabel: '',
 
         init() {
             // Default start date to today
@@ -440,7 +474,7 @@ function FF_CreateLease() {
             const opt = sel.options[sel.selectedIndex];
             if (!opt || !opt.value) return;
 
-            // Auto-fill customer defaults — rates come from unit template, but currency/cycle from customer
+            // Auto-fill customer defaults — currency/cycle/tax from customer record
             this.form.currency      = opt.dataset.currency      || 'CAD';
             this.form.mileage_unit  = opt.dataset.mileageUnit   || 'km';
             this.form.billing_cycle = opt.dataset.billingCycle  || 'monthly';
@@ -451,6 +485,11 @@ function FF_CreateLease() {
                 this.form.discount_type  = opt.dataset.discountType;
                 this.form.discount_value = opt.dataset.discountValue || '';
             }
+
+            // S019: If a unit is already selected, re-run rate lookup with new customer
+            if (this.form.equipment_unit_id) {
+                this._lookupRates();
+            }
         },
 
         onUnitChange() {
@@ -458,11 +497,43 @@ function FF_CreateLease() {
             const opt = sel.options[sel.selectedIndex];
             if (!opt || !opt.value) return;
 
-            // Pre-fill rates from template defaults
-            this.form.daily_rate   = opt.dataset.dailyRate   || '';
-            this.form.weekly_rate  = opt.dataset.weeklyRate  || '';
-            this.form.monthly_rate = opt.dataset.monthlyRate || '';
-            this.form.mileage_rate = opt.dataset.mileageRate || '';
+            // S019: call lookup_rates API — priority: customer override → rate card → template
+            // Store template_id on the option for the API call
+            this._currentTemplateId = parseInt(opt.dataset.templateId) || null;
+            this._lookupRates();
+        },
+
+        // S019: rate priority lookup — called when customer or unit changes
+        async _lookupRates() {
+            const customerId   = this.form.customer_id;
+            const templateId   = this._currentTemplateId;
+
+            if (!customerId || !templateId) return;
+
+            try {
+                const r = await FF_Api.get(
+                    `<?= base_url('api/v1/leases/lookup_rates') ?>?customer_id=${customerId}&equipment_template_id=${templateId}`
+                );
+                const d = r.data;
+
+                // Apply rates to form
+                this.form.daily_rate   = d.daily_rate   ?? '';
+                this.form.weekly_rate  = d.weekly_rate  ?? '';
+                this.form.monthly_rate = d.monthly_rate ?? '';
+                this.form.mileage_rate = d.mileage_rate ?? '';
+
+                // Apply currency/unit from rate source if not already set by customer
+                if (d.currency)     this.form.currency     = d.currency;
+                if (d.mileage_unit) this.form.mileage_unit = d.mileage_unit;
+
+                // Set banner state
+                this.rateSource      = d.source;       // 'customer' | 'rate_card' | 'template' | 'none'
+                this.rateSourceLabel = d.source_label;
+
+            } catch (e) {
+                // Rate lookup failure is non-fatal — fall back to blank rates, no banner
+                this.rateSource = null;
+            }
         },
 
         validate() {
@@ -494,7 +565,9 @@ function FF_CreateLease() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/create') ?>', payload);
                 if (r.success) {
-                    window.location.href = '<?= base_url('leases/show') ?>?id=' + r.data.id;
+                    this.showSuccessOverlay = true;
+                    const _newId = r.data.id;
+                    setTimeout(() => { window.location.href = '<?= base_url('leases/show') ?>?id=' + _newId; }, 3500);
                 } else {
                     this.globalError = r.message || 'Failed to create lease.';
                     if (r.errors) this.errors = r.errors;
@@ -507,5 +580,11 @@ function FF_CreateLease() {
     };
 }
 </script>
+
+<?php
+$overlayTitle    = 'Lease Created!';
+$overlaySubtitle = 'Redirecting to lease details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

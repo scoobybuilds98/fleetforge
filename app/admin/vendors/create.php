@@ -37,9 +37,9 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title">New Vendor</h1>
 </div>
 
-<div class="card" style="max-width:760px;"
-     x-data="vendorCreate()"
-     @submit.prevent="submit">
+<div x-data="vendorCreate()" @submit.prevent="submit">
+
+<div class="card" style="max-width:760px;">
 
     <div class="card-body">
 
@@ -222,11 +222,20 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /card-body -->
 </div><!-- /card -->
 
+<?php
+$overlayTitle    = 'Vendor Created!';
+$overlaySubtitle = 'Redirecting to vendor details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
+</div><!-- /x-data wrapper -->
+
 <script>
 function vendorCreate() {
     return {
-        saving: false,
-        error:  null,
+        saving:             false,
+        showSuccessOverlay: false,
+        error:              null,
         form: {
             name:            '',
             vendor_type:     '',
@@ -282,7 +291,9 @@ function vendorCreate() {
             // FF_Api sends JSON + X-CSRF-Token + X-Requested-With automatically
             FF_Api.post('<?= base_url('api/v1/vendors/create.php') ?>', payload)
                 .then(d => {
-                    window.location = '<?= base_url('vendors/show') ?>?id=' + d.data.id;
+                    this.showSuccessOverlay = true;
+                    const _newId = d.data.id;
+                    setTimeout(() => { window.location = '<?= base_url('vendors/show') ?>?id=' + _newId; }, 3500);
                 })
                 .catch(err => {
                     this.error = err?.data?.message ?? 'Save failed. Please try again.';

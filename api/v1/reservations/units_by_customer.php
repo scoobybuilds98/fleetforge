@@ -19,7 +19,7 @@ declare(strict_types=1);
  * @method      GET
  * @query       customer_id (optional — if omitted, returns only available units)
  * @auth        Session required; require_permission('reservations','create')
- * @returns     200 { customer_units[], available_units[], templates[] }
+ * @returns     200 { customer_units[], available_units[], templates[], yards[] }
  *
  * @depends     api/bootstrap.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.6 Reservations — create form
@@ -38,6 +38,9 @@ $customerId = clean_int($_GET['customer_id'] ?? null);
 // ── Customer-linked units (via active/pending leases) ──────────
 $customerUnits = [];
 if ($customerId) {
+    // WHY subquery: also exclude customer-leased units that are already in
+    // an active reservation — same rule as available units. One unit can only
+    // be in one active reservation at a time regardless of the customer.
     $customerUnits = db_select(
         "SELECT
             eu.id,
@@ -53,12 +56,24 @@ if ($customerId) {
          WHERE l.customer_id = ?
            AND l.status IN ('active', 'pending')
            AND l.deleted_at IS NULL
+           AND eu.id NOT IN (
+               SELECT ru.equipment_unit_id
+               FROM reservation_units ru
+               JOIN reservations r ON r.id = ru.reservation_id
+               WHERE r.status IN ('pending', 'confirmed')
+                 AND r.deleted_at IS NULL
+                 AND ru.equipment_unit_id IS NOT NULL
+           )
          ORDER BY eu.unit_number ASC",
         [$customerId]
     );
 }
 
-// ── All available units (not on lease, not reserved, not in maintenance) ──
+// ── All available units — exclude any unit already in an active reservation ──
+// WHY subquery: unit status is only set to 'reserved' when a reservation is
+// *confirmed*. A unit in a *pending* reservation still shows status='available'
+// in the equipment_units table. The NOT IN subquery catches both pending and
+// confirmed reservations so the same unit cannot be double-selected.
 $availableUnits = db_select(
     "SELECT
         eu.id,
@@ -71,6 +86,14 @@ $availableUnits = db_select(
      LEFT JOIN equipment_templates t ON t.id = eu.template_id AND t.deleted_at IS NULL
      WHERE eu.status = 'available'
        AND eu.deleted_at IS NULL
+       AND eu.id NOT IN (
+           SELECT ru.equipment_unit_id
+           FROM reservation_units ru
+           JOIN reservations r ON r.id = ru.reservation_id
+           WHERE r.status IN ('pending', 'confirmed')
+             AND r.deleted_at IS NULL
+             AND ru.equipment_unit_id IS NOT NULL
+       )
      ORDER BY t.name ASC, eu.unit_number ASC",
     []
 );
@@ -84,8 +107,21 @@ $templates = db_select(
     []
 );
 
+// ── Active yards for Pickup Yard dropdown ───────────────────────
+// WHY: reservation create/edit forms need the current list of active
+// yards for the Pickup Yard selector; returned here alongside units
+// and templates to minimise round-trips from the create form.
+$yards = db_select(
+    "SELECT id, name, city, state
+     FROM yards
+     WHERE is_active = 1
+     ORDER BY name ASC",
+    []
+);
+
 json_success([
     'customer_units'  => $customerUnits,
     'available_units' => $availableUnits,
     'templates'       => $templates,
+    'yards'           => $yards,
 ]);
