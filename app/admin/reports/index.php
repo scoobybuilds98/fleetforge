@@ -74,7 +74,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <!-- ════════════════════════════════════════════════════════════
          FINANCIAL TAB
     ════════════════════════════════════════════════════════════ -->
-    <div x-show="mainTab==='financial'">
+    <div x-show="mainTab==='financial'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
         <div x-show="tabs.financial.kpis" class="stat-grid mb-4">
                 <div class="stat-card stat-card--green"><div class="stat-label">Gross Revenue</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.gross_revenue)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.invoice_count??'')+' invoices'"></div></div>
@@ -102,7 +102,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <div x-show="tabs.financial.viewLoading" class="card"><div class="card-body"><div class="skeleton-chart" style="height:280px;"></div></div></div>
 
         <!-- By Period -->
-        <div x-show="tabs.financial.view==='period'&&!tabs.financial.viewLoading">
+        <div x-show="tabs.financial.view==='period'&&!tabs.financial.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Revenue Trend</div><div class="rpt-chart-sub">Monthly net revenue, collected, and outstanding amounts</div></div></div><div id="chart-rev-period" style="height:300px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Period</th><th class="text-right">Invoices</th><th class="text-right">Net Revenue</th><th class="text-right">Tax</th><th class="text-right">Gross Revenue</th><th class="text-right">Collected</th><th class="text-right">Outstanding</th><th class="text-right">Customers</th></tr></thead>
@@ -113,7 +113,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- By Customer -->
-        <div x-show="tabs.financial.view==='customer'&&!tabs.financial.viewLoading">
+        <div x-show="tabs.financial.view==='customer'&&!tabs.financial.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Top Customers by Revenue</div><div class="rpt-chart-sub">Top 15 customers ranked by gross revenue</div></div></div><div id="chart-rev-customer" style="height:360px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>#</th><th>Customer</th><th>Status</th><th class="text-right">Invoices</th><th class="text-right">Net Revenue</th><th class="text-right">Gross Revenue</th><th class="text-right">Collected</th><th class="text-right">Outstanding</th><th class="text-right">Avg Invoice</th></tr></thead>
@@ -123,7 +123,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- By Equipment Type -->
-        <div x-show="tabs.financial.view==='equipment_type'&&!tabs.financial.viewLoading">
+        <div x-show="tabs.financial.view==='equipment_type'&&!tabs.financial.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Revenue by Equipment Category</div><div class="rpt-chart-sub">Gross revenue breakdown by trailer/equipment type</div></div></div><div id="chart-rev-type" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Equipment Type</th><th class="text-right">Units</th><th class="text-right">Leases</th><th class="text-right">Invoices</th><th class="text-right">Net Revenue</th><th class="text-right">Gross Revenue</th><th class="text-right">Collected</th></tr></thead>
@@ -133,7 +133,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- AR Aging -->
-        <div x-show="tabs.financial.view==='ar_aging'&&!tabs.financial.viewLoading">
+        <div x-show="tabs.financial.view==='ar_aging'&&!tabs.financial.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Accounts Receivable Aging</div><div class="rpt-chart-sub">Outstanding balances grouped by overdue period</div></div></div><div id="chart-aging" style="height:240px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Invoice #</th><th>Customer</th><th>Invoice Date</th><th>Due Date</th><th class="text-right">Total</th><th class="text-right">Balance Due</th><th class="text-right">Days Overdue</th><th>Bucket</th></tr></thead>
@@ -143,7 +143,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Collection Rate -->
-        <div x-show="tabs.financial.view==='collection'&&!tabs.financial.viewLoading">
+        <div x-show="tabs.financial.view==='collection'&&!tabs.financial.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Collection Rate Trend</div><div class="rpt-chart-sub">Monthly invoiced vs. collected with collection rate overlay</div></div></div><div id="chart-collection" style="height:300px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Period</th><th class="text-right">Invoices</th><th class="text-right">Fully Paid</th><th class="text-right">Invoiced</th><th class="text-right">Collected</th><th class="text-right">Outstanding</th><th class="text-right">Collection %</th></tr></thead>
@@ -153,7 +153,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Invoice Status -->
-        <div x-show="tabs.financial.view==='status'&&!tabs.financial.viewLoading">
+        <div x-show="tabs.financial.view==='status'&&!tabs.financial.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Invoice Status Distribution</div><div class="rpt-chart-sub">Count and total value by invoice status</div></div></div><div id="chart-inv-status" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Status</th><th class="text-right">Count</th><th class="text-right">Customers</th><th class="text-right">Total Amount</th><th class="text-right">Balance Due</th><th class="text-right">Avg Amount</th></tr></thead>
@@ -166,7 +166,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <!-- ════════════════════════════════════════════════════════════
          FLEET TAB
     ════════════════════════════════════════════════════════════ -->
-    <div x-show="mainTab==='fleet'">
+    <div x-show="mainTab==='fleet'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
         <div x-show="tabs.fleet.kpis" class="stat-grid mb-4">
                 <div class="stat-card stat-card--blue"><div class="stat-label">Avg Utilization</div><div class="stat-value font-mono" x-text="pct(tabs.fleet.kpis?.avg_utilization)"></div><div class="stat-delta" x-text="(tabs.fleet.kpis?.period_days??'')+'-day period'"></div></div>
@@ -192,7 +192,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <div x-show="tabs.fleet.viewLoading" class="card"><div class="card-body"><div class="skeleton-chart" style="height:280px;"></div></div></div>
 
         <!-- Utilization — DISTRIBUTION HISTOGRAM (not per-unit bars) -->
-        <div x-show="tabs.fleet.view==='utilization'&&!tabs.fleet.viewLoading">
+        <div x-show="tabs.fleet.view==='utilization'&&!tabs.fleet.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Fleet Utilization Distribution</div><div class="rpt-chart-sub">Number of units in each utilization bracket — shows fleet health at a glance</div></div></div><div id="chart-fleet-util" style="height:320px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Unit #</th><th>Type</th><th>Yard</th><th>Status</th><th class="text-right">Days Leased</th><th class="text-right">Period Days</th><th class="text-right">Utilization</th><th class="text-right">Revenue</th><th class="text-right">Maint. Cost</th><th class="text-right">ROI</th></tr></thead>
@@ -202,7 +202,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- ROI — TOP 10 / BOTTOM 10 -->
-        <div x-show="tabs.fleet.view==='roi'&&!tabs.fleet.viewLoading">
+        <div x-show="tabs.fleet.view==='roi'&&!tabs.fleet.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-grid-2">
                 <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Top 10 — Highest ROI</div><div class="rpt-chart-sub">Best-performing units by revenue minus maintenance</div></div></div><div id="chart-fleet-roi-top" style="height:280px;"></div></div>
                 <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Bottom 10 — Lowest ROI</div><div class="rpt-chart-sub">Units needing attention — maintenance exceeds revenue</div></div></div><div id="chart-fleet-roi-bottom" style="height:280px;"></div></div>
@@ -215,7 +215,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Idle Units -->
-        <div x-show="tabs.fleet.view==='idle'&&!tabs.fleet.viewLoading">
+        <div x-show="tabs.fleet.view==='idle'&&!tabs.fleet.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Idle Fleet by Equipment Type</div><div class="rpt-chart-sub">Units with zero lease days in the selected period</div></div></div><div id="chart-fleet-idle" style="height:260px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Unit #</th><th>Type</th><th>Yard</th><th>Status</th><th class="text-right">Maint. Cost</th><th class="text-right">Work Orders</th></tr></thead>
@@ -225,7 +225,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Maintenance by Type -->
-        <div x-show="tabs.fleet.view==='maintenance'&&!tabs.fleet.viewLoading">
+        <div x-show="tabs.fleet.view==='maintenance'&&!tabs.fleet.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Maintenance Cost by Work Type</div><div class="rpt-chart-sub">Breakdown of labour, parts, and total cost by work order type</div></div></div><div id="chart-maint-type" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Work Type</th><th class="text-right">Work Orders</th><th class="text-right">Units</th><th class="text-right">Labour</th><th class="text-right">Parts</th><th class="text-right">Total Cost</th><th class="text-right">Avg Cost</th></tr></thead>
@@ -235,7 +235,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- By Yard -->
-        <div x-show="tabs.fleet.view==='yard'&&!tabs.fleet.viewLoading">
+        <div x-show="tabs.fleet.view==='yard'&&!tabs.fleet.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Fleet Performance by Yard</div><div class="rpt-chart-sub">Revenue vs. maintenance cost per yard location</div></div></div><div id="chart-fleet-yard" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Yard</th><th class="text-right">Units</th><th class="text-right">Idle</th><th class="text-right">Avg Utilization</th><th class="text-right">Revenue</th><th class="text-right">Maintenance</th><th class="text-right">ROI</th></tr></thead>
@@ -248,7 +248,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <!-- ════════════════════════════════════════════════════════════
          CUSTOMER TAB
     ════════════════════════════════════════════════════════════ -->
-    <div x-show="mainTab==='customer'">
+    <div x-show="mainTab==='customer'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
         <div x-show="tabs.customer.kpis" class="stat-grid mb-4">
                 <div class="stat-card stat-card--blue"><div class="stat-label">Unique Customers</div><div class="stat-value" x-text="tabs.customer.kpis?.unique_customers"></div><div class="stat-delta" x-text="(tabs.customer.kpis?.active_customers??'')+' active'"></div></div>
@@ -274,7 +274,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <div x-show="tabs.customer.viewLoading" class="card"><div class="card-body"><div class="skeleton-chart" style="height:280px;"></div></div></div>
 
         <!-- Lifetime Value -->
-        <div x-show="tabs.customer.view==='ltv'&&!tabs.customer.viewLoading">
+        <div x-show="tabs.customer.view==='ltv'&&!tabs.customer.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Customer Lifetime Value Ranking</div><div class="rpt-chart-sub">All-time revenue vs. current-period revenue — top 15 customers</div></div></div><div id="chart-cust-ltv" style="height:340px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>#</th><th>Customer</th><th>Status</th><th>Since</th><th class="text-right">Lifetime Revenue</th><th class="text-right">Collected</th><th class="text-right">Outstanding</th><th class="text-right">Period Rev.</th><th class="text-right">Invoices</th><th class="text-right">Leases</th><th class="text-right">Credit Issued</th></tr></thead>
@@ -284,7 +284,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Payment Behavior — DISTRIBUTION HISTOGRAM -->
-        <div x-show="tabs.customer.view==='payment_behavior'&&!tabs.customer.viewLoading">
+        <div x-show="tabs.customer.view==='payment_behavior'&&!tabs.customer.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Payment Timing Distribution</div><div class="rpt-chart-sub">How many customers pay early, on time, or late — based on average days relative to due date</div></div></div><div id="chart-pay-behavior" style="height:300px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Customer</th><th class="text-right">Paid Invoices</th><th class="text-right">Avg Days</th><th class="text-right">Best</th><th class="text-right">Worst</th><th class="text-right">On Time</th><th class="text-right">Late</th><th class="text-right">Amount Paid</th></tr></thead>
@@ -294,7 +294,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- New vs Returning -->
-        <div x-show="tabs.customer.view==='new_returning'&&!tabs.customer.viewLoading">
+        <div x-show="tabs.customer.view==='new_returning'&&!tabs.customer.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">New vs. Returning Revenue</div><div class="rpt-chart-sub">Monthly revenue split by first-time and returning customers</div></div></div><div id="chart-new-returning" style="height:300px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Period</th><th class="text-right">New Revenue</th><th class="text-right">Returning Revenue</th><th class="text-right">Total</th><th class="text-right">New Customers</th><th class="text-right">Returning</th></tr></thead>
@@ -304,7 +304,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Lease Frequency -->
-        <div x-show="tabs.customer.view==='frequency'&&!tabs.customer.viewLoading">
+        <div x-show="tabs.customer.view==='frequency'&&!tabs.customer.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Customer Lease Frequency</div><div class="rpt-chart-sub">Customers ranked by number of leases in the selected period</div></div></div><div id="chart-cust-freq" style="height:300px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>#</th><th>Customer</th><th>Status</th><th class="text-right">Leases</th><th class="text-right">Active</th><th class="text-right">Completed</th><th class="text-right">Avg Days</th><th class="text-right">Types</th><th>First Lease</th><th>Last Lease</th></tr></thead>
@@ -314,7 +314,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Credit Notes -->
-        <div x-show="tabs.customer.view==='credit_notes'&&!tabs.customer.viewLoading">
+        <div x-show="tabs.customer.view==='credit_notes'&&!tabs.customer.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Credit Note Impact by Customer</div><div class="rpt-chart-sub">Issued, applied, and remaining credit balances</div></div></div><div id="chart-credit-notes" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Customer</th><th class="text-right">Credits</th><th class="text-right">Total Issued</th><th class="text-right">Used</th><th class="text-right">Remaining</th><th class="text-right">Avg Amount</th><th class="text-right">Active</th><th class="text-right">Used Up</th><th class="text-right">Expired</th></tr></thead>
@@ -327,7 +327,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <!-- ════════════════════════════════════════════════════════════
          COMPLIANCE TAB
     ════════════════════════════════════════════════════════════ -->
-    <div x-show="mainTab==='compliance'">
+    <div x-show="mainTab==='compliance'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
         <!-- Compliance uses a look-ahead window instead of a date range -->
         <div class="card rpt-toolbar mb-4 no-print" id="comp-window-bar">
@@ -362,7 +362,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <div x-show="tabs.compliance.viewLoading" class="card"><div class="card-body"><div class="skeleton-chart" style="height:260px;"></div></div></div>
 
         <!-- Timeline -->
-        <div x-show="tabs.compliance.view==='timeline'&&!tabs.compliance.viewLoading">
+        <div x-show="tabs.compliance.view==='timeline'&&!tabs.compliance.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Document Expiry Timeline</div><div class="rpt-chart-sub">Number of CVI, registration, and insurance documents expiring each month</div></div></div><div id="chart-comp-timeline" style="height:300px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Month</th><th class="text-right">CVI</th><th class="text-right">Registration</th><th class="text-right">Insurance</th><th class="text-right">Total</th></tr></thead>
@@ -372,7 +372,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Status Snapshot -->
-        <div x-show="tabs.compliance.view==='status'&&!tabs.compliance.viewLoading">
+        <div x-show="tabs.compliance.view==='status'&&!tabs.compliance.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Compliance Status Snapshot</div><div class="rpt-chart-sub">Current state of each document type across all units</div></div></div><div id="chart-comp-status" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Document</th><th class="text-right">Expired</th><th class="text-right">≤30d</th><th class="text-right">31–90d</th><th class="text-right">OK</th><th class="text-right">No Date</th></tr></thead>
@@ -392,7 +392,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Expired -->
-        <div x-show="tabs.compliance.view==='expired'&&!tabs.compliance.viewLoading">
+        <div x-show="tabs.compliance.view==='expired'&&!tabs.compliance.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="card"><div class="card-header"><span class="card-title">Expired Documents</span><span class="text-muted" style="font-size:12px;" x-text="totalRows('compliance')+' units with expired documents'"></span></div><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Unit #</th><th>Yard</th><th>Status</th><th>CVI Expiry</th><th class="text-right">Overdue</th><th>Reg. Expiry</th><th class="text-right">Overdue</th><th>Insurance Expiry</th><th class="text-right">Overdue</th></tr></thead>
                 <tbody><template x-for="r in capped('compliance')" :key="r.unit_id"><tr><td class="font-mono" x-text="r.unit_number"></td><td x-text="r.yard_location||'—'"></td><td><span class="badge" :class="unitStatusBadge(r.status)" x-text="(r.status||'').replace(/_/g,' ')"></span></td>
@@ -405,7 +405,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </div>
 
         <!-- Upcoming -->
-        <div x-show="tabs.compliance.view==='upcoming'&&!tabs.compliance.viewLoading">
+        <div x-show="tabs.compliance.view==='upcoming'&&!tabs.compliance.viewLoading" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
             <div class="card"><div class="card-header"><span class="card-title">Upcoming Renewals</span><span class="text-muted" style="font-size:12px;" x-text="totalRows('compliance')+' units with upcoming renewals'"></span></div><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Unit #</th><th>Yard</th><th>Status</th><th>CVI Expiry</th><th class="text-right">Days Left</th><th>Reg. Expiry</th><th class="text-right">Days Left</th><th>Insurance Expiry</th><th class="text-right">Days Left</th></tr></thead>
                 <tbody><template x-for="r in capped('compliance')" :key="r.unit_id"><tr><td class="font-mono" x-text="r.unit_number"></td><td x-text="r.yard_location||'—'"></td><td><span class="badge" :class="unitStatusBadge(r.status)" x-text="(r.status||'').replace(/_/g,' ')"></span></td>
