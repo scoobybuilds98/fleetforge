@@ -203,35 +203,58 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header"><div class="card-title">Rental Rates</div></div>
             <div class="card-body">
 
-                <!-- S019: Rate source banner — shown when rates are auto-filled -->
-                <!-- green = customer override, blue = rate card, grey = template default -->
+                <!-- Rate source banner — green=customer (locked), blue=rate card, grey=template -->
+                <!-- source=customer: locked banner with explicit override escape hatch -->
                 <div x-show="rateSource === 'customer'"
-                     style="padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:0.875rem;
+                     style="display:flex;align-items:center;justify-content:space-between;gap:12px;
+                            padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:0.875rem;
                             background:var(--color-success-bg,#d1fae5);color:var(--color-success,#065f46);
                             border:1px solid var(--color-success-border,#6ee7b7);"
                      x-cloak>
-                    ✓ <span x-text="rateSourceLabel"></span>
+                    <span>
+                        🔒 <strong>Contracted rates</strong> —
+                        <span x-text="rateSourceLabel"></span>
+                        <span x-show="ratesLocked"> · Fields locked to prevent accidental changes.</span>
+                        <span x-show="!ratesLocked" style="font-style:italic;opacity:.8;"> · Override active — be careful.</span>
+                    </span>
+                    <button type="button"
+                            style="font-size:0.8125rem;white-space:nowrap;padding:3px 10px;border-radius:4px;
+                                   border:1px solid currentColor;background:transparent;cursor:pointer;color:inherit;"
+                            x-show="ratesLocked"
+                            @click="ratesLocked = false"
+                            title="Unlock to manually override contracted rates">
+                        Unlock
+                    </button>
+                    <button type="button"
+                            style="font-size:0.8125rem;white-space:nowrap;padding:3px 10px;border-radius:4px;
+                                   border:1px solid currentColor;background:transparent;cursor:pointer;color:inherit;"
+                            x-show="!ratesLocked"
+                            @click="ratesLocked = true"
+                            title="Re-lock to contracted rates">
+                        Re-lock
+                    </button>
                 </div>
                 <div x-show="rateSource === 'rate_card'"
                      style="padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:0.875rem;
                             background:var(--color-info-bg,#dbeafe);color:var(--color-info,#1e40af);
                             border:1px solid var(--color-info-border,#93c5fd);"
                      x-cloak>
-                    ℹ <span x-text="rateSourceLabel"></span>
+                    ℹ <span x-text="rateSourceLabel"></span> · You may adjust rates below.
                 </div>
                 <div x-show="rateSource === 'template'"
                      style="padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:0.875rem;
                             background:var(--bg-elevated,#f8fafc);color:var(--text-secondary,#64748b);
                             border:1px solid var(--border-color,#e2e8f0);"
                      x-cloak>
-                    <span x-text="rateSourceLabel"></span>
+                    <span x-text="rateSourceLabel"></span> · You may adjust rates below.
                 </div>
 
                 <div class="form-row-2" style="margin-bottom:1rem;">
                     <div class="form-group">
                         <label class="form-label" for="currency">Currency</label>
                         <select id="currency" class="form-control form-select"
-                                x-model="form.currency">
+                                x-model="form.currency"
+                                :disabled="ratesLocked">
                             <option value="CAD">CAD</option>
                             <option value="USD">USD</option>
                         </select>
@@ -239,7 +262,8 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label" for="mileage_unit">Mileage Unit</label>
                         <select id="mileage_unit" class="form-control form-select"
-                                x-model="form.mileage_unit">
+                                x-model="form.mileage_unit"
+                                :disabled="ratesLocked">
                             <option value="km">Kilometres</option>
                             <option value="miles">Miles</option>
                         </select>
@@ -252,7 +276,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
                             <input type="number" id="daily_rate" class="form-control font-mono"
-                                   x-model="form.daily_rate" step="0.01" min="0" placeholder="0.00">
+                                   x-model="form.daily_rate" step="0.01" min="0" placeholder="0.00"
+                                   :readonly="ratesLocked"
+                                   :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
                         </div>
                     </div>
                     <div class="form-group">
@@ -260,7 +286,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
                             <input type="number" id="weekly_rate" class="form-control font-mono"
-                                   x-model="form.weekly_rate" step="0.01" min="0" placeholder="0.00">
+                                   x-model="form.weekly_rate" step="0.01" min="0" placeholder="0.00"
+                                   :readonly="ratesLocked"
+                                   :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
                         </div>
                     </div>
                     <div class="form-group">
@@ -268,7 +296,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
                             <input type="number" id="monthly_rate" class="form-control font-mono"
-                                   x-model="form.monthly_rate" step="0.01" min="0" placeholder="0.00">
+                                   x-model="form.monthly_rate" step="0.01" min="0" placeholder="0.00"
+                                   :readonly="ratesLocked"
+                                   :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
                         </div>
                     </div>
                 </div>
@@ -279,7 +309,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
                             <input type="number" id="mileage_rate" class="form-control font-mono"
-                                   x-model="form.mileage_rate" step="0.0001" min="0" placeholder="0.0000">
+                                   x-model="form.mileage_rate" step="0.0001" min="0" placeholder="0.0000"
+                                   :readonly="ratesLocked"
+                                   :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
                         </div>
                         <div class="form-hint">Set 0 to disable mileage billing.</div>
                     </div>
@@ -460,9 +492,12 @@ function FF_CreateLease() {
         submitting:         false,
         showSuccessOverlay: false,
 
-        // S019: rate source tracking for banner display
+        // Rate source tracking for banner display and field locking
         rateSource:      null,   // 'customer' | 'rate_card' | 'template' | null
         rateSourceLabel: '',
+        // WHY: ratesLocked=true when source=customer — prevents accidental overwrite of
+        //      contracted rates. User must explicitly click Unlock to override.
+        ratesLocked:     false,
 
         init() {
             // Default start date to today
@@ -497,8 +532,11 @@ function FF_CreateLease() {
             const opt = sel.options[sel.selectedIndex];
             if (!opt || !opt.value) return;
 
-            // S019: call lookup_rates API — priority: customer override → rate card → template
-            // Store template_id on the option for the API call
+            // Reset lock state before lookup — will be re-set based on new source
+            this.ratesLocked = false;
+            this.rateSource  = null;
+
+            // Priority: customer override → rate card → template
             this._currentTemplateId = parseInt(opt.dataset.templateId) || null;
             this._lookupRates();
         },
@@ -530,9 +568,19 @@ function FF_CreateLease() {
                 this.rateSource      = d.source;       // 'customer' | 'rate_card' | 'template' | 'none'
                 this.rateSourceLabel = d.source_label;
 
+                // WHY: lock fields when source=customer so contracted rates can't be
+                //      accidentally overwritten. Unlock/Re-lock buttons let staff override.
+                this.ratesLocked = (d.source === 'customer');
+
+                // Auto-stamp rate_notes when customer rates are locked in
+                if (d.source === 'customer' && !this.form.rate_notes) {
+                    this.form.rate_notes = 'Contracted rates per customer agreement';
+                }
+
             } catch (e) {
                 // Rate lookup failure is non-fatal — fall back to blank rates, no banner
-                this.rateSource = null;
+                this.rateSource  = null;
+                this.ratesLocked = false;
             }
         },
 
