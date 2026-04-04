@@ -7,7 +7,8 @@ declare(strict_types=1);
  * @file        app/admin/customers/show.php
  * @description Customer profile page. Header shows key summary (name, status,
  *              risk, tags). Body has tabs: Overview, Notes, Leases, Invoices,
- *              Damage Claims, Mileage Logs, Rates (customer rate overrides).
+ *              Damage Claims, Mileage Logs, Rates (customer rate overrides),
+ *              Documents (uploaded files via polymorphic documents table).
  *              All tabs lazy-load on first activation. Rates tab supports inline
  *              Add/Edit/Delete of customer_equipment_rates via upsert + delete APIs.
  *
@@ -195,6 +196,11 @@ require_once FF_ROOT . '/includes/header.php';
             <?php endif; ?>
         </button>
         <?php endif; ?>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'documents' }"
+                @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
+            Documents
+            <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
+        </button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -992,6 +998,148 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
     <?php endif; ?>
 
+    <!-- ── TAB: Documents ───────────────────────────────────────── -->
+    <div x-show="activeTab === 'documents'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
+
+        <div class="card" style="margin-bottom:1rem;">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <h3 class="card-title">Customer Documents</h3>
+                <?php if (can('customers', 'edit')): ?>
+                <button class="btn btn-sm btn-primary" @click="openDocUploadModal()">+ Upload</button>
+                <?php endif; ?>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="docsLoading && documents.length === 0" class="card-body"
+                 style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading documents…</span>
+            </div>
+
+            <!-- Empty -->
+            <div x-show="docsLoaded && !docsLoading && documents.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No documents</p>
+                    <p class="empty-state-text">Upload tax exemptions, credit agreements, or other files.</p>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div x-show="documents.length > 0" class="tab-table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Title / File</th>
+                            <th>Size</th>
+                            <th>Expires</th>
+                            <th>Uploaded</th>
+                            <th>By</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="doc in documents" :key="doc.id">
+                            <tr>
+                                <td>
+                                    <span :class="customerDocTypeBadge(doc.document_type)"
+                                          x-text="customerDocTypeLabel(doc.document_type)"></span>
+                                </td>
+                                <td>
+                                    <div x-text="doc.title"></div>
+                                    <div class="font-mono text-sm text-secondary" x-text="doc.file_name"></div>
+                                </td>
+                                <td class="font-mono text-sm"
+                                    x-text="doc.file_size_kb ? doc.file_size_kb + ' KB' : '—'"></td>
+                                <td :class="docExpiryClass(doc.expiration_date)"
+                                    x-text="doc.expiration_date ? formatDate(doc.expiration_date) : '—'"></td>
+                                <td class="text-sm" x-text="formatDate(doc.uploaded_at)"></td>
+                                <td class="text-sm text-secondary" x-text="doc.uploaded_by_name || '—'"></td>
+                                <td style="white-space:nowrap;">
+                                    <a :href="doc.url" target="_blank" rel="noopener"
+                                       class="btn btn-xs btn-ghost">View</a>
+                                    <?php if (can('customers', 'edit')): ?>
+                                    <button class="btn btn-xs btn-outline-danger"
+                                            @click="confirmDeleteDoc(doc)"
+                                            style="margin-left:4px;">Remove</button>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <div x-show="documents.length > 0" class="tab-table-footer">
+                <span x-text="documents.length + ' document' + (documents.length !== 1 ? 's' : '')"></span>
+            </div>
+        </div>
+
+    </div><!-- /documents tab -->
+
+    <!-- ── Document Upload Modal ────────────────────────────────── -->
+    <?php if (can('customers', 'edit')): ?>
+    <div x-show="docUploadModal.open" x-cloak
+         style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+         @click.self="docUploadModal.open = false">
+        <div class="modal" style="width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
+            <div class="modal-header">
+                <h3 class="modal-title">Upload Document</h3>
+                <button class="modal-close" @click="docUploadModal.open = false">×</button>
+            </div>
+            <div class="modal-body">
+                <div x-show="docUploadModal.error" class="alert alert-danger"
+                     x-text="docUploadModal.error" style="margin-bottom:12px;"></div>
+
+                <div class="form-grid">
+                    <!-- Document Type -->
+                    <div class="form-group form-group--full">
+                        <label class="form-label">Document Type <span class="text-danger">*</span></label>
+                        <select class="form-select" x-model="docUploadModal.document_type">
+                            <option value="">— Select —</option>
+                            <option value="tax_exemption">Tax Exemption Certificate</option>
+                            <option value="credit_agreement">Credit Agreement</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <!-- Title -->
+                    <div class="form-group form-group--full">
+                        <label class="form-label">Title</label>
+                        <input type="text" class="form-control" x-model="docUploadModal.title"
+                               maxlength="255" placeholder="Optional — defaults to document type name">
+                    </div>
+                    <!-- Expiration Date -->
+                    <div class="form-group">
+                        <label class="form-label">Expiration Date</label>
+                        <input type="date" class="form-control" x-model="docUploadModal.expiration_date">
+                    </div>
+                    <!-- File -->
+                    <div class="form-group">
+                        <label class="form-label">File <span class="text-danger">*</span></label>
+                        <input type="file" class="form-control"
+                               accept=".pdf,.jpg,.jpeg,.png"
+                               @change="docUploadModal.file = $event.target.files[0]">
+                        <div class="form-hint">PDF, JPEG, or PNG — max 20 MB.</div>
+                    </div>
+                    <!-- Notes -->
+                    <div class="form-group form-group--full">
+                        <label class="form-label">Notes</label>
+                        <input type="text" class="form-control" x-model="docUploadModal.notes"
+                               maxlength="500" placeholder="Optional">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary"
+                        @click="docUploadModal.open = false">Cancel</button>
+                <button type="button" class="btn btn-primary"
+                        :disabled="docUploadModal.saving"
+                        @click="submitDocUpload()"
+                        x-text="docUploadModal.saving ? 'Uploading…' : 'Upload'">
+                </button>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
 </div><!-- /x-data -->
 
 <script>
@@ -1042,6 +1190,21 @@ function FF_CustomerProfile() {
         rateOverrides:       [],
         rateOverridesLoaded: false,
         rateOverridesLoading: false,
+
+        // ── Documents ─────────────────────────────────────────────
+        documents:       [],
+        docsLoaded:      false,
+        docsLoading:     false,
+        docUploadModal: {
+            open:            false,
+            saving:          false,
+            error:           null,
+            document_type:   '',
+            title:           '',
+            expiration_date: '',
+            notes:           '',
+            file:            null,
+        },
         rateModal: {
             open:  false,
             id:    null,
@@ -1070,6 +1233,7 @@ function FF_CustomerProfile() {
                 if (tab === 'damage_claims' && !this.damageClaimsLoaded)   this.loadDamageClaims();
                 if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)    this.loadMileageLogs();
                 if (tab === 'rates'         && !this.rateOverridesLoaded)  this.loadRateOverrides();
+                if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
             });
         },
 
@@ -1326,6 +1490,107 @@ function FF_CustomerProfile() {
             } catch (e) {
                 alert('Network error. Please try again.');
             }
+        },
+
+        // ── Documents ─────────────────────────────────────────────
+        async loadDocuments() {
+            this.docsLoading = true;
+            try {
+                const url  = '<?= base_url('api/v1/documents') ?>?entity_type=customer&entity_id=<?= $customerId ?>';
+                const json = await (await fetch(url)).json();
+                if (json.success) {
+                    this.documents = json.data.items || [];
+                    this.docsLoaded = true;
+                }
+            } catch (e) { /* silent */ }
+            this.docsLoading = false;
+        },
+
+        openDocUploadModal() {
+            this.docUploadModal = {
+                open: true, saving: false, error: null,
+                document_type: '', title: '', expiration_date: '', notes: '', file: null,
+            };
+        },
+
+        async submitDocUpload() {
+            const m = this.docUploadModal;
+            if (!m.document_type) { m.error = 'Document type is required.'; return; }
+            if (!m.file)          { m.error = 'Please select a file.';      return; }
+
+            m.saving = true;
+            m.error  = null;
+            try {
+                const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+                const fd   = new FormData();
+                fd.append('entity_type',   'customer');
+                fd.append('entity_id',     '<?= $customerId ?>');
+                fd.append('document_type', m.document_type);
+                fd.append('document',      m.file);
+                if (m.title)           fd.append('title',           m.title);
+                if (m.expiration_date) fd.append('expiration_date', m.expiration_date);
+                if (m.notes)           fd.append('notes',           m.notes);
+
+                const res  = await fetch('<?= base_url('api/v1/documents/upload') ?>', {
+                    method:  'POST',
+                    headers: { 'X-CSRF-Token': csrf, 'X-Requested-With': 'XMLHttpRequest' },
+                    body:    fd,
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    m.open = false;
+                    // Prepend the new document so it's immediately visible
+                    this.documents.unshift(json.data);
+                } else {
+                    m.error = json.error?.message ?? 'Upload failed. Please try again.';
+                }
+            } catch (e) {
+                m.error = 'Network error. Please try again.';
+            } finally {
+                m.saving = false;
+            }
+        },
+
+        async confirmDeleteDoc(doc) {
+            const label = doc.title || doc.file_name;
+            if (!confirm(`Remove "${label}"? This cannot be undone.`)) return;
+            try {
+                const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+                const res  = await fetch('<?= base_url('api/v1/documents/delete') ?>', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json',
+                               'X-CSRF-Token': csrf,
+                               'X-Requested-With': 'XMLHttpRequest' },
+                    body:    JSON.stringify({ id: doc.id }),
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    this.documents = this.documents.filter(d => d.id !== doc.id);
+                } else {
+                    alert(json.error?.message ?? 'Failed to remove document.');
+                }
+            } catch (e) {
+                alert('Network error. Please try again.');
+            }
+        },
+
+        customerDocTypeLabel(t) {
+            return { tax_exemption:'Tax Exemption', credit_agreement:'Credit Agr.', other:'Other' }[t] ?? t;
+        },
+
+        customerDocTypeBadge(t) {
+            return { tax_exemption:'badge badge-warning', credit_agreement:'badge badge-info',
+                     other:'badge badge-neutral' }[t] ?? 'badge badge-neutral';
+        },
+
+        docExpiryClass(date) {
+            if (!date) return 'font-mono text-sm';
+            const d    = new Date(date);
+            const now  = new Date();
+            const diff = (d - now) / (1000 * 60 * 60 * 24);
+            if (diff < 0)  return 'text-danger font-mono text-sm';
+            if (diff < 30) return 'text-warning font-mono text-sm';
+            return 'font-mono text-sm';
         },
 
         // ── Badge / format helpers (unchanged) ────────────────────
