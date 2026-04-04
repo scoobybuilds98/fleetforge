@@ -177,6 +177,8 @@
 
 | S020-UX | 2026-04-04 | UX Polish — Modern Tabs, Spec Cards, KPI Tile Icons & Clickable Drilldowns | Comprehensive visual upgrade across all modules. **20+ files modified.** (1) **Modern tab navigation**: `.tab-bar` + `.tab-btn` CSS in app.css completely rewritten from underline-based to modern segmented-pill style — `inline-flex` container with subtle background, `border-radius`, 4px padding; active tab gets solid `--color-primary` fill with white text + shadow; `.tab-badge` on active tabs gets translucent white background. equipment/show.php inline-styled tabs converted to standard `.tab-bar` + `.tab-btn` classes matching leases/show.php + customers/show.php. (2) **Unit spec cards contrast**: `.spec-card` class added to equipment/show.php — card headers use `--color-primary` background with white text (strong visual anchor); stronger border + elevated shadow; alternating row stripes on `.spec-table` via `nth-child(even)`. (3) **All module KPI tiles clickable**: 10 modules now have functional tile-to-table filtering with toggle behavior + visual `ring-active` feedback. Cross-component modules (invoices, payments, credit_notes, damage_claims, vendors, inspections) use `Alpine.$data(document.getElementById('id'))` pattern; same-component modules (leases, equipment, compliance) use direct filter manipulation. Table root elements given IDs for cross-component targeting. Each module's KPI function got `activeTile` tracking + `drill()`/`setFilter()` methods. Display-only tiles (revenue, monetary aggregates) left without click handlers. (4) **KPI tile visual redesign**: Each stat-card gets a unique accent color variant (`stat-card--green/blue/amber/red/purple/teal/slate`) controlling the left gradient bar and active ring color. SVG icon sprite (25 Heroicons outline symbols) added to `includes/footer.php` — defined once, referenced via `<svg><use href="#icon-name"/></svg>`. Each tile gets a 42×42px rounded-square icon container (`.stat-icon`) with color-tinted background in the top-right corner. Icons are contextual: check-circle (available/complete), key (on-lease), wrench (maintenance), truck (fleet), shield-check (compliance), clock (pending/expiring), exclamation-triangle (expired/overdue), fire (critical), currency-dollar (revenue), document-text (invoices), chart-bar (metrics), star (preferred), building (vendors), trophy (top vendor), bolt (active), magnifying-glass (inspections), clipboard (work orders), lock-open (open), pencil (draft). Equipment show page hero tiles also updated with contextual icons (heart/map-pin/shield-check/tag). All 20+ files pass php -l. |
 
+| S021-UX | 2026-04-05 | UX Fix — Scroll-to-top bug + tab flash + smooth transitions | **8 files modified.** (1) **Reports scroll-to-top fix**: Converted 12 `<template x-if>` to `<div x-show>` with optional chaining across all 4 report tabs (Financial/Fleet/Customer/Compliance) — KPI tiles, loading skeletons, and viewLoading placeholders. `x-if` was removing DOM nodes on toggle, collapsing page height and resetting scroll position. `x-show` keeps elements in DOM with `display:none`. (2) **Reports flash elimination**: Added `x-cloak` to root Alpine element to prevent FOUC (all `x-show` content briefly visible before Alpine init). Made `setPreset`/`runReport`/`setCompWindow` keep old KPIs visible on current tab during data refresh — old values stay until API response replaces them atomically. No more skeleton→content blink on cached responses. (3) **Smooth 120ms tab transitions across entire app (52 panels)**: CSS `.ff-tab-enter` classes + `@keyframes ff-tab-fade-in` animation in app.css. `x-show` tab panels get Alpine `x-transition:enter` (reports 24, equipment/show 9, customers/show 7, leases/show 4, rates/index 2). `x-if` tab panels get `.ff-tab-animated` CSS animation class (leases/show 4, profile/index 2). Old tab hides instantly, new tab fades in — masks content swap. (4) **Tab active class fix**: All 23 report tab buttons changed from `{active:...}` to `{'is-active':...}` to match `.tab-btn.is-active` CSS rule used by every other page. |
+
 ---
 
 ## NEXT SESSION STARTS WITH
@@ -184,13 +186,14 @@
 ```
 Session S022 — Documents Module (Phase 13)
 
-S021 + S021-EXT — Reports Module — complete.
-  7 files: lib/Reports/ReportBuilder.php,
+S021 + S021-EXT + S021-UX — Reports Module — complete.
+  7 core files: lib/Reports/ReportBuilder.php,
   api/v1/reports/{revenue,fleet,customer,compliance}.php,
   app/admin/reports/index.php, database/seed_reports_data.php.
   4 tabs / 20 views / 15 charts / CSV export / 15-min cache.
   Charts redesigned for 1000+ unit scale (histograms, top/bottom 10, row capping).
   Seed data: ~95 invoices, 13 customers, ~40 payments, ~40 WOs, compliance dates.
+  UX: smooth 120ms tab transitions across all 52 tab panels in the entire app.
   Login: admin@fleetforge.test / admin123
 
 ═══════════════════════════════════════════════════════════════════
@@ -200,8 +203,8 @@ CONTEXT — READ BEFORE WRITING ANY CODE
 READ IN THIS ORDER:
   1. FLEETFORGE_CLAUDE_CODE_REFERENCE.md  ← patterns, all helper signatures, Trap list
   2. FLEETFORGE_PROGRESS.md               ← SESSION LOG, DECISIONS, KNOWN ISSUES
-  3. FLEETFORGE_SPEC_FINAL.md             ← grep "reports\|report\|analytics\|export"
-  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep "report_cache\|saved_reports\|scheduled_reports"
+  3. FLEETFORGE_SPEC_FINAL.md             ← grep "documents\|document\|upload\|attachment"
+  4. FLEETFORGE_DATABASE_MASTER.sql       ← grep "documents"
 
 VERIFY BEFORE STARTING:
   curl http://fleetforge.test/fleetforge/api/v1/health → {"success":true,"data":{"db":true,...}}
