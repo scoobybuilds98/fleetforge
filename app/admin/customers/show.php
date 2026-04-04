@@ -6,10 +6,10 @@ declare(strict_types=1);
  *
  * @file        app/admin/customers/show.php
  * @description Customer profile page. Header shows key summary (name, status,
- *              risk, tags). Body has 4 tabs: Overview (detail cards), Notes
- *              (pinned + all), Leases (lazy-loaded from API), Invoices
- *              (lazy-loaded from API). Notes are loaded via Alpine.js from the
- *              notes API. Delete button fires soft-delete via confirm modal.
+ *              risk, tags). Body has tabs: Overview, Notes, Leases, Invoices,
+ *              Damage Claims, Mileage Logs, Rates (customer rate overrides).
+ *              All tabs lazy-load on first activation. Rates tab supports inline
+ *              Add/Edit/Delete of customer_equipment_rates via upsert + delete APIs.
  *
  * @depends     config/app.php, includes/auth.php, includes/header.php,
  *              includes/footer.php, api/v1/customers/show.php,
@@ -51,6 +51,12 @@ $tagRows = db_select(
     "SELECT tag FROM customer_tags WHERE customer_id = ? ORDER BY tag",
     [$customerId]
 );
+
+// Pre-count rate overrides for tab badge
+$rateOverridesCount = (int) db_row(
+    "SELECT COUNT(*) AS n FROM customer_equipment_rates WHERE customer_id = ?",
+    [$customerId]
+)['n'];
 $tags = array_column($tagRows, 'tag');
 
 // WHY: badge classes per FLEETFORGE_DESIGN_DETAILS.md §9
@@ -180,6 +186,15 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="activeTab = 'mileage_logs'" :aria-selected="activeTab === 'mileage_logs'" role="tab">
             Mileage Logs
         </button>
+        <?php if (can('rates', 'view')): ?>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'rates' }"
+                @click="activeTab = 'rates'" :aria-selected="activeTab === 'rates'" role="tab">
+            Rates
+            <?php if ($rateOverridesCount > 0): ?>
+            <span class="tab-badge"><?= e($rateOverridesCount) ?></span>
+            <?php endif; ?>
+        </button>
+        <?php endif; ?>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -791,6 +806,192 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div><!-- /mileage_logs tab -->
 
+    <!-- ── TAB: RATES ────────────────────────────────────────── -->
+    <?php if (can('rates', 'view')): ?>
+    <div x-show="activeTab === 'rates'" role="tabpanel">
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="card-title">Custom Rate Overrides</span>
+                <?php if (can('rates', 'edit')): ?>
+                <button type="button" class="btn btn-primary btn-sm"
+                        @click="openRateModal()">+ Add Override</button>
+                <?php endif; ?>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="rateOverridesLoading && rateOverrides.length === 0" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading rate overrides…</span>
+            </div>
+
+            <!-- Empty state -->
+            <div x-show="rateOverridesLoaded && !rateOverridesLoading && rateOverrides.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No custom rate overrides</p>
+                    <p class="empty-state-text">
+                        This customer uses the standard rate card. Add an override to set custom pricing per equipment type.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div x-show="rateOverrides.length > 0">
+                <div class="tab-table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Equipment Type</th>
+                                <th style="text-align:right;">Daily</th>
+                                <th style="text-align:right;">Weekly</th>
+                                <th style="text-align:right;">Monthly</th>
+                                <th style="text-align:right;">Mileage</th>
+                                <th>Currency</th>
+                                <th>Effective</th>
+                                <?php if (can('rates', 'edit') || can('rates', 'delete')): ?>
+                                <th></th>
+                                <?php endif; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="r in rateOverrides" :key="r.id">
+                                <tr>
+                                    <td x-text="r.equipment_type"></td>
+                                    <td class="font-mono" style="text-align:right;"
+                                        x-text="r.daily_rate ? '$' + parseFloat(r.daily_rate).toFixed(2) : '—'"></td>
+                                    <td class="font-mono" style="text-align:right;"
+                                        x-text="r.weekly_rate ? '$' + parseFloat(r.weekly_rate).toFixed(2) : '—'"></td>
+                                    <td class="font-mono" style="text-align:right;"
+                                        x-text="r.monthly_rate ? '$' + parseFloat(r.monthly_rate).toFixed(2) : '—'"></td>
+                                    <td class="font-mono" style="text-align:right;">
+                                        <span x-show="r.mileage_rate" x-text="'$' + parseFloat(r.mileage_rate).toFixed(4) + '/' + r.mileage_unit"></span>
+                                        <span x-show="!r.mileage_rate">—</span>
+                                    </td>
+                                    <td x-text="r.currency"></td>
+                                    <td class="text-sm text-secondary">
+                                        <span x-text="r.effective_from"></span>
+                                        <span x-show="r.effective_to"> → <span x-text="r.effective_to"></span></span>
+                                        <span x-show="!r.effective_to"> → open</span>
+                                    </td>
+                                    <?php if (can('rates', 'edit') || can('rates', 'delete')): ?>
+                                    <td style="white-space:nowrap;">
+                                        <?php if (can('rates', 'edit')): ?>
+                                        <button type="button" class="btn btn-sm btn-secondary"
+                                                @click="openRateModal(r)">Edit</button>
+                                        <?php endif; ?>
+                                        <?php if (can('rates', 'delete')): ?>
+                                        <button type="button" class="btn btn-sm btn-danger"
+                                                @click="deleteRateOverride(r)"
+                                                style="margin-left:4px;">Delete</button>
+                                        <?php endif; ?>
+                                    </td>
+                                    <?php endif; ?>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="tab-table-footer">
+                    <span x-text="`${rateOverrides.length} override${rateOverrides.length !== 1 ? 's' : ''}`"></span>
+                </div>
+            </div>
+        </div>
+    </div><!-- /rates tab -->
+
+    <!-- ── Rate Override Modal ──────────────────────────────── -->
+    <?php if (can('rates', 'edit')): ?>
+    <div x-show="rateModal.open" x-cloak
+         style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);">
+        <div class="modal" style="width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
+            <div class="modal-header">
+                <h3 class="modal-title" x-text="rateModal.id ? 'Edit Rate Override' : 'Add Rate Override'"></h3>
+                <button class="modal-close" @click="rateModal.open = false">×</button>
+            </div>
+            <div class="modal-body">
+                <div x-show="rateModal.error" class="alert alert-danger" x-text="rateModal.error" style="margin-bottom:12px;"></div>
+
+                <div class="form-grid">
+                    <!-- Equipment Type -->
+                    <div class="form-group form-group--full">
+                        <label class="form-label">Equipment Type <span class="text-danger">*</span></label>
+                        <select class="form-select" x-model="rateModal.form.equipment_type" :disabled="!!rateModal.id">
+                            <option value="">— Select —</option>
+                            <?php
+                            $templates = db_select("SELECT name FROM equipment_templates WHERE is_active=1 AND deleted_at IS NULL ORDER BY name");
+                            foreach ($templates as $t):
+                            ?>
+                            <option value="<?= e($t['name']) ?>"><?= e($t['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <!-- Effective From / To -->
+                    <div class="form-group">
+                        <label class="form-label">Effective From <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" x-model="rateModal.form.effective_from"
+                               :disabled="!!rateModal.id">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Effective To</label>
+                        <input type="date" class="form-control" x-model="rateModal.form.effective_to">
+                        <div class="form-hint">Leave blank for open-ended.</div>
+                    </div>
+
+                    <!-- Rates -->
+                    <div class="form-group">
+                        <label class="form-label">Daily Rate</label>
+                        <input type="number" class="form-control font-mono" x-model="rateModal.form.daily_rate"
+                               step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Weekly Rate</label>
+                        <input type="number" class="form-control font-mono" x-model="rateModal.form.weekly_rate"
+                               step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Monthly Rate</label>
+                        <input type="number" class="form-control font-mono" x-model="rateModal.form.monthly_rate"
+                               step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Mileage Rate</label>
+                        <input type="number" class="form-control font-mono" x-model="rateModal.form.mileage_rate"
+                               step="0.0001" min="0" placeholder="0.0000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Mileage Unit</label>
+                        <select class="form-select" x-model="rateModal.form.mileage_unit">
+                            <option value="km">km</option>
+                            <option value="miles">miles</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Currency</label>
+                        <select class="form-select" x-model="rateModal.form.currency">
+                            <option value="CAD">CAD</option>
+                            <option value="USD">USD</option>
+                        </select>
+                    </div>
+
+                    <!-- Notes -->
+                    <div class="form-group form-group--full">
+                        <label class="form-label">Notes</label>
+                        <input type="text" class="form-control" x-model="rateModal.form.notes"
+                               maxlength="2000" placeholder="Optional notes about this override">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="rateModal.open = false">Cancel</button>
+                <button type="button" class="btn btn-primary"
+                        :disabled="rateModal.saving"
+                        @click="saveRateOverride()"
+                        x-text="rateModal.saving ? 'Saving…' : (rateModal.id ? 'Save Changes' : 'Add Override')">
+                </button>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+    <?php endif; ?>
+
 </div><!-- /x-data -->
 
 <script>
@@ -837,13 +1038,38 @@ function FF_CustomerProfile() {
         mileageLogsLoading:  false,
         mileageLogsFilters:  { log_type: '', sort: 'log_date', dir: 'DESC' },
 
+        // ── Rate Overrides ────────────────────────────────────────
+        rateOverrides:       [],
+        rateOverridesLoaded: false,
+        rateOverridesLoading: false,
+        rateModal: {
+            open:  false,
+            id:    null,
+            updatedAt: null,
+            saving: false,
+            error:  null,
+            form: {
+                equipment_type: '',
+                effective_from: '<?= date('Y-m-d') ?>',
+                effective_to:   '',
+                daily_rate:     '',
+                weekly_rate:    '',
+                monthly_rate:   '',
+                mileage_rate:   '',
+                mileage_unit:   'km',
+                currency:       'CAD',
+                notes:          '',
+            },
+        },
+
         init() {
             this.loadNoteCount();
             this.$watch('activeTab', (tab) => {
-                if (tab === 'leases'        && !this.leasesLoaded)       this.loadLeases();
-                if (tab === 'invoices'      && !this.invoicesLoaded)     this.loadInvoices();
-                if (tab === 'damage_claims' && !this.damageClaimsLoaded) this.loadDamageClaims();
-                if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)  this.loadMileageLogs();
+                if (tab === 'leases'        && !this.leasesLoaded)         this.loadLeases();
+                if (tab === 'invoices'      && !this.invoicesLoaded)       this.loadInvoices();
+                if (tab === 'damage_claims' && !this.damageClaimsLoaded)   this.loadDamageClaims();
+                if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)    this.loadMileageLogs();
+                if (tab === 'rates'         && !this.rateOverridesLoaded)  this.loadRateOverrides();
             });
         },
 
@@ -989,6 +1215,118 @@ function FF_CustomerProfile() {
         },
         loadMoreMileageLogs()     { this.mileageLogsPage++; this.loadMileageLogs(true); },
         applyMileageLogsFilters() { this.mileageLogs = []; this.mileageLogsPage = 1; this.mileageLogsTotal = 0; this.mileageLogsLoaded = false; this.loadMileageLogs(); },
+
+        // ── Rate Overrides ─────────────────────────────────────────
+        async loadRateOverrides() {
+            this.rateOverridesLoading = true;
+            try {
+                const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 100 });
+                const json = await (await fetch('<?= base_url('api/v1/customer_equipment_rates/index') ?>?' + p)).json();
+                if (json.success) {
+                    this.rateOverrides       = json.data.items || [];
+                    this.rateOverridesLoaded = true;
+                }
+            } catch (e) { /* silent */ }
+            this.rateOverridesLoading = false;
+        },
+
+        openRateModal(existing = null) {
+            this.rateModal.error  = null;
+            this.rateModal.saving = false;
+            if (existing) {
+                this.rateModal.id        = existing.id;
+                this.rateModal.updatedAt = existing.updated_at;
+                this.rateModal.form = {
+                    equipment_type: existing.equipment_type,
+                    effective_from: existing.effective_from,
+                    effective_to:   existing.effective_to ?? '',
+                    daily_rate:     existing.daily_rate ?? '',
+                    weekly_rate:    existing.weekly_rate ?? '',
+                    monthly_rate:   existing.monthly_rate ?? '',
+                    mileage_rate:   existing.mileage_rate ?? '',
+                    mileage_unit:   existing.mileage_unit ?? 'km',
+                    currency:       existing.currency ?? 'CAD',
+                    notes:          existing.notes ?? '',
+                };
+            } else {
+                this.rateModal.id        = null;
+                this.rateModal.updatedAt = null;
+                this.rateModal.form = {
+                    equipment_type: '',
+                    effective_from: '<?= date('Y-m-d') ?>',
+                    effective_to:   '',
+                    daily_rate: '', weekly_rate: '', monthly_rate: '', mileage_rate: '',
+                    mileage_unit: 'km', currency: 'CAD', notes: '',
+                };
+            }
+            this.rateModal.open = true;
+        },
+
+        async saveRateOverride() {
+            if (!this.rateModal.form.equipment_type || !this.rateModal.form.effective_from) {
+                this.rateModal.error = 'Equipment type and Effective From are required.';
+                return;
+            }
+            this.rateModal.saving = true;
+            this.rateModal.error  = null;
+            try {
+                const csrf    = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+                const payload = {
+                    customer_id:    <?= $customerId ?>,
+                    equipment_type: this.rateModal.form.equipment_type,
+                    effective_from: this.rateModal.form.effective_from,
+                    effective_to:   this.rateModal.form.effective_to   || null,
+                    daily_rate:     this.rateModal.form.daily_rate     || null,
+                    weekly_rate:    this.rateModal.form.weekly_rate    || null,
+                    monthly_rate:   this.rateModal.form.monthly_rate   || null,
+                    mileage_rate:   this.rateModal.form.mileage_rate   || null,
+                    mileage_unit:   this.rateModal.form.mileage_unit,
+                    currency:       this.rateModal.form.currency,
+                    notes:          this.rateModal.form.notes          || null,
+                };
+                if (this.rateModal.id) {
+                    payload.id         = this.rateModal.id;
+                    payload.updated_at = this.rateModal.updatedAt;
+                }
+                const res  = await fetch('<?= base_url('api/v1/customer_equipment_rates/upsert') ?>', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Requested-With': 'XMLHttpRequest' },
+                    body:    JSON.stringify(payload),
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    this.rateModal.open      = false;
+                    this.rateOverridesLoaded = false;
+                    this.loadRateOverrides();
+                } else {
+                    this.rateModal.error = json.error?.message ?? 'Failed to save rate override.';
+                }
+            } catch (e) {
+                this.rateModal.error = 'Network error. Please try again.';
+            } finally {
+                this.rateModal.saving = false;
+            }
+        },
+
+        async deleteRateOverride(rate) {
+            if (!confirm(`Delete rate override for "${rate.equipment_type}"? This cannot be undone.`)) return;
+            try {
+                const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+                const res  = await fetch('<?= base_url('api/v1/customer_equipment_rates/delete') ?>', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Requested-With': 'XMLHttpRequest' },
+                    body:    JSON.stringify({ id: rate.id, updated_at: rate.updated_at }),
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    this.rateOverrides = this.rateOverrides.filter(r => r.id !== rate.id);
+                } else {
+                    alert(json.error?.message ?? 'Failed to delete rate override.');
+                }
+            } catch (e) {
+                alert('Network error. Please try again.');
+            }
+        },
 
         // ── Badge / format helpers (unchanged) ────────────────────
         mlTypeBadge(type) {
