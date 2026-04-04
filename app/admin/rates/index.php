@@ -411,8 +411,8 @@ function FF_RatesManager() {
         ovFilters:    { equipment_type: '' },
 
         // ── Modals
-        deleteCardModal: { open: false, id: null, name: '', saving: false, error: '' },
-        deleteOvModal:   { open: false, id: null, label: '', saving: false, error: '' },
+        deleteCardModal: { open: false, id: null, name: '', updated_at: null, saving: false, error: '' },
+        deleteOvModal:   { open: false, id: null, label: '', updated_at: null, saving: false, error: '' },
 
         init() {
             this.loadCards();
@@ -433,9 +433,9 @@ function FF_RatesManager() {
             });
             try {
                 const r = await FF_Api.get(`<?= base_url('api/v1/rate_cards/index') ?>?${params}`);
-                this.cardRows       = r.data ?? [];
-                this.cardTotal      = r.total ?? 0;
-                this.cardTotalPages = r.total_pages ?? 1;
+                this.cardRows       = r.data?.items ?? [];
+                this.cardTotal      = r.data?.pagination?.total ?? 0;
+                this.cardTotalPages = r.data?.pagination?.total_pages ?? 1;
             } catch (e) {
                 this.cardRows = [];
             } finally {
@@ -459,14 +459,14 @@ function FF_RatesManager() {
         },
 
         confirmDeleteCard(row) {
-            this.deleteCardModal = { open: true, id: row.id, name: row.name, saving: false, error: '' };
+            this.deleteCardModal = { open: true, id: row.id, name: row.name, updated_at: row.updated_at, saving: false, error: '' };
         },
 
         async deleteCard() {
             this.deleteCardModal.saving = true;
             this.deleteCardModal.error  = '';
             try {
-                await FF_Api.post('<?= base_url('api/v1/rate_cards/delete') ?>', { id: this.deleteCardModal.id });
+                await FF_Api.post('<?= base_url('api/v1/rate_cards/delete') ?>', { id: this.deleteCardModal.id, updated_at: this.deleteCardModal.updated_at });
                 this.deleteCardModal.open = false;
                 this.loadCards(this.cardPage);
             } catch (e) {
@@ -489,9 +489,9 @@ function FF_RatesManager() {
             });
             try {
                 const r = await FF_Api.get(`<?= base_url('api/v1/customer_equipment_rates/index') ?>?${params}`);
-                this.ovRows       = r.data ?? [];
-                this.ovTotal      = r.total ?? 0;
-                this.ovTotalPages = r.total_pages ?? 1;
+                this.ovRows       = r.data?.items ?? [];
+                this.ovTotal      = r.data?.pagination?.total ?? 0;
+                this.ovTotalPages = r.data?.pagination?.total_pages ?? 1;
             } catch (e) {
                 this.ovRows = [];
             } finally {
@@ -501,11 +501,12 @@ function FF_RatesManager() {
 
         confirmDeleteOverride(row) {
             this.deleteOvModal = {
-                open:   true,
-                id:     row.id,
-                label:  row.customer_name + ' — ' + row.equipment_type,
-                saving: false,
-                error:  '',
+                open:       true,
+                id:         row.id,
+                updated_at: row.updated_at,
+                label:      row.customer_name + ' — ' + row.equipment_type,
+                saving:     false,
+                error:      '',
             };
         },
 
@@ -513,7 +514,7 @@ function FF_RatesManager() {
             this.deleteOvModal.saving = true;
             this.deleteOvModal.error  = '';
             try {
-                await FF_Api.post('<?= base_url('api/v1/customer_equipment_rates/delete') ?>', { id: this.deleteOvModal.id });
+                await FF_Api.post('<?= base_url('api/v1/customer_equipment_rates/delete') ?>', { id: this.deleteOvModal.id, updated_at: this.deleteOvModal.updated_at });
                 this.deleteOvModal.open = false;
                 this.loadOverrides(this.ovPage);
             } catch (e) {

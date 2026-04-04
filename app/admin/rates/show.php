@@ -512,7 +512,7 @@ function FF_RateCardShow() {
             this.deleteModal.saving = true;
             this.deleteModal.error  = '';
             try {
-                await FF_Api.post('<?= base_url('api/v1/rate_cards/delete') ?>', { id: this.form.id });
+                await FF_Api.post('<?= base_url('api/v1/rate_cards/delete') ?>', { id: this.form.id, updated_at: this.form.updated_at });
                 window.location = '<?= base_url('rates') ?>';
             } catch (e) {
                 this.deleteModal.error  = e.message || 'Delete failed.';
