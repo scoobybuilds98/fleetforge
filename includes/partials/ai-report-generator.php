@@ -62,42 +62,50 @@ if ($_vizContext === 'reports') {
 ?>
 
 <!-- ── AI Visualization Generator ──────────────────────────────────────────── -->
-<div x-data="<?= e($_vizId) ?>()" class="ff-viz-root">
+<div x-data="<?= e($_vizId) ?>()" class="ff-viz-root" style="width:100%;">
 
     <?php if (!$_vizCompact): ?>
     <!-- Full card mode -->
-    <div class="card" style="margin-bottom:16px;overflow:visible;">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="margin-bottom:16px;width:100%;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
             <div style="display:flex;align-items:center;gap:8px;">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                <span style="font-weight:600;">AI Report Generator</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span style="font-weight:600;font-size:1rem;">AI Report Generator</span>
                 <span class="badge badge-info" style="font-size:0.6rem;">AI</span>
             </div>
             <span x-show="tokensUsed > 0" x-cloak style="font-size:0.7rem;color:var(--text-secondary);" class="font-mono"
                   x-text="tokensUsed.toLocaleString() + ' tokens'"></span>
         </div>
-        <div class="card-body">
     <?php endif; ?>
 
-            <!-- Input area -->
-            <form @submit.prevent="generate()" style="display:flex;gap:8px;align-items:center;">
-                <div style="flex:1;display:flex;align-items:center;border:1px solid var(--border-color);border-radius:10px;padding:4px 4px 4px 14px;background:var(--bg-surface-2);transition:border-color 0.15s,box-shadow 0.15s;"
+            <!-- Input area — full-width field, button below -->
+            <form @submit.prevent="generate()" style="width:100%;">
+                <div style="width:100%;display:flex;align-items:center;border:1px solid var(--border-color);border-radius:12px;padding:8px 16px;background:var(--bg-surface-2);transition:border-color 0.15s,box-shadow 0.15s;box-sizing:border-box;"
                      :style="focused ? 'border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-light);' : ''">
                     <input type="text" x-model="prompt" x-ref="vizInput"
                            @focus="focused=true" @blur="focused=false"
+                           @keydown.enter.prevent="generate()"
                            placeholder="Describe the chart or report you want..."
                            :disabled="loading"
-                           style="flex:1;border:none;background:transparent;outline:none;font-size:0.875rem;color:var(--text-primary);padding:8px 0;font-family:inherit;">
+                           style="width:100%;border:none;background:transparent;outline:none;font-size:1rem;color:var(--text-primary);padding:10px 0;font-family:inherit;">
+                </div>
+                <div style="display:flex;justify-content:flex-end;margin-top:10px;">
                     <button type="submit" :disabled="loading || !prompt.trim()"
-                            style="width:36px;height:36px;border-radius:8px;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.15s;flex-shrink:0;"
+                            style="height:44px;padding:0 24px;border-radius:10px;border:none;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;transition:all 0.15s;font-size:0.875rem;font-weight:600;font-family:inherit;"
                             :style="prompt.trim()
                                 ? 'background:var(--color-primary);color:#fff;'
                                 : 'background:var(--bg-surface-hover);color:var(--text-secondary);cursor:not-allowed;'">
                         <template x-if="!loading">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            <span style="display:flex;align-items:center;gap:6px;">
+                                Generate
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            </span>
                         </template>
                         <template x-if="loading">
-                            <div style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
+                            <span style="display:flex;align-items:center;gap:6px;">
+                                Generating
+                                <div style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
+                            </span>
                         </template>
                     </button>
                 </div>
@@ -114,7 +122,6 @@ if ($_vizContext === 'reports') {
             </div>
 
     <?php if (!$_vizCompact): ?>
-        </div>
     </div>
     <?php endif; ?>
 
@@ -442,6 +449,12 @@ function <?= e($_vizId) ?>() {
                 console.error('Chart render failed:', e);
                 el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:0.8125rem;">Chart rendering failed.</div>';
             }
+        },
+
+        // ── Auto-resize textarea ────────────────────────────
+        autoResizeViz(el) {
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, 160) + 'px';
         },
 
         // ── Cleanup ─────────────────────────────────────────
