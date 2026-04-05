@@ -251,6 +251,7 @@ require_once FF_ROOT . '/includes/header.php';
                                style="flex:1;"
                                :class="errors.pickup_date ? 'is-invalid' : ''"
                                x-model="form.pickup_date"
+                               min="<?= date('Y-m-d') ?>"
                                x-ref="pickupDate">
                         <button type="button"
                                 class="btn btn-ghost btn-sm"

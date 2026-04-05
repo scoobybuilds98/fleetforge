@@ -234,8 +234,14 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="acquired_date">Acquired Date</label>
-                        <input type="date" id="acquired_date" class="form-control"
-                               x-model="form.acquired_date">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="acquired_date" class="form-control"
+                                   x-model="form.acquired_date"
+                                   x-ref="eqAcqDate" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.eqAcqDate.showPicker ? $refs.eqAcqDate.showPicker() : $refs.eqAcqDate.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -250,7 +256,13 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="cvi_expiry">CVI Expiry</label>
-                        <input type="date" id="cvi_expiry" class="form-control" x-model="form.cvi_expiry">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="cvi_expiry" class="form-control" x-model="form.cvi_expiry"
+                                   min="<?= date('Y-m-d') ?>" x-ref="eqCviExp" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.eqCviExp.showPicker ? $refs.eqCviExp.showPicker() : $refs.eqCviExp.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="cvi_interval_days">CVI Renewal Interval (days)</label>
@@ -262,18 +274,36 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="registration_expiry">Registration Expiry</label>
-                        <input type="date" id="registration_expiry" class="form-control" x-model="form.registration_expiry">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="registration_expiry" class="form-control" x-model="form.registration_expiry"
+                                   min="<?= date('Y-m-d') ?>" x-ref="eqRegExp" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.eqRegExp.showPicker ? $refs.eqRegExp.showPicker() : $refs.eqRegExp.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="mvi_expiry">MVI Expiry</label>
-                        <input type="date" id="mvi_expiry" class="form-control" x-model="form.mvi_expiry">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="mvi_expiry" class="form-control" x-model="form.mvi_expiry"
+                                   min="<?= date('Y-m-d') ?>" x-ref="eqMviExp" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.eqMviExp.showPicker ? $refs.eqMviExp.showPicker() : $refs.eqMviExp.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="insurance_expiry">Insurance Expiry</label>
-                        <input type="date" id="insurance_expiry" class="form-control" x-model="form.insurance_expiry">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="insurance_expiry" class="form-control" x-model="form.insurance_expiry"
+                                   min="<?= date('Y-m-d') ?>" x-ref="eqInsExp" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.eqInsExp.showPicker ? $refs.eqInsExp.showPicker() : $refs.eqInsExp.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="insurance_interval_days">Insurance Renewal Interval (days)</label>

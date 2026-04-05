@@ -220,9 +220,15 @@ require_once FF_ROOT . '/includes/header.php';
                                 <input type="text" class="form-control form-control-sm"
                                        placeholder="GST exemption cert. number"
                                        x-model="form.gst_exempt_number" maxlength="100">
-                                <input type="date" class="form-control form-control-sm"
-                                       title="Expiry date (optional)"
-                                       x-model="form.gst_exempt_expiry">
+                                <div style="display:flex;gap:6px;align-items:center;">
+                                    <input type="date" class="form-control form-control-sm"
+                                           title="Expiry date (optional)"
+                                           x-model="form.gst_exempt_expiry"
+                                           min="<?= date('Y-m-d') ?>" style="flex:1;">
+                                    <button type="button" class="btn btn-ghost btn-sm" style="padding:0 8px;height:32px;flex-shrink:0;" title="Open calendar" @click="$el.previousElementSibling.showPicker ? $el.previousElementSibling.showPicker() : $el.previousElementSibling.click()">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:16px;height:16px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                                    </button>
+                                </div>
                             </div>
                         </template>
                     </div>
@@ -238,9 +244,15 @@ require_once FF_ROOT . '/includes/header.php';
                                 <input type="text" class="form-control form-control-sm"
                                        placeholder="PST exemption cert. number"
                                        x-model="form.pst_exempt_number" maxlength="100">
-                                <input type="date" class="form-control form-control-sm"
-                                       title="Expiry date (optional)"
-                                       x-model="form.pst_exempt_expiry">
+                                <div style="display:flex;gap:6px;align-items:center;">
+                                    <input type="date" class="form-control form-control-sm"
+                                           title="Expiry date (optional)"
+                                           x-model="form.pst_exempt_expiry"
+                                           min="<?= date('Y-m-d') ?>" style="flex:1;">
+                                    <button type="button" class="btn btn-ghost btn-sm" style="padding:0 8px;height:32px;flex-shrink:0;" title="Open calendar" @click="$el.previousElementSibling.showPicker ? $el.previousElementSibling.showPicker() : $el.previousElementSibling.click()">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:16px;height:16px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                                    </button>
+                                </div>
                             </div>
                         </template>
                     </div>

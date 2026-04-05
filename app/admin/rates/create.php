@@ -74,18 +74,32 @@ require_once FF_ROOT . '/includes/header.php';
                     <!-- Effective From -->
                     <div class="form-group">
                         <label class="form-label" for="effective_from">Effective From <span class="text-danger">*</span></label>
-                        <input type="date" id="effective_from" class="form-control"
-                               :class="errors.effective_from ? 'is-invalid' : ''"
-                               x-model="form.effective_from">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="effective_from" class="form-control"
+                                   :class="errors.effective_from ? 'is-invalid' : ''"
+                                   x-model="form.effective_from"
+                                   min="<?= date('Y-m-d') ?>"
+                                   x-ref="rateEffFrom" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.rateEffFrom.showPicker ? $refs.rateEffFrom.showPicker() : $refs.rateEffFrom.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                         <div class="invalid-feedback" x-show="errors.effective_from" x-text="errors.effective_from"></div>
                     </div>
 
                     <!-- Effective To -->
                     <div class="form-group">
                         <label class="form-label" for="effective_to">Effective To</label>
-                        <input type="date" id="effective_to" class="form-control"
-                               :class="errors.effective_to ? 'is-invalid' : ''"
-                               x-model="form.effective_to">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="effective_to" class="form-control"
+                                   :class="errors.effective_to ? 'is-invalid' : ''"
+                                   x-model="form.effective_to"
+                                   :min="form.effective_from || ''"
+                                   x-ref="rateEffTo" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.rateEffTo.showPicker ? $refs.rateEffTo.showPicker() : $refs.rateEffTo.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                         <div class="form-hint">Leave blank for open-ended (no expiry).</div>
                         <div class="invalid-feedback" x-show="errors.effective_to" x-text="errors.effective_to"></div>
                     </div>

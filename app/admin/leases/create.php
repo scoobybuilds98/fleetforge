@@ -165,23 +165,44 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label required" for="start_date">Start Date</label>
-                        <input type="date" id="start_date" class="form-control"
-                               x-model="form.start_date"
-                               :class="errors.start_date ? 'is-invalid' : ''">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="start_date" class="form-control"
+                                   x-model="form.start_date"
+                                   :class="errors.start_date ? 'is-invalid' : ''"
+                                   min="<?= date('Y-m-d') ?>"
+                                   x-ref="lsStartDate" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.lsStartDate.showPicker ? $refs.lsStartDate.showPicker() : $refs.lsStartDate.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                         <div class="form-error" x-show="errors.start_date" x-text="errors.start_date"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="end_date">End Date</label>
-                        <input type="date" id="end_date" class="form-control"
-                               x-model="form.end_date"
-                               :class="errors.end_date ? 'is-invalid' : ''">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="end_date" class="form-control"
+                                   x-model="form.end_date"
+                                   :class="errors.end_date ? 'is-invalid' : ''"
+                                   :min="form.start_date || ''"
+                                   x-ref="lsEndDate" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.lsEndDate.showPicker ? $refs.lsEndDate.showPicker() : $refs.lsEndDate.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                         <div class="form-hint">Leave blank for open-ended lease.</div>
                         <div class="form-error" x-show="errors.end_date" x-text="errors.end_date"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="minimum_end_date">Minimum End Date</label>
-                        <input type="date" id="minimum_end_date" class="form-control"
-                               x-model="form.minimum_end_date">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="date" id="minimum_end_date" class="form-control"
+                                   x-model="form.minimum_end_date"
+                                   :min="form.start_date || ''"
+                                   x-ref="lsMinEnd" style="flex:1;">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.lsMinEnd.showPicker ? $refs.lsMinEnd.showPicker() : $refs.lsMinEnd.click()">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                            </button>
+                        </div>
                         <div class="form-hint">Early return fee applies before this date.</div>
                     </div>
                 </div>
