@@ -67,6 +67,7 @@ require_once FF_ROOT . '/includes/header.php';
                                :class="errors.name ? 'is-invalid' : ''"
                                x-model="form.name" maxlength="255"
                                placeholder="e.g. Standard 2025 Rates">
+                        <div class="form-hint" style="text-align:right;" x-text="(form.name || '').length + ' / 255'"></div>
                         <div class="invalid-feedback" x-show="errors.name" x-text="errors.name"></div>
                     </div>
 
@@ -102,8 +103,9 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group form-group--full">
                         <label class="form-label" for="description">Description</label>
                         <input type="text" id="description" class="form-control"
-                               x-model="form.description" maxlength="1000"
+                               x-model="form.description" maxlength="255"
                                placeholder="Optional notes about this rate card">
+                        <div class="form-hint" style="text-align:right;" x-text="(form.description || '').length + ' / 255'"></div>
                     </div>
 
                 </div>

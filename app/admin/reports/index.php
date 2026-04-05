@@ -69,6 +69,11 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <button class="tab-btn" :class="{'is-active':mainTab==='fleet'}"      @click="switchMainTab('fleet')"><svg width="14" height="14"><use href="#icon-truck"/></svg> Fleet</button>
         <button class="tab-btn" :class="{'is-active':mainTab==='customer'}"   @click="switchMainTab('customer')"><svg width="14" height="14"><use href="#icon-user-group"/></svg> Customers</button>
         <button class="tab-btn" :class="{'is-active':mainTab==='compliance'}" @click="switchMainTab('compliance')"><svg width="14" height="14"><use href="#icon-shield-check"/></svg> Compliance</button>
+        <?php if (can('ai', 'view')): ?>
+        <button class="tab-btn" :class="{'is-active':mainTab==='ai'}" @click="mainTab='ai'" style="margin-left:auto;">
+            <span style="font-size:0.875rem;">&#10024;</span> AI Generate
+        </button>
+        <?php endif; ?>
     </div>
 
     <!-- ════════════════════════════════════════════════════════════
@@ -417,6 +422,21 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
             </div><div class="rpt-table-ft" x-show="isOverCap('compliance')"><span x-text="capLabel('compliance')"></span><button class="btn btn-sm btn-secondary" @click="toggleExpand('compliance')" x-text="isExpanded('compliance')?'Show less ▲':'Show all ▼'"></button></div></div>
         </div>
     </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+         AI GENERATE TAB
+    ════════════════════════════════════════════════════════════ -->
+    <?php if (can('ai', 'view')): ?>
+    <div x-show="mainTab==='ai'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+        <?php
+        // WHY: Include the reusable AI visualization generator with reports context
+        $aiVizId      = 'FF_AiVizReports';
+        $aiVizContext  = 'reports';
+        $aiVizCompact  = false;
+        include FF_ROOT . '/includes/partials/ai-report-generator.php';
+        ?>
+    </div>
+    <?php endif; ?>
 
 </div><!-- /reports-root -->
 

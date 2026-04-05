@@ -121,6 +121,9 @@
     <div class="modal-backdrop" @click="cancel()" aria-hidden="true"></div>
 </div>
 
+<!-- ── AI Chat Widget (floating bubble) ─────────────────────── -->
+<?php require_once FF_ROOT . '/includes/partials/ai-chat-widget.php'; ?>
+
 <!-- ============================================================
      CDN SCRIPTS
      Order: ApexCharts → app.js → Alpine.js

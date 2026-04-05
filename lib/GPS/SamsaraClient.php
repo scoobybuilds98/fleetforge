@@ -214,6 +214,204 @@ class SamsaraClient
     }
 
     // --------------------------------------------------------
+    // getVehicleLocations()
+    //
+    // Returns GPS locations for ALL vehicles in the Samsara org.
+    // Uses the fleet-wide stats endpoint with types=gps,obdOdometerMeters.
+    // Handles cursor-based pagination to fetch all vehicles.
+    //
+    // Each element in the returned array has:
+    //   id, name, gps { time, latitude, longitude, headingDegrees,
+    //                    speedMilesPerHour, reverseGeo { formattedLocation } },
+    //   obdOdometerMeters { time, value }
+    //
+    // @return array|null  Array of vehicle data, or null on any failure
+    // --------------------------------------------------------
+    public function getVehicleLocations(): ?array
+    {
+        if ($this->apiKey === '' || $this->orgId === '') {
+            $this->log('GPS_SKIP', 'API keys not configured — returning null (dev mode)');
+            return null;
+        }
+
+        $allVehicles = [];
+        $cursor = null;
+        $maxPages = 10; // Safety limit: 10 pages × 50/page = 500 vehicles max
+
+        for ($i = 0; $i < $maxPages; $i++) {
+            $url = self::API_BASE . '/fleet/vehicles/stats?types=gps,obdOdometerMeters';
+            if ($cursor) {
+                $url .= '&after=' . urlencode($cursor);
+            }
+
+            $response = $this->apiRequest($url);
+            if ($response === null) {
+                $this->log('GPS_LOCATIONS_ERROR', 'API request failed on page ' . ($i + 1));
+                return null;
+            }
+
+            foreach ($response['data'] ?? [] as $vehicle) {
+                $allVehicles[] = $vehicle;
+            }
+
+            // Cursor-based pagination (Samsara standard)
+            $hasMore = $response['pagination']['hasNextPage'] ?? false;
+            if (!$hasMore) break;
+            $cursor = $response['pagination']['endCursor'] ?? null;
+            if (!$cursor) break;
+        }
+
+        $this->log('GPS_LOCATIONS_SUCCESS', sprintf('Fetched %d vehicle locations', count($allVehicles)));
+        return $allVehicles;
+    }
+
+    // --------------------------------------------------------
+    // getVehicleLocation()
+    //
+    // Returns GPS location + stats for a SINGLE Samsara vehicle.
+    // Uses the per-vehicle stats endpoint.
+    //
+    // @param  string $vehicleId  Samsara vehicle ID (equipment_units.gps_device_id)
+    // @return array|null  Vehicle stat data, or null on failure
+    // --------------------------------------------------------
+    public function getVehicleLocation(string $vehicleId): ?array
+    {
+        if ($this->apiKey === '' || $this->orgId === '' || $vehicleId === '') {
+            return null;
+        }
+
+        $url = self::API_BASE . '/fleet/vehicles/' . urlencode($vehicleId)
+             . '/stats?types=gps,obdOdometerMeters,fuelPercents';
+
+        $response = $this->apiRequest($url);
+        return $response['data'] ?? null;
+    }
+
+    // --------------------------------------------------------
+    // testConnection()
+    //
+    // Tests the Samsara API connection by listing one vehicle.
+    // Returns a structured result for the Settings → Integrations
+    // connection test UI.
+    //
+    // @return array{success: bool, message: string, details: array}
+    // --------------------------------------------------------
+    public function testConnection(): array
+    {
+        if ($this->apiKey === '' || $this->orgId === '') {
+            return [
+                'success' => false,
+                'message' => 'API key or Organization ID not configured.',
+                'details' => [],
+            ];
+        }
+
+        $url = self::API_BASE . '/fleet/vehicles?limit=1';
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
+            CURLOPT_HTTPHEADER     => $this->buildHeaders(),
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+
+        $raw  = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err  = curl_error($ch);
+        curl_close($ch);
+
+        if ($raw === false || $err !== '') {
+            return [
+                'success' => false,
+                'message' => "Connection failed: {$err}",
+                'details' => ['http_code' => $code],
+            ];
+        }
+
+        if ($code === 401 || $code === 403) {
+            return [
+                'success' => false,
+                'message' => 'Authentication failed. Check your API key and Organization ID.',
+                'details' => ['http_code' => $code],
+            ];
+        }
+
+        if ($code !== 200) {
+            return [
+                'success' => false,
+                'message' => "Unexpected response: HTTP {$code}",
+                'details' => ['http_code' => $code, 'body' => substr((string)$raw, 0, 200)],
+            ];
+        }
+
+        $data = json_decode((string) $raw, true);
+        $vehicleCount = count($data['data'] ?? []);
+        $hasMore = $data['pagination']['hasNextPage'] ?? false;
+
+        return [
+            'success' => true,
+            'message' => 'Connected to Samsara successfully.',
+            'details' => [
+                'http_code'      => 200,
+                'vehicles_found' => $hasMore ? '1+' : (string)$vehicleCount,
+                'org_id'         => $this->orgId,
+            ],
+        ];
+    }
+
+    // --------------------------------------------------------
+    // apiRequest() — shared HTTP helper for all Samsara calls.
+    // Returns parsed JSON array on success, null on any failure.
+    // Centralizes curl setup, error handling, and logging.
+    // --------------------------------------------------------
+    private function apiRequest(string $url): ?array
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
+            CURLOPT_HTTPHEADER     => $this->buildHeaders(),
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+
+        $raw  = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err  = curl_error($ch);
+        curl_close($ch);
+
+        if ($raw === false || $err !== '') {
+            $this->log('GPS_API_CURL_ERROR', "url={$url} error={$err}");
+            return null;
+        }
+
+        if ($code !== 200) {
+            $this->log('GPS_API_HTTP_ERROR', "url={$url} HTTP={$code} body=" . substr((string)$raw, 0, 500));
+            return null;
+        }
+
+        $data = json_decode((string) $raw, true);
+        if (!is_array($data)) {
+            $this->log('GPS_API_PARSE_ERROR', "url={$url} — invalid JSON");
+            return null;
+        }
+
+        return $data;
+    }
+
+    // --------------------------------------------------------
+    // buildHeaders() — standard Samsara API request headers
+    // --------------------------------------------------------
+    private function buildHeaders(): array
+    {
+        return [
+            'Authorization: Bearer ' . $this->apiKey,
+            'X-Org-Id: '            . $this->orgId,
+            'Accept: application/json',
+        ];
+    }
+
+    // --------------------------------------------------------
     // log() — append a timestamped line to logs/gps.log
     // Never throws — logging failure is swallowed silently.
     // --------------------------------------------------------

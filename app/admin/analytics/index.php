@@ -180,6 +180,15 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
 </div>
 
+<!-- ── AI Report Generator ────────────────────────────────────────────────── -->
+<?php
+// WHY: AI visualization generator at the top of analytics for easy access
+$aiVizId      = 'FF_AiVizAnalytics';
+$aiVizContext  = 'analytics';
+$aiVizCompact  = false;
+include FF_ROOT . '/includes/partials/ai-report-generator.php';
+?>
+
 <div x-data="FF_Analytics()" x-init="init()" x-cloak>
 
     <!-- ════════════════════════════════════════════════════════════════════

@@ -4,24 +4,20 @@ declare(strict_types=1);
 /**
  * app/admin/settings/index.php
  *
- * Application settings management page.
- * Displays settings grouped by group_name. Each group gets a card.
+ * Comprehensive settings hub — tabbed layout with 6 sections:
+ *   1. General     — company, invoices, alerts, notifications settings
+ *   2. Users       — admin user management (invite, status, roles)
+ *   3. Portal Users — customer portal user management (super_admin only)
+ *   4. Audit Log   — filterable audit trail viewer
+ *   5. System      — system info, cron status, database stats
+ *   6. Integrations — GPS, AI, sensitive config (collapsed)
  *
- * Editable only if can('settings','edit') — super_admin only.
- * POSTs back to self with group + key/value pairs.
- *
- * Groups displayed: company, invoices, alerts, notifications.
- * Sensitive groups (gps, ai) shown in a collapsed section.
- *
- * Value types: string/text → text input/textarea
- *              integer/decimal → number input
- *              boolean → checkbox toggle
- *
+ * Permission: settings/view to see, settings/edit to modify (super_admin only).
  * D32: Only CSS classes confirmed in app.css.
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  * @decisions D7/D30/D32
- * @session  S017
+ * @session  S017, S025
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -30,11 +26,13 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('settings', 'view');
 
-$canEdit = can('settings', 'edit');
+$canEdit     = can('settings', 'edit');
+$isSuperAdmin = can('settings', 'delete'); // WHY: only super_admin has delete on settings
 
 // ── Flash message from previous save ────────────────────────────────────────
-$saveFlash = null;
-$saveError = null;
+$saveFlash = $_SESSION['settings_flash'] ?? null;
+$saveError = $_SESSION['settings_error'] ?? null;
+unset($_SESSION['settings_flash'], $_SESSION['settings_error']);
 
 // ── Handle POST (save a group) ────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
@@ -60,15 +58,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 
                     // Normalize value by type
                     if ($valueType === 'boolean') {
-                        // Checkbox: present = 1, absent = 0
                         $val = isset($_POST[$key]) ? '1' : '0';
                     } elseif ($valueType === 'integer') {
                         $val = $raw !== null ? (string)(int)$raw : '0';
                     } elseif ($valueType === 'decimal') {
-                        // WHY: store as string to preserve precision (D16 bcmath approach)
                         $val = $raw !== null ? (string)preg_replace('/[^0-9.\-]/', '', $raw) : '0';
                     } else {
-                        // string / text / json
                         $val = $raw !== null ? (string)$raw : '';
                     }
 
@@ -78,7 +73,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                     );
                 }
 
-                // Single audit log entry per group save
                 db_insert('audit_log', [
                     'user_id'      => current_user_id(),
                     'user_name'    => current_user()['name'] ?? 'system',
@@ -106,68 +100,104 @@ $allSettings = db_select(
      ORDER BY group_name ASC, `key` ASC"
 );
 
-// Group settings by group_name
 $grouped = [];
 foreach ($allSettings as $s) {
     $grouped[$s['group_name']][] = $s;
 }
 
-// Display order for groups — primary then sensitive
 $primaryGroups   = ['company', 'invoices', 'alerts', 'notifications'];
 $sensitiveGroups = ['gps', 'ai'];
-
-// Group labels
 $groupLabels = [
     'company'       => 'Company',
-    'invoices'      => 'Invoices',
-    'alerts'        => 'Alerts',
-    'notifications' => 'Notifications',
+    'invoices'      => 'Invoices & Billing',
+    'alerts'        => 'Alerts & Compliance',
+    'notifications' => 'Notifications & Email',
     'gps'           => 'GPS Integration',
     'ai'            => 'AI / Machine Learning',
 ];
 
+// ── Stats for tab badges ──────────────────────────────────────────────────────
+$userCount = db_count("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL");
+$portalUserCount = db_count("SELECT COUNT(*) FROM portal_users");
+$recentAuditCount = db_count("SELECT COUNT(*) FROM audit_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+
 $pageTitle = 'Settings';
 require_once FF_ROOT . '/includes/header.php';
 
-// Ensure CSRF token is available (it should be — auth.php starts session)
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 $csrfToken = $_SESSION['csrf_token'];
+
+// WHY: default tab can come from URL param (e.g. after redirect from sub-page)
+$defaultTab = clean_string($_GET['tab'] ?? 'general');
+$validTabs = ['general', 'users', 'portal_users', 'audit', 'system', 'integrations'];
+if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
 ?>
 
-<div class="page-header">
-    <h1 class="page-header-title">Settings</h1>
+<div x-data="{ activeTab: '<?= e($defaultTab) ?>' }">
+
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+    <div>
+        <h1 class="page-header-title">Settings</h1>
+        <p style="margin:4px 0 0;font-size:0.8125rem;color:var(--text-muted);">System configuration, user management, and administration</p>
+    </div>
     <?php if (!$canEdit): ?>
-    <span class="badge badge-neutral" style="margin-left:8px;">View Only</span>
+    <span class="badge badge-neutral">View Only</span>
     <?php endif; ?>
 </div>
 
 <?php if ($saveFlash): ?>
 <div class="toast toast-success" style="position:relative;margin-bottom:16px;animation:none;">
-    <span class="toast-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
-        </svg>
-    </span>
+    <span class="toast-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg></span>
     <div class="toast-body"><div class="toast-message"><?= e($saveFlash) ?></div></div>
 </div>
 <?php endif; ?>
 
 <?php if ($saveError): ?>
 <div class="toast toast-danger" style="position:relative;margin-bottom:16px;animation:none;">
-    <span class="toast-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008z"/>
-        </svg>
-    </span>
+    <span class="toast-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008z"/></svg></span>
     <div class="toast-body"><div class="toast-message"><?= e($saveError) ?></div></div>
 </div>
 <?php endif; ?>
 
-<!-- ── Primary groups ─────────────────────────────────────────────────────── -->
+<!-- ── Tab Navigation ─────────────────────────────────────────────────────── -->
+<div class="tab-bar" role="tablist" style="margin-bottom:24px;">
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'general' }"
+            @click="activeTab = 'general'" role="tab">
+        General
+    </button>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'users' }"
+            @click="activeTab = 'users'" role="tab">
+        Users <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$userCount) ?></span>
+    </button>
+    <?php if ($isSuperAdmin): ?>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'portal_users' }"
+            @click="activeTab = 'portal_users'" role="tab">
+        Portal Users <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$portalUserCount) ?></span>
+    </button>
+    <?php endif; ?>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'audit' }"
+            @click="activeTab = 'audit'" role="tab">
+        Audit Log <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$recentAuditCount) ?></span>
+    </button>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'system' }"
+            @click="activeTab = 'system'" role="tab">
+        System
+    </button>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'integrations' }"
+            @click="activeTab = 'integrations'" role="tab">
+        Integrations
+    </button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 1: GENERAL SETTINGS                                                 -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div x-show="activeTab === 'general'" x-transition:enter class="ff-tab-enter">
+
 <?php foreach ($primaryGroups as $grp): ?>
-<?php if (empty($grouped[$grp])): continue; endif; ?>
+<?php if (empty($grouped[$grp])) continue; ?>
 
 <div class="card" style="margin-bottom:20px;">
     <div class="card-header" style="font-weight:600;"><?= e($groupLabels[$grp] ?? ucfirst($grp)) ?></div>
@@ -176,67 +206,46 @@ $csrfToken = $_SESSION['csrf_token'];
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
             <input type="hidden" name="_group"     value="<?= e($grp) ?>">
 
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
             <?php foreach ($grouped[$grp] as $setting): ?>
             <?php
-            $key       = $setting['key'];
-            $val       = $setting['value'] ?? '';
-            $vtype     = $setting['value_type'];
-            $label     = $setting['label'] ?? $key;
-            $desc      = $setting['description'] ?? null;
-            $inputName = $key;
+            $key   = $setting['key'];
+            $val   = $setting['value'] ?? '';
+            $vtype = $setting['value_type'];
+            $label = $setting['label'] ?? $key;
+            $desc  = $setting['description'] ?? null;
             ?>
-            <div class="form-group" style="margin-bottom:16px;">
+            <div class="form-group" style="margin-bottom:0;">
                 <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
 
                 <?php if ($vtype === 'boolean'): ?>
                 <div class="form-check">
-                    <input type="checkbox"
-                           id="<?= e($key) ?>"
-                           name="<?= e($key) ?>"
-                           value="1"
-                           <?= $val === '1' ? 'checked' : '' ?>
-                           <?= !$canEdit ? 'disabled' : '' ?>>
+                    <input type="checkbox" id="<?= e($key) ?>" name="<?= e($key) ?>" value="1"
+                           <?= $val === '1' ? 'checked' : '' ?> <?= !$canEdit ? 'disabled' : '' ?>>
                     <label for="<?= e($key) ?>" style="margin-left:6px;font-size:0.875rem;">Enabled</label>
                 </div>
-
                 <?php elseif ($vtype === 'text'): ?>
-                <textarea id="<?= e($key) ?>"
-                          name="<?= e($key) ?>"
-                          class="form-control"
-                          rows="3"
+                <textarea id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control" rows="3"
                           <?= !$canEdit ? 'readonly' : '' ?>><?= e($val) ?></textarea>
-
                 <?php elseif (in_array($vtype, ['integer', 'decimal'], true)): ?>
-                <input type="number"
-                       id="<?= e($key) ?>"
-                       name="<?= e($key) ?>"
-                       class="form-control"
-                       value="<?= e($val) ?>"
-                       step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
-                       <?= !$canEdit ? 'readonly' : '' ?>>
-
+                <input type="number" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                       value="<?= e($val) ?>" step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
+                       min="0" <?= !$canEdit ? 'readonly' : '' ?>>
                 <?php else: ?>
-                <!-- string / default -->
-                <input type="text"
-                       id="<?= e($key) ?>"
-                       name="<?= e($key) ?>"
-                       class="form-control"
-                       value="<?= e($val) ?>"
-                       maxlength="500"
-                       <?= !$canEdit ? 'readonly' : '' ?>>
+                <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                       value="<?= e($val) ?>" maxlength="500" <?= !$canEdit ? 'readonly' : '' ?>>
                 <?php endif; ?>
 
                 <?php if ($desc): ?>
-                <p class="text-muted" style="font-size:0.8125rem;margin:4px 0 0;"><?= e($desc) ?></p>
+                <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;"><?= e($desc) ?></p>
                 <?php endif; ?>
             </div>
             <?php endforeach; ?>
+            </div>
 
             <?php if ($canEdit): ?>
-            <div style="padding-top:16px;border-top:1px solid var(--border-default);">
-                <button type="submit" class="btn btn-primary btn-sm">
-                    Save <?= e($groupLabels[$grp] ?? ucfirst($grp)) ?> Settings
-                </button>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save <?= e($groupLabels[$grp] ?? ucfirst($grp)) ?> Settings</button>
             </div>
             <?php endif; ?>
         </form>
@@ -244,97 +253,325 @@ $csrfToken = $_SESSION['csrf_token'];
 </div>
 <?php endforeach; ?>
 
-<!-- ── Sensitive / integration groups ───────────────────────────────────────── -->
-<?php
-$hasSensitive = false;
-foreach ($sensitiveGroups as $sg) {
-    if (!empty($grouped[$sg])) { $hasSensitive = true; break; }
-}
-?>
+</div><!-- /general tab -->
 
-<?php if ($hasSensitive): ?>
-<details style="margin-bottom:20px;">
-    <summary style="cursor:pointer;font-weight:600;padding:12px 0;font-size:0.9375rem;
-                    color:var(--text-secondary);user-select:none;">
-        ▶ Integration Settings (GPS, AI) — click to expand
-    </summary>
-    <div style="margin-top:16px;">
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 2: ADMIN USERS                                                      -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div x-show="activeTab === 'users'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/users.php'; ?>
+</div>
 
-    <?php foreach ($sensitiveGroups as $grp): ?>
-    <?php if (empty($grouped[$grp])): continue; endif; ?>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 3: PORTAL USERS (super_admin only)                                  -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php if ($isSuperAdmin): ?>
+<div x-show="activeTab === 'portal_users'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/portal_users.php'; ?>
+</div>
+<?php endif; ?>
 
-    <div class="card" style="margin-bottom:20px;">
-        <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
-            <?= e($groupLabels[$grp] ?? ucfirst($grp)) ?>
-            <span class="badge badge-warning" style="font-size:0.7rem;">Sensitive</span>
-        </div>
-        <div class="card-body">
-            <form method="POST" action="">
-                <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-                <input type="hidden" name="_group"     value="<?= e($grp) ?>">
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 4: AUDIT LOG                                                        -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div x-show="activeTab === 'audit'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/audit_log.php'; ?>
+</div>
 
-                <?php foreach ($grouped[$grp] as $setting): ?>
-                <?php
-                $key   = $setting['key'];
-                $val   = $setting['value'] ?? '';
-                $vtype = $setting['value_type'];
-                $label = $setting['label'] ?? $key;
-                $desc  = $setting['description'] ?? null;
-                ?>
-                <div class="form-group" style="margin-bottom:16px;">
-                    <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 5: SYSTEM                                                           -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div x-show="activeTab === 'system'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/system.php'; ?>
+</div>
 
-                    <?php if ($vtype === 'boolean'): ?>
-                    <div class="form-check">
-                        <input type="checkbox"
-                               id="<?= e($key) ?>"
-                               name="<?= e($key) ?>"
-                               value="1"
-                               <?= $val === '1' ? 'checked' : '' ?>
-                               <?= !$canEdit ? 'disabled' : '' ?>>
-                        <label for="<?= e($key) ?>" style="margin-left:6px;font-size:0.875rem;">Enabled</label>
-                    </div>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 6: INTEGRATIONS                                                     -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div x-show="activeTab === 'integrations'" x-transition:enter class="ff-tab-enter">
 
-                    <?php elseif (in_array($vtype, ['integer', 'decimal'], true)): ?>
-                    <input type="number"
-                           id="<?= e($key) ?>"
-                           name="<?= e($key) ?>"
-                           class="form-control"
-                           value="<?= e($val) ?>"
-                           step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
-                           <?= !$canEdit ? 'readonly' : '' ?>>
+<?php foreach ($sensitiveGroups as $grp): ?>
+<?php if (empty($grouped[$grp])) continue; ?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        <?= e($groupLabels[$grp] ?? ucfirst($grp)) ?>
+        <span class="badge badge-warning" style="font-size:0.7rem;">Sensitive</span>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="<?= e($grp) ?>">
 
-                    <?php else: ?>
-                    <input type="text"
-                           id="<?= e($key) ?>"
-                           name="<?= e($key) ?>"
-                           class="form-control"
-                           value="<?= e($val) ?>"
-                           maxlength="500"
-                           autocomplete="off"
-                           <?= !$canEdit ? 'readonly' : '' ?>>
-                    <?php endif; ?>
-
-                    <?php if ($desc): ?>
-                    <p class="text-muted" style="font-size:0.8125rem;margin:4px 0 0;"><?= e($desc) ?></p>
-                    <?php endif; ?>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
+            <?php foreach ($grouped[$grp] as $setting): ?>
+            <?php
+            $key   = $setting['key'];
+            $val   = $setting['value'] ?? '';
+            $vtype = $setting['value_type'];
+            $label = $setting['label'] ?? $key;
+            $desc  = $setting['description'] ?? null;
+            ?>
+            <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
+                <?php if ($vtype === 'boolean'): ?>
+                <div class="form-check">
+                    <input type="checkbox" id="<?= e($key) ?>" name="<?= e($key) ?>" value="1"
+                           <?= $val === '1' ? 'checked' : '' ?> <?= !$canEdit ? 'disabled' : '' ?>>
+                    <label for="<?= e($key) ?>" style="margin-left:6px;font-size:0.875rem;">Enabled</label>
                 </div>
-                <?php endforeach; ?>
-
-                <?php if ($canEdit): ?>
-                <div style="padding-top:16px;border-top:1px solid var(--border-default);">
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        Save <?= e($groupLabels[$grp] ?? ucfirst($grp)) ?> Settings
-                    </button>
-                </div>
+                <?php elseif (in_array($vtype, ['integer', 'decimal'], true)): ?>
+                <input type="number" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                       value="<?= e($val) ?>" step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
+                       min="0" <?= !$canEdit ? 'readonly' : '' ?>>
+                <?php else: ?>
+                <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                       value="<?= e($val) ?>" maxlength="500" autocomplete="off" <?= !$canEdit ? 'readonly' : '' ?>>
                 <?php endif; ?>
-            </form>
+                <?php if ($desc): ?>
+                <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;"><?= e($desc) ?></p>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+            </div>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save <?= e($groupLabels[$grp] ?? ucfirst($grp)) ?> Settings</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+<?php endforeach; ?>
+
+<?php if (empty($grouped['gps']) && empty($grouped['ai'])): ?>
+<div class="card">
+    <div class="card-body" style="text-align:center;padding:40px;color:var(--text-muted);">
+        No integration settings configured.
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- ── Samsara Connection Status ──────────────────────────────────────── -->
+<?php if ($isSuperAdmin): ?>
+<div class="card" style="margin-bottom:20px;" x-data="FF_SamsaraTest()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Samsara Connection
+        <span class="badge badge-info" style="font-size:0.7rem;">GPS</span>
+    </div>
+    <div class="card-body">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start;">
+            <div>
+                <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 12px;">
+                    Test your Samsara API connection to verify credentials and access. The test makes a
+                    single API call to list vehicles and confirms authentication is working.
+                </p>
+
+                <!-- Connection status display -->
+                <template x-if="tested">
+                    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:6px;font-size:0.875rem;"
+                         :style="connected
+                             ? 'background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);'
+                             : 'background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.2);'">
+                        <span x-show="connected" style="color:var(--color-success);font-size:1.1rem;">&#10003;</span>
+                        <span x-show="!connected" style="color:var(--color-danger);font-size:1.1rem;">&#10007;</span>
+                        <span x-text="message" :style="connected ? 'color:var(--color-success);' : 'color:var(--color-danger);'"></span>
+                    </div>
+                </template>
+
+                <!-- Details (when connected) -->
+                <template x-if="tested && connected && details.vehicles_found">
+                    <div style="margin-top:8px;font-size:0.8125rem;color:var(--text-muted);">
+                        Vehicles found: <span class="font-mono" x-text="details.vehicles_found"></span>
+                        <template x-if="details.org_id">
+                            &nbsp;·&nbsp;Org ID: <span class="font-mono" x-text="details.org_id"></span>
+                        </template>
+                    </div>
+                </template>
+            </div>
+
+            <button class="btn btn-secondary btn-sm" @click="test()" :disabled="testing" style="white-space:nowrap;">
+                <span x-show="!testing">Test Connection</span>
+                <span x-show="testing" x-cloak>Testing…</span>
+            </button>
+        </div>
+
+        <!-- GPS Fleet Overview -->
+        <?php
+        $gpsUnitCount = db_count(
+            "SELECT COUNT(*) FROM equipment_units WHERE deleted_at IS NULL AND tracking_provider = 'samsara' AND gps_device_id IS NOT NULL AND gps_device_id != ''"
+        );
+        $totalUnits = db_count("SELECT COUNT(*) FROM equipment_units WHERE deleted_at IS NULL");
+        $lastGpsSync = db_row(
+            "SELECT created_at FROM audit_log WHERE module = 'cron' AND entity_label LIKE '%gps_sync%' ORDER BY created_at DESC LIMIT 1"
+        );
+        ?>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default);display:flex;gap:20px;flex-wrap:wrap;">
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">GPS-Equipped Units</div>
+                <div class="font-mono" style="font-size:1rem;font-weight:600;">
+                    <?= e((string)$gpsUnitCount) ?> <span style="font-weight:400;color:var(--text-muted);font-size:0.8125rem;">/ <?= e((string)$totalUnits) ?></span>
+                </div>
+            </div>
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Last GPS Sync (Cron)</div>
+                <div style="font-size:0.875rem;">
+                    <?= $lastGpsSync ? e(format_datetime($lastGpsSync['created_at'])) : '<span style="color:var(--text-muted);">Never</span>' ?>
+                </div>
+            </div>
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Tracking Page</div>
+                <a href="<?= base_url('tracking') ?>" style="font-size:0.875rem;">Open Fleet Map →</a>
+            </div>
         </div>
     </div>
-    <?php endforeach; ?>
+</div>
 
-    </div><!-- /details inner -->
-</details>
+<script>
+function FF_SamsaraTest() {
+    return {
+        testing:   false,
+        tested:    false,
+        connected: false,
+        message:   '',
+        details:   {},
+
+        async test() {
+            this.testing = true;
+            this.tested = false;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/gps/test-connection') ?>');
+                if (r.success) {
+                    this.connected = r.data.connected;
+                    this.message   = r.data.message;
+                    this.details   = r.data.details || {};
+                } else {
+                    this.connected = false;
+                    this.message   = r.error?.message || 'Test request failed.';
+                }
+            } catch(e) {
+                this.connected = false;
+                this.message   = 'Network error. Could not reach the server.';
+            }
+            this.tested = true;
+            this.testing = false;
+        },
+    };
+}
+</script>
+
+<!-- ── Anthropic AI Connection Status ────────────────────────────────────── -->
+<div class="card" style="margin-bottom:20px;" x-data="FF_AiTest()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Anthropic AI Connection
+        <span class="badge badge-info" style="font-size:0.7rem;">Claude</span>
+    </div>
+    <div class="card-body">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start;">
+            <div>
+                <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 12px;">
+                    Test your Anthropic API connection to verify credentials are working.
+                    The test sends a minimal request to the Claude API.
+                </p>
+
+                <!-- Connection status display -->
+                <template x-if="tested">
+                    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:6px;font-size:0.875rem;"
+                         :style="connected
+                             ? 'background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);'
+                             : 'background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.2);'">
+                        <span x-show="connected" style="color:var(--color-success);font-size:1.1rem;">&#10003;</span>
+                        <span x-show="!connected" style="color:var(--color-danger);font-size:1.1rem;">&#10007;</span>
+                        <span x-text="message" :style="connected ? 'color:var(--color-success);' : 'color:var(--color-danger);'"></span>
+                    </div>
+                </template>
+
+                <template x-if="tested && connected && details.model">
+                    <div style="margin-top:8px;font-size:0.8125rem;color:var(--text-muted);">
+                        Model: <span class="font-mono" x-text="details.model"></span>
+                        <template x-if="details.tokens">
+                            &nbsp;&middot;&nbsp;Test tokens: <span class="font-mono" x-text="details.tokens"></span>
+                        </template>
+                    </div>
+                </template>
+            </div>
+
+            <button class="btn btn-secondary btn-sm" @click="test()" :disabled="testing" style="white-space:nowrap;">
+                <span x-show="!testing">Test Connection</span>
+                <span x-show="testing" x-cloak>Testing&hellip;</span>
+            </button>
+        </div>
+
+        <!-- AI Usage Overview -->
+        <?php
+        $aiUsageToday = db_row(
+            "SELECT COALESCE(SUM(total_tokens), 0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd), 0) AS cost
+             FROM ai_query_log WHERE DATE(created_at) = CURDATE()"
+        );
+        $aiDailyLimit = (int) settings_get('ai.daily_token_limit', 500000);
+        $aiModel = settings_get('ai.model', 'claude-sonnet-4-20250514');
+        ?>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default);display:flex;gap:20px;flex-wrap:wrap;">
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Today's Usage</div>
+                <div class="font-mono" style="font-size:1rem;font-weight:600;">
+                    <?= e(number_format((int) ($aiUsageToday['tokens'] ?? 0))) ?>
+                    <span style="font-weight:400;color:var(--text-muted);font-size:0.8125rem;">/ <?= e(number_format($aiDailyLimit)) ?></span>
+                </div>
+            </div>
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Requests Today</div>
+                <div class="font-mono" style="font-size:1rem;font-weight:600;">
+                    <?= e((string) ($aiUsageToday['requests'] ?? 0)) ?>
+                </div>
+            </div>
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Model</div>
+                <div style="font-size:0.875rem;" class="font-mono">
+                    <?= e((string) $aiModel) ?>
+                </div>
+            </div>
+            <div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">AI Chat</div>
+                <a href="<?= base_url('ai') ?>" style="font-size:0.875rem;">Open AI Assistant &rarr;</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function FF_AiTest() {
+    return {
+        testing:   false,
+        tested:    false,
+        connected: false,
+        message:   '',
+        details:   {},
+
+        async test() {
+            this.testing = true;
+            this.tested = false;
+            try {
+                // WHY: FF_Api.post() returns raw JSON — no wrapper envelope.
+                // The test-connection endpoint echoes {success, message, details} directly.
+                const r = await FF_Api.post('<?= base_url('api/v1/ai/test-connection') ?>');
+                this.connected = r.success === true;
+                this.message   = r.message || (r.success ? 'Connected.' : 'Test failed.');
+                this.details   = r.details || {};
+            } catch(e) {
+                this.connected = false;
+                this.message   = 'Network error. Could not reach the server.';
+            }
+            this.tested = true;
+            this.testing = false;
+        },
+    };
+}
+</script>
 <?php endif; ?>
+
+</div><!-- /integrations tab -->
+
+</div><!-- /x-data root -->
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

@@ -98,8 +98,9 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-group">
                     <label class="form-label" for="description">Description</label>
                     <textarea id="description" class="form-control"
-                              x-model="form.description" rows="2" maxlength="5000"
+                              x-model="form.description" rows="2" maxlength="2000"
                               placeholder="Optional description shown on template detail."></textarea>
+                    <div class="form-hint" style="text-align:right;" x-text="(form.description || '').length + ' / 2000'"></div>
                 </div>
 
             </div>

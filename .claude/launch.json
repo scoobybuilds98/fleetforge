@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fleetforge",
+      "runtimeExecutable": "php",
+      "runtimeArgs": ["-S", "localhost:8899", "-t", "public", "public/index.php"],
+      "port": 8899
+    }
+  ]
+}

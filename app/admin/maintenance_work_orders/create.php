@@ -157,8 +157,10 @@ require_once FF_ROOT . '/includes/header.php';
                 <textarea id="description"
                           class="form-control"
                           rows="3"
+                          maxlength="2000"
                           x-model="form.description"
                           placeholder="Describe the work to be performed…"></textarea>
+                <div class="form-hint" style="text-align:right;" x-text="(form.description || '').length + ' / 2000'"></div>
             </div>
         </div>
 
@@ -217,8 +219,10 @@ require_once FF_ROOT . '/includes/header.php';
                 <textarea id="notes"
                           class="form-control"
                           rows="2"
+                          maxlength="2000"
                           x-model="form.notes"
                           placeholder="Instructions for the vendor or technician…"></textarea>
+                <div class="form-hint" style="text-align:right;" x-text="(form.notes || '').length + ' / 2000'"></div>
             </div>
 
             <div class="form-group" style="margin-top:12px;">
@@ -226,8 +230,10 @@ require_once FF_ROOT . '/includes/header.php';
                 <textarea id="internal_notes"
                           class="form-control"
                           rows="2"
+                          maxlength="2000"
                           x-model="form.internal_notes"
                           placeholder="Internal notes not shared with vendor…"></textarea>
+                <div class="form-hint" style="text-align:right;" x-text="(form.internal_notes || '').length + ' / 2000'"></div>
             </div>
         </div>
 

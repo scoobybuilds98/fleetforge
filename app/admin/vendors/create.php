@@ -95,7 +95,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <input type="email" class="form-control"
                        x-model="form.email"
                        placeholder="vendor@example.com"
-                       maxlength="255">
+                       maxlength="255"
+                       @blur="if(form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) error = 'Invalid email format: ' + form.email; else if(error && error.startsWith('Invalid email')) error = null;">
             </div>
         </div>
 
@@ -205,7 +206,9 @@ require_once FF_ROOT . '/includes/header.php';
             <label class="form-label">Notes</label>
             <textarea class="form-control" rows="4"
                       x-model="form.notes"
+                      maxlength="2000"
                       placeholder="Internal notes, access instructions, etc."></textarea>
+            <div class="form-hint" style="text-align:right;" x-text="(form.notes || '').length + ' / 2000'"></div>
         </div>
 
         <!-- ── Submit ───────────────────────────────────────────────────── -->

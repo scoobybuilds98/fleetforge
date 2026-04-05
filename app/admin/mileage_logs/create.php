@@ -141,7 +141,9 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                 <label class="form-label" for="notes">Notes <span style="color:var(--text-secondary);font-weight:400;">(optional)</span></label>
                 <textarea class="form-control" id="notes" name="notes"
                           rows="3" maxlength="1000"
+                          oninput="document.getElementById('notes-count').textContent=this.value.length+' / 1000'"
                           placeholder="e.g. Reading taken at yard inspection"></textarea>
+                <div class="form-hint" style="text-align:right;" id="notes-count">0 / 1000</div>
             </div>
 
             <!-- Submit -->

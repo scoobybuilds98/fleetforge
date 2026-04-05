@@ -107,6 +107,15 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
+<!-- ── AI Summary Card ──────────────────────────────────────── -->
+<?php
+$aiSummaryEntityType = 'lease';
+$aiSummaryEntityId   = $lease['id'];
+$aiSummaryType       = 'lease_summary';
+$aiSummaryTitle      = 'AI Lease Summary';
+include FF_ROOT . '/includes/partials/ai-summary-card.php';
+?>
+
 <!-- ============================================================
      STATS ROW — server-rendered so tiles are always visible
      across all tabs, not just Overview.

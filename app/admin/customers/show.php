@@ -126,6 +126,15 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
+<!-- ── AI Summary Card ──────────────────────────────────────── -->
+<?php
+$aiSummaryEntityType = 'customer';
+$aiSummaryEntityId   = $customer['id'];
+$aiSummaryType       = 'customer_insights';
+$aiSummaryTitle      = 'AI Customer Insights';
+include FF_ROOT . '/includes/partials/ai-summary-card.php';
+?>
+
 <!-- ============================================================
      STATS ROW — 4 quick-stat tiles
      ============================================================ -->

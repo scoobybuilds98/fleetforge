@@ -208,6 +208,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <textarea class="form-input" rows="3"
                               x-model="form.notes" maxlength="2000"
                               placeholder="Optional note on this payment…"></textarea>
+                    <div style="font-size:0.75rem;color:var(--text-secondary);text-align:right;margin-top:2px;" x-text="(form.notes || '').length + ' / 2000'"></div>
                 </div>
 
                 <div class="form-group">
@@ -215,6 +216,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <textarea class="form-input" rows="2"
                               x-model="form.internal_notes" maxlength="2000"
                               placeholder="Internal reference, dispute notes, etc."></textarea>
+                    <div style="font-size:0.75rem;color:var(--text-secondary);text-align:right;margin-top:2px;" x-text="(form.internal_notes || '').length + ' / 2000'"></div>
                 </div>
 
             </div><!-- /card-body -->

@@ -86,7 +86,8 @@ if (!$unit) {
 // -----------------------------------------------------------------------
 $vendorId         = clean_int($body['vendor_id'] ?? null);
 $description      = clean_string($body['description'] ?? null, 5000);
-$mileageAtService = clean_int($body['mileage_at_service'] ?? null);
+// WHY: mileage must be >= 0 — a negative odometer reading is nonsensical
+$mileageAtService = clean_non_negative_int($body['mileage_at_service'] ?? null);
 $scheduledDate    = clean_date($body['scheduled_date'] ?? null);
 $notes            = clean_string($body['notes'] ?? null, 5000);
 $internalNotes    = clean_string($body['internal_notes'] ?? null, 5000);

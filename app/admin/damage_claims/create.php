@@ -182,10 +182,12 @@ require_once FF_ROOT . '/includes/header.php';
                 <textarea id="description"
                           class="form-control"
                           rows="4"
+                          maxlength="2000"
                           placeholder="Describe the damage in detail…"
                           x-model="form.description"
                           :class="{ 'is-invalid': errors.description }"
                           required></textarea>
+                <div class="form-hint" style="text-align:right;" x-text="(form.description || '').length + ' / 2000'"></div>
                 <div class="form-error" x-show="errors.description" x-text="errors.description"></div>
             </div>
 
@@ -229,8 +231,10 @@ require_once FF_ROOT . '/includes/header.php';
                 <textarea id="notes"
                           class="form-control"
                           rows="3"
+                          maxlength="2000"
                           placeholder="Internal notes visible only to staff…"
                           x-model="form.notes"></textarea>
+                <div class="form-hint" style="text-align:right;" x-text="(form.notes || '').length + ' / 2000'"></div>
             </div>
 
             <!-- Submit row -->

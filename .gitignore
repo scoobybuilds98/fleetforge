@@ -56,3 +56,4 @@ coverage/
 *.orig
 *.swp
 *.swo
+claude-fleetforge-api-key

@@ -35,6 +35,7 @@ $unit = db_row(
     "SELECT u.id, u.unit_number, u.status, u.year, u.health_score,
             u.cvi_expiry, u.registration_expiry, u.mvi_expiry, u.insurance_expiry,
             u.yard_location, u.mileage, u.vin, u.updated_at,
+            u.gps_device_id, u.tracking_provider, u.samsara_vehicle_url,
             t.name AS template_name, t.category AS template_category
        FROM equipment_units u
        JOIN equipment_templates t ON t.id = u.template_id
@@ -114,6 +115,15 @@ function daysUntil(?string $date): ?int {
     </div>
 </div>
 
+<!-- ── AI Summary Card ──────────────────────────────────────── -->
+<?php
+$aiSummaryEntityType = 'equipment_unit';
+$aiSummaryEntityId   = $unit['id'];
+$aiSummaryType       = 'unit_analysis';
+$aiSummaryTitle      = 'AI Unit Analysis';
+include FF_ROOT . '/includes/partials/ai-summary-card.php';
+?>
+
 <!-- ============================================================
      Hero stat row
      ============================================================ -->
@@ -183,6 +193,7 @@ function daysUntil(?string $date): ?int {
             ['key' => 'maintenance',    'label' => 'Maintenance'],
             ['key' => 'inspections',    'label' => 'Inspections'],
             ['key' => 'documents',      'label' => 'Documents'],
+            ['key' => 'tracking',       'label' => 'GPS Tracking'],
         ];
         foreach ($tabs as $tab):
         ?>
@@ -1009,7 +1020,146 @@ function daysUntil(?string $date): ?int {
 
     </div>
 
+    <!-- ── TAB: GPS Tracking ────────────────────────────────────── -->
+    <div x-show="activeTab === 'tracking'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+
+        <!-- No GPS device configured -->
+        <template x-if="!loading && unit && !unit.gps_device_id">
+            <div class="card">
+                <div class="card-body" style="text-align:center;padding:48px 20px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" style="width:48px;height:48px;color:var(--text-muted);margin-bottom:12px;">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/>
+                    </svg>
+                    <h3 style="margin:0 0 8px;font-size:1rem;font-weight:600;color:var(--text-primary);">No GPS Tracking Configured</h3>
+                    <p style="margin:0 0 16px;font-size:0.875rem;color:var(--text-secondary);max-width:400px;margin-left:auto;margin-right:auto;">
+                        This unit doesn't have a Samsara GPS device assigned. Add a GPS Device ID in the unit settings to enable real-time tracking.
+                    </p>
+                    <?php if (can('equipment', 'edit')): ?>
+                    <a href="<?= base_url('equipment/edit') ?>?id=<?= $unitId ?>" class="btn btn-primary btn-sm">Configure GPS Device</a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </template>
+
+        <!-- GPS configured — loading state -->
+        <template x-if="unit?.gps_device_id && trackingLoading">
+            <div class="card">
+                <div class="card-body" style="padding:2rem;text-align:center;color:var(--text-secondary);">
+                    Loading GPS data…
+                    <div class="skeleton skeleton-row" style="margin-top:12px;"></div>
+                    <div class="skeleton skeleton-row" style="margin-top:8px;"></div>
+                </div>
+            </div>
+        </template>
+
+        <!-- GPS configured — data loaded -->
+        <template x-if="unit?.gps_device_id && !trackingLoading && trackingLoaded">
+            <div>
+                <!-- No GPS signal warning -->
+                <template x-if="!trackingData?.location">
+                    <div class="toast toast-warning" style="position:relative;margin-bottom:16px;animation:none;">
+                        <span class="toast-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg></span>
+                        <div class="toast-body">
+                            <div class="toast-message">GPS data unavailable. The device may be offline or Samsara API is not configured.</div>
+                        </div>
+                    </div>
+                </template>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <!-- Mini Map -->
+                    <div class="card spec-card" style="margin-bottom:0;">
+                        <div class="card-header" style="padding:12px 16px;">
+                            <div class="card-title">Current Location</div>
+                        </div>
+                        <div class="card-body" style="padding:0;">
+                            <div id="unit-tracking-map" style="height:320px;background:var(--bg-page);">
+                                <template x-if="!trackingData?.location">
+                                    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.875rem;">
+                                        No location data available
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GPS Details -->
+                    <div class="card spec-card" style="margin-bottom:0;">
+                        <div class="card-header" style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+                            <div class="card-title">GPS Details</div>
+                            <button @click="refreshTracking()" class="btn btn-ghost btn-xs" style="color:#fff;opacity:0.8;">Refresh</button>
+                        </div>
+                        <div class="card-body" style="padding:0;">
+                            <table class="spec-table">
+                                <tr>
+                                    <td class="spec-label">Address</td>
+                                    <td x-text="trackingData?.location?.address || '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Latitude</td>
+                                    <td class="font-mono" x-text="trackingData?.location?.latitude?.toFixed(6) || '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Longitude</td>
+                                    <td class="font-mono" x-text="trackingData?.location?.longitude?.toFixed(6) || '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Speed</td>
+                                    <td class="font-mono" x-text="trackingData?.location?.speed !== null && trackingData?.location?.speed !== undefined ? Math.round(trackingData.location.speed) + ' mph' : '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Heading</td>
+                                    <td class="font-mono" x-text="trackingData?.location?.heading !== null && trackingData?.location?.heading !== undefined ? Math.round(trackingData.location.heading) + '°' : '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">GPS Odometer</td>
+                                    <td class="font-mono" x-text="trackingData?.location?.odometer_km ? trackingData.location.odometer_km.toLocaleString() + ' km' : '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Last GPS Update</td>
+                                    <td x-text="trackingData?.location?.time ? new Date(trackingData.location.time).toLocaleString() : '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Samsara ID</td>
+                                    <td class="font-mono" x-text="unit?.gps_device_id || '—'"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Provider</td>
+                                    <td style="text-transform:capitalize;" x-text="unit?.tracking_provider || 'None'"></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions bar -->
+                <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <a href="<?= base_url('tracking') ?>" class="btn btn-secondary btn-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z"/>
+                        </svg>
+                        View on Fleet Map
+                    </a>
+                    <?php if ($unit['samsara_vehicle_url']): ?>
+                    <a href="<?= e($unit['samsara_vehicle_url']) ?>" target="_blank" class="btn btn-ghost btn-sm">
+                        Open in Samsara Dashboard →
+                    </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </template>
+
+    </div>
+
 </div><!-- /x-data -->
+
+<!-- WHY: Leaflet CSS/JS loaded here (after content) for unit GPS tracking tab.
+     Only ~40KB JS + ~12KB CSS from CDN (heavily cached). Loaded unconditionally
+     because the tab may be opened at any time via direct URL param. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
 <style>
 /* Unit spec cards — elevated card style for visual separation from page bg */
@@ -1100,6 +1250,12 @@ function FF_UnitDetail() {
         uploadModal:  { open: false, docType: '', docLabel: '', file: null,
                         expiryDate: '', uploading: false, error: '' },
 
+        // ── GPS Tracking ──────────────────────────────────────────
+        trackingData:    null,
+        trackingLoading: false,
+        trackingLoaded:  false,
+        trackingMap:     null,
+
         async init() {
             await this.loadUnit();
         },
@@ -1119,6 +1275,7 @@ function FF_UnitDetail() {
                 if (tab === 'maintenance'   && !this.workOrdersLoaded)       this.loadWorkOrders();
                 if (tab === 'inspections'   && !this.inspectionsLoaded)      this.loadInspections();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
+                if (tab === 'tracking'      && !this.trackingLoaded)         this.loadTracking();
             });
         },
 
@@ -1396,6 +1553,73 @@ function FF_UnitDetail() {
             } else {
                 alert(r.message || 'Could not remove document.');
             }
+        },
+
+        // ── GPS Tracking tab methods ─────────────────────────────
+        async loadTracking() {
+            this.trackingLoading = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/gps/locations') ?>?unit_id=<?= $unitId ?>');
+                if (r.success && r.data.units?.length > 0) {
+                    this.trackingData = r.data.units[0];
+                } else {
+                    this.trackingData = { gps_device_id: this.unit?.gps_device_id, location: null };
+                }
+                this.trackingLoaded = true;
+                // WHY: $nextTick ensures the DOM element exists before Leaflet attaches
+                this.$nextTick(() => this.initTrackingMap());
+            } catch(e) {
+                this.trackingData = { gps_device_id: this.unit?.gps_device_id, location: null };
+                this.trackingLoaded = true;
+            }
+            this.trackingLoading = false;
+        },
+
+        refreshTracking() {
+            this.trackingLoaded = false;
+            this.trackingData = null;
+            if (this.trackingMap) {
+                this.trackingMap.remove();
+                this.trackingMap = null;
+            }
+            this.loadTracking();
+        },
+
+        initTrackingMap() {
+            if (!this.trackingData?.location || typeof L === 'undefined') return;
+
+            const el = document.getElementById('unit-tracking-map');
+            if (!el) return;
+
+            const lat = this.trackingData.location.latitude;
+            const lng = this.trackingData.location.longitude;
+            if (!lat || !lng) return;
+
+            // WHY: Remove previous map instance to avoid Leaflet "already initialized" error
+            if (this.trackingMap) {
+                this.trackingMap.remove();
+                this.trackingMap = null;
+            }
+
+            this.trackingMap = L.map('unit-tracking-map').setView([lat, lng], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap',
+                maxZoom: 19,
+            }).addTo(this.trackingMap);
+
+            const unitNum = this.unit?.unit_number || '';
+            const addr = this.trackingData.location.address || 'No address available';
+            const speed = this.trackingData.location.speed;
+            let popupHtml = `<div style="font-family:DM Sans,sans-serif;"><strong>${unitNum}</strong><br><span style="font-size:12px;">${addr}</span>`;
+            if (speed !== null && speed !== undefined) {
+                popupHtml += `<br><span style="font-size:11px;">Speed: ${Math.round(speed)} mph</span>`;
+            }
+            popupHtml += '</div>';
+
+            L.marker([lat, lng])
+                .addTo(this.trackingMap)
+                .bindPopup(popupHtml)
+                .openPopup();
         },
 
         statusBadgeClass(status) {

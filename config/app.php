@@ -104,6 +104,13 @@ define('FF_DB_USER', (string) env('DB_USERNAME', ''));
 define('FF_DB_PASS', (string) env('DB_PASSWORD', ''));
 
 // ============================================================
+// Anthropic AI constants — consumed by lib/AI/ClaudeClient.php
+// ============================================================
+define('AI_ENABLED',           (bool)   env('AI_ENABLED',           false));
+define('AI_ANTHROPIC_API_KEY', (string) env('AI_ANTHROPIC_API_KEY', ''));
+define('AI_DAILY_TOKEN_LIMIT', (int)    env('AI_DAILY_TOKEN_LIMIT', 500000));
+
+// ============================================================
 // PHP runtime configuration
 // ============================================================
 date_default_timezone_set(APP_TIMEZONE);

@@ -64,6 +64,7 @@ require_once FF_ROOT . '/includes/header.php';
                                x-model="form.company_name"
                                :class="{ 'is-invalid': errors.company_name }"
                                maxlength="255" autocomplete="organization" required>
+                        <div class="form-hint" style="text-align:right;" x-text="(form.company_name || '').length + ' / 255'"></div>
                         <div class="form-error" x-show="errors.company_name"
                              x-text="errors.company_name"></div>
                     </div>
@@ -80,7 +81,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="email" id="email" class="form-control"
                                x-model="form.email"
                                :class="{ 'is-invalid': errors.email }"
-                               maxlength="255" autocomplete="email">
+                               maxlength="255" autocomplete="email"
+                               @blur="if(form.email && !isValidEmail(form.email)) errors.email = 'Invalid email format.'; else if(errors.email === 'Invalid email format.') errors.email = '';">
                         <div class="form-error" x-show="errors.email"
                              x-text="errors.email"></div>
                     </div>
@@ -264,7 +266,9 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label" for="billing_email">Billing Email</label>
                         <input type="email" id="billing_email" class="form-control"
-                               x-model="form.billing_email" maxlength="255">
+                               x-model="form.billing_email" maxlength="255"
+                               @blur="if(form.billing_email && !isValidEmail(form.billing_email)) errors.billing_email = 'Invalid email format.'; else errors.billing_email = '';">
+                        <div class="form-error" x-show="errors.billing_email" x-text="errors.billing_email"></div>
                     </div>
 
                     <div class="form-group">
@@ -276,7 +280,9 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label" for="invoice_email">Invoice Email</label>
                         <input type="email" id="invoice_email" class="form-control"
-                               x-model="form.invoice_email" maxlength="255">
+                               x-model="form.invoice_email" maxlength="255"
+                               @blur="if(form.invoice_email && !isValidEmail(form.invoice_email)) errors.invoice_email = 'Invalid email format.'; else errors.invoice_email = '';">
+                        <div class="form-error" x-show="errors.invoice_email" x-text="errors.invoice_email"></div>
                     </div>
 
                     <div class="form-group">
@@ -412,8 +418,9 @@ require_once FF_ROOT . '/includes/header.php';
                 <textarea class="form-control"
                           x-model="form.notes"
                           rows="4"
-                          maxlength="10000"
+                          maxlength="2000"
                           placeholder="Add any initial notes about this customer…"></textarea>
+                <div class="form-hint" style="text-align:right;" x-text="(form.notes || '').length + ' / 2000'"></div>
             </div>
         </div>
 
@@ -495,6 +502,27 @@ function FF_CustomerForm() {
 
         init() {},
 
+        isValidEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        },
+
+        validate() {
+            this.errors = {};
+            if (!this.form.company_name.trim()) {
+                this.errors.company_name = 'Company name is required.';
+            }
+            if (this.form.email && !this.isValidEmail(this.form.email)) {
+                this.errors.email = 'Invalid email format.';
+            }
+            if (this.form.billing_email && !this.isValidEmail(this.form.billing_email)) {
+                this.errors.billing_email = 'Invalid email format.';
+            }
+            if (this.form.invoice_email && !this.isValidEmail(this.form.invoice_email)) {
+                this.errors.invoice_email = 'Invalid email format.';
+            }
+            return Object.keys(this.errors).length === 0;
+        },
+
         toggleTag(tag) {
             const idx = this.form.tags.indexOf(tag);
             if (idx === -1) this.form.tags.push(tag);
@@ -502,8 +530,12 @@ function FF_CustomerForm() {
         },
 
         async submit() {
-            this.submitting  = true;
             this.submitError = null;
+            if (!this.validate()) {
+                this.submitError = 'Please correct the errors above.';
+                return;
+            }
+            this.submitting  = true;
             this.errors      = {};
 
             // Strip empty strings so optional fields are omitted from the payload

@@ -80,12 +80,16 @@ if (isset($body['rating']) && $body['rating'] !== null && $body['rating'] !== ''
     }
 }
 
-// hourly_rate: D16 bcmath string
+// hourly_rate: D16 bcmath string; must be >= 0
 $hourlyRate = null;
 if (isset($body['hourly_rate']) && $body['hourly_rate'] !== null && $body['hourly_rate'] !== '') {
     $hourlyRate = clean_decimal($body['hourly_rate']);
     if ($hourlyRate === null) {
         json_error('VALIDATION_ERROR', 'hourly_rate must be a valid decimal number.', 422);
+    }
+    // WHY: a negative hourly rate is nonsensical — reject it server-side
+    if (bccomp($hourlyRate, '0', 6) < 0) {
+        json_error('VALIDATION_ERROR', 'hourly_rate must be a non-negative number.', 422);
     }
 }
 

@@ -49,6 +49,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'Fleet Tracking',
+        'icon'   => 'map',
+        'url'    => '/tracking',
+        'module' => 'equipment',  // WHY: same permission as equipment — anyone who can view equipment can track
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Leases',
         'icon'   => 'document-text',
         'url'    => '/leases',
@@ -152,6 +159,13 @@ return [
         'icon'   => 'chart-pie',
         'url'    => '/analytics',
         'module' => 'analytics',
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'AI Assistant',
+        'icon'   => 'sparkles',
+        'url'    => '/ai',
+        'module' => 'ai',
         'badge'  => null,
     ],
 

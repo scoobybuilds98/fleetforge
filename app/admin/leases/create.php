@@ -332,8 +332,9 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label" for="rate_notes">Rate Notes</label>
                         <input type="text" id="rate_notes" class="form-control"
-                               x-model="form.rate_notes" maxlength="5000"
+                               x-model="form.rate_notes" maxlength="255"
                                placeholder="e.g. Special negotiated rates per agreement">
+                        <div class="form-hint" style="text-align:right;" x-text="(form.rate_notes || '').length + ' / 255'"></div>
                     </div>
                 </div>
 
@@ -425,14 +426,16 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-group">
                     <label class="form-label" for="notes">Notes</label>
                     <textarea id="notes" class="form-control"
-                              x-model="form.notes" rows="2" maxlength="5000"
+                              x-model="form.notes" rows="2" maxlength="2000"
                               placeholder="Visible to customer in portal"></textarea>
+                    <div class="form-hint" style="text-align:right;" x-text="(form.notes || '').length + ' / 2000'"></div>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="internal_notes">Internal Notes</label>
                     <textarea id="internal_notes" class="form-control"
-                              x-model="form.internal_notes" rows="2" maxlength="5000"
+                              x-model="form.internal_notes" rows="2" maxlength="2000"
                               placeholder="Internal use only — not shown to customer"></textarea>
+                    <div class="form-hint" style="text-align:right;" x-text="(form.internal_notes || '').length + ' / 2000'"></div>
                 </div>
             </div>
         </div>

@@ -74,6 +74,7 @@ return [
         'users'         => $ALL,
         'settings'      => $ALL,
         'audit'         => $ALL,
+        'ai'            => $ALL,
         // Accounting modules (Phase 13+)
         'chart_of_accounts'  => $ALL,
         'journal_entries'    => $ALL,
@@ -105,6 +106,7 @@ return [
         'users'         => $V,
         'settings'      => $V,
         'audit'         => $V,
+        'ai'            => $VCE,
         // Accounting modules
         'chart_of_accounts'  => $V,
         'journal_entries'    => $V,
@@ -138,6 +140,7 @@ return [
         'users'         => $NONE,
         'settings'      => $NONE,
         'audit'         => $NONE,
+        'ai'            => $V,
         // Accounting modules — no access
         'chart_of_accounts'  => $NONE,
         'journal_entries'    => $NONE,
@@ -169,6 +172,7 @@ return [
         'users'         => $NONE,
         'settings'      => $NONE,
         'audit'         => $V,
+        'ai'            => $VCE,
         // Accounting modules
         'chart_of_accounts'  => $VCE,
         'journal_entries'    => $VCED,
@@ -200,6 +204,7 @@ return [
         'users'         => $NONE,
         'settings'      => $NONE,
         'audit'         => $V,
+        'ai'            => $V,
         // Accounting modules
         'chart_of_accounts'  => $V,
         'journal_entries'    => $V,
