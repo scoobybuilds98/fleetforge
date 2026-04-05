@@ -198,6 +198,29 @@
 ```
 Session S028 — Accounting Module
 
+DATE-1 — Date Field Hardening — complete.
+  Calendar icon (Heroicons, showPicker() + .click() fallback) added to
+  every type="date" input across all 11 create forms. Semantic min/max
+  constraints applied by field type:
+    • Lease start ≥ today; end/min-end :min=start_date (Alpine dynamic)
+    • Payment date ≤ today (no future payments)
+    • Equipment/inspection CVI/reg/MVI/insurance expiry ≥ today
+    • Inspection date ≤ today
+    • Rate effective-from ≥ today; effective-to :min=effective_from
+    • Invoice period-end :min=period_start
+    • Credit note expiry ≥ today
+    • Customer GST/PST exemption expiry ≥ today
+  11 files modified. All php -l clean.
+
+VALID-1 — Form Validation Hardening — complete.
+  min="0" on all numeric inputs (settings page generic renderer).
+  Server-side non-negative guards on mileage_at_service (work orders)
+  and hourly_rate (vendors). customers/create: added validate(),
+  isValidEmail(), email @blur on all 3 email fields, submit() gated.
+  vendors/create: email @blur. maxlength standardised (name≤255,
+  notes/desc≤2000) + character counts across 10 create forms.
+  12 files modified.
+
 S027 — Claude AI Integration — complete.
   5 AI features: Chat (SSE streaming + tool calling), Smart Summaries
   (cached, on entity pages), Document Analysis (PDF/image), Natural
@@ -248,6 +271,8 @@ S024 — Customer Portal (Phase 15) ✅ COMPLETE
 S025 — Settings Module Overhaul ✅ COMPLETE
 S026 — Samsara GPS Tracking ✅ COMPLETE
 S027 — Claude AI Integration ✅ COMPLETE
+VALID-1 — Form Validation Hardening ✅ COMPLETE
+DATE-1 — Date Field Hardening (calendar icons + min/max) ✅ COMPLETE
 
 S028+ — Accounting Module
 
