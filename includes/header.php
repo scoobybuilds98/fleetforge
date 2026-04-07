@@ -137,9 +137,20 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
 //    x-data is processed by Alpine.js (loaded in footer.php)
 // ============================================================
 ?>
-<div class="app-layout" x-data="{ sidebarOpen: window.innerWidth >= 1024 }" x-cloak>
+<div class="app-layout"
+     x-data="{ sidebarOpen: window.innerWidth >= 1024 }"
+     @keydown.escape.window="sidebarOpen = false"
+     x-cloak>
 
     <?php require_once __DIR__ . '/sidebar.php'; ?>
+
+    <!-- RESPONSIVE-1 mobile overlay — visible only when sidebar is open on mobile -->
+    <div class="sidebar-overlay"
+         :class="{ 'is-visible': sidebarOpen }"
+         x-show="sidebarOpen"
+         @click="sidebarOpen = false"
+         aria-hidden="true"
+         x-cloak></div>
 
     <div class="app-main" :class="{ 'sidebar-collapsed': !sidebarOpen }">
 

@@ -968,6 +968,48 @@ window.FF_ConfirmModal = function () {
 
 
 // ============================================================
+// RESPONSIVE-1 — ApexCharts global responsive patch
+//
+// Monkey-patches the ApexCharts constructor so every chart instance
+// automatically receives a `responsive` breakpoint that trims height,
+// moves legends to the bottom, and disables dataLabels on mobile.
+// Keeps page-level chart code untouched while guaranteeing mobile
+// behaviour across all dashboards.
+// ============================================================
+(function patchApexChartsForResponsive() {
+    if (typeof window === 'undefined' || typeof window.ApexCharts !== 'function') return;
+    if (window.ApexCharts.__ff_responsive_patched__) return;
+
+    const DEFAULT_RESPONSIVE = [{
+        breakpoint: 768,
+        options: {
+            chart: { height: 250 },
+            legend: { position: 'bottom' },
+            dataLabels: { enabled: false },
+        },
+    }];
+
+    const Original = window.ApexCharts;
+    function Patched(el, opts) {
+        try {
+            opts = opts || {};
+            const existing = Array.isArray(opts.responsive) ? opts.responsive.slice() : [];
+            const hasMobile = existing.some((r) => r && r.breakpoint && r.breakpoint <= 768);
+            if (!hasMobile) {
+                opts.responsive = existing.concat(DEFAULT_RESPONSIVE);
+            }
+        } catch (_e) { /* noop — never break chart rendering */ }
+        return new Original(el, opts);
+    }
+    Patched.prototype = Original.prototype;
+    // Copy static members (exec, initOnLoad, etc.)
+    Object.keys(Original).forEach((k) => { Patched[k] = Original[k]; });
+    Patched.__ff_responsive_patched__ = true;
+    window.ApexCharts = Patched;
+})();
+
+
+// ============================================================
 // 10. DOM-ready boot
 // ============================================================
 
@@ -1069,16 +1111,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function getSidebarOverlay() {
         if (!_sidebarOverlay) {
-            _sidebarOverlay = document.createElement('div');
-            _sidebarOverlay.className = 'sidebar-overlay';
-            document.body.appendChild(_sidebarOverlay);
+            // RESPONSIVE-1: prefer the static overlay rendered by header.php so
+            // we don't create a duplicate — fall back to dynamic creation for
+            // legacy pages that haven't been updated.
+            _sidebarOverlay = document.querySelector('.sidebar-overlay');
+            if (!_sidebarOverlay) {
+                _sidebarOverlay = document.createElement('div');
+                _sidebarOverlay.className = 'sidebar-overlay';
+                document.body.appendChild(_sidebarOverlay);
 
-            _sidebarOverlay.addEventListener('click', () => {
-                // Close sidebar by clicking overlay — we need to reach Alpine's
-                // sidebarOpen. The cleanest way is to click the close button or
-                // dispatch a custom event and let Alpine handle it.
-                document.querySelector('.topbar-menu-btn')?.click();
-            });
+                _sidebarOverlay.addEventListener('click', () => {
+                    // Close sidebar by clicking overlay — we need to reach Alpine's
+                    // sidebarOpen. The cleanest way is to click the close button or
+                    // dispatch a custom event and let Alpine handle it.
+                    document.querySelector('.topbar-menu-btn')?.click();
+                });
+            }
         }
         return _sidebarOverlay;
     }

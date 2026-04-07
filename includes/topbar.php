@@ -92,11 +92,22 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
          ================================================================ -->
     <div class="topbar-left">
 
+        <!-- Legacy hamburger (kept for backward compatibility; hidden on tablet
+             and mobile by RESPONSIVE-1 rules — replaced by .hamburger-btn). -->
         <button class="topbar-menu-btn btn-icon"
                 @click="sidebarOpen = !sidebarOpen"
                 aria-label="Toggle navigation menu"
                 aria-expanded="sidebarOpen"
                 aria-controls="ff-sidebar">
+            <?= heroicon('bars-3', 'nav-icon') ?>
+        </button>
+
+        <!-- RESPONSIVE-1 hamburger — visible on mobile (<768px) only, 44px tap target -->
+        <button class="hamburger-btn"
+                @click="sidebarOpen = !sidebarOpen"
+                :aria-expanded="sidebarOpen"
+                aria-controls="ff-sidebar"
+                aria-label="Open navigation menu">
             <?= heroicon('bars-3', 'nav-icon') ?>
         </button>
 

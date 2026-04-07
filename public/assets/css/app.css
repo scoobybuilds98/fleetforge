@@ -4675,3 +4675,398 @@ dl.detail-grid dd {
         display: block;
     }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE-1 — SESSION 2026-04-08
+   Tablet + mobile responsive rules and theme-toggle visibility fix.
+   STRICTLY ADDITIVE — does not modify any existing selectors.
+   Breakpoints:
+     Desktop : 1024px+  (unchanged)
+     Tablet  : 768..1023px  (sidebar collapses to icon rail)
+     Mobile  : ≤767px  (sidebar slides in, hamburger shown)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── FIX 1 — Theme toggle icon visibility ─────────────────────
+   Bordered pill with contrasting background so sun/moon icons
+   never blend into the topbar. Icon sized to 20×20 per spec.
+   WHY svg descendant selector: heroicon() is per-name cached so
+   the svg inside .topbar-theme-btn may inherit the sidebar's
+   .theme-icon class — we target svg directly to be class-agnostic
+   and never fight the existing sidebar-scoped display rules. */
+.topbar-theme-btn {
+    border: 1px solid var(--border-color-strong);
+    background-color: var(--bg-surface-2);
+    color: var(--text-primary);
+    min-width: 36px;
+    min-height: 36px;
+    /* WHY: skip background transition so the background recomputes
+       instantly from --bg-surface-2 on data-theme change. The inherited
+       .btn-icon transition otherwise caches the start value and the
+       button visually stays on the previous theme's surface tint. */
+    transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.topbar-theme-btn svg {
+    width: 20px !important;
+    height: 20px !important;
+    color: var(--text-primary);
+    stroke: currentColor;
+    stroke-width: 2;
+    display: block !important;
+}
+.topbar-theme-btn:hover {
+    border-color: var(--color-primary);
+    background-color: var(--bg-surface-hover);
+}
+.topbar-theme-btn:hover svg {
+    color: var(--color-primary);
+}
+[data-theme="light"] .topbar-theme-btn svg { color: var(--text-primary); }
+[data-theme="dark"]  .topbar-theme-btn svg { color: var(--text-primary); }
+
+/* ── FIX 2 — Shared utility classes (new, non-conflicting) ─── */
+
+/* KPI grid — auto columns that collapse gracefully */
+.kpi-grid,
+.stat-grid--4 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+}
+.stat-grid--3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+.stat-grid--2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+/* Form responsive grid */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+.form-group--full { grid-column: 1 / -1; }
+
+/* Table-responsive wrapper (additive — complements existing .table-wrapper) */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius-xl);
+}
+
+/* ── Hamburger button (mobile only) ─────────────────────────── */
+.hamburger-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.hamburger-btn:hover {
+    background: var(--bg-surface-hover);
+    border-color: var(--color-primary);
+}
+.hamburger-btn .nav-icon {
+    width: 22px;
+    height: 22px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TABLET — 768..1023px
+   Sidebar collapses to an always-visible 64px icon rail.
+   Overrides existing max-width:1023px rules via later source order.
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: var(--sidebar-width-collapsed);
+        height: 100%;
+        transform: translateX(0);
+        overflow: visible;
+    }
+    .sidebar .sidebar-brand-name,
+    .sidebar .nav-item-label,
+    .sidebar .nav-badge,
+    .sidebar .nav-section-label,
+    .sidebar .nav-group-arrow,
+    .sidebar .sidebar-user-info,
+    .sidebar .nav-children {
+        opacity: 0;
+        pointer-events: none;
+        max-width: 0;
+        visibility: hidden;
+    }
+    .sidebar .sidebar-brand {
+        justify-content: center;
+        padding: 0 8px;
+    }
+    .sidebar .sidebar-collapse-btn {
+        display: none;
+    }
+    .sidebar .nav-item {
+        justify-content: center;
+        padding: 10px 8px;
+    }
+    .sidebar .sidebar-user {
+        justify-content: center;
+    }
+    .sidebar .sidebar-user-actions {
+        flex-direction: column;
+    }
+
+    /* Main content sits to the right of the 64px rail */
+    .app-main {
+        margin-left: var(--sidebar-width-collapsed);
+    }
+
+    /* Hamburger hidden on tablet — rail is always visible */
+    .topbar-menu-btn,
+    .hamburger-btn {
+        display: none;
+    }
+
+    /* KPI + stat grids collapse to 2 columns */
+    .kpi-grid,
+    .stat-grid--4,
+    .stat-grid--3 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE — ≤767px
+   Sidebar hidden by default; slides in via hamburger toggle.
+   Overlay + body-no-scroll handled by Alpine state.
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+    /* Hamburger visible; hide desktop search bar */
+    .hamburger-btn {
+        display: inline-flex;
+    }
+    .topbar-search-btn {
+        display: none;
+    }
+    /* Keep existing .topbar-menu-btn logic too (inherited) */
+    .topbar {
+        padding: 0 12px;
+    }
+    .topbar-left {
+        gap: 6px;
+    }
+    .topbar-right {
+        gap: 4px;
+    }
+    .topbar-title {
+        font-size: 0.9375rem;
+    }
+    .topbar-home-btn {
+        display: none;
+    }
+
+    /* Sidebar overlay (new div injected from header.php) */
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: calc(var(--z-sidebar) - 1);
+    }
+    .sidebar-overlay.is-visible {
+        display: block;
+    }
+
+    /* KPI + stat grids collapse to single column */
+    .kpi-grid,
+    .stat-grid--4,
+    .stat-grid--3,
+    .stat-grid--2 {
+        grid-template-columns: 1fr;
+    }
+
+    /* Forms collapse to a single column */
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+    .form-group--full { grid-column: 1; }
+    .form-row,
+    .form-row-2,
+    .form-row-3,
+    .form-row-4 {
+        grid-template-columns: 1fr;
+    }
+
+    /* Form actions — stack, reverse, full width */
+    .form-actions {
+        flex-direction: column-reverse;
+        gap: 8px;
+        align-items: stretch;
+    }
+    .form-actions .btn {
+        width: 100%;
+    }
+
+    /* Page header — stack title above actions */
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    .page-header-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+    .page-header .btn,
+    .page-header-actions .btn {
+        width: 100%;
+    }
+
+    /* Modals — bottom-sheet style */
+    .modal-overlay {
+        align-items: flex-end;
+    }
+    .modal {
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        border-radius: 16px 16px 0 0;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    /* Tabs — horizontal scroll, hide scrollbar */
+    .tab-nav,
+    .tabs,
+    .tabs-list {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+    }
+    .tab-nav::-webkit-scrollbar,
+    .tabs::-webkit-scrollbar,
+    .tabs-list::-webkit-scrollbar { display: none; }
+    .tab-btn,
+    .tab-item,
+    .tab {
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    /* Filter bars — stack vertically */
+    .filter-bar,
+    .table-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .filter-bar select,
+    .filter-bar input,
+    .filter-bar .btn,
+    .table-toolbar-left,
+    .table-toolbar-right {
+        width: 100%;
+    }
+    .table-toolbar-left .form-control,
+    .table-toolbar-right .form-control,
+    .table-toolbar-left .btn,
+    .table-toolbar-right .btn {
+        width: 100%;
+    }
+
+    /* Ensure every table scrolls horizontally on mobile — safety net
+       for tables whose surrounding markup was not updated this pass. */
+    .table-wrapper,
+    .table-responsive,
+    .card > .table,
+    .card > .data-table {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    table.table,
+    table.data-table {
+        min-width: 640px;
+    }
+
+    /* Larger tap targets on mobile */
+    .btn {
+        min-height: 44px;
+    }
+    .btn-xs,
+    .btn-sm {
+        min-height: 36px;
+    }
+    .btn-icon,
+    .action-btn,
+    .nav-item,
+    .pagination-btn,
+    .page-btn,
+    .hamburger-btn {
+        min-height: 44px;
+    }
+
+    /* Page content padding tightened (existing rule already does 20/16; keep) */
+    .page-content {
+        padding: 16px 12px;
+    }
+
+    /* Notification dropdown — already full-width via existing rules */
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TABLE-STACK — opt-in responsive stacked table view for simple
+   lists (notes, activity, timelines). Use .table-stack on <table>
+   and data-label attributes on <td>.
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+    .table-stack thead { display: none; }
+    .table-stack tr {
+        display: block;
+        margin-bottom: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 12px;
+        background: var(--bg-surface);
+    }
+    .table-stack td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border: none;
+        font-size: 0.8125rem;
+    }
+    .table-stack td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-right: 8px;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TABLET — kpi + stat grids for tablet
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .stat-grid--2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .form-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .page-content {
+        padding: 18px 14px;
+    }
+}
