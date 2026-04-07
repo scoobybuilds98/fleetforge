@@ -124,49 +124,58 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
 
 <!-- ============================================================
      KPI Stat Cards — 6 tiles, server-rendered for accuracy
+     Each tile is a real <a> drilldown so accounting tiles behave
+     like every other module's clickable KPI tiles. URLs map to
+     the most relevant deep-link for that figure.
      ============================================================ -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid">
 
-    <!-- Current Period -->
-    <div class="stat-card stat-card--blue">
+    <!-- Current Period → Manage Periods -->
+    <a href="<?= base_url('accounting/periods') ?>"
+       class="stat-card stat-card--link stat-card--blue"
+       aria-label="Current Period — open Manage Periods">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">Current Period</div>
-        <div class="stat-value" style="font-size:1.1rem;">
+        <div class="stat-value">
             <?php if ($currentPeriod): ?>
                 <?= e($currentPeriod['name']) ?>
             <?php else: ?>
                 <span class="text-secondary">None open</span>
             <?php endif; ?>
         </div>
-        <?php if ($currentPeriod): ?>
-        <div style="margin-top:4px;">
-            <span class="badge badge-no-dot badge-success">Open</span>
+        <div class="stat-delta">
+            <?php if ($currentPeriod): ?>
+                <span class="badge badge-no-dot badge-success">Open</span>
+            <?php else: ?>
+                <span class="badge badge-no-dot badge-warning">No open period</span>
+            <?php endif; ?>
         </div>
-        <?php else: ?>
-        <div style="margin-top:4px;">
-            <span class="badge badge-no-dot badge-warning">No open period</span>
-        </div>
-        <?php endif; ?>
-    </div>
+    </a>
 
-    <!-- Revenue YTD -->
-    <div class="stat-card stat-card--green">
+    <!-- Revenue YTD → Income Statement -->
+    <a href="<?= base_url('accounting/statements') ?>"
+       class="stat-card stat-card--link stat-card--green"
+       aria-label="Total Revenue YTD — open income statement">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span>
         <div class="stat-label">Total Revenue YTD</div>
         <div class="stat-value currency font-mono">$<?= e(number_format((float)$revenueTotal, 2)) ?></div>
         <div class="stat-delta text-secondary">Posted journal entries</div>
-    </div>
+    </a>
 
-    <!-- Expenses YTD -->
-    <div class="stat-card stat-card--red">
+    <!-- Expenses YTD → Income Statement -->
+    <a href="<?= base_url('accounting/statements') ?>"
+       class="stat-card stat-card--link stat-card--red"
+       aria-label="Total Expenses YTD — open income statement">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-chart-bar"/></svg></span>
         <div class="stat-label">Total Expenses YTD</div>
         <div class="stat-value currency font-mono">$<?= e(number_format((float)$expenseTotal, 2)) ?></div>
         <div class="stat-delta text-secondary">Posted journal entries</div>
-    </div>
+    </a>
 
-    <!-- Net Income YTD -->
-    <div class="stat-card stat-card--<?= bccomp($netIncomeYtd, '0.00', 2) >= 0 ? 'green' : 'red' ?>">
+    <!-- Net Income YTD → Income Statement -->
+    <a href="<?= base_url('accounting/statements') ?>"
+       class="stat-card stat-card--link stat-card--<?= bccomp($netIncomeYtd, '0.00', 2) >= 0 ? 'green' : 'red' ?>"
+       aria-label="Net Income YTD — open income statement">
         <span class="stat-icon stat-icon--<?= bccomp($netIncomeYtd, '0.00', 2) >= 0 ? 'green' : 'red' ?>">
             <svg><use href="#icon-document-text"/></svg>
         </span>
@@ -180,10 +189,12 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
             ?>
         </div>
         <div class="stat-delta text-secondary">Revenue minus expenses</div>
-    </div>
+    </a>
 
-    <!-- AR Balance -->
-    <div class="stat-card stat-card--amber">
+    <!-- AR Balance → AR Aging -->
+    <a href="<?= base_url('accounting/ar-aging') ?>"
+       class="stat-card stat-card--link stat-card--amber"
+       aria-label="AR Balance — open AR aging report">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">AR Balance</div>
         <div class="stat-value currency font-mono">
@@ -195,10 +206,12 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
             ?>
         </div>
         <div class="stat-delta text-secondary">Accounts receivable</div>
-    </div>
+    </a>
 
-    <!-- AP Balance -->
-    <div class="stat-card stat-card--amber">
+    <!-- AP Balance → AP Aging -->
+    <a href="<?= base_url('accounting/ap-aging') ?>"
+       class="stat-card stat-card--link stat-card--amber"
+       aria-label="AP Balance — open AP aging report">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">AP Balance</div>
         <div class="stat-value currency font-mono">
@@ -210,7 +223,7 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
             ?>
         </div>
         <div class="stat-delta text-secondary">Accounts payable</div>
-    </div>
+    </a>
 
 </div>
 

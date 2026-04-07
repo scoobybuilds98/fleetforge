@@ -11,12 +11,16 @@ namespace FleetForge\GPS;
 // mileage auto-fill at lease close. No webhooks, no polling,
 // no live maps, no geofences.
 //
-// getMileageForLease() is the ONLY public method.
-// Returns total km driven for a vehicle over a date range.
-// Returns null on ANY failure — GPS is never blocking.
+// getMileageForLease() is the ONLY public method that talks
+// to the rest of the app for billing data. Returns total km
+// driven for a vehicle over a date range. Returns null on
+// ANY failure — GPS is never blocking.
 //
-// Dev mode: if GPS_SAMSARA_API_KEY is blank (local dev),
-// returns null immediately without making any HTTP calls.
+// Credentials lookup order [INT-1]:
+//   1. settings table FIRST  — settings_get('gps.samsara_api_key')
+//   2. .env file  SECOND     — env('GPS_SAMSARA_API_KEY')
+// This lets the Settings → Integrations UI override .env
+// without a redeploy. Empty settings value → fall through.
 //
 // All failures logged to logs/gps.log, never thrown to callers.
 // ============================================================
@@ -38,9 +42,18 @@ class SamsaraClient
 
     public function __construct()
     {
-        // API credentials come from .env constants loaded by config/app.php
-        $this->apiKey     = defined('GPS_SAMSARA_API_KEY') ? (string) GPS_SAMSARA_API_KEY : '';
-        $this->orgId      = defined('GPS_SAMSARA_ORG_ID')  ? (string) GPS_SAMSARA_ORG_ID  : '';
+        // INT-1: settings table FIRST, then fall back to .env.
+        // settings_get() returns null when the row exists with an empty
+        // value OR when the row is missing — both cases must fall back,
+        // so use the ?: operator (truthy check) rather than ??.
+        $this->apiKey = (string) (
+            settings_get('gps.samsara_api_key')
+            ?: env('GPS_SAMSARA_API_KEY', '')
+        );
+        $this->orgId = (string) (
+            settings_get('gps.samsara_org_id')
+            ?: env('GPS_SAMSARA_ORG_ID', '')
+        );
         $this->projectRoot = dirname(__DIR__, 2); // lib/GPS/ → project root
     }
 
@@ -61,9 +74,10 @@ class SamsaraClient
     // --------------------------------------------------------
     public function getMileageForLease(string $vehicleId, string $start, string $end): ?float
     {
-        // Dev mode: blank API key → return null without HTTP call
-        if ($this->apiKey === '' || $this->orgId === '') {
-            $this->log('GPS_SKIP', "API keys not configured — returning null (dev mode). vehicleId=$vehicleId");
+        // Dev mode: blank API key → return null without HTTP call.
+        // Org ID is optional (single-org tokens omit it).
+        if ($this->apiKey === '') {
+            $this->log('GPS_SKIP', "API key not configured — returning null (dev mode). vehicleId=$vehicleId");
             return null;
         }
 
@@ -165,7 +179,7 @@ class SamsaraClient
     // --------------------------------------------------------
     public function getOdometerReading(string $vehicleId): ?int
     {
-        if ($this->apiKey === '' || $this->orgId === '') {
+        if ($this->apiKey === '') {
             return null;
         }
 
@@ -229,8 +243,8 @@ class SamsaraClient
     // --------------------------------------------------------
     public function getVehicleLocations(): ?array
     {
-        if ($this->apiKey === '' || $this->orgId === '') {
-            $this->log('GPS_SKIP', 'API keys not configured — returning null (dev mode)');
+        if ($this->apiKey === '') {
+            $this->log('GPS_SKIP', 'API key not configured — returning null (dev mode)');
             return null;
         }
 
@@ -276,7 +290,7 @@ class SamsaraClient
     // --------------------------------------------------------
     public function getVehicleLocation(string $vehicleId): ?array
     {
-        if ($this->apiKey === '' || $this->orgId === '' || $vehicleId === '') {
+        if ($this->apiKey === '' || $vehicleId === '') {
             return null;
         }
 
@@ -298,10 +312,14 @@ class SamsaraClient
     // --------------------------------------------------------
     public function testConnection(): array
     {
-        if ($this->apiKey === '' || $this->orgId === '') {
+        // INT-1: distinguish "missing key" from "wrong key" so the
+        // Settings UI can give a useful next step. Org ID is optional
+        // for some Samsara accounts (single-org tokens) — only the
+        // API key is hard-required.
+        if ($this->apiKey === '') {
             return [
                 'success' => false,
-                'message' => 'API key or Organization ID not configured.',
+                'message' => 'API key not configured. Please add your Samsara API key in Settings → Integrations.',
                 'details' => [],
             ];
         }
@@ -332,7 +350,7 @@ class SamsaraClient
         if ($code === 401 || $code === 403) {
             return [
                 'success' => false,
-                'message' => 'Authentication failed. Check your API key and Organization ID.',
+                'message' => 'API key is invalid. Please check your Samsara API key in Settings → Integrations.',
                 'details' => ['http_code' => $code],
             ];
         }
@@ -401,14 +419,21 @@ class SamsaraClient
 
     // --------------------------------------------------------
     // buildHeaders() — standard Samsara API request headers
+    //
+    // X-Org-Id is only sent when configured. Single-org Samsara
+    // tokens are scoped to their org and reject this header,
+    // so omitting it lets one-org accounts work without setup.
     // --------------------------------------------------------
     private function buildHeaders(): array
     {
-        return [
+        $headers = [
             'Authorization: Bearer ' . $this->apiKey,
-            'X-Org-Id: '            . $this->orgId,
             'Accept: application/json',
         ];
+        if ($this->orgId !== '') {
+            $headers[] = 'X-Org-Id: ' . $this->orgId;
+        }
+        return $headers;
     }
 
     // --------------------------------------------------------

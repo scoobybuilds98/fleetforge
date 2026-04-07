@@ -25,8 +25,9 @@ declare(strict_types=1);
 // WHY: Only show if user has AI + reports access and AI is configured
 if (!function_exists('can') || !can('ai', 'view') || !can('reports', 'view')) return;
 
+// INT-1: settings table FIRST, .env SECOND.
 $_vizEnabled = (bool) settings_get('ai.enabled', false);
-$_vizHasKey  = defined('AI_ANTHROPIC_API_KEY') && AI_ANTHROPIC_API_KEY !== '';
+$_vizHasKey  = (bool) (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
 if (!$_vizEnabled || !$_vizHasKey) return;
 
 $_vizId      = $aiVizId ?? 'FF_AiViz';

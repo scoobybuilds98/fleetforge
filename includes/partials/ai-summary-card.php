@@ -25,8 +25,9 @@ declare(strict_types=1);
 // WHY: Only show if user has AI access and AI is configured
 if (!function_exists('can') || !can('ai', 'view')) return;
 
+// INT-1: settings table FIRST, .env SECOND.
 $_aiEnabled  = (bool) settings_get('ai.enabled', false);
-$_hasApiKey  = defined('AI_ANTHROPIC_API_KEY') && AI_ANTHROPIC_API_KEY !== '';
+$_hasApiKey  = (bool) (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
 if (!$_aiEnabled || !$_hasApiKey) return;
 
 // Required variables

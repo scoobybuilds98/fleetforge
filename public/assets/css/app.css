@@ -991,6 +991,142 @@ kbd {
     flex-shrink: 0;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   PERM-1 — Display settings popover (font size + density)
+   The trigger sits in the topbar before the notifications bell;
+   the dropdown floats below using the standard topbar dropdown
+   positioning conventions.
+   ══════════════════════════════════════════════════════════════ */
+.topbar-display {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.topbar-display-btn {
+    color: var(--text-secondary);
+}
+.topbar-display-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-surface-hover);
+}
+
+.topbar-display-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 248px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 12px;
+    z-index: 100;
+}
+
+.topbar-display-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 2px;
+}
+
+.topbar-display-value {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 48px;
+    text-align: center;
+}
+
+.topbar-display-density {
+    display: flex;
+    gap: 6px;
+    padding: 6px 2px 4px;
+}
+
+.topbar-display-chip {
+    flex: 1 1 0;
+    padding: 6px 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.topbar-display-chip:hover:not(:disabled) {
+    border-color: var(--color-primary);
+    color: var(--text-primary);
+}
+.topbar-display-chip.is-active {
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    font-weight: 600;
+}
+.topbar-display-chip:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.topbar-display-reset {
+    width: 100%;
+    margin-top: 4px;
+    padding: 7px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.topbar-display-reset:hover:not(:disabled) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+.topbar-display-reset:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PERM-1 — Density variants for .page-content.
+   <body data-density="..."> is set in includes/header.php from the
+   user's saved preference. These rules tweak the spacing of cards,
+   tables, and form controls within the main content area only —
+   never the sidebar/topbar/footer/modals.
+   ══════════════════════════════════════════════════════════════ */
+
+/* COMPACT — tighter padding, smaller gaps */
+body[data-density="compact"] .page-content .card-body { padding: 12px 14px; }
+body[data-density="compact"] .page-content .card-header { padding: 10px 14px; }
+body[data-density="compact"] .page-content .table th,
+body[data-density="compact"] .page-content .table td { padding: 6px 10px; }
+body[data-density="compact"] .page-content .form-group { margin-bottom: 10px; }
+body[data-density="compact"] .page-content .page-header { margin-bottom: 12px; }
+body[data-density="compact"] .page-content .form-control { padding: 6px 9px; }
+
+/* COMFORTABLE — current defaults (no overrides needed) */
+/* Intentionally empty so the rule cascade is explicit and easy to grep */
+body[data-density="comfortable"] .page-content { /* default spacing */ }
+
+/* SPACIOUS — looser padding, taller rows for easier scanning */
+body[data-density="spacious"] .page-content .card-body { padding: 24px 26px; }
+body[data-density="spacious"] .page-content .card-header { padding: 18px 26px; }
+body[data-density="spacious"] .page-content .table th,
+body[data-density="spacious"] .page-content .table td { padding: 14px 18px; }
+body[data-density="spacious"] .page-content .form-group { margin-bottom: 22px; }
+body[data-density="spacious"] .page-content .page-header { margin-bottom: 28px; }
+body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; }
+
 /* ── User avatar + dropdown ─────────────────────────────────────────────────── */
 .topbar-user {
     position: relative;
@@ -1332,22 +1468,50 @@ kbd {
     letter-spacing: normal;
 }
 
-/* Stats / Summary tiles */
+/* ============================================================
+   Stats / Summary tiles
+   ------------------------------------------------------------
+   Two structures share these styles:
+     1. Legacy:  <div class="stat-card stat-card--<color>">
+                   <span class="stat-icon stat-icon--<color>">…</span>
+                   <div class="stat-label">…</div>
+                   <div class="stat-value">…</div>
+                   <div class="stat-delta">…</div>
+                 </div>
+     2. Modern:  <a class="stat-card stat-card--link"> with
+                 <div class="stat-card__header"> wrapping
+                 <.stat-label> + <.stat-card__icon> (flex row).
+   Both must comfortably fit currency values up to ~$1,234,567.89
+   without truncating — that's the whole reason this block was
+   re-tuned: the previous 200px minimum + 1.875rem value font +
+   60px right-padding combo was clipping seven-digit dollar values.
+   ============================================================ */
 .stat-grid {
     display: grid;
+    /* WHY: 200px minimum keeps 6-tile dashboards on a single row at
+       our standard 1280–1440px content widths. After padding (30px)
+       that leaves ~170px content area which fits $1,234,567.89 at
+       the 1.375rem value font below with room to spare. */
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin-bottom: 24px;
+    gap: 14px;
+    margin-bottom: 20px;
 }
 
 .stat-card {
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    padding: 20px 60px 20px 28px;  /* right padding makes room for icon */
+    border-radius: var(--radius-lg);
+    /* WHY: padding tightened from 20/60/20/28 → 14/16/14/22.
+       The big-ticket change is dropping the 60px right reservation
+       (icon shrunk from 42px → 30px and is allowed to overlap the
+       label row only — the value below uses the full content width). */
+    padding: 14px 16px 14px 22px;
     box-shadow: var(--shadow-sm);
     position: relative;
     overflow: hidden;
+    /* WHY: lets the card shrink inside CSS grid so its children
+       can use min-width:0 / ellipsis without forcing the column. */
+    min-width: 0;
     transition: box-shadow var(--transition-base), border-color var(--transition-base),
                 transform var(--transition-base);
 }
@@ -1365,7 +1529,7 @@ kbd {
         var(--stat-accent, var(--color-primary)),
         color-mix(in srgb, var(--stat-accent, var(--color-primary)) 50%, transparent)
     );
-    border-radius: var(--radius-xl) 0 0 var(--radius-xl);
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
 }
 
 .stat-card:hover {
@@ -1383,58 +1547,94 @@ kbd {
 .stat-card--teal   { --stat-accent: #14b8a6; }
 .stat-card--slate  { --stat-accent: #64748b; }
 
-/* Decorative icon container — positioned top-right */
+/* Decorative icon container — positioned top-right (LEGACY structure).
+   Modern .stat-card__header / .stat-card__icon are defined separately
+   below the dashboard variants block. */
 .stat-icon {
     position: absolute;
-    top: 16px;
-    right: 16px;
-    width: 42px;
-    height: 42px;
-    border-radius: 10px;
+    top: 12px;
+    right: 12px;
+    /* WHY: shrunk 42→30 so it stops eating the value's horizontal room. */
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
 }
 .stat-icon svg {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
 }
-.stat-icon--green  { background: rgba(34,197,94,0.12); }
-.stat-icon--blue   { background: rgba(59,130,246,0.12); }
-.stat-icon--amber  { background: rgba(245,158,11,0.12); }
-.stat-icon--red    { background: rgba(239,68,68,0.12); }
-.stat-icon--purple { background: rgba(139,92,246,0.12); }
-.stat-icon--teal   { background: rgba(20,184,166,0.12); }
-.stat-icon--slate  { background: rgba(100,116,139,0.12); }
+.stat-icon--green  { background: rgba(34,197,94,0.12);  color: #22c55e; }
+.stat-icon--blue   { background: rgba(59,130,246,0.12); color: #60a5fa; }
+.stat-icon--amber  { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.stat-icon--red    { background: rgba(239,68,68,0.12);  color: #f87171; }
+.stat-icon--purple { background: rgba(139,92,246,0.12); color: #a78bfa; }
+.stat-icon--teal   { background: rgba(20,184,166,0.12); color: #2dd4bf; }
+.stat-icon--slate  { background: rgba(100,116,139,0.12);color: #94a3b8; }
 
 .stat-label {
-    font-size: 0.75rem;
+    font-size: 0.6875rem;            /* 11px — was 12px */
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.07em;
-    margin-bottom: 10px;
+    letter-spacing: 0.05em;
+    line-height: 1.3;
+    margin-bottom: 6px;              /* was 10px */
+    /* WHY: reserve horizontal room so the absolute icon at right:12 / w:30
+       doesn't overlap multi-word labels like "TOTAL REVENUE YTD". */
+    padding-right: 38px;
+    /* Cap at 2 lines, ellipsis if it overflows. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .stat-value {
-    font-size: 1.875rem;
+    /* WHY: dropped 1.875rem (~30px) → 1.375rem (~22px). At 22px DM Mono
+       each char is ~12px, so $1,234,567.89 (13 chars) ≈ 156px which
+       fits comfortably in the ~170px content area of a 200px tile. */
+    font-size: 1.375rem;
     font-weight: 700;
     color: var(--text-primary);
     font-family: 'DM Mono', monospace;
-    line-height: 1;
-    margin-bottom: 8px;
+    line-height: 1.2;
+    margin-bottom: 4px;              /* was 8px */
+    /* WHY: allow the line to shrink inside grid; never wrap mid-currency.
+       If a value still won't fit (e.g. 9-figure totals) we ellipsis it
+       instead of letting it crash through the tile boundary. */
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .stat-delta {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;              /* 12px — was 13px */
     color: var(--text-tertiary);
+    line-height: 1.3;
+    /* WHY: keep deltas like "$73,617.00 outstanding" on a single line
+       so they don't wrap mid-amount. Long deltas get cleanly trimmed. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Clickable stat-card KPI tiles — active ring + pointer affordance */
 .stat-card[style*="cursor:pointer"],
 .stat-card.stat-card--link {
     cursor: pointer;
+    /* WHY: <a> tags need explicit reset so the inner text doesn't underline. */
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+.stat-card.stat-card--link:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
 }
 .stat-card.ring-active {
     box-shadow: 0 0 0 2px var(--stat-accent, var(--color-primary)), var(--shadow-md);
@@ -3247,23 +3447,28 @@ html.is-mac .non-mac-only { display: none; }
     padding: 2px 4px;
 }
 
-/* ── Stat card icons ─────────────────────────────────────── */
+/* ── Stat card icons (MODERN structure used by main dashboard) ── */
 .stat-card__header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 12px;
+    /* WHY: shrunk 12 → 6 to match the tightened .stat-label margin
+       in the legacy block above so both structures look the same. */
+    margin-bottom: 6px;
+    gap: 8px;
 }
 .stat-card__icon {
-    width: 38px;
-    height: 38px;
-    border-radius: var(--radius-lg);
+    /* WHY: shrunk 38→30 to match the legacy .stat-icon size and
+       free up horizontal room for the value below. */
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
 }
-.stat-card__icon svg { width: 18px; height: 18px; }
+.stat-card__icon svg { width: 16px; height: 16px; }
 .stat-card__icon--primary { background: var(--color-primary-light);  color: var(--color-primary-text); }
 .stat-card__icon--success { background: var(--color-success-light);  color: var(--color-success-text); }
 .stat-card__icon--warning { background: var(--color-warning-light);  color: var(--color-warning-text); }

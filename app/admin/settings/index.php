@@ -50,7 +50,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 [$groupName]
             );
 
-            db_transaction(function () use ($groupKeys, $groupName) {
+            // INT-1: list of keys whose values are secret. The form
+            // renders these as masked password fields and submits the
+            // mask placeholder when the user does not edit them — we
+            // detect that placeholder and SKIP the update so the real
+            // stored secret is preserved.
+            $secretKeys = [
+                'gps.samsara_api_key',
+                'gps.samsara_org_id',
+                'gps.geotab_password',
+                'ai.anthropic_api_key',
+                'email.smtp_pass',
+                'aws.access_key_id',
+                'aws.secret_access_key',
+            ];
+
+            db_transaction(function () use ($groupKeys, $groupName, $secretKeys) {
                 foreach ($groupKeys as $setting) {
                     $key       = $setting['key'];
                     $valueType = $setting['value_type'];
@@ -59,6 +74,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                     // We must look up the underscore version to find the submitted value.
                     $postKey   = str_replace('.', '_', $key);
                     $raw       = $_POST[$postKey] ?? null;
+
+                    // INT-1: secret fields submit a placeholder when unchanged.
+                    // Trim and bail out so we never overwrite a real key with
+                    // dots. The placeholder always starts with U+2022 (•).
+                    if (in_array($key, $secretKeys, true) && is_string($raw)) {
+                        $trimmed = trim($raw);
+                        if ($trimmed === '' || str_starts_with($trimmed, '•')) {
+                            continue; // keep existing value
+                        }
+                    }
 
                     // Normalize value by type
                     if ($valueType === 'boolean') {
@@ -96,10 +121,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 }
 
 // ── Load all settings, grouped ───────────────────────────────────────────────
+// INT-1: include email/storage/aws so the integrations tab can manage
+// SMTP, S3, and SES credentials from the UI instead of editing .env.
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -110,7 +137,20 @@ foreach ($allSettings as $s) {
 }
 
 $primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
-$sensitiveGroups = ['gps', 'ai'];
+$sensitiveGroups = ['gps', 'ai', 'email', 'storage', 'aws'];
+
+// INT-1: secret keys are rendered as masked password fields.
+// Save handler skips writes when the masked placeholder comes back.
+$secretKeys = [
+    'gps.samsara_api_key',
+    'gps.samsara_org_id',
+    'gps.geotab_password',
+    'ai.anthropic_api_key',
+    'email.smtp_pass',
+    'aws.access_key_id',
+    'aws.secret_access_key',
+];
+
 $groupLabels = [
     'company'       => 'Company',
     'invoices'      => 'Invoices & Billing',
@@ -121,7 +161,18 @@ $groupLabels = [
     'gps'           => 'GPS Integration',
     'ai'            => 'AI / Machine Learning',
     'yards'         => 'Yards',
+    'email'         => 'Email (SMTP / SES)',
+    'storage'       => 'Storage Driver',
+    'aws'           => 'AWS Credentials (S3 + SES)',
 ];
+
+// INT-1: helper to mask a secret value, showing only the last 4 chars.
+// Returns '' if there is no stored value (so the field renders empty).
+$maskSecret = static function (string $value): string {
+    if ($value === '') return '';
+    $tail = substr($value, -4);
+    return str_repeat('•', 16) . $tail;
+};
 
 // ── Stats for tab badges ──────────────────────────────────────────────────────
 $userCount = db_count("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL");
@@ -312,11 +363,16 @@ if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
             <?php foreach ($grouped[$grp] as $setting): ?>
             <?php
-            $key   = $setting['key'];
-            $val   = $setting['value'] ?? '';
-            $vtype = $setting['value_type'];
-            $label = $setting['label'] ?? $key;
-            $desc  = $setting['description'] ?? null;
+            $key      = $setting['key'];
+            $val      = $setting['value'] ?? '';
+            $vtype    = $setting['value_type'];
+            $label    = $setting['label'] ?? $key;
+            $desc     = $setting['description'] ?? null;
+            // INT-1: secret keys render masked. The masked placeholder
+            // is what comes back on submit when the user does not edit
+            // the field — the save handler detects it and skips writes.
+            $isSecret = in_array($key, $secretKeys, true);
+            $display  = $isSecret ? $maskSecret((string) $val) : (string) $val;
             ?>
             <div class="form-group" style="margin-bottom:0;">
                 <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
@@ -330,6 +386,13 @@ if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
                 <input type="number" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
                        value="<?= e($val) ?>" step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
                        min="0" <?= !$canEdit ? 'readonly' : '' ?>>
+                <?php elseif ($isSecret): ?>
+                <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control font-mono"
+                       value="<?= e($display) ?>" maxlength="500"
+                       autocomplete="off" spellcheck="false"
+                       placeholder="Paste new key to replace stored value"
+                       <?= !$canEdit ? 'readonly' : '' ?>
+                       onfocus="if(this.value.startsWith('\u2022')) this.select();">
                 <?php else: ?>
                 <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
                        value="<?= e($val) ?>" maxlength="500" autocomplete="off" <?= !$canEdit ? 'readonly' : '' ?>>

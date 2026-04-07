@@ -49,6 +49,14 @@ define('FF_ROOT', dirname(__DIR__));
             $val = substr($val, 1, -1);
         }
 
+        // Respect environment variables already set by the SAPI
+        // (e.g. shell wrapper, FastCGI pass-through). This is
+        // standard 12-factor precedence: real env > .env file.
+        // Lets dev wrappers override APP_URL etc. without editing .env.
+        if (array_key_exists($key, $_ENV) || getenv($key) !== false) {
+            continue;
+        }
+
         // Populate both $_ENV and putenv for maximum compatibility
         $_ENV[$key] = $val;
         putenv("{$key}={$val}");

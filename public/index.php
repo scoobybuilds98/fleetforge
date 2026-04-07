@@ -20,6 +20,21 @@ declare(strict_types=1);
 //   • realpath() confirms resolved file is inside its root
 // ============================================================
 
+// PHP built-in dev server (`php -S`) — let static files in
+// public/ be served directly. Has NO effect under nginx/Apache
+// because PHP_SAPI is 'fpm-fcgi' / 'apache2handler' there.
+// `return false;` from a router script tells `php -S` to serve
+// the requested file as-is. We only do this for files that
+// actually exist inside the docroot, never for PHP files (the
+// router still owns all .php dispatching).
+if (PHP_SAPI === 'cli-server') {
+    $reqPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+    $diskPath = __DIR__ . $reqPath;
+    if ($reqPath !== '/' && is_file($diskPath) && !str_ends_with($reqPath, '.php')) {
+        return false;
+    }
+}
+
 require_once realpath(__DIR__ . '/../config/app.php');
 
 // ============================================================

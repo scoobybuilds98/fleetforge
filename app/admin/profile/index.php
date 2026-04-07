@@ -39,6 +39,7 @@ require_auth();
 $me = db_row(
     "SELECT u.id, u.name, u.email, u.status, u.phone, u.timezone,
             u.theme_preference, u.last_login_at, u.last_login_ip,
+            u.display_font_size, u.display_density,
             u.created_at, u.updated_at,
             ur.id AS role_id, ur.name AS role_name, ur.slug AS role_slug
      FROM users u
@@ -94,6 +95,11 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="tab = 'profile'"
                 :aria-selected="tab === 'profile'" role="tab">
             Profile
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'display' }"
+                @click="tab = 'display'"
+                :aria-selected="tab === 'display'" role="tab">
+            Display
         </button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'login_history' }"
                 @click="tab = 'login_history'"
@@ -192,7 +198,132 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- ══════════════════════════════════════════════════════
-         TAB 2 — Login History (server-rendered, read-only)
+         TAB 2 — Display Settings (PERM-1 Feature 2)
+         Lets the user set their personal main-content font size
+         and density. Changes apply immediately to the live page
+         (via FF_Display) and persist to the DB.
+         ══════════════════════════════════════════════════════ -->
+    <template x-if="tab === 'display'">
+        <div class="card ff-tab-animated" x-data="displaySettingsTab()" x-init="init()">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-weight:600;">Display Settings</span>
+                <button class="btn btn-secondary btn-sm"
+                        @click="reset()"
+                        :disabled="saving || (fontSize === 100 && density === 'comfortable')">
+                    Reset to default
+                </button>
+            </div>
+            <div class="card-body">
+
+                <p style="margin:0 0 18px;font-size:0.875rem;color:var(--text-secondary);">
+                    These settings affect the <strong>main content area only</strong>.
+                    The sidebar, top bar, and modals stay at their default size for layout consistency.
+                </p>
+
+                <!-- ── Font size ──────────────────────────────────── -->
+                <div class="form-group">
+                    <label class="form-label" for="display-font-size-slider">
+                        Text size
+                        <span class="text-muted" style="font-weight:400;margin-left:6px;"
+                              x-text="fontSize + '%'"></span>
+                    </label>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <button type="button"
+                                class="btn btn-secondary btn-sm"
+                                @click="decFont()"
+                                :disabled="saving || fontSize <= 70"
+                                aria-label="Decrease text size">
+                            A−
+                        </button>
+                        <input type="range"
+                               id="display-font-size-slider"
+                               min="70" max="130" step="5"
+                               x-model.number="fontSize"
+                               @change="applyFont()"
+                               :disabled="saving"
+                               style="flex:1;">
+                        <button type="button"
+                                class="btn btn-secondary btn-sm"
+                                @click="incFont()"
+                                :disabled="saving || fontSize >= 130"
+                                aria-label="Increase text size">
+                            A+
+                        </button>
+                    </div>
+                    <div class="text-muted" style="font-size:0.75rem;margin-top:6px;">
+                        70% – 130%, in 5% steps
+                    </div>
+                </div>
+
+                <!-- ── Density ────────────────────────────────────── -->
+                <div class="form-group">
+                    <label class="form-label">Density</label>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label class="display-density-option">
+                            <input type="radio" name="display-density" value="compact"
+                                   x-model="density" @change="applyDensity()"
+                                   :disabled="saving">
+                            <span class="display-density-label">
+                                <strong>Compact</strong>
+                                <span class="text-muted">Tighter padding, more content per screen.</span>
+                            </span>
+                        </label>
+                        <label class="display-density-option">
+                            <input type="radio" name="display-density" value="comfortable"
+                                   x-model="density" @change="applyDensity()"
+                                   :disabled="saving">
+                            <span class="display-density-label">
+                                <strong>Comfortable</strong>
+                                <span class="text-muted">Balanced spacing — the default.</span>
+                            </span>
+                        </label>
+                        <label class="display-density-option">
+                            <input type="radio" name="display-density" value="spacious"
+                                   x-model="density" @change="applyDensity()"
+                                   :disabled="saving">
+                            <span class="display-density-label">
+                                <strong>Spacious</strong>
+                                <span class="text-muted">Looser padding, easier to scan.</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- ── Live preview ───────────────────────────────── -->
+                <div class="form-group" style="margin-top:8px;">
+                    <label class="form-label">Live preview</label>
+                    <div class="card" style="margin:0;">
+                        <div class="card-header">
+                            <span style="font-weight:600;">Preview Card</span>
+                        </div>
+                        <div class="card-body">
+                            <p style="margin:0 0 10px;">
+                                This block updates in real time as you change the
+                                settings above. Use the topbar quick controls to
+                                make changes from any page.
+                            </p>
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr><th>Item</th><th>Quantity</th><th>Total</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td>Sample row 1</td><td>3</td><td>$120.00</td></tr>
+                                    <tr><td>Sample row 2</td><td>1</td><td>$45.00</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="saveError"
+                     x-text="saveError"
+                     style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;"></div>
+            </div>
+        </div>
+    </template>
+
+    <!-- ══════════════════════════════════════════════════════
+         TAB 3 — Login History (server-rendered, read-only)
          ══════════════════════════════════════════════════════ -->
     <template x-if="tab === 'login_history'">
         <div class="card ff-tab-animated">
@@ -350,6 +481,35 @@ require_once FF_ROOT . '/includes/header.php';
 @media (max-width: 768px) {
     .profile-layout { grid-template-columns: 1fr !important; }
 }
+
+/* PERM-1 — display density radio cards on profile page */
+.display-density-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.display-density-option:hover {
+    border-color: var(--color-primary);
+    background: var(--bg-surface-hover);
+}
+.display-density-option input[type="radio"] {
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+.display-density-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.875rem;
+}
+.display-density-label .text-muted {
+    font-size: 0.75rem;
+}
 </style>
 
 <script>
@@ -415,6 +575,67 @@ function profilePage() {
                 this.editError = err?.data?.message ?? 'Save failed. Please try again.';
                 this.saving = false;
             }
+        },
+    };
+}
+
+// ── displaySettingsTab Alpine component (PERM-1 Feature 2) ───────────────────
+// Seeded from the server-rendered user values; every change calls
+// FF_Display (from app.js) which writes to the DB AND updates the DOM
+// (including the topbar quick controls via window.FF_DISPLAY).
+function displaySettingsTab() {
+    return {
+        fontSize:  <?= (int) ($me['display_font_size'] ?? 100) ?>,
+        density:   <?= json_encode($me['display_density'] ?? 'comfortable') ?>,
+        saving:    false,
+        saveError: null,
+
+        init() {
+            // Keep local state in sync if topbar changes it while tab is open
+            this._onChange = () => {
+                if (window.FF_DISPLAY) {
+                    this.fontSize = window.FF_DISPLAY.font_size;
+                    this.density  = window.FF_DISPLAY.density;
+                }
+            };
+        },
+
+        async applyFont() {
+            this.saving = true;
+            this.saveError = null;
+            const res = await FF_Display.setFontSize(this.fontSize);
+            if (res && res.success === false) this.saveError = 'Could not save font size.';
+            this.saving = false;
+        },
+
+        async applyDensity() {
+            this.saving = true;
+            this.saveError = null;
+            const res = await FF_Display.setDensity(this.density);
+            if (res && res.success === false) this.saveError = 'Could not save density.';
+            this.saving = false;
+        },
+
+        async incFont() {
+            if (this.fontSize >= 130) return;
+            this.fontSize = Math.min(130, this.fontSize + 5);
+            await this.applyFont();
+        },
+
+        async decFont() {
+            if (this.fontSize <= 70) return;
+            this.fontSize = Math.max(70, this.fontSize - 5);
+            await this.applyFont();
+        },
+
+        async reset() {
+            this.saving = true;
+            this.saveError = null;
+            this.fontSize = 100;
+            this.density  = 'comfortable';
+            const res = await FF_Display.setBoth(100, 'comfortable');
+            if (res && res.success === false) this.saveError = 'Could not reset display settings.';
+            this.saving = false;
         },
     };
 }

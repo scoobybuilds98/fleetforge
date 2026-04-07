@@ -34,8 +34,9 @@ $pageTitle = 'AI Assistant';
 require_once FF_ROOT . '/includes/header.php';
 
 // WHY: Check if AI is configured so we can show setup prompt if needed
+// INT-1: settings table FIRST, .env SECOND.
 $aiEnabled  = (bool) settings_get('ai.enabled', false);
-$hasApiKey  = defined('AI_ANTHROPIC_API_KEY') && AI_ANTHROPIC_API_KEY !== '';
+$hasApiKey  = (bool) (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
 $aiReady    = $aiEnabled && $hasApiKey;
 $canCreate  = can('ai', 'create');
 $canEdit    = can('ai', 'edit');

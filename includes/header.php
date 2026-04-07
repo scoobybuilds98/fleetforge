@@ -65,6 +65,19 @@ $_theme     = $_user['theme'] ?? 'dark';
 $_pageTitle = isset($pageTitle) ? trim($pageTitle) : 'FleetForge';
 $_appName   = settings_get('company.name', 'FleetForge');
 $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
+
+// PERM-1 — display settings (per-user font size + density).
+// Read from session with conservative defaults so anonymous/legacy
+// requests still render normally. Range-clamped to the validated
+// 70..130 step set so injected CSS can never be hostile.
+$_displayFontSize = (int) ($_user['display_font_size'] ?? 100);
+if ($_displayFontSize < 70 || $_displayFontSize > 130) {
+    $_displayFontSize = 100;
+}
+$_displayDensity = $_user['display_density'] ?? 'comfortable';
+if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
+    $_displayDensity = 'comfortable';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="<?= e($_theme) ?>">
@@ -89,14 +102,31 @@ $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
     <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
+    <!-- ============================================================
+         PERM-1 — per-user display font size injection.
+         Scoped strictly to .page-content so the sidebar, topbar,
+         footer, and modals are NEVER rescaled (those use their
+         own fixed sizes for layout consistency).
+
+         The range is server-clamped above (70..130 only).
+         ============================================================ -->
+    <style id="ff-display-font-size">
+        .page-content { font-size: <?= $_displayFontSize ?>%; }
+    </style>
+
     <!-- Company timezone for client-side date formatting -->
     <script>
         window.FF_TIMEZONE    = <?= json_encode($_timezone) ?>;
         window.FF_BASE_PATH   = <?= json_encode(FF_BASE_PATH) ?>;
         window.FF_ASSET_VERSION = <?= json_encode(FF_ASSET_VERSION) ?>;
+        // PERM-1 — current display settings, read by topbar quick controls
+        window.FF_DISPLAY = {
+            font_size: <?= (int) $_displayFontSize ?>,
+            density:   <?= json_encode($_displayDensity) ?>,
+        };
     </script>
 </head>
-<body>
+<body data-density="<?= e($_displayDensity) ?>">
 
 <!-- Skip navigation — visually hidden, appears on keyboard focus (S025 / WCAG 2.4.1) -->
 <a href="#main-content" class="skip-nav">Skip to main content</a>
@@ -122,6 +152,6 @@ $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
 
 <?php
 // Clean up local variables so they don't leak into page scope
-unset($_theme, $_pageTitle, $_appName, $_timezone);
+unset($_theme, $_pageTitle, $_appName, $_timezone, $_displayFontSize, $_displayDensity);
 // Note: $_user and $_csrfToken are intentionally kept — pages may need them.
 ?>

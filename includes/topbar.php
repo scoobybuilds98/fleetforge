@@ -205,6 +205,102 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             </button>
         </div>
 
+        <!-- ── PERM-1 — Display settings popover (font size + density) ─ -->
+        <!-- Affects ONLY .page-content; sidebar/topbar/footer are unchanged.
+             State is seeded from window.FF_DISPLAY (set in header.php) and
+             persisted to users.display_font_size / users.display_density
+             via /api/v1/users/display_settings/update.php on every change. -->
+        <div class="topbar-display"
+             x-data="ffDisplaySettings()"
+             @click.outside="open = false"
+             @keydown.escape.window="open = false">
+
+            <button class="btn-icon topbar-display-btn"
+                    @click="open = !open"
+                    :aria-expanded="open"
+                    aria-haspopup="true"
+                    aria-label="Display settings (text size and density)"
+                    title="Display settings">
+                <!-- Inline "text size" icon (letter A with up-arrow arc) -->
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                     stroke-width="1.7" stroke="currentColor" aria-hidden="true"
+                     class="nav-icon">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M3 19 9 5l6 14M5.7 14h6.6M15.5 13h5M18 10.5v5"/>
+                </svg>
+            </button>
+
+            <div class="topbar-display-dropdown"
+                 x-show="open"
+                 x-transition:enter="dropdown-enter"
+                 x-transition:enter-start="dropdown-enter-start"
+                 x-transition:enter-end="dropdown-enter-end"
+                 x-transition:leave="dropdown-leave"
+                 x-transition:leave-start="dropdown-leave-start"
+                 x-transition:leave-end="dropdown-leave-end"
+                 role="menu"
+                 aria-label="Display settings"
+                 style="display:none;">
+
+                <p class="topbar-dropdown-label">Text size</p>
+
+                <div class="topbar-display-row">
+                    <button type="button"
+                            class="btn-icon"
+                            @click="decFont()"
+                            :disabled="saving || fontSize <= 70"
+                            aria-label="Decrease text size">
+                        <span style="font-size:0.875rem;font-weight:600;">A−</span>
+                    </button>
+                    <span class="topbar-display-value" x-text="fontSize + '%'"></span>
+                    <button type="button"
+                            class="btn-icon"
+                            @click="incFont()"
+                            :disabled="saving || fontSize >= 130"
+                            aria-label="Increase text size">
+                        <span style="font-size:1.0625rem;font-weight:600;">A+</span>
+                    </button>
+                </div>
+
+                <div class="user-dropdown-divider"></div>
+
+                <p class="topbar-dropdown-label">Density</p>
+
+                <div class="topbar-display-density">
+                    <button type="button"
+                            class="topbar-display-chip"
+                            :class="density === 'compact' ? 'is-active' : ''"
+                            @click="setDensity('compact')"
+                            :disabled="saving">
+                        Compact
+                    </button>
+                    <button type="button"
+                            class="topbar-display-chip"
+                            :class="density === 'comfortable' ? 'is-active' : ''"
+                            @click="setDensity('comfortable')"
+                            :disabled="saving">
+                        Cozy
+                    </button>
+                    <button type="button"
+                            class="topbar-display-chip"
+                            :class="density === 'spacious' ? 'is-active' : ''"
+                            @click="setDensity('spacious')"
+                            :disabled="saving">
+                        Spacious
+                    </button>
+                </div>
+
+                <div class="user-dropdown-divider"></div>
+
+                <button type="button"
+                        class="topbar-display-reset"
+                        @click="reset()"
+                        :disabled="saving || (fontSize === 100 && density === 'comfortable')">
+                    Reset to default
+                </button>
+            </div>
+        </div>
+
         <!-- ── Notifications bell ────────────────────────────────────── -->
         <div class="topbar-notifications"
              x-data="{ open: false }"

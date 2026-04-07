@@ -62,7 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "SELECT u.id, u.name, u.email, u.password_hash,
                         u.role_id, r.slug AS role_slug,
                         u.theme_preference, u.status,
-                        u.login_attempts, u.locked_until
+                        u.login_attempts, u.locked_until,
+                        u.display_font_size, u.display_density
                  FROM users u
                  JOIN user_roles r ON r.id = u.role_id
                  WHERE u.email = ? AND u.deleted_at IS NULL",

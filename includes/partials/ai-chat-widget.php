@@ -25,8 +25,9 @@ declare(strict_types=1);
 // WHY: Only show if user has AI access and AI is configured
 if (!function_exists('can') || !can('ai', 'view')) return;
 
+// INT-1: settings table FIRST, .env SECOND.
 $widgetAiEnabled = (bool) settings_get('ai.enabled', false);
-$widgetHasApiKey = defined('AI_ANTHROPIC_API_KEY') && AI_ANTHROPIC_API_KEY !== '';
+$widgetHasApiKey = (bool) (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
 if (!$widgetAiEnabled || !$widgetHasApiKey) return;
 
 // WHY: Don't show on the AI page itself — it has a full chat interface

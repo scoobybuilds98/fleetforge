@@ -121,14 +121,30 @@ function require_role(string $role): void
 }
 
 // can() — check if the current user has a permission
-// super_admin bypasses all checks (their permissions array already
-// has everything set, but this shortcut avoids the array lookup).
+//
+// PERM-1 layered permission resolution:
+//   1. super_admin always wins (returns true unconditionally).
+//   2. Per-user override (granted=1 → allow, granted=0 → deny).
+//      Overrides are loaded into the session at login as
+//      $_SESSION['ff_user']['permission_overrides'][module][action] = 0|1
+//   3. Fall through to the role default from config/permissions.php.
+//
+// WHY: storing the resolved override in the session at login keeps can()
+// O(1) on every page load — no per-request DB query. The override map
+// is refreshed whenever an override row is added/removed/reset via the
+// permissions API endpoints (which call _ff_refresh_user_permissions()).
 function can(string $module, string $action): bool
 {
     $user = current_user();
     if (!$user) return false;
 
     if (($user['role_slug'] ?? '') === 'super_admin') return true;
+
+    // Per-user override takes precedence over role default.
+    $override = $user['permission_overrides'][$module][$action] ?? null;
+    if ($override !== null) {
+        return (bool) $override;
+    }
 
     return (bool) ($user['permissions'][$module][$action] ?? false);
 }
@@ -173,14 +189,23 @@ function auth_login(array $user, bool $rememberMe = false): void
     $roleSlug          = $user['role_slug'] ?? '';
     $permissions       = $permissionsConfig[$roleSlug] ?? [];
 
+    // PERM-1: load any per-user permission overrides for this user.
+    // Stored as $overrides[module][action] = 0|1 — checked first by can().
+    $overrides = _ff_load_user_overrides((int) $user['id']);
+
     $_SESSION['ff_user'] = [
-        'id'          => (int) $user['id'],
-        'name'        => $user['name'],
-        'email'       => $user['email'],
-        'role_id'     => (int) $user['role_id'],
-        'role_slug'   => $roleSlug,
-        'permissions' => $permissions,
-        'theme'       => $user['theme_preference'] ?? 'dark',
+        'id'                   => (int) $user['id'],
+        'name'                 => $user['name'],
+        'email'                => $user['email'],
+        'role_id'              => (int) $user['role_id'],
+        'role_slug'            => $roleSlug,
+        'permissions'          => $permissions,
+        'permission_overrides' => $overrides,
+        'theme'                => $user['theme_preference'] ?? 'dark',
+        // PERM-1 Feature 2: per-user display settings (font size + density).
+        // Read by header.php to inject inline <style> + body data-density.
+        'display_font_size'    => (int) ($user['display_font_size'] ?? 100),
+        'display_density'      => $user['display_density'] ?? 'comfortable',
     ];
 
     $_SESSION['ff_last_activity'] = time();
@@ -323,4 +348,53 @@ function _ff_clear_remember_cookie(): void
         'httponly' => true,
         'samesite' => 'Lax',
     ]);
+}
+
+// ============================================================
+// PERM-1 — per-user permission override helpers
+// ============================================================
+
+/**
+ * Load all permission overrides for a single user from the DB.
+ *
+ * Returns a nested map: $overrides[module][action] = 0|1
+ *   - 1 = explicitly granted (even if role denies)
+ *   - 0 = explicitly denied  (even if role grants)
+ *   - missing entry = no override (fall through to role default)
+ *
+ * Called by auth_login() and by _ff_refresh_user_permissions() after
+ * an override row is added/removed/reset, so the next can() call
+ * sees the new state without a re-login.
+ */
+function _ff_load_user_overrides(int $userId): array
+{
+    $rows = db_select(
+        "SELECT module, action, granted
+         FROM user_permission_overrides
+         WHERE user_id = ?",
+        [$userId]
+    );
+
+    $map = [];
+    foreach ($rows as $r) {
+        $map[$r['module']][$r['action']] = (int) $r['granted'];
+    }
+    return $map;
+}
+
+/**
+ * Refresh the in-session permission_overrides map for the CURRENT user.
+ *
+ * Call this from any endpoint that mutates user_permission_overrides
+ * for the user who is currently logged in (or after editing your own
+ * overrides) so subsequent can() calls in the same request see the
+ * updated state. The PERM-1 admin endpoints (which let a super_admin
+ * edit *another* user's overrides) only need to call this if the
+ * super_admin happens to be editing themselves — but it's harmless to
+ * always call it.
+ */
+function _ff_refresh_user_permissions(int $userId): void
+{
+    if (current_user_id() !== $userId) return;
+    $_SESSION['ff_user']['permission_overrides'] = _ff_load_user_overrides($userId);
 }

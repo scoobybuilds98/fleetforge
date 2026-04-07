@@ -57,3 +57,11 @@ coverage/
 *.swp
 *.swo
 claude-fleetforge-api-key
+
+# --- Local secret scratch files (never commit) ---
+samsara api
+samsara_api*
+*.api_key
+
+# --- Claude Code working dirs ---
+.claude/worktrees/

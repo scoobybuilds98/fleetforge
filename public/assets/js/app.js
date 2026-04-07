@@ -216,6 +216,149 @@ window.FF_Theme = FF_Theme;
 
 
 // ============================================================
+// 04b. FF_Display — per-user main-content font-size + density
+// PERM-1 Feature 2.
+//
+// Manages two settings that apply ONLY to .page-content (the main
+// content area). Sidebar/topbar/footer/modals are not affected.
+//
+//   font-size: 70..130 in steps of 5 (percentage scaling factor)
+//   density:   compact | comfortable | spacious
+//
+// Persistence:
+//   - Source of truth is the DB (users.display_font_size /
+//     display_density), seeded into the page via window.FF_DISPLAY
+//     by header.php and stamped into <body data-density> + an inline
+//     <style> tag (#ff-display-font-size) for first paint.
+//   - apply() updates BOTH the DOM (so the change is visible
+//     immediately, no page reload) AND posts to the API (so the
+//     setting persists across devices and sessions).
+// ============================================================
+const FF_Display = {
+
+    STEPS:   [70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130],
+    DENSITY: ['compact', 'comfortable', 'spacious'],
+
+    /** Current state, hydrated from window.FF_DISPLAY. */
+    state() {
+        return {
+            fontSize: (window.FF_DISPLAY && window.FF_DISPLAY.font_size) || 100,
+            density:  (window.FF_DISPLAY && window.FF_DISPLAY.density)   || 'comfortable',
+        };
+    },
+
+    /**
+     * Apply font_size + density to the live DOM. Does NOT call the
+     * server — call _persist() for that.
+     */
+    _applyDom(fontSize, density) {
+        const styleEl = document.getElementById('ff-display-font-size');
+        if (styleEl) {
+            styleEl.textContent = `.page-content { font-size: ${fontSize}%; }`;
+        }
+        document.body.setAttribute('data-density', density);
+        window.FF_DISPLAY = { font_size: fontSize, density };
+    },
+
+    /**
+     * Persist the current settings to the DB. Returns the parsed
+     * API response so callers can show errors. Non-blocking — does
+     * NOT throw, errors are surfaced via FF_Toast.
+     */
+    async _persist(payload) {
+        try {
+            const res = await FF_Api.post(
+                FF_Api.url('/api/v1/users/display_settings/update.php'),
+                payload
+            );
+            if (!res.success) {
+                FF_Toast.error('Display settings',
+                    (res.error && res.error.message) || 'Could not save display settings.');
+            }
+            return res;
+        } catch (e) {
+            FF_Toast.error('Display settings', 'Network error. Please try again.');
+            return { success: false };
+        }
+    },
+
+    /** Set font size only. Step is clamped to the validated set. */
+    async setFontSize(value) {
+        const v = Number(value);
+        if (!this.STEPS.includes(v)) return;
+        const cur = this.state();
+        this._applyDom(v, cur.density);
+        await this._persist({ font_size: v });
+    },
+
+    /** Set density only. Value is clamped to the validated set. */
+    async setDensity(value) {
+        if (!this.DENSITY.includes(value)) return;
+        const cur = this.state();
+        this._applyDom(cur.fontSize, value);
+        await this._persist({ density: value });
+    },
+
+    /** Set both at once (used by the profile page reset/preview). */
+    async setBoth(fontSize, density) {
+        const v = Number(fontSize);
+        if (!this.STEPS.includes(v) || !this.DENSITY.includes(density)) return;
+        this._applyDom(v, density);
+        await this._persist({ font_size: v, density });
+    },
+};
+
+window.FF_Display = FF_Display;
+
+/**
+ * Alpine factory for the topbar quick-controls popover.
+ * Used by includes/topbar.php — `x-data="ffDisplaySettings()"`.
+ */
+function ffDisplaySettings() {
+    const seed = (window.FF_DISPLAY) || { font_size: 100, density: 'comfortable' };
+    return {
+        open:     false,
+        saving:   false,
+        fontSize: seed.font_size,
+        density:  seed.density,
+
+        async incFont() {
+            if (this.fontSize >= 130) return;
+            this.saving = true;
+            this.fontSize = Math.min(130, this.fontSize + 5);
+            await FF_Display.setFontSize(this.fontSize);
+            this.saving = false;
+        },
+
+        async decFont() {
+            if (this.fontSize <= 70) return;
+            this.saving = true;
+            this.fontSize = Math.max(70, this.fontSize - 5);
+            await FF_Display.setFontSize(this.fontSize);
+            this.saving = false;
+        },
+
+        async setDensity(value) {
+            if (!FF_Display.DENSITY.includes(value)) return;
+            this.saving = true;
+            this.density = value;
+            await FF_Display.setDensity(value);
+            this.saving = false;
+        },
+
+        async reset() {
+            this.saving = true;
+            this.fontSize = 100;
+            this.density  = 'comfortable';
+            await FF_Display.setBoth(100, 'comfortable');
+            this.saving = false;
+        },
+    };
+}
+window.ffDisplaySettings = ffDisplaySettings;
+
+
+// ============================================================
 // 05. FF_Toast — toast notification manager
 // ============================================================
 

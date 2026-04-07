@@ -13,10 +13,11 @@ use RuntimeException;
 // All application email goes through this class.
 // Transport: AWS SES API (via aws/aws-sdk-php).
 //
-// NOTE: .env carries AWS_SES_SMTP_* credentials which can be
-// used with a third-party SMTP library if needed later.
-// For now we use the SES API directly — same account, more
-// reliable, no additional Composer dependency.
+// Credentials lookup order [INT-1]:
+//   1. settings table FIRST  — settings_get('email.*' / 'aws.*')
+//   2. .env file  SECOND     — env('AWS_*' / 'SMTP_*')
+// Settings → Integrations UI saves rows, runtime reads them
+// without a redeploy. Empty/missing setting → fall through.
 //
 // Local development without AWS credentials:
 //   Emails are written to logs/mail.log instead of sending.
@@ -71,8 +72,15 @@ class Mailer
             $textBody = strip_tags($htmlBody);
         }
 
-        $fromEmail = (string) env('SMTP_FROM_EMAIL', 'noreply@example.com');
-        $fromName  = (string) env('SMTP_FROM_NAME', 'FleetForge');
+        // INT-1: settings table FIRST, .env SECOND.
+        $fromEmail = (string) (
+            settings_get('email.from_email')
+            ?: env('SMTP_FROM_EMAIL', 'noreply@example.com')
+        );
+        $fromName = (string) (
+            settings_get('email.from_name')
+            ?: env('SMTP_FROM_NAME', 'FleetForge')
+        );
 
         // Local dev without credentials → write to log file
         if (self::isLogMode()) {
@@ -227,12 +235,26 @@ class Mailer
             return self::$sesInstance;
         }
 
+        // INT-1: settings table FIRST, .env SECOND.
+        $region = (string) (
+            settings_get('aws.region')
+            ?: env('AWS_REGION', 'us-west-2')
+        );
+        $key = (string) (
+            settings_get('aws.access_key_id')
+            ?: env('AWS_ACCESS_KEY_ID', '')
+        );
+        $secret = (string) (
+            settings_get('aws.secret_access_key')
+            ?: env('AWS_SECRET_ACCESS_KEY', '')
+        );
+
         self::$sesInstance = new SesClient([
             'version'     => 'latest',
-            'region'      => (string) env('AWS_REGION', 'us-west-2'),
+            'region'      => $region,
             'credentials' => [
-                'key'    => (string) env('AWS_ACCESS_KEY_ID', ''),
-                'secret' => (string) env('AWS_SECRET_ACCESS_KEY', ''),
+                'key'    => $key,
+                'secret' => $secret,
             ],
         ]);
 
@@ -252,8 +274,15 @@ class Mailer
             return false;
         }
 
-        $key    = (string) env('AWS_ACCESS_KEY_ID', '');
-        $secret = (string) env('AWS_SECRET_ACCESS_KEY', '');
+        // INT-1: settings table FIRST, .env SECOND.
+        $key = (string) (
+            settings_get('aws.access_key_id')
+            ?: env('AWS_ACCESS_KEY_ID', '')
+        );
+        $secret = (string) (
+            settings_get('aws.secret_access_key')
+            ?: env('AWS_SECRET_ACCESS_KEY', '')
+        );
 
         return $key === '' || $secret === '';
     }

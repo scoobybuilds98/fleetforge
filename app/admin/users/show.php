@@ -275,6 +275,23 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
 
+    <?php if (is_super_admin() && $user['role_slug'] !== 'super_admin'): ?>
+    <!-- Manage Permissions — PERM-1 — super_admin only, never on super_admin targets -->
+    <div class="card">
+        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Permissions</div>
+        <div class="card-body" style="padding:16px;">
+            <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 12px;">
+                Grant or revoke individual permissions on top of this user's
+                <strong><?= e($user['role_name']) ?></strong> role.
+            </p>
+            <a href="<?= base_url('users/permissions') ?>?user_id=<?= $userId ?>"
+               class="btn btn-secondary w-full">
+                Manage Permissions
+            </a>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <?php if ($canEdit && !$isSelf): ?>
     <!-- Status actions -->
     <div class="card">

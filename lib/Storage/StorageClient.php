@@ -12,8 +12,14 @@ use RuntimeException;
 // FleetForge — Storage Abstraction Layer [INFRA / D9]
 //
 // Single interface for file storage in both environments:
-//   STORAGE_DRIVER=local → FF_ROOT/storage/ (development)
-//   STORAGE_DRIVER=s3    → Amazon S3 (production)
+//   storage.driver = local → FF_ROOT/storage/ (development)
+//   storage.driver = s3    → Amazon S3 (production)
+//
+// Credentials lookup order [INT-1]:
+//   1. settings table FIRST  — settings_get('storage.driver' / 'aws.*')
+//   2. .env file  SECOND     — env('STORAGE_DRIVER' / 'AWS_*')
+// Settings → Integrations UI saves rows, runtime reads them
+// without a redeploy. Empty/missing setting → fall through.
 //
 // RULES:
 //   • NEVER call move_uploaded_file() directly in business logic.
@@ -52,7 +58,7 @@ class StorageClient
     {
         self::validateStoragePath($storagePath);
 
-        return env('STORAGE_DRIVER', 'local') === 's3'
+        return self::driver() === 's3'
             ? self::uploadS3($tmpPath, $storagePath)
             : self::uploadLocal($tmpPath, $storagePath);
     }
@@ -70,7 +76,7 @@ class StorageClient
     {
         self::validateStoragePath($key);
 
-        return env('STORAGE_DRIVER', 'local') === 's3'
+        return self::driver() === 's3'
             ? self::urlS3($key, $expiry)
             : self::urlLocal($key, $expiry);
     }
@@ -85,9 +91,24 @@ class StorageClient
     {
         self::validateStoragePath($key);
 
-        return env('STORAGE_DRIVER', 'local') === 's3'
+        return self::driver() === 's3'
             ? self::deleteS3($key)
             : self::deleteLocal($key);
+    }
+
+    // ============================================================
+    // driver() — resolve the active storage driver
+    //
+    // INT-1: settings table FIRST, .env SECOND. Returns 'local'
+    // by default so a fresh install never tries to talk to S3.
+    // ============================================================
+    private static function driver(): string
+    {
+        $driver = (string) (
+            settings_get('storage.driver')
+            ?: env('STORAGE_DRIVER', 'local')
+        );
+        return $driver === 's3' ? 's3' : 'local';
     }
 
     // ============================================================
@@ -202,12 +223,26 @@ class StorageClient
             return self::$s3Instance;
         }
 
+        // INT-1: settings table FIRST, .env SECOND.
+        $region = (string) (
+            settings_get('aws.region')
+            ?: env('AWS_REGION', 'us-west-2')
+        );
+        $key = (string) (
+            settings_get('aws.access_key_id')
+            ?: env('AWS_ACCESS_KEY_ID', '')
+        );
+        $secret = (string) (
+            settings_get('aws.secret_access_key')
+            ?: env('AWS_SECRET_ACCESS_KEY', '')
+        );
+
         self::$s3Instance = new S3Client([
             'version'     => 'latest',
-            'region'      => (string) env('AWS_REGION', 'us-west-2'),
+            'region'      => $region,
             'credentials' => [
-                'key'    => (string) env('AWS_ACCESS_KEY_ID', ''),
-                'secret' => (string) env('AWS_SECRET_ACCESS_KEY', ''),
+                'key'    => $key,
+                'secret' => $secret,
             ],
         ]);
 
@@ -216,7 +251,11 @@ class StorageClient
 
     private static function bucket(): string
     {
-        return (string) env('AWS_S3_BUCKET', '');
+        // INT-1: settings table FIRST, .env SECOND.
+        return (string) (
+            settings_get('aws.s3_bucket')
+            ?: env('AWS_S3_BUCKET', '')
+        );
     }
 
     private static function uploadS3(string $tmpPath, string $storagePath): string

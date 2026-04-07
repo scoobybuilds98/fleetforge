@@ -20,8 +20,13 @@ namespace FleetForge\AI;
  *   if (!$ai->isEnabled()) return;
  *   $response = $ai->sendMessage($messages, $system, $tools, 4096, $userId);
  *
+ * Credentials lookup order [INT-1]:
+ *   1. settings table FIRST  — settings_get('ai.anthropic_api_key')
+ *   2. .env file  SECOND     — env('AI_ANTHROPIC_API_KEY')
+ * Same for the enabled toggle, model, and daily token limit.
+ *
  * @depends config/app.php (AI_ANTHROPIC_API_KEY, AI_ENABLED, AI_DAILY_TOKEN_LIMIT)
- * @session S026
+ * @session S026, S028 (INT-1)
  */
 class ClaudeClient
 {
@@ -47,10 +52,27 @@ class ClaudeClient
 
     public function __construct()
     {
-        // WHY: API key from .env (secret), model + toggle from settings table (runtime config)
-        $this->apiKey     = defined('AI_ANTHROPIC_API_KEY') ? (string) AI_ANTHROPIC_API_KEY : '';
-        $this->enabled    = (defined('AI_ENABLED') && AI_ENABLED) || (bool) settings_get('ai.enabled', false);
-        $this->model      = (string) settings_get('ai.model', 'claude-sonnet-4-20250514');
+        // INT-1: settings table FIRST, then .env fallback. The Settings →
+        // Integrations UI saves into ai.* rows, so users can rotate the
+        // key without redeploying. Empty/missing setting → fall through.
+        $this->apiKey = (string) (
+            settings_get('ai.anthropic_api_key')
+            ?: env('AI_ANTHROPIC_API_KEY', '')
+        );
+
+        // ai.enabled is stored as '1'/'0' string in settings; coerce safely.
+        $settingEnabled = settings_get('ai.enabled');
+        if ($settingEnabled !== null && $settingEnabled !== '') {
+            $this->enabled = (string) $settingEnabled === '1'
+                          || strtolower((string) $settingEnabled) === 'true';
+        } else {
+            $this->enabled = (bool) env('AI_ENABLED', false);
+        }
+
+        $this->model = (string) (
+            settings_get('ai.model')
+            ?: env('AI_MODEL', 'claude-sonnet-4-20250514')
+        );
         $this->projectRoot = dirname(__DIR__, 2); // lib/AI/ → project root
     }
 
@@ -339,10 +361,12 @@ class ClaudeClient
     // ────────────────────────────────────────────────────────────
     public function testConnection(): array
     {
+        // INT-1: explicit "not configured" message points the user at
+        // the right place to fix it instead of a vague network error.
         if ($this->apiKey === '') {
             return [
                 'success' => false,
-                'message' => 'API key not configured.',
+                'message' => 'API key not configured. Please add your Anthropic API key in Settings → Integrations.',
                 'details' => [],
             ];
         }
@@ -382,11 +406,16 @@ class ClaudeClient
         $body = json_decode((string) $raw, true);
 
         if ($code !== 200) {
-            // WHY: Extract the human-readable message from Anthropic's error response
+            // INT-1: extract Anthropic's own error message; fall back
+            // to the most useful generic for the HTTP code.
             $anthropicMsg = $body['error']['message'] ?? null;
-            $message = $anthropicMsg
-                ? 'Anthropic API error: ' . $anthropicMsg
-                : "Connection failed (HTTP {$code}). Check API key.";
+            if ($anthropicMsg) {
+                $message = 'Anthropic API error: ' . $anthropicMsg;
+            } elseif ($code === 401 || $code === 403) {
+                $message = 'API key is invalid. Please check your Anthropic API key in Settings → Integrations.';
+            } else {
+                $message = "Connection failed (HTTP {$code}). Check API key.";
+            }
 
             return [
                 'success' => false,
