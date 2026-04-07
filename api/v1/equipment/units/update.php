@@ -30,6 +30,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
+require_once dirname(__DIR__, 4) . '/lib/GPS/SamsaraClient.php';
 
 require_method('POST');
 require_auth_api();
@@ -49,8 +50,10 @@ if ($fields) {
 }
 
 // ── Fetch existing ─────────────────────────────────────────────
+// SAMSARA-3: include samsara_vehicle_id so we can PATCH Samsara after update
 $existing = db_row(
-    "SELECT id, unit_number, status, updated_at FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, unit_number, status, updated_at, samsara_vehicle_id, samsara_entity_type
+       FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
 if (!$existing) {
@@ -289,5 +292,30 @@ db_transaction(function () use (&$newUpdatedAt, $id, $updates, $userId, $existin
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 });
+
+// ── SAMSARA-3: PATCH the Samsara trailer with any changed fields ──
+// WHY after the transaction: DB is source of truth. Samsara failure
+// is non-blocking — we log it and still return 200.
+// Only trailer-type units are Samsara-managed (vehicles need hardware).
+// Only sync fields that Samsara cares about (name, vin, year, plate).
+if (!empty($existing['samsara_vehicle_id'])
+    && ($existing['samsara_entity_type'] ?? 'vehicle') === 'trailer'
+) {
+    $samsaraFields = array_filter([
+        'name'               => $updates['unit_number']   ?? null,
+        'vin'                => $updates['vin']            ?? null,
+        'year'               => isset($updates['year']) ? (int) $updates['year'] : null,
+        'licensePlateNumber' => $updates['license_plate'] ?? null,
+    ], fn($v) => $v !== null);
+
+    if (!empty($samsaraFields)) {
+        try {
+            $samsara = new \FleetForge\GPS\SamsaraClient();
+            $samsara->updateTrailer((string) $existing['samsara_vehicle_id'], $samsaraFields);
+        } catch (\Throwable) {
+            // Samsara sync failure is never blocking — it's already logged by SamsaraClient
+        }
+    }
+}
 
 json_success(['id' => $id, 'updated_at' => $newUpdatedAt]);

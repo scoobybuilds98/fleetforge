@@ -459,6 +459,159 @@ function verify_csrf_token(?string $submitted): bool
 }
 
 // ============================================================
+// EQUIPMENT-UNIT STATUS HELPERS — [SELECTOR-1]
+//
+// Centralised label / selectability rules for the
+// equipment_units.status ENUM. The ENUM values
+// (available, reserved, on_lease, maintenance, inactive,
+// decommissioned) are used in dropdowns across every
+// create form in the app, and the rules for which states a
+// user may pick MUST be the same in every place — UI label,
+// option-disabled flag, and server-side 409 rejection.
+//
+// USAGE:
+//   ff_unit_status_label('on_lease')  → 'On Lease'
+//   ff_unit_is_selectable('on_lease') → false   (block create)
+//   ff_unit_selector_label($row)      → '12TR1301 — 53ft Dry Van  ·  AVAILABLE'
+//
+// Forms render an <option> with the disabled attribute set when
+// ff_unit_is_selectable($u['status']) is false. APIs call the same
+// helper and respond with json_error('UNIT_UNAVAILABLE', $msg, 409,
+// ['fields' => ...]) if a non-available unit slips through anyway.
+// ============================================================
+
+if (!function_exists('ff_unit_status_label')) {
+function ff_unit_status_label(?string $status): string
+{
+    // Centralised so a label change here cascades everywhere.
+    // Keys MUST match the equipment_units.status ENUM exactly.
+    static $labels = [
+        'available'      => 'Available',
+        'reserved'       => 'Reserved',
+        'on_lease'       => 'On Lease',
+        'maintenance'    => 'Maintenance',
+        'inactive'       => 'Inactive',
+        'decommissioned' => 'Decommissioned',
+    ];
+    if ($status === null || $status === '') return 'Unknown';
+    return $labels[$status] ?? ucfirst(str_replace('_', ' ', $status));
+}
+}
+
+if (!function_exists('ff_unit_is_selectable')) {
+/**
+ * Whether a unit in this status may be selected for a NEW create
+ * action. Two contexts:
+ *
+ *   'booking'  (default) — picking a unit for a NEW LEASE or
+ *              RESERVATION. Only 'available' is selectable,
+ *              because a reserved/leased/maintenance unit can't
+ *              be double-booked. This is the STRICT rule.
+ *
+ *   'service' — picking a unit for a MAINTENANCE work order,
+ *              inspection, damage claim, or mileage log. These
+ *              are all "things that happen TO the unit", and must
+ *              still be allowed while the unit is on lease, in
+ *              maintenance, or reserved (a leased truck still
+ *              needs its 90-day inspection, a reserved trailer
+ *              still needs PM before it goes out). Only
+ *              'decommissioned' and 'inactive' units are blocked.
+ *
+ * Reserved/on_lease are visible-but-disabled for booking so the
+ * user SEES why they can't pick the unit, rather than the entry
+ * silently disappearing from the list. Filter dropdowns (e.g.
+ * mileage_logs/index.php) intentionally bypass this and show
+ * every status — they are read-only filters.
+ */
+function ff_unit_is_selectable(?string $status, string $context = 'booking'): bool
+{
+    if ($context === 'service') {
+        // Service workflow: block only the two "dead" states.
+        return !in_array($status, ['decommissioned', 'inactive'], true);
+    }
+    // Booking workflow (default): only truly-available units.
+    return $status === 'available';
+}
+}
+
+if (!function_exists('ff_unit_unavailable_message')) {
+/**
+ * Build the user-facing 409 / validation error message for a unit
+ * whose status blocks selection. Centralised so the API + form +
+ * audit log all read the same English. Pass the same context value
+ * you used with ff_unit_is_selectable() so the wording matches the
+ * actual rule (a leased unit is "already on a lease" in booking
+ * context but "decommissioned" in service context, etc.).
+ */
+function ff_unit_unavailable_message(string $unitNumber, string $status, string $context = 'booking'): string
+{
+    if ($context === 'booking' && in_array($status, ['on_lease', 'reserved'], true)) {
+        return "Unit {$unitNumber} already has an active lease.";
+    }
+    if ($context === 'service') {
+        return sprintf(
+            'Unit %s cannot be serviced (status: %s).',
+            $unitNumber,
+            ff_unit_status_label($status)
+        );
+    }
+    return sprintf(
+        'Unit %s is not available (status: %s).',
+        $unitNumber,
+        ff_unit_status_label($status)
+    );
+}
+}
+
+if (!function_exists('ff_unit_selector_label')) {
+/**
+ * Build the visible <option> label for an equipment-unit selector.
+ *
+ * Format: "12TR1301 — 53ft Dry Van  ·  AVAILABLE"
+ *  - The em-dash separator is used everywhere for unit_number
+ *    vs description, so this matches existing form aesthetics.
+ *  - The status suffix is uppercased so it reads as a badge,
+ *    visually separable from the descriptive text.
+ *  - Description is optional — pass any of template_name, year,
+ *    brand, model, category in $u and the function will assemble
+ *    a tidy descriptor in the same order forms have always used.
+ *
+ * @param array $u  Row containing at minimum unit_number + status.
+ *                  Optional: template_name, year, brand, model, category.
+ */
+function ff_unit_selector_label(array $u): string
+{
+    $unitNumber = (string) ($u['unit_number'] ?? '');
+    $status     = (string) ($u['status']      ?? '');
+
+    // Build the descriptive middle segment from whichever optional
+    // columns the caller selected. Order matches the conventions
+    // already in use in the various create forms.
+    $descParts = [];
+    if (!empty($u['template_name'])) {
+        $descParts[] = (string) $u['template_name'];
+    } else {
+        // Fallback for forms that pull year/brand/model individually.
+        $ybm = trim(sprintf(
+            '%s %s %s',
+            (string) ($u['year']  ?? ''),
+            (string) ($u['brand'] ?? ''),
+            (string) ($u['model'] ?? '')
+        ));
+        if ($ybm !== '') $descParts[] = $ybm;
+        if (!empty($u['category'])) $descParts[] = (string) $u['category'];
+    }
+    $desc = implode(' ', $descParts);
+
+    $label = $unitNumber;
+    if ($desc !== '') $label .= ' — ' . $desc;
+    if ($status !== '') $label .= '  ·  ' . strtoupper(ff_unit_status_label($status));
+
+    return $label;
+}
+}
+
+// ============================================================
 // MILEAGE HELPERS — D34 (km default for Canadian fleets)
 // ============================================================
 

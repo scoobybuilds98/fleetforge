@@ -25,13 +25,19 @@ require_permission('maintenance', 'create');
 // Pre-populate unit if coming from equipment profile
 $prefilledUnitId = clean_int($_GET['unit_id'] ?? null);
 
-// Load equipment units for dropdown (unit_number + year + brand + model)
+// Load equipment units for dropdown (unit_number + year + brand + model).
+// [SELECTOR-1] Also pull status so the option label can show
+// "· AVAILABLE / · ON LEASE / · MAINTENANCE" inline, and so the
+// template can disable rows that ff_unit_is_selectable() rejects.
+// Service-context rule: block decommissioned + inactive only — a
+// leased or in-maintenance unit still needs WOs.
 $units = db_select(
-    "SELECT eu.id, eu.unit_number, eu.year, et.brand, et.model
+    "SELECT eu.id, eu.unit_number, eu.status, eu.year, et.brand, et.model
      FROM equipment_units eu
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
      WHERE eu.deleted_at IS NULL
-     ORDER BY eu.unit_number ASC"
+     ORDER BY (eu.status IN ('available','on_lease','reserved','maintenance')) DESC,
+              eu.unit_number ASC"
 );
 
 // Load vendors for dropdown
@@ -81,14 +87,15 @@ require_once FF_ROOT . '/includes/header.php';
                             x-model="form.equipment_unit_id">
                         <option value="">— Select Unit —</option>
                         <?php foreach ($units as $unit): ?>
-                        <option value="<?= e($unit['id']) ?>">
-                            <?= e($unit['unit_number']) ?>
-                            <?php if ($unit['year'] || $unit['brand'] || $unit['model']): ?>
-                            — <?= e(trim($unit['year'] . ' ' . $unit['brand'] . ' ' . $unit['model'])) ?>
-                            <?php endif; ?>
+                        <?php // [SELECTOR-1] service context: decommissioned/inactive disabled, others allowed. ?>
+                        <option value="<?= e($unit['id']) ?>"
+                                data-status="<?= e($unit['status']) ?>"
+                                <?= ff_unit_is_selectable($unit['status'], 'service') ? '' : 'disabled' ?>>
+                            <?= e(ff_unit_selector_label($unit)) ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
+                    <div class="form-hint">Decommissioned and inactive units cannot be serviced.</div>
                     <div class="field-error" data-error-for="equipment_unit_id"></div>
                 </div>
 

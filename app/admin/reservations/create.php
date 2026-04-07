@@ -184,11 +184,14 @@ require_once FF_ROOT . '/includes/header.php';
                                     class="form-select"
                                     @change="addUnit($event.target.value); $event.target.value = ''">
                                 <option value="">— Add a unit —</option>
+                                <!-- [SELECTOR-1] Status badge appended via ffUnitLabel() —
+                                     mirrors the server-side ff_unit_selector_label() helper
+                                     so every selector in the app reads the same way. -->
                                 <template x-if="customerUnits.length > 0">
                                     <optgroup label="Customer's Leased Units">
                                         <template x-for="u in customerUnits" :key="'cu-'+u.id">
                                             <option :value="JSON.stringify({id:u.id, unit_number:u.unit_number, template_name:u.template_name, entry_type:'system'})"
-                                                    x-text="u.unit_number + (u.template_name ? ' — ' + u.template_name : '') + ' (' + u.lease_status + ')'">
+                                                    x-text="ffUnitLabel(u) + ' (lease: ' + u.lease_status + ')'">
                                             </option>
                                         </template>
                                     </optgroup>
@@ -197,7 +200,7 @@ require_once FF_ROOT . '/includes/header.php';
                                     <optgroup label="Available Units">
                                         <template x-for="u in availableUnits" :key="'au-'+u.id">
                                             <option :value="JSON.stringify({id:u.id, unit_number:u.unit_number, template_name:u.template_name, entry_type:'system'})"
-                                                    x-text="u.unit_number + (u.template_name ? ' — ' + u.template_name : '')">
+                                                    x-text="ffUnitLabel(u)">
                                             </option>
                                         </template>
                                     </optgroup>
@@ -625,6 +628,38 @@ function FF_ReservationCreate() {
         async init() {
             await this.loadCustomers();
             await this.loadTemplates();
+        },
+
+        // ── [SELECTOR-1] Build the option label for a unit row ─
+        // Mirrors the server-side ff_unit_selector_label() helper so
+        // every selector in the app reads the same way:
+        //   "12TR1301 — 53ft Dry Van  ·  AVAILABLE"
+        // Falls back to year/brand/model if template_name is missing,
+        // and uppercases a humanised status as a pseudo-badge suffix.
+        ffUnitLabel(u) {
+            if (!u) return '';
+            const labels = {
+                available:      'Available',
+                reserved:       'Reserved',
+                on_lease:       'On Lease',
+                maintenance:    'Maintenance',
+                inactive:       'Inactive',
+                decommissioned: 'Decommissioned',
+            };
+            const parts = [u.unit_number || ''];
+            let desc = '';
+            if (u.template_name) {
+                desc = u.template_name;
+            } else {
+                const ybm = [u.year, u.brand, u.model].filter(Boolean).join(' ').trim();
+                if (ybm) desc = ybm;
+            }
+            if (desc) parts.push('— ' + desc);
+            if (u.status) {
+                const lbl = labels[u.status] || u.status.replace('_', ' ');
+                parts.push(' · ' + lbl.toUpperCase());
+            }
+            return parts.join(' ');
         },
 
         // ── Load customers dropdown ───────────────────────────────

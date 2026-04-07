@@ -27,9 +27,14 @@ $lastGpsSync  = db_row(
 );
 $lastGpsSyncDate = $lastGpsSync ? format_date($lastGpsSync['log_date']) : '—';
 
-// ── Load units for filter dropdown (same query as create.php)
+// ── Load units for filter dropdown (same query as create.php).
+//    [SELECTOR-1] This is a READ-ONLY filter, so it intentionally
+//    shows EVERY non-deleted unit regardless of status — a user
+//    filtering by "decommissioned trailer that we sold last year"
+//    is a totally legitimate report. The label still includes the
+//    status badge for visual confirmation, but no row is disabled.
 $filterUnits = db_select(
-    "SELECT eu.id, eu.unit_number, et.brand, et.model
+    "SELECT eu.id, eu.unit_number, eu.status, et.brand, et.model
      FROM equipment_units eu
      JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
      WHERE eu.deleted_at IS NULL
@@ -82,12 +87,13 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <div class="card-header" style="flex-wrap:wrap;gap:.75rem;">
         <div class="card-title">Log Entries</div>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-left:auto;">
-            <select class="form-control form-control-sm" style="width:200px;"
+            <select class="form-control form-control-sm" style="width:240px;"
                     x-model="filters.equipment_unit_id" @change="load()">
                 <option value="">All Units</option>
                 <?php foreach ($filterUnits as $u): ?>
-                <option value="<?= e($u['id']) ?>">
-                    <?= e($u['unit_number']) ?> — <?= e($u['brand']) ?> <?= e($u['model']) ?>
+                <?php // [SELECTOR-1] Filter — every status visible & selectable. ?>
+                <option value="<?= e($u['id']) ?>" data-status="<?= e($u['status']) ?>">
+                    <?= e(ff_unit_selector_label($u)) ?>
                 </option>
                 <?php endforeach; ?>
             </select>

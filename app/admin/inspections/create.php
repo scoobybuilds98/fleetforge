@@ -25,12 +25,17 @@ require_auth();
 require_permission('inspections', 'create');
 
 // ── Load equipment units for dropdown
+// [SELECTOR-1] Pull status so we can show it inline in the option
+// label and disable rows that ff_unit_is_selectable() rejects in
+// the SERVICE context (decommissioned + inactive). A leased / in-
+// maintenance unit can still be inspected, so it stays selectable.
 $units = db_select(
-    "SELECT eu.id, eu.unit_number, eu.year, et.brand, et.model
+    "SELECT eu.id, eu.unit_number, eu.status, eu.year, et.brand, et.model
      FROM equipment_units eu
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
      WHERE eu.deleted_at IS NULL
-     ORDER BY eu.unit_number ASC"
+     ORDER BY (eu.status IN ('available','on_lease','reserved','maintenance')) DESC,
+              eu.unit_number ASC"
 );
 
 // ── Load active/pending leases for optional lease linkage
@@ -84,11 +89,15 @@ require_once FF_ROOT . '/includes/header.php';
                         x-model="form.equipment_unit_id" required>
                     <option value="">— Select unit —</option>
                     <?php foreach ($units as $u): ?>
-                    <option value="<?= e($u['id']) ?>">
-                        <?= e($u['unit_number']) ?><?= $u['year'] ? ' — ' . e($u['year']) : '' ?><?= $u['brand'] ? ' ' . e($u['brand']) . ' ' . e($u['model']) : '' ?>
+                    <?php // [SELECTOR-1] service context — only decommissioned/inactive disabled. ?>
+                    <option value="<?= e($u['id']) ?>"
+                            data-status="<?= e($u['status']) ?>"
+                            <?= ff_unit_is_selectable($u['status'], 'service') ? '' : 'disabled' ?>>
+                        <?= e(ff_unit_selector_label($u)) ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
+                <div class="form-hint">Decommissioned and inactive units cannot be inspected.</div>
                 <div class="field-error" x-show="errors.equipment_unit_id" x-text="errors.equipment_unit_id" x-cloak></div>
             </div>
             <div class="form-group">

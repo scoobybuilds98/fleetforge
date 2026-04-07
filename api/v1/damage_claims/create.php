@@ -115,13 +115,20 @@ if ($fields) {
 
 // -----------------------------------------------------------------------
 // 2. Pre-flight: verify related entities exist
+//    [SELECTOR-1] Pull status and reject decommissioned/inactive via
+//    the SERVICE-context predicate — mirrors the disabled-option rule
+//    the form uses so a stale page / hand-crafted POST can't bypass.
 // -----------------------------------------------------------------------
 $unit = db_row(
-    "SELECT id, unit_number FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, unit_number, status FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
     [$unitId]
 );
 if (!$unit) {
     json_validation_error(['equipment_unit_id' => 'Equipment unit not found.'], 'Equipment unit not found.');
+}
+if (!ff_unit_is_selectable($unit['status'], 'service')) {
+    $msg = ff_unit_unavailable_message((string) $unit['unit_number'], (string) $unit['status'], 'service');
+    json_error('UNIT_UNAVAILABLE', $msg, 409, ['fields' => ['equipment_unit_id' => $msg]]);
 }
 
 if ($customerId) {

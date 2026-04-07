@@ -32,13 +32,19 @@ $preUnitId    = clean_int($_GET['equipment_unit_id'] ?? null);
 $preLeaseId   = clean_int($_GET['lease_id'] ?? null);
 $preCustomerId = clean_int($_GET['customer_id'] ?? null);
 
-// Load equipment units for dropdown — brand/model from template (unit has no make/model column)
+// Load equipment units for dropdown — brand/model from template (unit has no make/model column).
+// [SELECTOR-1] Pull status so the option label shows it inline and
+// the disabled attribute can mirror the SERVICE-context predicate.
+// A leased / in-maintenance unit can absolutely have a damage claim
+// (in fact that's the most common scenario), so only decommissioned
+// + inactive are blocked.
 $units = db_select(
-    "SELECT eu.id, eu.unit_number, eu.year, et.brand, et.model
+    "SELECT eu.id, eu.unit_number, eu.status, eu.year, et.brand, et.model
      FROM equipment_units eu
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
      WHERE eu.deleted_at IS NULL
-     ORDER BY eu.unit_number ASC"
+     ORDER BY (eu.status IN ('available','on_lease','reserved','maintenance')) DESC,
+              eu.unit_number ASC"
 );
 
 // Load active customers for dropdown
@@ -93,11 +99,15 @@ require_once FF_ROOT . '/includes/header.php';
                             x-model="form.equipment_unit_id">
                         <option value="">— Select unit —</option>
                         <?php foreach ($units as $u): ?>
-                        <option value="<?= e($u['id']) ?>">
-                            <?= e($u['unit_number']) ?><?= $u['year'] ? ' · ' . e($u['year']) : '' ?><?= $u['brand'] ? ' · ' . e($u['brand']) : '' ?><?= $u['model'] ? ' ' . e($u['model']) : '' ?>
+                        <?php // [SELECTOR-1] service context — only decommissioned/inactive disabled. ?>
+                        <option value="<?= e($u['id']) ?>"
+                                data-status="<?= e($u['status']) ?>"
+                                <?= ff_unit_is_selectable($u['status'], 'service') ? '' : 'disabled' ?>>
+                            <?= e(ff_unit_selector_label($u)) ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
+                    <div class="form-hint">Decommissioned and inactive units cannot have new claims.</div>
                     <div class="field-error" data-error-for="equipment_unit_id"></div>
                 </div>
 

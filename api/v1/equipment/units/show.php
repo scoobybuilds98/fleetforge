@@ -81,6 +81,24 @@ $row = db_row(
         u.updated_by,
         u.created_at,
         u.updated_at,
+        u.samsara_vehicle_id,
+        u.samsara_entity_type,
+        u.samsara_vehicle_name,
+        u.samsara_vin,
+        u.samsara_serial_number,
+        u.samsara_gateway_id,
+        u.samsara_battery_pct,
+        u.samsara_battery_charging,
+        u.samsara_power_source,
+        u.samsara_check_in_mode,
+        u.samsara_last_location_lat,
+        u.samsara_last_location_lng,
+        u.samsara_last_location_address,
+        u.samsara_last_speed_kph,
+        u.samsara_last_connected_at,
+        u.samsara_last_synced_at,
+        u.samsara_odometer_km,
+        u.samsara_tags,
         t.name     AS template_name,
         t.category AS template_category,
         t.brand    AS template_brand,
@@ -150,4 +168,31 @@ json_success([
     'updated_by'             => $row['updated_by'] ? (int) $row['updated_by'] : null,
     'created_at'             => $row['created_at'],
     'updated_at'             => $row['updated_at'],
+    // SAMSARA-1: live mapping fields. Cast nullable numerics so the
+    // Alpine front-end gets typed numbers (not numeric strings) for
+    // toFixed() / toLocaleString() formatters.
+    // SAMSARA-2: samsara_entity_type drives the [Vehicle] / [Trailer]
+    // pill on the tracking tab and tells the show page which API path
+    // the link form will eventually POST to.
+    'samsara_vehicle_id'             => $row['samsara_vehicle_id'],
+    'samsara_entity_type'            => $row['samsara_entity_type'] ?? 'vehicle',
+    'samsara_vehicle_name'           => $row['samsara_vehicle_name'],
+    'samsara_vin'                    => $row['samsara_vin'],
+    'samsara_serial_number'          => $row['samsara_serial_number'],
+    'samsara_gateway_id'             => $row['samsara_gateway_id'],
+    'samsara_battery_pct'            => $row['samsara_battery_pct'] !== null ? (int) $row['samsara_battery_pct'] : null,
+    'samsara_battery_charging'       => $row['samsara_battery_charging'] !== null ? (int) $row['samsara_battery_charging'] : null,
+    'samsara_power_source'           => $row['samsara_power_source'],
+    'samsara_check_in_mode'          => $row['samsara_check_in_mode'],
+    'samsara_last_location_lat'      => $row['samsara_last_location_lat'] !== null ? (float) $row['samsara_last_location_lat'] : null,
+    'samsara_last_location_lng'      => $row['samsara_last_location_lng'] !== null ? (float) $row['samsara_last_location_lng'] : null,
+    'samsara_last_location_address'  => $row['samsara_last_location_address'],
+    'samsara_last_speed_kph'         => $row['samsara_last_speed_kph'] !== null ? (float) $row['samsara_last_speed_kph'] : null,
+    'samsara_last_connected_at'      => $row['samsara_last_connected_at'],
+    'samsara_last_synced_at'         => $row['samsara_last_synced_at'],
+    'samsara_odometer_km'            => $row['samsara_odometer_km'] !== null ? (float) $row['samsara_odometer_km'] : null,
+    // SAMSARA-2: structured tag array [{name, type:"lender|lessee", customer_id}]
+    // populated by the Samsara tags Option-B import. Empty array when unit
+    // has no tags or has not been synced yet.
+    'samsara_tags'                   => $row['samsara_tags'] ? json_decode($row['samsara_tags'], true) : [],
 ]);

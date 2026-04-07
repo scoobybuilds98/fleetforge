@@ -69,9 +69,21 @@ if ($fields) {
     json_validation_error($fields);
 }
 
-// ── Verify unit exists
-if (!db_exists('equipment_units', 'id = ? AND deleted_at IS NULL', [$unitId])) {
+// ── Verify unit exists AND is allowed in the SERVICE context.
+//    [SELECTOR-1] We need the row (not just db_exists()) so we can
+//    pull status + unit_number for the rejection message. The form
+//    greys these out, but a stale page or hand-crafted POST could
+//    still submit a decommissioned id.
+$unitRow = db_row(
+    "SELECT id, unit_number, status FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
+    [$unitId]
+);
+if (!$unitRow) {
     json_validation_error(['equipment_unit_id' => 'Equipment unit not found.']);
+}
+if (!ff_unit_is_selectable($unitRow['status'], 'service')) {
+    $msg = ff_unit_unavailable_message((string) $unitRow['unit_number'], (string) $unitRow['status'], 'service');
+    json_error('UNIT_UNAVAILABLE', $msg, 409, ['fields' => ['equipment_unit_id' => $msg]]);
 }
 
 // ── Verify lease exists and belongs to this unit (if provided)

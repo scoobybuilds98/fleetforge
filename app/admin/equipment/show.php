@@ -30,12 +30,23 @@ if (!$unitId) {
     exit;
 }
 
-// Load unit server-side for <title> and initial render — JS fills in the rest
+// Load unit server-side for <title> and initial render — JS fills in the rest.
+// SAMSARA-1: pull every samsara_* column so the hero "Live" badge, the
+// Samsara Mapping tab, and the Overview Samsara section can render from
+// the first paint without waiting on a JS round-trip.
 $unit = db_row(
     "SELECT u.id, u.unit_number, u.status, u.year, u.health_score,
             u.cvi_expiry, u.registration_expiry, u.mvi_expiry, u.insurance_expiry,
             u.yard_location, u.mileage, u.vin, u.updated_at,
             u.gps_device_id, u.tracking_provider, u.samsara_vehicle_url,
+            u.samsara_vehicle_id, u.samsara_entity_type, u.samsara_vehicle_name,
+            u.samsara_vin, u.samsara_serial_number, u.samsara_gateway_id,
+            u.samsara_battery_pct, u.samsara_battery_charging,
+            u.samsara_power_source, u.samsara_check_in_mode,
+            u.samsara_last_location_lat, u.samsara_last_location_lng,
+            u.samsara_last_location_address, u.samsara_last_speed_kph,
+            u.samsara_last_connected_at, u.samsara_last_synced_at,
+            u.samsara_odometer_km,
             t.name AS template_name, t.category AS template_category
        FROM equipment_units u
        JOIN equipment_templates t ON t.id = u.template_id
@@ -114,6 +125,38 @@ function daysUntil(?string $date): ?int {
             <span class="badge <?= statusBadgeClass($unit['status']) ?>" style="margin-left:0.5rem;font-size:0.75rem;vertical-align:middle;">
                 <?= e(str_replace('_', ' ', $unit['status'])) ?>
             </span>
+            <?php
+            // SAMSARA-1: Live tracking indicator. Shows a pulsing green dot
+            // when this unit is mapped to a Samsara trackable. Sits next to
+            // the status badge so dispatchers can spot live units at a glance.
+            //
+            // SAMSARA-2: Trailer-linked units never get a battery badge
+            // because the trailer stats endpoint doesn't return battery
+            // data — see SamsaraClient::normalizeTrailerStats(). The Live
+            // dot still shows so the unit is visibly being tracked.
+            if (!empty($unit['samsara_vehicle_id'])):
+                $isTrailer  = ($unit['samsara_entity_type'] ?? 'vehicle') === 'trailer';
+                $batteryPct = $unit['samsara_battery_pct'] !== null ? (int) $unit['samsara_battery_pct'] : null;
+            ?>
+            <span class="ff-live-badge" title="Synced from Samsara <?= $isTrailer ? 'trailer' : 'vehicle' ?>">
+                <span class="ff-live-dot"></span>
+                Live
+            </span>
+            <?php if ($isTrailer): ?>
+                <span class="badge" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:0.7rem;vertical-align:middle;margin-left:0.25rem;" title="Linked to a Samsara trailer (asset gateway)">
+                    Trailer
+                </span>
+            <?php endif; ?>
+            <?php if ($batteryPct !== null): ?>
+                <?php
+                // Battery color: red <20%, amber 20-49%, green ≥50%.
+                $battClass = $batteryPct < 20 ? 'badge-danger' : ($batteryPct < 50 ? 'badge-warning' : 'badge-success');
+                ?>
+                <span class="badge <?= $battClass ?>" style="font-size:0.7rem;vertical-align:middle;margin-left:0.25rem;" title="Samsara battery level">
+                    <?= $batteryPct ?>%
+                </span>
+            <?php endif; ?>
+            <?php endif; ?>
         </h1>
         <div class="text-secondary text-sm" style="margin-top:0.25rem;">
             <?= e($unit['template_name']) ?>
@@ -123,9 +166,35 @@ function daysUntil(?string $date): ?int {
             <?php if ($unit['yard_location']): ?>
                 · <?= e($unit['yard_location']) ?>
             <?php endif; ?>
+            <?php
+            // SAMSARA-1: Last-synced indicator inline with the subtitle
+            // so users can see at a glance how stale the live data is.
+            if (!empty($unit['samsara_last_synced_at'])):
+            ?>
+                · <span title="Last Samsara sync">Synced <?= e(format_datetime($unit['samsara_last_synced_at'])) ?></span>
+            <?php endif; ?>
         </div>
     </div>
     <div class="page-header-actions">
+        <?php
+        // SAMSARA-1: Direct link to the live trackable in the Samsara
+        // dashboard. Only shown when mapped — built from the vehicle
+        // ID so it works even if samsara_vehicle_url was never set.
+        // SAMSARA-2: trailers live under /o/trailers/, vehicles under
+        // /o/vehicles/. Picking the right path means the link opens
+        // straight to the asset detail page rather than a 404.
+        if (!empty($unit['samsara_vehicle_id'])):
+            $samsaraPathSegment = (($unit['samsara_entity_type'] ?? 'vehicle') === 'trailer') ? 'trailers' : 'vehicles';
+            $samsaraTrackUrl = 'https://cloud.samsara.com/o/' . $samsaraPathSegment . '/' . urlencode((string) $unit['samsara_vehicle_id']);
+        ?>
+        <a href="<?= e($samsaraTrackUrl) ?>" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/>
+            </svg>
+            Track in Samsara
+        </a>
+        <?php endif; ?>
         <?php if (can('equipment', 'edit')): ?>
         <a href="<?= base_url('equipment/edit') ?>?id=<?= $unitId ?>" class="btn btn-secondary btn-sm">
             Edit Unit
@@ -216,7 +285,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             ['key' => 'maintenance',    'label' => 'Maintenance'],
             ['key' => 'inspections',    'label' => 'Inspections'],
             ['key' => 'documents',      'label' => 'Documents'],
-            ['key' => 'tracking',       'label' => 'GPS Tracking'],
+            ['key' => 'tracking',       'label' => 'Samsara Mapping'],
         ];
         foreach ($tabs as $tab):
         ?>
@@ -315,6 +384,99 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </table>
                     </div>
                 </div>
+
+                <!-- ── SAMSARA-1: Live Tracking summary (full width) ── -->
+                <!-- Only rendered when the unit is mapped to a Samsara
+                     vehicle. Mirrors the most useful fields from the
+                     Samsara Mapping tab so users get the live picture
+                     without leaving the Overview. -->
+                <template x-if="unit.samsara_vehicle_id">
+                    <div class="card spec-card" style="margin-bottom:0;grid-column:1/-1;">
+                        <div class="card-header" style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+                            <div class="card-title">Samsara Live Tracking</div>
+                            <button @click="activeTab = 'tracking'" class="btn btn-ghost btn-xs" style="color:#fff;opacity:0.85;">Open Mapping →</button>
+                        </div>
+                        <div class="card-body" style="padding:0;">
+                            <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0;">
+                                <!-- Last location -->
+                                <div style="padding:14px 16px;border-right:1px solid var(--border-color);">
+                                    <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Location</div>
+                                    <div style="font-size:0.875rem;font-weight:500;margin-top:4px;line-height:1.35;"
+                                         x-text="unit.samsara_last_location_address || '—'"></div>
+                                </div>
+                                <!-- Speed -->
+                                <div style="padding:14px 16px;border-right:1px solid var(--border-color);">
+                                    <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Speed</div>
+                                    <div class="font-mono" style="font-size:0.95rem;font-weight:600;margin-top:4px;"
+                                         x-text="unit.samsara_last_speed_kph !== null && unit.samsara_last_speed_kph !== undefined ? Number(unit.samsara_last_speed_kph).toFixed(1) + ' km/h' : '—'"></div>
+                                </div>
+                                <!-- Odometer -->
+                                <div style="padding:14px 16px;border-right:1px solid var(--border-color);">
+                                    <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Odometer</div>
+                                    <div class="font-mono" style="font-size:0.95rem;font-weight:600;margin-top:4px;"
+                                         x-text="unit.samsara_odometer_km ? Number(unit.samsara_odometer_km).toLocaleString() + ' km' : '—'"></div>
+                                </div>
+                                <!-- Battery -->
+                                <div style="padding:14px 16px;">
+                                    <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Battery</div>
+                                    <div class="font-mono" style="font-size:0.95rem;font-weight:600;margin-top:4px;">
+                                        <span x-show="unit.samsara_battery_pct !== null && unit.samsara_battery_pct !== undefined"
+                                              x-text="unit.samsara_battery_pct + '%'"></span>
+                                        <span x-show="unit.samsara_battery_pct === null || unit.samsara_battery_pct === undefined">—</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-secondary text-xs" style="padding:8px 16px;border-top:1px solid var(--border-color);">
+                                Last synced
+                                <span x-text="unit.samsara_last_synced_at ? formatRelative(unit.samsara_last_synced_at) : 'never'"></span>
+                                · Linked to <span class="font-mono" x-text="unit.samsara_vehicle_name || unit.samsara_vehicle_id"></span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- ── SAMSARA-2: Tag pills (lenders + lessees) ─────────────
+                     Only rendered when samsara_tags has at least one entry.
+                     Lender tags (financing / lien holder) show in amber.
+                     Lessee tags (past / current renters) show in blue and
+                     link to their customer record.
+                     ─────────────────────────────────────────────────────── -->
+                <template x-if="unit.samsara_tags && unit.samsara_tags.length > 0">
+                    <div class="card spec-card" style="margin-bottom:0;grid-column:1/-1;">
+                        <div class="card-header" style="padding:12px 16px;">
+                            <div class="card-title">Samsara Tags</div>
+                            <div class="text-xs text-secondary" style="margin-left:auto;">
+                                from Samsara fleet tags
+                            </div>
+                        </div>
+                        <div class="card-body" style="padding:12px 16px;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-start;">
+                            <template x-for="tag in unit.samsara_tags" :key="tag.raw || tag.name">
+                                <template x-if="tag.type === 'lender'">
+                                    <!-- Amber pill for finance / lien holder -->
+                                    <span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.25rem 0.65rem;border-radius:9999px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:0.78rem;font-weight:500;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" style="width:12px;height:12px;flex-shrink:0;" aria-hidden="true">
+                                            <path d="M8 1a4 4 0 100 8A4 4 0 008 1zM2.75 9.5a.75.75 0 00-.75.75v.69c0 .622.447 1.146 1.057 1.244l.96.16a6.496 6.496 0 001.983.144 6.5 6.5 0 002.985-.822A6.5 6.5 0 0013 9.5H2.75z"/>
+                                        </svg>
+                                        <span>Financed by: </span>
+                                        <span x-text="tag.name"></span>
+                                    </span>
+                                </template>
+                                <template x-if="tag.type === 'lessee'">
+                                    <!-- Blue pill for lessee — links to customer record -->
+                                    <a :href="tag.customer_id ? `<?= base_url('customers/show') ?>?id=${tag.customer_id}` : '#'"
+                                       style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.25rem 0.65rem;border-radius:9999px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-size:0.78rem;font-weight:500;text-decoration:none;"
+                                       :style="!tag.customer_id ? 'pointer-events:none;' : ''"
+                                       title="View customer record">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" style="width:12px;height:12px;flex-shrink:0;" aria-hidden="true">
+                                            <path d="M8 8a3 3 0 100-6 3 3 0 000 6zM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 00-11.215 0C2.172 13.439 2.647 14 3.265 14H12.735z"/>
+                                        </svg>
+                                        <span x-text="tag.name"></span>
+                                    </a>
+                                </template>
+                            </template>
+                        </div>
+                    </div>
+                </template>
 
                 <!-- ── Notes (spans full width if present) ── -->
                 <template x-if="unit.notes">
@@ -1372,52 +1534,160 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
     </div>
 
-    <!-- ── TAB: GPS Tracking ────────────────────────────────────── -->
+    <!-- ── TAB: Samsara Mapping ────────────────────────────────── -->
+    <!-- SAMSARA-1: Replaces the older "GPS Tracking" tab. Shows two
+         possible states based on whether the unit is currently mapped
+         to a Samsara vehicle:
+           UNMAPPED → dropdown of unmapped Samsara vehicles + Link button
+           MAPPED   → live data cards (location, telemetry, identifiers)
+                      + mini-map + Sync Now / Unlink buttons
+         All inputs go through api/v1/samsara/* endpoints. -->
     <div x-show="activeTab === 'tracking'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
-        <!-- No GPS device configured -->
-        <template x-if="!loading && unit && !unit.gps_device_id">
-            <div class="card">
-                <div class="card-body" style="text-align:center;padding:48px 20px;">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" style="width:48px;height:48px;color:var(--text-muted);margin-bottom:12px;">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/>
-                    </svg>
-                    <h3 style="margin:0 0 8px;font-size:1rem;font-weight:600;color:var(--text-primary);">No GPS Tracking Configured</h3>
-                    <p style="margin:0 0 16px;font-size:0.875rem;color:var(--text-secondary);max-width:400px;margin-left:auto;margin-right:auto;">
-                        This unit doesn't have a Samsara GPS device assigned. Add a GPS Device ID in the unit settings to enable real-time tracking.
+        <!-- ── UNMAPPED STATE ────────────────────────────────── -->
+        <!-- SAMSARA-2: dropdown lists vehicles AND trailers; the
+             entity_type tag is rendered as a prefix so users can
+             tell at a glance which API path the unit will sync via. -->
+        <template x-if="!unit?.samsara_vehicle_id">
+            <div class="card spec-card">
+                <div class="card-header" style="padding:12px 16px;">
+                    <div class="card-title">Link to Samsara</div>
+                </div>
+                <div class="card-body" style="padding:20px;">
+                    <p style="margin:0 0 16px;font-size:0.875rem;color:var(--text-secondary);">
+                        Map this unit to a Samsara vehicle or trailer to start
+                        syncing GPS data every 5 minutes. Vehicles also report
+                        odometer, battery, and power source; trailers only
+                        report GPS + odometer.
                     </p>
-                    <?php if (can('equipment', 'edit')): ?>
-                    <a href="<?= base_url('equipment/edit') ?>?id=<?= $unitId ?>" class="btn btn-primary btn-sm">Configure GPS Device</a>
-                    <?php endif; ?>
+
+                    <!-- Loading trackables -->
+                    <template x-if="samsaraVehiclesLoading">
+                        <div style="color:var(--text-secondary);font-size:0.875rem;">
+                            Loading Samsara vehicles &amp; trailers…
+                        </div>
+                    </template>
+
+                    <!-- Trackables loaded but list is empty -->
+                    <template x-if="!samsaraVehiclesLoading && samsaraVehicles.length === 0 && samsaraVehiclesLoaded">
+                        <div class="toast toast-warning" style="position:relative;margin:0;animation:none;">
+                            <span class="toast-icon">!</span>
+                            <div class="toast-body">
+                                <div class="toast-message">
+                                    No vehicles or trailers found in Samsara. Verify the API key in
+                                    <a href="<?= base_url('settings/integrations') ?>" style="text-decoration:underline;">Settings → Integrations</a>.
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Trackable picker -->
+                    <template x-if="!samsaraVehiclesLoading && samsaraVehicles.length > 0">
+                        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+                            <div style="flex:1;min-width:280px;">
+                                <label class="form-label" for="samsara-vehicle-select">Samsara Vehicle or Trailer</label>
+                                <select id="samsara-vehicle-select"
+                                        class="form-control"
+                                        x-model="samsaraSelectedVehicleId">
+                                    <option value="">-- Select a vehicle or trailer --</option>
+                                    <template x-for="v in samsaraVehicles" :key="v.id">
+                                        <option :value="v.id"
+                                                :disabled="v.is_linked"
+                                                x-text="(v.entity_type === 'trailer' ? '[Trailer] ' : '[Vehicle] ') + (
+                                                    v.is_linked
+                                                    ? (v.name + ' — already linked to ' + v.linked_unit_number)
+                                                    : (v.name + (v.vin ? ' · VIN ' + v.vin.slice(-6) : ''))
+                                                )">
+                                        </option>
+                                    </template>
+                                </select>
+                                <div class="text-secondary text-sm" style="margin-top:4px;">
+                                    <span x-text="samsaraVehicles.length"></span> total
+                                    (<span x-text="samsaraVehicles.filter(v => v.entity_type !== 'trailer').length"></span> vehicles,
+                                    <span x-text="samsaraVehicles.filter(v => v.entity_type === 'trailer').length"></span> trailers) —
+                                    <span x-text="samsaraVehicles.filter(v => !v.is_linked).length"></span> available to link
+                                </div>
+                            </div>
+                            <?php if (can('equipment', 'edit')): ?>
+                            <button class="btn btn-primary"
+                                    @click="linkSamsaraVehicle()"
+                                    :disabled="!samsaraSelectedVehicleId || samsaraLinking">
+                                <span x-show="!samsaraLinking">Link to Samsara</span>
+                                <span x-show="samsaraLinking">Linking…</span>
+                            </button>
+                            <?php endif; ?>
+                        </div>
+                    </template>
+
+                    <template x-if="samsaraError">
+                        <div class="toast toast-error" style="position:relative;margin-top:12px;animation:none;">
+                            <span class="toast-icon">!</span>
+                            <div class="toast-body">
+                                <div class="toast-message" x-text="samsaraError"></div>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </div>
         </template>
 
-        <!-- GPS configured — loading state -->
-        <template x-if="unit?.gps_device_id && trackingLoading">
-            <div class="card">
-                <div class="card-body" style="padding:2rem;text-align:center;color:var(--text-secondary);">
-                    Loading GPS data…
-                    <div class="skeleton skeleton-row" style="margin-top:12px;"></div>
-                    <div class="skeleton skeleton-row" style="margin-top:8px;"></div>
-                </div>
-            </div>
-        </template>
-
-        <!-- GPS configured — data loaded -->
-        <template x-if="unit?.gps_device_id && !trackingLoading && trackingLoaded">
+        <!-- ── MAPPED STATE ──────────────────────────────────── -->
+        <template x-if="unit?.samsara_vehicle_id">
             <div>
-                <!-- No GPS signal warning -->
-                <template x-if="!trackingData?.location">
+                <!-- Top bar with vehicle name + Sync / Unlink actions -->
+                <!-- SAMSARA-2: entity_type pill makes it obvious whether
+                     this unit is wired to /fleet/vehicles or /fleet/trailers,
+                     since trailers won't show battery / power / fuel data. -->
+                <div class="card spec-card" style="margin-bottom:16px;">
+                    <div class="card-body" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                        <div>
+                            <div style="font-weight:600;color:var(--text-primary);font-size:0.95rem;">
+                                <span x-show="unit?.samsara_entity_type === 'trailer'"
+                                      style="display:inline-block;padding:2px 8px;margin-right:6px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;border-radius:10px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Trailer</span>
+                                <span x-show="!unit?.samsara_entity_type || unit?.samsara_entity_type === 'vehicle'"
+                                      style="display:inline-block;padding:2px 8px;margin-right:6px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:10px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Vehicle</span>
+                                Linked to <span x-text="unit?.samsara_vehicle_name || unit?.samsara_vehicle_id" class="font-mono"></span>
+                            </div>
+                            <div class="text-secondary text-sm" style="margin-top:2px;">
+                                <span x-show="unit?.samsara_last_synced_at">
+                                    Last synced <span x-text="formatRelative(unit?.samsara_last_synced_at)"></span>
+                                </span>
+                                <span x-show="!unit?.samsara_last_synced_at">Never synced</span>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-primary btn-sm"
+                                    @click="syncSamsaraNow()"
+                                    :disabled="samsaraSyncing">
+                                <span x-show="!samsaraSyncing">Sync Now</span>
+                                <span x-show="samsaraSyncing">Syncing…</span>
+                            </button>
+                            <?php if (can('equipment', 'edit')): ?>
+                            <button class="btn btn-danger btn-sm"
+                                    @click="unlinkSamsaraVehicle()"
+                                    :disabled="samsaraLinking">
+                                Unlink
+                            </button>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- No GPS yet (linked but device unreachable) -->
+                <template x-if="!unit?.samsara_last_location_lat">
                     <div class="toast toast-warning" style="position:relative;margin-bottom:16px;animation:none;">
-                        <span class="toast-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg></span>
+                        <span class="toast-icon">!</span>
                         <div class="toast-body">
-                            <div class="toast-message">GPS data unavailable. The device may be offline or Samsara API is not configured.</div>
+                            <div class="toast-message">
+                                No GPS fix yet. The gateway may be powered off or
+                                still initialising. Click <strong>Sync Now</strong>
+                                to retry.
+                            </div>
                         </div>
                     </div>
                 </template>
 
+                <!-- Live data: map + telemetry side-by-side -->
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                     <!-- Mini Map -->
                     <div class="card spec-card" style="margin-bottom:0;">
@@ -1426,7 +1696,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </div>
                         <div class="card-body" style="padding:0;">
                             <div id="unit-tracking-map" style="height:320px;background:var(--bg-page);">
-                                <template x-if="!trackingData?.location">
+                                <template x-if="!unit?.samsara_last_location_lat">
                                     <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.875rem;">
                                         No location data available
                                     </div>
@@ -1435,52 +1705,88 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </div>
                     </div>
 
-                    <!-- GPS Details -->
+                    <!-- Live Telemetry -->
                     <div class="card spec-card" style="margin-bottom:0;">
-                        <div class="card-header" style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
-                            <div class="card-title">GPS Details</div>
-                            <button @click="refreshTracking()" class="btn btn-ghost btn-xs" style="color:#fff;opacity:0.8;">Refresh</button>
+                        <div class="card-header" style="padding:12px 16px;">
+                            <div class="card-title">Live Telemetry</div>
                         </div>
                         <div class="card-body" style="padding:0;">
                             <table class="spec-table">
                                 <tr>
                                     <td class="spec-label">Address</td>
-                                    <td x-text="trackingData?.location?.address || '—'"></td>
+                                    <td x-text="unit?.samsara_last_location_address || '—'"></td>
                                 </tr>
                                 <tr>
                                     <td class="spec-label">Latitude</td>
-                                    <td class="font-mono" x-text="trackingData?.location?.latitude?.toFixed(6) || '—'"></td>
+                                    <td class="font-mono" x-text="unit?.samsara_last_location_lat ? Number(unit.samsara_last_location_lat).toFixed(6) : '—'"></td>
                                 </tr>
                                 <tr>
                                     <td class="spec-label">Longitude</td>
-                                    <td class="font-mono" x-text="trackingData?.location?.longitude?.toFixed(6) || '—'"></td>
+                                    <td class="font-mono" x-text="unit?.samsara_last_location_lng ? Number(unit.samsara_last_location_lng).toFixed(6) : '—'"></td>
                                 </tr>
                                 <tr>
                                     <td class="spec-label">Speed</td>
-                                    <td class="font-mono" x-text="trackingData?.location?.speed !== null && trackingData?.location?.speed !== undefined ? Math.round(trackingData.location.speed) + ' mph' : '—'"></td>
+                                    <td class="font-mono" x-text="unit?.samsara_last_speed_kph !== null && unit?.samsara_last_speed_kph !== undefined ? Number(unit.samsara_last_speed_kph).toFixed(1) + ' km/h' : '—'"></td>
                                 </tr>
                                 <tr>
-                                    <td class="spec-label">Heading</td>
-                                    <td class="font-mono" x-text="trackingData?.location?.heading !== null && trackingData?.location?.heading !== undefined ? Math.round(trackingData.location.heading) + '°' : '—'"></td>
+                                    <td class="spec-label">Odometer</td>
+                                    <td class="font-mono" x-text="unit?.samsara_odometer_km ? Number(unit.samsara_odometer_km).toLocaleString() + ' km' : '—'"></td>
                                 </tr>
                                 <tr>
-                                    <td class="spec-label">GPS Odometer</td>
-                                    <td class="font-mono" x-text="trackingData?.location?.odometer_km ? trackingData.location.odometer_km.toLocaleString() + ' km' : '—'"></td>
+                                    <td class="spec-label">Battery</td>
+                                    <td class="font-mono">
+                                        <span x-show="unit?.samsara_battery_pct !== null && unit?.samsara_battery_pct !== undefined">
+                                            <span x-text="unit?.samsara_battery_pct + '%'"></span>
+                                            <span x-show="unit?.samsara_battery_charging == 1" class="text-success" style="margin-left:4px;">⚡ Charging</span>
+                                        </span>
+                                        <span x-show="unit?.samsara_battery_pct === null || unit?.samsara_battery_pct === undefined">—</span>
+                                    </td>
                                 </tr>
                                 <tr>
-                                    <td class="spec-label">Last GPS Update</td>
-                                    <td x-text="trackingData?.location?.time ? new Date(trackingData.location.time).toLocaleString() : '—'"></td>
+                                    <td class="spec-label">Power Source</td>
+                                    <td x-text="unit?.samsara_power_source || '—'"></td>
                                 </tr>
                                 <tr>
-                                    <td class="spec-label">Samsara ID</td>
-                                    <td class="font-mono" x-text="unit?.gps_device_id || '—'"></td>
+                                    <td class="spec-label">Check-in Mode</td>
+                                    <td x-text="unit?.samsara_check_in_mode || '—'"></td>
                                 </tr>
                                 <tr>
-                                    <td class="spec-label">Provider</td>
-                                    <td style="text-transform:capitalize;" x-text="unit?.tracking_provider || 'None'"></td>
+                                    <td class="spec-label">Last Connected</td>
+                                    <td x-text="unit?.samsara_last_connected_at ? formatRelative(unit.samsara_last_connected_at) : '—'"></td>
                                 </tr>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Static identifiers (snapshot at link time) -->
+                <div class="card spec-card" style="margin-top:16px;margin-bottom:0;">
+                    <div class="card-header" style="padding:12px 16px;">
+                        <div class="card-title">Samsara Identifiers</div>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <table class="spec-table">
+                            <tr>
+                                <td class="spec-label">Vehicle ID</td>
+                                <td class="font-mono" x-text="unit?.samsara_vehicle_id || '—'"></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Vehicle Name</td>
+                                <td x-text="unit?.samsara_vehicle_name || '—'"></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">VIN</td>
+                                <td class="font-mono" x-text="unit?.samsara_vin || '—'"></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Serial Number</td>
+                                <td class="font-mono" x-text="unit?.samsara_serial_number || '—'"></td>
+                            </tr>
+                            <tr>
+                                <td class="spec-label">Gateway ID</td>
+                                <td class="font-mono" x-text="unit?.samsara_gateway_id || '—'"></td>
+                            </tr>
+                        </table>
                     </div>
                 </div>
 
@@ -1492,15 +1798,27 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </svg>
                         View on Fleet Map
                     </a>
-                    <?php if ($unit['samsara_vehicle_url']): ?>
-                    <a href="<?= e($unit['samsara_vehicle_url']) ?>" target="_blank" class="btn btn-ghost btn-sm">
+                    <!-- SAMSARA-2: pick the right URL segment so trailers
+                         deep-link to /o/trailers/ rather than 404'ing on
+                         /o/vehicles/. -->
+                    <a :href="'https://cloud.samsara.com/o/' + (unit?.samsara_entity_type === 'trailer' ? 'trailers' : 'vehicles') + '/' + encodeURIComponent(unit?.samsara_vehicle_id || '')"
+                       target="_blank"
+                       rel="noopener"
+                       class="btn btn-ghost btn-sm">
                         Open in Samsara Dashboard →
                     </a>
-                    <?php endif; ?>
                 </div>
+
+                <template x-if="samsaraError">
+                    <div class="toast toast-error" style="position:relative;margin-top:12px;animation:none;">
+                        <span class="toast-icon">!</span>
+                        <div class="toast-body">
+                            <div class="toast-message" x-text="samsaraError"></div>
+                        </div>
+                    </div>
+                </template>
             </div>
         </template>
-
     </div>
 
 </div><!-- /x-data -->
@@ -1544,6 +1862,39 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     white-space:nowrap;
 }
 .spec-table .spec-value { color:var(--text-primary); font-weight:500; }
+
+/* SAMSARA-1: Pulsing "Live" badge for the hero — green dot + pill.
+   Only rendered server-side when samsara_vehicle_id is set so it
+   accurately reflects whether the unit is currently linked. */
+.ff-live-badge {
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    margin-left:0.5rem;
+    padding:3px 8px 3px 7px;
+    background:rgba(34, 197, 94, 0.12);
+    color:#16a34a;
+    border-radius:999px;
+    font-size:0.7rem;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    vertical-align:middle;
+    line-height:1;
+}
+.ff-live-dot {
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:#22c55e;
+    box-shadow:0 0 0 0 rgba(34,197,94,0.7);
+    animation:ff-live-pulse 2s infinite;
+}
+@keyframes ff-live-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(34,197,94,0.7); }
+    70%  { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+    100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+}
 </style>
 
 <script>
@@ -1602,11 +1953,19 @@ function FF_UnitDetail() {
         uploadModal:  { open: false, docType: '', docLabel: '', file: null,
                         expiryDate: '', uploading: false, error: '' },
 
-        // ── GPS Tracking ──────────────────────────────────────────
-        trackingData:    null,
-        trackingLoading: false,
-        trackingLoaded:  false,
-        trackingMap:     null,
+        // ── Samsara Mapping (SAMSARA-1) ───────────────────────────
+        // Tab data is driven by `unit.samsara_*` columns. We only
+        // hit the API for: vehicle list (when unmapped), link, unlink,
+        // and Sync Now. The mapped-state telemetry comes back to us
+        // by re-reading the unit row after each write.
+        samsaraVehicles:           [],   // dropdown source from /api/v1/samsara/vehicles
+        samsaraVehiclesLoading:    false,
+        samsaraVehiclesLoaded:     false,
+        samsaraSelectedVehicleId:  '',
+        samsaraLinking:            false,
+        samsaraSyncing:            false,
+        samsaraError:              '',
+        trackingMap:               null, // Leaflet instance for the live map
 
         // ── Payoff Analysis (PAYOFF-1) ────────────────────────────
         // WHY: Driven off the server-side $linkedAssetId lookup — when
@@ -1642,7 +2001,11 @@ function FF_UnitDetail() {
                 if (tab === 'maintenance'   && !this.workOrdersLoaded)       this.loadWorkOrders();
                 if (tab === 'inspections'   && !this.inspectionsLoaded)      this.loadInspections();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
-                if (tab === 'tracking'      && !this.trackingLoaded)         this.loadTracking();
+                // SAMSARA-1: open Samsara tab — load picker if unmapped,
+                // mount the live map if mapped. Either way, no fetch is
+                // needed because the unit row already carries every
+                // samsara_* column from the page-load API call.
+                if (tab === 'tracking') this.openSamsaraTab();
                 // PAYOFF-1: only call the API when an asset is actually
                 // linked — otherwise the PHP empty state handles it.
                 if (tab === 'payoff' && this.linkedAssetId && !this.payoffLoaded) this.loadPayoff();
@@ -1930,47 +2293,137 @@ function FF_UnitDetail() {
             }
         },
 
-        // ── GPS Tracking tab methods ─────────────────────────────
-        async loadTracking() {
-            this.trackingLoading = true;
+        // ── Samsara Mapping tab methods (SAMSARA-1) ──────────────
+
+        // Tab dispatcher — picks the right initializer based on
+        // whether the unit is currently linked to a Samsara vehicle.
+        openSamsaraTab() {
+            if (this.unit?.samsara_vehicle_id) {
+                // Mapped state — render the live map (must defer one
+                // tick so Leaflet sees the now-visible #unit-tracking-map div).
+                this.$nextTick(() => this.initSamsaraMap());
+            } else {
+                // Unmapped — fetch the vehicle dropdown source if we
+                // haven't already, so the link form is ready to use.
+                if (!this.samsaraVehiclesLoaded) this.loadSamsaraVehicles();
+            }
+        },
+
+        // GET /api/v1/samsara/vehicles — populates the picker dropdown.
+        async loadSamsaraVehicles() {
+            this.samsaraVehiclesLoading = true;
+            this.samsaraError = '';
             try {
-                const r = await FF_Api.get('<?= base_url('api/v1/gps/locations') ?>?unit_id=<?= $unitId ?>');
-                if (r.success && r.data.units?.length > 0) {
-                    this.trackingData = r.data.units[0];
+                const r = await FF_Api.get('<?= base_url('api/v1/samsara/vehicles') ?>');
+                if (r.success) {
+                    this.samsaraVehicles  = r.data?.vehicles || [];
+                    this.samsaraVehiclesLoaded = true;
                 } else {
-                    this.trackingData = { gps_device_id: this.unit?.gps_device_id, location: null };
+                    this.samsaraError = r.error?.message || 'Failed to load Samsara vehicles.';
                 }
-                this.trackingLoaded = true;
-                // WHY: $nextTick ensures the DOM element exists before Leaflet attaches
-                this.$nextTick(() => this.initTrackingMap());
-            } catch(e) {
-                this.trackingData = { gps_device_id: this.unit?.gps_device_id, location: null };
-                this.trackingLoaded = true;
+            } catch (e) {
+                this.samsaraError = 'Network error loading Samsara vehicles.';
             }
-            this.trackingLoading = false;
+            this.samsaraVehiclesLoading = false;
         },
 
-        refreshTracking() {
-            this.trackingLoaded = false;
-            this.trackingData = null;
-            if (this.trackingMap) {
-                this.trackingMap.remove();
-                this.trackingMap = null;
+        // POST /api/v1/samsara/link — link this unit to selected trackable.
+        // SAMSARA-2: looks up the chosen entry's entity_type from the local
+        // dropdown source so the backend hits the right API path
+        // (/fleet/vehicles/stats vs /fleet/trailers/stats). Defaults to
+        // 'vehicle' if the field isn't present (paranoid fallback for
+        // partial deploys where the picker hasn't been redeployed yet).
+        async linkSamsaraVehicle() {
+            if (!this.samsaraSelectedVehicleId) return;
+            this.samsaraLinking = true;
+            this.samsaraError = '';
+
+            const picked = this.samsaraVehicles.find(v => v.id === this.samsaraSelectedVehicleId);
+            const entityType = (picked && picked.entity_type) ? picked.entity_type : 'vehicle';
+
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/samsara/link') ?>', {
+                    equipment_unit_id:    <?= $unitId ?>,
+                    samsara_vehicle_id:   this.samsaraSelectedVehicleId,
+                    samsara_entity_type:  entityType
+                });
+                if (r.success) {
+                    // Re-load the unit so every samsara_* column on the
+                    // page (hero badge, overview section, mapped tab)
+                    // updates from one canonical source.
+                    await this.loadUnit();
+                    this.samsaraSelectedVehicleId = '';
+                    this.$nextTick(() => this.initSamsaraMap());
+                } else {
+                    this.samsaraError = r.error?.message || 'Failed to link to Samsara.';
+                }
+            } catch (e) {
+                this.samsaraError = 'Network error linking to Samsara.';
             }
-            this.loadTracking();
+            this.samsaraLinking = false;
         },
 
-        initTrackingMap() {
-            if (!this.trackingData?.location || typeof L === 'undefined') return;
+        // POST /api/v1/samsara/unlink — clear the mapping.
+        async unlinkSamsaraVehicle() {
+            if (!confirm('Unlink this unit from Samsara? Live data will stop syncing.')) return;
+            this.samsaraLinking = true;
+            this.samsaraError = '';
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/samsara/unlink') ?>', {
+                    equipment_unit_id: <?= $unitId ?>
+                });
+                if (r.success) {
+                    if (this.trackingMap) {
+                        this.trackingMap.remove();
+                        this.trackingMap = null;
+                    }
+                    await this.loadUnit();
+                    // Refresh the picker so the just-unlinked vehicle is
+                    // available to other units immediately.
+                    this.samsaraVehiclesLoaded = false;
+                    this.loadSamsaraVehicles();
+                } else {
+                    this.samsaraError = r.error?.message || 'Failed to unlink vehicle.';
+                }
+            } catch (e) {
+                this.samsaraError = 'Network error unlinking vehicle.';
+            }
+            this.samsaraLinking = false;
+        },
 
+        // POST /api/v1/samsara/sync — refresh live telemetry on demand.
+        async syncSamsaraNow() {
+            this.samsaraSyncing = true;
+            this.samsaraError = '';
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/samsara/sync') ?>', {
+                    equipment_unit_id: <?= $unitId ?>
+                });
+                if (r.success) {
+                    await this.loadUnit();
+                    this.$nextTick(() => this.initSamsaraMap());
+                } else {
+                    this.samsaraError = r.error?.message || 'Sync failed.';
+                }
+            } catch (e) {
+                this.samsaraError = 'Network error during sync.';
+            }
+            this.samsaraSyncing = false;
+        },
+
+        // Mount/refresh the Leaflet map showing the unit's last position.
+        // Pulls lat/lng directly from unit.samsara_last_location_* columns.
+        initSamsaraMap() {
+            if (!this.unit?.samsara_last_location_lat || typeof L === 'undefined') return;
             const el = document.getElementById('unit-tracking-map');
             if (!el) return;
 
-            const lat = this.trackingData.location.latitude;
-            const lng = this.trackingData.location.longitude;
+            const lat = Number(this.unit.samsara_last_location_lat);
+            const lng = Number(this.unit.samsara_last_location_lng);
             if (!lat || !lng) return;
 
-            // WHY: Remove previous map instance to avoid Leaflet "already initialized" error
+            // WHY: Re-mounting Leaflet on the same div throws
+            // "already initialized"; remove the prior instance first.
             if (this.trackingMap) {
                 this.trackingMap.remove();
                 this.trackingMap = null;
@@ -1983,11 +2436,11 @@ function FF_UnitDetail() {
             }).addTo(this.trackingMap);
 
             const unitNum = this.unit?.unit_number || '';
-            const addr = this.trackingData.location.address || 'No address available';
-            const speed = this.trackingData.location.speed;
+            const addr    = this.unit?.samsara_last_location_address || 'No address available';
+            const speed   = this.unit?.samsara_last_speed_kph;
             let popupHtml = `<div style="font-family:DM Sans,sans-serif;"><strong>${unitNum}</strong><br><span style="font-size:12px;">${addr}</span>`;
             if (speed !== null && speed !== undefined) {
-                popupHtml += `<br><span style="font-size:11px;">Speed: ${Math.round(speed)} mph</span>`;
+                popupHtml += `<br><span style="font-size:11px;">Speed: ${Number(speed).toFixed(1)} km/h</span>`;
             }
             popupHtml += '</div>';
 
@@ -1995,6 +2448,22 @@ function FF_UnitDetail() {
                 .addTo(this.trackingMap)
                 .bindPopup(popupHtml)
                 .openPopup();
+        },
+
+        // Compact "5 minutes ago" / "2 hours ago" formatter used by
+        // both the mapping tab and the overview Samsara card so the
+        // staleness indicator reads consistently.
+        formatRelative(value) {
+            if (!value) return '';
+            const ts = new Date(value).getTime();
+            if (isNaN(ts)) return value;
+            const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+            if (diffSec < 60)    return 'just now';
+            if (diffSec < 3600)  return Math.floor(diffSec/60) + ' min ago';
+            if (diffSec < 86400) return Math.floor(diffSec/3600) + ' hr ago';
+            const days = Math.floor(diffSec/86400);
+            if (days < 7) return days + ' day' + (days > 1 ? 's' : '') + ' ago';
+            return new Date(value).toLocaleDateString();
         },
 
         statusBadgeClass(status) {

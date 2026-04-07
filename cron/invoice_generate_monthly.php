@@ -16,6 +16,23 @@ declare(strict_types=1);
  * Decisions: D3 (InvoiceGenerator is the only DB writer), D16 (bcmath),
  *            D21 (GET_LOCK advisory lock prevents duplicate runs)
  * Spec ref: §9 Monthly Billing Cron
+ * SAMSARA-3: cron now pulls cron-cached samsara_odometer_km from the linked
+ *            equipment unit and passes it to the generator as period-end
+ *            odometer, with period-start auto-derived from either the
+ *            previous invoice's end odometer or lease.odometer_start_km.
+ *            The Samsara odometer used here is the one kept fresh by the
+ *            5-minute samsara_sync cron — no extra live API calls, no
+ *            rate-limit risk. Source is marked 'gps' when samsara_odometer_km
+ *            is populated, and odometer_fetched_at is stamped with the unit's
+ *            samsara_last_synced_at so there's an audit trail for exactly
+ *            which sync tick the value came from. The cron does NOT care
+ *            whether the business bills in advance or in arrears — it just
+ *            captures whatever the current cached odometer reads and labels
+ *            it accurately. Users who bill in advance will see period_distance
+ *            represent "miles accrued since last invoice" rather than "miles
+ *            in the billed month"; users who bill in arrears get dead-accurate
+ *            in-month mileage. Either way the cumulative_distance_km is
+ *            always correct (end - lease.odometer_start_km).
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -38,13 +55,21 @@ try {
 
     // Find all active monthly leases that are due to be billed today.
     // Uses composite index idx_active_billing (status, billing_cycle, next_billing_date, deleted_at)
+    // SAMSARA-3: LEFT JOIN equipment_units to pull the cron-cached odometer + last sync
+    // so we can stamp per-invoice odometer + distance in the same loop. LEFT JOIN (not
+    // INNER) so leases whose unit was deleted after creation still bill — they'll just
+    // skip the odometer fields and behave exactly as before this change.
     $leases = db_select(
-        "SELECT id, contract_number, company_name_snapshot, next_billing_date
-         FROM leases
-         WHERE status         = 'active'
-           AND billing_cycle  = 'monthly'
-           AND next_billing_date = ?
-           AND deleted_at     IS NULL",
+        "SELECT l.id, l.contract_number, l.company_name_snapshot, l.next_billing_date,
+                l.odometer_start_km,
+                u.samsara_odometer_km AS unit_samsara_odometer_km,
+                u.samsara_last_synced_at AS unit_samsara_last_synced_at
+         FROM leases l
+         LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
+         WHERE l.status         = 'active'
+           AND l.billing_cycle  = 'monthly'
+           AND l.next_billing_date = ?
+           AND l.deleted_at     IS NULL",
         [$today]
     );
 
@@ -58,12 +83,52 @@ try {
         $periodStart = $billingDt->format('Y-m-01');
         $periodEnd   = $billingDt->format('Y-m-t');
 
+        // ── SAMSARA-3: resolve odometer inputs for this lease ─────
+        // Only capture odometer data when the linked unit actually has a
+        // cached samsara_odometer_km value — leases without GPS-tracked
+        // units stay odometer-less exactly as before.
+        $odoPeriodEnd   = null;
+        $odoPeriodStart = null;
+        $odoSource      = null;
+        $odoFetchedAt   = null;
+
+        if ($lease['unit_samsara_odometer_km'] !== null) {
+            // Period-end = whatever the unit's cron-cached odometer reads
+            // right now. Semantically this is "odometer at the moment the
+            // billing cron ran" — accurate for arrears billing, still
+            // useful (== miles accrued since last invoice) for advance.
+            $odoPeriodEnd = (string) $lease['unit_samsara_odometer_km'];
+            $odoSource    = 'gps';
+            $odoFetchedAt = $lease['unit_samsara_last_synced_at'] ?: null;
+
+            // Period-start priority (same rule as manual invoice create + lease close):
+            //   1. Previous invoice's odometer_at_period_end_km
+            //   2. Else lease.odometer_start_km
+            //   3. Else null (first invoice, no starting odo captured)
+            $prev = db_row(
+                "SELECT odometer_at_period_end_km
+                   FROM invoices
+                  WHERE lease_id = ? AND deleted_at IS NULL
+                    AND odometer_at_period_end_km IS NOT NULL
+                  ORDER BY billing_period_end DESC, id DESC LIMIT 1",
+                [$leaseId]
+            );
+            if ($prev && $prev['odometer_at_period_end_km'] !== null) {
+                $odoPeriodStart = (string) $prev['odometer_at_period_end_km'];
+            } elseif ($lease['odometer_start_km'] !== null) {
+                $odoPeriodStart = (string) $lease['odometer_start_km'];
+            }
+        }
+
         try {
             // Single outer transaction: invoice creation + next_billing_date advance.
             // InvoiceGenerator::createFromLease() has its own internal db_transaction()
             // call, but the nesting guard in includes/db.php makes it continue the outer
             // transaction safely — both the invoice and the date advance commit together.
-            $result = db_transaction(function () use ($generator, $leaseId, $periodStart, $periodEnd, $today) {
+            $result = db_transaction(function () use (
+                $generator, $leaseId, $periodStart, $periodEnd, $today,
+                $odoPeriodStart, $odoPeriodEnd, $odoSource, $odoFetchedAt
+            ) {
 
                 $inv = $generator->createFromLease([
                     'lease_id'          => $leaseId,
@@ -74,6 +139,11 @@ try {
                     'generation_source' => 'cron',
                     'auto_generated'    => 1,
                     'created_by'        => null,           // system — no user_id for cron
+                    // SAMSARA-3: odometer + distance (all null when unit isn't Samsara-linked)
+                    'odometer_at_period_start_km' => $odoPeriodStart,
+                    'odometer_at_period_end_km'   => $odoPeriodEnd,
+                    'odometer_source'             => $odoSource,
+                    'odometer_fetched_at'         => $odoFetchedAt,
                 ]);
 
                 // Advance next_billing_date by exactly one month (e.g. Apr 1 → May 1)

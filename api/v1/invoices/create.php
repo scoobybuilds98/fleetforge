@@ -9,13 +9,15 @@ declare(strict_types=1);
  *
  * @method  POST
  * @body    lease_id (required), period_start (required), period_end (required),
- *          billing_type, invoice_type, po_number, notes, internal_notes
+ *          billing_type, invoice_type, po_number, notes, internal_notes,
+ *          odometer_at_period_start_km, odometer_at_period_end_km (SAMSARA-3),
+ *          odometer_source, odometer_fetched_at (SAMSARA-3)
  * @auth    Session required; require_permission('invoices','create')
  * @returns 201 { id, invoice_number, total_amount, balance_due }
  *
  * Decisions: D14 (inclusive days), D15 (sequential numbers), D16 (bcmath),
  *            D20 (FOR UPDATE on number gen)
- * Session: S008
+ * Session: S008, SAMSARA-3 (odometer/distance tracking)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -82,6 +84,49 @@ if (!in_array($invoiceType, $validInvoiceTypes)) {
     $invoiceType = 'regular';
 }
 
+// ── SAMSARA-3: optional odometer fields ────────────────────────
+// All four are optional — invoices can still be created without any
+// odometer data. The UI populates these when the user fills the
+// Odometer & Distance section; InvoiceGenerator handles the rest.
+$odoStart = null;
+if (isset($body['odometer_at_period_start_km']) && $body['odometer_at_period_start_km'] !== '' && $body['odometer_at_period_start_km'] !== null) {
+    $dec = clean_decimal($body['odometer_at_period_start_km']);
+    if ($dec === null || bccomp($dec, '0', 2) < 0) {
+        $fields['odometer_at_period_start_km'] = 'Starting odometer cannot be negative.';
+    } else {
+        $odoStart = $dec;
+    }
+}
+$odoEnd = null;
+if (isset($body['odometer_at_period_end_km']) && $body['odometer_at_period_end_km'] !== '' && $body['odometer_at_period_end_km'] !== null) {
+    $dec = clean_decimal($body['odometer_at_period_end_km']);
+    if ($dec === null || bccomp($dec, '0', 2) < 0) {
+        $fields['odometer_at_period_end_km'] = 'Ending odometer cannot be negative.';
+    } else {
+        $odoEnd = $dec;
+    }
+}
+if ($odoStart !== null && $odoEnd !== null && bccomp($odoEnd, $odoStart, 2) < 0) {
+    $fields['odometer_at_period_end_km'] = 'Ending odometer cannot be less than starting odometer.';
+}
+
+$odoSourceRaw = $body['odometer_source'] ?? null;
+$odoSource    = in_array($odoSourceRaw, ['gps', 'manual', 'estimated'], true) ? $odoSourceRaw : null;
+
+$odoFetchedAt = null;
+if (!empty($body['odometer_fetched_at'])) {
+    try {
+        $dt = new DateTime((string) $body['odometer_fetched_at']);
+        $odoFetchedAt = $dt->format('Y-m-d H:i:s');
+    } catch (\Throwable) {
+        $odoFetchedAt = null;
+    }
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
+
 // --- Generate invoice + audit_log in single transaction (FIX #19) ---
 // db_transaction nesting guard ensures InvoiceGenerator's inner db_transaction
 // runs in this outer transaction — audit_log and invoice commit/rollback together.
@@ -89,7 +134,9 @@ $generator = new \FleetForge\Billing\InvoiceGenerator();
 $result    = null;
 
 db_transaction(function () use (
-    $generator, $leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $body, &$result
+    $generator, $leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $body,
+    $odoStart, $odoEnd, $odoSource, $odoFetchedAt,
+    &$result
 ) {
     $result = $generator->createFromLease([
         'lease_id'          => $leaseId,
@@ -102,6 +149,11 @@ db_transaction(function () use (
         'internal_notes'    => clean_string($body['internal_notes'] ?? null, 2000),
         'created_by'        => current_user_id(),
         'generation_source' => 'manual',
+        // SAMSARA-3
+        'odometer_at_period_start_km' => $odoStart,
+        'odometer_at_period_end_km'   => $odoEnd,
+        'odometer_source'             => $odoSource,
+        'odometer_fetched_at'         => $odoFetchedAt,
     ]);
 
     // Audit log inside same transaction (FIX #19)

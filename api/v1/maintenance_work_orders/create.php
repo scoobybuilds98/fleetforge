@@ -94,10 +94,14 @@ if ($fields) {
 }
 
 // -----------------------------------------------------------------------
-// 3. Verify equipment unit exists (not deleted)
+// 3. Verify equipment unit exists, is not deleted, and is allowed in
+//    the SERVICE context (i.e. not decommissioned / inactive). [SELECTOR-1]
+//    Status is pulled into the SELECT specifically so we can run the
+//    same ff_unit_is_selectable() rule the form uses for the disabled
+//    attribute, in case the user POSTs an id that bypassed the UI.
 // -----------------------------------------------------------------------
 $unit = db_row(
-    "SELECT eu.id, eu.unit_number, et.brand, et.model
+    "SELECT eu.id, eu.unit_number, eu.status, et.brand, et.model
      FROM equipment_units eu
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
      WHERE eu.id = ? AND eu.deleted_at IS NULL",
@@ -108,6 +112,14 @@ if (!$unit) {
         ['equipment_unit_id' => 'Equipment unit not found.'],
         'Equipment unit not found.'
     );
+}
+if (!ff_unit_is_selectable($unit['status'], 'service')) {
+    // 409 mirrors the leases/create.php pattern. UI greys these rows
+    // out, but defence-in-depth: a hand-crafted POST or stale page
+    // load could submit a decommissioned id, so we reject loudly with
+    // the field-level message so FF_Validate can paint the error.
+    $msg = ff_unit_unavailable_message((string) $unit['unit_number'], (string) $unit['status'], 'service');
+    json_error('UNIT_UNAVAILABLE', $msg, 409, ['fields' => ['equipment_unit_id' => $msg]]);
 }
 
 // -----------------------------------------------------------------------

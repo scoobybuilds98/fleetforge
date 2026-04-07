@@ -161,7 +161,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         <?php endif; ?>
 
         <?php if ($lease['status'] === 'active'): ?>
-        <button class="btn btn-warning" @click="showCloseModal = true" :disabled="actionInProgress">
+        <button class="btn btn-warning" @click="openCloseModal()" :disabled="actionInProgress">
             Close Lease
         </button>
         <?php endif; ?>
@@ -286,6 +286,165 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 <div x-show="lease.internal_notes" class="form-group">
                                     <div class="form-label text-secondary" style="font-size:0.8125rem;">Internal Notes</div>
                                     <div class="text-sm" x-text="lease.internal_notes"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ── SAMSARA-3: Odometer & Distance summary ────
+                             Shows starting odometer, latest reading from
+                             invoices, and total km driven. If no starting
+                             odometer captured, exposes a retroactive
+                             capture flow (Fetch from Samsara or manual
+                             entry) against /api/v1/leases/update_odometer. -->
+                        <div class="card" style="grid-column: span 2;">
+                            <div class="card-header"><div class="card-title">Odometer &amp; Distance</div></div>
+                            <div class="card-body">
+                                <!-- Has starting odometer → full summary -->
+                                <template x-if="lease.odometer_start_km !== null && lease.odometer_start_km !== undefined">
+                                    <div>
+                                        <div class="stat-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;">
+                                            <div>
+                                                <div class="stat-label">Starting Odometer</div>
+                                                <div class="stat-value font-mono"
+                                                     x-text="Number(lease.odometer_start_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></div>
+                                                <div class="text-xs text-secondary" style="margin-top:2px;">
+                                                    <template x-if="lease.odometer_start_source === 'gps'">
+                                                        <span>captured via GPS
+                                                            <template x-if="lease.odometer_start_fetched_at">
+                                                                <span>on <span x-text="formatDate(lease.odometer_start_fetched_at.slice(0,10))"></span></span>
+                                                            </template>
+                                                        </span>
+                                                    </template>
+                                                    <template x-if="lease.odometer_start_source === 'manual'">
+                                                        <span>entered manually</span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div class="stat-label">Latest Recorded</div>
+                                                <div class="stat-value font-mono"
+                                                     x-text="lease.latest_invoice_odometer_km !== null && lease.latest_invoice_odometer_km !== undefined
+                                                        ? Number(lease.latest_invoice_odometer_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'
+                                                        : '—'"></div>
+                                                <template x-if="lease.latest_invoice_number_for_odo">
+                                                    <div class="text-xs text-secondary" style="margin-top:2px;">
+                                                        from <a :href="`<?= base_url('invoices/show') ?>?id=${lease.latest_invoice_id_for_odo}`" class="link" x-text="lease.latest_invoice_number_for_odo"></a>
+                                                    </div>
+                                                </template>
+                                                <template x-if="!lease.latest_invoice_number_for_odo">
+                                                    <div class="text-xs text-secondary" style="margin-top:2px;">No invoices yet with odometer data</div>
+                                                </template>
+                                            </div>
+                                            <div>
+                                                <div class="stat-label">Total KM Driven</div>
+                                                <div class="stat-value font-mono"
+                                                     x-text="lease.latest_invoice_cumulative_km !== null && lease.latest_invoice_cumulative_km !== undefined
+                                                        ? Number(lease.latest_invoice_cumulative_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'
+                                                        : '—'"></div>
+                                                <div class="text-xs text-secondary" style="margin-top:2px;">since lease start</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- No starting odometer → retroactive capture flow -->
+                                <template x-if="lease.odometer_start_km === null || lease.odometer_start_km === undefined">
+                                    <div>
+                                        <div class="text-sm text-secondary" style="margin-bottom:0.75rem;">
+                                            Starting Odometer: <strong>Not recorded</strong>
+                                        </div>
+
+                                        <!-- Capture form (only enabled for non-closed leases) -->
+                                        <template x-if="lease.status === 'active' || lease.status === 'pending'">
+                                            <div style="display:flex;gap:0.5rem;align-items:flex-start;flex-wrap:wrap;">
+                                                <input type="number"
+                                                       class="form-control font-mono"
+                                                       x-model="retroOdo.value"
+                                                       step="0.01" min="0"
+                                                       placeholder="e.g. 1234.56"
+                                                       style="flex:1 1 180px;max-width:240px;">
+                                                <button type="button" class="btn btn-secondary"
+                                                        x-show="lease.samsara_vehicle_id"
+                                                        @click="fetchRetroOdometer()"
+                                                        :disabled="retroOdo.fetching">
+                                                    <span x-show="!retroOdo.fetching">Fetch from Samsara</span>
+                                                    <span x-show="retroOdo.fetching">Fetching…</span>
+                                                </button>
+                                                <button type="button" class="btn btn-primary"
+                                                        @click="saveRetroOdometer()"
+                                                        :disabled="retroOdo.saving || !retroOdo.value">
+                                                    <span x-show="!retroOdo.saving">Save</span>
+                                                    <span x-show="retroOdo.saving">Saving…</span>
+                                                </button>
+                                            </div>
+                                        </template>
+                                        <template x-if="lease.status !== 'active' && lease.status !== 'pending'">
+                                            <div class="text-xs text-secondary">
+                                                This lease is closed. Starting odometer cannot be captured retroactively.
+                                            </div>
+                                        </template>
+
+                                        <div x-show="retroOdo.banner"
+                                             :class="retroOdo.banner && retroOdo.banner.type === 'success' ? 'alert alert-success' : 'alert alert-warning'"
+                                             style="margin-top:0.75rem;padding:0.5rem 0.75rem;font-size:0.875rem;"
+                                             x-text="retroOdo.banner && retroOdo.banner.message"></div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- ── SAMSARA-1: Live GPS card ─────────────────
+                             Only renders if the underlying equipment unit
+                             has been mapped to a Samsara vehicle. Data is
+                             read-through from equipment_units (cron-cached)
+                             so this card adds zero latency to the page. -->
+                        <div class="card" x-show="lease.samsara_vehicle_id" style="grid-column: span 2;">
+                            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                                <div class="card-title">
+                                    Live GPS &amp; Telemetry
+                                    <span class="ff-live-badge" x-show="samsaraIsOnline()" style="margin-left:0.5rem;">
+                                        <span class="ff-live-dot"></span>Live
+                                    </span>
+                                    <span class="badge badge-no-dot badge-neutral" x-show="!samsaraIsOnline()" style="margin-left:0.5rem;">Offline</span>
+                                </div>
+                                <a :href="'<?= base_url('equipment/show') ?>?id=' + lease.equipment_unit_id + '&tab=tracking'"
+                                   class="btn btn-sm btn-ghost">Open Tracking →</a>
+                            </div>
+                            <div class="card-body">
+                                <div class="stat-grid" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem;">
+                                    <div>
+                                        <div class="stat-label">Last Location</div>
+                                        <div class="text-sm"
+                                             x-text="lease.samsara_last_location_address || (lease.samsara_last_location_lat !== null
+                                                ? lease.samsara_last_location_lat.toFixed(5) + ', ' + lease.samsara_last_location_lng.toFixed(5)
+                                                : '—')"></div>
+                                    </div>
+                                    <div>
+                                        <div class="stat-label">Speed</div>
+                                        <div class="stat-value font-mono"
+                                             x-text="lease.samsara_last_speed_kph !== null
+                                                ? lease.samsara_last_speed_kph.toFixed(1) + ' km/h'
+                                                : '—'"></div>
+                                    </div>
+                                    <div>
+                                        <div class="stat-label">Odometer</div>
+                                        <div class="stat-value font-mono"
+                                             x-text="lease.samsara_odometer_km !== null
+                                                ? lease.samsara_odometer_km.toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'
+                                                : '—'"></div>
+                                    </div>
+                                    <div>
+                                        <div class="stat-label">Battery</div>
+                                        <div class="stat-value font-mono"
+                                             x-text="lease.samsara_battery_pct !== null
+                                                ? lease.samsara_battery_pct + '%' + (lease.samsara_battery_charging ? ' ⚡' : '')
+                                                : '—'"></div>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-secondary" style="margin-top:0.75rem;">
+                                    Vehicle: <span class="font-mono" x-text="lease.samsara_vehicle_name || lease.samsara_vehicle_id"></span>
+                                    &nbsp;·&nbsp; Last connected: <span x-text="formatRelative(lease.samsara_last_connected_at)"></span>
+                                    &nbsp;·&nbsp; Last synced: <span x-text="formatRelative(lease.samsara_last_synced_at)"></span>
                                 </div>
                             </div>
                         </div>
@@ -569,7 +728,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     <!-- ── CLOSE LEASE MODAL ──────────────────────────────────── -->
     <template x-if="showCloseModal">
         <div class="modal-overlay" @click.self="showCloseModal = false">
-            <div class="modal">
+            <div class="modal" style="max-width:560px;">
                 <div class="modal-header">
                     <div class="modal-title">Close Lease</div>
                 </div>
@@ -579,12 +738,84 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         <input type="date" id="actual_return_date" class="form-control"
                                x-model="closeForm.actual_return_date">
                     </div>
+
+                    <!-- ── SAMSARA-3: Closing Odometer section ─────────
+                         Shows lease's starting odometer (if captured),
+                         lets user enter / fetch the current odometer,
+                         auto-calculates total km driven, and auto-fills
+                         the Actual Mileage (for billing) field below.
+                         ───────────────────────────────────────────── -->
+                    <div style="border:1px solid var(--border-color);border-radius:8px;padding:12px 14px;background:var(--bg-surface-2);margin-bottom:12px;">
+                        <div style="font-weight:600;margin-bottom:0.5rem;font-size:0.9rem;">Closing Odometer</div>
+
+                        <!-- Starting odometer display -->
+                        <div class="text-xs text-secondary" style="margin-bottom:0.75rem;">
+                            <template x-if="lease && lease.odometer_start_km !== null && lease.odometer_start_km !== undefined">
+                                <span>
+                                    Lease started with odometer:
+                                    <span class="font-mono" x-text="Number(lease.odometer_start_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></span>
+                                    <template x-if="lease.odometer_start_source === 'gps'">
+                                        <span> (captured <span x-text="lease.odometer_start_fetched_at ? formatDate(lease.odometer_start_fetched_at) : formatDate(lease.start_date)"></span> via GPS)</span>
+                                    </template>
+                                    <template x-if="lease.odometer_start_source === 'manual'">
+                                        <span> (entered manually)</span>
+                                    </template>
+                                </span>
+                            </template>
+                            <template x-if="lease && (lease.odometer_start_km === null || lease.odometer_start_km === undefined)">
+                                <span>No starting odometer captured for this lease.</span>
+                            </template>
+                        </div>
+
+                        <!-- Current odometer input + live fetch -->
+                        <div class="form-group" style="margin-bottom:0.5rem;">
+                            <label class="form-label" for="odometer_at_close_km">Current Odometer (km)</label>
+                            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                <input type="number" id="odometer_at_close_km" class="form-control font-mono"
+                                       x-model="closeForm.odometer_at_close_km"
+                                       @input="onClosingOdoEdited()"
+                                       step="0.01" min="0" placeholder="e.g. 2456.78"
+                                       style="flex:1 1 180px;min-width:0;">
+                                <span x-show="closeOdoSource === 'gps'" class="badge badge-info" title="Fetched live from Samsara">GPS</span>
+                                <span x-show="closeOdoSource === 'manual' && closeForm.odometer_at_close_km !== '' && closeForm.odometer_at_close_km !== null"
+                                      class="badge badge-neutral" title="Manually entered">Manual</span>
+                                <button type="button" class="btn btn-sm btn-secondary"
+                                        x-show="lease && lease.samsara_vehicle_id"
+                                        @click="fetchClosingOdometer()"
+                                        :disabled="closeOdoFetching">
+                                    <span x-show="!closeOdoFetching">Fetch from Samsara</span>
+                                    <span x-show="closeOdoFetching">Fetching…</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Live-calculated total km driven this lease -->
+                        <div class="text-xs text-secondary" style="margin-top:0.5rem;">
+                            Total km driven this lease:
+                            <span class="font-mono" style="font-weight:600;color:var(--text-primary);"
+                                  x-text="closingTotalKmDisplay"></span>
+                        </div>
+
+                        <div x-show="closeOdoBanner"
+                             :class="closeOdoBanner && closeOdoBanner.type === 'success' ? 'alert alert-success' : 'alert alert-warning'"
+                             style="margin-top:0.5rem;padding:0.4rem 0.6rem;font-size:0.8rem;"
+                             x-text="closeOdoBanner && closeOdoBanner.message"></div>
+                    </div>
+
                     <div class="form-group">
-                        <label class="form-label" for="mileage_at_end">End Mileage</label>
+                        <label class="form-label" for="mileage_at_end">
+                            Actual Mileage (for billing)
+                            <span class="text-secondary text-xs"
+                                  x-text="lease && lease.mileage_unit ? '(' + lease.mileage_unit + ')' : ''"></span>
+                        </label>
                         <input type="number" id="mileage_at_end" class="form-control font-mono"
                                x-model="closeForm.mileage_at_end" min="0"
-                               placeholder="Optional">
+                               placeholder="Auto-filled from closing odometer">
+                        <div class="form-hint">
+                            Auto-filled from total km above when you enter a closing odometer. Override to bill a different amount.
+                        </div>
                     </div>
+
                     <div class="form-group">
                         <label class="form-label" for="close_notes">Close Notes</label>
                         <textarea id="close_notes" class="form-control"
@@ -852,6 +1083,27 @@ function FF_LeaseDetail() {
             actual_return_date: new Date().toISOString().slice(0,10),
             mileage_at_end:     '',
             close_notes:        '',
+            // SAMSARA-3: closing odometer (decimal km, live from Samsara or manual)
+            odometer_at_close_km:  '',
+            odometer_source:       null,   // 'gps' | 'manual'
+            odometer_fetched_at:   null,   // ISO datetime if GPS
+        },
+        // SAMSARA-1: hint shown beneath End Mileage explaining where the
+        // value came from (e.g. "Pulled from Samsara: 184,233 km").
+        closeFormSamsaraHint: '',
+        // SAMSARA-3 closing odometer state
+        closeOdoSource:    null,    // 'gps' | 'manual' — drives badge
+        closeOdoFetching:  false,
+        closeOdoBanner:    null,    // { type: 'success'|'warning', message: string }
+
+        // SAMSARA-3 retroactive starting odometer capture (Overview tab)
+        retroOdo: {
+            value:    '',
+            source:   null,            // 'gps' | 'manual'
+            fetchedAt:null,
+            fetching: false,
+            saving:   false,
+            banner:   null,
         },
 
         async init() {
@@ -1135,6 +1387,193 @@ function FF_LeaseDetail() {
             this.activating       = false;
         },
 
+        // ── SAMSARA-1: Close-modal pre-fill helpers ──────────────
+        // openCloseModal: pops the dialog AND, if the unit is linked to
+        // Samsara with a known odometer, seeds End Mileage automatically
+        // (in the lease's mileage_unit — converting km→mi if necessary).
+        // The user can still clear or override the value before submit.
+        openCloseModal() {
+            this.showCloseModal       = true;
+            this.closeFormSamsaraHint = '';
+            if (this.lease && this.lease.samsara_odometer_km !== null && this.closeForm.mileage_at_end === '') {
+                this.prefillMileageFromSamsara();
+            }
+        },
+
+        // Convert the cron-cached samsara_odometer_km into the lease's
+        // mileage_unit and drop it into the form. Updates the hint line so
+        // the user knows the source. Manual button on the modal also calls
+        // this so people can re-pull after a fresh cron tick.
+        prefillMileageFromSamsara() {
+            if (!this.lease || this.lease.samsara_odometer_km === null) return;
+            const km   = this.lease.samsara_odometer_km;
+            const unit = (this.lease.mileage_unit || 'km').toLowerCase();
+            // Samsara reports km natively; convert to miles only if the
+            // lease was contracted in miles. 1 km = 0.621371 miles.
+            const value = unit === 'miles' ? Math.round(km * 0.621371) : Math.round(km);
+            this.closeForm.mileage_at_end = String(value);
+            this.closeFormSamsaraHint = 'Pulled from Samsara: '
+                + value.toLocaleString('en-CA') + ' ' + unit
+                + ' (last synced ' + this.formatRelative(this.lease.samsara_last_synced_at) + ')';
+        },
+
+        // ── SAMSARA-3: Live fetch the current odometer from Samsara
+        //     for the closing lease and drop it into the form. Also
+        //     auto-calculates and fills the Actual Mileage (for billing)
+        //     field with the total km driven since lease start.
+        async fetchClosingOdometer() {
+            if (!this.lease || !this.lease.equipment_unit_id) return;
+            this.closeOdoFetching = true;
+            this.closeOdoBanner   = null;
+            try {
+                const r = await FF_Api.get(
+                    `<?= base_url('api/v1/samsara/current_odometer') ?>?equipment_unit_id=${this.lease.equipment_unit_id}`
+                );
+                const d = r.data || {};
+                if (d.linked === false || d.odometer_km === null || d.odometer_km === undefined) {
+                    this.closeOdoBanner = { type: 'warning', message: d.message || 'Could not fetch current odometer. Enter manually.' };
+                    return;
+                }
+                const km = Number(d.odometer_km).toFixed(2);
+                this.closeForm.odometer_at_close_km = km;
+                this.closeForm.odometer_source      = 'gps';
+                this.closeForm.odometer_fetched_at  = d.fetched_at;
+                this.closeOdoSource                 = 'gps';
+                this.autoFillMileageFromClosingOdo();
+
+                const kmDisplay = Number(d.odometer_km).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                this.closeOdoBanner = { type: 'success', message: `✓ Live odometer fetched: ${kmDisplay} km from Samsara` };
+            } catch (e) {
+                this.closeOdoBanner = { type: 'warning', message: 'Could not reach Samsara. Enter odometer manually.' };
+            } finally {
+                this.closeOdoFetching = false;
+            }
+        },
+
+        // Fired whenever user types in the closing odometer field
+        onClosingOdoEdited() {
+            if (this.closeOdoSource === 'gps') {
+                // User overrode a GPS value — flip to manual
+                this.closeOdoSource                = 'manual';
+                this.closeForm.odometer_source     = 'manual';
+                this.closeForm.odometer_fetched_at = null;
+            } else if (this.closeForm.odometer_at_close_km !== '' && this.closeForm.odometer_at_close_km !== null) {
+                this.closeOdoSource            = 'manual';
+                this.closeForm.odometer_source = 'manual';
+            } else {
+                this.closeOdoSource            = null;
+                this.closeForm.odometer_source = null;
+            }
+            this.autoFillMileageFromClosingOdo();
+        },
+
+        // Auto-fill the "Actual Mileage (for billing)" field from the
+        // total km driven (closing - starting) — but only if the user
+        // hasn't already put a custom override value in there. Users can
+        // always override by typing directly into the mileage field.
+        autoFillMileageFromClosingOdo() {
+            const closeKm = parseFloat(this.closeForm.odometer_at_close_km);
+            const startKm = parseFloat(this.lease?.odometer_start_km);
+            if (isNaN(closeKm) || isNaN(startKm)) return;
+            const total = closeKm - startKm;
+            if (total < 0) return;
+            // Convert to lease's mileage_unit (default km)
+            const unit = (this.lease.mileage_unit || 'km').toLowerCase();
+            const val  = unit === 'miles' ? Math.round(total * 0.621371) : Math.round(total);
+            this.closeForm.mileage_at_end = String(val);
+        },
+
+        // ── SAMSARA-3: Retroactive starting odometer capture ───────
+        async fetchRetroOdometer() {
+            if (!this.lease || !this.lease.equipment_unit_id) return;
+            this.retroOdo.fetching = true;
+            this.retroOdo.banner   = null;
+            try {
+                const r = await FF_Api.get(
+                    `<?= base_url('api/v1/samsara/current_odometer') ?>?equipment_unit_id=${this.lease.equipment_unit_id}`
+                );
+                const d = r.data || {};
+                if (d.linked === false || d.odometer_km === null || d.odometer_km === undefined) {
+                    this.retroOdo.banner = { type: 'warning', message: d.message || 'Could not fetch from Samsara.' };
+                    return;
+                }
+                this.retroOdo.value      = Number(d.odometer_km).toFixed(2);
+                this.retroOdo.source     = 'gps';
+                this.retroOdo.fetchedAt  = d.fetched_at;
+                const kmDisplay = Number(d.odometer_km).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                this.retroOdo.banner = { type: 'success', message: `✓ Live odometer fetched: ${kmDisplay} km from Samsara` };
+            } catch (e) {
+                this.retroOdo.banner = { type: 'warning', message: 'Could not reach Samsara. Enter value manually.' };
+            } finally {
+                this.retroOdo.fetching = false;
+            }
+        },
+
+        async saveRetroOdometer() {
+            if (!this.lease || !this.retroOdo.value) return;
+            this.retroOdo.saving = true;
+            this.retroOdo.banner = null;
+            try {
+                const payload = {
+                    lease_id:          this.lease.id,
+                    odometer_start_km: parseFloat(this.retroOdo.value),
+                    source:            this.retroOdo.source || 'manual',
+                };
+                if (payload.source === 'gps' && this.retroOdo.fetchedAt) {
+                    payload.fetched_at = this.retroOdo.fetchedAt;
+                }
+                const r = await FF_Api.post('<?= base_url('api/v1/leases/update_odometer') ?>', payload);
+                if (r.success) {
+                    // Refresh to show the full summary view
+                    this.retroOdo.banner = { type: 'success', message: '✓ Starting odometer saved. Refreshing…' };
+                    setTimeout(() => { window.location.reload(); }, 800);
+                } else {
+                    this.retroOdo.banner = { type: 'warning', message: r.error?.message || r.message || 'Could not save.' };
+                }
+            } catch (e) {
+                this.retroOdo.banner = { type: 'warning', message: 'Network error — could not save.' };
+            } finally {
+                this.retroOdo.saving = false;
+            }
+        },
+
+        // Getter: display string for total km driven (live-calculated)
+        get closingTotalKmDisplay() {
+            const closeKm = parseFloat(this.closeForm.odometer_at_close_km);
+            const startKm = parseFloat(this.lease?.odometer_start_km);
+            if (isNaN(closeKm) || isNaN(startKm)) return '— km';
+            const total = closeKm - startKm;
+            if (total < 0) return '⚠ negative — check values';
+            return Number(total).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' km';
+        },
+
+        // ── SAMSARA-1: Live GPS card helpers ─────────────────────
+        // "Online" means we have a recent connection (<8h) — same rule the
+        // Fleet Tracking dashboard uses, kept consistent on purpose.
+        samsaraIsOnline() {
+            if (!this.lease || !this.lease.samsara_last_connected_at) return false;
+            const last = new Date(this.lease.samsara_last_connected_at).getTime();
+            if (isNaN(last)) return false;
+            return (Date.now() - last) < (8 * 3600 * 1000);
+        },
+
+        // Human relative time (e.g. "12m ago") for telemetry footers.
+        // Falls back to "—" rather than "Invalid Date" so empty rows
+        // render cleanly even before the first cron tick.
+        formatRelative(ts) {
+            if (!ts) return '—';
+            const t = new Date(ts).getTime();
+            if (isNaN(t)) return '—';
+            const diff = Math.max(0, Date.now() - t);
+            const m    = Math.floor(diff / 60000);
+            if (m < 1)    return 'just now';
+            if (m < 60)   return m + 'm ago';
+            const h = Math.floor(m / 60);
+            if (h < 24)   return h + 'h ago';
+            const d = Math.floor(h / 24);
+            return d + 'd ago';
+        },
+
         async closeLease() {
             this.actionInProgress = true;
             this.closing          = true;
@@ -1146,6 +1585,14 @@ function FF_LeaseDetail() {
             };
             if (this.closeForm.mileage_at_end !== '') {
                 payload.mileage_at_end = parseInt(this.closeForm.mileage_at_end);
+            }
+            // SAMSARA-3: closing odometer goes to the final invoice
+            if (this.closeForm.odometer_at_close_km !== '' && this.closeForm.odometer_at_close_km !== null) {
+                payload.odometer_at_close_km = parseFloat(this.closeForm.odometer_at_close_km);
+                payload.odometer_source      = this.closeForm.odometer_source || 'manual';
+                if (this.closeForm.odometer_fetched_at) {
+                    payload.odometer_fetched_at = this.closeForm.odometer_fetched_at;
+                }
             }
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/close') ?>', payload);

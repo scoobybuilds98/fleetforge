@@ -61,6 +61,9 @@ $lease = db_row(
         l.mileage_at_end,
         l.mileage_precharge_amount,
         l.mileage_precharge_invoiced,
+        l.odometer_start_km,
+        l.odometer_start_source,
+        l.odometer_start_fetched_at,
         l.tax_exempt,
         l.gst_exempt,
         l.pst_exempt,
@@ -94,7 +97,23 @@ $lease = db_row(
         l.updated_at,
         COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
         COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number,
-        t.name AS template_display_name
+        t.name AS template_display_name,
+        -- SAMSARA-1: live telemetry from the linked equipment unit so the
+        -- lease detail page can render a GPS card and the Close modal can
+        -- pre-fill End Mileage from the latest cron-cached odometer.
+        -- These come from equipment_units (NOT a live Samsara API call) so
+        -- the lease show endpoint stays fast and side-effect free.
+        u.samsara_vehicle_id,
+        u.samsara_vehicle_name,
+        u.samsara_battery_pct,
+        u.samsara_battery_charging,
+        u.samsara_last_location_lat,
+        u.samsara_last_location_lng,
+        u.samsara_last_location_address,
+        u.samsara_last_speed_kph,
+        u.samsara_last_connected_at,
+        u.samsara_last_synced_at,
+        u.samsara_odometer_km
      FROM leases l
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
@@ -109,6 +128,34 @@ if (!$lease) {
 
 // Trap 7 — strip server filesystem paths; never return file paths in API output
 unset($lease['contract_file'], $lease['inspection_in_file'], $lease['inspection_out_file']);
+
+// SAMSARA-1: cast nullable numerics so the Alpine UI gets typed numbers
+// (avoids ".toFixed is not a function" on numeric-string columns).
+$lease['samsara_battery_pct']         = $lease['samsara_battery_pct']         !== null ? (int)   $lease['samsara_battery_pct']         : null;
+$lease['samsara_battery_charging']    = $lease['samsara_battery_charging']    !== null ? (int)   $lease['samsara_battery_charging']    : null;
+$lease['samsara_last_location_lat']   = $lease['samsara_last_location_lat']   !== null ? (float) $lease['samsara_last_location_lat']   : null;
+$lease['samsara_last_location_lng']   = $lease['samsara_last_location_lng']   !== null ? (float) $lease['samsara_last_location_lng']   : null;
+$lease['samsara_last_speed_kph']      = $lease['samsara_last_speed_kph']      !== null ? (float) $lease['samsara_last_speed_kph']      : null;
+// SAMSARA-3: odometer_start_km is DECIMAL — cast so JS gets a typed number
+$lease['odometer_start_km']           = $lease['odometer_start_km']           !== null ? (float) $lease['odometer_start_km']           : null;
+
+// SAMSARA-3: pull the latest invoice's period-end odometer and invoice number
+// so the Overview tab can show "Latest recorded: 2,456.78 km (from INV-...)"
+$latestOdoInv = db_row(
+    "SELECT i.odometer_at_period_end_km, i.cumulative_distance_km, i.invoice_number, i.id
+       FROM invoices i
+      WHERE i.lease_id = ? AND i.deleted_at IS NULL
+        AND i.odometer_at_period_end_km IS NOT NULL
+      ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1",
+    [$id]
+);
+$lease['latest_invoice_odometer_km']     = $latestOdoInv && $latestOdoInv['odometer_at_period_end_km'] !== null
+    ? (float) $latestOdoInv['odometer_at_period_end_km'] : null;
+$lease['latest_invoice_cumulative_km']   = $latestOdoInv && $latestOdoInv['cumulative_distance_km'] !== null
+    ? (float) $latestOdoInv['cumulative_distance_km'] : null;
+$lease['latest_invoice_number_for_odo']  = $latestOdoInv['invoice_number'] ?? null;
+$lease['latest_invoice_id_for_odo']      = $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
+$lease['samsara_odometer_km']         = $lease['samsara_odometer_km']         !== null ? (float) $lease['samsara_odometer_km']         : null;
 
 // Fetch status log for this lease
 $statusLog = db_select(

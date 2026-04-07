@@ -55,7 +55,12 @@ class InvoiceGenerator
      *   lease_id: int, period_start: string(Y-m-d), period_end: string(Y-m-d),
      *   billing_type: string, invoice_type: string, notes: ?string,
      *   internal_notes: ?string, po_number: ?string, created_by: ?int,
-     *   extra_lines: ?array (manual line items)
+     *   extra_lines: ?array (manual line items),
+     *   // SAMSARA-3: optional odometer + distance params
+     *   odometer_at_period_start_km: ?string|float,
+     *   odometer_at_period_end_km:   ?string|float,
+     *   odometer_source:             ?string ('gps'|'manual'|'estimated'),
+     *   odometer_fetched_at:         ?string (ISO 8601)
      * }
      * @return array{invoice_id: int, invoice_number: string}
      */
@@ -235,6 +240,50 @@ class InvoiceGenerator
                 $exchangeRate = $fxRow ? $fxRow['rate'] : null;
             }
 
+            // --- SAMSARA-3: odometer + distance (optional) ---
+            // Values come in from callers (api/v1/invoices/create.php or
+            // api/v1/leases/close.php) via $params. They're optional —
+            // when omitted, the four distance columns stay null and the
+            // invoice behaves exactly like it did before this session.
+            //
+            // period_distance_km     = end - start            (this period)
+            // cumulative_distance_km = end - lease.odometer_start_km
+            //                                                  (since lease start)
+            $odoStartKm = isset($params['odometer_at_period_start_km']) && $params['odometer_at_period_start_km'] !== ''
+                ? (string) $params['odometer_at_period_start_km'] : null;
+            $odoEndKm   = isset($params['odometer_at_period_end_km']) && $params['odometer_at_period_end_km'] !== ''
+                ? (string) $params['odometer_at_period_end_km']   : null;
+
+            $periodDistanceKm     = null;
+            $cumulativeDistanceKm = null;
+            if ($odoStartKm !== null && $odoEndKm !== null) {
+                // Only compute when both ends have a value — prevents nonsense
+                // "cumulative since null" rows in the DB.
+                $diff = bcsub($odoEndKm, $odoStartKm, 2);
+                // Clamp negative period distance to 0 — negative readings
+                // mean a bad user edit, not reality. The UI will already
+                // have surfaced a warning, but defend the DB anyway.
+                $periodDistanceKm = bccomp($diff, '0', 2) >= 0 ? $diff : '0.00';
+            }
+            if ($odoEndKm !== null && !empty($lease['odometer_start_km'])) {
+                $cumDiff = bcsub($odoEndKm, (string) $lease['odometer_start_km'], 2);
+                $cumulativeDistanceKm = bccomp($cumDiff, '0', 2) >= 0 ? $cumDiff : '0.00';
+            }
+
+            $odometerSource = $params['odometer_source'] ?? null;
+            if ($odometerSource !== null && !in_array($odometerSource, ['gps', 'manual', 'estimated'], true)) {
+                $odometerSource = 'manual';
+            }
+            $odometerFetchedAt = null;
+            if (!empty($params['odometer_fetched_at'])) {
+                try {
+                    $dt = new \DateTime((string) $params['odometer_fetched_at']);
+                    $odometerFetchedAt = $dt->format('Y-m-d H:i:s');
+                } catch (\Throwable) {
+                    $odometerFetchedAt = null;
+                }
+            }
+
             // --- Insert invoice ---
             $invoiceId = db_insert('invoices', [
                 'invoice_number'            => $invoiceNumber,
@@ -281,6 +330,13 @@ class InvoiceGenerator
                 'balance_due'               => $balanceDue,
                 'notes'                     => $params['notes'] ?? null,
                 'internal_notes'            => $params['internal_notes'] ?? null,
+                // SAMSARA-3: per-invoice odometer + distance tracking
+                'odometer_at_period_start_km' => $odoStartKm,
+                'odometer_at_period_end_km'   => $odoEndKm,
+                'period_distance_km'          => $periodDistanceKm,
+                'cumulative_distance_km'      => $cumulativeDistanceKm,
+                'odometer_source'             => $odometerSource,
+                'odometer_fetched_at'         => $odometerFetchedAt,
                 'auto_generated'            => (int)($params['auto_generated'] ?? 0),
                 'generation_source'         => $params['generation_source'] ?? 'manual',
                 'created_by'                => $params['created_by'] ?? null,

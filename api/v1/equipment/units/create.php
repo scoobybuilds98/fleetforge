@@ -13,6 +13,7 @@ declare(strict_types=1);
  * @body     JSON
  * @required template_id, unit_number, ownership_type
  * @optional vin, year, gps_device_id, samsara_vehicle_url, tracking_provider,
+ *           (tracking_provider is auto-set to 'samsara' when Samsara creation succeeds)
  *           owner_company_id, yard_location, length_ft, height_ft, width_ft,
  *           weight_capacity_lbs, wheel_size, tire_size, axle_count,
  *           license_plate, license_state,
@@ -27,9 +28,11 @@ declare(strict_types=1);
  * @depends  api/bootstrap.php
  * @spec     FLEETFORGE_SPEC_FINAL.md §7.4 Equipment Units
  * @session  S006
+ * @session  SAMSARA-3 — auto-create trailer in Samsara after DB insert
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
+require_once dirname(__DIR__, 4) . '/lib/GPS/SamsaraClient.php';
 
 require_method('POST');
 require_auth_api();
@@ -90,8 +93,9 @@ if ($fields) {
 }
 
 // ── Verify template exists ─────────────────────────────────────
+// SAMSARA-3: pull brand/model/category so we can mirror them to Samsara
 $template = db_row(
-    "SELECT id FROM equipment_templates WHERE id = ? AND deleted_at IS NULL AND is_active = 1",
+    "SELECT id, brand, model, category FROM equipment_templates WHERE id = ? AND deleted_at IS NULL AND is_active = 1",
     [$templateId]
 );
 if (!$template) {
@@ -236,4 +240,54 @@ db_transaction(function () use (
     ]);
 });
 
-json_success(['id' => $newId, 'unit_number' => $unitNumber], 201);
+// ── SAMSARA-3: Mirror the new unit to Samsara ──────────────────
+// WHY after the transaction: the FleetForge record is the source of
+// truth — it must exist in the DB before we try to push it out.
+// WHY non-blocking: if Samsara is unreachable or returns an error, we
+// still return 201 and include a samsara_warning so the caller can
+// surface it as a soft alert. The unit is always created in FleetForge;
+// staff can use the Samsara Mapping tab to link it manually if needed.
+//
+// All FleetForge units push to Samsara via POST /fleet/trailers — the
+// created asset appears in the Samsara unified Assets list regardless
+// of equipment template category. No type filtering needed.
+$samsaraId      = null;
+$samsaraWarning = null;
+
+try {
+    $samsara = new \FleetForge\GPS\SamsaraClient();
+    $created = $samsara->createTrailer($unitNumber, [
+        'vin'           => $vin,
+        'year'          => $year,
+        'make'          => $template['brand'] ?? null,
+        'model'         => $template['model'] ?? null,
+        'license_plate' => $licensePlate,
+        'notes'         => 'Created in FleetForge — unit #' . $newId,
+    ]);
+
+    if ($created && !empty($created['id'])) {
+        $samsaraId = $created['id'];
+        // Write the Samsara ID back so the unit is immediately linked
+        db_execute(
+            "UPDATE equipment_units
+                SET samsara_vehicle_id   = ?,
+                    samsara_entity_type  = 'trailer',
+                    samsara_vehicle_name = ?,
+                    tracking_provider    = 'samsara',
+                    updated_at           = NOW()
+              WHERE id = ?",
+            [$samsaraId, $unitNumber, $newId]
+        );
+    } else {
+        $samsaraWarning = 'Unit created in FleetForge but could not be pushed to Samsara. Link it manually via the Samsara Mapping tab.';
+    }
+} catch (\Throwable $e) {
+    // Never let a Samsara error break a FleetForge create
+    $samsaraWarning = 'Samsara push failed: ' . $e->getMessage() . '. Link manually via the Mapping tab.';
+}
+
+$response = ['id' => $newId, 'unit_number' => $unitNumber];
+if ($samsaraId)      $response['samsara_id']      = $samsaraId;
+if ($samsaraWarning) $response['samsara_warning']  = $samsaraWarning;
+
+json_success($response, 201);

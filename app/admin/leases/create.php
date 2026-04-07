@@ -44,16 +44,23 @@ $customers = db_select(
 // Load available equipment units with template info
 // equipment_units has no mileage_unit — use template's default_mileage_unit instead
 // S019: include u.template_id so JS can call lookup_rates with equipment_template_id
+// [SELECTOR-1] Fetch every non-deleted unit, NOT just available ones,
+// so the user can SEE leased / maintenance units in the dropdown with
+// the reason they can't be picked. ff_unit_is_selectable() decides which
+// rows get the disabled attribute, and the API still 409s on the
+// server side if a non-available id is somehow submitted. Sort the
+// available rows first so the picker is still useful by default.
 $availableUnits = db_select(
     "SELECT u.id, u.unit_number, u.status, u.template_id,
+            u.samsara_vehicle_id, u.samsara_vehicle_name, u.samsara_entity_type,
             t.name AS template_name, t.category,
             t.default_daily_rate, t.default_weekly_rate,
             t.default_monthly_rate, t.default_mileage_rate,
             t.default_currency, t.default_mileage_unit
      FROM equipment_units u
      JOIN equipment_templates t ON t.id = u.template_id AND t.deleted_at IS NULL
-     WHERE u.status = 'available' AND u.deleted_at IS NULL
-     ORDER BY u.unit_number ASC",
+     WHERE u.deleted_at IS NULL
+     ORDER BY (u.status = 'available') DESC, u.unit_number ASC",
     []
 );
 
@@ -118,21 +125,25 @@ require_once FF_ROOT . '/includes/header.php';
                                 @change="onUnitChange()">
                             <option value="">— Select available unit —</option>
                             <?php foreach ($availableUnits as $u): ?>
+                            <?php // [SELECTOR-1] disable non-available so the option is visible-but-unpickable. ?>
                             <option value="<?= $u['id'] ?>"
                                     data-template-id="<?= (int)$u['template_id'] ?>"
                                     data-template="<?= e($u['template_name']) ?>"
                                     data-category="<?= e($u['category']) ?>"
+                                    data-status="<?= e($u['status']) ?>"
                                     data-daily-rate="<?= e($u['default_daily_rate'] ?? '0.00') ?>"
                                     data-weekly-rate="<?= e($u['default_weekly_rate'] ?? '0.00') ?>"
                                     data-monthly-rate="<?= e($u['default_monthly_rate'] ?? '0.00') ?>"
                                     data-mileage-rate="<?= e($u['default_mileage_rate'] ?? '0.0000') ?>"
                                     data-currency="<?= e($u['default_currency'] ?? 'CAD') ?>"
-                                    data-mileage-unit="<?= e($u['default_mileage_unit'] ?? 'km') ?>">
-                                <?= e($u['unit_number']) ?> — <?= e($u['template_name']) ?>
+                                    data-mileage-unit="<?= e($u['default_mileage_unit'] ?? 'km') ?>"
+                                    data-samsara-linked="<?= !empty($u['samsara_vehicle_id']) ? '1' : '0' ?>"
+                                    <?= ff_unit_is_selectable($u['status']) ? '' : 'disabled' ?>>
+                                <?= e(ff_unit_selector_label($u)) ?>
                             </option>
                             <?php endforeach; ?>
                         </select>
-                        <div class="form-hint">Only available units shown.</div>
+                        <div class="form-hint">Available units are selectable; leased / maintenance units are shown but greyed out.</div>
                         <div class="form-error" x-show="errors.equipment_unit_id" x-text="errors.equipment_unit_id"></div>
                     </div>
                 </div>
@@ -344,19 +355,19 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <div class="form-row-2">
-                    <div class="form-group">
-                        <label class="form-label" for="mileage_at_start">Starting Mileage</label>
-                        <input type="number" id="mileage_at_start" class="form-control font-mono"
-                               x-model="form.mileage_at_start" min="0" placeholder="Odometer reading">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="rate_notes">Rate Notes</label>
-                        <input type="text" id="rate_notes" class="form-control"
-                               x-model="form.rate_notes" maxlength="255"
-                               placeholder="e.g. Special negotiated rates per agreement">
-                        <div class="form-hint" style="text-align:right;" x-text="(form.rate_notes || '').length + ' / 255'"></div>
-                    </div>
+                <!-- SAMSARA-3: legacy "Starting Mileage" input was removed here.
+                     It's now replaced by the Starting Odometer section below
+                     (Section 6), which is decimal-precise and supports live GPS
+                     fetch. The server auto-derives the legacy integer
+                     mileage_at_start column from odometer_start_km so every
+                     downstream consumer (close.php overage math, reports, AI
+                     tools) keeps working without changes. -->
+                <div class="form-group">
+                    <label class="form-label" for="rate_notes">Rate Notes</label>
+                    <input type="text" id="rate_notes" class="form-control"
+                           x-model="form.rate_notes" maxlength="255"
+                           placeholder="e.g. Special negotiated rates per agreement">
+                    <div class="form-hint" style="text-align:right;" x-text="(form.rate_notes || '').length + ' / 255'"></div>
                 </div>
 
             </div>
@@ -440,7 +451,85 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
-        <!-- ── Section 6: Notes ─────────────────────────────────── -->
+        <!-- ── Section 6: Starting Odometer (SAMSARA-3) ────────────
+             Capture the odometer reading when the unit leaves the yard.
+             If the unit is linked to Samsara, the "Fetch from Samsara"
+             button pulls the current live reading; otherwise the user
+             enters it manually. Starting odometer is optional — the
+             lease can be created without one.
+             ───────────────────────────────────────────────────────── -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header"><div class="card-title">Starting Odometer</div></div>
+            <div class="card-body">
+                <div class="form-hint" style="margin-bottom:1rem;">
+                    Capture the odometer reading when the unit leaves the yard.
+                    Used to track km driven across the life of the lease.
+                </div>
+
+                <div class="form-group" style="max-width:540px;">
+                    <label class="form-label" for="odometer_start_km">Starting Odometer (km)</label>
+                    <div style="display:flex;gap:0.5rem;align-items:flex-start;flex-wrap:wrap;">
+                        <div style="flex:1 1 240px;min-width:0;">
+                            <div style="display:flex;gap:0.5rem;align-items:center;">
+                                <input type="number"
+                                       id="odometer_start_km"
+                                       class="form-control font-mono"
+                                       x-model="form.odometer_start_km"
+                                       @input="onOdometerEdited()"
+                                       step="0.01"
+                                       min="0"
+                                       placeholder="e.g. 1234.56">
+                                <span x-show="odometerSource === 'gps'"
+                                      class="badge badge-info"
+                                      title="Fetched live from Samsara">GPS</span>
+                                <span x-show="odometerSource === 'manual' && form.odometer_start_km !== '' && form.odometer_start_km !== null"
+                                      class="badge badge-neutral"
+                                      title="Manually entered">Manual</span>
+                            </div>
+                        </div>
+                        <button type="button"
+                                class="btn btn-secondary"
+                                x-show="odometerCanFetch"
+                                @click="fetchStartingOdometer()"
+                                :disabled="odometerFetching">
+                            <span x-show="!odometerFetching">Fetch from Samsara</span>
+                            <span x-show="odometerFetching">Fetching…</span>
+                        </button>
+                    </div>
+
+                    <!-- Success banner after live GPS fetch -->
+                    <div x-show="odometerBanner && odometerBanner.type === 'success'"
+                         class="alert alert-success"
+                         style="margin-top:0.75rem;padding:0.5rem 0.75rem;font-size:0.875rem;"
+                         x-text="odometerBanner && odometerBanner.message">
+                    </div>
+
+                    <!-- Warning banner on fetch failure -->
+                    <div x-show="odometerBanner && odometerBanner.type === 'warning'"
+                         class="alert alert-warning"
+                         style="margin-top:0.75rem;padding:0.5rem 0.75rem;font-size:0.875rem;"
+                         x-text="odometerBanner && odometerBanner.message">
+                    </div>
+
+                    <!-- Hint when unit is not Samsara-linked -->
+                    <div x-show="selectedUnit && !odometerCanFetch"
+                         class="form-hint"
+                         style="margin-top:0.5rem;color:var(--text-secondary);">
+                        Link this unit to Samsara on the equipment page to enable live GPS odometer fetch.
+                    </div>
+
+                    <!-- Default hint -->
+                    <div x-show="!selectedUnit"
+                         class="form-hint" style="margin-top:0.5rem;">
+                        Select a unit above to enable the Samsara fetch button.
+                    </div>
+
+                    <div class="form-error" x-show="errors.odometer_start_km" x-text="errors.odometer_start_km"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Section 7: Notes ─────────────────────────────────── -->
         <div class="card" style="margin-bottom:1.5rem;">
             <div class="card-header"><div class="card-title">Notes</div></div>
             <div class="card-body">
@@ -495,7 +584,7 @@ function FF_CreateLease() {
             monthly_rate:       '',
             mileage_rate:       '',
             estimated_mileage:  '',
-            mileage_at_start:   '',
+            // SAMSARA-3: mileage_at_start removed — derived from odometer_start_km on the server
             rate_notes:         '',
             discount_type:      'none',
             discount_value:     '',
@@ -507,11 +596,22 @@ function FF_CreateLease() {
             pst_exempt:         false,
             notes:              '',
             internal_notes:     '',
+            // SAMSARA-3: starting odometer captured at lease start
+            odometer_start_km:         '',
+            odometer_start_source:     null,  // 'gps' | 'manual' | null
+            odometer_start_fetched_at: null,  // ISO datetime when GPS fetched
         },
         errors:             {},
         globalError:        null,
         submitting:         false,
         showSuccessOverlay: false,
+
+        // SAMSARA-3 odometer state
+        selectedUnit:     null,    // snapshot of selected option dataset — includes samsara link state
+        odometerSource:   null,    // 'gps' | 'manual' — drives the badge display
+        odometerCanFetch: false,   // true when selected unit is linked to Samsara
+        odometerFetching: false,   // button spinner flag
+        odometerBanner:   null,    // { type: 'success'|'warning', message: string }
 
         // Rate source tracking for banner display and field locking
         rateSource:      null,   // 'customer' | 'rate_card' | 'template' | null
@@ -551,15 +651,108 @@ function FF_CreateLease() {
         onUnitChange() {
             const sel = document.getElementById('equipment_unit_id');
             const opt = sel.options[sel.selectedIndex];
-            if (!opt || !opt.value) return;
+
+            // SAMSARA-3: track selected unit state so the Starting Odometer
+            // section knows whether to show the Fetch button. Reset odometer
+            // state whenever the unit changes so stale GPS values don't
+            // survive across units.
+            if (!opt || !opt.value) {
+                this.selectedUnit     = null;
+                this.odometerCanFetch = false;
+                this.odometerSource   = null;
+                this.odometerBanner   = null;
+                this.form.odometer_start_km         = '';
+                this.form.odometer_start_source     = null;
+                this.form.odometer_start_fetched_at = null;
+                return;
+            }
+            this.selectedUnit = {
+                id:             opt.value,
+                templateId:     parseInt(opt.dataset.templateId) || null,
+                samsaraLinked:  opt.dataset.samsaraLinked === '1',
+            };
+            this.odometerCanFetch = this.selectedUnit.samsaraLinked;
+            // Clear any stale odometer state from a previous selection
+            this.odometerSource                 = null;
+            this.odometerBanner                 = null;
+            this.form.odometer_start_km         = '';
+            this.form.odometer_start_source     = null;
+            this.form.odometer_start_fetched_at = null;
 
             // Reset lock state before lookup — will be re-set based on new source
             this.ratesLocked = false;
             this.rateSource  = null;
 
             // Priority: customer override → rate card → template
-            this._currentTemplateId = parseInt(opt.dataset.templateId) || null;
+            this._currentTemplateId = this.selectedUnit.templateId;
             this._lookupRates();
+        },
+
+        // SAMSARA-3: Live-fetch the current odometer reading from Samsara
+        // for the currently selected unit. Populates odometer_start_km +
+        // marks source as 'gps'. Non-blocking on failure — user can still
+        // enter a value manually.
+        async fetchStartingOdometer() {
+            if (!this.selectedUnit) {
+                this.odometerBanner = { type: 'warning', message: 'Please select a unit first.' };
+                return;
+            }
+            this.odometerFetching = true;
+            this.odometerBanner   = null;
+            try {
+                const r = await FF_Api.get(
+                    `<?= base_url('api/v1/samsara/current_odometer') ?>?equipment_unit_id=${this.selectedUnit.id}`
+                );
+                const d = r.data || {};
+
+                if (d.linked === false) {
+                    this.odometerCanFetch = false;
+                    this.odometerBanner   = { type: 'warning', message: d.message || 'Unit not linked to Samsara.' };
+                    return;
+                }
+                if (d.odometer_km === null || d.odometer_km === undefined) {
+                    this.odometerBanner = { type: 'warning', message: d.message || 'Could not reach Samsara. Enter odometer manually.' };
+                    return;
+                }
+
+                // Success — populate field and mark as GPS source
+                this.form.odometer_start_km         = Number(d.odometer_km).toFixed(2);
+                this.form.odometer_start_source     = 'gps';
+                this.form.odometer_start_fetched_at = d.fetched_at;
+                this.odometerSource                 = 'gps';
+
+                const ts = new Date(d.fetched_at).toLocaleString('en-CA', {
+                    month: 'short', day: 'numeric', year: 'numeric',
+                    hour: 'numeric', minute: '2-digit', hour12: true,
+                });
+                const km = Number(d.odometer_km).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                this.odometerBanner = {
+                    type:    'success',
+                    message: `✓ Live odometer fetched: ${km} km from Samsara at ${ts}`,
+                };
+            } catch (e) {
+                this.odometerBanner = { type: 'warning', message: 'Could not fetch GPS odometer. Enter starting odometer manually.' };
+            } finally {
+                this.odometerFetching = false;
+            }
+        },
+
+        // SAMSARA-3: Fired whenever the user types into the odometer field.
+        // If the current value came from a GPS fetch and the user edits it,
+        // flip the badge from GPS → Manual and drop the fetched_at stamp.
+        onOdometerEdited() {
+            if (this.odometerSource === 'gps') {
+                this.odometerSource                 = 'manual';
+                this.form.odometer_start_source     = 'manual';
+                this.form.odometer_start_fetched_at = null;
+            } else if (this.form.odometer_start_km !== '' && this.form.odometer_start_km !== null) {
+                // First manual entry — stamp the source
+                this.odometerSource             = 'manual';
+                this.form.odometer_start_source = 'manual';
+            } else {
+                this.odometerSource             = null;
+                this.form.odometer_start_source = null;
+            }
         },
 
         // S019: rate priority lookup — called when customer or unit changes
@@ -637,7 +830,6 @@ function FF_CreateLease() {
                 ['monthly_rate',      'Monthly rate cannot be negative.'],
                 ['mileage_rate',      'Mileage rate cannot be negative.'],
                 ['estimated_mileage', 'Estimated mileage cannot be negative.'],
-                ['mileage_at_start',  'Starting mileage cannot be negative.'],
                 ['discount_value',    'Discount value cannot be negative.'],
                 ['insurance_cost',    'Insurance cost cannot be negative.'],
                 ['warranty_cost',     'Warranty cost cannot be negative.'],
@@ -681,9 +873,13 @@ function FF_CreateLease() {
             });
 
             // Coerce numeric integers
-            ['customer_id', 'equipment_unit_id', 'mileage_at_start', 'estimated_mileage'].forEach(f => {
+            ['customer_id', 'equipment_unit_id', 'estimated_mileage'].forEach(f => {
                 if (payload[f]) payload[f] = parseInt(payload[f]);
             });
+            // SAMSARA-3: coerce decimal odometer so the API sees a proper number
+            if (payload.odometer_start_km !== undefined) {
+                payload.odometer_start_km = parseFloat(payload.odometer_start_km);
+            }
 
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/create') ?>', payload);

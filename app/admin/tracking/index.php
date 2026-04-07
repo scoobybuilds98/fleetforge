@@ -4,26 +4,35 @@ declare(strict_types=1);
 /**
  * app/admin/tracking/index.php
  *
- * Fleet GPS Tracking — full-page map showing all GPS-equipped equipment
- * units with real-time locations from Samsara.
+ * Fleet Tracking — Samsara command center.
  *
- * Features:
- *   - Leaflet.js map with OpenStreetMap tiles (no API key needed)
- *   - Sidebar panel with searchable unit list and status indicators
- *   - Auto-refresh toggle (60-second interval by default)
- *   - Click unit in sidebar or marker popup to zoom + highlight
- *   - Marker popups with unit info, speed, address, link to profile
- *   - Color-coded markers by unit status (available, on_lease, etc.)
- *   - Graceful handling when Samsara API is not configured (dev mode)
+ * Three tabs:
+ *   1. Map View       — Leaflet + OSM, color-coded pins by status
+ *   2. List View      — sortable table of every linked unit
+ *   3. Unlinked Units — every unit that is NOT yet mapped to Samsara
  *
- * Data loaded via API: GET /api/v1/gps/locations
- * Alpine.js component: FF_FleetTracking()
+ * Plus an Alerts strip above the tabs that surfaces:
+ *   • Battery critical (≤10%)
+ *   • Battery low (≤25%)
+ *   • Not connected for >24 hrs (red)
+ *   • Not connected for >8 hrs  (amber)
+ *   • No GPS fix at all
+ *
+ * Data source: GET /api/v1/samsara/fleet — single round-trip that
+ * returns linked, unlinked, alerts, and stats from cached samsara_*
+ * columns. Live Samsara API is NOT called here — the 5-min cron
+ * (cron/samsara_sync.php) keeps the cache fresh.
+ *
+ * Alert dismissal: a dismissed alert is suppressed for 24 hours
+ * via localStorage so on-call doesn't have to keep clearing the
+ * same noisy battery alert all day.
  *
  * Permission: equipment:view
  *
  * @depends config/app.php, includes/auth.php, includes/header.php,
- *          includes/footer.php, api/v1/gps/locations.php
- * @session S026
+ *          includes/footer.php, api/v1/samsara/fleet.php,
+ *          api/v1/samsara/sync.php
+ * @session SAMSARA-1
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -35,19 +44,12 @@ require_permission('equipment', 'view');
 $pageTitle = 'Fleet Tracking';
 require_once FF_ROOT . '/includes/header.php';
 
-// Count GPS-equipped units for the header badge
-$gpsUnitCount = db_count(
-    "SELECT COUNT(*) FROM equipment_units
-     WHERE deleted_at IS NULL AND tracking_provider = 'samsara'
-       AND gps_device_id IS NOT NULL AND gps_device_id != ''"
-);
-
-// Check if Samsara API is configured
-$samsaraKey = settings_get('gps.samsara_api_key', '');
+// Check if Samsara API is configured — used for the dev-mode banner.
+$samsaraKey    = settings_get('gps.samsara_api_key', '');
 $gpsConfigured = ($samsaraKey !== '');
 ?>
 
-<!-- Leaflet CSS & JS (lightweight open-source mapping library) -->
+<!-- Leaflet CSS & JS — open-source mapping library, no API key needed -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -55,41 +57,39 @@ $gpsConfigured = ($samsaraKey !== '');
 
 <div x-data="FF_FleetTracking()" x-init="init()">
 
-<!-- ── Page Header ────────────────────────────────────────────────────────── -->
+<!-- ── Page header ───────────────────────────────────────────────── -->
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
     <div>
         <h1 class="page-header-title">
             Fleet Tracking
             <span class="badge badge-info" style="font-size:0.75rem;vertical-align:middle;margin-left:6px;">
-                <?= e((string)$gpsUnitCount) ?> GPS Unit<?= $gpsUnitCount !== 1 ? 's' : '' ?>
+                <span x-text="stats.linked"></span> Linked
+            </span>
+            <span class="badge badge-neutral" style="font-size:0.75rem;vertical-align:middle;margin-left:4px;">
+                <span x-text="stats.unlinked"></span> Unlinked
             </span>
         </h1>
         <p style="margin:4px 0 0;font-size:0.8125rem;color:var(--text-muted);">
-            Real-time GPS tracking via Samsara
+            Live Samsara telemetry · synced every 5 minutes
             <span x-show="lastUpdated" x-cloak style="margin-left:8px;">
                 · Updated <span x-text="formatTime(lastUpdated)"></span>
             </span>
         </p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
-        <!-- Auto-refresh toggle -->
         <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;color:var(--text-secondary);cursor:pointer;">
             <input type="checkbox" x-model="autoRefresh" style="accent-color:var(--color-primary);">
             Auto-refresh
         </label>
-        <!-- Manual refresh -->
         <button class="btn btn-secondary btn-sm" @click="refresh()" :disabled="loading">
             <span x-show="!loading">Refresh</span>
             <span x-show="loading" x-cloak>Loading…</span>
         </button>
-        <!-- Settings link -->
-        <?php if (can('settings', 'edit')): ?>
-        <a href="<?= base_url('settings?tab=integrations') ?>" class="btn btn-ghost btn-sm" title="GPS Settings">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:16px;height:16px;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/>
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
-            </svg>
-        </a>
+        <?php if (can('equipment', 'edit')): ?>
+        <button class="btn btn-primary btn-sm" @click="syncAllNow()" :disabled="syncing">
+            <span x-show="!syncing">Sync All Now</span>
+            <span x-show="syncing" x-cloak>Syncing…</span>
+        </button>
         <?php endif; ?>
     </div>
 </div>
@@ -97,190 +97,307 @@ $gpsConfigured = ($samsaraKey !== '');
 <?php if (!$gpsConfigured): ?>
 <!-- Dev mode banner -->
 <div class="toast toast-warning" style="position:relative;margin-bottom:16px;animation:none;">
-    <span class="toast-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg></span>
+    <span class="toast-icon">!</span>
     <div class="toast-body">
-        <div class="toast-title">GPS Not Configured</div>
-        <div class="toast-message">Samsara API key is not set. Configure it in <a href="<?= base_url('settings?tab=integrations') ?>" style="color:inherit;text-decoration:underline;">Settings → Integrations</a> to enable live tracking.</div>
+        <div class="toast-title">Samsara API Key Not Configured</div>
+        <div class="toast-message">
+            Configure it in
+            <a href="<?= base_url('settings/integrations') ?>" style="color:inherit;text-decoration:underline;">Settings → Integrations</a>
+            to enable live tracking.
+        </div>
     </div>
 </div>
 <?php endif; ?>
 
-<!-- Error banner -->
+<!-- Network error banner -->
 <template x-if="error">
-    <div class="toast toast-danger" style="position:relative;margin-bottom:16px;animation:none;">
-        <span class="toast-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg></span>
+    <div class="toast toast-error" style="position:relative;margin-bottom:16px;animation:none;">
+        <span class="toast-icon">!</span>
         <div class="toast-body"><div class="toast-message" x-text="error"></div></div>
     </div>
 </template>
 
-<!-- ── Main Tracking Layout ───────────────────────────────────────────────── -->
-<div style="display:flex;height:calc(100vh - 240px);min-height:500px;border:1px solid var(--border-default);border-radius:8px;overflow:hidden;background:var(--bg-card);">
-
-    <!-- ── Sidebar Panel ──────────────────────────────────────────────────── -->
-    <div style="width:320px;flex-shrink:0;border-right:1px solid var(--border-default);display:flex;flex-direction:column;background:var(--bg-page);">
-
-        <!-- Search -->
-        <div style="padding:12px;border-bottom:1px solid var(--border-default);">
-            <input type="text" x-model="search" placeholder="Search units…"
-                   class="form-control" style="font-size:0.8125rem;">
+<!-- ── Alerts strip ─────────────────────────────────────────────── -->
+<!-- Sits above the tabs because it's the most actionable thing on
+     the page. Each alert has a Dismiss button that hides it for 24h
+     via localStorage (no server roundtrip needed for dismissal). -->
+<template x-if="visibleAlerts.length > 0">
+    <div class="card spec-card" style="margin-bottom:16px;">
+        <div class="card-header" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">
+            <div class="card-title">
+                Active Alerts
+                <span class="badge badge-danger" style="font-size:0.7rem;margin-left:6px;" x-text="visibleAlerts.length"></span>
+            </div>
+            <button class="btn btn-ghost btn-xs" @click="dismissAllAlerts()" style="color:#fff;opacity:0.85;">Dismiss all</button>
         </div>
-
-        <!-- Stats row -->
-        <div style="padding:8px 12px;display:flex;gap:8px;border-bottom:1px solid var(--border-default);font-size:0.75rem;">
-            <span class="badge badge-success badge-no-dot" style="font-size:0.7rem;">
-                <span x-text="onlineCount"></span> Online
-            </span>
-            <span class="badge badge-neutral badge-no-dot" style="font-size:0.7rem;">
-                <span x-text="offlineCount"></span> No Signal
-            </span>
-            <span class="badge badge-info badge-no-dot" style="font-size:0.7rem;">
-                <span x-text="units.length"></span> Total
-            </span>
-        </div>
-
-        <!-- Unit list -->
-        <div style="flex:1;overflow-y:auto;">
-            <template x-if="loading && units.length === 0">
-                <div style="padding:20px;text-align:center;">
-                    <template x-for="n in 5" :key="n">
-                        <div class="skeleton skeleton-row" style="margin-bottom:8px;"></div>
-                    </template>
+        <div class="card-body" style="padding:0;">
+            <template x-for="alert in visibleAlerts" :key="alert.unit_id + '-' + alert.type">
+                <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border-color);">
+                    <span :class="alert.severity === 'critical' ? 'badge badge-danger' : 'badge badge-warning'"
+                          style="font-size:0.7rem;text-transform:uppercase;"
+                          x-text="alert.severity"></span>
+                    <a :href="'<?= base_url('equipment/show') ?>?id=' + alert.unit_id"
+                       class="font-mono"
+                       style="font-weight:600;font-size:0.875rem;color:var(--text-primary);text-decoration:none;"
+                       x-text="alert.unit_number"></a>
+                    <span style="font-size:0.875rem;color:var(--text-secondary);flex:1;" x-text="alert.message"></span>
+                    <button class="btn btn-ghost btn-xs"
+                            @click="dismissAlert(alert)"
+                            title="Dismiss for 24 hours">
+                        Dismiss
+                    </button>
                 </div>
             </template>
-
-            <template x-if="!loading && filteredUnits.length === 0">
-                <div style="padding:30px 16px;text-align:center;color:var(--text-muted);font-size:0.8125rem;">
-                    <template x-if="search">
-                        <span>No units match "<span x-text="search"></span>"</span>
-                    </template>
-                    <template x-if="!search">
-                        <span>No GPS-equipped units found.</span>
-                    </template>
-                </div>
-            </template>
-
-            <template x-for="unit in filteredUnits" :key="unit.id">
-                <div @click="selectUnit(unit)"
-                     :style="selectedUnit?.id === unit.id
-                         ? 'padding:10px 12px;border-bottom:1px solid var(--border-default);cursor:pointer;background:var(--bg-active);border-left:3px solid var(--color-primary);'
-                         : 'padding:10px 12px;border-bottom:1px solid var(--border-default);cursor:pointer;border-left:3px solid transparent;'"
-                     @mouseenter="$el.style.background = selectedUnit?.id === unit.id ? 'var(--bg-active)' : 'var(--bg-hover)'"
-                     @mouseleave="$el.style.background = selectedUnit?.id === unit.id ? 'var(--bg-active)' : ''">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-                        <span class="font-mono" style="font-weight:600;font-size:0.875rem;" x-text="unit.unit_number"></span>
-                        <span :class="unit.location ? 'badge badge-success badge-no-dot' : 'badge badge-neutral badge-no-dot'"
-                              style="font-size:0.65rem;" x-text="unit.location ? 'Online' : 'Offline'"></span>
-                    </div>
-                    <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:2px;" x-text="unit.template_name || ''"></div>
-                    <div x-show="unit.location?.address" style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                         x-text="unit.location?.address"></div>
-                    <div x-show="unit.location?.speed !== null && unit.location?.speed !== undefined"
-                         style="font-size:0.7rem;color:var(--text-muted);margin-top:1px;">
-                        Speed: <span class="font-mono" x-text="unit.location?.speed ? Math.round(unit.location.speed) + ' mph' : 'Idle'"></span>
-                    </div>
-                    <div x-show="!unit.location" style="font-size:0.7rem;color:var(--text-muted);">No GPS signal</div>
-                </div>
-            </template>
-        </div>
-
-        <!-- Sidebar footer -->
-        <div style="padding:8px 12px;border-top:1px solid var(--border-default);font-size:0.7rem;color:var(--text-muted);text-align:center;">
-            Powered by Samsara GPS
-        </div>
-    </div>
-
-    <!-- ── Map Container ──────────────────────────────────────────────────── -->
-    <div id="tracking-map" style="flex:1;z-index:0;"></div>
-
-</div>
-
-<!-- ── Selected Unit Detail Panel ─────────────────────────────────────────── -->
-<template x-if="selectedUnit">
-    <div class="card" style="margin-top:16px;">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <div>
-                <span style="font-weight:600;" x-text="'Unit ' + selectedUnit.unit_number"></span>
-                <span class="badge" :class="statusBadgeClass(selectedUnit.status)" style="margin-left:6px;font-size:0.7rem;"
-                      x-text="selectedUnit.status.replace('_',' ')"></span>
-            </div>
-            <div style="display:flex;gap:6px;">
-                <a :href="'<?= base_url('equipment/show') ?>?id=' + selectedUnit.id"
-                   class="btn btn-secondary btn-xs">View Profile</a>
-                <a x-show="selectedUnit.samsara_vehicle_url"
-                   :href="selectedUnit.samsara_vehicle_url"
-                   target="_blank" class="btn btn-ghost btn-xs">Samsara Dashboard →</a>
-            </div>
-        </div>
-        <div class="card-body">
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">Type</div>
-                    <div style="font-size:0.875rem;" x-text="selectedUnit.template_name + (selectedUnit.template_category ? ' · ' + selectedUnit.template_category.replace('_',' ') : '')"></div>
-                </div>
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">Location</div>
-                    <div style="font-size:0.875rem;" x-text="selectedUnit.location?.address || 'Unknown'"></div>
-                </div>
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">Coordinates</div>
-                    <div class="font-mono" style="font-size:0.8125rem;"
-                         x-text="selectedUnit.location ? selectedUnit.location.latitude.toFixed(6) + ', ' + selectedUnit.location.longitude.toFixed(6) : '—'"></div>
-                </div>
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">Speed</div>
-                    <div class="font-mono" style="font-size:0.875rem;"
-                         x-text="selectedUnit.location?.speed !== null ? Math.round(selectedUnit.location.speed) + ' mph' : '—'"></div>
-                </div>
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">Heading</div>
-                    <div class="font-mono" style="font-size:0.875rem;"
-                         x-text="selectedUnit.location?.heading !== null ? Math.round(selectedUnit.location.heading) + '°' : '—'"></div>
-                </div>
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">GPS Odometer</div>
-                    <div class="font-mono" style="font-size:0.875rem;"
-                         x-text="selectedUnit.location?.odometer_km ? selectedUnit.location.odometer_km.toLocaleString() + ' km' : '—'"></div>
-                </div>
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">Last GPS Update</div>
-                    <div style="font-size:0.8125rem;"
-                         x-text="selectedUnit.location?.time ? new Date(selectedUnit.location.time).toLocaleString() : '—'"></div>
-                </div>
-                <div>
-                    <div class="form-label" style="margin-bottom:2px;">Samsara ID</div>
-                    <div class="font-mono" style="font-size:0.8125rem;" x-text="selectedUnit.gps_device_id"></div>
-                </div>
-            </div>
         </div>
     </div>
 </template>
+
+<!-- ── Tabs ─────────────────────────────────────────────────────── -->
+<div class="tab-bar" role="tablist" style="margin-bottom:16px;">
+    <button class="tab-btn"
+            :class="{ 'is-active': activeTab === 'map' }"
+            @click="activeTab = 'map'; $nextTick(() => initMap())"
+            role="tab">
+        Map View
+    </button>
+    <button class="tab-btn"
+            :class="{ 'is-active': activeTab === 'list' }"
+            @click="activeTab = 'list'"
+            role="tab">
+        List View
+        <span class="badge badge-neutral" style="font-size:0.65rem;margin-left:4px;" x-text="stats.linked"></span>
+    </button>
+    <button class="tab-btn"
+            :class="{ 'is-active': activeTab === 'unlinked' }"
+            @click="activeTab = 'unlinked'"
+            role="tab">
+        Unlinked
+        <span class="badge badge-neutral" style="font-size:0.65rem;margin-left:4px;" x-text="stats.unlinked"></span>
+    </button>
+</div>
+
+<!-- ── TAB: Map View ────────────────────────────────────────────── -->
+<div x-show="activeTab === 'map'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+    <div style="display:flex;height:calc(100vh - 320px);min-height:480px;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;background:var(--bg-card);">
+        <!-- Sidebar list -->
+        <div style="width:300px;flex-shrink:0;border-right:1px solid var(--border-color);display:flex;flex-direction:column;background:var(--bg-page);">
+            <div style="padding:10px 12px;border-bottom:1px solid var(--border-color);">
+                <input type="text" x-model="mapSearch" placeholder="Search units…" class="form-control" style="font-size:0.8125rem;">
+            </div>
+            <div style="padding:8px 12px;display:flex;gap:6px;border-bottom:1px solid var(--border-color);font-size:0.7rem;flex-wrap:wrap;">
+                <span class="badge badge-success badge-no-dot" style="font-size:0.65rem;">
+                    <span x-text="stats.online"></span> Online
+                </span>
+                <span class="badge badge-neutral badge-no-dot" style="font-size:0.65rem;">
+                    <span x-text="stats.offline"></span> Offline
+                </span>
+            </div>
+            <div style="flex:1;overflow-y:auto;">
+                <template x-for="unit in filteredMapUnits" :key="unit.id">
+                    <div @click="selectUnit(unit)"
+                         :style="selectedUnit?.id === unit.id
+                             ? 'padding:10px 12px;border-bottom:1px solid var(--border-color);cursor:pointer;background:var(--bg-hover);border-left:3px solid var(--color-primary);'
+                             : 'padding:10px 12px;border-bottom:1px solid var(--border-color);cursor:pointer;border-left:3px solid transparent;'">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span class="font-mono" style="font-weight:600;font-size:0.875rem;" x-text="unit.unit_number"></span>
+                            <span :class="isOnline(unit) ? 'badge badge-success badge-no-dot' : 'badge badge-neutral badge-no-dot'"
+                                  style="font-size:0.6rem;"
+                                  x-text="isOnline(unit) ? 'Online' : 'Offline'"></span>
+                        </div>
+                        <div style="font-size:0.75rem;color:var(--text-secondary);" x-text="unit.template_name || ''"></div>
+                        <div x-show="unit.samsara_last_location_address"
+                             style="font-size:0.7rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                             x-text="unit.samsara_last_location_address"></div>
+                    </div>
+                </template>
+                <template x-if="!loading && filteredMapUnits.length === 0">
+                    <div style="padding:24px 12px;text-align:center;color:var(--text-muted);font-size:0.8125rem;">
+                        <span x-show="mapSearch">No units match "<span x-text="mapSearch"></span>"</span>
+                        <span x-show="!mapSearch">No linked units yet. Link units from their detail page.</span>
+                    </div>
+                </template>
+            </div>
+        </div>
+        <!-- Map -->
+        <div id="tracking-map" style="flex:1;z-index:0;"></div>
+    </div>
+</div>
+
+<!-- ── TAB: List View ────────────────────────────────────────────── -->
+<div x-show="activeTab === 'list'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+    <div class="card spec-card" style="margin-bottom:0;">
+        <div class="card-header" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <div class="card-title">Linked Units</div>
+            <input type="text" x-model="listSearch" placeholder="Search…" class="form-control"
+                   style="max-width:240px;font-size:0.8125rem;background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.25);">
+        </div>
+        <div class="card-body" style="padding:0;overflow-x:auto;">
+            <table class="data-table" style="margin:0;">
+                <thead>
+                    <tr>
+                        <th>Unit</th>
+                        <th>Status</th>
+                        <th>Customer</th>
+                        <th>Battery</th>
+                        <th>Odometer</th>
+                        <th>Speed</th>
+                        <th>Last Location</th>
+                        <th>Last Connected</th>
+                        <th>Last Synced</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="unit in filteredListUnits" :key="unit.id">
+                        <tr>
+                            <td>
+                                <a :href="'<?= base_url('equipment/show') ?>?id=' + unit.id"
+                                   class="font-mono"
+                                   style="font-weight:600;color:var(--text-primary);"
+                                   x-text="unit.unit_number"></a>
+                                <div class="text-xs text-muted" x-text="unit.template_name"></div>
+                            </td>
+                            <td>
+                                <span class="badge" :class="statusBadgeClass(unit.status)" style="font-size:0.7rem;text-transform:capitalize;"
+                                      x-text="(unit.status || '').replace('_',' ')"></span>
+                            </td>
+                            <td>
+                                <span x-show="unit.customer_name" x-text="unit.customer_name"></span>
+                                <span x-show="!unit.customer_name" class="text-muted">—</span>
+                            </td>
+                            <td>
+                                <template x-if="unit.samsara_battery_pct !== null && unit.samsara_battery_pct !== undefined">
+                                    <span class="font-mono" :class="batteryClass(unit.samsara_battery_pct)" x-text="unit.samsara_battery_pct + '%'"></span>
+                                </template>
+                                <span x-show="unit.samsara_battery_pct === null || unit.samsara_battery_pct === undefined" class="text-muted">—</span>
+                            </td>
+                            <td class="font-mono"
+                                x-text="unit.samsara_odometer_km ? Number(unit.samsara_odometer_km).toLocaleString() + ' km' : '—'"></td>
+                            <td class="font-mono"
+                                x-text="unit.samsara_last_speed_kph !== null && unit.samsara_last_speed_kph !== undefined ? Number(unit.samsara_last_speed_kph).toFixed(1) + ' km/h' : '—'"></td>
+                            <td style="max-width:240px;">
+                                <span x-show="unit.samsara_last_location_address"
+                                      x-text="unit.samsara_last_location_address"
+                                      style="font-size:0.8125rem;"></span>
+                                <span x-show="!unit.samsara_last_location_address" class="text-muted">—</span>
+                            </td>
+                            <td x-text="unit.samsara_last_connected_at ? formatRelative(unit.samsara_last_connected_at) : '—'"></td>
+                            <td x-text="unit.samsara_last_synced_at ? formatRelative(unit.samsara_last_synced_at) : '—'"></td>
+                            <td>
+                                <a :href="'<?= base_url('equipment/show') ?>?id=' + unit.id" class="btn btn-ghost btn-xs">View</a>
+                            </td>
+                        </tr>
+                    </template>
+                    <template x-if="!loading && filteredListUnits.length === 0">
+                        <tr>
+                            <td colspan="10" style="text-align:center;padding:24px;color:var(--text-muted);">
+                                <span x-show="listSearch">No units match "<span x-text="listSearch"></span>"</span>
+                                <span x-show="!listSearch">No linked units yet. Link from a unit's detail page.</span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ── TAB: Unlinked Units ───────────────────────────────────────── -->
+<div x-show="activeTab === 'unlinked'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+    <div class="card spec-card" style="margin-bottom:0;">
+        <div class="card-header" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <div class="card-title">Unlinked Units</div>
+            <input type="text" x-model="unlinkedSearch" placeholder="Search…" class="form-control"
+                   style="max-width:240px;font-size:0.8125rem;background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.25);">
+        </div>
+        <div class="card-body" style="padding:0;overflow-x:auto;">
+            <table class="data-table" style="margin:0;">
+                <thead>
+                    <tr>
+                        <th>Unit</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Yard</th>
+                        <th>Customer</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="unit in filteredUnlinkedUnits" :key="unit.id">
+                        <tr>
+                            <td>
+                                <a :href="'<?= base_url('equipment/show') ?>?id=' + unit.id"
+                                   class="font-mono"
+                                   style="font-weight:600;color:var(--text-primary);"
+                                   x-text="unit.unit_number"></a>
+                            </td>
+                            <td x-text="unit.template_name"></td>
+                            <td>
+                                <span class="badge" :class="statusBadgeClass(unit.status)" style="font-size:0.7rem;text-transform:capitalize;"
+                                      x-text="(unit.status || '').replace('_',' ')"></span>
+                            </td>
+                            <td x-text="unit.yard_location || '—'"></td>
+                            <td>
+                                <span x-show="unit.customer_name" x-text="unit.customer_name"></span>
+                                <span x-show="!unit.customer_name" class="text-muted">—</span>
+                            </td>
+                            <td>
+                                <a :href="'<?= base_url('equipment/show') ?>?id=' + unit.id + '&tab=tracking'"
+                                   class="btn btn-secondary btn-xs">Link to Samsara</a>
+                            </td>
+                        </tr>
+                    </template>
+                    <template x-if="!loading && filteredUnlinkedUnits.length === 0">
+                        <tr>
+                            <td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">
+                                <span x-show="unlinkedSearch">No units match "<span x-text="unlinkedSearch"></span>"</span>
+                                <span x-show="!unlinkedSearch">All units are linked to Samsara.</span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 
 </div><!-- /x-data -->
 
 <script>
 /**
- * FF_FleetTracking — Alpine.js component for the fleet tracking map.
+ * FF_FleetTracking — Alpine.js component for the fleet tracking command center.
  *
- * Manages Leaflet map lifecycle, marker creation/updates, sidebar
- * unit list, search filtering, and auto-refresh polling.
+ * Owns:
+ *   • The data fetch from /api/v1/samsara/fleet (single round-trip)
+ *   • Three tab views (map, list, unlinked)
+ *   • Leaflet marker management for the map view
+ *   • Alert dismissal state via localStorage (24-hour TTL)
+ *   • Sync All Now button → POSTs to /api/v1/samsara/sync as a GET
  */
 function FF_FleetTracking() {
-    const BASE = '<?= base_url('') ?>';
-    const API_URL = BASE + 'api/v1/gps/locations';
+    // Use base_url() with an explicit path — it handles the slash between
+    // FF_BASE_PATH and the path. Concatenating BASE + 'api/...' would
+    // produce '/fleetforgeapi/...' (missing slash) because base_url('')
+    // intentionally has no trailing slash.
+    const FLEET_URL    = '<?= base_url('api/v1/samsara/fleet') ?>';
+    const SYNC_URL     = '<?= base_url('api/v1/samsara/sync') ?>';
+    const UNIT_SHOW    = '<?= base_url('equipment/show') ?>';
+    const DISMISS_KEY  = 'ff_samsara_dismissed_alerts';
+    const DISMISS_TTL  = 24 * 3600 * 1000; // 24 hours in ms
 
-    // WHY: Custom marker icon SVGs for different unit statuses.
-    // Leaflet's default blue marker doesn't convey status at a glance.
+    // Marker icon factory — color-coded by status. Each status maps
+    // to a tailwind-ish color so the legend stays consistent with
+    // the rest of the app's badge palette.
     function markerIcon(status) {
         const colors = {
-            available:      '#16a34a', // green
-            on_lease:       '#2563eb', // blue
-            reserved:       '#9333ea', // purple
-            maintenance:    '#d97706', // amber
-            inactive:       '#6b7280', // gray
-            decommissioned: '#dc2626', // red
+            available:      '#16a34a',
+            on_lease:       '#2563eb',
+            reserved:       '#9333ea',
+            maintenance:    '#d97706',
+            inactive:       '#6b7280',
+            decommissioned: '#dc2626',
         };
         const color = colors[status] || '#6b7280';
-
         return L.divIcon({
             className: 'ff-map-marker',
             html: `<svg width="28" height="36" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">
@@ -295,56 +412,90 @@ function FF_FleetTracking() {
     }
 
     return {
-        map:             null,
-        markers:         {},
-        units:           [],
-        selectedUnit:    null,
-        search:          '',
-        autoRefresh:     true,
-        refreshInterval: null,
-        loading:         false,
-        lastUpdated:     null,
-        error:           null,
+        // ── Data ─────────────────────────────────────────────
+        linked:         [],
+        unlinked:       [],
+        alerts:         [],
+        stats:          { total: 0, linked: 0, unlinked: 0, online: 0, offline: 0, alert_counts: {} },
+        loading:        false,
+        syncing:        false,
+        error:          null,
+        lastUpdated:    null,
+        autoRefresh:    true,
+        refreshInterval:null,
 
-        // ── Computed: filtered unit list ─────────────────────────
-        get filteredUnits() {
-            if (!this.search) return this.units;
-            const q = this.search.toLowerCase();
-            return this.units.filter(u =>
-                u.unit_number.toLowerCase().includes(q) ||
+        // ── Tabs ─────────────────────────────────────────────
+        activeTab:      'map',
+
+        // ── Map state ────────────────────────────────────────
+        map:            null,
+        markers:        {},
+        selectedUnit:   null,
+        mapSearch:      '',
+        mapInitialized: false,
+
+        // ── List filters ─────────────────────────────────────
+        listSearch:     '',
+        unlinkedSearch: '',
+
+        // ── Dismissed alerts (localStorage-backed) ───────────
+        dismissed:      {},
+
+        // ── Filters / computed ───────────────────────────────
+        get filteredMapUnits() {
+            const q = this.mapSearch.toLowerCase().trim();
+            const list = this.linked.filter(u => u.samsara_last_location_lat !== null);
+            if (!q) return list;
+            return list.filter(u =>
+                (u.unit_number || '').toLowerCase().includes(q) ||
                 (u.template_name || '').toLowerCase().includes(q) ||
-                (u.location?.address || '').toLowerCase().includes(q) ||
+                (u.samsara_last_location_address || '').toLowerCase().includes(q) ||
+                (u.customer_name || '').toLowerCase().includes(q)
+            );
+        },
+
+        get filteredListUnits() {
+            const q = this.listSearch.toLowerCase().trim();
+            if (!q) return this.linked;
+            return this.linked.filter(u =>
+                (u.unit_number || '').toLowerCase().includes(q) ||
+                (u.template_name || '').toLowerCase().includes(q) ||
+                (u.samsara_last_location_address || '').toLowerCase().includes(q) ||
+                (u.customer_name || '').toLowerCase().includes(q)
+            );
+        },
+
+        get filteredUnlinkedUnits() {
+            const q = this.unlinkedSearch.toLowerCase().trim();
+            if (!q) return this.unlinked;
+            return this.unlinked.filter(u =>
+                (u.unit_number || '').toLowerCase().includes(q) ||
+                (u.template_name || '').toLowerCase().includes(q) ||
                 (u.yard_location || '').toLowerCase().includes(q)
             );
         },
 
-        get onlineCount() {
-            return this.units.filter(u => u.location).length;
-        },
-
-        get offlineCount() {
-            return this.units.filter(u => !u.location).length;
-        },
-
-        // ── Initialize ──────────────────────────────────────────
-        async init() {
-            // WHY: Default center is approximate North America center.
-            // Map will auto-fit to marker bounds after data loads.
-            this.map = L.map('tracking-map', {
-                center: [43.65, -79.38],
-                zoom: 5,
-                zoomControl: true,
+        // Visible alerts = raw alerts minus anything still inside
+        // its 24-hour dismiss window. Computed on every render so
+        // dismissals + new fetches both flow naturally.
+        get visibleAlerts() {
+            const now = Date.now();
+            return this.alerts.filter(a => {
+                const key = a.unit_id + '-' + a.type;
+                const dismissedAt = this.dismissed[key];
+                return !dismissedAt || (now - dismissedAt) > DISMISS_TTL;
             });
+        },
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-                maxZoom: 19,
-            }).addTo(this.map);
-
-            // Load initial data
+        // ── Lifecycle ────────────────────────────────────────
+        async init() {
+            this.loadDismissed();
             await this.refresh();
 
-            // Watch auto-refresh toggle
+            // Mount the map after first paint so the #tracking-map
+            // div is in the DOM with non-zero dimensions.
+            this.$nextTick(() => this.initMap());
+
             this.$watch('autoRefresh', (val) => {
                 if (val) this.startAutoRefresh();
                 else this.stopAutoRefresh();
@@ -364,129 +515,182 @@ function FF_FleetTracking() {
             }
         },
 
-        // ── Fetch GPS data from server ──────────────────────────
+        // ── Data fetch ───────────────────────────────────────
         async refresh() {
             this.loading = true;
             this.error = null;
             try {
-                const r = await FF_Api.get(API_URL);
+                const r = await FF_Api.get(FLEET_URL);
                 if (r.success) {
-                    this.units = r.data.units || [];
-                    this.updateMarkers();
+                    this.linked   = r.data.linked   || [];
+                    this.unlinked = r.data.unlinked || [];
+                    this.alerts   = r.data.alerts   || [];
+                    this.stats    = r.data.stats    || this.stats;
                     this.lastUpdated = new Date();
+                    if (this.mapInitialized) this.updateMarkers();
                 } else {
-                    this.error = r.error?.message || 'Failed to load GPS data.';
+                    this.error = r.error?.message || 'Failed to load fleet data.';
                 }
             } catch (e) {
-                this.error = 'Network error. Could not reach GPS service.';
+                this.error = 'Network error loading fleet data.';
             }
             this.loading = false;
         },
 
-        // ── Sync Leaflet markers with unit data ─────────────────
-        updateMarkers() {
-            const currentIds = new Set(this.units.map(u => String(u.id)));
-
-            // Remove stale markers
-            for (const id of Object.keys(this.markers)) {
-                if (!currentIds.has(id)) {
-                    this.map.removeLayer(this.markers[id]);
-                    delete this.markers[id];
-                }
+        // POST to /api/v1/samsara/sync as GET (sync ALL linked units)
+        // and re-pull /fleet so the dashboard updates.
+        async syncAllNow() {
+            this.syncing = true;
+            try {
+                await FF_Api.get(SYNC_URL);
+                await this.refresh();
+            } catch (e) {
+                this.error = 'Sync request failed.';
             }
+            this.syncing = false;
+        },
 
-            // Add/update markers for units with GPS location
+        // ── Map init/update ──────────────────────────────────
+        initMap() {
+            if (this.mapInitialized) return;
+            const el = document.getElementById('tracking-map');
+            if (!el) return;
+
+            this.map = L.map('tracking-map', {
+                center: [49.10, -122.66], // Surrey, BC default
+                zoom: 9,
+                zoomControl: true,
+            });
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                maxZoom: 19,
+            }).addTo(this.map);
+            this.mapInitialized = true;
+            this.updateMarkers();
+        },
+
+        updateMarkers() {
+            if (!this.map) return;
+
+            const ids = new Set();
             const bounds = [];
-            for (const unit of this.units) {
-                if (!unit.location?.latitude || !unit.location?.longitude) continue;
 
-                const lat = unit.location.latitude;
-                const lng = unit.location.longitude;
-                bounds.push([lat, lng]);
+            for (const unit of this.linked) {
+                if (unit.samsara_last_location_lat === null || unit.samsara_last_location_lng === null) continue;
+                const lat = Number(unit.samsara_last_location_lat);
+                const lng = Number(unit.samsara_last_location_lng);
+                if (!lat || !lng) continue;
                 const sid = String(unit.id);
+                ids.add(sid);
+                bounds.push([lat, lng]);
 
                 if (this.markers[sid]) {
-                    // Update existing marker position + icon + popup
                     this.markers[sid].setLatLng([lat, lng]);
                     this.markers[sid].setIcon(markerIcon(unit.status));
                     this.markers[sid].setPopupContent(this.buildPopup(unit));
                 } else {
-                    // Create new marker
-                    const marker = L.marker([lat, lng], { icon: markerIcon(unit.status) })
+                    const m = L.marker([lat, lng], { icon: markerIcon(unit.status) })
                         .addTo(this.map)
                         .bindPopup(this.buildPopup(unit));
-
-                    // WHY: Store reference to unit ID on marker for click handler
-                    marker._ffUnitId = unit.id;
-                    marker.on('click', () => {
-                        this.selectedUnit = this.units.find(u => u.id === marker._ffUnitId) || null;
+                    m._ffUnitId = unit.id;
+                    m.on('click', () => {
+                        this.selectedUnit = this.linked.find(u => u.id === m._ffUnitId) || null;
                     });
-
-                    this.markers[sid] = marker;
+                    this.markers[sid] = m;
                 }
             }
 
-            // Fit map to marker bounds (only on first load or if bounds changed significantly)
-            if (bounds.length > 0 && !this.lastUpdated) {
-                this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+            // Cull stale markers (e.g., a unit that was unlinked
+            // since the last refresh).
+            for (const sid of Object.keys(this.markers)) {
+                if (!ids.has(sid)) {
+                    this.map.removeLayer(this.markers[sid]);
+                    delete this.markers[sid];
+                }
+            }
+
+            // Auto-fit only on the first paint so we don't fight
+            // the user's manual pan/zoom on every 60s refresh.
+            if (bounds.length > 0 && !this._didFitBounds) {
+                this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+                this._didFitBounds = true;
             }
         },
 
-        // ── Build popup HTML for a marker ───────────────────────
         buildPopup(unit) {
-            const statusColors = {
+            const colors = {
                 available:'#16a34a', on_lease:'#2563eb', reserved:'#9333ea',
                 maintenance:'#d97706', inactive:'#6b7280', decommissioned:'#dc2626',
             };
-            const color = statusColors[unit.status] || '#6b7280';
-            const statusLabel = (unit.status || '').replace('_', ' ');
+            const color = colors[unit.status] || '#6b7280';
+            const status = (unit.status || '').replace('_', ' ');
 
-            let html = '<div style="min-width:200px;font-family:DM Sans,sans-serif;">';
+            let html = '<div style="min-width:220px;font-family:DM Sans,sans-serif;">';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
             html += `<span style="font-weight:700;font-size:14px;">${this.esc(unit.unit_number)}</span>`;
-            html += `<span style="background:${color};color:white;padding:1px 6px;border-radius:4px;font-size:10px;text-transform:capitalize;">${statusLabel}</span>`;
+            html += `<span style="background:${color};color:white;padding:1px 6px;border-radius:4px;font-size:10px;text-transform:capitalize;">${this.esc(status)}</span>`;
             html += '</div>';
-
-            if (unit.template_name) {
-                html += `<div style="font-size:12px;color:#666;margin-bottom:4px;">${this.esc(unit.template_name)}</div>`;
+            if (unit.template_name) html += `<div style="font-size:12px;color:#666;margin-bottom:3px;">${this.esc(unit.template_name)}</div>`;
+            if (unit.customer_name) html += `<div style="font-size:11px;color:#555;margin-bottom:3px;">Customer: ${this.esc(unit.customer_name)}</div>`;
+            if (unit.samsara_last_location_address) html += `<div style="font-size:11px;color:#555;margin-bottom:3px;">${this.esc(unit.samsara_last_location_address)}</div>`;
+            if (unit.samsara_last_speed_kph !== null && unit.samsara_last_speed_kph !== undefined) {
+                html += `<div style="font-size:11px;color:#555;">Speed: <strong>${Number(unit.samsara_last_speed_kph).toFixed(1)} km/h</strong></div>`;
             }
-
-            if (unit.location?.address) {
-                html += `<div style="font-size:11px;margin-bottom:3px;color:#555;">${this.esc(unit.location.address)}</div>`;
+            if (unit.samsara_battery_pct !== null && unit.samsara_battery_pct !== undefined) {
+                html += `<div style="font-size:11px;color:#555;">Battery: <strong>${unit.samsara_battery_pct}%</strong></div>`;
             }
-
-            if (unit.location?.speed !== null && unit.location?.speed !== undefined) {
-                const speed = Math.round(unit.location.speed);
-                html += `<div style="font-size:11px;color:#555;">Speed: <strong>${speed} mph</strong></div>`;
+            if (unit.samsara_odometer_km) {
+                html += `<div style="font-size:11px;color:#555;">Odometer: <strong>${Number(unit.samsara_odometer_km).toLocaleString()} km</strong></div>`;
             }
-
-            if (unit.location?.odometer_km) {
-                html += `<div style="font-size:11px;color:#555;">Odometer: <strong>${unit.location.odometer_km.toLocaleString()} km</strong></div>`;
-            }
-
-            if (unit.location?.time) {
-                const t = new Date(unit.location.time);
-                html += `<div style="font-size:10px;color:#999;margin-top:4px;">GPS: ${t.toLocaleString()}</div>`;
-            }
-
-            html += `<a href="${BASE}equipment/show?id=${unit.id}" style="display:inline-block;margin-top:6px;font-size:11px;color:#2563eb;">View Unit Profile &rarr;</a>`;
+            html += `<a href="${UNIT_SHOW}?id=${unit.id}" style="display:inline-block;margin-top:6px;font-size:11px;color:#2563eb;text-decoration:none;">View Unit Profile →</a>`;
             html += '</div>';
             return html;
         },
 
-        // ── Sidebar unit click: zoom to unit ────────────────────
         selectUnit(unit) {
             this.selectedUnit = unit;
-            if (unit.location?.latitude && unit.location?.longitude) {
-                this.map.setView([unit.location.latitude, unit.location.longitude], 15, { animate: true });
+            if (this.map && unit.samsara_last_location_lat) {
+                const lat = Number(unit.samsara_last_location_lat);
+                const lng = Number(unit.samsara_last_location_lng);
+                this.map.setView([lat, lng], 15, { animate: true });
                 const sid = String(unit.id);
-                if (this.markers[sid]) {
-                    this.markers[sid].openPopup();
-                }
+                if (this.markers[sid]) this.markers[sid].openPopup();
             }
         },
 
-        // ── Status badge class (mirrors equipment index pattern) ─
+        // ── Alert dismissal ──────────────────────────────────
+        loadDismissed() {
+            try {
+                const raw = localStorage.getItem(DISMISS_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                // Strip any expired entries while we're in here so
+                // localStorage doesn't grow unbounded over months.
+                const now = Date.now();
+                const fresh = {};
+                for (const k of Object.keys(parsed)) {
+                    if ((now - parsed[k]) <= DISMISS_TTL) fresh[k] = parsed[k];
+                }
+                this.dismissed = fresh;
+                localStorage.setItem(DISMISS_KEY, JSON.stringify(fresh));
+            } catch (e) { /* ignore — localStorage is best-effort */ }
+        },
+
+        dismissAlert(alert) {
+            const key = alert.unit_id + '-' + alert.type;
+            this.dismissed = { ...this.dismissed, [key]: Date.now() };
+            try { localStorage.setItem(DISMISS_KEY, JSON.stringify(this.dismissed)); } catch {}
+        },
+
+        dismissAllAlerts() {
+            const now = Date.now();
+            const next = { ...this.dismissed };
+            for (const a of this.alerts) next[a.unit_id + '-' + a.type] = now;
+            this.dismissed = next;
+            try { localStorage.setItem(DISMISS_KEY, JSON.stringify(this.dismissed)); } catch {}
+        },
+
+        // ── Helpers ──────────────────────────────────────────
         statusBadgeClass(status) {
             return {
                 available:'badge-success', on_lease:'badge-info', reserved:'badge-purple',
@@ -494,17 +698,42 @@ function FF_FleetTracking() {
             }[status] || 'badge-neutral';
         },
 
-        // ── Time formatting ─────────────────────────────────────
-        formatTime(d) {
-            if (!d) return '—';
-            return d.toLocaleTimeString('en-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        batteryClass(pct) {
+            if (pct === null || pct === undefined) return '';
+            if (pct < 20) return 'text-danger';
+            if (pct < 50) return 'text-warning';
+            return 'text-success';
         },
 
-        // ── HTML escape helper ──────────────────────────────────
+        // Online = has lat AND last_connected within 8 hours
+        isOnline(unit) {
+            if (!unit.samsara_last_location_lat || !unit.samsara_last_connected_at) return false;
+            const ts = new Date(unit.samsara_last_connected_at).getTime();
+            return !isNaN(ts) && (Date.now() - ts) < (8 * 3600 * 1000);
+        },
+
+        formatTime(d) {
+            if (!d) return '—';
+            return d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        },
+
+        formatRelative(value) {
+            if (!value) return '';
+            const ts = new Date(value).getTime();
+            if (isNaN(ts)) return value;
+            const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+            if (diffSec < 60)    return 'just now';
+            if (diffSec < 3600)  return Math.floor(diffSec/60) + ' min ago';
+            if (diffSec < 86400) return Math.floor(diffSec/3600) + ' hr ago';
+            const days = Math.floor(diffSec/86400);
+            if (days < 7) return days + 'd ago';
+            return new Date(value).toLocaleDateString();
+        },
+
         esc(str) {
-            if (!str) return '';
+            if (str === null || str === undefined) return '';
             const div = document.createElement('div');
-            div.textContent = str;
+            div.textContent = String(str);
             return div.innerHTML;
         },
     };
@@ -512,12 +741,10 @@ function FF_FleetTracking() {
 </script>
 
 <style>
-/* WHY: Override Leaflet's default marker class to remove shadow/background */
 .ff-map-marker {
     background: none !important;
     border: none !important;
 }
-/* WHY: Ensure Leaflet popups use our font stack */
 .leaflet-popup-content {
     font-family: 'DM Sans', sans-serif;
     line-height: 1.5;

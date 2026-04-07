@@ -99,12 +99,19 @@ if ($fields) {
 }
 
 // ── Validate equipment_unit exists (soft-delete aware — D5)
+//    [SELECTOR-1] Also pull status and reject decommissioned/inactive
+//    via the SERVICE-context predicate. Mirrors the disabled-option
+//    rule the form uses, so a hand-crafted POST can't bypass the UI.
 $unit = db_row(
-    "SELECT eu.id, eu.unit_number FROM equipment_units eu WHERE eu.id = ? AND eu.deleted_at IS NULL",
+    "SELECT eu.id, eu.unit_number, eu.status FROM equipment_units eu WHERE eu.id = ? AND eu.deleted_at IS NULL",
     [$unitId]
 );
 if (!$unit) {
     json_validation_error(['equipment_unit_id' => 'Equipment unit not found.']);
+}
+if (!ff_unit_is_selectable($unit['status'], 'service')) {
+    $msg = ff_unit_unavailable_message((string) $unit['unit_number'], (string) $unit['status'], 'service');
+    json_error('UNIT_UNAVAILABLE', $msg, 409, ['fields' => ['equipment_unit_id' => $msg]]);
 }
 
 // ── Validate lease if provided (soft-delete aware — D5)

@@ -19,9 +19,11 @@ declare(strict_types=1);
  * @depends  api/bootstrap.php
  * @spec     FLEETFORGE_SPEC_FINAL.md §7.4, §5 SOFT_DELETE_TABLES
  * @session  S006
+ * @session  SAMSARA-3 — delete trailer from Samsara when unit is soft-deleted
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
+require_once dirname(__DIR__, 4) . '/lib/GPS/SamsaraClient.php';
 
 require_method('POST');
 require_auth_api();
@@ -33,8 +35,10 @@ if (!$id) {
     json_error('VALIDATION_ERROR', 'id is required.', 422);
 }
 
+// SAMSARA-3: include samsara_vehicle_id + entity_type so we can delete from Samsara
 $unit = db_row(
-    "SELECT id, unit_number, status FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, unit_number, status, samsara_vehicle_id, samsara_entity_type
+       FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
 if (!$unit) {
@@ -90,5 +94,20 @@ db_transaction(function () use ($id, $userId, $unit): void {
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 });
+
+// ── SAMSARA-3: Remove the trailer from Samsara ────────────────
+// WHY after the DB transaction: FleetForge soft-delete is committed first.
+// If Samsara fails, the unit is already gone from FleetForge and we log
+// the orphaned Samsara asset. Non-blocking — always return 200 to the caller.
+if (!empty($unit['samsara_vehicle_id'])
+    && ($unit['samsara_entity_type'] ?? 'vehicle') === 'trailer'
+) {
+    try {
+        $samsara = new \FleetForge\GPS\SamsaraClient();
+        $samsara->deleteTrailer((string) $unit['samsara_vehicle_id']);
+    } catch (\Throwable) {
+        // Samsara sync failure is non-blocking — already logged by SamsaraClient
+    }
+}
 
 json_success(['id' => $id, 'deleted' => true]);

@@ -758,6 +758,78 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
 
 
 <!-- ================================================================
+     SAMSARA-3: ODOMETER & DISTANCE
+     Shows per-period and cumulative km driven when the invoice was
+     created with odometer data. Silent when no odometer captured.
+     ================================================================ -->
+<?php
+$hasOdometer = ($invoice['odometer_at_period_start_km'] ?? null) !== null
+            || ($invoice['odometer_at_period_end_km']   ?? null) !== null;
+if ($hasOdometer):
+    // Badge class for source
+    $odoSourceBadge = match ($invoice['odometer_source'] ?? 'manual') {
+        'gps'       => ['badge-info',    'GPS'],
+        'estimated' => ['badge-warning', 'Estimated'],
+        default     => ['badge-neutral', 'Manual'],
+    };
+    // Look up the lease's starting odometer + start date for the "since" context
+    $leaseOdoContext = db_row(
+        "SELECT start_date, odometer_start_km FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$invoice['lease_id']]
+    );
+?>
+<div class="card" style="padding:20px; margin-bottom:20px;">
+    <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 12px 0;">
+        Odometer &amp; Distance
+    </h3>
+    <dl style="display:grid; grid-template-columns:180px 1fr; gap:8px 16px; font-size:13px; margin:0;">
+        <?php if ($invoice['odometer_at_period_start_km'] !== null): ?>
+        <dt class="text-secondary">Period Start</dt>
+        <dd class="font-mono"><?= number_format((float)$invoice['odometer_at_period_start_km'], 2) ?> km</dd>
+        <?php endif; ?>
+
+        <?php if ($invoice['odometer_at_period_end_km'] !== null): ?>
+        <dt class="text-secondary">Period End</dt>
+        <dd class="font-mono"><?= number_format((float)$invoice['odometer_at_period_end_km'], 2) ?> km</dd>
+        <?php endif; ?>
+
+        <?php if ($invoice['period_distance_km'] !== null): ?>
+        <dt class="text-secondary">Period Distance</dt>
+        <dd>
+            <span class="font-mono" style="font-weight:600;"><?= number_format((float)$invoice['period_distance_km'], 2) ?> km</span>
+            <span class="badge badge-no-dot <?= $odoSourceBadge[0] ?>" style="font-size:10px; margin-left:6px;"><?= $odoSourceBadge[1] ?></span>
+        </dd>
+        <?php endif; ?>
+
+        <?php if ($invoice['cumulative_distance_km'] !== null): ?>
+        <dt class="text-secondary">Cumulative Total</dt>
+        <dd class="font-mono">
+            <?= number_format((float)$invoice['cumulative_distance_km'], 2) ?> km
+            <?php if ($leaseOdoContext && $leaseOdoContext['start_date']): ?>
+            <span class="text-secondary text-sm" style="margin-left:4px;">since lease start on <?= format_date($leaseOdoContext['start_date']) ?></span>
+            <?php endif; ?>
+        </dd>
+        <?php endif; ?>
+
+        <dt class="text-secondary">Source</dt>
+        <dd>
+            <?php if (($invoice['odometer_source'] ?? null) === 'gps'): ?>
+                GPS via Samsara
+                <?php if (!empty($invoice['odometer_fetched_at'])): ?>
+                <span class="text-secondary text-sm">· fetched <?= format_datetime($invoice['odometer_fetched_at']) ?></span>
+                <?php endif; ?>
+            <?php elseif (($invoice['odometer_source'] ?? null) === 'estimated'): ?>
+                Estimated
+            <?php else: ?>
+                Manually entered
+            <?php endif; ?>
+        </dd>
+    </dl>
+</div>
+<?php endif; ?>
+
+
+<!-- ================================================================
      RATE METHOD EXPLANATION — How the rental charge was calculated
      ================================================================ -->
 <?php

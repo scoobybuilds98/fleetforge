@@ -152,6 +152,66 @@ if ($mileageAtStartRaw !== null && $mileageAtStartRaw !== '') {
 
 $minimumEndDate    = clean_date($body['minimum_end_date'] ?? null);
 
+// ── SAMSARA-3: starting odometer (optional) ────────────────────
+// odometer_start_km    — decimal km (allow negatives? no — odometer is monotonic)
+// odometer_start_source— 'gps' or 'manual'; null when odometer_start_km is empty
+// odometer_start_fetched_at — ISO datetime; only set by the client when source='gps'
+$odometerStartKm       = null;
+$odometerStartSource   = null;
+$odometerStartFetchedAt = null;
+
+$odoStartRaw = $body['odometer_start_km'] ?? null;
+if ($odoStartRaw !== null && $odoStartRaw !== '') {
+    $odoStartDec = clean_decimal($odoStartRaw);
+    if ($odoStartDec === null || bccomp($odoStartDec, '0', 2) < 0) {
+        $fields['odometer_start_km'] = 'Starting odometer cannot be negative.';
+    } else {
+        $odometerStartKm = $odoStartDec;
+    }
+
+    // Validate source when odometer has a value
+    $srcRaw = $body['odometer_start_source'] ?? null;
+    if ($srcRaw !== null && in_array($srcRaw, ['gps', 'manual'], true)) {
+        $odometerStartSource = $srcRaw;
+    } else {
+        // Default to manual if client didn't supply a source
+        $odometerStartSource = 'manual';
+    }
+
+    // fetched_at only meaningful when source is 'gps'
+    if ($odometerStartSource === 'gps') {
+        $fetchedAtRaw = $body['odometer_start_fetched_at'] ?? null;
+        if ($fetchedAtRaw !== null && $fetchedAtRaw !== '') {
+            // Parse ISO 8601 into MySQL datetime format
+            try {
+                $dt = new DateTime((string) $fetchedAtRaw);
+                $odometerStartFetchedAt = $dt->format('Y-m-d H:i:s');
+            } catch (\Throwable) {
+                // Ignore malformed timestamp — keep source but leave timestamp null
+            }
+        }
+        if ($odometerStartFetchedAt === null) {
+            // Stamp server-side so we always have an audit trail
+            $odometerStartFetchedAt = date('Y-m-d H:i:s');
+        }
+    }
+
+    // SAMSARA-3: auto-derive the legacy integer `mileage_at_start` column
+    // from the new decimal odometer. This preserves all downstream consumers
+    // (close.php overage math, reports, AI tools) without changing their
+    // contracts. Convert km → miles when the lease is contracted in miles
+    // (factor 0.621371, same as the existing close-modal conversion).
+    // Only overrides $mileageAtStart when the request didn't already supply
+    // one explicitly, so API callers that still send mileage_at_start
+    // directly keep working.
+    if ($mileageAtStart === null) {
+        $kmVal = (float) $odometerStartKm;
+        $mileageAtStart = ($mileageUnit === 'miles')
+            ? (int) round($kmVal * 0.621371)
+            : (int) round($kmVal);
+    }
+}
+
 // ── Date validation ─────────────────────────────────────────────
 if ($startDate && $endDate && $endDate < $startDate) {
     $fields['end_date'] = 'End date must be after start date.';
@@ -237,6 +297,7 @@ db_transaction(function () use (
     $insuranceOptIn, $insuranceCost, $warrantyOptIn, $warrantyCost,
     $poNumber, $notes, $internalNotes,
     $estimatedMileage, $mileageAtStart,
+    $odometerStartKm, $odometerStartSource, $odometerStartFetchedAt,
     &$leaseId
 ) {
     // D20: FOR UPDATE — lock the unit row before status check
@@ -335,6 +396,10 @@ db_transaction(function () use (
         'internal_notes'           => $internalNotes,
         'estimated_mileage'        => $estimatedMileage,
         'mileage_at_start'         => $mileageAtStart,
+        // SAMSARA-3: starting odometer captured at lease start (decimal km)
+        'odometer_start_km'        => $odometerStartKm,
+        'odometer_start_source'    => $odometerStartSource,
+        'odometer_start_fetched_at'=> $odometerStartFetchedAt,
         'created_by'               => current_user_id(),
         'updated_by'               => current_user_id(),
     ]);

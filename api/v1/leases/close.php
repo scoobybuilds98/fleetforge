@@ -28,14 +28,17 @@ declare(strict_types=1);
  *
  * @method      POST
  * @body        JSON — id (required), actual_return_date (optional, defaults today),
- *              mileage_at_end (optional), close_notes (optional)
+ *              mileage_at_end (optional), close_notes (optional),
+ *              odometer_at_close_km (optional, SAMSARA-3),
+ *              odometer_source (optional, SAMSARA-3),
+ *              odometer_fetched_at (optional, SAMSARA-3)
  * @auth        Session required; require_permission('leases','edit')
  * @returns     200 { id, status } | 409 INVALID_TRANSITION | 404 NOT_FOUND
  *
  * @depends     api/bootstrap.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases, §12 Final Invoice [PASS-3:2C]
  * @decisions   D20 (FOR UPDATE on unit)
- * @session     S007
+ * @session     S007, SAMSARA-3 (closing odometer on final invoice)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -55,15 +58,42 @@ $actualReturnDate = clean_date($body['actual_return_date'] ?? null) ?? date('Y-m
 $mileageAtEnd     = clean_int($body['mileage_at_end'] ?? null);
 $closeNotes       = clean_string($body['close_notes'] ?? null, 5000);
 
+// SAMSARA-3: optional closing odometer (decimal km) — stored on the final
+// invoice as odometer_at_period_end_km so the invoice can show per-period
+// and cumulative distance.
+$odoAtClose     = null;
+$odoSource      = null;
+$odoFetchedAt   = null;
+
+if (isset($body['odometer_at_close_km']) && $body['odometer_at_close_km'] !== '' && $body['odometer_at_close_km'] !== null) {
+    $dec = clean_decimal($body['odometer_at_close_km']);
+    if ($dec !== null && bccomp($dec, '0', 2) >= 0) {
+        $odoAtClose = $dec;
+        $srcRaw = $body['odometer_source'] ?? null;
+        $odoSource = in_array($srcRaw, ['gps', 'manual'], true) ? $srcRaw : 'manual';
+        if ($odoSource === 'gps' && !empty($body['odometer_fetched_at'])) {
+            try {
+                $dt = new DateTime((string) $body['odometer_fetched_at']);
+                $odoFetchedAt = $dt->format('Y-m-d H:i:s');
+            } catch (\Throwable) {
+                $odoFetchedAt = null;
+            }
+        }
+    }
+}
+
 $result = null;
 
-db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNotes, &$result) {
+db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
+    // SAMSARA-3: include odometer_start_km so we can derive the period
+    // start odometer for the final invoice when the user supplies a
+    // closing odometer without an explicit start value.
     $lease = db_row(
         "SELECT id, status, contract_number, company_name_snapshot,
                 equipment_unit_id, unit_number_snapshot, mileage_at_start,
                 mileage_rate, mileage_unit, estimated_mileage, mileage_precharge_amount,
-                start_date, last_billed_date
+                start_date, last_billed_date, odometer_start_km
          FROM leases WHERE id = ? AND deleted_at IS NULL",
         [$id]
     );
@@ -202,6 +232,25 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         }
     }
 
+    // SAMSARA-3: derive the period-start odometer for the final invoice.
+    // Priority: latest prior invoice's period-end odometer → lease start.
+    $odoPeriodStart = null;
+    if ($odoAtClose !== null) {
+        $prev = db_row(
+            "SELECT odometer_at_period_end_km
+               FROM invoices
+              WHERE lease_id = ? AND deleted_at IS NULL
+                AND odometer_at_period_end_km IS NOT NULL
+              ORDER BY billing_period_end DESC, id DESC LIMIT 1",
+            [$id]
+        );
+        if ($prev && $prev['odometer_at_period_end_km'] !== null) {
+            $odoPeriodStart = $prev['odometer_at_period_end_km'];
+        } elseif ($lease['odometer_start_km'] !== null) {
+            $odoPeriodStart = $lease['odometer_start_km'];
+        }
+    }
+
     $generator     = new \FleetForge\Billing\InvoiceGenerator();
     $invoiceResult = $generator->createFromLease([
         'lease_id'          => $id,
@@ -214,6 +263,11 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         'auto_generated'    => 1,
         'generation_source' => 'lease_close',  // ENUM: cron|manual|lease_close|late_fee_cron
         'extra_lines'       => $extraLines,
+        // SAMSARA-3: closing odometer flows into the final invoice
+        'odometer_at_period_start_km' => $odoPeriodStart,
+        'odometer_at_period_end_km'   => $odoAtClose,
+        'odometer_source'             => $odoSource,
+        'odometer_fetched_at'         => $odoFetchedAt,
     ]);
 
     $result = ['id' => $id, 'status' => 'completed', 'invoice_id' => $invoiceResult['invoice_id']];

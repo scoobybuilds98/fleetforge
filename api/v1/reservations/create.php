@@ -177,6 +177,17 @@ db_transaction(function () use (
         if (!$unit) {
             json_error('NOT_FOUND', "Equipment unit ID $unitId not found.", 404);
         }
+        // [SELECTOR-1] Hard-block decommissioned + inactive units even
+        // before the conflict-check, since they should never be on a
+        // reservation regardless of date. Other statuses (available,
+        // on_lease, reserved, maintenance) are still allowed because a
+        // reservation is a forward booking — the unit might come free
+        // before pickup_date, and the existing $conflict + $leaseConflict
+        // checks catch the actual same-day conflicts.
+        if (in_array($unit['status'], ['decommissioned', 'inactive'], true)) {
+            $msg = ff_unit_unavailable_message((string) $unit['unit_number'], (string) $unit['status'], 'service');
+            json_error('UNIT_UNAVAILABLE', $msg, 409, ['fields' => ['units' => $msg]]);
+        }
 
         // Check for ANY active reservation on this unit (any pickup date).
         // WHY no date filter: one unit can only be in one active reservation at
