@@ -3,9 +3,10 @@
   "configurations": [
     {
       "name": "fleetforge",
-      "runtimeExecutable": "php",
+      "runtimeExecutable": "/Users/avi/Library/Application Support/Herd/bin/php",
       "runtimeArgs": ["-S", "localhost:8899", "-t", "public", "public/index.php"],
-      "port": 8899
+      "port": 8899,
+      "url": "http://localhost:8899/fleetforge/auth/login"
     }
   ]
 }

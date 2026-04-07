@@ -166,7 +166,9 @@ db_transaction(function () use (
         [$key]
     );
     $next          = $settingsRow ? (int) $settingsRow['value'] : 1;
-    $paymentNumber = sprintf('PAY-%s-%05d', $year, $next);
+    // WHY: prefix from settings so admin can rebrand without code change
+    $prefix        = settings_get('payment.prefix', 'PAY');
+    $paymentNumber = sprintf('%s-%s-%05d', $prefix, $year, $next);
 
     if ($settingsRow) {
         db_execute(
@@ -295,6 +297,15 @@ db_transaction(function () use (
         'notes'        => "Payment {$paymentNumber} ({$currency} {$allocatedAmount}) applied to invoice {$invoice['invoice_number']}. Invoice status: {$newInvoiceStatus}.",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // Auto-JE: DR 1010 Cash / CR 1030 AR for the allocated amount
+    // WHY: Inside same transaction — JE failure rolls back the payment (A8, §16)
+    \FleetForge\Accounting\AutoEntryBridge::onPaymentReceived(
+        $paymentId,
+        $invoiceId,
+        $allocatedAmount,
+        current_user_id()
+    );
 
     // Return values to outer scope
     $result = [

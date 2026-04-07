@@ -201,7 +201,20 @@ return [
 
     // ----------------------------------------------------------
     // Accounting section — accountant role and above (Phase 13+)
-    // Each item is gated by its own module permission.
+    //
+    // STRUCTURE: This mirrors the grouped accounting topnav bar
+    // (see includes/partials/accounting-nav.php). The sidebar
+    // shows a single "Accounting" parent with 8 children — the 6
+    // functional groups + Periods + Settings. Each child uses
+    // `match_prefix` (a list of URL prefixes) so the correct child
+    // stays highlighted no matter which sub-page the user visits
+    // within that group (e.g. the "General Ledger" child stays
+    // active on Chart of Accounts, Journal Entries, Ledger AND
+    // Trial Balance).
+    //
+    // Clicking a group child navigates to that group's primary
+    // landing page; the in-page topnav then exposes the other
+    // pages in the same group.
     // ----------------------------------------------------------
     [
         'separator' => true,
@@ -209,66 +222,107 @@ return [
         'module'    => 'journal_entries', // section shown if user can view any accounting module
     ],
     [
-        'label'  => 'Accounting Dashboard',
-        'icon'   => 'calculator',
-        'url'    => '/accounting/dashboard',
-        'module' => 'journal_entries',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Chart of Accounts',
-        'icon'   => 'list-bullet',
-        'url'    => '/accounting/chart-of-accounts',
-        'module' => 'chart_of_accounts',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Journal Entries',
-        'icon'   => 'pencil-square',
-        'url'    => '/accounting/journal-entries',
-        'module' => 'journal_entries',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Accounts Payable',
-        'icon'   => 'inbox-arrow-down',
-        'url'    => '/accounting/accounts-payable',
-        'module' => 'accounts_payable',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Bank Accounts',
-        'icon'   => 'building-library',
-        'url'    => '/accounting/bank-accounts',
-        'module' => 'bank_accounts',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Fixed Assets',
-        'icon'   => 'cube',
-        'url'    => '/accounting/fixed-assets',
-        'module' => 'fixed_assets',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Tax',
-        'icon'   => 'receipt-percent',
-        'url'    => '/accounting/tax',
-        'module' => 'tax_management',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Financial Reports',
-        'icon'   => 'document-chart-bar',
-        'url'    => '/accounting/reports',
-        'module' => 'financial_reports',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Budget',
-        'icon'   => 'banknotes',
-        'url'    => '/accounting/budgets',
-        'module' => 'budgets',
-        'badge'  => null,
+        'label'        => 'Accounting',
+        'icon'         => 'calculator',
+        'url'          => '/accounting/dashboard',
+        'match_prefix' => '/accounting',   // highlighted on ANY /accounting/* page
+        'module'       => 'journal_entries',
+        'badge'        => null,
+        'children' => [
+            [
+                'label'  => 'Dashboard',
+                'icon'   => 'home',
+                'url'    => '/accounting/dashboard',
+                'module' => 'journal_entries',
+                'badge'  => null,
+            ],
+            [
+                'label'        => 'General Ledger',
+                'icon'         => 'book-open',
+                'url'          => '/accounting/ledger',
+                'match_prefix' => [
+                    '/accounting/ledger',
+                    '/accounting/chart-of-accounts',
+                    '/accounting/journal-entries',
+                    '/accounting/reports/trial-balance',
+                ],
+                'module' => 'journal_entries',
+                'badge'  => null,
+            ],
+            [
+                'label'        => 'Receivables',
+                'icon'         => 'inbox-arrow-down',
+                'url'          => '/accounting/ar-aging',
+                'match_prefix' => [
+                    '/accounting/ar-aging',
+                    '/accounting/statements',
+                    '/accounting/collections',
+                    '/accounting/deposits',
+                ],
+                'module' => 'journal_entries',
+                'badge'  => null,
+            ],
+            [
+                'label'        => 'Payables',
+                'icon'         => 'document-text',
+                'url'          => '/accounting/bills',
+                'match_prefix' => [
+                    '/accounting/bills',
+                    '/accounting/ap-aging',
+                    '/accounting/vendor-credits',
+                ],
+                'module' => 'accounts_payable',
+                'badge'  => null,
+            ],
+            [
+                'label'        => 'Banking',
+                'icon'         => 'building-library',
+                'url'          => '/accounting/bank-accounts',
+                'match_prefix' => [
+                    '/accounting/bank-accounts',
+                    '/accounting/bank-reconciliation',
+                ],
+                'module' => 'bank_accounts',
+                'badge'  => null,
+            ],
+            [
+                'label'        => 'Fixed Assets',
+                'icon'         => 'truck',
+                'url'          => '/accounting/fixed-assets',
+                'match_prefix' => [
+                    '/accounting/fixed-assets',
+                    '/accounting/depreciation',
+                    '/accounting/capex',
+                ],
+                'module' => 'fixed_assets',
+                'badge'  => null,
+            ],
+            [
+                // S035 — Tax Management. Single child for GST/HST + PST
+                // filing periods, calculation, mark-filed, and remittance
+                // posting. match_prefix uses /accounting/tax so both
+                // index.php and show.php highlight the parent correctly.
+                'label'        => 'Tax',
+                'icon'         => 'receipt-percent',
+                'url'          => '/accounting/tax',
+                'match_prefix' => ['/accounting/tax'],
+                'module'       => 'tax_management',
+                'badge'        => null,
+            ],
+            [
+                'label'  => 'Periods',
+                'icon'   => 'calendar-days',
+                'url'    => '/accounting/periods',
+                'module' => 'period_management',
+                'badge'  => null,
+            ],
+            [
+                'label'  => 'Settings',
+                'icon'   => 'cog-6-tooth',
+                'url'    => '/accounting/settings',
+                'module' => 'journal_entries',
+                'badge'  => null,
+            ],
+        ],
     ],
 ];

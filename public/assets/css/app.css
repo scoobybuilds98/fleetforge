@@ -531,6 +531,55 @@ kbd {
     transition: opacity var(--transition-base);
 }
 
+/* ── Nav groups (collapsible parent + children) ── */
+.nav-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.nav-group > .nav-item {
+    position: relative;
+}
+
+.nav-group-arrow {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: var(--sidebar-text);
+    opacity: 0.5;
+    transition: transform var(--transition-fast), opacity var(--transition-fast);
+}
+
+.nav-group.is-open > .nav-item .nav-group-arrow {
+    transform: rotate(90deg);
+    opacity: 0.7;
+}
+
+.nav-children {
+    display: none;
+    flex-direction: column;
+    padding-left: 14px;
+}
+
+.nav-group.is-open > .nav-children {
+    display: flex;
+}
+
+.nav-item--child {
+    font-size: 0.825rem;
+    padding: 6px 10px;
+}
+
+.nav-item--child .nav-item-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.nav-item--child .nav-icon {
+    width: 14px;
+    height: 14px;
+}
+
 /* ── User Footer ─────────────────────────── */
 .sidebar-footer {
     border-top: 1px solid var(--sidebar-border);
@@ -599,6 +648,8 @@ kbd {
     .sidebar:not(.is-open) .nav-item-label,
     .sidebar:not(.is-open) .nav-badge,
     .sidebar:not(.is-open) .nav-section-label,
+    .sidebar:not(.is-open) .nav-group-arrow,
+    .sidebar:not(.is-open) .nav-children,
     .sidebar:not(.is-open) .sidebar-user-info {
         opacity: 0;
         pointer-events: none;
@@ -1206,6 +1257,79 @@ kbd {
     padding: 14px 20px;
     border-top: 1px solid var(--border-color);
     background: var(--bg-surface-2);
+}
+
+/* ── Spec card — elevated key/value table card ──────────────
+   Used for showing structured "label: value" data in detail
+   modals and profile pages. Promoted from app/admin/equipment/show.php
+   so the same look can be reused across the fixed-assets module
+   and any other place that needs a labeled property list. */
+.spec-card {
+    border: 1px solid var(--border-color-strong);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.03);
+}
+.spec-card .card-header {
+    background: var(--color-primary);
+    border-bottom: none;
+    padding: 12px 16px;
+}
+.spec-card .card-header .card-title {
+    color: #fff;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+.spec-card .card-body { padding: 0; }
+
+.spec-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.spec-table tr { border-bottom: 1px solid var(--border-color); }
+.spec-table tr:last-child { border-bottom: none; }
+.spec-table tr:nth-child(even) { background: var(--bg-surface-2); }
+.spec-table td {
+    padding: 11px 16px;
+    font-size: 0.875rem;
+    vertical-align: baseline;
+}
+.spec-table .spec-label {
+    width: 160px;
+    color: var(--text-tertiary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.spec-table .spec-value { color: var(--text-primary); font-weight: 500; }
+.spec-table td.text-right { text-align: right; }
+
+/* ── Section header inside a card or modal ──────────────────
+   Slim divider with an uppercase eyebrow label. Used to break
+   up long forms (Create/Edit modals) into visual groups. */
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 24px 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+.section-header:first-child { margin-top: 0; }
+.section-header .section-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin: 0;
+}
+.section-header .section-hint {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
 }
 
 /* Stats / Summary tiles */
@@ -1821,14 +1945,16 @@ textarea.form-input {
     box-shadow: var(--shadow-sm);
 }
 
-.table {
+.table,
+.data-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.875rem;
     background: var(--bg-surface);
 }
 
-.table thead th {
+.table thead th,
+.data-table thead th {
     padding: 12px 16px;
     text-align: left;
     font-size: 0.6875rem;
@@ -1841,21 +1967,27 @@ textarea.form-input {
     white-space: nowrap;
 }
 
-.table thead th:first-child { border-radius: var(--radius-xl) 0 0 0; }
-.table thead th:last-child  { border-radius: 0 var(--radius-xl) 0 0; }
+.table thead th:first-child,
+.data-table thead th:first-child { border-radius: var(--radius-xl) 0 0 0; }
+.table thead th:last-child,
+.data-table thead th:last-child  { border-radius: 0 var(--radius-xl) 0 0; }
 
-.table tbody tr {
+.table tbody tr,
+.data-table tbody tr {
     border-bottom: 1px solid var(--border-color);
     transition: background var(--transition-fast);
 }
 
-.table tbody tr:last-child { border-bottom: none; }
+.table tbody tr:last-child,
+.data-table tbody tr:last-child { border-bottom: none; }
 
-.table tbody tr:hover {
+.table tbody tr:hover,
+.data-table tbody tr:hover {
     background: var(--bg-surface-hover);
 }
 
-.table tbody td {
+.table tbody td,
+.data-table tbody td {
     padding: 13px 16px;
     color: var(--text-primary);
     vertical-align: middle;
@@ -1863,11 +1995,17 @@ textarea.form-input {
 
 .table .text-right,
 .table th.text-right,
-.table td.text-right { text-align: right; }
+.table td.text-right,
+.data-table .text-right,
+.data-table th.text-right,
+.data-table td.text-right { text-align: right; }
 
 .table .text-center,
 .table th.text-center,
-.table td.text-center { text-align: center; }
+.table td.text-center,
+.data-table .text-center,
+.data-table th.text-center,
+.data-table td.text-center { text-align: center; }
 
 /* Sortable column header */
 .th-sortable {
@@ -2196,6 +2334,176 @@ textarea.form-input {
     opacity: 0;
     transform: translateY(-6px) scale(0.98);
 }
+
+
+/* ============================================================
+   14b. Accounting Sub-Navigation Bar (acc-topnav)
+   ============================================================
+   Grouped horizontal nav rendered by includes/partials/accounting-nav.php
+   on every accounting page. Top-level groups with sub-pages render as
+   click-to-open dropdowns; standalone destinations render as direct links.
+
+   Layout: flex row that wraps on narrow viewports.
+   The "pin-right" modifier pushes Periods + Settings to the right side.
+
+   WHY no overflow-x: per CSS spec, setting `overflow-x: auto` silently
+   forces `overflow-y` to be non-visible too, which would CLIP the
+   absolutely-positioned dropdown panels that sit below the bar. Since
+   8 top-level items comfortably fit on any reasonable viewport, we use
+   flex-wrap instead to handle edge cases without creating a clipping
+   context.
+   ============================================================ */
+
+.acc-topnav {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 6px 8px;
+    margin-bottom: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    /* overflow MUST remain visible so absolute-positioned dropdowns can escape */
+    overflow: visible;
+}
+
+/* Wrapper around groups so the dropdown can be position:absolute */
+.acc-topnav-group {
+    position: relative;
+    flex-shrink: 0;
+}
+
+/* The leaf link OR the dropdown trigger button — same visual treatment */
+.acc-topnav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+    text-decoration: none;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    flex-shrink: 0;
+    font-family: inherit;
+    line-height: 1.2;
+}
+.acc-topnav-link:hover {
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+    text-decoration: none;
+}
+.acc-topnav-link svg {
+    flex-shrink: 0;
+    color: currentColor;
+}
+
+/* Active state — applies to both leaf links and group triggers */
+.acc-topnav-link.acc-topnav-active {
+    background: var(--color-primary);
+    color: #fff;
+}
+.acc-topnav-link.acc-topnav-active:hover {
+    background: var(--color-primary-hover, var(--color-primary));
+    color: #fff;
+}
+
+/* Dropdown trigger — button is open but page is NOT the active section */
+.acc-topnav-link.acc-topnav-open:not(.acc-topnav-active) {
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+}
+
+/* Right-pinned items (Periods, Settings) */
+.acc-topnav-pin-right {
+    margin-left: auto;
+}
+/* When two items are both pin-right, only the first needs auto margin */
+.acc-topnav-pin-right ~ .acc-topnav-pin-right {
+    margin-left: 0;
+}
+
+/* Chevron caret next to dropdown trigger labels */
+.acc-topnav-chevron {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2px;
+    transition: transform var(--transition-fast);
+    opacity: 0.7;
+}
+.acc-topnav-chevron-open {
+    transform: rotate(180deg);
+}
+
+/* Dropdown panel — same shadow/radius treatment as other dropdowns */
+.acc-topnav-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 220px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    z-index: var(--z-dropdown);
+    padding: 6px 0;
+    overflow: hidden;
+}
+/* Right-pinned dropdowns flush right so they don't overflow off-screen */
+.acc-topnav-pin-right .acc-topnav-dropdown {
+    left: auto;
+    right: 0;
+}
+
+.acc-topnav-dropdown-label {
+    padding: 6px 14px 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin: 0;
+}
+
+.acc-topnav-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: background var(--transition-fast);
+    line-height: 1.2;
+}
+.acc-topnav-dropdown-item:hover {
+    background: var(--bg-surface-hover);
+    text-decoration: none;
+    color: var(--text-primary);
+}
+.acc-topnav-dropdown-item svg {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+/* Active child highlight inside an open dropdown */
+.acc-topnav-dropdown-item.acc-topnav-dropdown-item-active {
+    background: var(--color-primary-light, rgba(249, 115, 22, 0.12));
+    color: var(--color-primary-text, var(--color-primary));
+    font-weight: 600;
+}
+.acc-topnav-dropdown-item.acc-topnav-dropdown-item-active svg {
+    color: var(--color-primary-text, var(--color-primary));
+}
+
+/* x-cloak hides Alpine elements until Alpine has finished initialising */
+[x-cloak] { display: none !important; }
 
 
 /* ============================================================
@@ -2775,19 +3083,27 @@ html.is-mac .non-mac-only { display: none; }
     text-decoration-color: var(--color-primary);
 }
 
-/* ── Tab bar — modern segmented-pill style ───────────────── */
+/* ── Tab bar — modern segmented-pill style ─────────────────
+   WHY display:flex (not inline-flex): inline-flex sizes to its
+   content width, so a long tab list will overflow the parent and
+   stretch the page. Block-level flex respects max-width:100%.
+
+   WHY flex-wrap:wrap (not nowrap + horizontal scroll): we'd
+   rather have a long tab list flow onto a second row inside the
+   same pill frame than make the user scroll a hidden region.
+   row-gap gives a small breathing space between wrapped rows. */
 .tab-bar {
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
     gap: 4px;
+    row-gap: 6px;
     padding: 4px;
     background: var(--bg-surface-2);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     margin-bottom: 1.5rem;
-    overflow-x: auto;
-    scrollbar-width: none;
 }
-.tab-bar::-webkit-scrollbar { display: none; }
 
 .tab-btn {
     padding: 8px 18px;
@@ -3421,12 +3737,20 @@ dl.detail-grid dd {
 }
 
 /* ── Portal Tab Navigation ──────────────────────────────────── */
+/* WHY display:flex + flex-wrap (not inline-flex):
+   inline-flex sizes to its content width and would overflow the
+   viewport when the tab list is long. Block flex with wrapping
+   keeps the bar inside its container and lets long tab lists
+   flow onto a second row. */
 .portal-tabs {
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
     background: var(--bg-muted);
     border-radius: 10px;
     padding: 4px;
     gap: 2px;
+    row-gap: 6px;
     margin-bottom: 16px;
 }
 .portal-tab-btn {
@@ -4076,10 +4400,7 @@ dl.detail-grid dd {
     .portal-login-card {
         padding: 28px 20px;
     }
-    .portal-tabs {
-        width: 100%;
-        overflow-x: auto;
-    }
+    /* portal-tabs already wraps via flex-wrap; no scroll needed. */
 }
 
 /* ── Portal Mobile Overlay ──────────────────────────────────── */

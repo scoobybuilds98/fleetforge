@@ -92,7 +92,7 @@ $_nav    = require FF_ROOT . '/config/navigation.php';
 $_vis    = [];
 $_nCount = count($_nav);
 
-// Pass 1: items
+// Pass 1: items (including children)
 foreach ($_nav as $_i => $_item) {
     if (isset($_item['separator'])) {
         $_vis[$_i] = false; // tentative — resolved in pass 2
@@ -100,6 +100,14 @@ foreach ($_nav as $_i => $_item) {
         $_vis[$_i] = true;  // module=null → visible to all logged-in users
     } else {
         $_vis[$_i] = can($_item['module'], 'view');
+    }
+
+    // Resolve visibility for children
+    if (!empty($_item['children'])) {
+        foreach ($_item['children'] as $_ci => $_child) {
+            $_nav[$_i]['children'][$_ci]['_visible'] =
+                (($_child['module'] ?? null) === null) || can($_child['module'], 'view');
+        }
     }
 }
 
@@ -166,10 +174,43 @@ $_sidebarUser = current_user();
 
             <?php else: ?>
                 <?php
-                // Active state: current path starts with this item's full URL
-                $_itemFullUrl = FF_BASE_PATH . $_item['url'];
-                $_isActive    = $_currentPath !== '' &&
-                                str_starts_with($_currentPath, $_itemFullUrl);
+                // ── Active-state detection ─────────────────────────
+                // WHY: We support an optional `match_prefix` field (string or
+                // array of strings) so a single nav item can "claim" multiple
+                // URL prefixes. Example: a "General Ledger" group item links
+                // to /accounting/ledger as its primary URL but also highlights
+                // when the user is on /accounting/chart-of-accounts or
+                // /accounting/journal-entries. This is essential for the
+                // accounting sidebar which mirrors the grouped topnav.
+                //
+                // Falls back to $_item['url'] when match_prefix is not set,
+                // preserving backward compatibility with all existing items.
+                $_matchPrefixes = (array) ($_item['match_prefix'] ?? $_item['url']);
+                $_isActive      = false;
+                if ($_currentPath !== '') {
+                    foreach ($_matchPrefixes as $_mp) {
+                        if (str_starts_with($_currentPath, FF_BASE_PATH . $_mp)) {
+                            $_isActive = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Check if any child is active (expands the parent group)
+                $_hasChildren  = !empty($_item['children']);
+                $_childActive  = false;
+                if ($_hasChildren && $_currentPath !== '') {
+                    foreach ($_item['children'] as $_child) {
+                        $_childPrefixes = (array) ($_child['match_prefix'] ?? $_child['url']);
+                        foreach ($_childPrefixes as $_cp) {
+                            if (str_starts_with($_currentPath, FF_BASE_PATH . $_cp)) {
+                                $_childActive = true;
+                                break 2;
+                            }
+                        }
+                    }
+                }
+                $_groupOpen = $_isActive || $_childActive;
 
                 // Badge count
                 $_badgeCount = 0;
@@ -177,22 +218,85 @@ $_sidebarUser = current_user();
                     $_badgeCount = sidebar_badge_count($_item['badge']);
                 }
                 ?>
-                <a href="<?= e(base_url(ltrim($_item['url'], '/'))) ?>"
-                   class="nav-item<?= $_isActive ? ' is-active' : '' ?>"
-                   <?= $_isActive ? 'aria-current="page"' : '' ?>>
 
-                    <span class="nav-item-icon">
-                        <?= heroicon($_item['icon']) ?>
-                    </span>
+                <?php if ($_hasChildren): ?>
+                    <!-- Parent item with children — collapsible group -->
+                    <div class="nav-group<?= $_groupOpen ? ' is-open' : '' ?>">
+                        <a href="<?= e(base_url(ltrim($_item['url'], '/'))) ?>"
+                           class="nav-item<?= $_isActive ? ' is-active' : '' ?>"
+                           <?= $_isActive ? 'aria-current="page"' : '' ?>>
 
-                    <span class="nav-item-label"><?= e($_item['label']) ?></span>
+                            <span class="nav-item-icon">
+                                <?= heroicon($_item['icon']) ?>
+                            </span>
 
-                    <?php if ($_badgeCount > 0): ?>
-                        <span class="nav-badge" aria-label="<?= e($_badgeCount) ?> items">
-                            <?= e($_badgeCount > 99 ? '99+' : (string) $_badgeCount) ?>
+                            <span class="nav-item-label"><?= e($_item['label']) ?></span>
+
+                            <span class="nav-group-arrow" aria-hidden="true">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/>
+                                </svg>
+                            </span>
+                        </a>
+
+                        <div class="nav-children">
+                            <?php foreach ($_item['children'] as $_child):
+                                if (empty($_child['_visible'])) continue;
+                                // Children also honor match_prefix (see note above)
+                                $_childPrefixes = (array) ($_child['match_prefix'] ?? $_child['url']);
+                                $_childIsActive = false;
+                                if ($_currentPath !== '') {
+                                    foreach ($_childPrefixes as $_cp) {
+                                        if (str_starts_with($_currentPath, FF_BASE_PATH . $_cp)) {
+                                            $_childIsActive = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                $_childBadge = 0;
+                                if (!empty($_child['badge'])) {
+                                    $_childBadge = sidebar_badge_count($_child['badge']);
+                                }
+                            ?>
+                                <a href="<?= e(base_url(ltrim($_child['url'], '/'))) ?>"
+                                   class="nav-item nav-item--child<?= $_childIsActive ? ' is-active' : '' ?>"
+                                   <?= $_childIsActive ? 'aria-current="page"' : '' ?>>
+
+                                    <span class="nav-item-icon">
+                                        <?= heroicon($_child['icon']) ?>
+                                    </span>
+
+                                    <span class="nav-item-label"><?= e($_child['label']) ?></span>
+
+                                    <?php if ($_childBadge > 0): ?>
+                                        <span class="nav-badge" aria-label="<?= e($_childBadge) ?> items">
+                                            <?= e($_childBadge > 99 ? '99+' : (string) $_childBadge) ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                <?php else: ?>
+                    <!-- Regular nav item -->
+                    <a href="<?= e(base_url(ltrim($_item['url'], '/'))) ?>"
+                       class="nav-item<?= $_isActive ? ' is-active' : '' ?>"
+                       <?= $_isActive ? 'aria-current="page"' : '' ?>>
+
+                        <span class="nav-item-icon">
+                            <?= heroicon($_item['icon']) ?>
                         </span>
-                    <?php endif; ?>
-                </a>
+
+                        <span class="nav-item-label"><?= e($_item['label']) ?></span>
+
+                        <?php if ($_badgeCount > 0): ?>
+                            <span class="nav-badge" aria-label="<?= e($_badgeCount) ?> items">
+                                <?= e($_badgeCount > 99 ? '99+' : (string) $_badgeCount) ?>
+                            </span>
+                        <?php endif; ?>
+                    </a>
+                <?php endif; ?>
 
             <?php endif; ?>
         <?php endforeach; ?>
@@ -232,6 +336,8 @@ $_sidebarUser = current_user();
 <?php
 // Clean up sidebar-scoped variables
 unset($_nav, $_vis, $_nCount, $_i, $_j, $_item, $_currentPath,
-      $_itemFullUrl, $_isActive, $_badgeCount,
+      $_matchPrefixes, $_mp, $_isActive, $_badgeCount, $_hasChildren,
+      $_childActive, $_groupOpen, $_child, $_childPrefixes, $_cp,
+      $_childIsActive, $_childBadge, $_ci,
       $_companyName, $_logoUrl, $_sidebarUser);
 ?>

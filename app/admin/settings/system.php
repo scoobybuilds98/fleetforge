@@ -66,22 +66,26 @@ foreach ($coreTables as $t) {
 
 // ── Cron Status (last run times) ────────────────────────────────────────────
 $cronJobs = [];
+// WHY: trigger_slug is the name used by api/v1/cron/trigger.php,
+// audit_slug is the entity_label written to audit_log by the cron script.
+// They may differ (e.g. gps_mileage_sync cron writes 'gps_mileage_sync' to audit_log).
 $cronNames = [
-    'invoice_generate_monthly' => 'Monthly Invoice Generation',
-    'invoice_overdue'          => 'Overdue Invoice Marking',
-    'late_fee_apply'           => 'Late Fee Application',
-    'gps_sync'                 => 'GPS Location Sync',
+    ['trigger' => 'compliance_alerts',        'audit' => 'compliance_alerts',        'label' => 'Compliance Alerts'],
+    ['trigger' => 'invoice_generate_monthly',  'audit' => 'invoice_generate_monthly', 'label' => 'Monthly Invoice Generation'],
+    ['trigger' => 'invoice_overdue',           'audit' => 'invoice_overdue',          'label' => 'Overdue Invoice Marking'],
+    ['trigger' => 'late_fee_apply',            'audit' => 'late_fee_apply',           'label' => 'Late Fee Application'],
+    ['trigger' => 'gps_mileage_sync',          'audit' => 'gps_mileage_sync',        'label' => 'GPS Mileage Sync'],
 ];
-foreach ($cronNames as $slug => $label) {
+foreach ($cronNames as $cron) {
     $lastRun = db_row(
         "SELECT created_at, notes FROM audit_log
-         WHERE module = 'cron' AND entity_label LIKE ?
-         ORDER BY created_at DESC LIMIT 1",
-        ['%' . $slug . '%']
+         WHERE entity_type = 'cron' AND entity_label = ?
+         ORDER BY id DESC LIMIT 1",
+        [$cron['audit']]
     );
     $cronJobs[] = [
-        'name'     => $label,
-        'slug'     => $slug,
+        'name'     => $cron['label'],
+        'slug'     => $cron['trigger'],
         'last_run' => $lastRun['created_at'] ?? null,
         'notes'    => $lastRun['notes'] ?? null,
     ];
@@ -192,17 +196,30 @@ $statusIcon = [
 
 <!-- Cron Jobs -->
 <div class="card" style="margin-top:20px;">
-    <div class="card-header" style="font-weight:600;">Scheduled Tasks (Cron)</div>
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;font-weight:600;">
+        Scheduled Tasks (Cron)
+        <?php if ($isSuperAdmin): ?>
+        <button type="button" class="btn btn-sm btn-outline" onclick="cronRunAll()" id="btn-run-all-crons"
+                style="font-size:0.75rem;padding:3px 10px;">
+            Run All Now
+        </button>
+        <?php endif; ?>
+    </div>
     <div class="card-body" style="padding:0;">
         <table class="table" style="margin:0;">
             <thead>
-                <tr><th>Task</th><th>Last Run</th><th>Notes</th></tr>
+                <tr>
+                    <th>Task</th>
+                    <th>Last Run</th>
+                    <th>Notes</th>
+                    <?php if ($isSuperAdmin): ?><th style="width:100px;text-align:center;">Action</th><?php endif; ?>
+                </tr>
             </thead>
             <tbody>
                 <?php foreach ($cronJobs as $cj): ?>
-                <tr>
+                <tr id="cron-row-<?= e($cj['slug']) ?>">
                     <td style="font-weight:500;font-size:0.8125rem;"><?= e($cj['name']) ?></td>
-                    <td class="font-mono" style="font-size:0.8125rem;">
+                    <td class="font-mono cron-last-run" style="font-size:0.8125rem;">
                         <?php if ($cj['last_run']): ?>
                             <?= e(format_datetime($cj['last_run'])) ?>
                             <?php
@@ -217,13 +234,97 @@ $statusIcon = [
                             <span style="color:var(--text-muted);">Never</span>
                         <?php endif; ?>
                     </td>
-                    <td style="font-size:0.75rem;color:var(--text-muted);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><?= e($cj['notes'] ?? '') ?></td>
+                    <td class="cron-notes" style="font-size:0.75rem;color:var(--text-muted);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><?= e($cj['notes'] ?? '') ?></td>
+                    <?php if ($isSuperAdmin): ?>
+                    <td style="text-align:center;">
+                        <button type="button" class="btn btn-sm btn-outline btn-cron-trigger"
+                                data-job="<?= e($cj['slug']) ?>"
+                                style="font-size:0.7rem;padding:2px 8px;"
+                                onclick="cronTrigger('<?= e($cj['slug']) ?>', this)">
+                            Run Now
+                        </button>
+                    </td>
+                    <?php endif; ?>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
     </div>
 </div>
+
+<?php if ($isSuperAdmin): ?>
+<script>
+// WHY: Manual trigger for cron jobs — every automation needs a manual override
+async function cronTrigger(job, btn) {
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    btn.style.opacity = '0.6';
+
+    try {
+        const resp = await fetch(FF_Api.url('/api/v1/cron/trigger'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': FF_CSRF_TOKEN
+            },
+            body: JSON.stringify({ job: job })
+        });
+
+        const data = await resp.json();
+
+        if (data.success) {
+            btn.textContent = 'Done';
+            btn.classList.add('btn-success');
+            const row = document.getElementById('cron-row-' + job);
+            if (row && data.data.last_log) {
+                const notesCell = row.querySelector('.cron-notes');
+                if (notesCell) notesCell.textContent = data.data.last_log.notes || '';
+                const runCell = row.querySelector('.cron-last-run');
+                if (runCell) runCell.textContent = 'Just now';
+            }
+            setTimeout(() => {
+                btn.textContent = origText;
+                btn.classList.remove('btn-success');
+                btn.disabled = false;
+                btn.style.opacity = '';
+            }, 3000);
+        } else {
+            btn.textContent = 'Failed';
+            btn.classList.add('btn-danger');
+            FF_Toast.error('Trigger Failed', data.error?.message || 'Unknown error');
+            setTimeout(() => {
+                btn.textContent = origText;
+                btn.classList.remove('btn-danger');
+                btn.disabled = false;
+                btn.style.opacity = '';
+            }, 3000);
+        }
+    } catch (err) {
+        btn.textContent = 'Error';
+        btn.disabled = false;
+        btn.style.opacity = '';
+        FF_Toast.error('Network Error', err.message);
+        setTimeout(() => { btn.textContent = origText; }, 3000);
+    }
+}
+
+async function cronRunAll() {
+    const btn = document.getElementById('btn-run-all-crons');
+    btn.disabled = true;
+    btn.textContent = 'Running all...';
+
+    const jobs = <?= json_encode(array_column($cronJobs, 'slug')) ?>;
+    for (const job of jobs) {
+        const jobBtn = document.querySelector(`[data-job="${job}"]`);
+        if (jobBtn) await cronTrigger(job, jobBtn);
+    }
+
+    btn.textContent = 'Run All Now';
+    btn.disabled = false;
+}
+</script>
+<?php endif; ?>
 
 <!-- Table Row Counts -->
 <div class="card" style="margin-top:20px;">

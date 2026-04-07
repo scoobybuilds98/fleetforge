@@ -44,8 +44,17 @@ require_once FF_ROOT . '/includes/header.php';
 </nav>
 
 <div class="page-header">
-    <h1 class="page-header-title h4">Fixed Assets Register</h1>
+    <div>
+        <h1 class="page-header-title h4">Fixed Assets Register</h1>
+        <div class="text-secondary text-sm" style="margin-top:4px;">
+            Track depreciable assets, their net book value, impairments and disposals.
+        </div>
+    </div>
     <div class="page-header-actions">
+        <a href="<?= base_url('accounting/fixed-assets/payoff-report') ?>" class="btn btn-secondary btn-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></svg>
+            Payoff Report
+        </a>
         <?php if (can('fixed_assets', 'create')): ?>
         <button class="btn btn-primary btn-sm" @click="$dispatch('open-asset-create')">
             + New Asset
@@ -85,31 +94,33 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <div x-data="FF_FixedAssets()" x-init="init()" @open-asset-create.window="openCreate()">
 
-    <!-- ── Filter toolbar ────────────────────────────────────── -->
-    <div class="table-toolbar" style="margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-        <input type="text" class="form-control form-control-sm" placeholder="Search by name or asset number…"
-               x-model.debounce.300ms="search" @input="load()" style="min-width:280px;">
+    <!-- ── Filter toolbar (wrapped in card for visual containment) ── -->
+    <div class="card" style="margin-bottom:20px;padding:14px 16px;">
+        <div class="table-toolbar" style="margin-bottom:0;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <input type="text" class="form-control form-control-sm" placeholder="Search by name or asset number…"
+                   x-model.debounce.300ms="search" @input="load()" style="min-width:280px;flex:1;max-width:380px;">
 
-        <select class="form-select form-control-sm" x-model="filterStatus" @change="load()" style="min-width:140px;">
-            <option value="">All statuses</option>
-            <option value="active">Active</option>
-            <option value="impaired">Impaired</option>
-            <option value="fully_depreciated">Fully Depreciated</option>
-            <option value="disposed">Disposed</option>
-        </select>
+            <select class="form-select form-control-sm" x-model="filterStatus" @change="load()" style="min-width:140px;">
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="impaired">Impaired</option>
+                <option value="fully_depreciated">Fully Depreciated</option>
+                <option value="disposed">Disposed</option>
+            </select>
 
-        <select class="form-select form-control-sm" x-model="filterClass" @change="load()" style="min-width:160px;">
-            <option value="">All classes</option>
-            <option value="fleet_equipment">Fleet Equipment</option>
-            <option value="vehicles">Vehicles</option>
-            <option value="office_equipment">Office Equipment</option>
-            <option value="leasehold_improvements">Leasehold Improvements</option>
-            <option value="land">Land</option>
-            <option value="building">Building</option>
-            <option value="other">Other</option>
-        </select>
+            <select class="form-select form-control-sm" x-model="filterClass" @change="load()" style="min-width:160px;">
+                <option value="">All classes</option>
+                <option value="fleet_equipment">Fleet Equipment</option>
+                <option value="vehicles">Vehicles</option>
+                <option value="office_equipment">Office Equipment</option>
+                <option value="leasehold_improvements">Leasehold Improvements</option>
+                <option value="land">Land</option>
+                <option value="building">Building</option>
+                <option value="other">Other</option>
+            </select>
 
-        <span class="text-secondary text-sm" x-text="pagination.total + ' assets'"></span>
+            <span class="text-secondary text-sm" style="margin-left:auto;" x-text="pagination.total + ' assets'"></span>
+        </div>
     </div>
 
     <!-- ── Loading state ─────────────────────────────────────── -->
@@ -214,35 +225,120 @@ require_once FF_ROOT . '/includes/header.php';
                 </template>
                 <template x-if="!detailLoading && detailAsset && detailTab === 'details'">
                     <div>
-                        <!-- Summary grid -->
-                        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px 24px;margin-bottom:18px;">
-                            <div><strong>Class:</strong> <span x-text="formatClass(detailAsset.asset_class)"></span></div>
-                            <div><strong>Status:</strong> <span class="badge badge-no-dot" :class="statusBadge(detailAsset.status)" x-text="formatStatus(detailAsset.status)"></span></div>
-                            <div><strong>Method:</strong> <span x-text="formatMethod(detailAsset.depreciation_method)"></span></div>
-                            <div><strong>Acquired:</strong> <span x-text="detailAsset.acquisition_date"></span></div>
-                            <div><strong>Cost:</strong> <span class="font-mono" x-text="formatMoney(detailAsset.acquisition_cost)"></span></div>
-                            <div><strong>Salvage:</strong> <span class="font-mono" x-text="formatMoney(detailAsset.salvage_value)"></span></div>
-                            <div><strong>Depreciable:</strong> <span class="font-mono" x-text="formatMoney(detailAsset.depreciable_cost)"></span></div>
-                            <div><strong>Accum Depr:</strong> <span class="font-mono" x-text="formatMoney(detailAsset.accumulated_depreciation)"></span></div>
-                            <div><strong>NBV:</strong> <span class="font-mono" x-text="formatMoney(detailAsset.net_book_value)"></span></div>
-                            <template x-if="detailAsset.useful_life_years">
-                                <div><strong>Life (years):</strong> <span x-text="detailAsset.useful_life_years"></span></div>
+                        <!-- Two-column spec cards: Classification + Valuation -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;">
+
+                            <!-- ── Classification ── -->
+                            <div class="card spec-card" style="margin-bottom:0;">
+                                <div class="card-header">
+                                    <div class="card-title">Classification</div>
+                                </div>
+                                <div class="card-body">
+                                    <table class="spec-table">
+                                        <tr>
+                                            <td class="spec-label">Class</td>
+                                            <td class="spec-value" x-text="formatClass(detailAsset.asset_class)"></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="spec-label">Status</td>
+                                            <td>
+                                                <span class="badge badge-no-dot" :class="statusBadge(detailAsset.status)" x-text="formatStatus(detailAsset.status)"></span>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td class="spec-label">Method</td>
+                                            <td class="spec-value" x-text="formatMethod(detailAsset.depreciation_method)"></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="spec-label">Acquired</td>
+                                            <td class="spec-value font-mono" x-text="detailAsset.acquisition_date"></td>
+                                        </tr>
+                                        <template x-if="detailAsset.useful_life_years">
+                                            <tr>
+                                                <td class="spec-label">Useful Life</td>
+                                                <td class="spec-value font-mono"><span x-text="detailAsset.useful_life_years"></span> years</td>
+                                            </tr>
+                                        </template>
+                                        <template x-if="detailAsset.cra_cca_rate">
+                                            <tr>
+                                                <td class="spec-label">CCA Rate</td>
+                                                <td class="spec-value font-mono" x-text="(parseFloat(detailAsset.cra_cca_rate) * 100).toFixed(0) + '%'"></td>
+                                            </tr>
+                                        </template>
+                                        <template x-if="detailAsset.total_expected_units">
+                                            <tr>
+                                                <td class="spec-label">Total Units</td>
+                                                <td class="spec-value font-mono" x-text="parseInt(detailAsset.total_expected_units).toLocaleString()"></td>
+                                            </tr>
+                                        </template>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- ── Valuation ── -->
+                            <div class="card spec-card" style="margin-bottom:0;">
+                                <div class="card-header">
+                                    <div class="card-title">Valuation</div>
+                                </div>
+                                <div class="card-body">
+                                    <table class="spec-table">
+                                        <tr>
+                                            <td class="spec-label">Cost</td>
+                                            <td class="spec-value font-mono text-right" x-text="formatMoney(detailAsset.acquisition_cost)"></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="spec-label">Salvage</td>
+                                            <td class="spec-value font-mono text-right" x-text="formatMoney(detailAsset.salvage_value)"></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="spec-label">Depreciable</td>
+                                            <td class="spec-value font-mono text-right" x-text="formatMoney(detailAsset.depreciable_cost)"></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="spec-label">Accum Depr</td>
+                                            <td class="spec-value font-mono text-right text-danger" x-text="'−' + formatMoney(detailAsset.accumulated_depreciation)"></td>
+                                        </tr>
+                                        <tr style="font-weight:600;background:var(--bg-surface-2);">
+                                            <td class="spec-label">Net Book Value</td>
+                                            <td class="spec-value font-mono text-right" x-text="formatMoney(detailAsset.net_book_value)"></td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- ── Identification (full width if any field present) ── -->
+                            <template x-if="detailAsset.serial_number || detailAsset.location || detailAsset.equipment_unit_number">
+                                <div class="card spec-card" style="margin-bottom:0;grid-column:1/-1;">
+                                    <div class="card-header">
+                                        <div class="card-title">Identification</div>
+                                    </div>
+                                    <div class="card-body">
+                                        <table class="spec-table">
+                                            <template x-if="detailAsset.serial_number">
+                                                <tr>
+                                                    <td class="spec-label">Serial Number</td>
+                                                    <td class="spec-value font-mono" x-text="detailAsset.serial_number"></td>
+                                                </tr>
+                                            </template>
+                                            <template x-if="detailAsset.location">
+                                                <tr>
+                                                    <td class="spec-label">Location</td>
+                                                    <td class="spec-value" x-text="detailAsset.location"></td>
+                                                </tr>
+                                            </template>
+                                            <template x-if="detailAsset.equipment_unit_number">
+                                                <tr>
+                                                    <td class="spec-label">Equipment Unit</td>
+                                                    <td class="spec-value">
+                                                        <span class="font-mono" x-text="detailAsset.equipment_unit_number"></span>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </table>
+                                    </div>
+                                </div>
                             </template>
-                            <template x-if="detailAsset.cra_cca_rate">
-                                <div><strong>CCA Rate:</strong> <span x-text="(parseFloat(detailAsset.cra_cca_rate) * 100).toFixed(0) + '%'"></span></div>
-                            </template>
-                            <template x-if="detailAsset.total_expected_units">
-                                <div><strong>Total Units:</strong> <span class="font-mono" x-text="parseInt(detailAsset.total_expected_units).toLocaleString()"></span></div>
-                            </template>
-                            <template x-if="detailAsset.serial_number">
-                                <div><strong>Serial #:</strong> <span class="font-mono" x-text="detailAsset.serial_number"></span></div>
-                            </template>
-                            <template x-if="detailAsset.location">
-                                <div><strong>Location:</strong> <span x-text="detailAsset.location"></span></div>
-                            </template>
-                            <template x-if="detailAsset.equipment_unit_number">
-                                <div><strong>Equipment Unit:</strong> <span x-text="detailAsset.equipment_unit_number"></span></div>
-                            </template>
+
                         </div>
 
                         <!-- Disposal record -->
@@ -262,22 +358,29 @@ require_once FF_ROOT . '/includes/header.php';
 
                         <!-- Impairment history -->
                         <template x-if="detailImpairments && detailImpairments.length > 0">
-                            <div style="margin-bottom:16px;">
-                                <strong>Impairments:</strong>
-                                <ul style="margin-top:4px;">
-                                    <template x-for="i in detailImpairments" :key="i.id">
-                                        <li class="text-sm">
-                                            <span x-text="i.impairment_date"></span> —
-                                            <span class="font-mono" x-text="formatMoney(i.impairment_loss)"></span> loss
-                                            (<span x-text="i.reason"></span>)
-                                        </li>
-                                    </template>
-                                </ul>
+                            <div class="card spec-card" style="margin-bottom:16px;">
+                                <div class="card-header">
+                                    <div class="card-title">Impairment History</div>
+                                </div>
+                                <div class="card-body" style="padding:12px 16px;">
+                                    <ul style="margin:0;padding-left:18px;">
+                                        <template x-for="i in detailImpairments" :key="i.id">
+                                            <li class="text-sm" style="margin-bottom:4px;">
+                                                <span class="font-mono" x-text="i.impairment_date"></span> —
+                                                <span class="font-mono text-danger" x-text="formatMoney(i.impairment_loss)"></span> loss
+                                                <span class="text-secondary">(<span x-text="i.reason"></span>)</span>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                </div>
                             </div>
                         </template>
 
                         <!-- Depreciation schedule -->
-                        <h3 class="h6" style="margin-top:16px;margin-bottom:8px;">Depreciation Forecast</h3>
+                        <div class="section-header">
+                            <h3 class="section-title">Depreciation Forecast</h3>
+                            <span class="section-hint" x-show="detailSchedule.length > 0">Period-by-period schedule</span>
+                        </div>
                         <template x-if="detailSchedule.length === 0">
                             <p class="text-secondary text-sm">No forecast available (asset is impaired, disposed, or uses a method with no fixed schedule).</p>
                         </template>
@@ -595,26 +698,37 @@ require_once FF_ROOT . '/includes/header.php';
          CREATE MODAL
          ============================================================ -->
     <div class="modal-backdrop" x-show="createOpen" x-transition @click.self="createOpen = false" style="display:none;">
-        <div class="modal" style="max-width:740px;width:96%;max-height:90vh;overflow-y:auto;">
+        <div class="modal" style="max-width:760px;width:96%;max-height:90vh;overflow-y:auto;">
             <div class="modal-header"><h2 class="h5">New Fixed Asset</h2><button class="modal-close" @click="createOpen = false">×</button></div>
             <div class="modal-body">
-                <h3 class="h6" style="margin:0 0 10px 0;">Core Details</h3>
-                <div class="form-group"><label>Name *</label><input type="text" class="form-control form-control-sm" x-model="createForm.name"></div>
-                <div class="form-group"><label>Asset Class *</label>
-                    <select class="form-select form-control-sm" x-model="createForm.asset_class">
-                        <option value="fleet_equipment">Fleet Equipment</option>
-                        <option value="vehicles">Vehicles</option>
-                        <option value="office_equipment">Office Equipment</option>
-                        <option value="leasehold_improvements">Leasehold Improvements</option>
-                        <option value="land">Land</option>
-                        <option value="building">Building</option>
-                        <option value="other">Other</option>
-                    </select>
+
+                <!-- ── Core Details ─────────────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Core Details</h3>
                 </div>
-                <div class="form-group"><label>Acquisition Date *</label><input type="date" class="form-control form-control-sm" x-model="createForm.acquisition_date"></div>
-                <div class="form-group"><label>Acquisition Cost ($) *</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="createForm.acquisition_cost"></div>
-                <div class="form-group"><label>Salvage Value ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.salvage_value"></div>
-                <div class="form-group"><label>Depreciation Method *</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
+                    <div class="form-group" style="grid-column:1/-1;"><label>Name *</label><input type="text" class="form-control form-control-sm" x-model="createForm.name"></div>
+                    <div class="form-group"><label>Asset Class *</label>
+                        <select class="form-select form-control-sm" x-model="createForm.asset_class">
+                            <option value="fleet_equipment">Fleet Equipment</option>
+                            <option value="vehicles">Vehicles</option>
+                            <option value="office_equipment">Office Equipment</option>
+                            <option value="leasehold_improvements">Leasehold Improvements</option>
+                            <option value="land">Land</option>
+                            <option value="building">Building</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>Acquisition Date *</label><input type="date" class="form-control form-control-sm" x-model="createForm.acquisition_date"></div>
+                    <div class="form-group"><label>Acquisition Cost ($) *</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="createForm.acquisition_cost"></div>
+                    <div class="form-group"><label>Salvage Value ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.salvage_value"></div>
+                </div>
+
+                <!-- ── Depreciation ─────────────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Depreciation</h3>
+                </div>
+                <div class="form-group"><label>Method *</label>
                     <select class="form-select form-control-sm" x-model="createForm.depreciation_method">
                         <option value="straight_line">Straight Line</option>
                         <option value="declining_balance">Declining Balance (CRA CCA)</option>
@@ -634,38 +748,62 @@ require_once FF_ROOT . '/includes/header.php';
                     <label>Total Expected Units *</label>
                     <input type="number" step="1" min="1" class="form-control form-control-sm" x-model="createForm.total_expected_units">
                 </div>
-                <div class="form-group"><label>Asset Account ID *</label><input type="number" class="form-control form-control-sm" x-model="createForm.asset_account_id" placeholder="e.g. 1210 fleet_cost"></div>
-                <div class="form-group"><label>Accum Depr Account ID *</label><input type="number" class="form-control form-control-sm" x-model="createForm.accum_depr_account_id" placeholder="e.g. 1220 fleet_accum"></div>
-                <div class="form-group"><label>Depreciation Expense Account ID *</label><input type="number" class="form-control form-control-sm" x-model="createForm.depr_expense_account_id" placeholder="e.g. 5010 depr_fleet"></div>
-                <div class="form-group"><label>Equipment Unit ID (for Payoff Analysis)</label><input type="number" class="form-control form-control-sm" x-model="createForm.equipment_unit_id" placeholder="optional, numeric ID of the linked equipment_units row"></div>
-                <div class="form-group"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="createForm.location"></div>
-                <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="createForm.serial_number"></div>
 
-                <!-- PAYOFF-1 — Acquisition Details -->
-                <h3 class="h6" style="margin:24px 0 10px 0;">Acquisition Details <span class="text-secondary text-xs">(for Payoff Calculator)</span></h3>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0 12px;">
+                <!-- ── GL Accounts ──────────────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">GL Accounts</h3>
+                    <span class="section-hint">Required for journal entries</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px;">
+                    <div class="form-group"><label>Asset Acct *</label><input type="number" class="form-control form-control-sm" x-model="createForm.asset_account_id" placeholder="e.g. 1210"></div>
+                    <div class="form-group"><label>Accum Depr Acct *</label><input type="number" class="form-control form-control-sm" x-model="createForm.accum_depr_account_id" placeholder="e.g. 1220"></div>
+                    <div class="form-group"><label>Depr Expense Acct *</label><input type="number" class="form-control form-control-sm" x-model="createForm.depr_expense_account_id" placeholder="e.g. 5010"></div>
+                </div>
+
+                <!-- ── Identification ───────────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Identification</h3>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
+                    <div class="form-group"><label>Equipment Unit ID</label><input type="number" class="form-control form-control-sm" x-model="createForm.equipment_unit_id" placeholder="Enables Payoff Analysis"></div>
+                    <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="createForm.serial_number"></div>
+                    <div class="form-group" style="grid-column:1/-1;"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="createForm.location"></div>
+                </div>
+
+                <!-- ── Acquisition Details (PAYOFF-1) ───────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Acquisition Details</h3>
+                    <span class="section-hint">For payoff calculator</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0 14px;">
                     <div class="form-group"><label>GST ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.purchase_tax_gst"></div>
                     <div class="form-group"><label>PST ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.purchase_tax_pst"></div>
                     <div class="form-group"><label>Delivery Cost ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.delivery_cost"></div>
                     <div class="form-group"><label>Setup Cost ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.setup_cost"></div>
                 </div>
 
-                <!-- PAYOFF-1 — Financing -->
-                <h3 class="h6" style="margin:16px 0 10px 0;">Financing <span class="text-secondary text-xs">(optional)</span></h3>
+                <!-- ── Financing (PAYOFF-1) ─────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Financing</h3>
+                    <span class="section-hint">Optional</span>
+                </div>
                 <div class="form-group">
-                    <label style="display:flex;align-items:center;gap:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                         <input type="checkbox" x-model="createForm.is_financed"> This asset is financed
                     </label>
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px;" x-show="createForm.is_financed">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;" x-show="createForm.is_financed">
                     <div class="form-group"><label>Monthly Payment ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.financing_monthly_payment"></div>
                     <div class="form-group"><label>Interest Rate</label><input type="number" step="0.0001" min="0" max="1" class="form-control form-control-sm" x-model="createForm.financing_interest_rate" placeholder="e.g. 0.075"></div>
                     <div class="form-group"><label>Remaining Months</label><input type="number" step="1" min="0" class="form-control form-control-sm" x-model="createForm.financing_remaining_months"></div>
                 </div>
 
-                <!-- PAYOFF-1 — Monthly Fixed Costs -->
-                <h3 class="h6" style="margin:16px 0 10px 0;">Monthly Fixed Costs <span class="text-secondary text-xs">(reduce net revenue every month)</span></h3>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px;">
+                <!-- ── Monthly Fixed Costs (PAYOFF-1) ───────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Monthly Fixed Costs</h3>
+                    <span class="section-hint">Reduce net revenue every month</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;">
                     <div class="form-group"><label>Insurance ($/mo)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.monthly_insurance_cost"></div>
                     <div class="form-group"><label>Licensing ($/mo)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.monthly_licensing_cost"></div>
                     <div class="form-group"><label>Registration ($/mo)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.monthly_registration_cost"></div>
@@ -689,54 +827,82 @@ require_once FF_ROOT . '/includes/header.php';
          add a full edit form that posts to the update.php endpoint
          with the optimistic-lock updated_at field. -->
     <div class="modal-backdrop" x-show="editOpen" x-transition @click.self="editOpen = false" style="display:none;">
-        <div class="modal" style="max-width:740px;width:96%;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header"><h2 class="h5">Edit Fixed Asset</h2><button class="modal-close" @click="editOpen = false">×</button></div>
+        <div class="modal" style="max-width:760px;width:96%;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h2 class="h5">Edit Fixed Asset</h2>
+                <button class="modal-close" @click="editOpen = false">×</button>
+            </div>
             <div class="modal-body">
-                <h3 class="h6" style="margin:0 0 10px 0;">Core Details</h3>
-                <div class="form-group"><label>Name *</label><input type="text" class="form-control form-control-sm" x-model="editForm.name"></div>
-                <div class="form-group"><label>Asset Class</label>
-                    <select class="form-select form-control-sm" x-model="editForm.asset_class">
-                        <option value="fleet_equipment">Fleet Equipment</option>
-                        <option value="vehicles">Vehicles</option>
-                        <option value="office_equipment">Office Equipment</option>
-                        <option value="leasehold_improvements">Leasehold Improvements</option>
-                        <option value="land">Land</option>
-                        <option value="building">Building</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-                <div class="form-group"><label>Description</label><textarea class="form-control form-control-sm" rows="2" x-model="editForm.description"></textarea></div>
-                <div class="form-group"><label>Equipment Unit ID (for Payoff Analysis)</label>
-                    <input type="number" class="form-control form-control-sm" x-model="editForm.equipment_unit_id"
-                           placeholder="Numeric ID of the linked equipment_units row">
-                    <p class="text-secondary text-xs" style="margin:4px 0 0 0;">Link to an equipment unit so the payoff calculator can sum revenue, maintenance, and damage automatically.</p>
-                </div>
-                <div class="form-group"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="editForm.location"></div>
-                <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="editForm.serial_number"></div>
-                <div class="form-group"><label>Notes</label><textarea class="form-control form-control-sm" rows="2" x-model="editForm.notes"></textarea></div>
 
-                <h3 class="h6" style="margin:24px 0 10px 0;">Acquisition Details <span class="text-secondary text-xs">(for Payoff Calculator)</span></h3>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0 12px;">
+                <!-- ── Core Details ─────────────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Core Details</h3>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
+                    <div class="form-group" style="grid-column:1/-1;"><label>Name *</label><input type="text" class="form-control form-control-sm" x-model="editForm.name"></div>
+                    <div class="form-group"><label>Asset Class</label>
+                        <select class="form-select form-control-sm" x-model="editForm.asset_class">
+                            <option value="fleet_equipment">Fleet Equipment</option>
+                            <option value="vehicles">Vehicles</option>
+                            <option value="office_equipment">Office Equipment</option>
+                            <option value="leasehold_improvements">Leasehold Improvements</option>
+                            <option value="land">Land</option>
+                            <option value="building">Building</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="editForm.location"></div>
+                    <div class="form-group" style="grid-column:1/-1;"><label>Description</label><textarea class="form-control form-control-sm" rows="2" x-model="editForm.description"></textarea></div>
+                    <div class="form-group" style="grid-column:1/-1;"><label>Notes</label><textarea class="form-control form-control-sm" rows="2" x-model="editForm.notes"></textarea></div>
+                </div>
+
+                <!-- ── Identification ───────────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Identification</h3>
+                    <span class="section-hint">Link a unit to enable Payoff Analysis</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
+                    <div class="form-group"><label>Equipment Unit ID</label>
+                        <input type="number" class="form-control form-control-sm" x-model="editForm.equipment_unit_id"
+                               placeholder="Numeric ID of the equipment_units row">
+                    </div>
+                    <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="editForm.serial_number"></div>
+                </div>
+
+                <!-- ── Acquisition Details ──────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Acquisition Details</h3>
+                    <span class="section-hint">For payoff calculator</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0 14px;">
                     <div class="form-group"><label>GST ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.purchase_tax_gst"></div>
                     <div class="form-group"><label>PST ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.purchase_tax_pst"></div>
                     <div class="form-group"><label>Delivery Cost ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.delivery_cost"></div>
                     <div class="form-group"><label>Setup Cost ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.setup_cost"></div>
                 </div>
 
-                <h3 class="h6" style="margin:16px 0 10px 0;">Financing <span class="text-secondary text-xs">(optional)</span></h3>
+                <!-- ── Financing ────────────────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Financing</h3>
+                    <span class="section-hint">Optional</span>
+                </div>
                 <div class="form-group">
-                    <label style="display:flex;align-items:center;gap:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                         <input type="checkbox" x-model="editForm.is_financed"> This asset is financed
                     </label>
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px;" x-show="editForm.is_financed">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;" x-show="editForm.is_financed">
                     <div class="form-group"><label>Monthly Payment ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.financing_monthly_payment"></div>
                     <div class="form-group"><label>Interest Rate</label><input type="number" step="0.0001" min="0" max="1" class="form-control form-control-sm" x-model="editForm.financing_interest_rate" placeholder="e.g. 0.075"></div>
                     <div class="form-group"><label>Remaining Months</label><input type="number" step="1" min="0" class="form-control form-control-sm" x-model="editForm.financing_remaining_months"></div>
                 </div>
 
-                <h3 class="h6" style="margin:16px 0 10px 0;">Monthly Fixed Costs <span class="text-secondary text-xs">(reduce net revenue every month)</span></h3>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px;">
+                <!-- ── Monthly Fixed Costs ──────────────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">Monthly Fixed Costs</h3>
+                    <span class="section-hint">Reduce net revenue every month</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;">
                     <div class="form-group"><label>Insurance ($/mo)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.monthly_insurance_cost"></div>
                     <div class="form-group"><label>Licensing ($/mo)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.monthly_licensing_cost"></div>
                     <div class="form-group"><label>Registration ($/mo)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="editForm.monthly_registration_cost"></div>

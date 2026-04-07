@@ -54,11 +54,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 foreach ($groupKeys as $setting) {
                     $key       = $setting['key'];
                     $valueType = $setting['value_type'];
-                    $raw       = $_POST[$key] ?? null;
+                    // WHY: PHP converts dots in POST field names to underscores.
+                    // <input name="invoice.prefix"> becomes $_POST['invoice_prefix'].
+                    // We must look up the underscore version to find the submitted value.
+                    $postKey   = str_replace('.', '_', $key);
+                    $raw       = $_POST[$postKey] ?? null;
 
                     // Normalize value by type
                     if ($valueType === 'boolean') {
-                        $val = isset($_POST[$key]) ? '1' : '0';
+                        $val = isset($_POST[$postKey]) ? '1' : '0';
                     } elseif ($valueType === 'integer') {
                         $val = $raw !== null ? (string)(int)$raw : '0';
                     } elseif ($valueType === 'decimal') {
@@ -95,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','alerts','notifications','gps','ai')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -105,15 +109,18 @@ foreach ($allSettings as $s) {
     $grouped[$s['group_name']][] = $s;
 }
 
-$primaryGroups   = ['company', 'invoices', 'alerts', 'notifications'];
+$primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
 $sensitiveGroups = ['gps', 'ai'];
 $groupLabels = [
     'company'       => 'Company',
     'invoices'      => 'Invoices & Billing',
+    'leases'        => 'Leases & Contracts',
+    'maintenance'   => 'Maintenance & Claims',
     'alerts'        => 'Alerts & Compliance',
     'notifications' => 'Notifications & Email',
     'gps'           => 'GPS Integration',
     'ai'            => 'AI / Machine Learning',
+    'yards'         => 'Yards',
 ];
 
 // ── Stats for tab badges ──────────────────────────────────────────────────────

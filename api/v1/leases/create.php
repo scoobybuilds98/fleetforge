@@ -163,9 +163,11 @@ if ($customer['tax_rate_id']) {
     }
 }
 
-// ── Build contract number: CN-XXXXXX-YYYY ─────────────────────
+// ── Build contract number: PREFIX-XXXXXX-YYYY ─────────────────
+// WHY: prefix from settings so admin can rebrand without code change
+$leasePrefix     = settings_get('lease.prefix', 'CN');
 $year            = date('Y');
-$contractNumber  = 'CN-' . generate_random_code(6) . '-' . $year;
+$contractNumber  = $leasePrefix . '-' . generate_random_code(6) . '-' . $year;
 $attempt         = 0;
 // De-duplicate on collision (extremely rare with 6 char A-Z0-9 space)
 while (db_exists('leases', 'contract_number = ?', [$contractNumber])) {
@@ -173,7 +175,7 @@ while (db_exists('leases', 'contract_number = ?', [$contractNumber])) {
     if ($attempt > 20) {
         json_error('SERVER_ERROR', 'Could not generate unique contract number.', 500);
     }
-    $contractNumber = 'CN-' . generate_random_code(6) . '-' . $year;
+    $contractNumber = $leasePrefix . '-' . generate_random_code(6) . '-' . $year;
 }
 
 // ── Transaction: FOR UPDATE on unit + create lease ─────────────

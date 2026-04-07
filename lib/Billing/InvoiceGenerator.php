@@ -614,6 +614,9 @@ class InvoiceGenerator
         $year = date('Y');
         $key = "invoice.next_number.{$year}";
 
+        // WHY: prefix from settings so admin can rebrand without code change
+        $prefix = settings_get('invoice.prefix', 'INV');
+
         // FOR UPDATE lock on the counter row (D20)
         $row = db_row(
             "SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE",
@@ -621,7 +624,7 @@ class InvoiceGenerator
         );
 
         $next = $row ? (int)$row['value'] : 1;
-        $invoiceNumber = sprintf("INV-%s-%05d", $year, $next);
+        $invoiceNumber = sprintf("%s-%s-%05d", $prefix, $year, $next);
 
         // Increment atomically
         if ($row) {

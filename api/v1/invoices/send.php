@@ -49,6 +49,7 @@ $sentToEmail = clean_email($body['sent_to_email'] ?? null) ?? $invoice['customer
 $now = date('Y-m-d H:i:s');
 
 // FIX #19 + FIX #32: wrap db_update + audit_log in transaction
+// S030: Auto-JE bridge — JE posts inside same transaction so failure rolls back send
 db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
     db_update('invoices', [
         'status'          => 'sent',
@@ -71,6 +72,10 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
         'notes'        => "Invoice {$invoice['invoice_number']} sent (draft → sent)",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // Auto-JE: DR 1030 AR / CR 4xxx Revenue / CR 2030 GST / CR 2040 PST
+    // WHY: Posted inside same transaction — JE failure rolls back the send (A8, §16)
+    \FleetForge\Accounting\AutoEntryBridge::onInvoiceSent($id, current_user_id());
 });
 
 json_success(['id' => $id, 'status' => 'sent']);

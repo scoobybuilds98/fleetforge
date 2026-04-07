@@ -272,6 +272,16 @@ db_transaction(function () use (
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
+    // Auto-JE: DR 2060 Customer Credits Liability / CR 1030 AR
+    // WHY: PASS-6:G2 — this is the step that actually reduces AR in the GL.
+    // Inside same transaction — JE failure rolls back the application (A8, §16).
+    \FleetForge\Accounting\AutoEntryBridge::onCreditNoteApplied(
+        $creditNoteId,
+        $invoiceId,
+        $amountApplied,
+        current_user_id()
+    );
+
     $result = [
         'application_id'        => $appId,
         'credit_note_number'    => $cn['credit_note_number'],

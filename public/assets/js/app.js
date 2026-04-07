@@ -117,6 +117,22 @@ const FF_Api = {
     },
 
     /**
+     * DELETE request. Returns parsed JSON or throws on network error.
+     * WHY: Used for destructive operations like removing AI chat sessions,
+     * draft records, or attachments — endpoints that follow REST conventions.
+     * @param {string} url
+     * @returns {Promise<object>}
+     */
+    async delete(url) {
+        const res = await fetch(url, {
+            method: 'DELETE',
+            headers: this._headers(),
+            credentials: 'same-origin',
+        });
+        return res.json();
+    },
+
+    /**
      * POST multipart/form-data (file uploads).
      * Content-Type is intentionally omitted so the browser sets the boundary.
      * @param {string} url
@@ -742,6 +758,18 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             document.body.style.overflow = '';
         }
+    });
+
+    // ── Nav group toggle (collapsible sidebar sub-items) ──
+    document.querySelectorAll('.nav-group > .nav-item').forEach(function (parentLink) {
+        var arrow = parentLink.querySelector('.nav-group-arrow');
+        if (!arrow) return;
+
+        arrow.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            parentLink.closest('.nav-group').classList.toggle('is-open');
+        });
     });
 
 });

@@ -117,7 +117,9 @@ if (str_contains($currentPath, '/ai')) return;
                     <!-- AI avatar (only for assistant) -->
                     <div x-show="msg.role === 'assistant'" class="ff-chat-msg-avatar">AI</div>
                     <div :class="msg.role === 'user' ? 'ff-chat-bubble ff-chat-bubble-user' : 'ff-chat-bubble ff-chat-bubble-ai'">
-                        <span x-text="msg.content" style="white-space:pre-wrap;word-break:break-word;"></span>
+                        <!-- WHY: User text is plain (preserves line breaks); AI text rendered as markdown HTML -->
+                        <span x-show="msg.role === 'user'" x-text="msg.content" style="white-space:pre-wrap;word-break:break-word;"></span>
+                        <div x-show="msg.role === 'assistant'" x-html="renderMd(msg.content)" class="ff-chat-md"></div>
                     </div>
                 </div>
             </template>
@@ -232,8 +234,8 @@ if (str_contains($currentPath, '/ai')) return;
     bottom: 24px;
     right: 24px;
     z-index: 9999;
-    width: 380px;
-    height: 560px;
+    width: 440px;
+    height: 620px;
     display: flex;
     flex-direction: column;
     border-radius: 16px;
@@ -340,15 +342,17 @@ if (str_contains($currentPath, '/ai')) return;
 }
 
 .ff-chat-bubble {
-    max-width: 78%;
-    padding: 9px 14px;
+    max-width: 88%;
+    padding: 12px 16px;
     font-size: 0.8125rem;
-    line-height: 1.5;
+    line-height: 1.6;
+    word-break: break-word;
 }
 .ff-chat-bubble-user {
     background: var(--color-primary);
     color: #fff;
     border-radius: 14px 14px 4px 14px;
+    max-width: 80%;
 }
 .ff-chat-bubble-ai {
     background: var(--bg-surface-2);
@@ -356,6 +360,77 @@ if (str_contains($currentPath, '/ai')) return;
     border: 1px solid var(--border-color);
     border-radius: 4px 14px 14px 14px;
 }
+
+/* ── AI markdown rendering inside widget bubble ───────────────────────── */
+.ff-chat-md > *:first-child { margin-top: 0 !important; }
+.ff-chat-md > *:last-child  { margin-bottom: 0 !important; }
+.ff-chat-md p { margin: 8px 0; }
+.ff-chat-md h1, .ff-chat-md h2, .ff-chat-md h3, .ff-chat-md h4 {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 12px 0 6px;
+    line-height: 1.35;
+}
+.ff-chat-md h1 { font-size: 0.9375rem; }
+.ff-chat-md h2 { font-size: 0.9375rem; }
+.ff-chat-md h3 { font-size: 0.875rem; }
+.ff-chat-md h4 { font-size: 0.8125rem; }
+.ff-chat-md ul, .ff-chat-md ol { margin: 8px 0; padding-left: 20px; }
+.ff-chat-md li { margin: 4px 0; line-height: 1.55; }
+.ff-chat-md strong { font-weight: 600; color: var(--text-primary); }
+.ff-chat-md em { font-style: italic; }
+.ff-chat-md code {
+    background: var(--bg-surface-hover);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-family: 'DM Mono', ui-monospace, monospace;
+    border: 1px solid var(--border-color);
+}
+.ff-chat-md pre {
+    background: var(--bg-surface-hover);
+    border: 1px solid var(--border-color);
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 10px 0;
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+.ff-chat-md pre code { background: none; border: none; padding: 0; font-size: 0.75rem; }
+.ff-chat-md table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    margin: 10px 0;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.ff-chat-md th, .ff-chat-md td {
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: top;
+}
+.ff-chat-md tr:last-child td { border-bottom: none; }
+.ff-chat-md th {
+    background: var(--bg-surface-hover);
+    font-weight: 600;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+.ff-chat-md blockquote {
+    border-left: 3px solid var(--color-primary);
+    padding: 2px 0 2px 10px;
+    margin: 8px 0;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+.ff-chat-md hr { border: none; border-top: 1px solid var(--border-color); margin: 12px 0; }
+.ff-chat-md a { color: var(--color-primary); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ── Typing indicator ────────────────── */
 .ff-chat-typing {
@@ -446,8 +521,8 @@ if (str_contains($currentPath, '/ai')) return;
     letter-spacing: 0.01em;
 }
 
-/* ── Mobile ──────────────────────────── */
-@media (max-width: 480px) {
+/* ── Tablet / smaller desktop ─────────── */
+@media (max-width: 520px) {
     .ff-chat-panel {
         width: calc(100vw - 16px);
         height: calc(100vh - 80px);
@@ -534,6 +609,80 @@ function FF_ChatWidget() {
         scrollDown() {
             const el = this.$refs.wMessages;
             if (el) el.scrollTop = el.scrollHeight;
+        },
+
+        // WHY: Same markdown-to-HTML logic as the /ai page so AI responses
+        // render with bold/headers/lists/tables instead of raw `**text**` symbols.
+        renderMd(text) {
+            if (!text) return '';
+            let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            // Stash fenced code blocks
+            const codeBlocks = [];
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, code) => {
+                codeBlocks.push('<pre><code>' + code.replace(/\n$/, '') + '</code></pre>');
+                return '\u0000CODE' + (codeBlocks.length - 1) + '\u0000';
+            });
+
+            // Stash markdown tables
+            const tables = [];
+            html = html.replace(
+                /(^\|[^\n]+\|\n\|[\s\-:|]+\|\n(?:\|[^\n]+\|(?:\n|$))+)/gm,
+                (block) => {
+                    const lines = block.trim().split('\n');
+                    const headerCells = lines[0].slice(1, -1).split('|').map(c => c.trim());
+                    const bodyLines = lines.slice(2);
+                    const thead = '<thead><tr>' + headerCells.map(c => '<th>' + c + '</th>').join('') + '</tr></thead>';
+                    const tbody = '<tbody>' + bodyLines.map(line => {
+                        const cells = line.slice(1, -1).split('|').map(c => c.trim());
+                        return '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+                    }).join('') + '</tbody>';
+                    tables.push('<table>' + thead + tbody + '</table>');
+                    return '\u0000TABLE' + (tables.length - 1) + '\u0000';
+                }
+            );
+
+            // Headers
+            html = html
+                .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+                .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+            html = html.replace(/^---+$/gm, '<hr>');
+            html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+            // Lists
+            html = html.replace(/(?:^[\-\*] .+(?:\n|$))+/gm, (block) => {
+                const items = block.trim().split('\n').map(l => l.replace(/^[\-\*] /, ''));
+                return '<ul>' + items.map(i => '<li>' + i + '</li>').join('') + '</ul>\n';
+            });
+            html = html.replace(/(?:^\d+\. .+(?:\n|$))+/gm, (block) => {
+                const items = block.trim().split('\n').map(l => l.replace(/^\d+\. /, ''));
+                return '<ol>' + items.map(i => '<li>' + i + '</li>').join('') + '</ol>\n';
+            });
+
+            // Inline formatting
+            html = html
+                .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
+                .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+            // Paragraphs
+            const blockTagRe = /^<(h[1-6]|ul|ol|table|pre|blockquote|hr|\u0000)/i;
+            html = html.split(/\n{2,}/).map(chunk => {
+                const trimmed = chunk.trim();
+                if (!trimmed) return '';
+                if (blockTagRe.test(trimmed)) return trimmed;
+                return '<p>' + trimmed.replace(/\n/g, '<br>') + '</p>';
+            }).join('\n');
+
+            // Restore stashes
+            html = html.replace(/\u0000TABLE(\d+)\u0000/g, (m, i) => tables[+i]);
+            html = html.replace(/\u0000CODE(\d+)\u0000/g, (m, i) => codeBlocks[+i]);
+
+            return html;
         },
     };
 }

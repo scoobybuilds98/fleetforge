@@ -161,7 +161,9 @@ db_transaction(function () use (
         [$key]
     );
     $next        = $settingsRow ? (int) $settingsRow['value'] : 1;
-    $claimNumber = sprintf('DMG-%s-%05d', $year, $next);
+    // WHY: prefix from settings so admin can rebrand without code change
+    $prefix      = settings_get('damage_claim.prefix', 'DMG');
+    $claimNumber = sprintf('%s-%s-%05d', $prefix, $year, $next);
 
     if ($settingsRow) {
         db_execute(

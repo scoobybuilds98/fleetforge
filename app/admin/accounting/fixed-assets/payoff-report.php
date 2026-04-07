@@ -39,9 +39,18 @@ require_once FF_ROOT . '/includes/header.php';
 </nav>
 
 <div class="page-header">
-    <h1 class="page-header-title h4">Fleet Payoff Report</h1>
+    <div>
+        <h1 class="page-header-title h4">Fleet Payoff Report</h1>
+        <div class="text-secondary text-sm" style="margin-top:4px;">
+            See how every linked fixed asset is recovering its investment, plus a 6-month projection of when each unit pays itself off.
+        </div>
+    </div>
     <div class="page-header-actions">
-        <button class="btn btn-secondary btn-sm" @click="exportCsv()" x-data>
+        <a href="<?= base_url('accounting/fixed-assets') ?>" class="btn btn-secondary btn-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+            Back to Assets
+        </a>
+        <button class="btn btn-primary btn-sm" @click="$dispatch('payoff-export-csv')">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
             Export CSV
         </button>
@@ -50,42 +59,49 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="FF_PayoffReport()" x-init="init()">
+<div x-data="FF_PayoffReport()" x-init="init()" @payoff-export-csv.window="exportCsv()">
 
     <!-- ── Summary tiles ─────────────────────────────────────── -->
     <div class="stat-grid" style="margin-bottom:24px;">
         <div class="stat-card stat-card--blue">
+            <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
             <div class="stat-label">Assets Tracked</div>
             <div class="stat-value font-mono" x-text="summary.asset_count || 0"></div>
         </div>
         <div class="stat-card">
+            <span class="stat-icon"><svg><use href="#icon-banknotes"/></svg></span>
             <div class="stat-label">Total Invested</div>
             <div class="stat-value font-mono" x-text="formatMoney(summary.total_invested || 0)"></div>
         </div>
         <div class="stat-card stat-card--green">
+            <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
             <div class="stat-label">Net Revenue to Date</div>
             <div class="stat-value font-mono" x-text="formatMoney(summary.total_net_revenue || 0)"></div>
         </div>
         <div class="stat-card stat-card--amber">
+            <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
             <div class="stat-label">Still to Recover</div>
             <div class="stat-value font-mono" x-text="formatMoney(summary.total_still_to_recover || 0)"></div>
         </div>
     </div>
 
-    <!-- ── Filter toolbar ────────────────────────────────────── -->
-    <div class="table-toolbar" style="margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-        <input type="text" class="form-control form-control-sm" placeholder="Search by name or asset number…"
-               x-model.debounce.300ms="search" @input="load()" style="min-width:280px;">
+    <!-- ── Filter toolbar (wrapped in card for visual containment) ── -->
+    <div class="card" style="margin-bottom:20px;padding:14px 16px;">
+        <div class="table-toolbar" style="margin-bottom:0;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <input type="text" class="form-control form-control-sm" placeholder="Search by name or asset number…"
+                   x-model.debounce.300ms="search" @input="load()" style="min-width:260px;flex:1;max-width:380px;">
 
-        <select class="form-select form-control-sm" x-model="filterStatus" @change="load()" style="min-width:140px;">
-            <option value="active">Active</option>
-            <option value="impaired">Impaired</option>
-            <option value="fully_depreciated">Fully Depreciated</option>
-            <option value="disposed">Disposed</option>
-            <option value="all">All statuses</option>
-        </select>
+            <select class="form-select form-control-sm" x-model="filterStatus" @change="load()" style="min-width:160px;">
+                <option value="active">Active</option>
+                <option value="impaired">Impaired</option>
+                <option value="fully_depreciated">Fully Depreciated</option>
+                <option value="disposed">Disposed</option>
+                <option value="all">All statuses</option>
+            </select>
 
-        <span class="text-secondary text-sm" x-text="rows.length + ' assets · avg progress ' + (summary.avg_progress_pct || '0.00') + '% · ' + (summary.fully_paid_count || 0) + ' fully paid'"></span>
+            <span class="text-secondary text-sm" style="margin-left:auto;"
+                  x-text="rows.length + ' assets · avg progress ' + (summary.avg_progress_pct || '0.00') + '% · ' + (summary.fully_paid_count || 0) + ' fully paid'"></span>
+        </div>
     </div>
 
     <!-- ── Loading / empty ───────────────────────────────────── -->
@@ -106,42 +122,42 @@ require_once FF_ROOT . '/includes/header.php';
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th @click="toggleSort('asset_number')" style="cursor:pointer;user-select:none;">
-                            Asset # <span x-show="sort === 'asset_number'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
+                        <th @click="toggleSort('asset_number')" style="cursor:pointer;user-select:none;white-space:nowrap;">
+                            Asset # <span class="text-secondary" x-text="sort === 'asset_number' ? (dir === 'ASC' ? '↑' : '↓') : ''"></span>
                         </th>
                         <th>Name / Unit</th>
-                        <th class="text-right" @click="toggleSort('total_acquisition')" style="cursor:pointer;user-select:none;">
-                            Total Invested <span x-show="sort === 'total_acquisition'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
+                        <th class="text-right" @click="toggleSort('total_acquisition')" style="cursor:pointer;user-select:none;white-space:nowrap;">
+                            Total Invested <span class="text-secondary" x-text="sort === 'total_acquisition' ? (dir === 'ASC' ? '↑' : '↓') : ''"></span>
                         </th>
-                        <th class="text-right" @click="toggleSort('net_revenue')" style="cursor:pointer;user-select:none;">
-                            Net Revenue <span x-show="sort === 'net_revenue'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
+                        <th class="text-right" @click="toggleSort('net_revenue')" style="cursor:pointer;user-select:none;white-space:nowrap;">
+                            Net Revenue <span class="text-secondary" x-text="sort === 'net_revenue' ? (dir === 'ASC' ? '↑' : '↓') : ''"></span>
                         </th>
-                        <th class="text-right" @click="toggleSort('still_to_recover')" style="cursor:pointer;user-select:none;">
-                            Still to Recover <span x-show="sort === 'still_to_recover'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
+                        <th class="text-right" @click="toggleSort('still_to_recover')" style="cursor:pointer;user-select:none;white-space:nowrap;">
+                            Still to Recover <span class="text-secondary" x-text="sort === 'still_to_recover' ? (dir === 'ASC' ? '↑' : '↓') : ''"></span>
                         </th>
-                        <th @click="toggleSort('progress_pct')" style="cursor:pointer;user-select:none;min-width:180px;">
-                            Progress <span x-show="sort === 'progress_pct'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
+                        <th @click="toggleSort('progress_pct')" style="cursor:pointer;user-select:none;min-width:200px;">
+                            Progress <span class="text-secondary" x-text="sort === 'progress_pct' ? (dir === 'ASC' ? '↑' : '↓') : ''"></span>
                         </th>
-                        <th class="text-right" @click="toggleSort('projection_months')" style="cursor:pointer;user-select:none;">
-                            Projection <span x-show="sort === 'projection_months'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
+                        <th class="text-right" @click="toggleSort('projection_months')" style="cursor:pointer;user-select:none;white-space:nowrap;">
+                            Projection <span class="text-secondary" x-text="sort === 'projection_months' ? (dir === 'ASC' ? '↑' : '↓') : ''"></span>
                         </th>
                     </tr>
                 </thead>
                 <tbody>
                     <template x-for="r in rows" :key="r.id">
                         <tr>
-                            <td class="font-mono">
+                            <td class="font-mono" style="white-space:nowrap;">
                                 <a :href="'<?= base_url('accounting/fixed-assets') ?>?asset=' + r.id" x-text="r.asset_number"></a>
                             </td>
                             <td>
-                                <strong x-text="r.name"></strong>
-                                <div class="text-secondary text-xs" x-text="'Unit: ' + r.equipment_unit_number"></div>
+                                <div style="font-weight:600;" x-text="r.name"></div>
+                                <div class="text-secondary text-xs" style="margin-top:2px;" x-text="'Unit: ' + r.equipment_unit_number"></div>
                             </td>
                             <td class="text-right font-mono" x-text="formatMoney(r.total_acquisition)"></td>
                             <td class="text-right font-mono" x-text="formatMoney(r.net_revenue)"></td>
                             <td class="text-right font-mono" x-text="formatMoney(r.still_to_recover)"></td>
                             <td>
-                                <div style="display:flex;align-items:center;gap:8px;">
+                                <div style="display:flex;align-items:center;gap:10px;">
                                     <div style="flex:1;height:10px;background:var(--bg-tertiary);border-radius:5px;overflow:hidden;border:1px solid var(--border-default);">
                                         <div :style="barStyle(r.progress_pct)"></div>
                                     </div>

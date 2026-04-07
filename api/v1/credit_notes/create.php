@@ -138,7 +138,9 @@ db_transaction(function () use (
         [$key]
     );
     $next             = $settingsRow ? (int) $settingsRow['value'] : 1;
-    $creditNoteNumber = sprintf('CN-CR-%s-%05d', $year, $next);
+    // WHY: prefix from settings so admin can rebrand without code change
+    $prefix           = settings_get('credit_note.prefix', 'CN-CR');
+    $creditNoteNumber = sprintf('%s-%s-%05d', $prefix, $year, $next);
 
     if ($settingsRow) {
         db_execute(
@@ -188,6 +190,12 @@ db_transaction(function () use (
         'notes'        => "Credit note {$creditNoteNumber} ({$currency} {$amount}) created for {$customer['company_name']}. Source: {$source}.",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // Auto-JE: DR 4xxx Revenue / CR 2060 Customer Credits Liability
+    // WHY: PASS-6:G2 — credit note creation posts to liability, NOT to AR directly.
+    // AR is only reduced when the credit is APPLIED to an invoice.
+    // Inside same transaction — JE failure rolls back the credit note creation (A8, §16).
+    \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued($cnId, current_user_id());
 
     $result = [
         'id'                 => $cnId,

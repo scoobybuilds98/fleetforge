@@ -41,9 +41,12 @@ $skipped  = 0;   // deduplication skips
 $errors   = 0;
 
 try {
-    $today  = date('Y-m-d');
-    $in7    = date('Y-m-d', strtotime('+7 days'));
-    $in30   = date('Y-m-d', strtotime('+30 days'));
+    $today       = date('Y-m-d');
+    // WHY: Read thresholds from settings so admins can tune alert windows
+    $critDays    = (int) settings_get('alerts.compliance_critical_days', '7');
+    $warnDays    = (int) settings_get('alerts.compliance_warning_days', '30');
+    $inCritical  = date('Y-m-d', strtotime("+{$critDays} days"));
+    $inWarning   = date('Y-m-d', strtotime("+{$warnDays} days"));
 
     // -----------------------------------------------------------------------
     // Fetch all units that have at least one expiry within 30 days OR already expired.
@@ -69,7 +72,7 @@ try {
                OR (eu.insurance_expiry IS NOT NULL     AND eu.insurance_expiry     <= ?)
            )
          ORDER BY eu.unit_number ASC",
-        [$in30, $in30, $in30, $in30]
+        [$inWarning, $inWarning, $inWarning, $inWarning]
     );
 
     foreach ($units as $unit) {
@@ -91,12 +94,12 @@ try {
 
         foreach ($docChecks as $docName => $expiryDate) {
             if ($expiryDate === null) continue;
-            if ($expiryDate > $in30) continue;   // Only care about ≤30d or already expired
+            if ($expiryDate > $inWarning) continue;   // Only care about ≤30d or already expired
 
             if ($expiryDate <= $today) {
                 $urgency     = 'expired';
                 $maxSeverity = 'critical';
-            } elseif ($expiryDate <= $in7) {
+            } elseif ($expiryDate <= $inCritical) {
                 $urgency     = 'critical';
                 if ($maxSeverity !== 'critical') $maxSeverity = 'critical';
             } else {

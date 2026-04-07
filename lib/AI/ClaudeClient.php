@@ -464,6 +464,35 @@ class ClaudeClient
     }
 
     // ────────────────────────────────────────────────────────────
+    // normalizeContentForResend()
+    //
+    // Prepares assistant content blocks for being sent back to the
+    // Anthropic API in a follow-up message (tool-calling loop).
+    //
+    // WHY: json_decode($json, true) decodes {} as [] (empty PHP array).
+    // When re-encoded, [] becomes [] (JSON array), but Anthropic requires
+    // tool_use.input to be a dictionary ({}). For zero-arg tools like
+    // get_fleet_summary, Claude sends "input": {} which decodes to [],
+    // and the API rejects the round-tripped message with:
+    //   "messages.X.content.Y.tool_use.input: Input should be a valid dictionary"
+    // Cast empty inputs to stdClass so they re-encode as {}.
+    //
+    // @param  array $content  Raw content blocks from API response
+    // @return array           Same blocks, safe to re-send
+    // ────────────────────────────────────────────────────────────
+    public static function normalizeContentForResend(array $content): array
+    {
+        foreach ($content as &$block) {
+            if (($block['type'] ?? '') !== 'tool_use') continue;
+            $input = $block['input'] ?? null;
+            if ($input === null || (is_array($input) && $input === [])) {
+                $block['input'] = (object) [];
+            }
+        }
+        return $content;
+    }
+
+    // ────────────────────────────────────────────────────────────
     // makeRequest() — raw HTTP POST to Anthropic API
     // Returns parsed JSON or null on any failure.
     // ────────────────────────────────────────────────────────────

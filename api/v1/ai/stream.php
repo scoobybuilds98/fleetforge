@@ -151,36 +151,31 @@ $systemPrompt = buildStreamSystemPrompt($userName, $contextType, $contextId);
 $tools = \FleetForge\AI\ToolRegistry::getTools('chat');
 
 // ── Streaming tool-calling loop ────────────────────────────
-$iteration     = 0;
-$maxIterations = \FleetForge\AI\ClaudeClient::MAX_TOOL_ITERATIONS;
-$finalText     = '';
+$iteration      = 0;
+$maxIterations  = \FleetForge\AI\ClaudeClient::MAX_TOOL_ITERATIONS;
+$finalText      = '';
 $totalTokensAll = 0;
 
+// WHY: Single shared onChunk used by EVERY iteration. Without this, post-tool-call
+// answers (iter 1+) generate but never reach the client UI — the user reported
+// "I'll get the overdue invoices for you, then nothing happened." That happened
+// because the original code only streamed iter 0; the actual answer (iter 1) used
+// non-streaming sendMessage and its text never made it onto the SSE channel.
+$onChunk = function (string $text) use (&$finalText) {
+    $finalText .= $text;
+    sendSSE('token', ['text' => $text]);
+};
+
 while ($iteration < $maxIterations) {
-    // WHY: First iteration streams to client; subsequent iterations (tool loops) are non-streaming
-    // because the client doesn't need to see intermediate tool processing text
-    if ($iteration === 0) {
-        $response = $ai->sendMessageStreaming(
-            messages:     $messages,
-            systemPrompt: $systemPrompt,
-            tools:        $tools,
-            maxTokens:    4096,
-            userId:       $userId,
-            queryType:    'chat',
-            onChunk:      function (string $text) {
-                sendSSE('token', ['text' => $text]);
-            }
-        );
-    } else {
-        $response = $ai->sendMessage(
-            messages:     $messages,
-            systemPrompt: $systemPrompt,
-            tools:        $tools,
-            maxTokens:    4096,
-            userId:       $userId,
-            queryType:    'chat'
-        );
-    }
+    $response = $ai->sendMessageStreaming(
+        messages:     $messages,
+        systemPrompt: $systemPrompt,
+        tools:        $tools,
+        maxTokens:    4096,
+        userId:       $userId,
+        queryType:    'chat',
+        onChunk:      $onChunk
+    );
 
     if ($response === null) {
         sendSSE('error', ['message' => 'AI service unavailable']);
@@ -189,15 +184,19 @@ while ($iteration < $maxIterations) {
 
     $totalTokensAll += ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0);
 
-    // WHY: If no tool calls, we're done — Claude has given its final answer
+    // WHY: If no tool calls, we're done — Claude's final text has already been
+    // streamed via $onChunk, so $finalText is up-to-date.
     if (!\FleetForge\AI\ClaudeClient::hasToolUse($response)) {
-        $finalText .= \FleetForge\AI\ClaudeClient::extractTextContent($response);
         break;
     }
 
     // Execute tool calls
     $toolBlocks = \FleetForge\AI\ClaudeClient::extractToolUseBlocks($response);
-    $messages[] = ['role' => 'assistant', 'content' => $response['content']];
+    // WHY: normalizeContentForResend fixes empty tool_use.input ([] → {}) before re-sending.
+    $messages[] = [
+        'role'    => 'assistant',
+        'content' => \FleetForge\AI\ClaudeClient::normalizeContentForResend($response['content']),
+    ];
 
     $toolResults = [];
     foreach ($toolBlocks as $block) {
@@ -219,13 +218,6 @@ while ($iteration < $maxIterations) {
     }
 
     $messages[] = ['role' => 'user', 'content' => $toolResults];
-
-    // WHY: After tool results, Claude's next response should stream to the client
-    // We need to accumulate any text from intermediate responses
-    $intermediateText = \FleetForge\AI\ClaudeClient::extractTextContent($response);
-    if ($intermediateText !== '') {
-        $finalText .= $intermediateText;
-    }
 
     $iteration++;
 }
@@ -260,26 +252,40 @@ function buildStreamSystemPrompt(string $userName, string $contextType, int $con
 {
     $today = date('Y-m-d');
     $prompt = <<<PROMPT
-You are FleetForge AI, an intelligent assistant for a trailer and equipment leasing company. You help the team manage their fleet, customers, leases, invoices, and maintenance operations.
+You are FleetForge AI, an intelligent assistant for a trailer and equipment leasing company. You help the team manage their fleet, customers, leases, invoices, payments, accounting, maintenance, damage claims, inspections, and reservations.
 
 Current date: {$today}
 User: {$userName}
 
-Your capabilities:
-- Search and look up customers, equipment, leases, invoices, and payments
-- Provide fleet utilization stats and KPI summaries
-- Generate financial summaries (revenue, AR aging, overdue invoices)
-- Check compliance document expiry dates
-- Review maintenance work order history
-- Answer questions about FleetForge data using the tools available to you
+Your capabilities (use the matching tool — never guess):
+- Customers — search_customers, get_customer_details, get_customer_leases, get_customer_invoices
+- Equipment / fleet — get_fleet_summary, search_equipment, get_equipment_unit, get_yard_inventory, get_yards
+- Leases & reservations — get_active_leases, get_lease_details, get_reservations, get_reservation_details
+- Invoicing & AR — get_revenue_by_period, get_revenue_by_customer, get_overdue_invoices, get_ar_aging, get_payment_summary, get_recent_payments, get_credit_notes
+- Rates & pricing — get_rate_cards, get_rate_card_items, get_customer_rates
+- Maintenance & inspections — get_maintenance_summary, get_inspections, get_inspection_details
+- Damage & mileage — get_damage_claims, get_damage_claim_details, get_mileage_logs
+- Vendors & AP — search_vendors, get_vendor_details, get_vendor_bills, get_ap_aging
+- Accounting (GL/banking/tax) — get_chart_of_accounts, get_journal_entries, get_trial_balance, get_account_balance, get_bank_accounts, get_bank_transactions, get_tax_filing_periods, get_accounting_periods, get_budgets
+- Fixed assets & payoff — get_fixed_assets, get_fixed_asset_details, get_payoff_analysis, get_depreciation_summary, get_capex_requests
+- Collections — get_promise_to_pay, get_collection_notes
+- Compliance — get_expiring_documents
+- Dashboard — get_dashboard_kpis, get_fleet_summary
+
+Identifier patterns (very important):
+- Equipment unit numbers look like CHS-001, RFR-002, FLT-001, DRY-014, CON-003 — these are EQUIPMENT UNITS (chassis, reefer, flatbed, dry van, container), NOT customers. Use get_equipment_unit, search_equipment, get_payoff_analysis, or get_fixed_asset_details with the unit_number parameter.
+- Customer names are company names like "Acme Logistics" — use search_customers.
+- Fixed asset numbers look like FA-2026-00007 — use get_fixed_asset_details.
+- Invoice numbers look like INV-2026-... and lease numbers like LSE-2026-...
+- If a user asks how long a unit (e.g. "CHS-001") will take to pay off, call get_payoff_analysis with unit_number — do NOT search customers first.
 
 Guidelines:
 - Always use the available tools to look up real data before answering questions. Never guess or make up data.
+- If your first tool call returns "no results", consider whether the user meant a different entity type (unit vs customer vs asset) and retry with the right tool.
 - Be concise but thorough. Use bullet points and tables when presenting multiple data points.
-- When discussing financial data, always include the currency (CAD/USD).
+- When discussing financial data, always include the currency (CAD/USD) and format monetary values with dollar signs and two decimal places.
 - If a question is outside your capabilities, say so clearly.
-- If a tool returns an error or no results, explain that to the user helpfully.
-- Format monetary values with dollar signs and two decimal places.
+- If a tool returns an error, explain it to the user helpfully and suggest what to try next.
 - When referencing dates, use a clear format like "January 15, 2026".
 PROMPT;
 

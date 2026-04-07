@@ -46,19 +46,19 @@ class FleetForgeTools
     {
         return match ($toolName) {
             // Customer tools
-            'search_customers'       => self::searchCustomers($input),
-            'get_customer_details'   => self::getCustomerDetails($input),
-            'get_customer_leases'    => self::getCustomerLeases($input),
-            'get_customer_invoices'  => self::getCustomerInvoices($input, $userId),
+            'search_customers'         => self::searchCustomers($input),
+            'get_customer_details'     => self::getCustomerDetails($input),
+            'get_customer_leases'      => self::getCustomerLeases($input),
+            'get_customer_invoices'    => self::getCustomerInvoices($input, $userId),
 
             // Fleet / Equipment tools
-            'get_fleet_summary'      => self::getFleetSummary(),
-            'get_equipment_unit'     => self::getEquipmentUnit($input),
-            'search_equipment'       => self::searchEquipment($input),
+            'get_fleet_summary'        => self::getFleetSummary(),
+            'get_equipment_unit'       => self::getEquipmentUnit($input),
+            'search_equipment'         => self::searchEquipment($input),
 
             // Lease tools
-            'get_active_leases'      => self::getActiveLeases($input, $userId),
-            'get_lease_details'      => self::getLeaseDetails($input, $userId),
+            'get_active_leases'        => self::getActiveLeases($input, $userId),
+            'get_lease_details'        => self::getLeaseDetails($input, $userId),
 
             // Financial tools
             'get_revenue_by_period'    => self::getRevenueByPeriod($input, $userId),
@@ -66,6 +66,7 @@ class FleetForgeTools
             'get_overdue_invoices'     => self::getOverdueInvoices($userId),
             'get_ar_aging'             => self::getArAging($userId),
             'get_payment_summary'      => self::getPaymentSummary($input, $userId),
+            'get_recent_payments'      => self::getRecentPayments($input, $userId),
 
             // Compliance tools
             'get_expiring_documents'   => self::getExpiringDocuments($input),
@@ -75,6 +76,71 @@ class FleetForgeTools
 
             // Dashboard tools
             'get_dashboard_kpis'       => self::getDashboardKpis($userId),
+
+            // ── Rate / Pricing tools (S028) ─────────────────────
+            'get_rate_cards'           => self::getRateCards(),
+            'get_rate_card_items'      => self::getRateCardItems($input),
+            'get_customer_rates'       => self::getCustomerRates($input),
+
+            // ── Reservation tools (S028) ────────────────────────
+            'get_reservations'         => self::getReservations($input),
+            'get_reservation_details'  => self::getReservationDetails($input),
+
+            // ── Yard tools (S028) ───────────────────────────────
+            'get_yards'                => self::getYards(),
+            'get_yard_inventory'       => self::getYardInventory($input),
+
+            // ── Vendor tools (S028) ─────────────────────────────
+            'search_vendors'           => self::searchVendors($input),
+            'get_vendor_details'       => self::getVendorDetails($input),
+
+            // ── Inspection tools (S028) ─────────────────────────
+            'get_inspections'          => self::getInspections($input),
+            'get_inspection_details'   => self::getInspectionDetails($input),
+
+            // ── Damage Claim tools (S028) ───────────────────────
+            'get_damage_claims'        => self::getDamageClaims($input, $userId),
+            'get_damage_claim_details' => self::getDamageClaimDetails($input, $userId),
+
+            // ── Mileage tools (S028) ────────────────────────────
+            'get_mileage_logs'         => self::getMileageLogs($input),
+
+            // ── Credit Note tools (S028) ────────────────────────
+            'get_credit_notes'         => self::getCreditNotes($input, $userId),
+
+            // ── General Ledger tools (S028) ─────────────────────
+            'get_chart_of_accounts'    => self::getChartOfAccounts($input),
+            'get_journal_entries'      => self::getJournalEntries($input, $userId),
+            'get_trial_balance'        => self::getTrialBalance($input, $userId),
+            'get_account_balance'      => self::getAccountBalance($input, $userId),
+
+            // ── Accounts Payable tools (S028) ───────────────────
+            'get_vendor_bills'         => self::getVendorBills($input, $userId),
+            'get_ap_aging'             => self::getApAging($userId),
+
+            // ── Banking tools (S028) ────────────────────────────
+            'get_bank_accounts'        => self::getBankAccounts($userId),
+            'get_bank_transactions'    => self::getBankTransactions($input, $userId),
+
+            // ── Fixed Asset tools (S028) ────────────────────────
+            'get_fixed_assets'         => self::getFixedAssets($input, $userId),
+            'get_fixed_asset_details'  => self::getFixedAssetDetails($input, $userId),
+            'get_payoff_analysis'      => self::getPayoffAnalysis($input, $userId),
+            'get_depreciation_summary' => self::getDepreciationSummary($userId),
+            'get_capex_requests'       => self::getCapexRequests($input, $userId),
+
+            // ── Budget tools (S028) ─────────────────────────────
+            'get_budgets'              => self::getBudgets($userId),
+
+            // ── Tax tools (S028) ────────────────────────────────
+            'get_tax_filing_periods'   => self::getTaxFilingPeriods($input, $userId),
+
+            // ── Period tools (S028) ─────────────────────────────
+            'get_accounting_periods'   => self::getAccountingPeriods($input),
+
+            // ── Collections tools (S028) ────────────────────────
+            'get_promise_to_pay'       => self::getPromiseToPay($input, $userId),
+            'get_collection_notes'     => self::getCollectionNotes($input),
 
             default => throw new \RuntimeException("Unknown tool: {$toolName}"),
         };
@@ -864,6 +930,1497 @@ class FleetForgeTools
             'compliance_alerts_30d' => $complianceAlerts,
             'month_revenue'         => $monthRevenue,
         ];
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  RATE / PRICING TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getRateCards
+    //
+    // Lists all rate cards with item counts and effective dates.
+    // Used by the AI when answering rate/pricing questions.
+    // ────────────────────────────────────────────────────────────
+    private static function getRateCards(): array
+    {
+        return db_select(
+            "SELECT rc.id, rc.name, rc.description, rc.is_default,
+                    rc.effective_from, rc.effective_to,
+                    (SELECT COUNT(*) FROM rate_card_items WHERE rate_card_id = rc.id) AS item_count
+             FROM rate_cards rc
+             WHERE rc.deleted_at IS NULL
+             ORDER BY rc.is_default DESC, rc.name ASC"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getRateCardItems
+    //
+    // Returns all rate items for a specific rate card. If no
+    // rate_card_id is given, falls back to the default rate card.
+    // ────────────────────────────────────────────────────────────
+    private static function getRateCardItems(array $input): array|string
+    {
+        $cardId = (int) ($input['rate_card_id'] ?? 0);
+
+        // WHY: AI may ask "what are our rates?" without specifying a card — fall back to default.
+        if ($cardId <= 0) {
+            $default = db_row(
+                "SELECT id FROM rate_cards WHERE is_default = 1 AND deleted_at IS NULL LIMIT 1"
+            );
+            if ($default === null) return 'No default rate card found. Please specify rate_card_id.';
+            $cardId = (int) $default['id'];
+        }
+
+        $card = db_row(
+            "SELECT id, name, description, is_default, effective_from, effective_to
+             FROM rate_cards WHERE id = ? AND deleted_at IS NULL",
+            [$cardId]
+        );
+        if ($card === null) return "No rate card found with ID {$cardId}.";
+
+        $items = db_select(
+            "SELECT equipment_type, daily_rate, weekly_rate, monthly_rate,
+                    mileage_rate, mileage_unit, currency, notes
+             FROM rate_card_items
+             WHERE rate_card_id = ?
+             ORDER BY equipment_type ASC",
+            [$cardId]
+        );
+
+        return ['rate_card' => $card, 'items' => $items];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getCustomerRates
+    //
+    // Custom negotiated rates for a specific customer (overrides
+    // the standard rate card).
+    // ────────────────────────────────────────────────────────────
+    private static function getCustomerRates(array $input): array|string
+    {
+        $customerId = (int) ($input['customer_id'] ?? 0);
+        if ($customerId <= 0) return 'Error: customer_id is required.';
+
+        return db_select(
+            "SELECT id, equipment_type, daily_rate, weekly_rate, monthly_rate,
+                    mileage_rate, mileage_unit, currency, minimum_charge,
+                    effective_from, effective_to, notes
+             FROM customer_equipment_rates
+             WHERE customer_id = ?
+             ORDER BY equipment_type ASC, effective_from DESC",
+            [$customerId]
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  RESERVATION TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getReservations
+    //
+    // List reservations with optional status filter.
+    // ────────────────────────────────────────────────────────────
+    private static function getReservations(array $input): array
+    {
+        $status = trim($input['status'] ?? '');
+        $limit  = ToolRegistry::MAX_ROWS;
+
+        $where  = ['r.deleted_at IS NULL'];
+        $params = [];
+
+        if ($status !== '') {
+            $where[]  = 'r.status = ?';
+            $params[] = $status;
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT r.id, r.status, r.contact_name, r.company_name,
+                    r.contact_phone, r.contact_email, r.quantity,
+                    r.pickup_date, r.pickup_time, r.yard_location,
+                    r.priority, r.purpose, r.created_at
+             FROM reservations r
+             WHERE {$whereSql}
+             ORDER BY r.pickup_date ASC, r.priority DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getReservationDetails
+    //
+    // Full reservation profile including reserved equipment units.
+    // ────────────────────────────────────────────────────────────
+    private static function getReservationDetails(array $input): array|string
+    {
+        $reservationId = (int) ($input['reservation_id'] ?? 0);
+        if ($reservationId <= 0) return 'Error: reservation_id is required.';
+
+        $row = db_row(
+            "SELECT * FROM reservations WHERE id = ? AND deleted_at IS NULL",
+            [$reservationId]
+        );
+
+        if ($row === null) return "No reservation found with ID {$reservationId}.";
+
+        $units = db_select(
+            "SELECT ru.equipment_unit_id, eu.unit_number, eu.status
+             FROM reservation_units ru
+             LEFT JOIN equipment_units eu ON eu.id = ru.equipment_unit_id
+             WHERE ru.reservation_id = ?",
+            [$reservationId]
+        );
+
+        $row['reserved_units'] = $units;
+        return $row;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  YARD TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getYards
+    //
+    // List all yards with capacity and current unit count.
+    // ────────────────────────────────────────────────────────────
+    private static function getYards(): array
+    {
+        return db_select(
+            "SELECT y.id, y.name, y.slug, y.city, y.state, y.capacity,
+                    y.is_active, y.phone, y.address,
+                    (SELECT COUNT(*) FROM equipment_units eu
+                      WHERE eu.yard_location = y.slug AND eu.deleted_at IS NULL) AS unit_count
+             FROM yards y
+             ORDER BY y.is_active DESC, y.name ASC"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getYardInventory
+    //
+    // List all equipment units currently parked at a yard.
+    // ────────────────────────────────────────────────────────────
+    private static function getYardInventory(array $input): array|string
+    {
+        $yardId = (int) ($input['yard_id'] ?? 0);
+        if ($yardId <= 0) return 'Error: yard_id is required.';
+
+        $yard = db_row("SELECT id, name, slug FROM yards WHERE id = ?", [$yardId]);
+        if ($yard === null) return "No yard found with ID {$yardId}.";
+
+        $units = db_select(
+            "SELECT eu.id, eu.unit_number, eu.status, eu.mileage,
+                    et.name AS template_name, et.category
+             FROM equipment_units eu
+             LEFT JOIN equipment_templates et ON et.id = eu.template_id
+             WHERE eu.yard_location = ? AND eu.deleted_at IS NULL
+             ORDER BY eu.unit_number ASC",
+            [$yard['slug']]
+        );
+
+        return ['yard' => $yard, 'unit_count' => count($units), 'units' => $units];
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  VENDOR TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // searchVendors
+    //
+    // Search vendors by name/contact/email and optional vendor_type.
+    // ────────────────────────────────────────────────────────────
+    private static function searchVendors(array $input): array
+    {
+        $query = trim($input['query'] ?? '');
+        $type  = trim($input['vendor_type'] ?? '');
+        $limit = ToolRegistry::MAX_ROWS;
+
+        $where  = ['v.deleted_at IS NULL'];
+        $params = [];
+
+        if ($query !== '') {
+            $where[]  = '(v.name LIKE ? OR v.contact_name LIKE ? OR v.email LIKE ?)';
+            $like     = "%{$query}%";
+            $params[] = $like;
+            $params[] = $like;
+            $params[] = $like;
+        }
+
+        if ($type !== '') {
+            $where[]  = 'v.vendor_type = ?';
+            $params[] = $type;
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT v.id, v.name, v.vendor_type, v.contact_name, v.email, v.phone,
+                    v.city, v.state, v.hourly_rate, v.rating, v.is_preferred, v.total_spent
+             FROM vendors v
+             WHERE {$whereSql}
+             ORDER BY v.is_preferred DESC, v.name ASC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getVendorDetails
+    //
+    // Full vendor profile.
+    // ────────────────────────────────────────────────────────────
+    private static function getVendorDetails(array $input): array|string
+    {
+        $vendorId = (int) ($input['vendor_id'] ?? 0);
+        if ($vendorId <= 0) return 'Error: vendor_id is required.';
+
+        $row = db_row(
+            "SELECT * FROM vendors WHERE id = ? AND deleted_at IS NULL",
+            [$vendorId]
+        );
+
+        return $row ?? "No vendor found with ID {$vendorId}.";
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  INSPECTION TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getInspections
+    //
+    // List inspections, optionally filtered by unit, lease, or type.
+    // ────────────────────────────────────────────────────────────
+    private static function getInspections(array $input): array
+    {
+        $unitId  = (int) ($input['unit_id'] ?? 0);
+        $leaseId = (int) ($input['lease_id'] ?? 0);
+        $type    = trim($input['inspection_type'] ?? '');
+        $limit   = ToolRegistry::MAX_ROWS;
+
+        $where  = ['1=1'];
+        $params = [];
+
+        if ($unitId > 0)  { $where[] = 'i.equipment_unit_id = ?'; $params[] = $unitId; }
+        if ($leaseId > 0) { $where[] = 'i.lease_id = ?';          $params[] = $leaseId; }
+        if ($type !== '') { $where[] = 'i.inspection_type = ?';   $params[] = $type; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT i.id, i.inspection_number, i.inspection_type,
+                    i.equipment_unit_id, eu.unit_number,
+                    i.lease_id, l.contract_number,
+                    i.overall_condition, i.condition_score, i.status,
+                    i.inspected_by, i.inspection_date, i.mileage_at_inspection,
+                    i.fuel_level, i.is_clean
+             FROM inspections i
+             LEFT JOIN equipment_units eu ON eu.id = i.equipment_unit_id
+             LEFT JOIN leases l           ON l.id = i.lease_id
+             WHERE {$whereSql}
+             ORDER BY i.inspection_date DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getInspectionDetails
+    //
+    // Full inspection record with unit and lease context.
+    // ────────────────────────────────────────────────────────────
+    private static function getInspectionDetails(array $input): array|string
+    {
+        $inspectionId = (int) ($input['inspection_id'] ?? 0);
+        if ($inspectionId <= 0) return 'Error: inspection_id is required.';
+
+        $row = db_row(
+            "SELECT i.*, eu.unit_number, l.contract_number
+             FROM inspections i
+             LEFT JOIN equipment_units eu ON eu.id = i.equipment_unit_id
+             LEFT JOIN leases l           ON l.id = i.lease_id
+             WHERE i.id = ?",
+            [$inspectionId]
+        );
+
+        return $row ?? "No inspection found with ID {$inspectionId}.";
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  DAMAGE CLAIM TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getDamageClaims
+    //
+    // List damage claims with optional status/severity filter.
+    // ────────────────────────────────────────────────────────────
+    private static function getDamageClaims(array $input, ?int $userId): array
+    {
+        $status   = trim($input['status'] ?? '');
+        $severity = trim($input['severity'] ?? '');
+        $limit    = ToolRegistry::MAX_ROWS;
+
+        $where  = ['dc.deleted_at IS NULL'];
+        $params = [];
+
+        if ($status !== '')   { $where[] = 'dc.status = ?';   $params[] = $status; }
+        if ($severity !== '') { $where[] = 'dc.severity = ?'; $params[] = $severity; }
+
+        $whereSql = implode(' AND ', $where);
+
+        $rows = db_select(
+            "SELECT dc.id, dc.claim_number, dc.equipment_unit_id, eu.unit_number,
+                    dc.lease_id, dc.customer_id, dc.customer_name,
+                    dc.severity, dc.status, dc.description, dc.damage_location,
+                    dc.estimated_repair_cost, dc.actual_repair_cost,
+                    dc.customer_liable_amount, dc.created_at
+             FROM damage_claims dc
+             LEFT JOIN equipment_units eu ON eu.id = dc.equipment_unit_id
+             WHERE {$whereSql}
+             ORDER BY dc.created_at DESC
+             LIMIT {$limit}",
+            $params
+        );
+
+        return self::stripFinancials($rows, $userId);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getDamageClaimDetails
+    //
+    // Full damage claim record with related context.
+    // ────────────────────────────────────────────────────────────
+    private static function getDamageClaimDetails(array $input, ?int $userId): array|string
+    {
+        $claimId = (int) ($input['claim_id'] ?? 0);
+        if ($claimId <= 0) return 'Error: claim_id is required.';
+
+        $row = db_row(
+            "SELECT dc.*, eu.unit_number, l.contract_number
+             FROM damage_claims dc
+             LEFT JOIN equipment_units eu ON eu.id = dc.equipment_unit_id
+             LEFT JOIN leases l           ON l.id = dc.lease_id
+             WHERE dc.id = ? AND dc.deleted_at IS NULL",
+            [$claimId]
+        );
+
+        if ($row === null) return "No damage claim found with ID {$claimId}.";
+
+        if (!self::canViewFinancials($userId)) {
+            foreach (['estimated_repair_cost', 'actual_repair_cost',
+                      'customer_liable_amount', 'insurance_claim_amount'] as $k) {
+                unset($row[$k]);
+            }
+        }
+
+        return $row;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  MILEAGE TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getMileageLogs
+    //
+    // Recent mileage readings for a unit or lease.
+    // ────────────────────────────────────────────────────────────
+    private static function getMileageLogs(array $input): array
+    {
+        $unitId  = (int) ($input['unit_id'] ?? 0);
+        $leaseId = (int) ($input['lease_id'] ?? 0);
+        $limit   = ToolRegistry::MAX_ROWS;
+
+        $where  = ['1=1'];
+        $params = [];
+
+        if ($unitId > 0)  { $where[] = 'ml.equipment_unit_id = ?'; $params[] = $unitId; }
+        if ($leaseId > 0) { $where[] = 'ml.lease_id = ?';          $params[] = $leaseId; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT ml.id, ml.equipment_unit_id, eu.unit_number,
+                    ml.lease_id, l.contract_number,
+                    ml.log_type, ml.odometer_reading, ml.mileage_unit,
+                    ml.log_date, ml.notes
+             FROM mileage_logs ml
+             LEFT JOIN equipment_units eu ON eu.id = ml.equipment_unit_id
+             LEFT JOIN leases l           ON l.id = ml.lease_id
+             WHERE {$whereSql}
+             ORDER BY ml.log_date DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  CREDIT NOTE TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getCreditNotes
+    //
+    // List credit notes with optional customer/status filter.
+    // ────────────────────────────────────────────────────────────
+    private static function getCreditNotes(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $customerId = (int) ($input['customer_id'] ?? 0);
+        $status     = trim($input['status'] ?? '');
+        $limit      = ToolRegistry::MAX_ROWS;
+
+        $where  = ['cn.deleted_at IS NULL'];
+        $params = [];
+
+        if ($customerId > 0) { $where[] = 'cn.customer_id = ?'; $params[] = $customerId; }
+        if ($status !== '')  { $where[] = 'cn.status = ?';      $params[] = $status; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT cn.id, cn.credit_note_number, cn.customer_id,
+                    c.company_name AS customer_name,
+                    cn.source, cn.amount, cn.amount_remaining, cn.currency,
+                    cn.status, cn.expires_at, cn.reason, cn.created_at
+             FROM credit_notes cn
+             LEFT JOIN customers c ON c.id = cn.customer_id
+             WHERE {$whereSql}
+             ORDER BY cn.created_at DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  GENERAL LEDGER TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getChartOfAccounts
+    //
+    // List the chart of accounts with optional account_type filter.
+    // ────────────────────────────────────────────────────────────
+    private static function getChartOfAccounts(array $input): array
+    {
+        $accountType = trim($input['account_type'] ?? '');
+        $limit       = ToolRegistry::MAX_ROWS;
+
+        $where  = ['is_active = 1'];
+        $params = [];
+
+        if ($accountType !== '') {
+            $where[]  = 'account_type = ?';
+            $params[] = $accountType;
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT id, code, name, account_type, account_subtype, normal_balance,
+                    currency, is_bank_account, parent_id, sort_order
+             FROM acc_accounts
+             WHERE {$whereSql}
+             ORDER BY code ASC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getJournalEntries
+    //
+    // Recent journal entries within a date range.
+    // ────────────────────────────────────────────────────────────
+    private static function getJournalEntries(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $dateFrom = $input['date_from'] ?? date('Y-m-01');
+        $dateTo   = $input['date_to']   ?? date('Y-m-d');
+        $status   = trim($input['status'] ?? '');
+        $limit    = ToolRegistry::MAX_ROWS;
+
+        $where  = ['je.entry_date BETWEEN ? AND ?'];
+        $params = [$dateFrom, $dateTo];
+
+        if ($status !== '') {
+            $where[]  = 'je.status = ?';
+            $params[] = $status;
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT je.id, je.entry_number, je.entry_date, je.entry_type,
+                    je.status, je.description, je.reference, je.source_type,
+                    je.currency,
+                    (SELECT COALESCE(SUM(debit), 0) FROM acc_journal_entry_lines
+                      WHERE journal_entry_id = je.id) AS total_debit
+             FROM acc_journal_entries je
+             WHERE {$whereSql}
+             ORDER BY je.entry_date DESC, je.id DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getTrialBalance
+    //
+    // Trial balance as of a specific date — only posted entries.
+    // ────────────────────────────────────────────────────────────
+    private static function getTrialBalance(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $asOf = $input['as_of_date'] ?? date('Y-m-d');
+
+        return db_select(
+            "SELECT a.code, a.name, a.account_type, a.normal_balance,
+                    COALESCE(SUM(jel.debit), 0)  AS total_debit,
+                    COALESCE(SUM(jel.credit), 0) AS total_credit,
+                    COALESCE(SUM(jel.debit - jel.credit), 0) AS balance
+             FROM acc_accounts a
+             LEFT JOIN acc_journal_entry_lines jel ON jel.account_id = a.id
+             LEFT JOIN acc_journal_entries je      ON je.id = jel.journal_entry_id
+                AND je.entry_date <= ?
+                AND je.status = 'posted'
+             WHERE a.is_active = 1 AND a.is_header = 0
+             GROUP BY a.id, a.code, a.name, a.account_type, a.normal_balance
+             HAVING balance != 0
+             ORDER BY a.code ASC",
+            [$asOf]
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getAccountBalance
+    //
+    // Net balance for a specific GL account (looked up by id or code).
+    // ────────────────────────────────────────────────────────────
+    private static function getAccountBalance(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $accountId = (int) ($input['account_id'] ?? 0);
+        if ($accountId <= 0) {
+            $code = trim($input['account_code'] ?? '');
+            if ($code === '') return 'Error: account_id or account_code is required.';
+            $a = db_row("SELECT id FROM acc_accounts WHERE code = ?", [$code]);
+            if ($a === null) return "No account found with code {$code}.";
+            $accountId = (int) $a['id'];
+        }
+
+        $account = db_row(
+            "SELECT id, code, name, account_type, normal_balance
+             FROM acc_accounts WHERE id = ?",
+            [$accountId]
+        );
+        if ($account === null) return "No account found with ID {$accountId}.";
+
+        $balance = db_row(
+            "SELECT COALESCE(SUM(jel.debit), 0)  AS total_debit,
+                    COALESCE(SUM(jel.credit), 0) AS total_credit,
+                    COALESCE(SUM(jel.debit - jel.credit), 0) AS net_balance
+             FROM acc_journal_entry_lines jel
+             JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+             WHERE jel.account_id = ? AND je.status = 'posted'",
+            [$accountId]
+        );
+
+        return array_merge($account, $balance ?? []);
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  ACCOUNTS PAYABLE TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getVendorBills
+    //
+    // List AP bills, optionally filtered by vendor or status.
+    // ────────────────────────────────────────────────────────────
+    private static function getVendorBills(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $vendorId = (int) ($input['vendor_id'] ?? 0);
+        $status   = trim($input['status'] ?? '');
+        $limit    = ToolRegistry::MAX_ROWS;
+
+        $where  = ['1=1'];
+        $params = [];
+
+        if ($vendorId > 0)  { $where[] = 'b.vendor_id = ?'; $params[] = $vendorId; }
+        if ($status !== '') { $where[] = 'b.status = ?';    $params[] = $status; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT b.id, b.bill_number, b.vendor_id, v.name AS vendor_name,
+                    b.bill_date, b.due_date, b.status, b.currency,
+                    b.subtotal, b.tax_total, b.total_amount, b.amount_paid, b.balance_due
+             FROM acc_bills b
+             LEFT JOIN vendors v ON v.id = b.vendor_id
+             WHERE {$whereSql}
+             ORDER BY b.due_date ASC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getApAging
+    //
+    // AP aging buckets (current, 1-30, 31-60, 61-90, 90+ days overdue).
+    // ────────────────────────────────────────────────────────────
+    private static function getApAging(?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $row = db_row(
+            "SELECT
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) <= 0 THEN b.balance_due ELSE 0 END) AS current_amount,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 1 AND 30 THEN b.balance_due ELSE 0 END) AS days_1_30,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 31 AND 60 THEN b.balance_due ELSE 0 END) AS days_31_60,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 61 AND 90 THEN b.balance_due ELSE 0 END) AS days_61_90,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) > 90 THEN b.balance_due ELSE 0 END) AS days_90_plus,
+                SUM(b.balance_due) AS total_outstanding,
+                COUNT(*) AS bill_count
+             FROM acc_bills b
+             WHERE b.balance_due > 0
+               AND b.status NOT IN ('void', 'paid', 'draft')"
+        );
+
+        return $row ?? ['total_outstanding' => 0, 'bill_count' => 0];
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  BANKING TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getBankAccounts
+    //
+    // List bank accounts with current movement totals.
+    // ────────────────────────────────────────────────────────────
+    private static function getBankAccounts(?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        return db_select(
+            "SELECT ba.id, ba.name, ba.institution, ba.account_type, ba.currency,
+                    ba.account_number_last4, ba.opening_balance,
+                    ba.is_active, ba.is_default,
+                    (SELECT COALESCE(SUM(amount), 0)
+                       FROM acc_bank_transactions
+                      WHERE bank_account_id = ba.id) AS net_movement
+             FROM acc_bank_accounts ba
+             ORDER BY ba.is_default DESC, ba.name ASC"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getBankTransactions
+    //
+    // Recent bank transactions, optionally for a specific account.
+    // ────────────────────────────────────────────────────────────
+    private static function getBankTransactions(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $accountId = (int) ($input['bank_account_id'] ?? 0);
+        $dateFrom  = $input['date_from'] ?? date('Y-m-01');
+        $dateTo    = $input['date_to']   ?? date('Y-m-d');
+        $limit     = ToolRegistry::MAX_ROWS;
+
+        $where  = ['t.transaction_date BETWEEN ? AND ?'];
+        $params = [$dateFrom, $dateTo];
+
+        if ($accountId > 0) {
+            $where[]  = 't.bank_account_id = ?';
+            $params[] = $accountId;
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT t.id, t.bank_account_id, ba.name AS bank_account_name,
+                    t.transaction_date, t.description, t.reference,
+                    t.amount, t.transaction_type, t.status, t.is_cleared
+             FROM acc_bank_transactions t
+             LEFT JOIN acc_bank_accounts ba ON ba.id = t.bank_account_id
+             WHERE {$whereSql}
+             ORDER BY t.transaction_date DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  FIXED ASSET TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getFixedAssets
+    //
+    // List fixed assets with NBV, optionally filtered.
+    // ────────────────────────────────────────────────────────────
+    private static function getFixedAssets(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $assetClass = trim($input['asset_class'] ?? '');
+        $status     = trim($input['status'] ?? '');
+        $limit      = ToolRegistry::MAX_ROWS;
+
+        $where  = ['1=1'];
+        $params = [];
+
+        if ($assetClass !== '') { $where[] = 'asset_class = ?'; $params[] = $assetClass; }
+        if ($status !== '')     { $where[] = 'status = ?';      $params[] = $status; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT id, asset_number, name, asset_class, cra_class,
+                    acquisition_date, acquisition_cost,
+                    depreciation_method, useful_life_years,
+                    accumulated_depreciation, net_book_value,
+                    status, location
+             FROM acc_fixed_assets
+             WHERE {$whereSql}
+             ORDER BY acquisition_date DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // resolveAssetRow()
+    //
+    // Internal helper for the new fixed-asset tools. Accepts any of:
+    //   asset_id     — numeric primary key
+    //   asset_number — e.g. FA-2026-00007
+    //   unit_number  — e.g. CHS-001 (resolves the asset linked to it)
+    //
+    // Returns the matching acc_fixed_assets row joined with the
+    // equipment_unit_number, or a string error message.
+    //
+    // WHY centralised: get_fixed_asset_details and get_payoff_analysis
+    // both need this lookup, and we want consistent error messages
+    // when the AI is given a unit number that doesn't exist or
+    // has no linked asset (the most likely failure modes).
+    // ────────────────────────────────────────────────────────────
+    private static function resolveAssetRow(array $input): array|string
+    {
+        $assetId     = isset($input['asset_id'])     ? (int) $input['asset_id'] : 0;
+        $assetNumber = trim((string) ($input['asset_number'] ?? ''));
+        $unitNumber  = trim((string) ($input['unit_number']  ?? ''));
+
+        $sql = "SELECT a.*, eu.unit_number AS equipment_unit_number,
+                       et.category         AS equipment_category,
+                       et.name             AS equipment_template_name
+                FROM acc_fixed_assets a
+                LEFT JOIN equipment_units eu
+                       ON eu.id = a.equipment_unit_id
+                      AND eu.deleted_at IS NULL
+                LEFT JOIN equipment_templates et
+                       ON et.id = eu.template_id";
+
+        if ($assetId > 0) {
+            $row = db_row("$sql WHERE a.id = ? LIMIT 1", [$assetId]);
+            if (!$row) return "No fixed asset found with id={$assetId}.";
+            return $row;
+        }
+
+        if ($assetNumber !== '') {
+            $row = db_row("$sql WHERE a.asset_number = ? LIMIT 1", [$assetNumber]);
+            if (!$row) return "No fixed asset found with asset_number={$assetNumber}.";
+            return $row;
+        }
+
+        if ($unitNumber !== '') {
+            // Resolve the unit first so we can give a precise error
+            // when the unit exists but has no linked asset.
+            $unit = db_row(
+                "SELECT id, unit_number FROM equipment_units
+                  WHERE unit_number = ? AND deleted_at IS NULL
+                  LIMIT 1",
+                [$unitNumber]
+            );
+            if (!$unit) {
+                return "No equipment unit found with unit_number={$unitNumber}. "
+                     . "Note: unit numbers like CHS-001, RFR-002, FLT-001 belong to "
+                     . "the equipment fleet, not customers — use search_equipment to "
+                     . "look up units, or search_customers for customers.";
+            }
+            $row = db_row(
+                "$sql WHERE a.equipment_unit_id = ? AND a.status != 'disposed'
+                       ORDER BY a.id DESC LIMIT 1",
+                [(int) $unit['id']]
+            );
+            if (!$row) {
+                return "Equipment unit {$unitNumber} (id={$unit['id']}) is not linked "
+                     . "to any fixed asset. Link it on the asset Edit form before "
+                     . "running a payoff analysis.";
+            }
+            return $row;
+        }
+
+        return 'Provide one of: asset_id, asset_number, or unit_number.';
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getFixedAssetDetails()
+    //
+    // Returns the full record of a single fixed asset by id, asset
+    // number, or linked equipment unit number. Used by the AI when
+    // a user asks for the cost / financing / depreciation profile
+    // of a specific asset or unit (e.g. "what's the financing on
+    // FA-2026-00007?" or "show me the cost basis for CHS-001").
+    // ────────────────────────────────────────────────────────────
+    private static function getFixedAssetDetails(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $row = self::resolveAssetRow($input);
+        if (is_string($row)) return $row;
+
+        // WHY shape: We omit the noisy DB internals (created_by /
+        // updated_at / *_account_id) and return a flat structure the
+        // AI can speak about naturally.
+        return [
+            'id'                       => (int) $row['id'],
+            'asset_number'             => $row['asset_number'],
+            'name'                     => $row['name'],
+            'description'              => $row['description'],
+            'asset_class'              => $row['asset_class'],
+            'status'                   => $row['status'],
+            'location'                 => $row['location'],
+            'equipment_unit_id'        => $row['equipment_unit_id'] !== null ? (int) $row['equipment_unit_id'] : null,
+            'equipment_unit_number'    => $row['equipment_unit_number'],
+            'equipment_category'       => $row['equipment_category'],
+            'equipment_template_name'  => $row['equipment_template_name'],
+            'acquisition_date'         => $row['acquisition_date'],
+            'acquisition_cost'         => $row['acquisition_cost'],
+            'purchase_tax_gst'         => $row['purchase_tax_gst'],
+            'purchase_tax_pst'         => $row['purchase_tax_pst'],
+            'delivery_cost'            => $row['delivery_cost'],
+            'setup_cost'               => $row['setup_cost'],
+            'is_financed'              => (int) ($row['is_financed'] ?? 0),
+            'financing_monthly_payment'=> $row['financing_monthly_payment'],
+            'financing_interest_rate'  => $row['financing_interest_rate'],
+            'financing_remaining_months' => $row['financing_remaining_months'],
+            'monthly_insurance_cost'   => $row['monthly_insurance_cost'],
+            'monthly_licensing_cost'   => $row['monthly_licensing_cost'],
+            'monthly_registration_cost'=> $row['monthly_registration_cost'],
+            'depreciation_method'      => $row['depreciation_method'],
+            'useful_life_years'        => $row['useful_life_years'],
+            'salvage_value'            => $row['salvage_value'],
+            'depreciable_cost'         => $row['depreciable_cost'],
+            'accumulated_depreciation' => $row['accumulated_depreciation'],
+            'net_book_value'           => $row['net_book_value'],
+            'depreciation_start_date'  => $row['depreciation_start_date'],
+        ];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getPayoffAnalysis()
+    //
+    // Mirrors the calculation done by api/v1/accounting/fixed_assets/
+    // payoff.php. Returns the headline numbers the AI needs to answer
+    // "how long until <unit> pays for itself?":
+    //
+    //   total_invested      = purchase + GST + PST + delivery + setup
+    //   total_revenue       = invoice line items linked to the unit
+    //   total_maintenance   = completed work order costs
+    //   total_damage        = damage_claims (actual or estimated)
+    //   total_financing_paid = months_since_acq × monthly_payment
+    //   total_fixed_paid    = months_since_acq × (ins+lic+reg)
+    //   net_revenue_to_date = revenue − all costs
+    //   still_to_recover    = total_invested − net_revenue (floored at 0)
+    //   progress_pct        = (net_revenue / total_invested) × 100
+    //
+    // Plus a 6-month-rolling projected payoff (months + date), and
+    // the 3 / 6 / 12 month average net revenue per month.
+    //
+    // All math is bcmath strings — never floats — per D16.
+    // ────────────────────────────────────────────────────────────
+    private static function getPayoffAnalysis(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $asset = self::resolveAssetRow($input);
+        if (is_string($asset)) return $asset;
+
+        if (empty($asset['equipment_unit_id'])) {
+            return 'This asset is not linked to an equipment unit, so payoff cannot '
+                 . 'be computed. Link it to a unit on the asset Edit form first.';
+        }
+
+        $period = isset($input['period']) ? (int) $input['period'] : 6;
+        if (!in_array($period, [3, 6, 12], true)) $period = 6;
+
+        $eqUnitId = (int) $asset['equipment_unit_id'];
+
+        // BC rounding helper — match payoff.php::$bcround behaviour.
+        $bcround = static function (string $val, int $scale = 2): string {
+            if ($val === '' || !is_numeric($val)) return '0.00';
+            $half = '0.' . str_repeat('0', $scale) . '5';
+            return bcsub(bcadd($val, $half, $scale + 1), '0', $scale);
+        };
+
+        // ── Acquisition total ───────────────────────────────────
+        $purchaseCost = (string) ($asset['acquisition_cost'] ?? '0.00');
+        $gst          = (string) ($asset['purchase_tax_gst'] ?? '0.00');
+        $pst          = (string) ($asset['purchase_tax_pst'] ?? '0.00');
+        $delivery     = (string) ($asset['delivery_cost']    ?? '0.00');
+        $setup        = (string) ($asset['setup_cost']       ?? '0.00');
+        if ($gst === '')      $gst = '0.00';
+        if ($pst === '')      $pst = '0.00';
+        if ($delivery === '') $delivery = '0.00';
+        if ($setup === '')    $setup = '0.00';
+
+        $totalAcquisition = bcadd($purchaseCost, $gst, 2);
+        $totalAcquisition = bcadd($totalAcquisition, $pst, 2);
+        $totalAcquisition = bcadd($totalAcquisition, $delivery, 2);
+        $totalAcquisition = bcadd($totalAcquisition, $setup, 2);
+
+        // ── Months since acquisition (clamped to >= 1) ──────────
+        $acquiredDate   = (string) ($asset['acquisition_date'] ?? '');
+        $monthsSinceAcq = 0;
+        if ($acquiredDate !== '') {
+            try {
+                $start = new \DateTimeImmutable($acquiredDate);
+                $now   = new \DateTimeImmutable('today');
+                if ($now > $start) {
+                    $diff = $start->diff($now);
+                    $monthsSinceAcq = ($diff->y * 12) + $diff->m;
+                    if ($diff->d > 0) $monthsSinceAcq += 1;
+                }
+            } catch (\Throwable $e) {
+                $monthsSinceAcq = 0;
+            }
+        }
+        if ($monthsSinceAcq < 1) $monthsSinceAcq = 1;
+
+        // ── Monthly fixed cost total ────────────────────────────
+        $ins = (string) ($asset['monthly_insurance_cost']    ?? '0.00');
+        $lic = (string) ($asset['monthly_licensing_cost']    ?? '0.00');
+        $reg = (string) ($asset['monthly_registration_cost'] ?? '0.00');
+        if ($ins === '') $ins = '0.00';
+        if ($lic === '') $lic = '0.00';
+        if ($reg === '') $reg = '0.00';
+
+        $monthlyFixed   = bcadd(bcadd($ins, $lic, 2), $reg, 2);
+        $totalFixedPaid = bcmul($monthlyFixed, (string) $monthsSinceAcq, 2);
+
+        // ── Financing paid so far ───────────────────────────────
+        $totalFinancingPaid = '0.00';
+        if ((int) ($asset['is_financed'] ?? 0) === 1
+            && !empty($asset['financing_monthly_payment'])) {
+            $payment = (string) $asset['financing_monthly_payment'];
+            if ($payment === '') $payment = '0.00';
+            $totalFinancingPaid = bcmul($payment, (string) $monthsSinceAcq, 2);
+        }
+
+        // ── Total revenue from linked leases/invoices ───────────
+        $revenueRow = db_row(
+            "SELECT COALESCE(SUM(ili.amount), 0) AS total
+             FROM invoice_line_items ili
+             JOIN invoices i ON i.id = ili.invoice_id
+             JOIN leases   l ON l.id = i.lease_id
+             WHERE l.equipment_unit_id = ?
+               AND l.deleted_at IS NULL
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('void', 'written_off')
+               AND ili.is_credit = 0",
+            [$eqUnitId]
+        );
+        $totalRevenue = (string) ($revenueRow['total'] ?? '0.00');
+        if ($totalRevenue === '') $totalRevenue = '0.00';
+
+        // ── Total maintenance cost ──────────────────────────────
+        $mntRow = db_row(
+            "SELECT COALESCE(SUM(total_cost), 0) AS total
+             FROM maintenance_work_orders
+             WHERE equipment_unit_id = ?
+               AND status = 'completed'
+               AND deleted_at IS NULL",
+            [$eqUnitId]
+        );
+        $totalMaintenance = (string) ($mntRow['total'] ?? '0.00');
+        if ($totalMaintenance === '') $totalMaintenance = '0.00';
+
+        // ── Total damage cost ───────────────────────────────────
+        $dmgRow = db_row(
+            "SELECT COALESCE(SUM(COALESCE(actual_repair_cost, estimated_repair_cost, 0)), 0) AS total
+             FROM damage_claims
+             WHERE equipment_unit_id = ?
+               AND deleted_at IS NULL",
+            [$eqUnitId]
+        );
+        $totalDamage = (string) ($dmgRow['total'] ?? '0.00');
+        if ($totalDamage === '') $totalDamage = '0.00';
+
+        // ── Net revenue to date ─────────────────────────────────
+        $netRevenue = bcsub($totalRevenue, $totalMaintenance, 2);
+        $netRevenue = bcsub($netRevenue, $totalDamage, 2);
+        $netRevenue = bcsub($netRevenue, $totalFinancingPaid, 2);
+        $netRevenue = bcsub($netRevenue, $totalFixedPaid, 2);
+
+        $stillToRecover = bcsub($totalAcquisition, $netRevenue, 2);
+        if (bccomp($stillToRecover, '0', 2) < 0) $stillToRecover = '0.00';
+
+        $progressPct = '0.00';
+        if (bccomp($totalAcquisition, '0', 2) > 0) {
+            $raw = bcdiv(bcmul($netRevenue, '100', 6), $totalAcquisition, 6);
+            $progressPct = $bcround($raw, 2);
+        }
+
+        // ── 14-month rolling history → scenario averages ───────
+        $monthlyRows = db_select(
+            "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS ym,
+                    COALESCE(SUM(ili.amount), 0) AS revenue
+             FROM invoice_line_items ili
+             JOIN invoices i ON i.id = ili.invoice_id
+             JOIN leases   l ON l.id = i.lease_id
+             WHERE l.equipment_unit_id = ?
+               AND l.deleted_at IS NULL
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('void', 'written_off')
+               AND ili.is_credit = 0
+               AND i.invoice_date >= (CURDATE() - INTERVAL 13 MONTH)
+             GROUP BY ym",
+            [$eqUnitId]
+        );
+        $revByMonth = [];
+        foreach ($monthlyRows as $r) $revByMonth[$r['ym']] = (string) $r['revenue'];
+
+        $mntMonthRows = db_select(
+            "SELECT DATE_FORMAT(COALESCE(completed_date, requested_date), '%Y-%m') AS ym,
+                    COALESCE(SUM(total_cost), 0) AS cost
+             FROM maintenance_work_orders
+             WHERE equipment_unit_id = ?
+               AND status = 'completed'
+               AND deleted_at IS NULL
+               AND COALESCE(completed_date, requested_date) >= (CURDATE() - INTERVAL 13 MONTH)
+             GROUP BY ym",
+            [$eqUnitId]
+        );
+        $mntByMonth = [];
+        foreach ($mntMonthRows as $r) $mntByMonth[$r['ym']] = (string) $r['cost'];
+
+        $dmgMonthRows = db_select(
+            "SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym,
+                    COALESCE(SUM(COALESCE(actual_repair_cost, estimated_repair_cost, 0)), 0) AS cost
+             FROM damage_claims
+             WHERE equipment_unit_id = ?
+               AND deleted_at IS NULL
+               AND created_at >= (CURDATE() - INTERVAL 13 MONTH)
+             GROUP BY ym",
+            [$eqUnitId]
+        );
+        $dmgByMonth = [];
+        foreach ($dmgMonthRows as $r) $dmgByMonth[$r['ym']] = (string) $r['cost'];
+
+        // Dense 14-month series (oldest → newest) of net revenue.
+        $netSeries = [];
+        $cursor = new \DateTimeImmutable('first day of this month');
+        $start  = $cursor->modify('-13 months');
+        $monthlyFinancePortion = '0.00';
+        if ((int) ($asset['is_financed'] ?? 0) === 1
+            && !empty($asset['financing_monthly_payment'])) {
+            $monthlyFinancePortion = (string) $asset['financing_monthly_payment'];
+        }
+        for ($m = $start; $m <= $cursor; $m = $m->modify('+1 month')) {
+            $ym = $m->format('Y-m');
+            $rev = $revByMonth[$ym] ?? '0.00';
+            $mnt = $mntByMonth[$ym] ?? '0.00';
+            $dmg = $dmgByMonth[$ym] ?? '0.00';
+
+            $net = bcsub($rev, $mnt, 2);
+            $net = bcsub($net, $dmg, 2);
+            $net = bcsub($net, $monthlyFinancePortion, 2);
+            $net = bcsub($net, $monthlyFixed, 2);
+            $netSeries[] = $net;
+        }
+
+        // Tail-window average helper.
+        $avgFromTail = function (array $rows, int $n) use ($bcround): string {
+            if ($n <= 0 || count($rows) === 0) return '0.00';
+            $n = min($n, count($rows));
+            $slice = array_slice($rows, -$n);
+            $sum = '0.00';
+            foreach ($slice as $v) $sum = bcadd($sum, $v, 2);
+            return $bcround(bcdiv($sum, (string) $n, 6), 2);
+        };
+
+        $avg3  = $avgFromTail($netSeries, 3);
+        $avg6  = $avgFromTail($netSeries, 6);
+        $avg12 = $avgFromTail($netSeries, 12);
+
+        // Project months/date for an average net.
+        $projectFor = function (string $avg) use ($stillToRecover) {
+            if (bccomp($avg, '0', 2) <= 0 || bccomp($stillToRecover, '0', 2) <= 0) {
+                return ['months' => null, 'date' => null];
+            }
+            $months    = bcdiv($stillToRecover, $avg, 2);
+            $monthsInt = (int) ceil((float) $months);
+            try {
+                $d = (new \DateTimeImmutable('today'))->modify("+{$monthsInt} months");
+                return ['months' => $monthsInt, 'date' => $d->format('Y-m-d')];
+            } catch (\Throwable $e) {
+                return ['months' => $monthsInt, 'date' => null];
+            }
+        };
+
+        $selectedAvg = match ($period) {
+            3  => $avg3,
+            12 => $avg12,
+            default => $avg6,
+        };
+        $selected = $projectFor($selectedAvg);
+        $consProj = $projectFor($avg12);
+        $currProj = $projectFor($avg6);
+        $optProj  = $projectFor($avg3);
+
+        $fullyPaid = bccomp($stillToRecover, '0', 2) === 0;
+
+        return [
+            'asset' => [
+                'id'                    => (int) $asset['id'],
+                'asset_number'          => $asset['asset_number'],
+                'name'                  => $asset['name'],
+                'equipment_unit_id'     => $eqUnitId,
+                'equipment_unit_number' => $asset['equipment_unit_number'],
+                'equipment_category'    => $asset['equipment_category'],
+                'acquisition_date'      => $asset['acquisition_date'],
+                'is_financed'           => (int) ($asset['is_financed'] ?? 0),
+                'months_since_acquisition' => $monthsSinceAcq,
+            ],
+            'invested' => [
+                'purchase_cost'   => $bcround($purchaseCost, 2),
+                'gst'             => $bcround($gst, 2),
+                'pst'             => $bcround($pst, 2),
+                'delivery_cost'   => $bcround($delivery, 2),
+                'setup_cost'      => $bcround($setup, 2),
+                'total_invested'  => $bcround($totalAcquisition, 2),
+            ],
+            'totals' => [
+                'total_revenue'        => $bcround($totalRevenue, 2),
+                'total_maintenance'    => $bcround($totalMaintenance, 2),
+                'total_damage'         => $bcround($totalDamage, 2),
+                'total_financing_paid' => $bcround($totalFinancingPaid, 2),
+                'monthly_fixed_cost'   => $bcround($monthlyFixed, 2),
+                'total_fixed_paid'     => $bcround($totalFixedPaid, 2),
+                'net_revenue_to_date'  => $bcround($netRevenue, 2),
+                'still_to_recover'     => $bcround($stillToRecover, 2),
+                'progress_pct'         => $progressPct,
+                'fully_paid'           => $fullyPaid,
+            ],
+            'scenarios' => [
+                'optimistic_3mo'   => ['avg_monthly_net' => $avg3,  'months' => $optProj['months'],  'date' => $optProj['date']],
+                'current_6mo'      => ['avg_monthly_net' => $avg6,  'months' => $currProj['months'], 'date' => $currProj['date']],
+                'conservative_12mo'=> ['avg_monthly_net' => $avg12, 'months' => $consProj['months'], 'date' => $consProj['date']],
+            ],
+            'projection' => [
+                'period_months'    => $period,
+                'avg_monthly_net'  => $selectedAvg,
+                'projected_months' => $selected['months'],
+                'projected_date'   => $selected['date'],
+            ],
+        ];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getDepreciationSummary
+    //
+    // Totals for active fixed assets and recent depreciation runs.
+    // ────────────────────────────────────────────────────────────
+    private static function getDepreciationSummary(?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $totals = db_row(
+            "SELECT COUNT(*) AS total_assets,
+                    COALESCE(SUM(acquisition_cost), 0)         AS total_cost,
+                    COALESCE(SUM(accumulated_depreciation), 0) AS total_depreciation,
+                    COALESCE(SUM(net_book_value), 0)           AS total_nbv
+             FROM acc_fixed_assets
+             WHERE status = 'active'"
+        );
+
+        $recentRuns = db_select(
+            "SELECT id, run_date, status, total_depreciation, asset_count
+             FROM acc_depreciation_runs
+             ORDER BY run_date DESC
+             LIMIT 10"
+        );
+
+        return ['totals' => $totals, 'recent_runs' => $recentRuns];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getCapexRequests
+    //
+    // Capital expenditure requests with optional status filter.
+    // ────────────────────────────────────────────────────────────
+    private static function getCapexRequests(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $status = trim($input['status'] ?? '');
+        $limit  = ToolRegistry::MAX_ROWS;
+
+        $where  = ['1=1'];
+        $params = [];
+
+        if ($status !== '') { $where[] = 'status = ?'; $params[] = $status; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT id, request_number, title, asset_class, status,
+                    budget_amount, actual_amount, requested_at, approved_at,
+                    justification
+             FROM acc_capex_requests
+             WHERE {$whereSql}
+             ORDER BY requested_at DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  BUDGET TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getBudgets
+    //
+    // List all budgets with annual totals.
+    // ────────────────────────────────────────────────────────────
+    private static function getBudgets(?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        return db_select(
+            "SELECT b.id, b.name, b.year, b.version, b.status, b.is_active,
+                    (SELECT COALESCE(SUM(annual_total), 0)
+                       FROM acc_budget_lines
+                      WHERE budget_id = b.id) AS total_budget
+             FROM acc_budgets b
+             ORDER BY b.year DESC, b.is_active DESC"
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  TAX TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getTaxFilingPeriods
+    //
+    // GST/HST/PST filing periods with totals and filing status.
+    // ────────────────────────────────────────────────────────────
+    private static function getTaxFilingPeriods(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $taxType = trim($input['tax_type'] ?? '');
+        $status  = trim($input['status'] ?? '');
+        $limit   = ToolRegistry::MAX_ROWS;
+
+        $where  = ['1=1'];
+        $params = [];
+
+        if ($taxType !== '') { $where[] = 'tax_type = ?'; $params[] = $taxType; }
+        if ($status !== '')  { $where[] = 'status = ?';   $params[] = $status; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT id, tax_type, period_start, period_end, filing_due_date,
+                    frequency, total_sales, total_tax_collected, total_itc,
+                    net_tax_owing, status, filed_date
+             FROM acc_tax_filing_periods
+             WHERE {$whereSql}
+             ORDER BY period_end DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  PERIOD TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getAccountingPeriods
+    //
+    // List accounting periods with open/closed status for a year.
+    // ────────────────────────────────────────────────────────────
+    private static function getAccountingPeriods(array $input): array
+    {
+        $year  = (int) ($input['year'] ?? date('Y'));
+        $limit = ToolRegistry::MAX_ROWS;
+
+        return db_select(
+            "SELECT id, year, month, name, start_date, end_date,
+                    status, is_year_end, closed_at, locked_at
+             FROM acc_periods
+             WHERE year = ?
+             ORDER BY month ASC
+             LIMIT {$limit}",
+            [$year]
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  COLLECTIONS TOOLS  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getPromiseToPay
+    //
+    // List promise-to-pay records with optional filters.
+    // ────────────────────────────────────────────────────────────
+    private static function getPromiseToPay(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $status     = trim($input['status'] ?? '');
+        $customerId = (int) ($input['customer_id'] ?? 0);
+        $limit      = ToolRegistry::MAX_ROWS;
+
+        $where  = ['1=1'];
+        $params = [];
+
+        if ($status !== '')  { $where[] = 'p.status = ?';      $params[] = $status; }
+        if ($customerId > 0) { $where[] = 'p.customer_id = ?'; $params[] = $customerId; }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT p.id, p.customer_id, c.company_name AS customer_name,
+                    p.invoice_id, p.promised_amount, p.promise_date,
+                    p.promised_by, p.status, p.actual_payment_date, p.notes
+             FROM acc_promise_to_pay p
+             LEFT JOIN customers c ON c.id = p.customer_id
+             WHERE {$whereSql}
+             ORDER BY p.promise_date DESC
+             LIMIT {$limit}",
+            $params
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getCollectionNotes
+    //
+    // Collection notes for a customer.
+    // ────────────────────────────────────────────────────────────
+    private static function getCollectionNotes(array $input): array|string
+    {
+        $customerId = (int) ($input['customer_id'] ?? 0);
+        if ($customerId <= 0) return 'Error: customer_id is required.';
+
+        $limit = ToolRegistry::MAX_ROWS;
+
+        return db_select(
+            "SELECT id, customer_id, invoice_id, note_date, contact_method,
+                    contact_person, note, outcome, follow_up_date
+             FROM acc_collection_notes
+             WHERE customer_id = ?
+             ORDER BY note_date DESC
+             LIMIT {$limit}",
+            [$customerId]
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  PAYMENT TOOLS — additional  (S028)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // getRecentPayments
+    //
+    // Recent payments, optionally filtered by customer.
+    // ────────────────────────────────────────────────────────────
+    private static function getRecentPayments(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial data.';
+        }
+
+        $customerId = (int) ($input['customer_id'] ?? 0);
+        $limit      = ToolRegistry::MAX_ROWS;
+
+        $where  = ['p.deleted_at IS NULL'];
+        $params = [];
+
+        if ($customerId > 0) {
+            $where[]  = 'p.customer_id = ?';
+            $params[] = $customerId;
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        return db_select(
+            "SELECT p.id, p.payment_number, p.customer_id,
+                    c.company_name AS customer_name,
+                    p.amount, p.currency, p.payment_method, p.payment_date,
+                    p.status, p.reference_number
+             FROM payments p
+             LEFT JOIN customers c ON c.id = p.customer_id
+             WHERE {$whereSql}
+             ORDER BY p.payment_date DESC
+             LIMIT {$limit}",
+            $params
+        );
     }
 
     // ════════════════════════════════════════════════════════════

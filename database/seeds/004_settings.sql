@@ -32,16 +32,23 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 ('company.timezone',    'America/Vancouver',               'string',  'company', 'Timezone',            'All dates are displayed in this timezone.',                                     0),
 ('company.currency',    'CAD',                             'string',  'company', 'Currency Code',       'ISO 4217 currency code (e.g. CAD, USD).',                                      0),
 ('company.currency_symbol', '$',                           'string',  'company', 'Currency Symbol',     'Symbol prepended to all monetary values.',                                     1),
-('company.gst_number',  '',                                'string',  'company', 'GST/HST Number',      'CRA Business Number in BN-RT format (e.g. 123456789 RT 0001). Required on all invoices.', 0),
-('company.pst_number',  '',                                'string',  'company', 'PST Number',          'BC PST registration number. Required on BC invoices.',                         0),
+('company.gst_number',          '',                                'string',  'company', 'GST/HST Number',         'CRA Business Number in BN-RT format (e.g. 123456789 RT 0001). Required on all invoices.', 0),
+('company.pst_number',          '',                                'string',  'company', 'PST Number',             'BC PST registration number. Required on BC invoices.',                         0),
+('company.bank_name',           '',                                'string',  'company', 'Bank Name',              'Bank name shown on portal invoice payment details.',                           0),
+('company.bank_account',        '',                                'string',  'company', 'Bank Account',           'Bank account number shown on portal invoice payment details.',                 0),
+('company.check_payable_to',    '',                                'string',  'company', 'Cheque Payable To',      'Name shown on portal invoices for cheque payments.',                           0),
+('company.payment_instructions','',                                'text',    'company', 'Payment Instructions',   'Default payment instructions shown on portal invoices.',                       0),
 
 -- ----------------------------------------------------------------
 -- Invoices & Payments
 -- ----------------------------------------------------------------
-('invoice.prefix',                 'INV',  'string',  'invoices', 'Invoice Number Prefix',    'Prefix for all invoice numbers (e.g. INV → INV-2025-00001).',      0),
-('invoice.due_days_default',       '30',   'integer', 'invoices', 'Default Payment Due Days', 'Days after invoice date that payment is due.',                      0),
-('invoice.late_fee_percentage',    '0',    'decimal', 'invoices', 'Late Fee Percentage',      'Monthly late fee applied to overdue invoices (0 = disabled).',     0),
-('invoice.payment_instructions',   '',     'text',    'invoices', 'Payment Instructions',     'Default text shown at the bottom of all invoice PDFs.',             0),
+('invoice.prefix',                 'INV',   'string',  'invoices',      'Invoice Number Prefix',      'Prefix for all invoice numbers (e.g. INV → INV-2025-00001).',      0),
+('invoice.due_days_default',       '30',   'integer', 'invoices',      'Default Payment Due Days',   'Days after invoice date that payment is due.',                      0),
+('invoice.late_fee_percentage',    '0',    'decimal', 'invoices',      'Late Fee Percentage',        'Monthly late fee applied to overdue invoices (0 = disabled).',     0),
+('payment.prefix',                 'PAY',  'string',  'invoices',      'Payment Number Prefix',      'Prefix for all payment numbers (e.g. PAY → PAY-2025-00001).',      0),
+('credit_note.prefix',             'CN-CR','string',  'invoices',      'Credit Note Number Prefix',  'Prefix for all credit note numbers (e.g. CN-CR → CN-CR-2025-00001).', 0),
+('damage_claim.prefix',            'DMG',  'string',  'maintenance',   'Damage Claim Number Prefix', 'Prefix for all damage claim numbers (e.g. DMG → DMG-2025-00001).', 0),
+('lease.prefix',                   'CN',   'string',  'leases',        'Contract Number Prefix',     'Prefix for lease contract numbers (e.g. CN → CN-ABC123-2025).',    0),
 
 -- ----------------------------------------------------------------
 -- Alerts & Compliance
@@ -69,6 +76,7 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 ('ai.daily_token_limit', '500000',                   'integer', 'ai', 'Daily Token Limit',     'Max tokens per day across all users (0 = unlimited).',                      0),
 ('ai.model',             'claude-sonnet-4-20250514', 'string',  'ai', 'AI Model',              'Claude model ID used for all AI features.',                                 0),
 ('ai.cache_summaries',   '1',                        'boolean', 'ai', 'Cache AI Summaries',    'Cache AI-generated summaries to reduce API calls.',                         0),
+('ai.summary_ttl_hours', '24',                       'integer', 'ai', 'Summary Cache TTL (h)', 'Hours before cached AI summaries expire and regenerate.',                   0),
 
 -- ----------------------------------------------------------------
 -- Notifications / Email

@@ -176,7 +176,13 @@ while ($iteration < $maxIterations) {
     }
 
     $toolBlocks = \FleetForge\AI\ClaudeClient::extractToolUseBlocks($response);
-    $messages[] = ['role' => 'assistant', 'content' => $response['content']];
+    // WHY: normalizeContentForResend fixes empty tool_use.input ([] → {}) — without
+    // this, the next API call crashes with "Input should be a valid dictionary" the
+    // moment Claude emits a tool_use with no parameters.
+    $messages[] = [
+        'role'    => 'assistant',
+        'content' => \FleetForge\AI\ClaudeClient::normalizeContentForResend($response['content']),
+    ];
 
     $toolResults = [];
     foreach ($toolBlocks as $block) {

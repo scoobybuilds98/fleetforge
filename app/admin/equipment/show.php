@@ -48,6 +48,28 @@ if (!$unit) {
     exit;
 }
 
+// ── Linked fixed asset lookup (PAYOFF-1 tab) ───────────────────
+// WHY: The Payoff Analysis tab calls the existing
+// /api/v1/accounting/fixed_assets/payoff.php endpoint which takes
+// asset_id (not equipment_unit_id). We resolve that link here so the
+// tab can either show the payoff UI or an empty state directly from
+// first paint — no extra round-trip to a "lookup" endpoint.
+//
+// NOTE: acc_fixed_assets does not use soft deletes (it has its own
+// lifecycle via `status` — active/impaired/fully_depreciated/disposed).
+// We exclude disposed assets from the "still paying off" view because
+// they've been written off the books.
+$linkedAsset = db_row(
+    "SELECT id, asset_number, name, acquisition_date, status
+       FROM acc_fixed_assets
+      WHERE equipment_unit_id = ?
+        AND status != 'disposed'
+      ORDER BY acquisition_date DESC, id DESC
+      LIMIT 1",
+    [$unitId]
+);
+$linkedAssetId = $linkedAsset ? (int) $linkedAsset['id'] : 0;
+
 $pageTitle = 'Unit ' . e($unit['unit_number']);
 require_once FF_ROOT . '/includes/header.php';
 
@@ -185,6 +207,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         <?php
         $tabs = [
             ['key' => 'overview',       'label' => 'Overview'],
+            ['key' => 'payoff',         'label' => 'Payoff Analysis'],
             ['key' => 'compliance',     'label' => 'Compliance'],
             ['key' => 'leases',         'label' => 'Lease History'],
             ['key' => 'damage_claims',  'label' => 'Damage Claims'],
@@ -307,6 +330,335 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
             </div>
         </template>
+    </div>
+
+    <!-- ── TAB: Payoff Analysis ───────────────────────────────────
+         PAYOFF-1: shows the same analysis the fixed-asset detail modal
+         shows, but keyed off this unit's linked acc_fixed_assets row.
+         Server-side lookup happened in PHP so we know upfront whether
+         the unit has a linked asset — the empty state is a plain static
+         card, not a JS-driven template.
+         ──────────────────────────────────────────────────────────── -->
+    <div x-show="activeTab === 'payoff'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+
+        <?php if (!$linkedAsset): ?>
+        <!-- ── Empty state: no linked fixed asset ───────────────── -->
+        <div class="card">
+            <div class="card-body" style="text-align:center;padding:48px 20px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" style="width:48px;height:48px;color:var(--text-muted);margin-bottom:12px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V13.5Zm0 2.25h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V18Zm2.498-6.75h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V13.5Zm0 2.25h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V18Zm2.504-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5Zm0 2.25h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V18ZM8.25 6h7.5v2.25h-7.5V6ZM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 0 0 2.25 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0 0 12 2.25Z"/>
+                </svg>
+                <h3 style="margin:0 0 8px;font-size:1rem;font-weight:600;color:var(--text-primary);">No Linked Fixed Asset</h3>
+                <p style="margin:0 0 16px;font-size:0.875rem;color:var(--text-secondary);max-width:460px;margin-left:auto;margin-right:auto;">
+                    This unit isn't linked to a fixed asset yet, so there's no acquisition cost to recover.
+                    Create a fixed asset for it (or edit an existing one) and set its <strong>Equipment Unit</strong>
+                    field to <span class="font-mono"><?= e($unit['unit_number']) ?></span> to see a full payoff analysis here.
+                </p>
+                <a href="<?= base_url('accounting/fixed-assets') ?>" class="btn btn-primary btn-sm">Go to Fixed Assets →</a>
+            </div>
+        </div>
+        <?php else: ?>
+
+        <!-- ── Header bar: link to full fixed-asset detail page ──── -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+            <div>
+                <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+                    Linked Fixed Asset
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <span class="font-mono" style="font-size:0.9375rem;font-weight:600;"><?= e($linkedAsset['asset_number']) ?></span>
+                    <span style="color:var(--text-secondary);font-size:0.875rem;">·</span>
+                    <span style="font-size:0.875rem;"><?= e($linkedAsset['name']) ?></span>
+                    <span class="badge badge-neutral"><?= e($linkedAsset['status']) ?></span>
+                </div>
+                <div class="text-secondary text-xs" style="margin-top:2px;">
+                    Acquired <span class="font-mono"><?= e($linkedAsset['acquisition_date']) ?></span>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <a href="<?= base_url('accounting/fixed-assets') ?>?asset=<?= (int) $linkedAsset['id'] ?>" class="btn btn-secondary btn-sm">Open in Fixed Assets →</a>
+            </div>
+        </div>
+
+        <!-- ── Loading skeleton ──────────────────────────────────── -->
+        <template x-if="payoffLoading && !payoff">
+            <div class="card">
+                <div class="card-body">
+                    <div class="skeleton skeleton-row" style="margin-bottom:8px;"></div>
+                    <div class="skeleton skeleton-row" style="margin-bottom:8px;"></div>
+                    <div class="skeleton skeleton-row" style="margin-bottom:8px;"></div>
+                    <div class="skeleton skeleton-row" style="margin-bottom:8px;"></div>
+                </div>
+            </div>
+        </template>
+
+        <!-- ── Error state ──────────────────────────────────────── -->
+        <template x-if="payoffError">
+            <div class="card">
+                <div class="card-body" style="text-align:center;padding:32px 20px;">
+                    <div class="text-danger" style="font-size:0.9375rem;font-weight:600;margin-bottom:6px;">Couldn't load payoff analysis</div>
+                    <div class="text-secondary text-sm" x-text="payoffError" style="margin-bottom:14px;"></div>
+                    <button class="btn btn-secondary btn-sm" @click="loadPayoff()">Retry</button>
+                </div>
+            </div>
+        </template>
+
+        <!-- ── Loaded: full payoff UI ───────────────────────────── -->
+        <template x-if="payoff && !payoffError">
+            <div>
+
+                <!-- KPI stat cards -->
+                <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Invested</div>
+                        <div class="stat-value font-mono" style="font-size:1.125rem;" x-text="formatMoney(payoff.acquisition.total)"></div>
+                        <div class="text-secondary text-xs" style="margin-top:4px;">
+                            Target <span class="font-mono" x-text="formatMoney(payoff.acquisition.adjusted_target)"></span>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-card--green">
+                        <div class="stat-label">Net Revenue to Date</div>
+                        <div class="stat-value font-mono" style="font-size:1.125rem;" x-text="formatMoney(payoff.totals.net_revenue_to_date)"></div>
+                        <div class="text-secondary text-xs" style="margin-top:4px;">
+                            <span x-text="payoff.totals.months_since_acquisition + ' months'"></span>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-card--amber">
+                        <div class="stat-label">Still to Recover</div>
+                        <div class="stat-value font-mono" style="font-size:1.125rem;" x-text="formatMoney(payoff.totals.still_to_recover)"></div>
+                        <div class="text-secondary text-xs" style="margin-top:4px;">
+                            <span x-text="'Avg ' + formatMoney(payoff.selected.monthly_net) + '/mo'"></span>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-card--blue">
+                        <div class="stat-label">Progress</div>
+                        <div class="stat-value font-mono" style="font-size:1.125rem;" x-text="(parseFloat(payoff.totals.progress_pct) >= 0 ? payoff.totals.progress_pct : '0.00') + '%'"></div>
+                        <template x-if="payoff.selected.date">
+                            <div class="text-secondary text-xs" style="margin-top:4px;">
+                                Paid off by <span x-text="payoff.selected.date"></span>
+                            </div>
+                        </template>
+                        <template x-if="!payoff.selected.date && parseFloat(payoff.totals.still_to_recover) <= 0">
+                            <div class="text-success text-xs" style="margin-top:4px;"><strong>Fully paid!</strong></div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Big progress bar -->
+                <div class="card" style="padding:16px;margin-bottom:20px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span class="text-sm text-secondary" style="font-weight:600;">Payoff progress</span>
+                        <span class="text-sm font-mono" x-text="payoff.totals.progress_pct + '%'"></span>
+                    </div>
+                    <div style="width:100%;height:14px;background:var(--bg-tertiary);border-radius:7px;overflow:hidden;border:1px solid var(--border-default);">
+                        <div :style="payoffBarStyle()"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-top:6px;">
+                        <span class="text-xs text-secondary">$0</span>
+                        <span class="text-xs text-secondary font-mono" x-text="formatMoney(payoff.acquisition.adjusted_target)"></span>
+                    </div>
+                </div>
+
+                <!-- Projection scenarios (click to re-project) -->
+                <h3 class="h6" style="margin:0 0 10px 0;">Projection Scenarios</h3>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+                    <div class="card"
+                         @click="payoffPeriod = 12; reloadPayoff()"
+                         :style="(payoffPeriod === 12 ? 'border:2px solid var(--color-primary);' : 'border:1px solid var(--border-default);') + 'cursor:pointer;padding:14px;'">
+                        <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Conservative</div>
+                        <div class="text-xs text-secondary" style="margin-bottom:6px;">12-month average</div>
+                        <div class="font-mono" style="font-size:1rem;font-weight:600;" x-text="formatMoney(payoff.scenarios.conservative.monthly_net) + '/mo'"></div>
+                        <div class="text-sm" style="margin-top:6px;">
+                            <template x-if="payoff.scenarios.conservative.months !== null">
+                                <span>Paid off in <strong x-text="payoff.scenarios.conservative.months"></strong> months</span>
+                            </template>
+                            <template x-if="payoff.scenarios.conservative.months === null">
+                                <span class="text-secondary">— no projection —</span>
+                            </template>
+                        </div>
+                        <template x-if="payoff.scenarios.conservative.date">
+                            <div class="text-xs text-secondary" style="margin-top:2px;" x-text="'by ' + payoff.scenarios.conservative.date"></div>
+                        </template>
+                    </div>
+                    <div class="card"
+                         @click="payoffPeriod = 6; reloadPayoff()"
+                         :style="(payoffPeriod === 6 ? 'border:2px solid var(--color-primary);' : 'border:1px solid var(--border-default);') + 'cursor:pointer;padding:14px;'">
+                        <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Current</div>
+                        <div class="text-xs text-secondary" style="margin-bottom:6px;">6-month average</div>
+                        <div class="font-mono" style="font-size:1rem;font-weight:600;" x-text="formatMoney(payoff.scenarios.current.monthly_net) + '/mo'"></div>
+                        <div class="text-sm" style="margin-top:6px;">
+                            <template x-if="payoff.scenarios.current.months !== null">
+                                <span>Paid off in <strong x-text="payoff.scenarios.current.months"></strong> months</span>
+                            </template>
+                            <template x-if="payoff.scenarios.current.months === null">
+                                <span class="text-secondary">— no projection —</span>
+                            </template>
+                        </div>
+                        <template x-if="payoff.scenarios.current.date">
+                            <div class="text-xs text-secondary" style="margin-top:2px;" x-text="'by ' + payoff.scenarios.current.date"></div>
+                        </template>
+                    </div>
+                    <div class="card"
+                         @click="payoffPeriod = 3; reloadPayoff()"
+                         :style="(payoffPeriod === 3 ? 'border:2px solid var(--color-primary);' : 'border:1px solid var(--border-default);') + 'cursor:pointer;padding:14px;'">
+                        <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Optimistic</div>
+                        <div class="text-xs text-secondary" style="margin-bottom:6px;">3-month average</div>
+                        <div class="font-mono" style="font-size:1rem;font-weight:600;" x-text="formatMoney(payoff.scenarios.optimistic.monthly_net) + '/mo'"></div>
+                        <div class="text-sm" style="margin-top:6px;">
+                            <template x-if="payoff.scenarios.optimistic.months !== null">
+                                <span>Paid off in <strong x-text="payoff.scenarios.optimistic.months"></strong> months</span>
+                            </template>
+                            <template x-if="payoff.scenarios.optimistic.months === null">
+                                <span class="text-secondary">— no projection —</span>
+                            </template>
+                        </div>
+                        <template x-if="payoff.scenarios.optimistic.date">
+                            <div class="text-xs text-secondary" style="margin-top:2px;" x-text="'by ' + payoff.scenarios.optimistic.date"></div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="card" style="padding:16px;margin-bottom:20px;">
+                    <h3 class="h6" style="margin:0 0 10px 0;">Cumulative Net Revenue vs Payoff Target</h3>
+                    <p class="text-secondary text-xs" style="margin:0 0 10px 0;">Last 14 months of revenue, minus maintenance, damage, monthly fixed costs, and financing payments. Dashed green line = total target to recover.</p>
+                    <div id="unit-payoff-chart" style="min-height:300px;"></div>
+                </div>
+
+                <!-- Two-column split: Acquisition breakdown + Earnings breakdown -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+
+                    <!-- Acquisition detail -->
+                    <div class="card spec-card" style="margin-bottom:0;">
+                        <div class="card-header" style="padding:12px 16px;">
+                            <div class="card-title">Acquisition Cost</div>
+                        </div>
+                        <div class="card-body" style="padding:0;">
+                            <table class="spec-table">
+                                <tr>
+                                    <td class="spec-label">Purchase Cost</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.purchase_cost)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">+ GST</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.gst)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">+ PST</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.pst)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">+ Delivery</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.delivery_cost)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">+ Setup</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.setup_cost)"></td>
+                                </tr>
+                                <tr style="font-weight:600;">
+                                    <td class="spec-label">= Total Invested</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.total)"></td>
+                                </tr>
+                                <template x-if="parseFloat(payoff.acquisition.extra_costs) > 0">
+                                    <tr>
+                                        <td class="spec-label">+ Extra Costs</td>
+                                        <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.extra_costs)"></td>
+                                    </tr>
+                                </template>
+                                <tr style="font-weight:600;background:var(--bg-surface-2);">
+                                    <td class="spec-label">Adjusted Target</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.acquisition.adjusted_target)"></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Earnings breakdown -->
+                    <div class="card spec-card" style="margin-bottom:0;">
+                        <div class="card-header" style="padding:12px 16px;">
+                            <div class="card-title">Earnings &amp; Expenses to Date</div>
+                        </div>
+                        <div class="card-body" style="padding:0;">
+                            <table class="spec-table">
+                                <tr>
+                                    <td class="spec-label">Total Revenue</td>
+                                    <td class="font-mono text-right text-success" x-text="formatMoney(payoff.totals.total_revenue)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">− Maintenance</td>
+                                    <td class="font-mono text-right text-danger" x-text="'−' + formatMoney(payoff.totals.total_maintenance)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">− Damage Claims</td>
+                                    <td class="font-mono text-right text-danger" x-text="'−' + formatMoney(payoff.totals.total_damage)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">− Financing Paid</td>
+                                    <td class="font-mono text-right text-danger" x-text="'−' + formatMoney(payoff.totals.total_financing_paid)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">− Fixed Costs Paid</td>
+                                    <td class="font-mono text-right text-danger" x-text="'−' + formatMoney(payoff.totals.total_fixed_paid)"></td>
+                                </tr>
+                                <tr>
+                                    <td class="spec-label">Monthly Fixed</td>
+                                    <td class="font-mono text-right text-secondary" x-text="formatMoney(payoff.totals.monthly_fixed) + '/mo'"></td>
+                                </tr>
+                                <tr style="font-weight:600;background:var(--bg-surface-2);">
+                                    <td class="spec-label">= Net Revenue</td>
+                                    <td class="font-mono text-right" x-text="formatMoney(payoff.totals.net_revenue_to_date)"></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Manual override card -->
+                <div class="card" style="padding:14px;border:1px dashed var(--border-default);margin-bottom:20px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                        <h3 class="h6" style="margin:0;">Manual Override</h3>
+                        <template x-if="payoff.custom_projection">
+                            <span class="badge badge-info">Custom</span>
+                        </template>
+                    </div>
+                    <p class="text-secondary text-xs" style="margin:0 0 10px 0;">
+                        Try your own projected monthly net revenue and any one-time upcoming costs (tires, compliance, major repair) to see a custom payoff date.
+                    </p>
+                    <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;">
+                        <div>
+                            <label class="text-xs text-secondary">Custom Monthly Net ($)</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm"
+                                   x-model="payoffCustomMonthly" placeholder="e.g. 4000.00">
+                        </div>
+                        <div>
+                            <label class="text-xs text-secondary">Extra One-Time Costs ($)</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm"
+                                   x-model="payoffCustomExtra" placeholder="e.g. 2500.00">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="applyPayoffCustom()" :disabled="payoffLoading">Apply</button>
+                        <button class="btn btn-secondary btn-sm" @click="resetPayoffCustom()" :disabled="payoffLoading">Reset</button>
+                    </div>
+                    <template x-if="payoff.custom_projection">
+                        <div style="margin-top:12px;padding:10px;background:var(--bg-tertiary);border-radius:6px;">
+                            <div class="text-sm">
+                                At <strong class="font-mono" x-text="formatMoney(payoff.custom_projection.monthly_net) + '/mo'"></strong>,
+                                <template x-if="payoff.custom_projection.months !== null">
+                                    <span>paid off in <strong x-text="payoff.custom_projection.months"></strong> months
+                                    (<span x-text="payoff.custom_projection.date"></span>).</span>
+                                </template>
+                                <template x-if="payoff.custom_projection.months === null">
+                                    <span class="text-secondary">— already fully paid or nothing to project —</span>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+            </div>
+        </template>
+
+        <?php endif; ?>
     </div>
 
     <!-- ── TAB: Compliance ────────────────────────────────────── -->
@@ -1256,6 +1608,21 @@ function FF_UnitDetail() {
         trackingLoaded:  false,
         trackingMap:     null,
 
+        // ── Payoff Analysis (PAYOFF-1) ────────────────────────────
+        // WHY: Driven off the server-side $linkedAssetId lookup — when
+        // no asset is linked we never hit the API at all (the PHP
+        // branch renders an empty state card instead). When an asset
+        // IS linked, we lazy-load on first visit to the Payoff tab.
+        payoff:               null,
+        payoffLoading:        false,
+        payoffLoaded:         false,
+        payoffError:          '',
+        payoffPeriod:         6,
+        payoffCustomMonthly:  '',
+        payoffCustomExtra:    '',
+        payoffChart:          null,
+        linkedAssetId:        <?= (int) $linkedAssetId ?>,
+
         async init() {
             await this.loadUnit();
         },
@@ -1276,6 +1643,14 @@ function FF_UnitDetail() {
                 if (tab === 'inspections'   && !this.inspectionsLoaded)      this.loadInspections();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
                 if (tab === 'tracking'      && !this.trackingLoaded)         this.loadTracking();
+                // PAYOFF-1: only call the API when an asset is actually
+                // linked — otherwise the PHP empty state handles it.
+                if (tab === 'payoff' && this.linkedAssetId && !this.payoffLoaded) this.loadPayoff();
+                // When re-entering the tab, re-render the chart because
+                // ApexCharts won't repaint while the element is display:none.
+                if (tab === 'payoff' && this.payoff) {
+                    this.$nextTick(() => this.renderPayoffChart());
+                }
             });
         },
 
@@ -1627,6 +2002,155 @@ function FF_UnitDetail() {
                           maintenance:'badge-warning', inactive:'badge-neutral', decommissioned:'badge-danger',
                           none: 'badge-neutral' };
             return map[status] || 'badge-neutral';
+        },
+
+        // ── Payoff Analysis (PAYOFF-1) ─────────────────────────────
+        // All methods mirror the ones on the fixed-asset detail modal
+        // so the UX is identical between both places.
+        async loadPayoff() {
+            if (!this.linkedAssetId) return;
+            this.payoffLoading = true;
+            this.payoffError   = '';
+            try {
+                const params = new URLSearchParams();
+                params.set('asset_id', this.linkedAssetId);
+                params.set('period',   String(this.payoffPeriod));
+                if (this.payoffCustomMonthly) params.set('custom_monthly_revenue', this.payoffCustomMonthly);
+                if (this.payoffCustomExtra)   params.set('extra_costs',            this.payoffCustomExtra);
+
+                const r = await FF_Api.get('<?= base_url('api/v1/accounting/fixed_assets/payoff.php') ?>?' + params.toString());
+                if (r.success) {
+                    this.payoff       = r.data;
+                    this.payoffLoaded = true;
+                    // WHY: Chart element is now in the DOM; defer to next tick
+                    // so x-show='payoff' has resolved before we attach ApexCharts.
+                    this.$nextTick(() => this.renderPayoffChart());
+                } else {
+                    this.payoffError = r.error?.message || 'Failed to load payoff analysis.';
+                }
+            } catch (e) {
+                this.payoffError = 'Network error while loading payoff analysis.';
+            }
+            this.payoffLoading = false;
+        },
+
+        // Called by the scenario cards (3/6/12 click) — re-fetches so
+        // the "selected" projection and scenario highlight update.
+        reloadPayoff() {
+            this.loadPayoff();
+        },
+
+        applyPayoffCustom() {
+            this.loadPayoff();
+        },
+
+        resetPayoffCustom() {
+            this.payoffCustomMonthly = '';
+            this.payoffCustomExtra   = '';
+            this.loadPayoff();
+        },
+
+        // Progress-bar fill style — red <33%, amber 33-65%, green ≥66%.
+        payoffBarStyle() {
+            const pct = Math.max(0, Math.min(100, parseFloat(this.payoff?.totals?.progress_pct) || 0));
+            let colour = 'var(--color-danger)';
+            if (pct >= 66)       colour = 'var(--color-success)';
+            else if (pct >= 33)  colour = 'var(--color-warning)';
+            return 'width:' + pct + '%;height:100%;background:' + colour + ';transition:width 0.4s ease;';
+        },
+
+        // Render the ApexCharts area chart. Theme-aware — rebuilt from
+        // scratch on every call so theme switches pick up new colours.
+        renderPayoffChart() {
+            const el = document.getElementById('unit-payoff-chart');
+            if (!el || !this.payoff || !this.payoff.monthly_data) return;
+            if (typeof ApexCharts === 'undefined') return;
+
+            // Destroy previous instance to prevent duplicate charts.
+            if (this.payoffChart) {
+                try { this.payoffChart.destroy(); } catch (e) { /* ignore */ }
+                this.payoffChart = null;
+            }
+
+            const isLight = (window.FF_Theme && FF_Theme.current() === 'light');
+            const cs = getComputedStyle(document.documentElement);
+            const cssVar = v => (cs.getPropertyValue(v) || '').trim();
+            const primary = cssVar('--color-primary') || '#f97316';
+            const success = cssVar('--color-success') || '#22c55e';
+            const fgMuted = cssVar('--text-tertiary') || '#64748b';
+            const border  = cssVar('--border-default') || '#1d2133';
+
+            const categories = this.payoff.monthly_data.map(r => r.month);
+            const series = [{
+                name: 'Cumulative Net Revenue',
+                data: this.payoff.monthly_data.map(r => parseFloat(r.cumulative_net_revenue)),
+            }];
+
+            const target = parseFloat(this.payoff.acquisition.adjusted_target) || 0;
+
+            const opts = {
+                chart: {
+                    type: 'area',
+                    height: 300,
+                    background: 'transparent',
+                    fontFamily: 'DM Sans, sans-serif',
+                    toolbar: { show: false },
+                    animations: { enabled: true, speed: 400 },
+                },
+                theme: { mode: isLight ? 'light' : 'dark' },
+                colors: [primary],
+                stroke: { curve: 'smooth', width: 2 },
+                fill: {
+                    type: 'gradient',
+                    gradient: { opacityFrom: 0.35, opacityTo: 0.05 },
+                },
+                dataLabels: { enabled: false },
+                grid: { borderColor: border },
+                xaxis: {
+                    categories,
+                    labels: { style: { colors: fgMuted, fontFamily: 'DM Mono, monospace' } },
+                    axisBorder: { color: border },
+                    axisTicks:  { color: border },
+                },
+                yaxis: {
+                    labels: {
+                        style: { colors: fgMuted, fontFamily: 'DM Mono, monospace' },
+                        formatter: v => '$' + (Math.round(v)).toLocaleString('en-CA'),
+                    },
+                },
+                tooltip: {
+                    theme: isLight ? 'light' : 'dark',
+                    y: { formatter: v => '$' + parseFloat(v).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+                },
+                series,
+                annotations: target > 0 ? {
+                    yaxis: [{
+                        y: target,
+                        borderColor: success,
+                        strokeDashArray: 6,
+                        label: {
+                            borderColor: success,
+                            style: { color: '#fff', background: success, fontFamily: 'DM Mono, monospace' },
+                            text: 'Target $' + target.toLocaleString('en-CA'),
+                            position: 'right',
+                        },
+                    }],
+                } : {},
+            };
+
+            try {
+                this.payoffChart = new ApexCharts(el, opts);
+                this.payoffChart.render();
+            } catch (e) {
+                console.error('[UnitShow] Payoff chart render failed', e);
+            }
+        },
+
+        formatMoney(s) {
+            if (s === null || s === undefined || s === '') return '—';
+            const n = parseFloat(s);
+            if (!Number.isFinite(n)) return '—';
+            return '$' + n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         },
 
         formatDate(d) {

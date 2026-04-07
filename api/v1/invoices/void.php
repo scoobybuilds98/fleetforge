@@ -87,6 +87,10 @@ db_transaction(function () use ($id, $invoice, $voidReason) {
         'notes'        => "Invoice {$invoice['invoice_number']} voided: {$voidReason}",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // Auto-JE: Reverse the original invoice JE (if one exists)
+    // WHY: Inside same transaction — reversal failure rolls back the void (A8, §16)
+    \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, current_user_id());
 });
 
 json_success(['id' => $id, 'status' => 'void']);
