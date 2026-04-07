@@ -39,16 +39,26 @@ require_auth_api();
 require_permission('maintenance', 'edit');
 
 $body      = json_body();
+$fields    = [];
+
 $id        = clean_int($body['id'] ?? null);
 $newStatus = clean_string($body['new_status'] ?? null);
 $reason    = clean_string($body['reason'] ?? null, 1000);
 $resNotes  = clean_string($body['resolution_notes'] ?? null, 5000);
 
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Work order ID is required.';
 }
+
+$validStatuses = ['open', 'in_progress', 'waiting_parts', 'completed', 'cancelled'];
 if (!$newStatus) {
-    json_error('MISSING_REQUIRED', 'new_status is required.', 422);
+    $fields['new_status'] = 'Please select a status.';
+} elseif (!in_array($newStatus, $validStatuses, true)) {
+    $fields['new_status'] = 'Please select a valid status.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // Valid state machine transitions (spec §11)
@@ -86,7 +96,8 @@ db_transaction(function() use ($id, $newStatus, $reason, $resNotes, &$result) {
 
     if (!in_array($newStatus, $allowedNext, true)) {
         json_error('INVALID_TRANSITION',
-            "Cannot transition work order {$wo['work_order_number']} from '{$oldStatus}' to '{$newStatus}'.", 409);
+            "Cannot transition work order {$wo['work_order_number']} from '{$oldStatus}' to '{$newStatus}'.", 409,
+            ['fields' => ['new_status' => "Cannot move a work order from '{$oldStatus}' to '{$newStatus}'."]]);
     }
 
     // Build the UPDATE fields

@@ -23,29 +23,53 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'edit');
 
-$reconId = clean_int($_POST['reconciliation_id'] ?? null);
-$txnId = clean_int($_POST['transaction_id'] ?? null);
-$isCleared = clean_int($_POST['is_cleared'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$reconId) json_error('VALIDATION_ERROR', 'reconciliation_id is required.', 422);
-if (!$txnId) json_error('VALIDATION_ERROR', 'transaction_id is required.', 422);
-if ($isCleared === null || !in_array($isCleared, [0, 1])) {
-    json_error('VALIDATION_ERROR', 'is_cleared must be 0 or 1.', 422);
+$fields = [];
+
+$reconId = clean_int($input['reconciliation_id'] ?? null);
+$txnId = clean_int($input['transaction_id'] ?? null);
+$rawCleared = $input['is_cleared'] ?? null;
+$isCleared = $rawCleared === null ? null : (int) $rawCleared;
+
+if (!$reconId) $fields['reconciliation_id'] = 'Reconciliation ID is required.';
+if (!$txnId)   $fields['transaction_id']    = 'Transaction ID is required.';
+if ($isCleared === null || !in_array($isCleared, [0, 1], true)) {
+    $fields['is_cleared'] = 'Cleared status must be 0 or 1.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $recon = db_row("SELECT * FROM acc_bank_reconciliations WHERE id = ?", [$reconId]);
-if (!$recon) json_error('NOT_FOUND', 'Reconciliation not found.', 404);
+if (!$recon) {
+    json_error('NOT_FOUND', 'Reconciliation not found.', 404, [
+        'fields' => ['reconciliation_id' => 'Reconciliation not found.'],
+    ]);
+}
 if ($recon['status'] !== 'in_progress') {
-    json_error('IMMUTABLE_RECORD', 'Reconciliation is locked — no changes allowed.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Reconciliation is locked — no changes allowed.', 422,
+        ['fields' => ['reconciliation_id' => 'Reconciliation is locked — no changes allowed.']]);
 }
 
 $txn = db_row(
     "SELECT * FROM acc_bank_transactions WHERE id = ? AND bank_account_id = ?",
     [$txnId, $recon['bank_account_id']]
 );
-if (!$txn) json_error('NOT_FOUND', 'Transaction not found for this bank account.', 404);
+if (!$txn) {
+    json_error('NOT_FOUND', 'Transaction not found for this bank account.', 404, [
+        'fields' => ['transaction_id' => 'Transaction not found for this bank account.'],
+    ]);
+}
 if ($txn['status'] === 'excluded') {
-    json_error('VALIDATION_ERROR', 'Cannot clear an excluded transaction.', 422);
+    json_validation_error(
+        ['transaction_id' => 'Cannot clear an excluded transaction.'],
+        'Cannot clear an excluded transaction.'
+    );
 }
 
 db_transaction(function () use ($reconId, $txnId, $isCleared, $recon) {

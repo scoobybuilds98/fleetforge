@@ -30,21 +30,34 @@ require_method('POST');
 require_auth_api();
 require_permission('payments', 'create');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $paymentId = clean_int($body['payment_id'] ?? null);
 if (!$paymentId) {
-    json_error('MISSING_REQUIRED', 'payment_id is required.', 422);
+    $fields['payment_id'] = 'Please select a payment.';
 }
 
 $invoiceId = clean_int($body['invoice_id'] ?? null);
 if (!$invoiceId) {
-    json_error('MISSING_REQUIRED', 'invoice_id is required.', 422);
+    $fields['invoice_id'] = 'Please select an invoice.';
 }
 
-$amountRaw = clean_decimal($body['amount'] ?? null);
-if ($amountRaw === null || bccomp($amountRaw, '0', 6) <= 0) {
-    json_error('VALIDATION_ERROR', 'amount must be a positive number.', 422);
+// VALID-2: differentiate missing / negative / zero amounts
+$rawAmount = $body['amount'] ?? null;
+$amountRaw = clean_decimal($rawAmount);
+if ($rawAmount === null || $rawAmount === '') {
+    $fields['amount'] = 'Please enter an allocation amount.';
+} elseif ($amountRaw === null) {
+    $fields['amount'] = 'Please enter a valid allocation amount.';
+} elseif (bccomp($amountRaw, '0', 6) < 0) {
+    $fields['amount'] = 'Allocation amount cannot be negative.';
+} elseif (bccomp($amountRaw, '0', 6) === 0) {
+    $fields['amount'] = 'Allocation amount must be greater than zero.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // --- Load payment ---
@@ -54,11 +67,14 @@ $payment = db_row(
     [$paymentId]
 );
 if (!$payment) {
-    json_error('NOT_FOUND', 'Payment not found.', 404);
+    json_error('NOT_FOUND', 'Payment not found.', 404,
+        ['fields' => ['payment_id' => 'Payment not found.']]);
 }
 
 if ($payment['status'] === 'void' || $payment['status'] === 'refunded') {
-    json_error('IMMUTABLE_RECORD', 'Cannot allocate a voided or refunded payment.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Cannot allocate a voided or refunded payment.', 422,
+        ['fields' => ['payment_id' => 'Cannot allocate a voided or refunded payment.']]);
 }
 
 // --- Pre-flight check on invoice ---
@@ -67,23 +83,35 @@ $invoiceCheck = db_row(
     [$invoiceId]
 );
 if (!$invoiceCheck) {
-    json_error('NOT_FOUND', 'Invoice not found.', 404);
+    json_error('NOT_FOUND', 'Invoice not found.', 404,
+        ['fields' => ['invoice_id' => 'Invoice not found.']]);
 }
+
+// VALID-2: accumulate cross-field errors (currency / status / balance)
+$crossFieldErrors = [];
 
 // D18: currency match
 if ($payment['currency'] !== $invoiceCheck['currency']) {
-    json_error(
-        'CURRENCY_MISMATCH',
-        "Payment currency ({$payment['currency']}) does not match invoice currency ({$invoiceCheck['currency']}).",
-        422
-    );
+    $crossFieldErrors['invoice_id'] =
+        "Payment currency must match invoice currency ({$invoiceCheck['currency']}).";
 }
 
 if ($invoiceCheck['status'] === 'void') {
-    json_error('INVOICE_VOID', 'Cannot allocate a payment to a voided invoice.', 422);
+    $crossFieldErrors['invoice_id'] = 'Cannot allocate a payment to a voided invoice.';
+} elseif ($invoiceCheck['status'] === 'paid') {
+    $crossFieldErrors['invoice_id'] = 'This invoice is already fully paid.';
 }
-if ($invoiceCheck['status'] === 'paid') {
-    json_error('ALLOCATION_EXCEEDS_BALANCE', 'This invoice is already fully paid.', 422);
+
+// Allocation amount must not exceed balance due
+if (empty($crossFieldErrors['invoice_id'])
+    && bccomp($amountRaw, (string) $invoiceCheck['balance_due'], 6) > 0) {
+    $balanceFormatted = '$' . number_format((float) $invoiceCheck['balance_due'], 2);
+    $crossFieldErrors['amount'] =
+        "Allocation amount exceeds invoice balance of {$balanceFormatted}.";
+}
+
+if ($crossFieldErrors) {
+    json_validation_error($crossFieldErrors);
 }
 
 // Check this payment is not already allocated to this invoice
@@ -92,7 +120,9 @@ $existingAlloc = db_row(
     [$paymentId, $invoiceId]
 );
 if ($existingAlloc) {
-    json_error('ALREADY_EXISTS', 'This payment already has an allocation for the specified invoice.', 409);
+    json_error('ALREADY_EXISTS',
+        'This payment already has an allocation for the specified invoice.', 409,
+        ['fields' => ['invoice_id' => 'This payment already has an allocation for the specified invoice.']]);
 }
 
 $result = null;
@@ -109,14 +139,13 @@ db_transaction(function () use ($paymentId, $invoiceId, $amountRaw, $payment, &$
         json_error('NOT_FOUND', 'Invoice not found.', 404);
     }
 
-    // D20: Cannot exceed balance_due
+    // D20: Cannot exceed balance_due (defense in depth; pre-flight already rejected this)
     $balanceDue = (string) $invoice['balance_due'];
     if (bccomp($amountRaw, $balanceDue, 6) > 0) {
-        json_error(
-            'ALLOCATION_EXCEEDS_BALANCE',
-            "Allocation amount ({$amountRaw}) exceeds invoice balance_due ({$balanceDue}).",
-            422
-        );
+        $balanceFormatted = '$' . number_format((float) $balanceDue, 2);
+        json_error('ALLOCATION_EXCEEDS_BALANCE',
+            "Allocation amount exceeds invoice balance of {$balanceFormatted}.", 422,
+            ['fields' => ['amount' => "Allocation amount exceeds invoice balance of {$balanceFormatted}."]]);
     }
 
     $allocatedAmount = bcround($amountRaw, 2);

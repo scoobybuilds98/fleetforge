@@ -27,21 +27,25 @@ require_method('POST');
 require_auth_api();
 require_permission('fixed_assets', 'edit');
 
-$body = json_body();
+$body        = json_body();
+$fieldErrors = [];
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fieldErrors['id'] = 'Asset ID is required.';
 }
 
 $updatedAt = clean_string($body['updated_at'] ?? null);
 if (!$updatedAt) {
-    json_error('MISSING_REQUIRED', 'updated_at is required for the optimistic lock.', 422);
+    $fieldErrors['updated_at'] = 'Optimistic lock token is required.';
+}
+if ($fieldErrors) {
+    json_validation_error($fieldErrors);
 }
 
 // Build sanitized update set — only fields explicitly present
 $data = ['updated_at' => $updatedAt];
-$fields = [
+$updatableFields = [
     'name'                    => 'string',
     'description'             => 'string',
     'asset_class'             => 'string',
@@ -76,7 +80,7 @@ $fields = [
     'monthly_registration_cost'  => 'decimal',
 ];
 
-foreach ($fields as $field => $type) {
+foreach ($updatableFields as $field => $type) {
     if (array_key_exists($field, $body)) {
         $val = $body[$field];
         if ($type === 'int') {
@@ -92,14 +96,55 @@ foreach ($fields as $field => $type) {
     }
 }
 
+// ── Range validation for common money fields BEFORE hitting service
+if (array_key_exists('salvage_value', $data) && $data['salvage_value'] !== null && $data['salvage_value'] !== '') {
+    if (bccomp($data['salvage_value'], '0.00', 2) < 0) {
+        $fieldErrors['salvage_value'] = 'Salvage value cannot be negative.';
+    }
+}
+if (array_key_exists('useful_life_years', $data) && $data['useful_life_years'] !== null && $data['useful_life_years'] !== '') {
+    if (bccomp($data['useful_life_years'], '0', 2) <= 0) {
+        $fieldErrors['useful_life_years'] = 'Useful life must be at least 1 year.';
+    }
+}
+if (array_key_exists('cra_cca_rate', $data) && $data['cra_cca_rate'] !== null && $data['cra_cca_rate'] !== '') {
+    if (bccomp($data['cra_cca_rate'], '0', 4) < 0) {
+        $fieldErrors['cra_cca_rate'] = 'CCA rate cannot be negative.';
+    } elseif (bccomp($data['cra_cca_rate'], '100', 4) > 0) {
+        $fieldErrors['cra_cca_rate'] = 'CCA rate cannot exceed 100%.';
+    }
+}
+if (array_key_exists('total_expected_units', $data) && $data['total_expected_units'] !== null) {
+    if ($data['total_expected_units'] < 0) {
+        $fieldErrors['total_expected_units'] = 'Total expected units cannot be negative.';
+    }
+}
+
+if ($fieldErrors) {
+    json_validation_error($fieldErrors);
+}
+
 try {
     $asset = FixedAssetService::update($id, $data, current_user_id());
 } catch (\RuntimeException $e) {
+    $msg = $e->getMessage();
     // STALE_DATA → 409, everything else → 422
-    if (str_starts_with($e->getMessage(), 'STALE_DATA')) {
-        json_error('STALE_DATA', 'This asset was modified by another user. Please refresh and try again.', 409);
+    if (str_starts_with($msg, 'STALE_DATA')) {
+        json_error('STALE_DATA',
+            'This asset was modified by another user. Refresh and try again.', 409,
+            ['fields' => ['updated_at' => 'This asset was modified by another user. Refresh and try again.']]);
     }
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    // Map common messages to field slots
+    $slot = '_general';
+    if (stripos($msg, 'salvage') !== false)              $slot = 'salvage_value';
+    elseif (stripos($msg, 'useful_life') !== false)      $slot = 'useful_life_years';
+    elseif (stripos($msg, 'disposed') !== false)         $slot = 'id';
+    elseif (stripos($msg, 'cca') !== false)              $slot = 'cra_cca_rate';
+    elseif (stripos($msg, 'cannot be negative') !== false) {
+        // Extract the field name before the colon
+        if (preg_match('/^([a-z_]+)\s+cannot/i', $msg, $m)) $slot = $m[1];
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($asset);

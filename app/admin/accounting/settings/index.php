@@ -116,9 +116,9 @@ require_once FF_ROOT . '/includes/header.php';
     <div x-show="activeTab === 'general'" class="card" style="padding:24px;">
         <h3 class="h6" style="margin:0 0 16px;">General Settings</h3>
 
-        <div x-show="messages.general" class="alert"
-             :class="messages.general.type === 'success' ? 'alert-success' : 'alert-danger'"
-             x-text="messages.general.text" style="margin-bottom:16px;"></div>
+        <div x-show="messages.general && messages.general.type === 'success'" class="alert alert-success"
+             x-text="messages.general ? messages.general.text : ''" style="margin-bottom:16px;"></div>
+        <div class="form-error-banner" x-show="formErrors.general" x-cloak x-text="formErrors.general" style="margin-bottom:16px;"></div>
 
         <div class="form-group">
             <label class="form-label" style="display:flex;align-items:center;gap:8px;">
@@ -131,7 +131,10 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="form-group" style="max-width:300px;">
             <label class="form-label">CapEx Threshold ($)</label>
             <input type="number" class="form-input" x-model.number="general.capex_threshold_cad"
+                   :class="errors.capex_threshold_cad ? 'is-invalid' : ''"
+                   @input="errors.capex_threshold_cad = ''"
                    min="0" step="100" placeholder="e.g. 5000">
+            <div class="field-error" x-show="errors.capex_threshold_cad" x-cloak x-text="errors.capex_threshold_cad"></div>
             <p class="text-secondary text-sm" style="margin:4px 0 0;">Expenses above this amount are capitalized as assets rather than expensed immediately.</p>
         </div>
 
@@ -153,9 +156,9 @@ require_once FF_ROOT . '/includes/header.php';
         <h3 class="h6" style="margin:0 0 4px;">GL Account Mapping</h3>
         <p class="text-secondary text-sm" style="margin:0 0 16px;">Map system functions to their corresponding GL accounts. These are used for automatic journal entry generation.</p>
 
-        <div x-show="messages.gl_mapping" class="alert"
-             :class="messages.gl_mapping.type === 'success' ? 'alert-success' : 'alert-danger'"
-             x-text="messages.gl_mapping.text" style="margin-bottom:16px;"></div>
+        <div x-show="messages.gl_mapping && messages.gl_mapping.type === 'success'" class="alert alert-success"
+             x-text="messages.gl_mapping ? messages.gl_mapping.text : ''" style="margin-bottom:16px;"></div>
+        <div class="form-error-banner" x-show="formErrors.gl_mapping" x-cloak x-text="formErrors.gl_mapping" style="margin-bottom:16px;"></div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <template x-for="mapping in glMappings" :key="mapping.key">
@@ -187,9 +190,9 @@ require_once FF_ROOT . '/includes/header.php';
         <h3 class="h6" style="margin:0 0 4px;">Revenue Account Mapping</h3>
         <p class="text-secondary text-sm" style="margin:0 0 16px;">Map each invoice line type to the GL revenue account it should post to.</p>
 
-        <div x-show="messages.revenue_mapping" class="alert"
-             :class="messages.revenue_mapping.type === 'success' ? 'alert-success' : 'alert-danger'"
-             x-text="messages.revenue_mapping.text" style="margin-bottom:16px;"></div>
+        <div x-show="messages.revenue_mapping && messages.revenue_mapping.type === 'success'" class="alert alert-success"
+             x-text="messages.revenue_mapping ? messages.revenue_mapping.text : ''" style="margin-bottom:16px;"></div>
+        <div class="form-error-banner" x-show="formErrors.revenue_mapping" x-cloak x-text="formErrors.revenue_mapping" style="margin-bottom:16px;"></div>
 
         <template x-if="lineTypes.length === 0">
             <div class="empty-state" style="padding:24px;">
@@ -245,32 +248,41 @@ require_once FF_ROOT . '/includes/header.php';
         <h3 class="h6" style="margin:0 0 4px;">Depreciation Defaults</h3>
         <p class="text-secondary text-sm" style="margin:0 0 16px;">Default values for new capitalized assets. Individual assets can override these.</p>
 
-        <div x-show="messages.depreciation" class="alert"
-             :class="messages.depreciation.type === 'success' ? 'alert-success' : 'alert-danger'"
-             x-text="messages.depreciation.text" style="margin-bottom:16px;"></div>
+        <div x-show="messages.depreciation && messages.depreciation.type === 'success'" class="alert alert-success"
+             x-text="messages.depreciation ? messages.depreciation.text : ''" style="margin-bottom:16px;"></div>
+        <div class="form-error-banner" x-show="formErrors.depreciation" x-cloak x-text="formErrors.depreciation" style="margin-bottom:16px;"></div>
 
         <div class="form-row" style="max-width:600px;">
             <div class="form-group" style="flex:1;">
                 <label class="form-label">Default Method</label>
-                <select class="form-select" x-model="depreciation.default_depreciation_method">
+                <select class="form-select" x-model="depreciation.default_depreciation_method"
+                        :class="errors.default_depreciation_method ? 'is-invalid' : ''"
+                        @change="errors.default_depreciation_method = ''">
                     <option value="straight_line">Straight Line</option>
                     <option value="declining_balance">Declining Balance</option>
                     <option value="double_declining">Double Declining Balance</option>
                     <option value="sum_of_years">Sum of Years Digits</option>
                     <option value="units_of_production">Units of Production</option>
                 </select>
+                <div class="field-error" x-show="errors.default_depreciation_method" x-cloak x-text="errors.default_depreciation_method"></div>
             </div>
             <div class="form-group" style="flex:1;">
                 <label class="form-label">Default Useful Life (years)</label>
                 <input type="number" class="form-input" x-model.number="depreciation.default_useful_life_years"
+                       :class="errors.default_useful_life_years ? 'is-invalid' : ''"
+                       @input="errors.default_useful_life_years = ''"
                        min="1" max="50" step="1" placeholder="e.g. 5">
+                <div class="field-error" x-show="errors.default_useful_life_years" x-cloak x-text="errors.default_useful_life_years"></div>
             </div>
         </div>
 
         <div class="form-group" style="max-width:300px;">
             <label class="form-label">Default Salvage Value (%)</label>
             <input type="number" class="form-input" x-model="depreciation.default_salvage_pct"
+                   :class="errors.default_salvage_pct ? 'is-invalid' : ''"
+                   @input="errors.default_salvage_pct = ''"
                    min="0" max="100" step="1" placeholder="e.g. 10">
+            <div class="field-error" x-show="errors.default_salvage_pct" x-cloak x-text="errors.default_salvage_pct"></div>
             <p class="text-secondary text-sm" style="margin:4px 0 0;">Percentage of original cost retained as residual value at end of useful life.</p>
         </div>
 
@@ -291,26 +303,32 @@ require_once FF_ROOT . '/includes/header.php';
         <h3 class="h6" style="margin:0 0 4px;">Tax Filing</h3>
         <p class="text-secondary text-sm" style="margin:0 0 16px;">Configure tax filing frequencies and remittance settings.</p>
 
-        <div x-show="messages.tax_filing" class="alert"
-             :class="messages.tax_filing.type === 'success' ? 'alert-success' : 'alert-danger'"
-             x-text="messages.tax_filing.text" style="margin-bottom:16px;"></div>
+        <div x-show="messages.tax_filing && messages.tax_filing.type === 'success'" class="alert alert-success"
+             x-text="messages.tax_filing ? messages.tax_filing.text : ''" style="margin-bottom:16px;"></div>
+        <div class="form-error-banner" x-show="formErrors.tax_filing" x-cloak x-text="formErrors.tax_filing" style="margin-bottom:16px;"></div>
 
         <div class="form-row" style="max-width:600px;">
             <div class="form-group" style="flex:1;">
                 <label class="form-label">GST Filing Frequency</label>
-                <select class="form-select" x-model="tax_filing.gst_filing_frequency">
+                <select class="form-select" x-model="tax_filing.gst_filing_frequency"
+                        :class="errors.gst_filing_frequency ? 'is-invalid' : ''"
+                        @change="errors.gst_filing_frequency = ''">
                     <option value="monthly">Monthly</option>
                     <option value="quarterly">Quarterly</option>
                     <option value="annually">Annually</option>
                 </select>
+                <div class="field-error" x-show="errors.gst_filing_frequency" x-cloak x-text="errors.gst_filing_frequency"></div>
             </div>
             <div class="form-group" style="flex:1;">
                 <label class="form-label">PST Filing Frequency</label>
-                <select class="form-select" x-model="tax_filing.pst_filing_frequency">
+                <select class="form-select" x-model="tax_filing.pst_filing_frequency"
+                        :class="errors.pst_filing_frequency ? 'is-invalid' : ''"
+                        @change="errors.pst_filing_frequency = ''">
                     <option value="monthly">Monthly</option>
                     <option value="quarterly">Quarterly</option>
                     <option value="annually">Annually</option>
                 </select>
+                <div class="field-error" x-show="errors.pst_filing_frequency" x-cloak x-text="errors.pst_filing_frequency"></div>
             </div>
         </div>
 
@@ -390,8 +408,139 @@ function FF_AcctSettings() {
         // ── Saving state per tab ───────────────────────────────
         saving: { general: false, gl_mapping: false, revenue_mapping: false, depreciation: false, tax_filing: false },
 
-        // ── Success/error messages per tab ─────────────────────
+        // ── Success messages per tab (errors now shown via form-error-banner + field-errors) ─
         messages: { general: null, gl_mapping: null, revenue_mapping: null, depreciation: null, tax_filing: null },
+
+        // ── VALID-2: Per-tab banner errors and per-field errors ───
+        formErrors: { general: '', gl_mapping: '', revenue_mapping: '', depreciation: '', tax_filing: '' },
+        errors: {
+            // general
+            capex_threshold_cad: '',
+            // depreciation
+            default_depreciation_method: '', default_useful_life_years: '', default_salvage_pct: '',
+            // tax_filing
+            gst_filing_frequency: '', pst_filing_frequency: ''
+        },
+
+        // ── VALID-2: Error helpers ──────────────────────────────
+        _extractError(r, fallback) {
+            if (r && r.error) {
+                if (typeof r.error === 'string') return r.error;
+                if (r.error.message) return r.error.message;
+            }
+            if (r && r.message) return r.message;
+            return fallback || 'Something went wrong.';
+        },
+        _clearErrorsForTab(tab) {
+            this.formErrors[tab] = '';
+            if (tab === 'general') {
+                this.errors.capex_threshold_cad = '';
+            } else if (tab === 'depreciation') {
+                this.errors.default_depreciation_method = '';
+                this.errors.default_useful_life_years = '';
+                this.errors.default_salvage_pct = '';
+            } else if (tab === 'tax_filing') {
+                this.errors.gst_filing_frequency = '';
+                this.errors.pst_filing_frequency = '';
+            }
+        },
+        _paintServerErrorsForTab(tab, r, fallback) {
+            // Map possible server field keys back to UI fields by stripping 'accounting.' prefix
+            const fields = (r && r.error && r.error.fields) || (r && r.fields) || null;
+            if (fields && typeof fields === 'object') {
+                let any = false;
+                for (const k in fields) {
+                    if (!Object.prototype.hasOwnProperty.call(fields, k)) continue;
+                    const msg = fields[k];
+                    const bare = k.replace(/^accounting\./, '').replace(/^settings\./, '');
+                    if (Object.prototype.hasOwnProperty.call(this.errors, bare)) {
+                        this.errors[bare] = msg;
+                        any = true;
+                    } else if (bare === '_general' || bare === '') {
+                        this.formErrors[tab] = msg;
+                        any = true;
+                    }
+                }
+                if (!any) {
+                    this.formErrors[tab] = this._extractError(r, fallback);
+                }
+            } else {
+                this.formErrors[tab] = this._extractError(r, fallback);
+            }
+        },
+
+        // ── VALID-2: Per-tab client-side validators ─────────────
+        validateGeneral() {
+            this._clearErrorsForTab('general');
+            let ok = true;
+            const v = this.general.capex_threshold_cad;
+            if (v === '' || v === null || v === undefined || isNaN(v)) {
+                this.errors.capex_threshold_cad = 'CapEx threshold is required.';
+                ok = false;
+            } else if (Number(v) < 0) {
+                this.errors.capex_threshold_cad = 'CapEx threshold must be zero or greater.';
+                ok = false;
+            } else if (!Number.isInteger(Number(v))) {
+                this.errors.capex_threshold_cad = 'CapEx threshold must be a whole number.';
+                ok = false;
+            }
+            return ok;
+        },
+        validateDepreciation() {
+            this._clearErrorsForTab('depreciation');
+            let ok = true;
+            const methods = ['straight_line','declining_balance','double_declining','sum_of_years','units_of_production'];
+            if (!this.depreciation.default_depreciation_method) {
+                this.errors.default_depreciation_method = 'Default depreciation method is required.';
+                ok = false;
+            } else if (!methods.includes(this.depreciation.default_depreciation_method)) {
+                this.errors.default_depreciation_method = 'Please select a valid depreciation method.';
+                ok = false;
+            }
+            const years = this.depreciation.default_useful_life_years;
+            if (years === '' || years === null || years === undefined || isNaN(years)) {
+                this.errors.default_useful_life_years = 'Useful life is required.';
+                ok = false;
+            } else if (!Number.isInteger(Number(years))) {
+                this.errors.default_useful_life_years = 'Useful life must be a whole number.';
+                ok = false;
+            } else if (Number(years) < 1 || Number(years) > 50) {
+                this.errors.default_useful_life_years = 'Useful life must be between 1 and 50 years.';
+                ok = false;
+            }
+            const salvage = String(this.depreciation.default_salvage_pct || '').trim();
+            if (salvage === '') {
+                this.errors.default_salvage_pct = 'Salvage percentage is required.';
+                ok = false;
+            } else if (!/^\d+(\.\d{1,2})?$/.test(salvage)) {
+                this.errors.default_salvage_pct = 'Salvage percentage must be a number.';
+                ok = false;
+            } else if (Number(salvage) < 0 || Number(salvage) > 100) {
+                this.errors.default_salvage_pct = 'Salvage percentage must be between 0 and 100.';
+                ok = false;
+            }
+            return ok;
+        },
+        validateTaxFiling() {
+            this._clearErrorsForTab('tax_filing');
+            let ok = true;
+            const freqs = ['monthly','quarterly','annually'];
+            if (!this.tax_filing.gst_filing_frequency) {
+                this.errors.gst_filing_frequency = 'GST filing frequency is required.';
+                ok = false;
+            } else if (!freqs.includes(this.tax_filing.gst_filing_frequency)) {
+                this.errors.gst_filing_frequency = 'GST filing frequency must be monthly, quarterly, or annually.';
+                ok = false;
+            }
+            if (!this.tax_filing.pst_filing_frequency) {
+                this.errors.pst_filing_frequency = 'PST filing frequency is required.';
+                ok = false;
+            } else if (!freqs.includes(this.tax_filing.pst_filing_frequency)) {
+                this.errors.pst_filing_frequency = 'PST filing frequency must be monthly, quarterly, or annually.';
+                ok = false;
+            }
+            return ok;
+        },
 
         // ── GL Mapping definitions ─────────────────────────────
         // WHY: key values MUST match DB column (minus 'accounting.' prefix)
@@ -436,12 +585,13 @@ function FF_AcctSettings() {
                     settings: data
                 });
                 if (r.success) {
+                    this._clearErrorsForTab(tab);
                     this.messages[tab] = { type: 'success', text: 'Settings saved successfully.' };
                 } else {
-                    this.messages[tab] = { type: 'error', text: r.message || 'Failed to save settings.' };
+                    this._paintServerErrorsForTab(tab, r, 'Failed to save settings.');
                 }
             } catch(e) {
-                this.messages[tab] = { type: 'error', text: 'Network error. Please try again.' };
+                this.formErrors[tab] = 'Network error. Please try again.';
             }
 
             this.saving[tab] = false;
@@ -456,6 +606,7 @@ function FF_AcctSettings() {
         // WHY: Save keys MUST exactly match DB `key` column values.
         // The API update endpoint matches on the exact key.
         saveGeneral() {
+            if (!this.validateGeneral()) return;
             this._save('general', {
                 'accounting.enabled':              this.general.enabled ? 'true' : 'false',
                 'accounting.capex_threshold_cad':  String(this.general.capex_threshold_cad)
@@ -463,6 +614,7 @@ function FF_AcctSettings() {
         },
 
         saveGlMapping() {
+            this._clearErrorsForTab('gl_mapping');
             const data = {};
             for (const m of this.glMappings) {
                 data['accounting.' + m.key] = String(this.gl_mapping[m.key] || '');
@@ -471,6 +623,7 @@ function FF_AcctSettings() {
         },
 
         saveRevenueMapping() {
+            this._clearErrorsForTab('revenue_mapping');
             const data = {};
             for (const lt of this.lineTypes) {
                 data['accounting.revenue_mapping.' + lt] = String(this.revenue_mapping[lt] || '');
@@ -479,6 +632,7 @@ function FF_AcctSettings() {
         },
 
         saveDepreciation() {
+            if (!this.validateDepreciation()) return;
             this._save('depreciation', {
                 'accounting.default_depreciation_method':  this.depreciation.default_depreciation_method,
                 'accounting.default_useful_life_years':    String(this.depreciation.default_useful_life_years),
@@ -487,6 +641,7 @@ function FF_AcctSettings() {
         },
 
         saveTaxFiling() {
+            if (!this.validateTaxFiling()) return;
             this._save('tax_filing', {
                 'accounting.gst_filing_frequency':  this.tax_filing.gst_filing_frequency,
                 'accounting.pst_filing_frequency':  this.tax_filing.pst_filing_frequency

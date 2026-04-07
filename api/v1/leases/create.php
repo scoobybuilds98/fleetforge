@@ -47,36 +47,51 @@ require_permission('leases', 'create');
 
 $body = json_body();
 
+// ════════════════════════════════════════════════════════════
+// VALID-2: collect every validation error into $fields, then
+// return them in one 422 response so the UI can show all
+// problems at once instead of one-at-a-time.
+// ════════════════════════════════════════════════════════════
+$fields = [];
+
 // ── Required fields ────────────────────────────────────────────
 $customerId    = clean_int($body['customer_id'] ?? null);
 $unitId        = clean_int($body['equipment_unit_id'] ?? null);
 $startDate     = clean_date($body['start_date'] ?? null);
-$errors        = [];
 
-if (!$customerId)  $errors['customer_id']        = 'Customer is required.';
-if (!$unitId)      $errors['equipment_unit_id']   = 'Equipment unit is required.';
-if (!$startDate)   $errors['start_date']          = 'Start date is required.';
+if (!$customerId)  $fields['customer_id']        = 'Please select a customer.';
+if (!$unitId)      $fields['equipment_unit_id']  = 'Please select an equipment unit.';
+if (!$startDate)   $fields['start_date']         = 'Start date is required.';
 
-if ($errors) {
-    json_error('VALIDATION_ERROR', 'Validation failed.', 422, ['errors' => $errors]);
-}
+// ── Rate fields — at least one must be > 0; negatives rejected ─
+// VALID-2: use clean_decimal() so we can detect negatives — the
+// old code used clean_non_negative_decimal() which silently
+// coerced negatives to null/0, meaning a -$50 rate looked fine.
+$dailyRateIn   = clean_decimal($body['daily_rate']   ?? null);
+$weeklyRateIn  = clean_decimal($body['weekly_rate']  ?? null);
+$monthlyRateIn = clean_decimal($body['monthly_rate'] ?? null);
+$mileageRateIn = clean_decimal($body['mileage_rate'] ?? null);
 
-// ── Rate fields — at least one must be > 0; negatives rejected ────
-// FIX #1 (negative rates), FIX #2 (all-zero rates), FIX #6 (discount bounds)
-$dailyRate    = clean_non_negative_decimal($body['daily_rate']   ?? null) ?? '0.00';
-$weeklyRate   = clean_non_negative_decimal($body['weekly_rate']  ?? null) ?? '0.00';
-$monthlyRate  = clean_non_negative_decimal($body['monthly_rate'] ?? null) ?? '0.00';
-$mileageRate  = clean_non_negative_decimal($body['mileage_rate'] ?? null) ?? '0.0000';
+if ($dailyRateIn   !== null && bccomp($dailyRateIn,   '0', 4) < 0) $fields['daily_rate']   = 'Daily rate cannot be negative.';
+if ($weeklyRateIn  !== null && bccomp($weeklyRateIn,  '0', 4) < 0) $fields['weekly_rate']  = 'Weekly rate cannot be negative.';
+if ($monthlyRateIn !== null && bccomp($monthlyRateIn, '0', 4) < 0) $fields['monthly_rate'] = 'Monthly rate cannot be negative.';
+if ($mileageRateIn !== null && bccomp($mileageRateIn, '0', 4) < 0) $fields['mileage_rate'] = 'Mileage rate cannot be negative.';
+
+$dailyRate   = ($dailyRateIn   !== null && bccomp($dailyRateIn,   '0', 4) >= 0) ? $dailyRateIn   : '0.00';
+$weeklyRate  = ($weeklyRateIn  !== null && bccomp($weeklyRateIn,  '0', 4) >= 0) ? $weeklyRateIn  : '0.00';
+$monthlyRate = ($monthlyRateIn !== null && bccomp($monthlyRateIn, '0', 4) >= 0) ? $monthlyRateIn : '0.00';
+$mileageRate = ($mileageRateIn !== null && bccomp($mileageRateIn, '0', 4) >= 0) ? $mileageRateIn : '0.0000';
+
 // Enforce: at least one rate must be positive (spec §7.5 docblock)
 if (
+    !isset($fields['daily_rate']) && !isset($fields['weekly_rate']) &&
+    !isset($fields['monthly_rate']) && !isset($fields['mileage_rate']) &&
     bccomp($dailyRate, '0', 4) <= 0 &&
     bccomp($weeklyRate, '0', 4) <= 0 &&
     bccomp($monthlyRate, '0', 4) <= 0 &&
     bccomp($mileageRate, '0', 4) <= 0
 ) {
-    json_error('VALIDATION_ERROR',
-        'At least one rate (daily, weekly, monthly, or mileage) must be greater than zero.', 422,
-        ['errors' => ['daily_rate' => 'At least one rate must be greater than zero.']]);
+    $fields['daily_rate'] = 'At least one rate (daily, weekly, monthly, or mileage) must be greater than zero.';
 }
 
 // ── Optional fields ────────────────────────────────────────────
@@ -87,37 +102,67 @@ $billingCycle   = in_array($body['billing_cycle'] ?? '', ['monthly','on_close_on
 $gstExempt      = isset($body['gst_exempt']) ? (bool) $body['gst_exempt'] : null;
 $pstExempt      = isset($body['pst_exempt']) ? (bool) $body['pst_exempt'] : null;
 $discountType   = in_array($body['discount_type'] ?? '', ['none','percentage','flat']) ? $body['discount_type'] : 'none';
-// FIX #5 / #6: discount must be >= 0; percentage capped at 100
-$discountValue  = clean_non_negative_decimal($body['discount_value'] ?? null) ?? '0.0000';
-if ($discountType === 'percentage' && bccomp($discountValue, '100', 4) > 0) {
-    json_error('VALIDATION_ERROR',
-        'Percentage discount cannot exceed 100%.', 422,
-        ['errors' => ['discount_value' => 'Percentage discount cannot exceed 100%.']]);
+
+$discountValueIn = clean_decimal($body['discount_value'] ?? null);
+if ($discountValueIn !== null && bccomp($discountValueIn, '0', 4) < 0) {
+    $fields['discount_value'] = 'Discount value cannot be negative.';
 }
+$discountValue = ($discountValueIn !== null && bccomp($discountValueIn, '0', 4) >= 0) ? $discountValueIn : '0.0000';
+if ($discountType === 'percentage' && bccomp($discountValue, '100', 4) > 0) {
+    $fields['discount_value'] = 'Discount cannot exceed 100%.';
+}
+
 $insuranceOptIn = isset($body['insurance_opt_in']) ? (bool) $body['insurance_opt_in'] : false;
-// FIX #7: insurance/warranty costs must be >= 0
-$insuranceCost  = clean_non_negative_decimal($body['insurance_cost'] ?? null) ?? '0.00';
+$insuranceCostIn = clean_decimal($body['insurance_cost'] ?? null);
+if ($insuranceCostIn !== null && bccomp($insuranceCostIn, '0', 4) < 0) {
+    $fields['insurance_cost'] = 'Insurance cost cannot be negative.';
+}
+$insuranceCost = ($insuranceCostIn !== null && bccomp($insuranceCostIn, '0', 4) >= 0) ? $insuranceCostIn : '0.00';
+
 $warrantyOptIn  = isset($body['warranty_opt_in']) ? (bool) $body['warranty_opt_in'] : false;
-$warrantyCost   = clean_non_negative_decimal($body['warranty_cost'] ?? null) ?? '0.00';
+$warrantyCostIn = clean_decimal($body['warranty_cost'] ?? null);
+if ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) < 0) {
+    $fields['warranty_cost'] = 'Warranty cost cannot be negative.';
+}
+$warrantyCost = ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) >= 0) ? $warrantyCostIn : '0.00';
+
 $poNumber       = clean_string($body['po_number'] ?? null, 100);
 $notes          = clean_string($body['notes'] ?? null, 5000);
 $internalNotes  = clean_string($body['internal_notes'] ?? null, 5000);
 $rateNotes      = clean_string($body['rate_notes'] ?? null, 5000);
-// FIX #4: estimated_mileage must be >= 0
-$estimatedMileage  = clean_non_negative_decimal($body['estimated_mileage'] ?? null) ?? '0.00';
-// FIX #3: mileage_at_start must be >= 0
-$mileageAtStart    = clean_non_negative_int($body['mileage_at_start'] ?? null);
+
+$estimatedMileageIn = clean_decimal($body['estimated_mileage'] ?? null);
+if ($estimatedMileageIn !== null && bccomp($estimatedMileageIn, '0', 4) < 0) {
+    $fields['estimated_mileage'] = 'Estimated mileage cannot be negative.';
+}
+$estimatedMileage = ($estimatedMileageIn !== null && bccomp($estimatedMileageIn, '0', 4) >= 0) ? $estimatedMileageIn : '0.00';
+
+$mileageAtStartRaw = $body['mileage_at_start'] ?? null;
+if ($mileageAtStartRaw !== null && $mileageAtStartRaw !== '') {
+    $mileageAtStartInt = clean_int($mileageAtStartRaw);
+    if ($mileageAtStartInt === null || $mileageAtStartInt < 0) {
+        $fields['mileage_at_start'] = 'Starting mileage cannot be negative.';
+        $mileageAtStart = null;
+    } else {
+        $mileageAtStart = $mileageAtStartInt;
+    }
+} else {
+    $mileageAtStart = null;
+}
+
 $minimumEndDate    = clean_date($body['minimum_end_date'] ?? null);
 
 // ── Date validation ─────────────────────────────────────────────
-if ($endDate && $endDate < $startDate) {
-    json_error('VALIDATION_ERROR', 'end_date must be on or after start_date.', 422,
-        ['errors' => ['end_date' => 'End date must be on or after start date.']]);
+if ($startDate && $endDate && $endDate < $startDate) {
+    $fields['end_date'] = 'End date must be after start date.';
 }
-// FIX #8: minimum_end_date must be >= start_date
-if ($minimumEndDate && $minimumEndDate < $startDate) {
-    json_error('VALIDATION_ERROR', 'minimum_end_date must be on or after start_date.', 422,
-        ['errors' => ['minimum_end_date' => 'Minimum end date must be on or after start date.']]);
+if ($startDate && $minimumEndDate && $minimumEndDate < $startDate) {
+    $fields['minimum_end_date'] = 'Minimum end date must be on or after start date.';
+}
+
+// ── Bail out if any validation errors collected ────────────────
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Fetch customer (for snapshot + tax defaults) ───────────────
@@ -210,12 +255,21 @@ db_transaction(function () use (
     );
 
     if (!$unit) {
-        json_error('NOT_FOUND', 'Equipment unit not found.', 404);
+        json_validation_error(
+            ['equipment_unit_id' => 'Equipment unit not found.'],
+            'Equipment unit not found.'
+        );
     }
 
     if ($unit['status'] !== 'available') {
-        json_error('UNIT_UNAVAILABLE',
-            "Unit {$unit['unit_number']} is not available (status: {$unit['status']}).", 409);
+        // VALID-2: specific user-facing message per spec
+        // "This unit is not available for the selected dates" / "already has an active lease"
+        $isLeased = in_array($unit['status'], ['on_lease', 'reserved'], true);
+        $msg = $isLeased
+            ? "Unit {$unit['unit_number']} already has an active lease."
+            : "Unit {$unit['unit_number']} is not available for the selected dates (status: {$unit['status']}).";
+        json_error('UNIT_UNAVAILABLE', $msg, 409,
+            ['fields' => ['equipment_unit_id' => $msg]]);
     }
 
     // ── Build snapshots ────────────────────────────────────────

@@ -43,29 +43,47 @@ require_method('POST');
 require_auth_api();
 require_permission('reservations', 'create');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-// ── Required fields ────────────────────────────────────────────
+// ── Required fields — VALID-2: accumulate every error ──────────
 $contactName = clean_string($body['contact_name'] ?? null, 255);
 $companyName = clean_string($body['company_name'] ?? null, 255);
 $pickupDate  = clean_date($body['pickup_date'] ?? null);
 $quantity    = clean_int($body['quantity'] ?? null);
-$errors      = [];
 
-if (!$contactName) $errors['contact_name'] = 'Contact name is required.';
-if (!$companyName) $errors['company_name'] = 'Company name is required.';
-if (!$pickupDate)  {
-    $errors['pickup_date'] = 'Pickup date is required.';
-} elseif ($pickupDate < date('Y-m-d')) {
-    // FIX #7: reservations are forward-looking; block past pickup dates
-    $errors['pickup_date'] = 'Pickup date cannot be in the past.';
+if (!$contactName) {
+    $fields['contact_name'] = 'Contact name is required.';
 }
-// FIX #8: cap quantity at 500 to prevent absurd values
-if (!$quantity || $quantity < 1) $errors['quantity'] = 'Quantity must be at least 1.';
-elseif ($quantity > 500)         $errors['quantity'] = 'Quantity cannot exceed 500.';
+if (!$companyName) {
+    $fields['company_name'] = 'Company name is required.';
+}
+if (!$pickupDate) {
+    $fields['pickup_date'] = 'Pickup date is required.';
+} elseif ($pickupDate < date('Y-m-d')) {
+    // Reservations are forward-looking
+    $fields['pickup_date'] = 'Pickup date cannot be in the past.';
+}
+// Quantity: must be between 1 and 500
+if ($quantity === null || $quantity < 1) {
+    $fields['quantity'] = 'Quantity must be at least 1.';
+} elseif ($quantity > 500) {
+    $fields['quantity'] = 'Quantity cannot exceed 500.';
+}
 
-if ($errors) {
-    json_error('VALIDATION_ERROR', 'Validation failed.', 422, ['errors' => $errors]);
+// Email format check (optional but must be valid when provided)
+$contactEmail = null;
+if (array_key_exists('contact_email', $body)
+    && $body['contact_email'] !== null
+    && $body['contact_email'] !== '') {
+    $contactEmail = clean_email($body['contact_email']);
+    if ($contactEmail === null) {
+        $fields['contact_email'] = 'Please enter a valid email address.';
+    }
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Optional fields ────────────────────────────────────────────
@@ -73,8 +91,7 @@ $allowedStatuses = ['pending', 'confirmed'];
 $status       = in_array($body['status'] ?? '', $allowedStatuses) ? $body['status'] : 'pending';
 $customerId   = clean_int($body['customer_id'] ?? null);
 $contactPhone = clean_string($body['contact_phone'] ?? null, 50);
-$contactEmail = clean_email($body['contact_email'] ?? null);
-$pickupTime   = clean_time($body['pickup_time'] ?? null);  // FIX #18: validated HH:MM or HH:MM:SS
+$pickupTime   = clean_time($body['pickup_time'] ?? null);  // validated HH:MM or HH:MM:SS
 $yardLocation = clean_string($body['yard_location'] ?? null, 100);
 $purpose      = clean_string($body['purpose'] ?? null, 500);
 $allowedPriorities = ['low', 'medium', 'high', 'urgent'];
@@ -91,31 +108,31 @@ $forceOverride = !empty($body['force_override']);
 // ── Units array ────────────────────────────────────────────────
 $units = is_array($body['units'] ?? null) ? $body['units'] : [];
 
-// Validate each unit object
+// Validate each unit object — VALID-2: accumulate every error into fields['units']
 $unitErrors = [];
-$seenUnitIds = []; // FIX #9: track seen equipment_unit_ids to catch duplicates
+$seenUnitIds = []; // track seen equipment_unit_ids to catch duplicates
 foreach ($units as $i => $u) {
     $entryType = $u['entry_type'] ?? 'system';
     if (!in_array($entryType, ['system', 'manual'])) {
-        $unitErrors[] = "Unit $i: entry_type must be 'system' or 'manual'.";
+        $unitErrors[] = "Unit " . ($i + 1) . ": entry type must be 'system' or 'manual'.";
         continue;
     }
     if ($entryType === 'system' && empty($u['equipment_unit_id'])) {
-        $unitErrors[] = "Unit $i: equipment_unit_id is required for system entry type.";
+        $unitErrors[] = "Unit " . ($i + 1) . ": please select an equipment unit.";
     } elseif ($entryType === 'system' && !empty($u['equipment_unit_id'])) {
-        // FIX #9: prevent the same unit from being added twice in one reservation
+        // Prevent the same unit from being added twice in one reservation
         $uid = (int) $u['equipment_unit_id'];
         if (isset($seenUnitIds[$uid])) {
-            $unitErrors[] = "Unit $i: equipment_unit_id $uid appears more than once in this reservation.";
+            $unitErrors[] = "Unit " . ($i + 1) . ": this equipment unit is listed more than once.";
         }
         $seenUnitIds[$uid] = true;
     }
     if (empty($u['unit_number'])) {
-        $unitErrors[] = "Unit $i: unit_number is required.";
+        $unitErrors[] = "Unit " . ($i + 1) . ": unit number is required.";
     }
 }
 if ($unitErrors) {
-    json_error('VALIDATION_ERROR', implode(' ', $unitErrors), 422);
+    json_validation_error(['units' => implode(' ', $unitErrors)], implode(' ', $unitErrors));
 }
 
 // ── Validate customer exists (if provided) ─────────────────────
@@ -125,7 +142,7 @@ if ($customerId) {
         [$customerId]
     );
     if (!$customer) {
-        json_error('NOT_FOUND', 'Customer not found.', 404);
+        json_validation_error(['customer_id' => 'Customer not found.'], 'Customer not found.');
     }
 }
 

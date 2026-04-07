@@ -22,11 +22,18 @@ require_method('POST');
 require_auth_api();
 require_permission('accounting_settings', 'edit');
 
-$input = json_decode(file_get_contents('php://input'), true) ?? [];
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 $settingsToUpdate = $input['settings'] ?? [];
 
+// Allow a form-encoded "settings" JSON string
+if (is_string($settingsToUpdate)) {
+    $settingsToUpdate = json_decode($settingsToUpdate, true) ?? [];
+}
+
 if (empty($settingsToUpdate) || !is_array($settingsToUpdate)) {
-    json_error('No settings provided.', 400);
+    json_validation_error(['settings' => 'No settings provided.'], 'No settings provided.');
 }
 
 // ── Whitelist of allowed setting keys ────────────────────────

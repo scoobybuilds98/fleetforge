@@ -174,9 +174,8 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- Error display -->
-    <template x-if="error">
-        <div class="alert alert-danger" style="margin-bottom:16px;" x-text="error"></div>
-    </template>
+    <!-- VALID-2: form-level error banner injected by FF_Validate.banner() -->
+    <div class="form-error-banner" data-form-error></div>
 
     <!-- Submit -->
     <div style="display:flex; gap:12px; align-items:center;">
@@ -243,10 +242,37 @@ function FF_InvoiceCreate() {
             }
         },
 
+        validate() {
+            // VALID-2
+            const f = document.querySelector('form');
+            FF_Validate.clear(f);
+            let ok = true;
+            if (!this.form.lease_id) {
+                FF_Validate.field(f, 'lease_id', 'Please select a lease.');
+                ok = false;
+            }
+            if (!this.form.period_start) {
+                FF_Validate.field(f, 'period_start', 'Invoice date is required.');
+                ok = false;
+            }
+            if (!this.form.period_end) {
+                FF_Validate.field(f, 'period_end', 'Due date is required.');
+                ok = false;
+            }
+            if (this.form.period_start && this.form.period_end &&
+                this.form.period_end < this.form.period_start) {
+                FF_Validate.field(f, 'period_end', 'Due date cannot be before invoice date.');
+                ok = false;
+            }
+            if (!ok) FF_Validate.scrollToFirst(f);
+            return ok;
+        },
+
         async submit() {
+            if (!this.validate()) return;
             this.submitting = true;
-            this.error = null;
             this.result = null;
+            const f = document.querySelector('form');
 
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/invoices/create') ?>', this.form);
@@ -254,15 +280,18 @@ function FF_InvoiceCreate() {
                     this.result = r.data;
                     this.showSuccessOverlay = true;
                     const _newId = r.data.id;
-                    // Redirect to invoice detail after overlay animation
                     setTimeout(() => {
                         window.location.href = '<?= base_url('invoices/show') ?>?id=' + _newId;
                     }, 3500);
+                } else if (r.error?.code === 'VALIDATION_ERROR' && r.error?.fields) {
+                    FF_Validate.applyApi(f, r.error);
                 } else {
-                    this.error = r.error?.message || 'Failed to create invoice.';
+                    FF_Validate.banner(f, r.error?.message || 'Failed to create invoice.');
+                    FF_Validate.scrollToFirst(f);
                 }
             } catch(e) {
-                this.error = 'Network error. Please try again.';
+                FF_Validate.banner(f, 'Network error. Please try again.');
+                FF_Validate.scrollToFirst(f);
             }
             this.submitting = false;
         },

@@ -88,24 +88,27 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- Add Note Form -->
             <div class="card" style="padding:16px;margin-bottom:16px;" x-show="can_create">
                 <div style="font-weight:600;font-size:0.875rem;margin-bottom:12px;">Add Collection Note</div>
+                <div class="form-error-banner" x-show="noteFormError" x-cloak x-text="noteFormError" style="margin-bottom:12px;"></div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Date</label>
-                        <input type="date" x-model="noteForm.note_date" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <input type="date" x-model="noteForm.note_date" @change="noteErrors.note_date = ''" :class="noteErrors.note_date ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <div class="field-error" x-show="noteErrors.note_date" x-cloak x-text="noteErrors.note_date"></div>
                     </div>
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Contact Method</label>
-                        <select x-model="noteForm.contact_method" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <select x-model="noteForm.contact_method" @change="noteErrors.contact_method = ''" :class="noteErrors.contact_method ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                             <option value="phone">Phone</option>
                             <option value="email">Email</option>
                             <option value="letter">Letter</option>
                             <option value="in_person">In Person</option>
                             <option value="other">Other</option>
                         </select>
+                        <div class="field-error" x-show="noteErrors.contact_method" x-cloak x-text="noteErrors.contact_method"></div>
                     </div>
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Outcome</label>
-                        <select x-model="noteForm.outcome" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <select x-model="noteForm.outcome" @change="noteErrors.outcome = ''" :class="noteErrors.outcome ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                             <option value="no_answer">No Answer</option>
                             <option value="left_message">Left Message</option>
                             <option value="spoke_with_customer">Spoke with Customer</option>
@@ -113,6 +116,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="dispute">Dispute</option>
                             <option value="other">Other</option>
                         </select>
+                        <div class="field-error" x-show="noteErrors.outcome" x-cloak x-text="noteErrors.outcome"></div>
                     </div>
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Follow-up Date</label>
@@ -121,9 +125,10 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div style="margin-bottom:10px;">
                     <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Note</label>
-                    <textarea x-model="noteForm.note" rows="3" class="form-input" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;resize:vertical;"></textarea>
+                    <textarea x-model="noteForm.note" @input="noteErrors.note = ''" :class="noteErrors.note ? 'is-invalid' : ''" rows="3" class="form-input" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;resize:vertical;"></textarea>
+                    <div class="field-error" x-show="noteErrors.note" x-cloak x-text="noteErrors.note"></div>
                 </div>
-                <button class="btn btn-primary btn-sm" @click="saveNote()" :disabled="!noteForm.note">Save Note</button>
+                <button class="btn btn-primary btn-sm" @click="saveNote()">Save Note</button>
             </div>
 
             <!-- Notes List -->
@@ -170,14 +175,17 @@ require_once FF_ROOT . '/includes/header.php';
         <div>
             <div class="card" style="padding:16px;margin-bottom:16px;" x-show="can_create">
                 <div style="font-weight:600;font-size:0.875rem;margin-bottom:12px;">Record Promise to Pay</div>
+                <div class="form-error-banner" x-show="promiseFormError" x-cloak x-text="promiseFormError" style="margin-bottom:12px;"></div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Promise Date</label>
-                        <input type="date" x-model="promiseForm.promise_date" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <input type="date" x-model="promiseForm.promise_date" @change="promiseErrors.promise_date = ''" :class="promiseErrors.promise_date ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <div class="field-error" x-show="promiseErrors.promise_date" x-cloak x-text="promiseErrors.promise_date"></div>
                     </div>
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Amount</label>
-                        <input type="number" step="0.01" min="0" x-model="promiseForm.promised_amount" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <input type="number" step="0.01" min="0" x-model="promiseForm.promised_amount" @input="promiseErrors.promised_amount = ''" :class="promiseErrors.promised_amount ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <div class="field-error" x-show="promiseErrors.promised_amount" x-cloak x-text="promiseErrors.promised_amount"></div>
                     </div>
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Promised By</label>
@@ -188,7 +196,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="text" x-model="promiseForm.notes" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                     </div>
                 </div>
-                <button class="btn btn-primary btn-sm" @click="savePromise()" :disabled="!promiseForm.promised_amount || !promiseForm.promise_date">Record Promise</button>
+                <button class="btn btn-primary btn-sm" @click="savePromise()">Record Promise</button>
             </div>
 
             <div class="card" style="overflow-x:auto;">
@@ -244,23 +252,26 @@ require_once FF_ROOT . '/includes/header.php';
         <div>
             <div class="card" style="padding:16px;margin-bottom:16px;" x-show="can_create">
                 <div style="font-weight:600;font-size:0.875rem;margin-bottom:12px;">Generate Dunning Letter</div>
+                <div class="form-error-banner" x-show="dunningFormError" x-cloak x-text="dunningFormError" style="margin-bottom:12px;"></div>
                 <div style="display:flex;gap:10px;align-items:end;">
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Letter Type</label>
-                        <select x-model="dunningForm.letter_type" class="form-input" style="padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <select x-model="dunningForm.letter_type" @change="dunningErrors.letter_type = ''" :class="dunningErrors.letter_type ? 'is-invalid' : ''" class="form-input" style="padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                             <option value="reminder_30">30-Day Reminder</option>
                             <option value="reminder_60">60-Day Second Notice</option>
                             <option value="warning_90">90-Day Final Warning</option>
                             <option value="final_notice">Final Notice / Collections</option>
                         </select>
+                        <div class="field-error" x-show="dunningErrors.letter_type" x-cloak x-text="dunningErrors.letter_type"></div>
                     </div>
                     <div>
                         <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Send Method</label>
-                        <select x-model="dunningForm.sent_method" class="form-input" style="padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <select x-model="dunningForm.sent_method" @change="dunningErrors.sent_method = ''" :class="dunningErrors.sent_method ? 'is-invalid' : ''" class="form-input" style="padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                             <option value="email">Email</option>
                             <option value="mail">Mail</option>
                             <option value="both">Both</option>
                         </select>
+                        <div class="field-error" x-show="dunningErrors.sent_method" x-cloak x-text="dunningErrors.sent_method"></div>
                     </div>
                     <button class="btn btn-warning btn-sm" @click="sendDunning()" :disabled="dunningBusy" style="height:36px;">
                         <span x-show="!dunningBusy">Generate & Send</span>
@@ -371,6 +382,47 @@ function collectionsPage() {
         promiseForm: { promise_date: '', promised_amount: '', promised_by: '', notes: '' },
         dunningForm: { letter_type: 'reminder_30', sent_method: 'email' },
 
+        // Per-form error state
+        noteFormError: '',
+        noteErrors: { note_date: '', contact_method: '', outcome: '', note: '' },
+        promiseFormError: '',
+        promiseErrors: { promise_date: '', promised_amount: '' },
+        dunningFormError: '',
+        dunningErrors: { letter_type: '', sent_method: '' },
+
+        _extractError(r, fallback) {
+            if (!r) return fallback || 'An unexpected error occurred.';
+            if (r.error && r.error.message) return r.error.message;
+            if (r.message) return r.message;
+            return fallback || 'An unexpected error occurred.';
+        },
+
+        _clearErrors(errorsObj, bannerKey) {
+            for (const k in errorsObj) errorsObj[k] = '';
+            this[bannerKey] = '';
+        },
+
+        _paintErrors(errorsObj, bannerKey, r, fallback) {
+            const err = r && r.error ? r.error : r;
+            const fields = (err && err.fields) || (r && r.fields) || {};
+            for (const k in errorsObj) errorsObj[k] = '';
+            let painted = false;
+            for (const k in fields) {
+                if (k === '_general') continue;
+                if (k in errorsObj) {
+                    errorsObj[k] = fields[k];
+                    painted = true;
+                }
+            }
+            if (fields._general) {
+                this[bannerKey] = fields._general;
+            } else if (!painted) {
+                this[bannerKey] = this._extractError(r, fallback);
+            } else {
+                this[bannerKey] = this._extractError(r, 'Please correct the highlighted fields.');
+            }
+        },
+
         init() {
             const urlCust = new URLSearchParams(window.location.search).get('customer_id');
             if (urlCust) { this.customerId = urlCust; this.loadAll(); }
@@ -412,7 +464,40 @@ function collectionsPage() {
             } catch(e) { console.error(e); }
         },
 
+        validateNote() {
+            this._clearErrors(this.noteErrors, 'noteFormError');
+            let ok = true;
+            if (!this.noteForm.note_date) {
+                this.noteErrors.note_date = 'Please select a date.';
+                ok = false;
+            }
+            const validMethods = ['phone', 'email', 'letter', 'in_person', 'other'];
+            if (!this.noteForm.contact_method || !validMethods.includes(this.noteForm.contact_method)) {
+                this.noteErrors.contact_method = 'Contact method must be one of: phone, email, letter, in_person, other.';
+                ok = false;
+            }
+            const validOutcomes = ['no_answer', 'left_message', 'spoke_with_customer', 'payment_promised', 'dispute', 'other'];
+            if (!this.noteForm.outcome || !validOutcomes.includes(this.noteForm.outcome)) {
+                this.noteErrors.outcome = 'Outcome must be one of: no_answer, left_message, spoke_with_customer, payment_promised, dispute, other.';
+                ok = false;
+            }
+            if (!this.noteForm.note || !this.noteForm.note.trim()) {
+                this.noteErrors.note = 'Note text is required.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async saveNote() {
+            if (!this.customerId) {
+                this.noteFormError = 'Please select a customer first.';
+                return;
+            }
+            if (!this.validateNote()) {
+                this.noteFormError = 'Please correct the highlighted fields.';
+                return;
+            }
+            this.noteFormError = '';
             const body = new FormData();
             body.append('customer_id', this.customerId);
             body.append('note_date', this.noteForm.note_date);
@@ -424,12 +509,48 @@ function collectionsPage() {
             try {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ar/collection_notes/create.php'), { method: 'POST', body });
                 const j = await r.json();
-                if (j.success) { this.noteForm.note = ''; this.loadNotes(); FF_Toast.success('Collection note saved.'); }
-                else FF_Toast.error(j.message || 'Failed to save.');
-            } catch(e) { FF_Toast.error('Error saving note.'); }
+                if (j.success) {
+                    this.noteForm.note = '';
+                    this._clearErrors(this.noteErrors, 'noteFormError');
+                    this.loadNotes();
+                    FF_Toast.success('Collection note saved.');
+                } else {
+                    this._paintErrors(this.noteErrors, 'noteFormError', j, 'Failed to save note.');
+                }
+            } catch(e) { this.noteFormError = 'Network error. Please try again.'; }
+        },
+
+        validatePromise() {
+            this._clearErrors(this.promiseErrors, 'promiseFormError');
+            let ok = true;
+            if (!this.promiseForm.promise_date) {
+                this.promiseErrors.promise_date = 'Promise date is required.';
+                ok = false;
+            }
+            const amt = String(this.promiseForm.promised_amount || '').trim();
+            if (!amt) {
+                this.promiseErrors.promised_amount = 'Promised amount is required.';
+                ok = false;
+            } else if (isNaN(parseFloat(amt))) {
+                this.promiseErrors.promised_amount = 'Promised amount must be a valid number.';
+                ok = false;
+            } else if (parseFloat(amt) <= 0) {
+                this.promiseErrors.promised_amount = 'Promised amount must be greater than zero.';
+                ok = false;
+            }
+            return ok;
         },
 
         async savePromise() {
+            if (!this.customerId) {
+                this.promiseFormError = 'Please select a customer first.';
+                return;
+            }
+            if (!this.validatePromise()) {
+                this.promiseFormError = 'Please correct the highlighted fields.';
+                return;
+            }
+            this.promiseFormError = '';
             const body = new FormData();
             body.append('customer_id', this.customerId);
             body.append('promise_date', this.promiseForm.promise_date);
@@ -440,9 +561,15 @@ function collectionsPage() {
             try {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ar/promise_to_pay/create.php'), { method: 'POST', body });
                 const j = await r.json();
-                if (j.success) { this.promiseForm = {promise_date:'',promised_amount:'',promised_by:'',notes:''}; this.loadPromises(); FF_Toast.success('Promise recorded.'); }
-                else FF_Toast.error(j.message || 'Failed.');
-            } catch(e) { FF_Toast.error('Error.'); }
+                if (j.success) {
+                    this.promiseForm = {promise_date:'',promised_amount:'',promised_by:'',notes:''};
+                    this._clearErrors(this.promiseErrors, 'promiseFormError');
+                    this.loadPromises();
+                    FF_Toast.success('Promise recorded.');
+                } else {
+                    this._paintErrors(this.promiseErrors, 'promiseFormError', j, 'Failed to record promise.');
+                }
+            } catch(e) { this.promiseFormError = 'Network error. Please try again.'; }
         },
 
         async updatePromise(id, status) {
@@ -454,11 +581,36 @@ function collectionsPage() {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ar/promise_to_pay/update.php'), { method: 'POST', body });
                 const j = await r.json();
                 if (j.success) { this.loadPromises(); FF_Toast.success('Promise marked as ' + status + '.'); }
-                else FF_Toast.error(j.message || 'Failed.');
-            } catch(e) { FF_Toast.error('Error.'); }
+                else FF_Toast.error(this._extractError(j, 'Failed to update promise.'));
+            } catch(e) { FF_Toast.error('Network error.'); }
+        },
+
+        validateDunning() {
+            this._clearErrors(this.dunningErrors, 'dunningFormError');
+            let ok = true;
+            const validTypes = ['reminder_30', 'reminder_60', 'warning_90', 'final_notice'];
+            if (!this.dunningForm.letter_type || !validTypes.includes(this.dunningForm.letter_type)) {
+                this.dunningErrors.letter_type = 'Letter type must be one of: reminder_30, reminder_60, warning_90, final_notice.';
+                ok = false;
+            }
+            const validMethods = ['email', 'mail', 'both'];
+            if (!this.dunningForm.sent_method || !validMethods.includes(this.dunningForm.sent_method)) {
+                this.dunningErrors.sent_method = 'Send method must be one of: email, mail, both.';
+                ok = false;
+            }
+            return ok;
         },
 
         async sendDunning() {
+            if (!this.customerId) {
+                this.dunningFormError = 'Please select a customer first.';
+                return;
+            }
+            if (!this.validateDunning()) {
+                this.dunningFormError = 'Please correct the highlighted fields.';
+                return;
+            }
+            this.dunningFormError = '';
             this.dunningBusy = true;
             const body = new FormData();
             body.append('customer_id', this.customerId);
@@ -468,9 +620,14 @@ function collectionsPage() {
             try {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ar/dunning_letter.php'), { method: 'POST', body });
                 const j = await r.json();
-                if (j.success) { this.loadAll(); FF_Toast.success('Dunning letter generated.'); }
-                else FF_Toast.error(j.message || 'Failed to generate.');
-            } catch(e) { FF_Toast.error('Error generating letter.'); }
+                if (j.success) {
+                    this._clearErrors(this.dunningErrors, 'dunningFormError');
+                    this.loadAll();
+                    FF_Toast.success('Dunning letter generated.');
+                } else {
+                    this._paintErrors(this.dunningErrors, 'dunningFormError', j, 'Failed to generate dunning letter.');
+                }
+            } catch(e) { this.dunningFormError = 'Network error. Please try again.'; }
             this.dunningBusy = false;
         },
 

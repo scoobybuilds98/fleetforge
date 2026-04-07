@@ -268,11 +268,8 @@ require_once FF_ROOT . '/includes/header.php';
             </button>
         </div>
 
-        <template x-if="globalError">
-            <div class="card card-body" style="background:var(--color-danger-light);color:var(--color-danger-text);margin-bottom:1rem;">
-                <strong>Error:</strong> <span x-text="globalError"></span>
-            </div>
-        </template>
+        <!-- VALID-2: form-level error banner is injected by FF_Validate.banner() -->
+        <div class="form-error-banner" data-form-error></div>
 
     </form>
 </div>
@@ -297,38 +294,72 @@ function FF_EditLease() {
             notes:              <?= json_encode($lease['notes'] ?? '') ?>,
             internal_notes:     <?= json_encode($lease['internal_notes'] ?? '') ?>,
         },
-        errors:      {},
-        globalError: null,
+        errors:      {},     // kept for x-show="errors.end_date" legacy bindings
         submitting:  false,
 
         init() {},
 
         validate() {
+            // VALID-2: use FF_Validate for per-field error display
+            const f = document.querySelector('form');
+            FF_Validate.clear(f);
             this.errors = {};
+            let ok = true;
             const startDate = <?= json_encode($lease['start_date']) ?>;
+
             if (this.form.end_date && this.form.end_date < startDate) {
-                this.errors.end_date = 'End date must be on or after start date.';
+                FF_Validate.field(f, 'end_date', 'End date must be after start date.');
+                this.errors.end_date = 'End date must be after start date.';
+                ok = false;
             }
-            return Object.keys(this.errors).length === 0;
+
+            const numChecks = [
+                ['mileage_at_start',  'Starting mileage cannot be negative.'],
+                ['mileage_at_end',    'End mileage cannot be negative.'],
+                ['estimated_mileage', 'Estimated mileage cannot be negative.'],
+                ['insurance_cost',    'Insurance cost cannot be negative.'],
+                ['warranty_cost',     'Warranty cost cannot be negative.'],
+            ];
+            numChecks.forEach(([k, msg]) => {
+                const v = this.form[k];
+                if (v !== '' && v !== null && v !== undefined && Number(v) < 0) {
+                    FF_Validate.field(f, k, msg);
+                    ok = false;
+                }
+            });
+
+            if (this.form.mileage_at_end && this.form.mileage_at_start &&
+                Number(this.form.mileage_at_end) < Number(this.form.mileage_at_start)) {
+                FF_Validate.field(f, 'mileage_at_end',
+                    'End mileage must be greater than or equal to start mileage.');
+                ok = false;
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(f);
+            return ok;
         },
 
         async submit() {
             if (!this.validate()) return;
             this.submitting  = true;
-            this.globalError = null;
+            const f = document.querySelector('form');
 
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/update') ?>', this.form);
                 if (r.success) {
                     window.location.href = '<?= base_url('leases/show') ?>?id=<?= $leaseId ?>';
-                } else if (r.code === 'STALE_DATA') {
-                    this.globalError = r.message + ' Reload this page to get the latest version.';
+                } else if (r.error?.code === 'STALE_DATA') {
+                    FF_Validate.banner(f, (r.error.message || '') + ' Reload this page to get the latest version.');
+                    FF_Validate.scrollToFirst(f);
+                } else if (r.error?.code === 'VALIDATION_ERROR' && r.error?.fields) {
+                    FF_Validate.applyApi(f, r.error);
                 } else {
-                    this.globalError = r.message || 'Failed to save changes.';
-                    if (r.errors) this.errors = r.errors;
+                    FF_Validate.banner(f, r.error?.message || r.message || 'Failed to save changes.');
+                    FF_Validate.scrollToFirst(f);
                 }
             } catch(e) {
-                this.globalError = 'Network error. Please try again.';
+                FF_Validate.banner(f, 'Network error. Please try again.');
+                FF_Validate.scrollToFirst(f);
             }
             this.submitting = false;
         },

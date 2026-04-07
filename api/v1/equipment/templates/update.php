@@ -35,13 +35,18 @@ require_method('POST');
 require_auth_api();
 require_permission('equipment', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id         = clean_int($body['id'] ?? null);
 $updatedAt  = clean_string($body['updated_at'] ?? null);
 
-if (!$id)        json_error('VALIDATION_ERROR', 'id is required.', 422);
-if (!$updatedAt) json_error('VALIDATION_ERROR', 'updated_at is required for optimistic locking.', 422);
+if (!$id)        $fields['id']         = 'Template ID is required.';
+if (!$updatedAt) $fields['updated_at'] = 'Optimistic lock token is required.';
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // ── Fetch existing record ──────────────────────────────────────
 $existing = db_row(
@@ -55,39 +60,46 @@ if (!$existing) {
 // ── D19: Optimistic lock check ─────────────────────────────────
 // WHY: prevents last-write-wins race when two users edit simultaneously
 if ($existing['updated_at'] !== $updatedAt) {
-    json_error('STALE_DATA', 'This template was modified by another user. Refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This template was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This template was modified by another user. Refresh and try again.']]);
 }
 
-// ── Collect updated fields (only what was sent) ────────────────
+// ── Collect updated fields — VALID-2: accumulate every error ───
 $updates = [];
+$fields  = [];
 
 if (isset($body['name'])) {
     $name = clean_string($body['name'], 100);
-    if (!$name) json_error('VALIDATION_ERROR', 'name cannot be empty.', 422);
-    // Check for name conflict with OTHER templates
-    $conflict = db_row(
-        "SELECT id FROM equipment_templates WHERE name = ? AND id != ? AND deleted_at IS NULL",
-        [$name, $id]
-    );
-    if ($conflict) json_error('ALREADY_EXISTS', 'Another template with this name already exists.', 409);
-    $updates['name'] = $name;
+    if (!$name) {
+        $fields['name'] = 'Template name is required.';
+    } else {
+        $conflict = db_row(
+            "SELECT id FROM equipment_templates WHERE name = ? AND id != ? AND deleted_at IS NULL",
+            [$name, $id]
+        );
+        if ($conflict) {
+            $fields['name'] = 'A template with this name already exists.';
+        } else {
+            $updates['name'] = $name;
 
-    // FIX #42: regenerate slug when name changes so URL references stay consistent
-    if (!function_exists('make_template_slug')) {
-        function make_template_slug(string $n): string {
-            $s = strtolower(trim($n));
-            $s = preg_replace('/[^a-z0-9]+/', '-', $s);
-            return trim($s, '-');
+            if (!function_exists('make_template_slug')) {
+                function make_template_slug(string $n): string {
+                    $s = strtolower(trim($n));
+                    $s = preg_replace('/[^a-z0-9]+/', '-', $s);
+                    return trim($s, '-');
+                }
+            }
+            $baseSlug = make_template_slug($name);
+            $newSlug  = $baseSlug;
+            $suffix   = 2;
+            while (db_exists('equipment_templates', 'slug = ? AND id != ? AND deleted_at IS NULL', [$newSlug, $id])) {
+                $newSlug = $baseSlug . '-' . $suffix;
+                $suffix++;
+            }
+            $updates['slug'] = $newSlug;
         }
     }
-    $baseSlug = make_template_slug($name);
-    $newSlug  = $baseSlug;
-    $suffix   = 2;
-    while (db_exists('equipment_templates', 'slug = ? AND id != ? AND deleted_at IS NULL', [$newSlug, $id])) {
-        $newSlug = $baseSlug . '-' . $suffix;
-        $suffix++;
-    }
-    $updates['slug'] = $newSlug;
 }
 
 if (isset($body['category'])) {
@@ -95,9 +107,10 @@ if (isset($body['category'])) {
                         'step_deck','lowboy','tanker','dump','other'];
     $cat = clean_string($body['category']);
     if (!in_array($cat, $validCategories, true)) {
-        json_error('VALIDATION_ERROR', 'Invalid category.', 422);
+        $fields['category'] = 'Please select a valid category.';
+    } else {
+        $updates['category'] = $cat;
     }
-    $updates['category'] = $cat;
 }
 
 $stringFields = ['description','brand','model','default_wheel_size','default_tire_size',
@@ -108,38 +121,108 @@ foreach ($stringFields as $field) {
     }
 }
 
-// FIX #35: dimensions must be positive (zero or negative dimensions are nonsensical)
-foreach (['default_length_ft','default_height_ft','default_width_ft'] as $field) {
+// VALID-2: dimensions must be > 0 with specific labels
+$dimLabels = [
+    'default_length_ft' => 'Length',
+    'default_height_ft' => 'Height',
+    'default_width_ft'  => 'Width',
+];
+foreach ($dimLabels as $field => $label) {
     if (array_key_exists($field, $body)) {
-        $updates[$field] = clean_positive_decimal($body[$field]);
+        $raw = $body[$field];
+        if ($raw === null || $raw === '') {
+            $updates[$field] = null;
+        } else {
+            $d = clean_decimal($raw);
+            if ($d === null || bccomp($d, '0', 4) <= 0) {
+                $fields[$field] = "{$label} must be greater than zero.";
+            } else {
+                $updates[$field] = $d;
+            }
+        }
     }
 }
 
-// FIX #34: rates must be >= 0 (a rate of zero is valid, e.g. free-of-charge period)
-foreach (['default_daily_rate','default_weekly_rate','default_monthly_rate','default_mileage_rate'] as $field) {
+// VALID-2: rates must be >= 0 — spec-exact messages
+$rateLabels = [
+    'default_daily_rate'   => 'Daily rate',
+    'default_weekly_rate'  => 'Weekly rate',
+    'default_monthly_rate' => 'Monthly rate',
+    'default_mileage_rate' => 'Mileage rate',
+];
+foreach ($rateLabels as $field => $label) {
     if (array_key_exists($field, $body)) {
-        $updates[$field] = clean_non_negative_decimal($body[$field]);
+        $raw = $body[$field];
+        if ($raw === null || $raw === '') {
+            $updates[$field] = null;
+        } else {
+            $d = clean_decimal($raw);
+            if ($d === null || bccomp($d, '0', 4) < 0) {
+                $fields[$field] = "{$label} cannot be negative.";
+            } else {
+                $updates[$field] = $d;
+            }
+        }
     }
 }
 
-// FIX #35 / #36: weight and axle count must be positive
-foreach (['default_weight_capacity_lbs','default_axle_count'] as $field) {
+// VALID-2: weight_capacity_lbs and axle_count > 0
+$posIntLabels = [
+    'default_weight_capacity_lbs' => 'Weight capacity',
+    'default_axle_count'          => 'Axle count',
+];
+foreach ($posIntLabels as $field => $label) {
     if (array_key_exists($field, $body)) {
-        $updates[$field] = clean_positive_int($body[$field]);
+        $raw = $body[$field];
+        if ($raw === null || $raw === '') {
+            $updates[$field] = null;
+        } else {
+            $i = clean_int($raw);
+            if ($i === null || $i <= 0) {
+                $fields[$field] = "{$label} must be greater than zero.";
+            } else {
+                $updates[$field] = $i;
+            }
+        }
     }
 }
 
-// FIX #36: interval days must be positive (an interval of 0 would mean daily — use 1)
-foreach (['default_cvi_interval_days','default_mvi_interval_days',
-          'default_registration_interval_days','default_insurance_interval_days'] as $field) {
+// VALID-2: interval days must be > 0
+$intervalLabels = [
+    'default_cvi_interval_days'          => 'CVI interval',
+    'default_mvi_interval_days'          => 'MVI interval',
+    'default_registration_interval_days' => 'Registration interval',
+    'default_insurance_interval_days'    => 'Insurance interval',
+];
+foreach ($intervalLabels as $field => $label) {
     if (array_key_exists($field, $body)) {
-        $updates[$field] = clean_positive_int($body[$field]);
+        $raw = $body[$field];
+        if ($raw === null || $raw === '') {
+            $updates[$field] = null;
+        } else {
+            $i = clean_int($raw);
+            if ($i === null || $i <= 0) {
+                $fields[$field] = "{$label} must be greater than zero.";
+            } else {
+                $updates[$field] = $i;
+            }
+        }
     }
 }
 
-// FIX #37: sort_order must be >= 0 (negative ordering positions make no sense)
+// sort_order >= 0
 if (array_key_exists('sort_order', $body)) {
-    $updates['sort_order'] = clean_non_negative_int($body['sort_order']) ?? 0;
+    $raw = $body['sort_order'];
+    if ($raw === null || $raw === '') {
+        $updates['sort_order'] = 0;
+    } else {
+        $i = clean_int($raw);
+        if ($i === null || $i < 0) {
+            $fields['sort_order'] = 'Sort order cannot be negative.';
+        } else {
+            $updates['sort_order'] = $i;
+        }
+    }
 }
 
 if (isset($body['default_ownership_type'])) {
@@ -162,8 +245,12 @@ if (isset($body['is_active'])) {
     $updates['is_active'] = (bool) $body['is_active'] ? 1 : 0;
 }
 
+if ($fields) {
+    json_validation_error($fields);
+}
+
 if (empty($updates)) {
-    json_error('VALIDATION_ERROR', 'No fields provided to update.', 422);
+    json_validation_error([], 'No fields provided to update.');
 }
 
 // ── Update ─────────────────────────────────────────────────────

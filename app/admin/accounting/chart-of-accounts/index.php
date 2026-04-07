@@ -337,25 +337,31 @@ require_once FF_ROOT . '/includes/header.php';
                 <button class="modal-close" @click="showModal = false">&times;</button>
             </div>
             <div class="modal-body">
-                <div x-show="formError" class="alert alert-danger"
+                <div class="form-error-banner" x-show="formError" x-cloak
                      x-text="formError" style="margin-bottom:1rem;"></div>
 
                 <div class="form-row">
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">Account Code <span class="text-danger">*</span></label>
                         <input type="text" class="form-control"
+                               :class="errors.code ? 'is-invalid' : ''"
                                x-model="form.code"
+                               @input="errors.code = ''"
                                maxlength="20"
                                placeholder="e.g. 1000"
                                :disabled="formSaving">
+                        <div class="field-error" x-show="errors.code" x-cloak x-text="errors.code"></div>
                     </div>
                     <div class="form-group" style="flex:2;">
                         <label class="form-label">Account Name <span class="text-danger">*</span></label>
                         <input type="text" class="form-control"
+                               :class="errors.name ? 'is-invalid' : ''"
                                x-model="form.name"
+                               @input="errors.name = ''"
                                maxlength="100"
                                placeholder="e.g. Cash"
                                :disabled="formSaving">
+                        <div class="field-error" x-show="errors.name" x-cloak x-text="errors.name"></div>
                     </div>
                 </div>
 
@@ -363,9 +369,10 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">Account Type <span class="text-danger">*</span></label>
                         <select class="form-select"
+                                :class="errors.account_type ? 'is-invalid' : ''"
                                 x-model="form.account_type"
-                                :disabled="formSaving"
-                                @change="autoNormalBalance()">
+                                @change="errors.account_type = ''; autoNormalBalance()"
+                                :disabled="formSaving">
                             <option value="">-- Select --</option>
                             <option value="asset">Asset</option>
                             <option value="liability">Liability</option>
@@ -376,14 +383,18 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="other_income">Other Income</option>
                             <option value="other_expense">Other Expense</option>
                         </select>
+                        <div class="field-error" x-show="errors.account_type" x-cloak x-text="errors.account_type"></div>
                     </div>
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">Account Subtype</label>
                         <input type="text" class="form-control"
+                               :class="errors.account_subtype ? 'is-invalid' : ''"
                                x-model="form.account_subtype"
+                               @input="errors.account_subtype = ''"
                                maxlength="50"
                                placeholder="e.g. Current Asset"
                                :disabled="formSaving">
+                        <div class="field-error" x-show="errors.account_subtype" x-cloak x-text="errors.account_subtype"></div>
                     </div>
                 </div>
 
@@ -391,16 +402,21 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">Normal Balance <span class="text-danger">*</span></label>
                         <select class="form-select"
+                                :class="errors.normal_balance ? 'is-invalid' : ''"
                                 x-model="form.normal_balance"
+                                @change="errors.normal_balance = ''"
                                 :disabled="formSaving">
                             <option value="debit">Debit</option>
                             <option value="credit">Credit</option>
                         </select>
+                        <div class="field-error" x-show="errors.normal_balance" x-cloak x-text="errors.normal_balance"></div>
                     </div>
                     <div class="form-group" style="flex:1;">
                         <label class="form-label">Parent Account</label>
                         <select class="form-select"
+                                :class="errors.parent_id ? 'is-invalid' : ''"
                                 x-model="form.parent_id"
+                                @change="errors.parent_id = ''"
                                 :disabled="formSaving">
                             <option value="">None (Top Level)</option>
                             <template x-for="opt in parentOptions" :key="opt.id">
@@ -409,16 +425,20 @@ require_once FF_ROOT . '/includes/header.php';
                                         :disabled="editMode && opt.id == form.id"></option>
                             </template>
                         </select>
+                        <div class="field-error" x-show="errors.parent_id" x-cloak x-text="errors.parent_id"></div>
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Description</label>
                     <textarea class="form-control" rows="2"
+                              :class="errors.description ? 'is-invalid' : ''"
                               x-model="form.description"
+                              @input="errors.description = ''"
                               maxlength="500"
                               :disabled="formSaving"
                               placeholder="Optional description of this account..."></textarea>
+                    <div class="field-error" x-show="errors.description" x-cloak x-text="errors.description"></div>
                 </div>
 
                 <div class="form-row">
@@ -466,7 +486,11 @@ function FF_ChartOfAccounts() {
         showModal:  false,
         editMode:   false,
         formSaving: false,
-        formError:  null,
+        formError:  '',
+        errors: {
+            code: '', name: '', account_type: '', account_subtype: '',
+            normal_balance: '', parent_id: '', description: ''
+        },
         form: {
             id:               null,
             code:             '',
@@ -477,6 +501,42 @@ function FF_ChartOfAccounts() {
             normal_balance:   'debit',
             description:      '',
             is_header:        false
+        },
+
+        // -- Helper: normalize error from API response ---------------
+        _extractError(r, fallback) {
+            if (!r) return fallback || 'An unexpected error occurred.';
+            if (r.error && r.error.message) return r.error.message;
+            if (r.message) return r.message;
+            return fallback || 'An unexpected error occurred.';
+        },
+
+        // -- Helper: reset field errors ------------------------------
+        _clearErrors() {
+            for (const k in this.errors) this.errors[k] = '';
+            this.formError = '';
+        },
+
+        // -- Helper: paint server-side fields → errors state ---------
+        _paintServerErrors(r) {
+            const err = r && r.error ? r.error : r;
+            const fields = (err && err.fields) || (r && r.fields) || {};
+            for (const k in fields) {
+                if (k === '_general') continue;
+                if (k in this.errors) {
+                    this.errors[k] = fields[k];
+                } else {
+                    // Unknown slot — surface in banner
+                    this.formError = fields[k];
+                }
+            }
+            if (fields._general) {
+                this.formError = fields._general;
+            } else if (!Object.keys(fields).length) {
+                this.formError = this._extractError(r, 'Failed to save account.');
+            } else if (!this.formError) {
+                this.formError = this._extractError(r, 'Please correct the highlighted fields.');
+            }
         },
 
         // -- Computed: visible tree accounts based on expand state ---
@@ -703,7 +763,7 @@ function FF_ChartOfAccounts() {
                 is_header:       false
             };
             this.editMode   = false;
-            this.formError  = null;
+            this._clearErrors();
             this.formSaving = false;
             this.showModal  = true;
         },
@@ -722,19 +782,51 @@ function FF_ChartOfAccounts() {
                 is_header:       !!acct.is_header
             };
             this.editMode   = true;
-            this.formError  = null;
+            this._clearErrors();
             this.formSaving = false;
             this.showModal  = true;
         },
 
+        // -- Client-side validation mirror of API field rules -------
+        validateAccount() {
+            this._clearErrors();
+            let ok = true;
+
+            if (!this.form.code || !this.form.code.trim()) {
+                this.errors.code = 'Account code is required.';
+                ok = false;
+            }
+            if (!this.form.name || !this.form.name.trim()) {
+                this.errors.name = 'Account name is required.';
+                ok = false;
+            }
+            if (!this.form.account_type) {
+                this.errors.account_type = 'Please select an account type.';
+                ok = false;
+            } else {
+                const validTypes = ['asset', 'liability', 'equity', 'revenue',
+                                    'expense', 'cogs', 'other_income', 'other_expense'];
+                if (!validTypes.includes(this.form.account_type)) {
+                    this.errors.account_type = 'Account type must be one of: asset, liability, equity, revenue, expense, cogs, other_income, other_expense.';
+                    ok = false;
+                }
+            }
+            if (this.form.normal_balance !== 'debit' && this.form.normal_balance !== 'credit') {
+                this.errors.normal_balance = 'Normal balance must be debit or credit.';
+                ok = false;
+            }
+
+            return ok;
+        },
+
         // -- CRUD: Save (create or update) --------------------------
         async saveAccount() {
-            if (!this.form.code.trim() || !this.form.name.trim() || !this.form.account_type) {
-                this.formError = 'Code, name, and type are required.';
+            if (!this.validateAccount()) {
+                this.formError = 'Please correct the highlighted fields.';
                 return;
             }
             this.formSaving = true;
-            this.formError  = null;
+            this.formError  = '';
 
             const url = this.editMode
                 ? '<?= base_url('api/v1/accounting/accounts/update') ?>'
@@ -766,7 +858,7 @@ function FF_ChartOfAccounts() {
                     );
                     await this.loadAccounts();
                 } else {
-                    this.formError = r.message || 'Failed to save account.';
+                    this._paintServerErrors(r);
                 }
             } catch (e) {
                 this.formError = 'Network error. Please try again.';

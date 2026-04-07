@@ -21,16 +21,32 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'edit');
 
-$id = clean_int($_POST['id'] ?? null);
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
+
+$id = clean_int($input['id'] ?? null);
+if (!$id) {
+    json_validation_error(['id' => 'Transaction ID is required.']);
+}
 
 $txn = db_row("SELECT * FROM acc_bank_transactions WHERE id = ?", [$id]);
-if (!$txn) json_error('NOT_FOUND', 'Bank transaction not found.', 404);
+if (!$txn) {
+    json_error('NOT_FOUND', 'Bank transaction not found.', 404, [
+        'fields' => ['id' => 'Bank transaction not found.'],
+    ]);
+}
 if ($txn['status'] !== 'matched') {
-    json_error('VALIDATION_ERROR', 'Transaction is not currently matched.', 422);
+    json_validation_error(
+        ['id' => 'Transaction is not currently matched.'],
+        'Transaction is not currently matched.'
+    );
 }
 if ($txn['is_cleared']) {
-    json_error('VALIDATION_ERROR', 'Cannot unmatch a cleared/reconciled transaction.', 422);
+    json_validation_error(
+        ['id' => 'Cannot unmatch a cleared/reconciled transaction.'],
+        'Cannot unmatch a cleared/reconciled transaction.'
+    );
 }
 
 $userId = current_user_id();

@@ -35,39 +35,83 @@ require_method('POST');
 require_auth_api();
 require_permission('equipment', 'create');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-// ── Required fields ────────────────────────────────────────────
+// ── Required fields — VALID-2: accumulate, single 422 response ──
 $name = clean_string($body['name'] ?? null, 100);
 if (!$name) {
-    json_error('VALIDATION_ERROR', 'name is required.', 422);
+    $fields['name'] = 'Template name is required.';
 }
 
 $validCategories = ['chassis','dry_van','reefer','container','flatbed',
                     'step_deck','lowboy','tanker','dump','other'];
 $category = clean_string($body['category'] ?? null);
-if (!$category || !in_array($category, $validCategories, true)) {
-    json_error('VALIDATION_ERROR', 'category must be one of: ' . implode(', ', $validCategories), 422);
+if (!$category) {
+    $fields['category'] = 'Please select a category.';
+} elseif (!in_array($category, $validCategories, true)) {
+    $fields['category'] = 'Please select a valid category.';
 }
+
+// Helper: check decimal >= 0 with specific message
+$checkNonNegDecimal = function ($raw, string $fieldName, string $label) use (&$fields) {
+    if ($raw === null || $raw === '') return null;
+    $d = clean_decimal($raw);
+    if ($d === null || bccomp($d, '0', 4) < 0) {
+        $fields[$fieldName] = "{$label} cannot be negative.";
+        return null;
+    }
+    return $d;
+};
+
+// Helper: check decimal > 0 with specific message
+$checkPosDecimal = function ($raw, string $fieldName, string $label) use (&$fields) {
+    if ($raw === null || $raw === '') return null;
+    $d = clean_decimal($raw);
+    if ($d === null || bccomp($d, '0', 4) <= 0) {
+        $fields[$fieldName] = "{$label} must be greater than zero.";
+        return null;
+    }
+    return $d;
+};
+
+// Helper: check int > 0
+$checkPosInt = function ($raw, string $fieldName, string $label) use (&$fields) {
+    if ($raw === null || $raw === '') return null;
+    $i = clean_int($raw);
+    if ($i === null || $i <= 0) {
+        $fields[$fieldName] = "{$label} must be greater than zero.";
+        return null;
+    }
+    return $i;
+};
 
 // ── Optional fields ────────────────────────────────────────────
 $description   = clean_string($body['description'] ?? null, 5000);
 $brand         = clean_string($body['brand'] ?? null, 100);
 $model         = clean_string($body['model'] ?? null, 100);
-// FIX #35: dimensions must be positive; FIX #35 / #36: intervals must be positive
-$lengthFt      = isset($body['default_length_ft']) ? clean_positive_decimal($body['default_length_ft']) : null;
-$heightFt      = isset($body['default_height_ft']) ? clean_positive_decimal($body['default_height_ft']) : null;
-$widthFt       = isset($body['default_width_ft'])  ? clean_positive_decimal($body['default_width_ft'])  : null;
-$weightCap     = isset($body['default_weight_capacity_lbs']) ? clean_positive_int($body['default_weight_capacity_lbs']) : null;
+$lengthFt      = $checkPosDecimal($body['default_length_ft']           ?? null, 'default_length_ft',           'Length');
+$heightFt      = $checkPosDecimal($body['default_height_ft']           ?? null, 'default_height_ft',           'Height');
+$widthFt       = $checkPosDecimal($body['default_width_ft']            ?? null, 'default_width_ft',            'Width');
+$weightCap     = $checkPosInt   ($body['default_weight_capacity_lbs']  ?? null, 'default_weight_capacity_lbs', 'Weight capacity');
 $wheelSize     = clean_string($body['default_wheel_size'] ?? null, 50);
 $tireSize      = clean_string($body['default_tire_size'] ?? null, 50);
-$axleCount     = isset($body['default_axle_count']) ? clean_positive_int($body['default_axle_count']) : null;
+$axleCount     = $checkPosInt   ($body['default_axle_count']           ?? null, 'default_axle_count',          'Axle count');
 $yardLocation  = clean_string($body['default_yard_location'] ?? null, 100);
 $notes         = clean_string($body['default_notes'] ?? null, 5000);
 $inspNotes     = clean_string($body['default_inspection_notes'] ?? null, 5000);
 $isActive      = isset($body['is_active']) ? (bool) $body['is_active'] : true;
-// FIX #37: sort_order must be >= 0
-$sortOrder     = clean_non_negative_int($body['sort_order'] ?? null) ?? 0;
+
+// sort_order must be >= 0
+$sortOrder = 0;
+if (isset($body['sort_order']) && $body['sort_order'] !== '' && $body['sort_order'] !== null) {
+    $i = clean_int($body['sort_order']);
+    if ($i === null || $i < 0) {
+        $fields['sort_order'] = 'Sort order cannot be negative.';
+    } else {
+        $sortOrder = $i;
+    }
+}
 
 // Ownership type
 $validOwnership = ['owned','leased','brokered'];
@@ -78,17 +122,17 @@ $ownershipType  = ($rawOwnership && in_array($rawOwnership, $validOwnership, tru
 $rawTracking = $body['default_tracking_provider'] ?? 'none';
 $trackingProvider = in_array($rawTracking, ['samsara','none'], true) ? $rawTracking : 'none';
 
-// Interval fields (smallint unsigned) — FIX #36: must be positive
-$cviInterval  = isset($body['default_cvi_interval_days'])          ? clean_positive_int($body['default_cvi_interval_days'])          : null;
-$mviInterval  = isset($body['default_mvi_interval_days'])          ? clean_positive_int($body['default_mvi_interval_days'])          : null;
-$regInterval  = isset($body['default_registration_interval_days']) ? clean_positive_int($body['default_registration_interval_days']) : null;
-$insInterval  = isset($body['default_insurance_interval_days'])    ? clean_positive_int($body['default_insurance_interval_days'])    : null;
+// Interval fields — must be > 0
+$cviInterval  = $checkPosInt($body['default_cvi_interval_days']          ?? null, 'default_cvi_interval_days',          'CVI interval');
+$mviInterval  = $checkPosInt($body['default_mvi_interval_days']          ?? null, 'default_mvi_interval_days',          'MVI interval');
+$regInterval  = $checkPosInt($body['default_registration_interval_days'] ?? null, 'default_registration_interval_days', 'Registration interval');
+$insInterval  = $checkPosInt($body['default_insurance_interval_days']    ?? null, 'default_insurance_interval_days',    'Insurance interval');
 
-// Rate fields (bcmath strings — D16) — FIX #34: rates must be >= 0
-$dailyRate    = isset($body['default_daily_rate'])   ? clean_non_negative_decimal($body['default_daily_rate'])   : null;
-$weeklyRate   = isset($body['default_weekly_rate'])  ? clean_non_negative_decimal($body['default_weekly_rate'])  : null;
-$monthlyRate  = isset($body['default_monthly_rate']) ? clean_non_negative_decimal($body['default_monthly_rate']) : null;
-$mileageRate  = isset($body['default_mileage_rate']) ? clean_non_negative_decimal($body['default_mileage_rate']) : null;
+// Rate fields — VALID-2: spec-exact messages "Daily/Weekly/Monthly/Mileage rate cannot be negative"
+$dailyRate    = $checkNonNegDecimal($body['default_daily_rate']   ?? null, 'default_daily_rate',   'Daily rate');
+$weeklyRate   = $checkNonNegDecimal($body['default_weekly_rate']  ?? null, 'default_weekly_rate',  'Weekly rate');
+$monthlyRate  = $checkNonNegDecimal($body['default_monthly_rate'] ?? null, 'default_monthly_rate', 'Monthly rate');
+$mileageRate  = $checkNonNegDecimal($body['default_mileage_rate'] ?? null, 'default_mileage_rate', 'Mileage rate');
 
 $rawCurrency  = $body['default_currency'] ?? 'CAD';
 $currency     = in_array($rawCurrency, ['CAD','USD'], true) ? $rawCurrency : 'CAD';
@@ -96,8 +140,12 @@ $rawMileage   = $body['default_mileage_unit'] ?? 'km';
 $mileageUnit  = in_array($rawMileage, ['km','miles'], true) ? $rawMileage : 'km';
 
 // ── Duplicate name check ───────────────────────────────────────
-if (db_exists('equipment_templates', 'name = ? AND deleted_at IS NULL', [$name])) {
-    json_error('ALREADY_EXISTS', 'A template with this name already exists.', 409);
+if ($name && db_exists('equipment_templates', 'name = ? AND deleted_at IS NULL', [$name])) {
+    $fields['name'] = 'A template with this name already exists.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Generate unique slug ───────────────────────────────────────

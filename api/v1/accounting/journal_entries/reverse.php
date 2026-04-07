@@ -26,11 +26,15 @@ require_auth_api();
 require_permission('journal_entries', 'edit');
 
 $body         = json_body();
+$fields       = [];
 $id           = clean_int($body['id'] ?? null);
 $reversalDate = clean_date($body['reversal_date'] ?? null);
 
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Journal entry ID is required.';
+}
+if ($fields) {
+    json_validation_error($fields);
 }
 
 try {
@@ -43,7 +47,9 @@ try {
         json_error('NOT_FOUND', $message, 404);
     }
 
-    json_error('VALIDATION_ERROR', $message, 422);
+    $slot = 'id';
+    if (stripos($message, 'period') !== false) $slot = 'reversal_date';
+    json_validation_error([$slot => $message], $message);
 }
 
 json_success($reversalEntry);

@@ -33,41 +33,59 @@ require_method('POST');
 require_auth_api();
 require_permission('maintenance', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 // -----------------------------------------------------------------------
-// 1. Validate required fields
+// 1. Validate required fields — VALID-2: accumulate every error
 // -----------------------------------------------------------------------
 $woId = clean_int($body['work_order_id'] ?? null);
 if (!$woId) {
-    json_error('MISSING_REQUIRED', 'work_order_id is required.', 422);
+    $fields['work_order_id'] = 'Work order ID is required.';
 }
 
-$itemType = clean_string($body['item_type'] ?? null);
+$itemType   = clean_string($body['item_type'] ?? null);
 $validTypes = ['labor', 'part', 'sublet', 'other'];
-if (!$itemType || !in_array($itemType, $validTypes, true)) {
-    json_error('VALIDATION_ERROR', 'item_type is required and must be one of: ' . implode(', ', $validTypes) . '.', 422);
+if (!$itemType) {
+    $fields['item_type'] = 'Please select an item type.';
+} elseif (!in_array($itemType, $validTypes, true)) {
+    $fields['item_type'] = 'Please select a valid item type.';
 }
 
 $description = clean_string($body['description'] ?? null, 500);
 if (!$description) {
-    json_error('MISSING_REQUIRED', 'description is required.', 422);
+    $fields['description'] = 'Description is required.';
 }
 
-// quantity and unit_cost: D16 bcmath
+// quantity: D16 bcmath, must be > 0 with specific message
 $quantityRaw = $body['quantity'] ?? null;
-$quantity    = clean_decimal((string)($quantityRaw ?? ''));
-if ($quantity === null || bccomp($quantity, '0', 6) <= 0) {
-    json_error('VALIDATION_ERROR', 'quantity must be a positive number.', 422);
+$quantity    = null;
+if ($quantityRaw === null || $quantityRaw === '') {
+    $fields['quantity'] = 'Quantity is required.';
+} else {
+    $quantity = clean_decimal((string) $quantityRaw);
+    if ($quantity === null || bccomp($quantity, '0', 6) <= 0) {
+        $fields['quantity'] = 'Quantity must be greater than zero.';
+    }
 }
 
+// unit_cost: D16 bcmath, must be >= 0 with specific message
 $unitCostRaw = $body['unit_cost'] ?? null;
-$unitCost    = clean_decimal((string)($unitCostRaw ?? ''));
-if ($unitCost === null || bccomp($unitCost, '0', 6) < 0) {
-    json_error('VALIDATION_ERROR', 'unit_cost must be a non-negative number.', 422);
+$unitCost    = null;
+if ($unitCostRaw === null || $unitCostRaw === '') {
+    $fields['unit_cost'] = 'Unit cost is required.';
+} else {
+    $unitCost = clean_decimal((string) $unitCostRaw);
+    if ($unitCost === null || bccomp($unitCost, '0', 6) < 0) {
+        $fields['unit_cost'] = 'Unit cost cannot be negative.';
+    }
 }
 
 $partNumber = clean_string($body['part_number'] ?? null, 100);
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // -----------------------------------------------------------------------
 // 2. Verify WO exists and is editable
@@ -78,10 +96,12 @@ $wo = db_row(
     [$woId]
 );
 if (!$wo) {
-    json_error('NOT_FOUND', 'Work order not found.', 404);
+    json_validation_error(['work_order_id' => 'Work order not found.'], 'Work order not found.');
 }
 if (in_array($wo['status'], ['completed', 'cancelled'], true)) {
-    json_error('IMMUTABLE_RECORD', 'Cannot add line items to a completed or cancelled work order.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Cannot add line items to a completed or cancelled work order.', 422,
+        ['fields' => ['work_order_id' => 'Cannot add line items to a completed or cancelled work order.']]);
 }
 
 // -----------------------------------------------------------------------

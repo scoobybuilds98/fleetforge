@@ -25,14 +25,16 @@ require_permission('chart_of_accounts', 'edit');
 
 use FleetForge\Accounting\AccountingService;
 
-$body = json_body();
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$body     = !empty($jsonBody) ? $jsonBody : $_POST;
 
 // -----------------------------------------------------------------------
 // 1. Validate required ID
 // -----------------------------------------------------------------------
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    json_validation_error(['id' => 'Account ID is required.']);
 }
 
 // -----------------------------------------------------------------------
@@ -44,7 +46,9 @@ $account = db_row(
     [$id]
 );
 if (!$account) {
-    json_error('NOT_FOUND', 'Account not found.', 404);
+    json_error('NOT_FOUND', 'Account not found.', 404, [
+        'fields' => ['id' => 'Account not found.'],
+    ]);
 }
 
 // Already deactivated — idempotent, just return success
@@ -59,7 +63,8 @@ if ((int) $account['is_system'] === 1) {
     json_error(
         'SYSTEM_ACCOUNT',
         "Account '{$account['code']} — {$account['name']}' is a system account and cannot be deactivated.",
-        422
+        422,
+        ['fields' => ['id' => "Account '{$account['code']}' is a system account and cannot be deactivated."]]
     );
 }
 
@@ -74,7 +79,8 @@ if ((int) $account['is_header'] !== 1) {
         json_error(
             'NON_ZERO_BALANCE',
             "Account '{$account['code']}' has a balance of {$balance}. Transfer the balance to another account before deactivating.",
-            422
+            422,
+            ['fields' => ['id' => "Account '{$account['code']}' has a balance of {$balance}. Transfer the balance to another account before deactivating."]]
         );
     }
 }

@@ -29,11 +29,13 @@ require_method('POST');
 require_auth_api();
 require_permission('maintenance', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $lineId = clean_int($body['id'] ?? null);
 if (!$lineId) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Line item ID is required.';
+    json_validation_error($fields);
 }
 
 // Load line item + parent WO
@@ -48,47 +50,74 @@ if (!$line) {
     json_error('NOT_FOUND', 'Line item not found.', 404);
 }
 if (in_array($line['wo_status'], ['completed', 'cancelled'], true)) {
-    json_error('IMMUTABLE_RECORD', 'Cannot edit line items on a completed or cancelled work order.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Cannot edit line items on a completed or cancelled work order.', 422,
+        ['fields' => ['id' => 'Cannot edit line items on a completed or cancelled work order.']]);
 }
 
 $woId = (int)$line['work_order_id'];
 
-// Resolve updatable fields
-$itemType = clean_string($body['item_type'] ?? null);
+// Resolve updatable fields — VALID-2: accumulate every error
 $validTypes = ['labor', 'part', 'sublet', 'other'];
-if ($itemType && !in_array($itemType, $validTypes, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid item_type.', 422);
+if (array_key_exists('item_type', $body)) {
+    $itemType = clean_string($body['item_type']);
+    if (!$itemType || !in_array($itemType, $validTypes, true)) {
+        $fields['item_type'] = 'Please select a valid item type.';
+        $itemType = $line['item_type'];
+    }
+} else {
+    $itemType = $line['item_type'];
 }
-$itemType = $itemType ?? $line['item_type'];
 
-$description = clean_string($body['description'] ?? null, 500) ?? $line['description'];
-if (!$description) {
-    json_error('MISSING_REQUIRED', 'description cannot be blank.', 422);
+if (array_key_exists('description', $body)) {
+    $description = clean_string($body['description'], 500);
+    if (!$description) {
+        $fields['description'] = 'Description is required.';
+        $description = $line['description'];
+    }
+} else {
+    $description = $line['description'];
 }
 
-// quantity
+// quantity — must be > 0
 $quantity = $line['quantity'];
 if (array_key_exists('quantity', $body)) {
-    $q = clean_decimal((string)($body['quantity'] ?? ''));
-    if ($q === null || bccomp($q, '0', 6) <= 0) {
-        json_error('VALIDATION_ERROR', 'quantity must be a positive number.', 422);
+    $raw = $body['quantity'];
+    if ($raw === null || $raw === '') {
+        $fields['quantity'] = 'Quantity is required.';
+    } else {
+        $q = clean_decimal((string) $raw);
+        if ($q === null || bccomp($q, '0', 6) <= 0) {
+            $fields['quantity'] = 'Quantity must be greater than zero.';
+        } else {
+            $quantity = $q;
+        }
     }
-    $quantity = $q;
 }
 
-// unit_cost
+// unit_cost — must be >= 0
 $unitCost = $line['unit_cost'];
 if (array_key_exists('unit_cost', $body)) {
-    $uc = clean_decimal((string)($body['unit_cost'] ?? ''));
-    if ($uc === null || bccomp($uc, '0', 6) < 0) {
-        json_error('VALIDATION_ERROR', 'unit_cost must be a non-negative number.', 422);
+    $raw = $body['unit_cost'];
+    if ($raw === null || $raw === '') {
+        $fields['unit_cost'] = 'Unit cost is required.';
+    } else {
+        $uc = clean_decimal((string) $raw);
+        if ($uc === null || bccomp($uc, '0', 6) < 0) {
+            $fields['unit_cost'] = 'Unit cost cannot be negative.';
+        } else {
+            $unitCost = $uc;
+        }
     }
-    $unitCost = $uc;
 }
 
 $partNumber = array_key_exists('part_number', $body)
     ? clean_string($body['part_number'] ?? null, 100)
     : $line['part_number'];
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $lineTotalCost = bcround(bcmul((string)$quantity, (string)$unitCost, 6), 2);
 

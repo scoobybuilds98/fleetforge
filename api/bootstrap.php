@@ -162,6 +162,24 @@ function json_error(
 }
 
 /**
+ * Terminate with a VALIDATION_ERROR (422) carrying a fields map.
+ *
+ * VALID-2: the standard shape every form validation endpoint should
+ * produce. Keeps the legacy top-level `error.code`/`error.message`
+ * shape for backward compatibility, AND copies `fields` to
+ * `error.fields` so FF_Validate.applyApi() can wire them up.
+ *
+ * @param array  $fields   Map of field_name => user-facing message.
+ * @param string $message  Top-level summary message.
+ */
+function json_validation_error(
+    array  $fields,
+    string $message = 'Please correct the highlighted fields.'
+): never {
+    json_error('VALIDATION_ERROR', $message, 422, ['fields' => $fields]);
+}
+
+/**
  * Terminate the request with a paginated JSON list response.
  *
  * Response shape:

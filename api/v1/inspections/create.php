@@ -37,25 +37,29 @@ require_method('POST');
 require_auth_api();
 require_permission('inspections', 'create');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-// ── Required fields
+// ── Required fields — VALID-2: accumulate every error
 $unitId         = clean_int($body['equipment_unit_id'] ?? null);
 $inspectionType = clean_string($body['inspection_type'] ?? null);
 $inspectionDate = clean_date($body['inspection_date'] ?? null);
 
-$errors = [];
-if (!$unitId)         $errors['equipment_unit_id'] = 'Equipment unit is required.';
-if (!$inspectionType) $errors['inspection_type']   = 'Inspection type is required.';
-if (!$inspectionDate) $errors['inspection_date']   = 'Inspection date is required.';
+if (!$unitId) {
+    $fields['equipment_unit_id'] = 'Please select an equipment unit.';
+}
+if (!$inspectionType) {
+    $fields['inspection_type'] = 'Please select an inspection type.';
+}
+if (!$inspectionDate) {
+    $fields['inspection_date'] = 'Inspection date is required.';
+}
 
 // Validate inspection_type ENUM
 $validTypes = ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance'];
 if ($inspectionType && !in_array($inspectionType, $validTypes, true)) {
-    $errors['inspection_type'] = 'Invalid inspection type.';
+    $fields['inspection_type'] = 'Please select a valid inspection type.';
 }
-
-if ($errors) json_error('VALIDATION_ERROR', 'Validation failed.', 422, ['fields' => $errors]);
 
 // ── Optional fields
 $leaseId             = clean_int($body['lease_id'] ?? null);
@@ -68,10 +72,30 @@ $cviExpiry           = clean_date($body['cvi_expiry'] ?? null);
 $isClean             = isset($body['is_clean']) ? (int)(bool)$body['is_clean'] : null;
 $notes               = clean_string($body['notes'] ?? null, 5000);
 
+// Odometer / reefer hours must be non-negative
+if (array_key_exists('mileage_at_inspection', $body)
+    && $body['mileage_at_inspection'] !== null
+    && $body['mileage_at_inspection'] !== '') {
+    if ($mileageAtInspection === null || $mileageAtInspection < 0) {
+        $fields['mileage_at_inspection'] = 'Odometer cannot be negative.';
+    }
+}
+if (array_key_exists('reefer_hours', $body)
+    && $body['reefer_hours'] !== null
+    && $body['reefer_hours'] !== '') {
+    if ($reeferHours === null || $reeferHours < 0) {
+        $fields['reefer_hours'] = 'Reefer hours cannot be negative.';
+    }
+}
+
 // Validate fuel_level if provided
 $validFuelLevels = ['empty', 'quarter', 'half', 'three_quarter', 'full'];
 if ($fuelLevel && !in_array($fuelLevel, $validFuelLevels, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid fuel level.', 422, ['fields' => ['fuel_level' => 'Invalid fuel level.']]);
+    $fields['fuel_level'] = 'Please select a valid fuel level.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Validate equipment_unit exists (soft-delete aware — D5)
@@ -79,12 +103,16 @@ $unit = db_row(
     "SELECT eu.id, eu.unit_number FROM equipment_units eu WHERE eu.id = ? AND eu.deleted_at IS NULL",
     [$unitId]
 );
-if (!$unit) json_error('NOT_FOUND', 'Equipment unit not found.', 404);
+if (!$unit) {
+    json_validation_error(['equipment_unit_id' => 'Equipment unit not found.']);
+}
 
 // ── Validate lease if provided (soft-delete aware — D5)
 if ($leaseId) {
     $lease = db_row("SELECT id FROM leases WHERE id = ? AND deleted_at IS NULL", [$leaseId]);
-    if (!$lease) json_error('NOT_FOUND', 'Lease not found.', 404);
+    if (!$lease) {
+        json_validation_error(['lease_id' => 'Lease not found.']);
+    }
 }
 
 // ── Tire section JSON skeleton — 20 positions (L/R, outer/inner, 5 axles per side)

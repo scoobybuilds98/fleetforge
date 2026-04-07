@@ -452,6 +452,17 @@ const INSP_ID        = <?= (int)$id ?>;
 const CSRF_TOKEN     = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 const canEdit        = <?= $canEdit ? 'true' : 'false' ?>;
 
+// ── Extract user-facing error message from VALID-2 envelope ──────────────
+function extractError(d, fallback) {
+    if (!d || !d.error) return fallback;
+    // Prefer field-specific message if only one error, else the top message
+    const f = d.error.fields || d.error.errors || {};
+    const keys = Object.keys(f);
+    if (keys.length === 1) return f[keys[0]];
+    if (keys.length > 1)   return keys.map(k => f[k]).join(' ');
+    return d.error.message || d.message || fallback;
+}
+
 // ── Save standard section condition + notes ──────────────────────────────
 function saveConditionNotes(secId) {
     const condEl  = document.getElementById('cond-'  + secId);
@@ -468,7 +479,7 @@ function saveConditionNotes(secId) {
         .then(d => {
             const msg = document.getElementById('sec-save-msg-' + secId);
             if (d && d.error) {
-                if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = d.message ?? 'Save failed.'; }
+                if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = extractError(d, 'Save failed.'); }
             } else {
                 // Update badge inline
                 const badge = document.getElementById('sec-badge-' + secId);
@@ -494,13 +505,27 @@ function saveTires(secId) {
         if (!positions[key]) positions[key] = {brakes:'',tread:'',brand:'',org:'',wheels:''};
         positions[key][field] = el.value;
     });
+
+    // Client-side numeric validation — tread must be non-negative if set
+    const problems = [];
+    for (const [key, pos] of Object.entries(positions)) {
+        if (pos.tread && pos.tread.trim()) {
+            const n = parseFloat(pos.tread);
+            if (isNaN(n) || n < 0) problems.push(`Tire ${key}: tread depth must be a positive number.`);
+        }
+    }
+    const msg = document.getElementById('tire-msg-' + secId);
+    if (problems.length) {
+        if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = problems[0]; }
+        return;
+    }
+
     const payload = { section_id: secId, section_data: { positions } };
 
     FF_Api.post('<?= base_url('api/v1/inspections/sections/update.php') ?>', payload)
         .then(d => {
-            const msg = document.getElementById('tire-msg-' + secId);
             if (d && d.error) {
-                if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = d.message ?? 'Save failed.'; }
+                if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = extractError(d, 'Save failed.'); }
             } else {
                 if (msg) { msg.style.color = 'var(--color-success)'; msg.textContent = 'Tire data saved.'; setTimeout(() => { if(msg) msg.textContent = ''; }, 2000); }
             }
@@ -524,7 +549,7 @@ function saveTrailer(secId) {
         .then(d => {
             const msg = document.getElementById('trailer-msg-' + secId);
             if (d && d.error) {
-                if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = d.message ?? 'Save failed.'; }
+                if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = extractError(d, 'Save failed.'); }
             } else {
                 if (msg) { msg.style.color = 'var(--color-success)'; msg.textContent = 'Trailer condition saved.'; setTimeout(() => { if(msg) msg.textContent = ''; }, 2000); }
             }
@@ -541,7 +566,7 @@ function transitionStatus(newStatus) {
     }).then(d => {
         if (d && d.error) {
             const msg = document.getElementById('status-msg');
-            if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = d.message ?? 'Failed.'; }
+            if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = extractError(d, 'Failed.'); }
         } else {
             window.location.reload();
         }
@@ -553,6 +578,21 @@ function uploadPhoto(event, secId) {
     const file = event.target.files[0];
     if (!file) return;
     const msg = document.getElementById('photo-msg-' + secId);
+
+    // Client-side validation before hitting network
+    if (file.size > 10 * 1024 * 1024) {
+        if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = 'Photo must be 10 MB or smaller.'; }
+        event.target.value = '';
+        return;
+    }
+    const allowedExt = ['jpg','jpeg','png','heic','heif'];
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (!allowedExt.includes(ext)) {
+        if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = 'Unsupported file type. Allowed formats: JPEG, PNG, HEIC.'; }
+        event.target.value = '';
+        return;
+    }
+
     if (msg) { msg.style.color = 'var(--text-secondary)'; msg.textContent = 'Uploading...'; }
 
     const fd = new FormData();
@@ -572,7 +612,7 @@ function uploadPhoto(event, secId) {
     .then(r => r.json())
     .then(d => {
         if (d && d.error) {
-            if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = d.message ?? 'Upload failed.'; }
+            if (msg) { msg.style.color = 'var(--color-danger)'; msg.textContent = extractError(d, 'Upload failed.'); }
         } else {
             // Append new thumb
             const zone = document.getElementById('photos-' + secId);
@@ -602,7 +642,7 @@ function deletePhoto(photoId, secId) {
     FF_Api.post('<?= base_url('api/v1/inspections/photos/delete.php') ?>', { photo_id: photoId })
         .then(d => {
             if (d && d.error) {
-                alert(d.message ?? 'Delete failed.');
+                alert(extractError(d, 'Delete failed.'));
             } else {
                 const el = document.getElementById('photo-' + photoId);
                 if (el) el.remove();
@@ -616,7 +656,7 @@ function deleteInspection() {
     FF_Api.post('<?= base_url('api/v1/inspections/delete.php') ?>', { id: INSP_ID })
         .then(d => {
             if (d && d.error) {
-                alert(d.message ?? 'Delete failed.');
+                alert(extractError(d, 'Delete failed.'));
             } else {
                 window.location.href = '<?= base_url('inspections') ?>';
             }

@@ -26,44 +26,67 @@ require_permission('accounts_payable', 'edit');
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
-$creditId     = clean_int($_POST['vendor_credit_id'] ?? null);
-$billId       = clean_int($_POST['bill_id'] ?? null);
-$amountApplied = clean_decimal($_POST['amount_applied'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$creditId)     json_error('VALIDATION_ERROR', 'vendor_credit_id is required.', 422);
-if (!$billId)       json_error('VALIDATION_ERROR', 'bill_id is required.', 422);
-if (!$amountApplied || bccomp($amountApplied, '0', 2) <= 0) {
-    json_error('VALIDATION_ERROR', 'amount_applied must be > 0.', 422);
+$fields = [];
+$creditId      = clean_int($input['vendor_credit_id'] ?? null);
+$billId        = clean_int($input['bill_id'] ?? null);
+$amountApplied = clean_decimal($input['amount_applied'] ?? null);
+
+if (!$creditId) $fields['vendor_credit_id'] = 'Please select a vendor credit.';
+if (!$billId)   $fields['bill_id']          = 'Please select a bill.';
+if ($amountApplied === null || $amountApplied === '') {
+    $fields['amount_applied'] = 'Amount applied is required.';
+} elseif (bccomp($amountApplied, '0', 2) <= 0) {
+    $fields['amount_applied'] = 'Amount applied must be greater than zero.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $result = db_transaction(function () use ($creditId, $billId, $amountApplied) {
     // Lock credit row (FOR UPDATE)
     $credit = db_row("SELECT * FROM acc_vendor_credits WHERE id = ? FOR UPDATE", [$creditId]);
-    if (!$credit) json_error('NOT_FOUND', 'Vendor credit not found.', 404);
+    if (!$credit) {
+        json_validation_error(['vendor_credit_id' => 'Vendor credit not found.'], 'Vendor credit not found.');
+    }
 
     if ($credit['status'] === 'fully_used' || $credit['status'] === 'void') {
-        json_error('INVALID_TRANSITION', "Credit is {$credit['status']} — cannot apply.", 409);
+        json_error('INVALID_TRANSITION',
+            "Credit is {$credit['status']} — cannot apply.", 409,
+            ['fields' => ['vendor_credit_id' => "Credit is {$credit['status']} — cannot apply."]]);
     }
 
     if (bccomp($amountApplied, (string) $credit['amount_remaining'], 2) > 0) {
-        json_error('CREDIT_EXCEEDS_BALANCE', "Amount \${$amountApplied} exceeds credit remaining \${$credit['amount_remaining']}.", 422);
+        json_error('CREDIT_EXCEEDS_BALANCE',
+            "Amount \${$amountApplied} exceeds credit remaining \${$credit['amount_remaining']}.", 422,
+            ['fields' => ['amount_applied' => "Amount \${$amountApplied} exceeds credit remaining \${$credit['amount_remaining']}."]]);
     }
 
     // Lock bill row (FOR UPDATE — D20)
     $bill = db_row("SELECT * FROM acc_bills WHERE id = ? FOR UPDATE", [$billId]);
-    if (!$bill) json_error('NOT_FOUND', 'Bill not found.', 404);
+    if (!$bill) {
+        json_validation_error(['bill_id' => 'Bill not found.'], 'Bill not found.');
+    }
 
     if ((int) $bill['vendor_id'] !== (int) $credit['vendor_id']) {
-        json_error('VALIDATION_ERROR', 'Credit and bill must belong to the same vendor.', 422);
+        json_validation_error(['bill_id' => 'Credit and bill must belong to the same vendor.']);
     }
 
     $payable = ['approved', 'partially_paid'];
     if (!in_array($bill['status'], $payable, true)) {
-        json_error('INVALID_TRANSITION', "Bill is {$bill['status']} — cannot apply credit.", 409);
+        json_error('INVALID_TRANSITION',
+            "Bill is {$bill['status']} — cannot apply credit.", 409,
+            ['fields' => ['bill_id' => "Bill is {$bill['status']} — cannot apply credit."]]);
     }
 
     if (bccomp($amountApplied, (string) $bill['balance_due'], 2) > 0) {
-        json_error('ALLOCATION_EXCEEDS_BALANCE', "Amount exceeds bill balance of \${$bill['balance_due']}.", 422);
+        json_error('ALLOCATION_EXCEEDS_BALANCE',
+            "Amount exceeds bill balance of \${$bill['balance_due']}.", 422,
+            ['fields' => ['amount_applied' => "Amount exceeds bill balance of \${$bill['balance_due']}."]]);
     }
 
     $vendor = db_row("SELECT id, name FROM vendors WHERE id = ?", [(int) $credit['vendor_id']]);

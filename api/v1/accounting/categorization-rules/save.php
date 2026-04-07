@@ -24,31 +24,64 @@ require_method('POST');
 require_auth_api();
 require_permission('accounts_payable', 'edit');
 
-$id                  = clean_int($_POST['id'] ?? null);
-$name                = clean_string($_POST['name'] ?? null);
-$vendorId            = clean_int($_POST['vendor_id'] ?? null);
-$vendorNamePattern   = clean_string($_POST['vendor_name_pattern'] ?? null);
-$descriptionKeywords = clean_string($_POST['description_keywords'] ?? null, 2000);
-$amountMin           = clean_decimal($_POST['amount_min'] ?? null);
-$amountMax           = clean_decimal($_POST['amount_max'] ?? null);
-$vendorType          = clean_string($_POST['vendor_type'] ?? null);
-$accountId           = clean_int($_POST['account_id'] ?? null);
-$priority            = clean_int($_POST['priority'] ?? null) ?? 0;
-$isActive            = ($_POST['is_active'] ?? '1') === '1' ? 1 : 0;
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$name)      json_error('VALIDATION_ERROR', 'name is required.', 422);
-if (!$accountId) json_error('VALIDATION_ERROR', 'account_id is required.', 422);
+$fields = [];
+
+$id                  = clean_int($input['id'] ?? null);
+$name                = clean_string($input['name'] ?? null);
+$vendorId            = clean_int($input['vendor_id'] ?? null);
+$vendorNamePattern   = clean_string($input['vendor_name_pattern'] ?? null);
+$descriptionKeywords = clean_string($input['description_keywords'] ?? null, 2000);
+$amountMin           = clean_decimal($input['amount_min'] ?? null);
+$amountMax           = clean_decimal($input['amount_max'] ?? null);
+$vendorType          = clean_string($input['vendor_type'] ?? null);
+$accountId           = clean_int($input['account_id'] ?? null);
+$priority            = clean_int($input['priority'] ?? null) ?? 0;
+$isActive            = ((string)($input['is_active'] ?? '1')) === '1' ? 1 : 0;
+
+if (!$name)      $fields['name'] = 'Rule name is required.';
+if (!$accountId) $fields['account_id'] = 'Please select a GL account.';
+
+if ($amountMin !== null && $amountMin !== '' && bccomp($amountMin, '0', 2) < 0) {
+    $fields['amount_min'] = 'Minimum amount cannot be negative.';
+}
+if ($amountMax !== null && $amountMax !== '' && bccomp($amountMax, '0', 2) < 0) {
+    $fields['amount_max'] = 'Maximum amount cannot be negative.';
+}
+if ($amountMin !== null && $amountMin !== '' && $amountMax !== null && $amountMax !== ''
+    && bccomp($amountMin, $amountMax, 2) > 0) {
+    $fields['amount_max'] = 'Maximum amount must be greater than minimum amount.';
+}
+
+if ($priority < 0) {
+    $fields['priority'] = 'Priority cannot be negative.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // Validate GL account exists
 $account = db_row("SELECT id, is_header, is_active FROM acc_accounts WHERE id = ?", [$accountId]);
-if (!$account) json_error('VALIDATION_ERROR', 'GL account not found.', 422);
-if ($account['is_header']) json_error('VALIDATION_ERROR', 'Cannot use a header account.', 422);
-if (!$account['is_active']) json_error('VALIDATION_ERROR', 'GL account is inactive.', 422);
+if (!$account) {
+    json_validation_error(['account_id' => 'GL account not found.'], 'GL account not found.');
+}
+if ($account['is_header']) {
+    json_validation_error(['account_id' => 'Cannot use a header account.'], 'Cannot use a header account.');
+}
+if (!$account['is_active']) {
+    json_validation_error(['account_id' => 'GL account is inactive.'], 'GL account is inactive.');
+}
 
 // Validate vendor if specified
 if ($vendorId) {
     $vendor = db_row("SELECT id FROM vendors WHERE id = ? AND deleted_at IS NULL", [$vendorId]);
-    if (!$vendor) json_error('NOT_FOUND', 'Vendor not found.', 404);
+    if (!$vendor) {
+        json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
+    }
 }
 
 $data = [
@@ -67,12 +100,18 @@ $data = [
 if ($id) {
     // Update existing rule
     $existing = db_row("SELECT * FROM acc_categorization_rules WHERE id = ?", [$id]);
-    if (!$existing) json_error('NOT_FOUND', 'Rule not found.', 404);
+    if (!$existing) {
+        json_error('NOT_FOUND', 'Rule not found.', 404, [
+            'fields' => ['id' => 'Rule not found.'],
+        ]);
+    }
 
     // D19 optimistic lock
-    $submittedUpdatedAt = clean_string($_POST['updated_at'] ?? null);
+    $submittedUpdatedAt = clean_string($input['updated_at'] ?? null);
     if ($submittedUpdatedAt && $existing['updated_at'] !== $submittedUpdatedAt) {
-        json_error('STALE_DATA', 'Record modified by another user.', 409);
+        json_error('STALE_DATA', 'This rule was modified by another user. Please refresh and try again.', 409, [
+            'fields' => ['updated_at' => 'This rule was modified by another user. Please refresh and try again.'],
+        ]);
     }
 
     db_update('acc_categorization_rules', $data, 'id = ?', [$id]);

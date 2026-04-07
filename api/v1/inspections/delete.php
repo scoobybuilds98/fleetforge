@@ -27,17 +27,25 @@ require_method('POST');
 require_auth_api();
 require_permission('inspections', 'delete');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id = clean_int($body['id'] ?? null);
-if (!$id) json_error('MISSING_REQUIRED', 'id is required.', 422);
+if (!$id) {
+    $fields['id'] = 'Inspection ID is required.';
+}
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $insp = db_row("SELECT id, inspection_number, status FROM inspections WHERE id = ?", [$id]);
 if (!$insp) json_error('NOT_FOUND', 'Inspection not found.', 404);
 
 // Block delete of completed or signed inspections — they are permanent records
 if (in_array($insp['status'], ['complete', 'signed'], true)) {
-    json_error('INVALID_TRANSITION', 'Completed or signed inspections cannot be deleted.', 409);
+    json_error('IMMUTABLE_RECORD',
+        'Completed or signed inspections cannot be deleted.', 409,
+        ['fields' => ['id' => "Cannot delete a {$insp['status']} inspection."]]);
 }
 
 db_transaction(function () use ($id, $insp) {

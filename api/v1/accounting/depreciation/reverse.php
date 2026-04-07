@@ -35,13 +35,22 @@ require_permission('fixed_assets', 'edit');
 $body  = json_body();
 $runId = clean_int($body['run_id'] ?? null);
 if (!$runId) {
-    json_error('MISSING_REQUIRED', 'run_id is required.', 422);
+    json_validation_error(['run_id' => 'Depreciation run ID is required.']);
 }
 
 try {
     $result = FixedAssetService::reverseRun($runId, current_user_id());
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $msg  = $e->getMessage();
+    $slot = '_general';
+    if (stripos($msg, 'not found') !== false
+        || stripos($msg, 'already') !== false
+        || stripos($msg, 'status') !== false
+        || stripos($msg, 'period') !== false
+        || stripos($msg, 'locked') !== false) {
+        $slot = 'run_id';
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($result);

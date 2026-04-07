@@ -27,9 +27,12 @@ require_auth_api();
 require_permission('maintenance', 'edit');
 
 $body   = json_body();
+$fields = [];
+
 $lineId = clean_int($body['id'] ?? null);
 if (!$lineId) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Line item ID is required.';
+    json_validation_error($fields);
 }
 
 $line = db_row(
@@ -43,7 +46,9 @@ if (!$line) {
     json_error('NOT_FOUND', 'Line item not found.', 404);
 }
 if (in_array($line['wo_status'], ['completed', 'cancelled'], true)) {
-    json_error('IMMUTABLE_RECORD', 'Cannot delete line items from a completed or cancelled work order.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Cannot delete line items from a completed or cancelled work order.', 422,
+        ['fields' => ['id' => 'Cannot delete line items from a completed or cancelled work order.']]);
 }
 
 $woId = (int)$line['work_order_id'];

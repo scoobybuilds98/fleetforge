@@ -21,20 +21,38 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'edit');
 
-$id = clean_int($_POST['id'] ?? null);
-$isActive = clean_int($_POST['is_active'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
-if ($isActive === null || !in_array($isActive, [0, 1])) {
-    json_error('VALIDATION_ERROR', 'is_active must be 0 or 1.', 422);
+$fields = [];
+
+$id = clean_int($input['id'] ?? null);
+$isActiveRaw = $input['is_active'] ?? null;
+$isActive = $isActiveRaw === null ? null : (int) $isActiveRaw;
+
+if (!$id) $fields['id'] = 'Bank account ID is required.';
+if ($isActive === null || !in_array($isActive, [0, 1], true)) {
+    $fields['is_active'] = 'Active status must be 0 or 1.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $existing = db_row("SELECT * FROM acc_bank_accounts WHERE id = ?", [$id]);
-if (!$existing) json_error('NOT_FOUND', 'Bank account not found.', 404);
+if (!$existing) {
+    json_error('NOT_FOUND', 'Bank account not found.', 404, [
+        'fields' => ['id' => 'Bank account not found.'],
+    ]);
+}
 
 // WHY: Cannot deactivate the default account — must assign a new default first
 if ($isActive === 0 && $existing['is_default']) {
-    json_error('VALIDATION_ERROR', 'Cannot deactivate the default account. Assign a new default first.', 422);
+    json_validation_error(
+        ['id' => 'Cannot deactivate the default account. Assign a new default first.'],
+        'Cannot deactivate the default account. Assign a new default first.'
+    );
 }
 
 // Check for unreconciled transactions if deactivating
@@ -44,7 +62,10 @@ if ($isActive === 0) {
         [$id]
     );
     if ($unreconciledCount > 0) {
-        json_error('VALIDATION_ERROR', "Cannot deactivate — {$unreconciledCount} unreconciled transactions remain.", 422);
+        json_validation_error(
+            ['id' => "Cannot deactivate — {$unreconciledCount} unreconciled transactions remain."],
+            "Cannot deactivate — {$unreconciledCount} unreconciled transactions remain."
+        );
     }
 }
 

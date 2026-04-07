@@ -23,43 +23,60 @@ require_method('POST');
 require_auth_api();
 require_permission('journal_entries', 'create');
 
-// Validate required fields
-$customerId    = clean_int($_POST['customer_id'] ?? null);
-$noteDate      = clean_date($_POST['note_date'] ?? null);
-$contactMethod = clean_string($_POST['contact_method'] ?? null);
-$note          = trim($_POST['note'] ?? '');
-$outcome       = clean_string($_POST['outcome'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$customerId)    json_error('VALIDATION_ERROR', 'customer_id is required.', 422);
-if (!$noteDate)      json_error('VALIDATION_ERROR', 'note_date is required.', 422);
-if (!$contactMethod) json_error('VALIDATION_ERROR', 'contact_method is required.', 422);
-if ($note === '')    json_error('VALIDATION_ERROR', 'note is required.', 422);
-if (!$outcome)       json_error('VALIDATION_ERROR', 'outcome is required.', 422);
+$fields = [];
+
+// Validate required fields
+$customerId    = clean_int($input['customer_id'] ?? null);
+$noteDate      = clean_date($input['note_date'] ?? null);
+$contactMethod = clean_string($input['contact_method'] ?? null);
+$note          = clean_string($input['note'] ?? null, 4000);
+$outcome       = clean_string($input['outcome'] ?? null);
+
+if (!$customerId) $fields['customer_id'] = 'Please select a customer.';
+if (!$noteDate)   $fields['note_date']   = 'Note date is required.';
 
 $validMethods = ['phone', 'email', 'letter', 'in_person', 'other'];
-if (!in_array($contactMethod, $validMethods, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid contact_method. Must be one of: ' . implode(', ', $validMethods), 422);
+if (!$contactMethod) {
+    $fields['contact_method'] = 'Please select a contact method.';
+} elseif (!in_array($contactMethod, $validMethods, true)) {
+    $fields['contact_method'] = 'Contact method must be one of: ' . implode(', ', $validMethods) . '.';
 }
 
+if (!$note) $fields['note'] = 'Note content is required.';
+
 $validOutcomes = ['no_answer', 'left_message', 'spoke_with_customer', 'payment_promised', 'dispute', 'other'];
-if (!in_array($outcome, $validOutcomes, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid outcome. Must be one of: ' . implode(', ', $validOutcomes), 422);
+if (!$outcome) {
+    $fields['outcome'] = 'Please select an outcome.';
+} elseif (!in_array($outcome, $validOutcomes, true)) {
+    $fields['outcome'] = 'Outcome must be one of: ' . implode(', ', $validOutcomes) . '.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // Verify customer exists
 if (!db_exists('customers', 'id = ? AND deleted_at IS NULL', [$customerId])) {
-    json_error('NOT_FOUND', 'Customer not found.', 404);
+    json_error('NOT_FOUND', 'Customer not found.', 404, [
+        'fields' => ['customer_id' => 'Customer not found.'],
+    ]);
 }
 
 // Optional fields
-$invoiceId     = clean_int($_POST['invoice_id'] ?? null);
-$contactPerson = clean_string($_POST['contact_person'] ?? null);
-$followUpDate  = clean_date($_POST['follow_up_date'] ?? null);
+$invoiceId     = clean_int($input['invoice_id'] ?? null);
+$contactPerson = clean_string($input['contact_person'] ?? null);
+$followUpDate  = clean_date($input['follow_up_date'] ?? null);
 
 // Verify invoice belongs to customer if provided
 if ($invoiceId) {
     if (!db_exists('invoices', 'id = ? AND customer_id = ? AND deleted_at IS NULL', [$invoiceId, $customerId])) {
-        json_error('NOT_FOUND', 'Invoice not found for this customer.', 404);
+        json_error('NOT_FOUND', 'Invoice not found for this customer.', 404, [
+            'fields' => ['invoice_id' => 'Invoice not found for this customer.'],
+        ]);
     }
 }
 

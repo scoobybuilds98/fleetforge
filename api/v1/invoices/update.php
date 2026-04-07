@@ -26,7 +26,7 @@ $body = json_body();
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    json_validation_error(['id' => 'Invoice ID is required.']);
 }
 
 $invoice = db_row(
@@ -37,30 +37,47 @@ if (!$invoice) {
     json_error('NOT_FOUND', 'Invoice not found.', 404);
 }
 
-// D12: Only draft invoices are editable — super_admin may edit any status
+// D12 / VALID-2: Only draft invoices are editable. Sent/paid/etc get a specific message.
 if ($invoice['status'] !== 'draft' && !is_super_admin()) {
-    json_error('IMMUTABLE_RECORD', 'Only draft invoices can be edited. Void and recreate for corrections.', 422);
+    json_error(
+        'IMMUTABLE_RECORD',
+        'Sent invoices cannot be edited. Void and recreate.',
+        422,
+        ['fields' => ['status' => 'Sent invoices cannot be edited. Void and recreate.']]
+    );
 }
 
 // D19: Optimistic lock
 $submittedUpdatedAt = clean_string($body['updated_at'] ?? null);
 if (!$submittedUpdatedAt) {
-    json_error('VALIDATION_ERROR', 'updated_at is required for optimistic locking.', 422);
+    json_validation_error(['updated_at' => 'Optimistic lock token is required.']);
 }
 if ($invoice['updated_at'] !== $submittedUpdatedAt) {
-    json_error('STALE_DATA', 'Record modified by another user. Refresh and try again.', 409);
+    json_error(
+        'STALE_DATA',
+        'This invoice was modified by another user. Refresh and try again.',
+        409,
+        ['fields' => ['updated_at' => 'This invoice was modified by another user. Refresh and try again.']]
+    );
 }
 
 // Only allow updating non-financial metadata on draft
 $updateData = [];
-$fields = [
+$updatable = [
     'po_number'      => clean_string($body['po_number'] ?? null),
     'notes'          => clean_string($body['notes'] ?? null, 2000),
     'internal_notes' => clean_string($body['internal_notes'] ?? null, 2000),
     'sent_to_email'  => clean_email($body['sent_to_email'] ?? null),
 ];
 
-foreach ($fields as $col => $val) {
+// VALID-2: specific email-format error
+if (array_key_exists('sent_to_email', $body)
+    && ($body['sent_to_email'] !== null && $body['sent_to_email'] !== '')
+    && $updatable['sent_to_email'] === null) {
+    json_validation_error(['sent_to_email' => 'Please enter a valid email address.']);
+}
+
+foreach ($updatable as $col => $val) {
     if (array_key_exists($col, $body)) {
         $updateData[$col] = $val;
     }

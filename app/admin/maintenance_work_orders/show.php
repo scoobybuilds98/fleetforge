@@ -177,9 +177,11 @@ function priorityBadgeClass(string $p): string {
 <!-- ── Main content: detail + line items ─────────────────────────────────── -->
 <div x-data="woShow()" x-init="init()">
 
-    <!-- Global error banner -->
-    <template x-if="error">
-        <div class="alert alert-danger" x-text="error" style="margin-bottom:16px;"></div>
+    <!-- Global error banners -->
+    <template x-if="staleError">
+        <div class="alert alert-danger" style="margin-bottom:16px;">
+            This work order was modified by another user. Please reload this page to get the latest version.
+        </div>
     </template>
     <template x-if="success">
         <div class="alert alert-success" x-text="success" style="margin-bottom:16px;"></div>
@@ -343,11 +345,13 @@ function priorityBadgeClass(string $p): string {
 
             <!-- Edit mode -->
             <template x-if="editing">
-                <div>
+                <form id="wo-edit-form" @submit.prevent="saveEdit()" novalidate>
+                    <div class="form-error-banner" data-form-error></div>
+
                     <div class="form-row-2">
                         <div class="form-group">
-                            <label class="form-label">Work Type</label>
-                            <select class="form-select" x-model="editForm.work_type">
+                            <label class="form-label" for="edit_work_type">Work Type</label>
+                            <select id="edit_work_type" name="work_type" class="form-select" x-model="editForm.work_type">
                                 <option value="scheduled_service">Scheduled Service</option>
                                 <option value="repair">Repair</option>
                                 <option value="inspection">Inspection</option>
@@ -357,75 +361,86 @@ function priorityBadgeClass(string $p): string {
                                 <option value="breakdown">Breakdown</option>
                                 <option value="other">Other</option>
                             </select>
+                            <div class="field-error" data-error-for="work_type"></div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Priority</label>
-                            <select class="form-select" x-model="editForm.priority">
+                            <label class="form-label" for="edit_priority">Priority</label>
+                            <select id="edit_priority" name="priority" class="form-select" x-model="editForm.priority">
                                 <option value="low">Low</option>
                                 <option value="medium">Medium</option>
                                 <option value="high">High</option>
                                 <option value="emergency">Emergency</option>
                             </select>
+                            <div class="field-error" data-error-for="priority"></div>
                         </div>
                     </div>
 
                     <div class="form-group" style="margin-top:12px;">
-                        <label class="form-label">Title</label>
-                        <input type="text" class="form-control" x-model="editForm.title" maxlength="500">
+                        <label class="form-label" for="edit_title">Title</label>
+                        <input type="text" id="edit_title" name="title" class="form-control" x-model="editForm.title" maxlength="500">
+                        <div class="field-error" data-error-for="title"></div>
                     </div>
 
                     <div class="form-group" style="margin-top:12px;">
-                        <label class="form-label">Vendor</label>
-                        <select class="form-select" x-model="editForm.vendor_id">
+                        <label class="form-label" for="edit_vendor_id">Vendor</label>
+                        <select id="edit_vendor_id" name="vendor_id" class="form-select" x-model="editForm.vendor_id">
                             <option value="">— No Vendor —</option>
                             <?php foreach ($vendors as $v): ?>
                             <option value="<?= e($v['id']) ?>"><?= e($v['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="field-error" data-error-for="vendor_id"></div>
                     </div>
 
                     <div class="form-row-2" style="margin-top:12px;">
                         <div class="form-group">
-                            <label class="form-label">Requested Date</label>
-                            <input type="date" class="form-control" x-model="editForm.requested_date">
+                            <label class="form-label" for="edit_requested_date">Requested Date</label>
+                            <input type="date" id="edit_requested_date" name="requested_date" class="form-control" x-model="editForm.requested_date">
+                            <div class="field-error" data-error-for="requested_date"></div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Scheduled Date</label>
-                            <input type="date" class="form-control" x-model="editForm.scheduled_date">
+                            <label class="form-label" for="edit_scheduled_date">Scheduled Date</label>
+                            <input type="date" id="edit_scheduled_date" name="scheduled_date" class="form-control" x-model="editForm.scheduled_date">
+                            <div class="field-error" data-error-for="scheduled_date"></div>
                         </div>
                     </div>
 
                     <div class="form-row-2" style="margin-top:12px;">
                         <div class="form-group">
-                            <label class="form-label">Odometer (km)</label>
-                            <input type="number" class="form-control" x-model="editForm.mileage_at_service" min="0">
+                            <label class="form-label" for="edit_mileage_at_service">Odometer (km)</label>
+                            <input type="number" id="edit_mileage_at_service" name="mileage_at_service" class="form-control" x-model="editForm.mileage_at_service">
+                            <div class="field-error" data-error-for="mileage_at_service"></div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Assigned To</label>
-                            <select class="form-select" x-model="editForm.assigned_to">
+                            <label class="form-label" for="edit_assigned_to">Assigned To</label>
+                            <select id="edit_assigned_to" name="assigned_to" class="form-select" x-model="editForm.assigned_to">
                                 <option value="">— Unassigned —</option>
                                 <?php foreach ($assignableUsers as $u): ?>
                                 <option value="<?= e($u['id']) ?>"><?= e($u['name']) ?></option>
                                 <?php endforeach; ?>
                             </select>
+                            <div class="field-error" data-error-for="assigned_to"></div>
                         </div>
                     </div>
 
                     <div class="form-group" style="margin-top:12px;">
-                        <label class="form-label">Description</label>
-                        <textarea class="form-control" rows="3" x-model="editForm.description"></textarea>
+                        <label class="form-label" for="edit_description">Description</label>
+                        <textarea id="edit_description" name="description" class="form-control" rows="3" x-model="editForm.description"></textarea>
+                        <div class="field-error" data-error-for="description"></div>
                     </div>
 
                     <div class="form-group" style="margin-top:12px;">
-                        <label class="form-label">Notes (visible to vendor)</label>
-                        <textarea class="form-control" rows="2" x-model="editForm.notes"></textarea>
+                        <label class="form-label" for="edit_notes">Notes (visible to vendor)</label>
+                        <textarea id="edit_notes" name="notes" class="form-control" rows="2" x-model="editForm.notes"></textarea>
+                        <div class="field-error" data-error-for="notes"></div>
                     </div>
 
                     <div class="form-group" style="margin-top:12px;">
-                        <label class="form-label">Internal Notes</label>
-                        <textarea class="form-control" rows="2" x-model="editForm.internal_notes"></textarea>
+                        <label class="form-label" for="edit_internal_notes">Internal Notes</label>
+                        <textarea id="edit_internal_notes" name="internal_notes" class="form-control" rows="2" x-model="editForm.internal_notes"></textarea>
+                        <div class="field-error" data-error-for="internal_notes"></div>
                     </div>
-                </div>
+                </form>
             </template>
 
         </div><!-- /card-body -->
@@ -450,48 +465,55 @@ function priorityBadgeClass(string $p): string {
                 <div class="card" style="background:var(--bg-muted);margin-bottom:16px;">
                     <div class="card-body">
                         <h4 style="margin:0 0 12px;font-size:0.875rem;">Add Line Item</h4>
-                        <div class="form-row-2">
-                            <div class="form-group">
-                                <label class="form-label">Type</label>
-                                <select class="form-select" x-model="newItem.item_type">
-                                    <option value="labor">Labour</option>
-                                    <option value="part">Part</option>
-                                    <option value="sublet">Sublet</option>
-                                    <option value="other">Other</option>
-                                </select>
+                        <form id="wo-add-item-form" @submit.prevent="addItem()" novalidate>
+                            <div class="form-error-banner" data-form-error></div>
+
+                            <div class="form-row-2">
+                                <div class="form-group">
+                                    <label class="form-label" for="add_item_type">Type</label>
+                                    <select id="add_item_type" name="item_type" class="form-select" x-model="newItem.item_type">
+                                        <option value="labor">Labour</option>
+                                        <option value="part">Part</option>
+                                        <option value="sublet">Sublet</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                    <div class="field-error" data-error-for="item_type"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="add_part_number">Part Number</label>
+                                    <input type="text" id="add_part_number" name="part_number" class="form-control" x-model="newItem.part_number" placeholder="Optional">
+                                    <div class="field-error" data-error-for="part_number"></div>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label class="form-label">Part Number</label>
-                                <input type="text" class="form-control" x-model="newItem.part_number" placeholder="Optional">
+                            <div class="form-group" style="margin-top:10px;">
+                                <label class="form-label" for="add_description">Description <span class="text-danger">*</span></label>
+                                <input type="text" id="add_description" name="description" class="form-control" x-model="newItem.description" placeholder="Item description…">
+                                <div class="field-error" data-error-for="description"></div>
                             </div>
-                        </div>
-                        <div class="form-group" style="margin-top:10px;">
-                            <label class="form-label">Description <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" x-model="newItem.description" placeholder="Item description…">
-                        </div>
-                        <div class="form-row-3" style="margin-top:10px;">
-                            <div class="form-group">
-                                <label class="form-label">Quantity <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" x-model="newItem.quantity" min="0.01" step="0.01">
+                            <div class="form-row-3" style="margin-top:10px;">
+                                <div class="form-group">
+                                    <label class="form-label" for="add_quantity">Quantity <span class="text-danger">*</span></label>
+                                    <input type="number" id="add_quantity" name="quantity" class="form-control" x-model="newItem.quantity" step="0.01">
+                                    <div class="field-error" data-error-for="quantity"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="add_unit_cost">Unit Cost <span class="text-danger">*</span></label>
+                                    <input type="number" id="add_unit_cost" name="unit_cost" class="form-control" x-model="newItem.unit_cost" step="0.01">
+                                    <div class="field-error" data-error-for="unit_cost"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Line Total</label>
+                                    <input type="text" class="form-control" readonly
+                                           :value="'$' + (parseFloat(newItem.quantity||0) * parseFloat(newItem.unit_cost||0)).toFixed(2)">
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label class="form-label">Unit Cost <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" x-model="newItem.unit_cost" min="0" step="0.01">
+                            <div style="margin-top:10px;display:flex;gap:8px;">
+                                <button type="submit" class="btn btn-primary btn-sm" :disabled="addingItem">
+                                    <span x-text="addingItem ? 'Adding…' : 'Add Item'"></span>
+                                </button>
+                                <button type="button" class="btn btn-secondary btn-sm" @click="showAddItem = false">Cancel</button>
                             </div>
-                            <div class="form-group">
-                                <label class="form-label">Line Total</label>
-                                <input type="text" class="form-control" readonly
-                                       :value="'$' + (parseFloat(newItem.quantity||0) * parseFloat(newItem.unit_cost||0)).toFixed(2)">
-                            </div>
-                        </div>
-                        <div style="margin-top:10px;display:flex;gap:8px;">
-                            <button class="btn btn-primary btn-sm"
-                                    @click="addItem()"
-                                    :disabled="addingItem">
-                                <span x-text="addingItem ? 'Adding…' : 'Add Item'"></span>
-                            </button>
-                            <button class="btn btn-secondary btn-sm" @click="showAddItem = false">Cancel</button>
-                        </div>
+                        </form>
                     </div>
                 </div>
             </template>
@@ -592,26 +614,16 @@ function priorityBadgeClass(string $p): string {
 
 <script>
 function confirmDelete() {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
-    fetch('<?= base_url('api/v1/maintenance_work_orders/delete.php') ?>', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-CSRF-Token': csrfToken,
-        },
-        body: JSON.stringify({ id: <?= (int)$wo['id'] ?> }),
-    })
-    .then(r => r.json())
-    .then(d => {
-        if (d && d.error) {
-            alert(d.message ?? 'Delete failed.');
-            document.getElementById('delete-modal').style.display = 'none';
-            return;
-        }
-        window.location.href = '<?= base_url('maintenance_work_orders') ?>';
-    })
-    .catch(() => { alert('Network error. Please try again.'); });
+    FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/delete.php') ?>', { id: <?= (int)$wo['id'] ?> })
+        .then(r => {
+            if (!r.success) {
+                alert((r.error && r.error.message) || 'Delete failed.');
+                document.getElementById('delete-modal').style.display = 'none';
+                return;
+            }
+            window.location.href = '<?= base_url('maintenance_work_orders') ?>';
+        })
+        .catch(() => { alert('Network error. Please try again.'); });
 }
 </script>
 <?php endif; ?>
@@ -624,6 +636,7 @@ function woShow() {
         saving:       false,
         editForm:     {},
         updatedAt:    '<?= addslashes($wo['updated_at']) ?>',
+        staleError:   false,
 
         // Status transition state
         transitioning:       false,
@@ -644,7 +657,6 @@ function woShow() {
         },
 
         // Feedback
-        error:   null,
         success: null,
 
         init() {},
@@ -666,16 +678,56 @@ function woShow() {
                 internal_notes:   '<?= addslashes(e($wo['internal_notes'] ?? '')) ?>',
                 updated_at:       this.updatedAt,
             };
-            this.editing = true;
-            this.error   = null;
-            this.success = null;
+            this.editing    = true;
+            this.staleError = false;
+            this.success    = null;
         },
 
-        cancelEdit() { this.editing = false; this.error = null; },
+        cancelEdit() {
+            this.editing    = false;
+            const form = document.getElementById('wo-edit-form');
+            if (form) FF_Validate.clear(form);
+        },
+
+        validateEdit(form) {
+            FF_Validate.clear(form);
+            let ok = true;
+
+            if (!this.editForm.title || !this.editForm.title.trim()) {
+                FF_Validate.field(form, 'title', 'Title is required.');
+                ok = false;
+            }
+            if (!this.editForm.work_type) {
+                FF_Validate.field(form, 'work_type', 'Please select a work type.');
+                ok = false;
+            }
+            if (!this.editForm.priority) {
+                FF_Validate.field(form, 'priority', 'Please select a priority.');
+                ok = false;
+            }
+            if (this.editForm.mileage_at_service !== '' && this.editForm.mileage_at_service !== null) {
+                const mi = parseInt(this.editForm.mileage_at_service);
+                if (isNaN(mi) || mi < 0) {
+                    FF_Validate.field(form, 'mileage_at_service', 'Odometer cannot be negative.');
+                    ok = false;
+                }
+            }
+            if (this.editForm.scheduled_date && this.editForm.requested_date &&
+                this.editForm.scheduled_date < this.editForm.requested_date) {
+                FF_Validate.field(form, 'scheduled_date', 'Scheduled date cannot be before requested date.');
+                ok = false;
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(form);
+            return ok;
+        },
 
         saveEdit() {
+            const form = document.getElementById('wo-edit-form');
+            if (!form) return;
+            if (!this.validateEdit(form)) return;
+
             this.saving = true;
-            this.error  = null;
             const payload = {
                 id:                parseInt(this.editForm.id),
                 updated_at:        this.updatedAt,
@@ -692,14 +744,27 @@ function woShow() {
                 internal_notes:    this.editForm.internal_notes || null,
             };
             FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/update.php') ?>', payload)
-                .then(d => {
-                    if (d && d.error) { this.error = d.message ?? 'Save failed.'; return; }
-                    this.updatedAt = d.data.updated_at;
+                .then(r => {
+                    if (!r.success) {
+                        if (r.error && r.error.code === 'STALE_DATA') {
+                            this.staleError = true;
+                            this.editing    = false;
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        } else if (r.error && r.error.code === 'VALIDATION_ERROR') {
+                            FF_Validate.applyApi(form, r.error);
+                        } else {
+                            FF_Validate.banner(form, (r.error && r.error.message) || 'Save failed.');
+                        }
+                        return;
+                    }
+                    this.updatedAt = r.data.updated_at;
                     this.editing   = false;
                     this.success   = 'Work order updated.';
                     setTimeout(() => { this.success = null; }, 3000);
                 })
-                .catch(() => { this.error = 'Network error. Please try again.'; })
+                .catch(() => {
+                    FF_Validate.banner(form, 'Network error. Please try again.');
+                })
                 .finally(() => { this.saving = false; });
         },
 
@@ -720,7 +785,6 @@ function woShow() {
 
         _doTransition(newStatus, reason, resolutionNotes) {
             this.transitioning = true;
-            this.error         = null;
             const payload = {
                 id:               <?= (int)$wo['id'] ?>,
                 new_status:       newStatus,
@@ -728,20 +792,45 @@ function woShow() {
                 resolution_notes: resolutionNotes,
             };
             FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/update_status.php') ?>', payload)
-                .then(d => {
-                    if (d && d.error) { this.error = d.message ?? 'Transition failed.'; return; }
-                    // Reload page to reflect new status, buttons, and resolved data
+                .then(r => {
+                    if (!r.success) {
+                        alert((r.error && r.error.message) || 'Transition failed.');
+                        return;
+                    }
                     window.location.reload();
                 })
-                .catch(() => { this.error = 'Network error. Please try again.'; })
+                .catch(() => { alert('Network error. Please try again.'); })
                 .finally(() => { this.transitioning = false; });
         },
 
         // ── Line items ─────────────────────────────────────────────────────
+        validateNewItem(form) {
+            FF_Validate.clear(form);
+            let ok = true;
+
+            if (!this.newItem.description || !this.newItem.description.trim()) {
+                FF_Validate.field(form, 'description', 'Description is required.');
+                ok = false;
+            }
+            const q = parseFloat(this.newItem.quantity);
+            if (isNaN(q) || q <= 0) {
+                FF_Validate.field(form, 'quantity', 'Quantity must be greater than zero.');
+                ok = false;
+            }
+            const uc = parseFloat(this.newItem.unit_cost);
+            if (isNaN(uc) || uc < 0) {
+                FF_Validate.field(form, 'unit_cost', 'Unit cost cannot be negative.');
+                ok = false;
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(form);
+            return ok;
+        },
+
         addItem() {
-            this.error = null;
-            if (!this.newItem.description.trim()) { this.error = 'Description is required.'; return; }
-            if (parseFloat(this.newItem.quantity) <= 0) { this.error = 'Quantity must be > 0.'; return; }
+            const form = document.getElementById('wo-add-item-form');
+            if (!form) return;
+            if (!this.validateNewItem(form)) return;
 
             this.addingItem = true;
             const payload = {
@@ -753,24 +842,34 @@ function woShow() {
                 part_number:   this.newItem.part_number || null,
             };
             FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/line_items/add.php') ?>', payload)
-                .then(d => {
-                    if (d && d.error) { this.error = d.message ?? 'Failed to add item.'; return; }
-                    // Reload to get fresh line items + WO cost tiles
+                .then(r => {
+                    if (!r.success) {
+                        if (r.error && r.error.code === 'VALIDATION_ERROR') {
+                            FF_Validate.applyApi(form, r.error);
+                        } else {
+                            FF_Validate.banner(form, (r.error && r.error.message) || 'Failed to add item.');
+                        }
+                        return;
+                    }
                     window.location.reload();
                 })
-                .catch(() => { this.error = 'Network error. Please try again.'; })
+                .catch(() => {
+                    FF_Validate.banner(form, 'Network error. Please try again.');
+                })
                 .finally(() => { this.addingItem = false; });
         },
 
         deleteItem(lineItemId) {
             if (!confirm('Delete this line item?')) return;
-            this.error = null;
             FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/line_items/delete.php') ?>', { id: lineItemId })
-                .then(d => {
-                    if (d && d.error) { this.error = d.message ?? 'Delete failed.'; return; }
+                .then(r => {
+                    if (!r.success) {
+                        alert((r.error && r.error.message) || 'Delete failed.');
+                        return;
+                    }
                     window.location.reload();
                 })
-                .catch(() => { this.error = 'Network error. Please try again.'; });
+                .catch(() => { alert('Network error. Please try again.'); });
         },
 
         // ── Badge helpers ──────────────────────────────────────────────────

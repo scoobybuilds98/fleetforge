@@ -28,10 +28,13 @@ require_method('POST');
 require_auth_api();
 require_permission('maintenance', 'delete');
 
-$body = json_body();
-$id   = clean_int($body['id'] ?? null);
+$body   = json_body();
+$fields = [];
+
+$id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Work order ID is required.';
+    json_validation_error($fields);
 }
 
 $wo = db_row(
@@ -46,7 +49,8 @@ if (!$wo) {
 // Block delete on active or completed states
 if (!in_array($wo['status'], ['open', 'cancelled'], true)) {
     json_error('INVALID_TRANSITION',
-        "Cannot delete a work order with status '{$wo['status']}'. Only open or cancelled work orders may be deleted.", 422);
+        "Cannot delete a work order with status '{$wo['status']}'. Only open or cancelled work orders may be deleted.", 422,
+        ['fields' => ['id' => 'Only open or cancelled work orders may be deleted.']]);
 }
 
 db_transaction(function() use ($id, $wo) {

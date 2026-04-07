@@ -35,26 +35,41 @@ require_method('POST');
 require_auth_api();
 require_permission('tax_management', 'edit');
 
-require_input([
-    'filing_period_id' => 'Filing period',
-    'remittance_date'  => 'Remittance date',
-    'amount'           => 'Amount',
-    'payment_method'   => 'Payment method',
-    'updated_at'       => 'updated_at (optimistic lock)',
-]);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$body     = !empty($jsonBody) ? $jsonBody : $_POST;
 
-$body            = json_body();
-$periodId        = clean_int($body['filing_period_id']);
-$remittanceDate  = clean_date($body['remittance_date']);
-$amount          = clean_decimal($body['amount']);
-$paymentMethod   = clean_string($body['payment_method']);
+$fields = [];
+
+$periodId        = clean_int($body['filing_period_id'] ?? null);
+$remittanceDate  = clean_date($body['remittance_date'] ?? null);
+$amount          = clean_decimal($body['amount'] ?? null);
+$paymentMethod   = clean_string($body['payment_method'] ?? null);
 $bankAccountId   = clean_int($body['bank_account_id'] ?? null);
 $referenceNumber = clean_string($body['reference_number'] ?? null, 100);
 $notes           = clean_string($body['notes'] ?? null, 1000);
-$updatedAt       = clean_string($body['updated_at']);
+$updatedAt       = clean_string($body['updated_at'] ?? null);
 
-if (!$periodId) {
-    json_error('MISSING_REQUIRED', 'filing_period_id must be a positive integer.', 422);
+if (!$periodId)       $fields['filing_period_id'] = 'Please select a tax filing period.';
+if (!$remittanceDate) $fields['remittance_date']  = 'Remittance date is required.';
+
+if ($amount === null || $amount === '') {
+    $fields['amount'] = 'Remittance amount is required.';
+} elseif (bccomp($amount, '0', 2) <= 0) {
+    $fields['amount'] = 'Remittance amount must be greater than zero.';
+}
+
+$validMethods = ['eft', 'wire', 'check', 'online_banking', 'credit_card', 'other'];
+if (!$paymentMethod) {
+    $fields['payment_method'] = 'Please select a payment method.';
+} elseif (!in_array($paymentMethod, $validMethods, true)) {
+    $fields['payment_method'] = 'Payment method must be one of: ' . implode(', ', $validMethods) . '.';
+}
+
+if (!$updatedAt) $fields['updated_at'] = 'Concurrency token (updated_at) is required.';
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // D19 optimistic lock check on the parent period.
@@ -63,13 +78,16 @@ $current = db_row(
     [$periodId]
 );
 if (!$current) {
-    json_error('NOT_FOUND', 'Tax filing period not found.', 404);
+    json_error('NOT_FOUND', 'Tax filing period not found.', 404, [
+        'fields' => ['filing_period_id' => 'Tax filing period not found.'],
+    ]);
 }
 if ((string) $current['updated_at'] !== $updatedAt) {
     json_error(
         'STALE_DATA',
         'This tax period was modified by another user. Please refresh and try again.',
-        409
+        409,
+        ['fields' => ['updated_at' => 'This tax period was modified by another user. Please refresh and try again.']]
     );
 }
 
@@ -85,10 +103,16 @@ $payload = [
 try {
     $result = TaxFilingService::recordRemittance($periodId, $payload, current_user_id());
 } catch (\RuntimeException $e) {
-    if (str_starts_with($e->getMessage(), 'INVALID_TRANSITION')) {
-        json_error('INVALID_TRANSITION', $e->getMessage(), 409);
+    $msg = $e->getMessage();
+    if (str_starts_with($msg, 'INVALID_TRANSITION')) {
+        json_error('INVALID_TRANSITION', $msg, 409, ['fields' => ['filing_period_id' => $msg]]);
     }
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $slot = '_general';
+    if (stripos($msg, 'bank') !== false) $slot = 'bank_account_id';
+    elseif (stripos($msg, 'amount') !== false) $slot = 'amount';
+    elseif (stripos($msg, 'method') !== false) $slot = 'payment_method';
+    elseif (stripos($msg, 'date') !== false || stripos($msg, 'period') !== false) $slot = 'remittance_date';
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($result, 201);

@@ -23,19 +23,46 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'create');
 
-// Input validation
-$name = clean_string($_POST['name'] ?? null);
-$glAccountId = clean_int($_POST['gl_account_id'] ?? null);
-$currency = clean_string($_POST['currency'] ?? null);
-$accountType = clean_string($_POST['account_type'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$name) json_error('VALIDATION_ERROR', 'name is required.', 422);
-if (!$glAccountId) json_error('VALIDATION_ERROR', 'gl_account_id is required.', 422);
-if (!$currency || !in_array($currency, ['CAD', 'USD'])) {
-    json_error('VALIDATION_ERROR', 'currency must be CAD or USD.', 422);
+$fields = [];
+
+// Input validation
+$name = clean_string($input['name'] ?? null);
+$glAccountId = clean_int($input['gl_account_id'] ?? null);
+$currency = clean_string($input['currency'] ?? null);
+$accountType = clean_string($input['account_type'] ?? null);
+
+if (!$name) $fields['name'] = 'Bank account name is required.';
+if (!$glAccountId) $fields['gl_account_id'] = 'Please select a GL cash account.';
+if (!$currency) {
+    $fields['currency'] = 'Please select a currency.';
+} elseif (!in_array($currency, ['CAD', 'USD'], true)) {
+    $fields['currency'] = 'Currency must be CAD or USD.';
 }
-if (!$accountType || !in_array($accountType, ['checking', 'savings', 'line_of_credit', 'credit_card'])) {
-    json_error('VALIDATION_ERROR', 'account_type must be checking, savings, line_of_credit, or credit_card.', 422);
+$validAccountTypes = ['checking', 'savings', 'line_of_credit', 'credit_card'];
+if (!$accountType) {
+    $fields['account_type'] = 'Please select an account type.';
+} elseif (!in_array($accountType, $validAccountTypes, true)) {
+    $fields['account_type'] = 'Account type must be checking, savings, line of credit, or credit card.';
+}
+
+$last4 = clean_string($input['account_number_last4'] ?? null, 4);
+if ($last4 !== null && $last4 !== '' && !preg_match('/^\d{1,4}$/', $last4)) {
+    $fields['account_number_last4'] = 'Last 4 digits must be numeric (up to 4 digits).';
+}
+
+$openingBalance = clean_decimal($input['opening_balance'] ?? null) ?? '0.00';
+$openingDate = clean_date($input['opening_balance_date'] ?? null);
+
+if ($openingBalance !== '0.00' && !$openingDate) {
+    $fields['opening_balance_date'] = 'Opening balance date is required when opening balance is non-zero.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // Validate GL account exists and is a bank account
@@ -43,16 +70,17 @@ $glAccount = db_row(
     "SELECT id, is_bank_account, is_active FROM acc_accounts WHERE id = ?",
     [$glAccountId]
 );
-if (!$glAccount) json_error('VALIDATION_ERROR', 'GL account not found.', 422);
-if (!$glAccount['is_active']) json_error('VALIDATION_ERROR', 'GL account is inactive.', 422);
+if (!$glAccount) {
+    json_validation_error(['gl_account_id' => 'GL account not found.'], 'GL account not found.');
+}
+if (!$glAccount['is_active']) {
+    json_validation_error(['gl_account_id' => 'GL account is inactive.'], 'GL account is inactive.');
+}
 
-$institution = clean_string($_POST['institution'] ?? null);
-$last4 = clean_string($_POST['account_number_last4'] ?? null, 4);
-$routingNumber = clean_string($_POST['routing_number'] ?? null, 20);
-$openingBalance = clean_decimal($_POST['opening_balance'] ?? null) ?? '0.00';
-$openingDate = clean_date($_POST['opening_balance_date'] ?? null);
-$isDefault = (int) ($_POST['is_default'] ?? 0);
-$notes = clean_string($_POST['notes'] ?? null, 2000);
+$institution = clean_string($input['institution'] ?? null);
+$routingNumber = clean_string($input['routing_number'] ?? null, 20);
+$isDefault = (int) ($input['is_default'] ?? 0);
+$notes = clean_string($input['notes'] ?? null, 2000);
 
 $userId = current_user_id();
 

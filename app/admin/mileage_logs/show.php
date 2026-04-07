@@ -192,13 +192,14 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <div class="card-title">Edit Entry</div>
     </div>
     <div class="card-body">
-        <div class="alert alert-danger" id="edit-error" style="display:none;"></div>
-        <form id="edit-form">
+        <div class="form-error-banner" id="edit-error" style="display:none;"></div>
+        <form id="edit-form" novalidate>
             <div class="form-row-2">
                 <div class="form-group">
                     <label class="form-label" for="edit_odometer">Odometer Reading</label>
                     <input type="number" class="form-control" id="edit_odometer" name="odometer_reading"
                            min="0" step="1" value="<?= e($log['odometer_reading']) ?>">
+                    <div class="field-error" id="err-odometer_reading"></div>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="edit_unit">Unit</label>
@@ -206,16 +207,19 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                         <option value="km"    <?= $log['mileage_unit'] === 'km'    ? 'selected' : '' ?>>km</option>
                         <option value="miles" <?= $log['mileage_unit'] === 'miles' ? 'selected' : '' ?>>miles</option>
                     </select>
+                    <div class="field-error" id="err-mileage_unit"></div>
                 </div>
             </div>
             <div class="form-group">
                 <label class="form-label" for="edit_date">Log Date</label>
                 <input type="date" class="form-control" id="edit_date" name="log_date"
                        value="<?= e($log['log_date']) ?>" max="<?= e(date('Y-m-d')) ?>">
+                <div class="field-error" id="err-log_date"></div>
             </div>
             <div class="form-group">
                 <label class="form-label" for="edit_notes">Notes</label>
                 <textarea class="form-control" id="edit_notes" name="notes" rows="3"><?= e($log['notes'] ?? '') ?></textarea>
+                <div class="field-error" id="err-notes"></div>
             </div>
             <!-- Optimistic lock: use created_at since no updated_at on this table -->
             <input type="hidden" name="id" value="<?= e($id) ?>">
@@ -231,11 +235,47 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
 </div>
 <script>
-document.getElementById('edit-form').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const btn   = document.getElementById('edit-btn');
+// Clear/paint helpers for the edit form
+function mlogEditClear() {
     const errEl = document.getElementById('edit-error');
     errEl.style.display = 'none';
+    errEl.textContent = '';
+    ['odometer_reading','mileage_unit','log_date','notes'].forEach(f => {
+        const el = document.getElementById('err-' + f);
+        if (el) { el.textContent = ''; el.style.display = 'none'; }
+    });
+}
+function mlogEditPaint(fields, topMsg) {
+    const errEl = document.getElementById('edit-error');
+    errEl.textContent = topMsg || 'Please fix the errors below and try again.';
+    errEl.style.display = 'block';
+    for (const [f, msg] of Object.entries(fields || {})) {
+        const el = document.getElementById('err-' + f);
+        if (el) { el.textContent = msg; el.style.display = 'block'; }
+    }
+}
+
+document.getElementById('edit-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    mlogEditClear();
+
+    // Client-side validation
+    const cErrs  = {};
+    const odo    = document.getElementById('edit_odometer').value;
+    const dt     = document.getElementById('edit_date').value;
+    if (odo !== '' && (isNaN(parseInt(odo)) || parseInt(odo) < 0)) {
+        cErrs.odometer_reading = 'Odometer cannot be negative.';
+    }
+    if (dt) {
+        const today = new Date().toISOString().split('T')[0];
+        if (dt > today) cErrs.log_date = 'Log date cannot be in the future.';
+    }
+    if (Object.keys(cErrs).length) {
+        mlogEditPaint(cErrs, 'Please fix the errors below and try again.');
+        return;
+    }
+
+    const btn = document.getElementById('edit-btn');
     btn.disabled = true; btn.textContent = 'Saving…';
 
     try {
@@ -249,19 +289,20 @@ document.getElementById('edit-form').addEventListener('submit', async function(e
         });
         const data = await res.json();
         if (!data.success) {
-            if (data.code === 'STALE_DATA') {
-                errEl.textContent = 'This entry was modified by another user. Please refresh.';
+            const err = data.error || {};
+            const code = err.code || data.code;
+            const fields = err.fields || {};
+            if (code === 'STALE_DATA') {
+                mlogEditPaint({}, 'This entry was modified by another user. Please refresh the page and try again.');
             } else {
-                errEl.textContent = data.message || 'Update failed.';
+                mlogEditPaint(fields, err.message || data.message || 'Update failed.');
             }
-            errEl.style.display = 'block';
             btn.disabled = false; btn.textContent = 'Save Changes';
             return;
         }
         window.location.reload();
     } catch(err) {
-        errEl.textContent = 'Network error. Please try again.';
-        errEl.style.display = 'block';
+        mlogEditPaint({}, 'Network error. Please try again.');
         btn.disabled = false; btn.textContent = 'Save Changes';
     }
 });
@@ -296,6 +337,7 @@ document.getElementById('edit-form').addEventListener('submit', async function(e
 async function confirmDelete() {
     const btn   = document.getElementById('confirm-delete-btn');
     const errEl = document.getElementById('delete-error');
+    errEl.style.display = 'none';
     btn.disabled = true; btn.textContent = 'Deleting…';
     try {
         const form = new FormData();
@@ -309,7 +351,10 @@ async function confirmDelete() {
         });
         const data = await res.json();
         if (!data.success) {
-            errEl.textContent = data.message || 'Delete failed.';
+            const err = data.error || {};
+            const fields = err.fields || {};
+            const msgs = Object.values(fields);
+            errEl.textContent = msgs.length ? msgs.join(' ') : (err.message || data.message || 'Delete failed.');
             errEl.style.display = 'block';
             btn.disabled = false; btn.textContent = 'Delete';
             return;

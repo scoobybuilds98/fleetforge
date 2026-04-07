@@ -411,7 +411,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <button class="modal-close" @click="showCreateModal = false">&times;</button>
                 </div>
                 <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
-                    <div x-show="createError" class="alert alert-danger" x-text="createError" style="margin-bottom:1rem;"></div>
+                    <div class="form-error-banner" x-show="createFormError" x-cloak x-text="createFormError" style="margin-bottom:1rem;"></div>
 
                     <!-- Entry header fields -->
                     <div class="form-row" style="display:flex;gap:16px;margin-bottom:16px;">
@@ -420,16 +420,22 @@ require_once FF_ROOT . '/includes/header.php';
                             <input type="date"
                                    class="form-control"
                                    x-model="form.entry_date"
+                                   :class="createErrors.entry_date ? 'is-invalid' : ''"
+                                   @input="createErrors.entry_date = ''"
                                    :disabled="saving">
+                            <div class="field-error" x-show="createErrors.entry_date" x-cloak x-text="createErrors.entry_date"></div>
                         </div>
                         <div class="form-group" style="flex:1;">
                             <label class="form-label">Entry Type <span class="text-danger">*</span></label>
                             <select class="form-select"
                                     x-model="form.entry_type"
+                                    :class="createErrors.entry_type ? 'is-invalid' : ''"
+                                    @change="createErrors.entry_type = ''"
                                     :disabled="saving">
                                 <option value="manual">Manual</option>
                                 <option value="adjusting">Adjusting</option>
                             </select>
+                            <div class="field-error" x-show="createErrors.entry_type" x-cloak x-text="createErrors.entry_type"></div>
                         </div>
                     </div>
 
@@ -438,9 +444,12 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="text"
                                class="form-control"
                                x-model="form.description"
+                               :class="createErrors.description ? 'is-invalid' : ''"
+                               @input="createErrors.description = ''"
                                maxlength="255"
                                placeholder="Describe the purpose of this entry..."
                                :disabled="saving">
+                        <div class="field-error" x-show="createErrors.description" x-cloak x-text="createErrors.description"></div>
                     </div>
 
                     <div class="form-group" style="margin-bottom:20px;">
@@ -448,9 +457,12 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="text"
                                class="form-control"
                                x-model="form.reference"
+                               :class="createErrors.reference ? 'is-invalid' : ''"
+                               @input="createErrors.reference = ''"
                                maxlength="100"
                                placeholder="Optional invoice #, PO #, etc."
                                :disabled="saving">
+                        <div class="field-error" x-show="createErrors.reference" x-cloak x-text="createErrors.reference"></div>
                     </div>
 
                     <!-- Dynamic lines table -->
@@ -471,6 +483,8 @@ require_once FF_ROOT . '/includes/header.php';
                                         <td>
                                             <select class="form-select form-control-sm"
                                                     x-model="line.account_id"
+                                                    :class="(lineErrors[idx] && lineErrors[idx].account_id) ? 'is-invalid' : ''"
+                                                    @change="if (lineErrors[idx]) lineErrors[idx].account_id = ''"
                                                     :disabled="saving">
                                                 <option value="">-- Select Account --</option>
                                                 <template x-for="acct in accounts" :key="acct.id">
@@ -478,14 +492,18 @@ require_once FF_ROOT . '/includes/header.php';
                                                             x-text="acct.account_code + ' — ' + acct.account_name"></option>
                                                 </template>
                                             </select>
+                                            <div class="field-error" x-show="lineErrors[idx] && lineErrors[idx].account_id" x-cloak x-text="lineErrors[idx] ? lineErrors[idx].account_id : ''"></div>
                                         </td>
                                         <td>
                                             <input type="text"
                                                    class="form-control form-control-sm"
                                                    x-model="line.description"
+                                                   :class="(lineErrors[idx] && lineErrors[idx].description) ? 'is-invalid' : ''"
+                                                   @input="if (lineErrors[idx]) lineErrors[idx].description = ''"
                                                    maxlength="255"
                                                    placeholder="Line memo"
                                                    :disabled="saving">
+                                            <div class="field-error" x-show="lineErrors[idx] && lineErrors[idx].description" x-cloak x-text="lineErrors[idx] ? lineErrors[idx].description : ''"></div>
                                         </td>
                                         <td>
                                             <!-- WHY: Auto-clear credit when user types a debit amount
@@ -493,11 +511,13 @@ require_once FF_ROOT . '/includes/header.php';
                                             <input type="number"
                                                    class="form-control form-control-sm text-right font-mono"
                                                    x-model="line.debit"
-                                                   @input="if (parseFloat(line.debit) > 0) line.credit = ''"
+                                                   :class="(lineErrors[idx] && lineErrors[idx].debit) ? 'is-invalid' : ''"
+                                                   @input="if (parseFloat(line.debit) > 0) line.credit = ''; if (lineErrors[idx]) { lineErrors[idx].debit = ''; lineErrors[idx].amounts = ''; }"
                                                    step="0.01"
                                                    min="0"
                                                    placeholder="0.00"
                                                    :disabled="saving">
+                                            <div class="field-error" x-show="lineErrors[idx] && lineErrors[idx].debit" x-cloak x-text="lineErrors[idx] ? lineErrors[idx].debit : ''"></div>
                                         </td>
                                         <td>
                                             <!-- WHY: Auto-clear debit when user types a credit amount
@@ -505,11 +525,13 @@ require_once FF_ROOT . '/includes/header.php';
                                             <input type="number"
                                                    class="form-control form-control-sm text-right font-mono"
                                                    x-model="line.credit"
-                                                   @input="if (parseFloat(line.credit) > 0) line.debit = ''"
+                                                   :class="(lineErrors[idx] && lineErrors[idx].credit) ? 'is-invalid' : ''"
+                                                   @input="if (parseFloat(line.credit) > 0) line.debit = ''; if (lineErrors[idx]) { lineErrors[idx].credit = ''; lineErrors[idx].amounts = ''; }"
                                                    step="0.01"
                                                    min="0"
                                                    placeholder="0.00"
                                                    :disabled="saving">
+                                            <div class="field-error" x-show="lineErrors[idx] && (lineErrors[idx].credit || lineErrors[idx].amounts)" x-cloak x-text="lineErrors[idx] ? (lineErrors[idx].credit || lineErrors[idx].amounts) : ''"></div>
                                         </td>
                                         <td style="text-align:center;vertical-align:middle;">
                                             <button class="btn btn-ghost btn-xs"
@@ -610,8 +632,13 @@ function FF_JournalEntries() {
         // -- Create modal -------------------------------------------------
         showCreateModal: false,
         saving:          false,
-        createError:     null,
+        createError:     null,     // legacy — kept for backwards compat
         accounts:        [],
+
+        // VALID-2: per-form banner and per-field errors
+        createFormError: '',
+        createErrors: { entry_date: '', entry_type: '', description: '', reference: '' },
+        lineErrors:   [],  // parallel array to form.lines: each entry {account_id, description, debit, credit, amounts}
 
         form: {
             entry_date:       new Date().toISOString().split('T')[0],
@@ -718,9 +745,65 @@ function FF_JournalEntries() {
                 || this.filters.date_from || this.filters.date_to;
         },
 
+        // -- VALID-2 helpers ----------------------------------------------
+        _emptyLineErr() {
+            return { account_id: '', description: '', debit: '', credit: '', amounts: '' };
+        },
+        _syncLineErrors() {
+            // Make lineErrors length match form.lines length
+            while (this.lineErrors.length < this.form.lines.length) {
+                this.lineErrors.push(this._emptyLineErr());
+            }
+            while (this.lineErrors.length > this.form.lines.length) {
+                this.lineErrors.pop();
+            }
+        },
+        _clearCreateErrors() {
+            this.createFormError = '';
+            for (const k in this.createErrors) {
+                if (Object.prototype.hasOwnProperty.call(this.createErrors, k)) this.createErrors[k] = '';
+            }
+            this.lineErrors = this.form.lines.map(() => this._emptyLineErr());
+        },
+        _paintCreateServerErrors(r, fallback) {
+            const fields = (r && r.error && r.error.fields) || (r && r.fields) || null;
+            if (fields && typeof fields === 'object') {
+                let any = false;
+                for (const k in fields) {
+                    if (!Object.prototype.hasOwnProperty.call(fields, k)) continue;
+                    const msg = fields[k];
+                    if (Object.prototype.hasOwnProperty.call(this.createErrors, k)) {
+                        this.createErrors[k] = msg;
+                        any = true;
+                    } else if (k === '_general' || k === '') {
+                        this.createFormError = msg;
+                        any = true;
+                    } else {
+                        // line-specific keys like lines.0.account_id or lines[0].debit
+                        const m = k.match(/^lines[\.\[](\d+)[\]\.](.+)$/);
+                        if (m) {
+                            const idx = parseInt(m[1], 10);
+                            const f = m[2];
+                            if (this.lineErrors[idx] && Object.prototype.hasOwnProperty.call(this.lineErrors[idx], f)) {
+                                this.lineErrors[idx][f] = msg;
+                                any = true;
+                            } else if (this.lineErrors[idx]) {
+                                this.lineErrors[idx].amounts = msg;
+                                any = true;
+                            }
+                        }
+                    }
+                }
+                if (!any) this.createFormError = this.extractError(r, fallback);
+            } else {
+                this.createFormError = this.extractError(r, fallback);
+            }
+        },
+
         // -- Line management (create form) --------------------------------
         addLine() {
             this.form.lines.push({ account_id: '', description: '', debit: '', credit: '' });
+            this._syncLineErrors();
         },
 
         removeLine(idx) {
@@ -728,6 +811,7 @@ function FF_JournalEntries() {
             // at least one debit side and one credit side.
             if (this.form.lines.length > 2) {
                 this.form.lines.splice(idx, 1);
+                this._syncLineErrors();
             }
         },
 
@@ -745,33 +829,91 @@ function FF_JournalEntries() {
                 ]
             };
             this.createError     = null;
+            this._clearCreateErrors();
             this.saving          = false;
             this.showCreateModal = true;
         },
 
+        // -- Extract error message from VALID-2 envelope ------------------
+        extractError(r, fallback) {
+            if (!r || !r.error) return fallback;
+            var f = r.error.fields || r.error.errors || {};
+            var keys = Object.keys(f);
+            if (keys.length) return keys.map(function(k){ return f[k]; }).join(' ');
+            return r.error.message || r.message || fallback;
+        },
+
+        validateCreateEntry() {
+            this._clearCreateErrors();
+            this._syncLineErrors();
+            let ok = true;
+
+            if (!this.form.entry_date) {
+                this.createErrors.entry_date = 'Entry date is required.';
+                ok = false;
+            }
+            const types = ['manual','adjusting'];
+            if (!this.form.entry_type) {
+                this.createErrors.entry_type = 'Entry type is required.';
+                ok = false;
+            } else if (!types.includes(this.form.entry_type)) {
+                this.createErrors.entry_type = 'Entry type must be manual or adjusting.';
+                ok = false;
+            }
+            if (!this.form.description || !this.form.description.trim()) {
+                this.createErrors.description = 'Description is required.';
+                ok = false;
+            }
+            if (!this.form.lines || this.form.lines.length < 2) {
+                this.createFormError = 'Journal entry must have at least 2 lines.';
+                ok = false;
+            }
+
+            let totalDebit  = 0;
+            let totalCredit = 0;
+            for (let i = 0; i < this.form.lines.length; i++) {
+                const l  = this.form.lines[i];
+                const le = this.lineErrors[i] || this._emptyLineErr();
+                if (!l.account_id) {
+                    le.account_id = 'Please select an account.';
+                    ok = false;
+                }
+                const dStr = String(l.debit  || '').trim();
+                const cStr = String(l.credit || '').trim();
+                if (dStr !== '' && !/^\d+(\.\d{1,2})?$/.test(dStr)) {
+                    le.debit = 'Debit must be a valid amount.';
+                    ok = false;
+                }
+                if (cStr !== '' && !/^\d+(\.\d{1,2})?$/.test(cStr)) {
+                    le.credit = 'Credit must be a valid amount.';
+                    ok = false;
+                }
+                const d = parseFloat(dStr || '0') || 0;
+                const c = parseFloat(cStr || '0') || 0;
+                if (d < 0) { le.debit = 'Debit cannot be negative.'; ok = false; }
+                if (c < 0) { le.credit = 'Credit cannot be negative.'; ok = false; }
+                if (d > 0 && c > 0) { le.amounts = 'Line cannot have both debit and credit.'; ok = false; }
+                if (d === 0 && c === 0 && l.account_id) { le.amounts = 'Line must have either a debit or a credit.'; ok = false; }
+                this.lineErrors[i] = le;
+                totalDebit  += d;
+                totalCredit += c;
+            }
+
+            if (ok && Math.abs(totalDebit - totalCredit) > 0.009) {
+                this.createFormError = 'Entry is unbalanced: debits (' + totalDebit.toFixed(2) + ') must equal credits (' + totalCredit.toFixed(2) + ').';
+                ok = false;
+            }
+            if (ok && totalDebit === 0) {
+                this.createFormError = 'Entry total cannot be zero.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async createEntry() {
-            if (!this.form.description.trim()) {
-                this.createError = 'Description is required.';
-                return;
-            }
+            if (!this.validateCreateEntry()) return;
 
-            // WHY: Validate every line has an account selected so the GL
-            // posting will not fail server-side with a missing FK.
-            var hasEmptyAccount = this.form.lines.some(function(l) {
-                return !l.account_id;
-            });
-            if (hasEmptyAccount) {
-                this.createError = 'Every line must have an account selected.';
-                return;
-            }
-
-            if (!this.isBalanced) {
-                this.createError = 'Entry must be balanced (debits must equal credits).';
-                return;
-            }
-
-            this.saving      = true;
-            this.createError = null;
+            this.saving = true;
 
             try {
                 var r = await FF_Api.post('<?= base_url('api/v1/accounting/journal_entries/create') ?>', this.form);
@@ -780,10 +922,10 @@ function FF_JournalEntries() {
                     FF_Toast.success('Journal entry created successfully.');
                     this.loadEntries();
                 } else {
-                    this.createError = r.message || 'Failed to create journal entry.';
+                    this._paintCreateServerErrors(r, 'Failed to create journal entry.');
                 }
             } catch(e) {
-                this.createError = 'Network error. Please try again.';
+                this.createFormError = 'Network error. Please try again.';
             }
             this.saving = false;
         },
@@ -802,7 +944,7 @@ function FF_JournalEntries() {
                             FF_Toast.success('Journal entry posted.');
                             this.loadEntries();
                         } else {
-                            FF_Toast.error(r.message || 'Failed to post entry.');
+                            FF_Toast.error(this.extractError(r, 'Failed to post entry.'));
                         }
                     } catch(e) {
                         FF_Toast.error('Network error. Please try again.');
@@ -825,7 +967,7 @@ function FF_JournalEntries() {
                             FF_Toast.success('Journal entry reversed.');
                             this.loadEntries();
                         } else {
-                            FF_Toast.error(r.message || 'Failed to reverse entry.');
+                            FF_Toast.error(this.extractError(r, 'Failed to reverse entry.'));
                         }
                     } catch(e) {
                         FF_Toast.error('Network error. Please try again.');

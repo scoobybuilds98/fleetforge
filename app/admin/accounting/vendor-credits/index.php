@@ -83,38 +83,44 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="showCreate">
         <div class="card" style="padding:16px;margin-bottom:16px;">
             <div style="font-weight:600;font-size:0.875rem;margin-bottom:12px;">New Vendor Credit</div>
+            <div class="form-error-banner" x-show="createFormError" x-cloak x-text="createFormError" style="margin-bottom:10px;"></div>
             <div style="display:grid;grid-template-columns:2fr 1fr 1fr 2fr;gap:10px;margin-bottom:10px;">
                 <div>
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Vendor *</label>
-                    <select x-model="createForm.vendor_id" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <select x-model="createForm.vendor_id" :class="createErrors.vendor_id ? 'is-invalid' : ''" @change="createErrors.vendor_id = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                         <option value="">Select vendor...</option>
                         <?php foreach ($vendors as $v): ?>
                         <option value="<?= (int)$v['id'] ?>"><?= e($v['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <div class="field-error" x-show="createErrors.vendor_id" x-cloak x-text="createErrors.vendor_id"></div>
                 </div>
                 <div>
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Amount *</label>
-                    <input type="number" x-model="createForm.amount" step="0.01" min="0.01" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <input type="number" x-model="createForm.amount" step="0.01" min="0.01" :class="createErrors.amount ? 'is-invalid' : ''" @input="createErrors.amount = ''" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <div class="field-error" x-show="createErrors.amount" x-cloak x-text="createErrors.amount"></div>
                 </div>
                 <div>
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Date *</label>
-                    <input type="date" x-model="createForm.credit_date" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <input type="date" x-model="createForm.credit_date" :class="createErrors.credit_date ? 'is-invalid' : ''" @change="createErrors.credit_date = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <div class="field-error" x-show="createErrors.credit_date" x-cloak x-text="createErrors.credit_date"></div>
                 </div>
                 <div>
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Reason *</label>
-                    <input type="text" x-model="createForm.reason" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. Return, overcharge">
+                    <input type="text" x-model="createForm.reason" :class="createErrors.reason ? 'is-invalid' : ''" @input="createErrors.reason = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. Return, overcharge">
+                    <div class="field-error" x-show="createErrors.reason" x-cloak x-text="createErrors.reason"></div>
                 </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div>
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Expense Account (credit reversal)</label>
-                    <select x-model="createForm.expense_account_id" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <select x-model="createForm.expense_account_id" :class="createErrors.expense_account_id ? 'is-invalid' : ''" @change="createErrors.expense_account_id = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                         <option value="">Auto (from AP)</option>
                         <?php foreach ($glAccounts as $a): ?>
                         <option value="<?= (int)$a['id'] ?>"><?= e($a['code'] . ' — ' . $a['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <div class="field-error" x-show="createErrors.expense_account_id" x-cloak x-text="createErrors.expense_account_id"></div>
                 </div>
                 <div>
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Notes</label>
@@ -123,9 +129,8 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
             <div style="display:flex;gap:8px;">
                 <button class="btn btn-success btn-sm" @click="submitCreate()" :disabled="creating">Create Credit</button>
-                <button class="btn btn-secondary btn-sm" @click="showCreate = false">Cancel</button>
+                <button class="btn btn-secondary btn-sm" @click="cancelCreate()">Cancel</button>
             </div>
-            <div x-show="createError" style="margin-top:8px;padding:8px;border-radius:6px;background:var(--badge-danger-bg);color:var(--badge-danger-text);font-size:0.8125rem;" x-text="createError"></div>
         </div>
     </template>
 
@@ -191,24 +196,26 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="font-size:0.8125rem;color:var(--text-secondary);margin-bottom:12px;">
                     Credit: <span class="font-mono" x-text="applyForm.credit_number"></span> — Available: <span class="font-mono" x-text="fmtAmt(applyForm.amount_remaining)"></span>
                 </div>
+                <div class="form-error-banner" x-show="applyFormError" x-cloak x-text="applyFormError" style="margin-bottom:10px;"></div>
                 <div style="margin-bottom:12px;">
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Bill *</label>
-                    <select x-model="applyForm.bill_id" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <select x-model="applyForm.bill_id" :class="applyErrors.bill_id ? 'is-invalid' : ''" @change="applyErrors.bill_id = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                         <option value="">Select bill...</option>
                         <template x-for="b in vendorBills" :key="b.id">
                             <option :value="b.id" x-text="b.bill_number + ' — $' + Number(b.balance_due).toFixed(2)"></option>
                         </template>
                     </select>
+                    <div class="field-error" x-show="applyErrors.bill_id" x-cloak x-text="applyErrors.bill_id"></div>
                 </div>
                 <div style="margin-bottom:12px;">
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Amount to Apply *</label>
-                    <input type="number" x-model="applyForm.amount_applied" step="0.01" min="0.01" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <input type="number" x-model="applyForm.amount_applied" step="0.01" min="0.01" :class="applyErrors.amount_applied ? 'is-invalid' : ''" @input="applyErrors.amount_applied = ''" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <div class="field-error" x-show="applyErrors.amount_applied" x-cloak x-text="applyErrors.amount_applied"></div>
                 </div>
                 <div style="display:flex;justify-content:flex-end;gap:8px;">
                     <button class="btn btn-secondary btn-sm" @click="showApply = false">Cancel</button>
                     <button class="btn btn-success btn-sm" @click="submitApply()" :disabled="applying">Apply</button>
                 </div>
-                <div x-show="applyError" style="margin-top:8px;padding:8px;border-radius:6px;background:var(--badge-danger-bg);color:var(--badge-danger-text);font-size:0.8125rem;" x-text="applyError"></div>
             </div>
     </div>
 </div>
@@ -219,11 +226,17 @@ function vendorCreditsPage() {
         credits: [], loading: false, totalRows: 0,
         tab: '', filterVendor: '',
         kpi: { active: '0.00', applied: '0.00' },
-        showCreate: false, creating: false, createError: '',
-        showApply: false, applying: false, applyError: '',
+        showCreate: false, creating: false,
+        showApply: false, applying: false,
         vendorBills: [],
         createForm: { vendor_id: '', amount: '', credit_date: new Date().toISOString().slice(0,10), reason: '', expense_account_id: '', notes: '' },
         applyForm: {},
+
+        // VALID-2 per-form error state
+        createFormError: '',
+        createErrors: { vendor_id: '', amount: '', credit_date: '', reason: '', expense_account_id: '' },
+        applyFormError: '',
+        applyErrors: { bill_id: '', amount_applied: '' },
 
         tabs: [
             { label: 'All', value: '' },
@@ -237,6 +250,91 @@ function vendorCreditsPage() {
                 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
                 'X-Requested-With': 'XMLHttpRequest',
             };
+        },
+
+        // VALID-2 error helpers
+        _extractError(r, fallback) {
+            if (r && r.error) {
+                if (typeof r.error === 'string') return r.error;
+                if (r.error.message) return r.error.message;
+            }
+            return fallback || 'Request failed.';
+        },
+        _clearErrors(errorsObj, bannerKey) {
+            this[bannerKey] = '';
+            for (const k in errorsObj) errorsObj[k] = '';
+        },
+        _paintErrors(errorsObj, bannerKey, r, fallback) {
+            this._clearErrors(errorsObj, bannerKey);
+            const fields = r && r.error && r.error.fields;
+            if (fields && typeof fields === 'object') {
+                let mapped = false;
+                for (const k in fields) {
+                    if (k === '_general') {
+                        this[bannerKey] = String(fields[k]);
+                        mapped = true;
+                    } else if (k in errorsObj) {
+                        errorsObj[k] = String(fields[k]);
+                        mapped = true;
+                    }
+                }
+                if (mapped) return;
+            }
+            this[bannerKey] = this._extractError(r, fallback);
+        },
+        _isValidAmount(v) {
+            if (v === null || v === undefined || v === '') return false;
+            return /^\d+(\.\d{1,2})?$/.test(String(v).trim());
+        },
+
+        validateCreate() {
+            this._clearErrors(this.createErrors, 'createFormError');
+            let ok = true;
+            if (!this.createForm.vendor_id) {
+                this.createErrors.vendor_id = 'Please select a vendor.';
+                ok = false;
+            }
+            if (!this._isValidAmount(this.createForm.amount)) {
+                this.createErrors.amount = 'Amount must be a valid number with up to 2 decimal places.';
+                ok = false;
+            } else if (Number(this.createForm.amount) <= 0) {
+                this.createErrors.amount = 'Amount must be greater than zero.';
+                ok = false;
+            }
+            if (!this.createForm.credit_date) {
+                this.createErrors.credit_date = 'Credit date is required.';
+                ok = false;
+            }
+            if (!this.createForm.reason || this.createForm.reason.trim() === '') {
+                this.createErrors.reason = 'Reason is required.';
+                ok = false;
+            }
+            return ok;
+        },
+
+        validateApply() {
+            this._clearErrors(this.applyErrors, 'applyFormError');
+            let ok = true;
+            if (!this.applyForm.bill_id) {
+                this.applyErrors.bill_id = 'Please select a bill.';
+                ok = false;
+            }
+            if (!this._isValidAmount(this.applyForm.amount_applied)) {
+                this.applyErrors.amount_applied = 'Amount must be a valid number with up to 2 decimal places.';
+                ok = false;
+            } else if (Number(this.applyForm.amount_applied) <= 0) {
+                this.applyErrors.amount_applied = 'Amount must be greater than zero.';
+                ok = false;
+            } else if (Number(this.applyForm.amount_applied) > Number(this.applyForm.amount_remaining)) {
+                this.applyErrors.amount_applied = 'Amount cannot exceed credit remaining.';
+                ok = false;
+            }
+            return ok;
+        },
+
+        cancelCreate() {
+            this.showCreate = false;
+            this._clearErrors(this.createErrors, 'createFormError');
         },
 
         async load() {
@@ -264,21 +362,27 @@ function vendorCreditsPage() {
         },
 
         async submitCreate() {
-            this.creating = true; this.createError = '';
+            if (!this.validateCreate()) return;
+            this.creating = true;
             try {
                 const fd = new FormData();
                 Object.entries(this.createForm).forEach(([k, v]) => fd.append(k, v));
                 const r = await fetch(FF_Api.url('/api/v1/accounting/vendor-credits/create.php'), { method: 'POST', body: fd, headers: this._csrfHeaders() });
                 const j = await r.json();
-                if (j.success) { this.showCreate = false; this.load(); }
-                else this.createError = j.error?.message || 'Create failed.';
-            } catch (e) { this.createError = e.message; }
+                if (j.success) {
+                    this.showCreate = false;
+                    this._clearErrors(this.createErrors, 'createFormError');
+                    this.load();
+                } else {
+                    this._paintErrors(this.createErrors, 'createFormError', j, 'Failed to create credit.');
+                }
+            } catch (e) { this.createFormError = 'Network error. Please try again.'; }
             this.creating = false;
         },
 
         async openApply(credit) {
             this.applyForm = { vendor_credit_id: credit.id, credit_number: credit.credit_number, amount_remaining: credit.amount_remaining, bill_id: '', amount_applied: credit.amount_remaining };
-            this.applyError = '';
+            this._clearErrors(this.applyErrors, 'applyFormError');
             try {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/bills/index.php?vendor_id=' + credit.vendor_id + '&status=approved&per_page=100'));
                 const j = await r.json();
@@ -292,7 +396,8 @@ function vendorCreditsPage() {
         },
 
         async submitApply() {
-            this.applying = true; this.applyError = '';
+            if (!this.validateApply()) return;
+            this.applying = true;
             try {
                 const fd = new FormData();
                 fd.append('vendor_credit_id', this.applyForm.vendor_credit_id);
@@ -300,9 +405,14 @@ function vendorCreditsPage() {
                 fd.append('amount_applied', this.applyForm.amount_applied);
                 const r = await fetch(FF_Api.url('/api/v1/accounting/vendor-credits/apply.php'), { method: 'POST', body: fd, headers: this._csrfHeaders() });
                 const j = await r.json();
-                if (j.success) { this.showApply = false; this.load(); }
-                else this.applyError = j.error?.message || 'Apply failed.';
-            } catch (e) { this.applyError = e.message; }
+                if (j.success) {
+                    this.showApply = false;
+                    this._clearErrors(this.applyErrors, 'applyFormError');
+                    this.load();
+                } else {
+                    this._paintErrors(this.applyErrors, 'applyFormError', j, 'Failed to apply credit.');
+                }
+            } catch (e) { this.applyFormError = 'Network error. Please try again.'; }
             this.applying = false;
         },
 

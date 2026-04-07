@@ -29,13 +29,21 @@ require_method('POST');
 require_auth_api();
 require_permission('inspections', 'edit');
 
-$body = json_body();
+$body       = json_body();
+$fieldErrors = [];
 
 $id        = clean_int($body['id'] ?? null);
 $updatedAt = clean_string($body['updated_at'] ?? null);
 
-if (!$id)        json_error('MISSING_REQUIRED', 'id is required.', 422);
-if (!$updatedAt) json_error('MISSING_REQUIRED', 'updated_at is required.', 422);
+if (!$id) {
+    $fieldErrors['id'] = 'Inspection ID is required.';
+}
+if (!$updatedAt) {
+    $fieldErrors['updated_at'] = 'Optimistic lock token is required.';
+}
+if ($fieldErrors) {
+    json_validation_error($fieldErrors);
+}
 
 // ── Fetch existing row (lock not needed here — D19 detects conflict via updated_at comparison)
 $existing = db_row("SELECT * FROM inspections WHERE id = ?", [$id]);
@@ -43,17 +51,74 @@ if (!$existing) json_error('NOT_FOUND', 'Inspection not found.', 404);
 
 // D19 optimistic lock — reject if another user modified the record since the client loaded it
 if ($existing['updated_at'] !== $updatedAt) {
-    json_error('STALE_DATA', 'Inspection was modified by another user. Refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This inspection was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This inspection was modified by another user. Refresh and try again.']]);
 }
 
 // Block edits to completed/signed inspections (immutable — sections+photos have their own rules)
 if (in_array($existing['status'], ['complete', 'signed'], true)) {
-    json_error('IMMUTABLE_RECORD', 'Completed or signed inspections cannot be edited.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Completed or signed inspections cannot be edited.', 422,
+        ['fields' => ['status' => "Cannot edit a {$existing['status']} inspection."]]);
+}
+
+// Validate enums + numeric fields BEFORE building SQL
+$validTypes = ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance'];
+if (isset($body['inspection_type']) && !in_array($body['inspection_type'], $validTypes, true)) {
+    $fieldErrors['inspection_type'] = 'Please select a valid inspection type.';
+}
+$validFuel = ['empty', 'quarter', 'half', 'three_quarter', 'full'];
+if (isset($body['fuel_level']) && $body['fuel_level'] !== null && $body['fuel_level'] !== ''
+    && !in_array($body['fuel_level'], $validFuel, true)) {
+    $fieldErrors['fuel_level'] = 'Please select a valid fuel level.';
+}
+$validConditions = ['excellent', 'good', 'fair', 'poor', 'damaged'];
+if (isset($body['overall_condition']) && $body['overall_condition'] !== null && $body['overall_condition'] !== ''
+    && !in_array($body['overall_condition'], $validConditions, true)) {
+    $fieldErrors['overall_condition'] = 'Please select a valid overall condition.';
+}
+if (array_key_exists('mileage_at_inspection', $body)
+    && $body['mileage_at_inspection'] !== null
+    && $body['mileage_at_inspection'] !== '') {
+    $mi = clean_int($body['mileage_at_inspection']);
+    if ($mi === null || $mi < 0) {
+        $fieldErrors['mileage_at_inspection'] = 'Odometer cannot be negative.';
+    }
+}
+if (array_key_exists('reefer_hours', $body)
+    && $body['reefer_hours'] !== null
+    && $body['reefer_hours'] !== '') {
+    $rh = clean_int($body['reefer_hours']);
+    if ($rh === null || $rh < 0) {
+        $fieldErrors['reefer_hours'] = 'Reefer hours cannot be negative.';
+    }
+}
+if (array_key_exists('condition_score', $body)
+    && $body['condition_score'] !== null
+    && $body['condition_score'] !== '') {
+    $cs = clean_int($body['condition_score']);
+    if ($cs === null || $cs < 0 || $cs > 100) {
+        $fieldErrors['condition_score'] = 'Condition score must be between 0 and 100.';
+    }
+}
+if (array_key_exists('lease_id', $body)) {
+    $leaseId = clean_int($body['lease_id'] ?? null);
+    if ($leaseId) {
+        $lease = db_row("SELECT id FROM leases WHERE id = ? AND deleted_at IS NULL", [$leaseId]);
+        if (!$lease) {
+            $fieldErrors['lease_id'] = 'Lease not found.';
+        }
+    }
+}
+
+if ($fieldErrors) {
+    json_validation_error($fieldErrors);
 }
 
 // ── Optional updatable fields (only update what was sent)
-$fields  = [];
-$params  = [];
+$sqlFields = [];
+$params    = [];
 
 $updatable = [
     'inspection_type'       => fn($v) => clean_string($v),
@@ -71,51 +136,34 @@ $updatable = [
 
 // is_clean needs special boolean handling
 if (array_key_exists('is_clean', $body)) {
-    $fields[]  = 'is_clean = ?';
-    $params[]  = $body['is_clean'] === null ? null : (int)(bool)$body['is_clean'];
+    $sqlFields[] = 'is_clean = ?';
+    $params[]    = $body['is_clean'] === null ? null : (int)(bool)$body['is_clean'];
 }
 
 foreach ($updatable as $col => $cleaner) {
     if (array_key_exists($col, $body)) {
         $val = $cleaner($body[$col]);
-        $fields[]  = "$col = ?";
-        $params[]  = $val;
+        $sqlFields[] = "$col = ?";
+        $params[]    = $val;
     }
 }
 
-// lease_id: allow explicit null to detach
+// lease_id: allow explicit null to detach (already validated above)
 if (array_key_exists('lease_id', $body)) {
-    $leaseId = clean_int($body['lease_id'] ?? null);
-    if ($leaseId) {
-        $lease = db_row("SELECT id FROM leases WHERE id = ? AND deleted_at IS NULL", [$leaseId]);
-        if (!$lease) json_error('NOT_FOUND', 'Lease not found.', 404);
-    }
-    $fields[]  = 'lease_id = ?';
-    $params[]  = $leaseId;
+    $sqlFields[] = 'lease_id = ?';
+    $params[]    = clean_int($body['lease_id'] ?? null);
 }
 
-if (!$fields) json_error('VALIDATION_ERROR', 'No updatable fields provided.', 422);
-
-// Validate enums if provided
-$validTypes = ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance'];
-if (isset($body['inspection_type']) && !in_array($body['inspection_type'], $validTypes, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid inspection type.', 422, ['fields' => ['inspection_type' => 'Invalid type.']]);
-}
-$validFuel = ['empty', 'quarter', 'half', 'three_quarter', 'full'];
-if (isset($body['fuel_level']) && $body['fuel_level'] !== null && !in_array($body['fuel_level'], $validFuel, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid fuel level.', 422, ['fields' => ['fuel_level' => 'Invalid value.']]);
-}
-$validConditions = ['excellent', 'good', 'fair', 'poor', 'damaged'];
-if (isset($body['overall_condition']) && $body['overall_condition'] !== null && !in_array($body['overall_condition'], $validConditions, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid overall condition.', 422, ['fields' => ['overall_condition' => 'Invalid value.']]);
+if (!$sqlFields) {
+    json_validation_error(['_general' => 'No updatable fields provided.'], 'No updatable fields provided.');
 }
 
 $params[] = $id;
 $newUpdatedAt = null;
 
-db_transaction(function () use ($fields, $params, $id, $existing, &$newUpdatedAt) {
+db_transaction(function () use ($sqlFields, $params, $id, $existing, &$newUpdatedAt) {
     db_execute(
-        "UPDATE inspections SET " . implode(', ', $fields) . " WHERE id = ?",
+        "UPDATE inspections SET " . implode(', ', $sqlFields) . " WHERE id = ?",
         $params
     );
 

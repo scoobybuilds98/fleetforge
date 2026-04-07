@@ -27,24 +27,36 @@ require_permission('accounts_payable', 'edit');
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
-$id = clean_int($_POST['id'] ?? null);
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
+// VALID-2: accept both JSON and form-encoded payloads.
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
+
+$id = clean_int($input['id'] ?? null);
+if (!$id) {
+    json_validation_error(['id' => 'Bill ID is required.']);
+}
 
 $result = db_transaction(function () use ($id) {
     // FOR UPDATE to prevent race condition on double-approve
     $bill = db_row("SELECT * FROM acc_bills WHERE id = ? FOR UPDATE", [$id]);
-    if (!$bill) json_error('NOT_FOUND', 'Bill not found.', 404);
+    if (!$bill) {
+        json_validation_error(['id' => 'Bill not found.'], 'Bill not found.');
+    }
 
     if ($bill['status'] !== 'draft') {
-        json_error('INVALID_TRANSITION', "Cannot approve — bill is already {$bill['status']}.", 409);
+        json_error('INVALID_TRANSITION',
+            "Cannot approve — bill is already {$bill['status']}.", 409,
+            ['fields' => ['id' => "Cannot approve a bill in status '{$bill['status']}'."]]);
     }
 
     $vendor = db_row("SELECT id, name FROM vendors WHERE id = ? AND deleted_at IS NULL", [(int)$bill['vendor_id']]);
-    if (!$vendor) json_error('NOT_FOUND', 'Vendor not found.', 404);
+    if (!$vendor) {
+        json_validation_error(['id' => 'Vendor not found on this bill.'], 'Vendor not found.');
+    }
 
     $lines = db_select("SELECT * FROM acc_bill_lines WHERE bill_id = ? ORDER BY sort_order", [$id]);
     if (empty($lines)) {
-        json_error('VALIDATION_ERROR', 'Bill has no line items.', 422);
+        json_validation_error(['id' => 'Cannot approve a bill with no line items.']);
     }
 
     // Build JE lines

@@ -23,15 +23,25 @@ require_method('POST');
 require_auth_api();
 require_permission('fixed_assets', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-$id = clean_int($body['id'] ?? null);
+$id           = clean_int($body['id'] ?? null);
+$actualAmount = clean_decimal($body['actual_amount'] ?? null);
+
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'CapEx request ID is required.';
+}
+if ($actualAmount !== null && $actualAmount !== '' && bccomp($actualAmount, '0.00', 2) < 0) {
+    $fields['actual_amount'] = 'Actual amount cannot be negative.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $payload = [
-    'actual_amount' => clean_decimal($body['actual_amount'] ?? null),
+    'actual_amount' => $actualAmount,
     'asset_id'      => clean_int($body['asset_id'] ?? null),
 ];
 
@@ -64,7 +74,16 @@ if (!empty($body['asset_data']) && is_array($body['asset_data'])) {
 try {
     $capex = FixedAssetService::completeCapex($id, $payload, current_user_id());
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $msg  = $e->getMessage();
+    $slot = '_general';
+    if (stripos($msg, 'not found') !== false || stripos($msg, 'status') !== false || stripos($msg, 'already') !== false) {
+        $slot = 'id';
+    } elseif (stripos($msg, 'actual') !== false) {
+        $slot = 'actual_amount';
+    } elseif (stripos($msg, 'asset_data') !== false || stripos($msg, 'asset data') !== false) {
+        $slot = '_general';
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($capex);

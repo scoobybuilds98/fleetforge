@@ -25,21 +25,37 @@ require_permission('journal_entries', 'edit');
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
-$depositId = clean_int($_POST['deposit_id'] ?? null);
-$invoiceId = clean_int($_POST['invoice_id'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$depositId) json_error('VALIDATION_ERROR', 'deposit_id is required.', 422);
-if (!$invoiceId) json_error('VALIDATION_ERROR', 'invoice_id is required.', 422);
+$fields = [];
+
+$depositId = clean_int($input['deposit_id'] ?? null);
+$invoiceId = clean_int($input['invoice_id'] ?? null);
+
+if (!$depositId) $fields['deposit_id'] = 'Please select a deposit.';
+if (!$invoiceId) $fields['invoice_id'] = 'Please select an invoice.';
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $result = db_transaction(function () use ($depositId, $invoiceId) {
     $deposit = db_row(
         "SELECT * FROM acc_customer_deposits WHERE id = ? FOR UPDATE",
         [$depositId]
     );
-    if (!$deposit) json_error('NOT_FOUND', 'Deposit not found.', 404);
+    if (!$deposit) {
+        json_error('NOT_FOUND', 'Deposit not found.', 404, [
+            'fields' => ['deposit_id' => 'Deposit not found.'],
+        ]);
+    }
 
     if ($deposit['status'] !== 'held') {
-        json_error('INVALID_TRANSITION', "Deposit status is '{$deposit['status']}' — only 'held' deposits can be applied.", 409);
+        json_error('INVALID_TRANSITION',
+            "Deposit status is '{$deposit['status']}' — only 'held' deposits can be applied.", 409,
+            ['fields' => ['deposit_id' => "Deposit status is '{$deposit['status']}' — only 'held' deposits can be applied."]]);
     }
 
     $invoice = db_row(
@@ -47,11 +63,18 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
          FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$invoiceId]
     );
-    if (!$invoice) json_error('NOT_FOUND', 'Invoice not found.', 404);
+    if (!$invoice) {
+        json_error('NOT_FOUND', 'Invoice not found.', 404, [
+            'fields' => ['invoice_id' => 'Invoice not found.'],
+        ]);
+    }
 
     // Deposit and invoice must belong to the same customer
     if ((int)$deposit['customer_id'] !== (int)$invoice['customer_id']) {
-        json_error('VALIDATION_ERROR', 'Deposit and invoice must belong to the same customer.', 422);
+        json_validation_error(
+            ['invoice_id' => 'Deposit and invoice must belong to the same customer.'],
+            'Deposit and invoice must belong to the same customer.'
+        );
     }
 
     $amount = (string) $deposit['amount'];

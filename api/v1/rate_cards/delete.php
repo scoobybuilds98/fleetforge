@@ -32,11 +32,13 @@ require_permission('rates', 'delete');
 // -----------------------------------------------------------------------
 // 1. Parse body + resolve card
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Rate card ID is required.';
+    json_validation_error($fields);
 }
 
 $card = db_row(
@@ -51,11 +53,9 @@ if (!$card) {
 // 2. Block deletion of the default card
 // -----------------------------------------------------------------------
 if ($card['is_default']) {
-    json_error(
-        'VALIDATION_ERROR',
-        'Cannot delete the default rate card. Remove its default status first.',
-        422
-    );
+    json_validation_error([
+        'is_default' => 'Cannot delete the default rate card. Remove its default status first.',
+    ], 'Cannot delete the default rate card. Remove its default status first.');
 }
 
 // -----------------------------------------------------------------------

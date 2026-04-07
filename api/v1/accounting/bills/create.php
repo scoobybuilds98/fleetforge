@@ -31,26 +31,47 @@ use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
 // ── Input validation ───────────────────────────────────────
-$vendorId        = clean_int($_POST['vendor_id'] ?? null);
-$billDate        = clean_date($_POST['bill_date'] ?? null);
-$dueDate         = clean_date($_POST['due_date'] ?? null);
-$vendorBillNum   = clean_string($_POST['vendor_bill_number'] ?? null);
-$workOrderId     = clean_int($_POST['work_order_id'] ?? null);
-$equipmentUnitId = clean_int($_POST['equipment_unit_id'] ?? null);
-$notes           = clean_string($_POST['notes'] ?? null, 2000);
-$currency        = clean_string($_POST['currency'] ?? null) ?? 'CAD';
-$autoApprove     = ($_POST['auto_approve'] ?? '0') === '1';
+// VALID-2: accept both form-encoded and JSON bodies so the
+// admin UI can send a structured JSON payload (the Alpine
+// client does this now) while legacy form posts still work.
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$vendorId)  json_error('VALIDATION_ERROR', 'vendor_id is required.', 422);
-if (!$billDate)  json_error('VALIDATION_ERROR', 'bill_date is required.', 422);
-if (!$dueDate)   json_error('VALIDATION_ERROR', 'due_date is required.', 422);
+$vendorId        = clean_int($input['vendor_id'] ?? null);
+$billDate        = clean_date($input['bill_date'] ?? null);
+$dueDate         = clean_date($input['due_date'] ?? null);
+$vendorBillNum   = clean_string($input['vendor_bill_number'] ?? null);
+$workOrderId     = clean_int($input['work_order_id'] ?? null);
+$equipmentUnitId = clean_int($input['equipment_unit_id'] ?? null);
+$notes           = clean_string($input['notes'] ?? null, 2000);
+$currency        = clean_string($input['currency'] ?? null) ?? 'CAD';
+$autoApprove     = !empty($input['auto_approve']) && $input['auto_approve'] !== '0';
+
+// VALID-2: accumulator pattern — collect every error, return all at once
+$fields = [];
+
+if (!$vendorId)  $fields['vendor_id']  = 'Please select a vendor.';
+if (!$billDate)  $fields['bill_date']  = 'Bill date is required.';
+if (!$dueDate)   $fields['due_date']   = 'Due date is required.';
+
+// Cross-field date check — only when both are present and valid
+if ($billDate && $dueDate && strtotime($dueDate) < strtotime($billDate)) {
+    $fields['due_date'] = 'Due date cannot be before the bill date.';
+}
+
+// Short-circuit if header fields are bad — further DB checks are pointless
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // Validate vendor exists and is not deleted
 $vendor = db_row(
     "SELECT id, name, vendor_type FROM vendors WHERE id = ? AND deleted_at IS NULL",
     [$vendorId]
 );
-if (!$vendor) json_error('NOT_FOUND', 'Vendor not found.', 404);
+if (!$vendor) {
+    json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
+}
 
 // Validate optional work order link
 if ($workOrderId) {
@@ -58,7 +79,9 @@ if ($workOrderId) {
         "SELECT id FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL",
         [$workOrderId]
     );
-    if (!$wo) json_error('NOT_FOUND', 'Work order not found.', 404);
+    if (!$wo) {
+        json_validation_error(['work_order_id' => 'Work order not found.'], 'Work order not found.');
+    }
 }
 
 // Validate optional equipment unit link
@@ -67,19 +90,21 @@ if ($equipmentUnitId) {
         "SELECT id FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
         [$equipmentUnitId]
     );
-    if (!$eu) json_error('NOT_FOUND', 'Equipment unit not found.', 404);
+    if (!$eu) {
+        json_validation_error(['equipment_unit_id' => 'Equipment unit not found.'], 'Equipment unit not found.');
+    }
 }
 
 // Parse lines from JSON or form data
-$rawLines = $_POST['lines'] ?? null;
+$rawLines = $input['lines'] ?? null;
 if (is_string($rawLines)) {
     $rawLines = json_decode($rawLines, true);
 }
 if (!is_array($rawLines) || count($rawLines) === 0) {
-    json_error('VALIDATION_ERROR', 'At least one line item is required.', 422);
+    json_validation_error(['lines' => 'At least one line item is required.']);
 }
 if (count($rawLines) > 50) {
-    json_error('VALIDATION_ERROR', 'Maximum 50 line items per bill.', 422);
+    json_validation_error(['lines' => 'Maximum 50 line items per bill.']);
 }
 
 // Validate each line and compute totals (bcmath only — D16)
@@ -88,25 +113,51 @@ $taxGst   = '0.00';
 $taxPst   = '0.00';
 $taxHst   = '0.00';
 $validatedLines = [];
+// VALID-2: line-level errors collected as a list, joined into the
+// `lines` field slot so every problem is surfaced at once.
+$lineErrors = [];
 
 foreach ($rawLines as $i => $line) {
+    $lineNum     = $i + 1;
     $accountId   = clean_int($line['account_id'] ?? null);
     $description = clean_string($line['description'] ?? null, 500);
     $quantity    = clean_decimal($line['quantity'] ?? '1') ?? '1.0000';
     $unitCost    = clean_decimal($line['unit_cost'] ?? null);
 
-    if (!$accountId) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": account_id is required.", 422);
-    if (!$description) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": description is required.", 422);
-    if (!$unitCost) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": unit_cost is required.", 422);
+    $hasError = false;
+    if (!$accountId)   { $lineErrors[] = "Line {$lineNum}: please select a GL account."; $hasError = true; }
+    if (!$description) { $lineErrors[] = "Line {$lineNum}: description is required."; $hasError = true; }
+    if ($unitCost === null || $unitCost === '') {
+        $lineErrors[] = "Line {$lineNum}: unit cost is required.";
+        $hasError = true;
+    } elseif (bccomp($unitCost, '0', 2) < 0) {
+        $lineErrors[] = "Line {$lineNum}: unit cost cannot be negative.";
+        $hasError = true;
+    }
+    if ($quantity !== null && $quantity !== '' && bccomp($quantity, '0', 4) <= 0) {
+        $lineErrors[] = "Line {$lineNum}: quantity must be greater than zero.";
+        $hasError = true;
+    }
 
     // Verify GL account exists, is active, and is not a header
-    $account = db_row(
-        "SELECT id, is_header, is_active FROM acc_accounts WHERE id = ?",
-        [$accountId]
-    );
-    if (!$account) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": GL account not found.", 422);
-    if ($account['is_header']) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": cannot post to header account.", 422);
-    if (!$account['is_active']) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": GL account is inactive.", 422);
+    if ($accountId) {
+        $account = db_row(
+            "SELECT id, is_header, is_active FROM acc_accounts WHERE id = ?",
+            [$accountId]
+        );
+        if (!$account) {
+            $lineErrors[] = "Line {$lineNum}: GL account not found.";
+            $hasError = true;
+        } elseif ($account['is_header']) {
+            $lineErrors[] = "Line {$lineNum}: cannot post to a header account.";
+            $hasError = true;
+        } elseif (!$account['is_active']) {
+            $lineErrors[] = "Line {$lineNum}: GL account is inactive.";
+            $hasError = true;
+        }
+    }
+
+    if ($hasError) continue;
 
     $lineAmount = bcmul($quantity, $unitCost, 2);
     $lineGst = clean_decimal($line['tax_gst_amount'] ?? '0') ?? '0.00';
@@ -114,6 +165,11 @@ foreach ($rawLines as $i => $line) {
     $lineHst = clean_decimal($line['tax_hst_amount'] ?? '0') ?? '0.00';
     $isItc = (int)($line['is_tax_input_credit'] ?? 1);
     $isAutoCategorized = (int)($line['is_auto_categorized'] ?? 0);
+
+    // VALID-2: reject negative taxes — they would invert the JE sides
+    if (bccomp($lineGst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: GST cannot be negative."; continue; }
+    if (bccomp($linePst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: PST cannot be negative."; continue; }
+    if (bccomp($lineHst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: HST cannot be negative."; continue; }
 
     $subtotal = bcadd($subtotal, $lineAmount, 2);
     $taxGst = bcadd($taxGst, $lineGst, 2);
@@ -133,6 +189,11 @@ foreach ($rawLines as $i => $line) {
         'is_auto_categorized' => $isAutoCategorized,
         'sort_order'          => $i,
     ];
+}
+
+// Surface every collected line error at once
+if ($lineErrors) {
+    json_validation_error(['lines' => implode(' ', $lineErrors)]);
 }
 
 $taxTotal = bcadd(bcadd($taxGst, $taxPst, 2), $taxHst, 2);

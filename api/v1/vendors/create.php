@@ -36,34 +36,33 @@ require_permission('maintenance', 'create');
 // -----------------------------------------------------------------------
 // 1. Parse JSON body
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 // -----------------------------------------------------------------------
-// 2. Validate required fields
+// 2. Validate every field — VALID-2: accumulate, never fail-fast.
+//    All errors are collected into $fields and emitted via
+//    json_validation_error() so the client can highlight every
+//    offending input on a single response.
 // -----------------------------------------------------------------------
+
+// name
 $name = clean_string($body['name'] ?? null, 255);
 if (!$name) {
-    json_error('MISSING_REQUIRED', 'name is required.', 422);
+    $fields['name'] = 'Vendor name is required.';
 }
 
+// vendor_type
 $vendorType = clean_string($body['vendor_type'] ?? null);
 $validTypes = ['maintenance', 'repair', 'parts', 'inspection', 'towing', 'other'];
-if (!$vendorType || !in_array($vendorType, $validTypes, true)) {
-    json_error('VALIDATION_ERROR', 'vendor_type is required and must be one of: ' . implode(', ', $validTypes) . '.', 422);
+if (!$vendorType) {
+    $fields['vendor_type'] = 'Vendor type is required.';
+} elseif (!in_array($vendorType, $validTypes, true)) {
+    $fields['vendor_type'] = 'Vendor type must be one of: ' . implode(', ', $validTypes) . '.';
 }
 
-// -----------------------------------------------------------------------
-// 3. Uniqueness check — name must be unique among active vendors
-// -----------------------------------------------------------------------
-if (db_exists('vendors', 'name = ? AND deleted_at IS NULL', [$name])) {
-    json_error('ALREADY_EXISTS', 'A vendor with that name already exists.', 409);
-}
-
-// -----------------------------------------------------------------------
-// 4. Optional fields with validation
-// -----------------------------------------------------------------------
+// optional scalars
 $contactName = clean_string($body['contact_name'] ?? null, 255);
-$email       = clean_email($body['email'] ?? null);
 $phone       = clean_string($body['phone'] ?? null, 50);
 $address     = clean_string($body['address'] ?? null, 500);
 $city        = clean_string($body['city'] ?? null, 100);
@@ -71,12 +70,22 @@ $state       = clean_string($body['state'] ?? null, 100);
 $notes       = clean_string($body['notes'] ?? null, 5000);
 $isPreferred = isset($body['is_preferred']) ? (int)(bool)$body['is_preferred'] : 0;
 
+// VALID-2: email format check (only when provided)
+$email     = null;
+$rawEmail  = $body['email'] ?? null;
+if ($rawEmail !== null && $rawEmail !== '') {
+    $email = clean_email($rawEmail);
+    if ($email === null) {
+        $fields['email'] = 'Please enter a valid email address.';
+    }
+}
+
 // rating: 1–5 or null
 $rating = null;
 if (isset($body['rating']) && $body['rating'] !== null && $body['rating'] !== '') {
     $rating = clean_int($body['rating']);
     if ($rating === null || $rating < 1 || $rating > 5) {
-        json_error('VALIDATION_ERROR', 'rating must be an integer between 1 and 5.', 422);
+        $fields['rating'] = 'Rating must be an integer between 1 and 5.';
     }
 }
 
@@ -85,11 +94,10 @@ $hourlyRate = null;
 if (isset($body['hourly_rate']) && $body['hourly_rate'] !== null && $body['hourly_rate'] !== '') {
     $hourlyRate = clean_decimal($body['hourly_rate']);
     if ($hourlyRate === null) {
-        json_error('VALIDATION_ERROR', 'hourly_rate must be a valid decimal number.', 422);
-    }
-    // WHY: a negative hourly rate is nonsensical — reject it server-side
-    if (bccomp($hourlyRate, '0', 6) < 0) {
-        json_error('VALIDATION_ERROR', 'hourly_rate must be a non-negative number.', 422);
+        $fields['hourly_rate'] = 'Hourly rate must be a valid decimal number.';
+    } elseif (bccomp($hourlyRate, '0', 6) < 0) {
+        // WHY: a negative hourly rate is nonsensical
+        $fields['hourly_rate'] = 'Hourly rate must be a non-negative number.';
     }
 }
 
@@ -104,6 +112,23 @@ if (isset($body['specializations']) && is_array($body['specializations'])) {
         }
     }
     $specializations = !empty($specs) ? json_encode($specs) : null;
+}
+
+// Short-circuit before duplicate lookup if anything failed above
+if ($fields) {
+    json_validation_error($fields);
+}
+
+// -----------------------------------------------------------------------
+// 3. Uniqueness check — name must be unique among active vendors.
+//    VALID-2: report collisions through the same envelope so the
+//    client can attach the message to the offending field.
+// -----------------------------------------------------------------------
+if (db_exists('vendors', 'name = ? AND deleted_at IS NULL', [$name])) {
+    json_validation_error(
+        ['name' => 'A vendor with that name already exists.'],
+        'A vendor with that name already exists.'
+    );
 }
 
 // -----------------------------------------------------------------------

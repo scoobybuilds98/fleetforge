@@ -98,28 +98,24 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="company_name">
                             Company Name <span style="color:var(--color-danger);">*</span>
                         </label>
-                        <input type="text" id="company_name" class="form-control"
+                        <input type="text" id="company_name" name="company_name" class="form-control"
                                x-model="form.company_name"
-                               :class="{ 'is-invalid': errors.company_name }"
-                               maxlength="255" required>
-                        <div class="form-error" x-show="errors.company_name"
-                             x-text="errors.company_name"></div>
+                               maxlength="255">
+                        <div class="field-error" data-error-for="company_name"></div>
                     </div>
 
                     <div class="form-group">
                         <label class="form-label" for="contact_name">Primary Contact Name</label>
-                        <input type="text" id="contact_name" class="form-control"
+                        <input type="text" id="contact_name" name="contact_name" class="form-control"
                                x-model="form.contact_name" maxlength="255">
                     </div>
 
                     <div class="form-group">
                         <label class="form-label" for="email">Email</label>
-                        <input type="email" id="email" class="form-control"
+                        <input type="email" id="email" name="email" class="form-control"
                                x-model="form.email"
-                               :class="{ 'is-invalid': errors.email }"
                                maxlength="255">
-                        <div class="form-error" x-show="errors.email"
-                             x-text="errors.email"></div>
+                        <div class="field-error" data-error-for="email"></div>
                     </div>
 
                     <div class="form-group">
@@ -293,8 +289,9 @@ require_once FF_ROOT . '/includes/header.php';
 
                     <div class="form-group">
                         <label class="form-label" for="billing_email">Billing Email</label>
-                        <input type="email" id="billing_email" class="form-control"
+                        <input type="email" id="billing_email" name="billing_email" class="form-control"
                                x-model="form.billing_email" maxlength="255">
+                        <div class="field-error" data-error-for="billing_email"></div>
                     </div>
 
                     <div class="form-group">
@@ -305,8 +302,9 @@ require_once FF_ROOT . '/includes/header.php';
 
                     <div class="form-group">
                         <label class="form-label" for="invoice_email">Invoice Email</label>
-                        <input type="email" id="invoice_email" class="form-control"
+                        <input type="email" id="invoice_email" name="invoice_email" class="form-control"
                                x-model="form.invoice_email" maxlength="255">
+                        <div class="field-error" data-error-for="invoice_email"></div>
                     </div>
 
                     <div class="form-group">
@@ -372,9 +370,10 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="credit_limit">Credit Limit</label>
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
-                            <input type="number" id="credit_limit" class="form-control"
-                                   x-model="form.credit_limit" min="0" step="0.01">
+                            <input type="number" id="credit_limit" name="credit_limit" class="form-control"
+                                   x-model="form.credit_limit" step="0.01">
                         </div>
+                        <div class="field-error" data-error-for="credit_limit"></div>
                     </div>
 
                     <div class="form-group">
@@ -397,8 +396,9 @@ require_once FF_ROOT . '/includes/header.php';
                     <template x-if="form.discount_type !== 'none'">
                         <div class="form-group">
                             <label class="form-label" for="discount_value">Discount Value</label>
-                            <input type="number" id="discount_value" class="form-control"
-                                   x-model="form.discount_value" min="0" step="0.0001">
+                            <input type="number" id="discount_value" name="discount_value" class="form-control"
+                                   x-model="form.discount_value" step="0.0001">
+                            <div class="field-error" data-error-for="discount_value"></div>
                         </div>
                     </template>
 
@@ -428,6 +428,9 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+        <!-- Form-level error banner (VALID-2) -->
+        <div class="form-error-banner" data-form-error></div>
+
         <!-- ── FORM ACTIONS ──────────────────────────────────── -->
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:32px;">
             <a href="<?= base_url('customers/show') ?>?id=<?= $customerId ?>"
@@ -438,13 +441,6 @@ require_once FF_ROOT . '/includes/header.php';
                     x-text="submitting ? 'Saving…' : 'Save Changes'">
                 Save Changes
             </button>
-        </div>
-
-        <!-- Submit error -->
-        <div x-show="submitError"
-             style="padding:12px 16px; background:var(--color-danger-light); color:var(--color-danger-text); border-radius:var(--radius-md); font-size:0.875rem; margin-bottom:24px;"
-             x-text="submitError"
-             role="alert">
         </div>
 
     </form>
@@ -499,8 +495,6 @@ function FF_CustomerEditForm() {
 
     return {
         submitting:  false,
-        submitError: null,
-        errors:      {},
         form:        prefill,
         allTags: [
             'vip','preferred','owner-operator','fleet','net-30','net-45','net-60',
@@ -510,49 +504,94 @@ function FF_CustomerEditForm() {
 
         init() {},
 
+        isValidEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        },
+
         toggleTag(tag) {
             const idx = this.form.tags.indexOf(tag);
             if (idx === -1) this.form.tags.push(tag);
             else            this.form.tags.splice(idx, 1);
         },
 
+        // VALID-2: spec-exact per-field validation with FF_Validate
+        validate() {
+            const form = document.querySelector('form');
+            FF_Validate.clear(form);
+            let ok = true;
+
+            if (!this.form.company_name || !this.form.company_name.trim()) {
+                FF_Validate.field(form, 'company_name', 'Company name is required.');
+                ok = false;
+            }
+            if (this.form.email && !this.isValidEmail(this.form.email)) {
+                FF_Validate.field(form, 'email', 'Please enter a valid email address.');
+                ok = false;
+            }
+            if (this.form.billing_email && !this.isValidEmail(this.form.billing_email)) {
+                FF_Validate.field(form, 'billing_email', 'Please enter a valid billing email address.');
+                ok = false;
+            }
+            if (this.form.invoice_email && !this.isValidEmail(this.form.invoice_email)) {
+                FF_Validate.field(form, 'invoice_email', 'Please enter a valid invoice email address.');
+                ok = false;
+            }
+
+            // Credit limit >= 0
+            if (this.form.credit_limit !== '' && this.form.credit_limit !== null && this.form.credit_limit !== undefined) {
+                const n = parseFloat(this.form.credit_limit);
+                if (isNaN(n) || n < 0) {
+                    FF_Validate.field(form, 'credit_limit', 'Credit limit cannot be negative.');
+                    ok = false;
+                }
+            }
+
+            // Discount: >= 0; percentage type capped at 100
+            if (this.form.discount_type !== 'none'
+                && this.form.discount_value !== '' && this.form.discount_value !== null && this.form.discount_value !== undefined) {
+                const n = parseFloat(this.form.discount_value);
+                if (isNaN(n) || n < 0) {
+                    FF_Validate.field(form, 'discount_value', 'Discount cannot be negative.');
+                    ok = false;
+                } else if (this.form.discount_type === 'percentage' && n > 100) {
+                    FF_Validate.field(form, 'discount_value', 'Percentage discount cannot exceed 100%.');
+                    ok = false;
+                }
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(form);
+            return ok;
+        },
+
         async submit() {
-            this.submitting  = true;
-            this.submitError = null;
-            this.errors      = {};
+            if (!this.validate()) return;
+            this.submitting = true;
+            const form = document.querySelector('form');
 
             // Payload includes id and updated_at for D19 optimistic locking
             const payload = { ...this.form };
 
             try {
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
-                const res  = await fetch('<?= base_url('api/v1/customers/update') ?>', {
-                    method:  'POST',
-                    headers: {
-                        'Content-Type':     'application/json',
-                        'X-CSRF-Token':     csrf,
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body: JSON.stringify(payload),
-                });
-                const json = await res.json();
+                const r = await FF_Api.post('<?= base_url('api/v1/customers/update') ?>', payload);
 
-                if (res.ok && json.success) {
+                if (r.success) {
                     window.location.href = '<?= base_url('customers/show') ?>?id=' + this.form.id;
                     return;
                 }
 
-                if (res.status === 409) {
-                    this.submitError = json.error?.message
-                        ?? 'This record was modified by another user. Please reload and try again.';
-                } else if (res.status === 422 && json.errors) {
-                    this.errors      = json.errors;
-                    this.submitError = 'Please correct the errors above.';
+                if (r.error?.code === 'STALE_DATA') {
+                    FF_Validate.banner(form,
+                        (r.error.message || 'This customer was modified by another user.') +
+                        ' Reload this page to get the latest version.');
+                } else if (r.error?.code === 'VALIDATION_ERROR') {
+                    FF_Validate.applyApi(form, r.error);
+                    FF_Validate.scrollToFirst(form);
                 } else {
-                    this.submitError = json.error?.message ?? 'Failed to save changes.';
+                    FF_Validate.banner(form, r.error?.message || 'Failed to save changes.');
+                    if (r.error?.fields) FF_Validate.applyApi(form, r.error);
                 }
             } catch (e) {
-                this.submitError = 'Network error. Please try again.';
+                FF_Validate.banner(form, 'Network error. Please try again.');
             } finally {
                 this.submitting = false;
             }

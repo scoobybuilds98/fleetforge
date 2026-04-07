@@ -47,16 +47,21 @@ require_permission('maintenance', 'edit');
 // -----------------------------------------------------------------------
 // 1. Load and validate claim
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $claimId = clean_int($body['id'] ?? null);
 if (!$claimId) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Damage claim ID is required.';
 }
 
 $submittedUpdatedAt = clean_string($body['updated_at'] ?? null);
 if (!$submittedUpdatedAt) {
-    json_error('MISSING_REQUIRED', 'updated_at is required for optimistic lock (D19).', 422);
+    $fields['updated_at'] = 'Optimistic lock token is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $claim = db_row(
@@ -69,7 +74,9 @@ if (!$claim) {
 
 // D19: optimistic lock
 if ($claim['updated_at'] !== $submittedUpdatedAt) {
-    json_error('STALE_DATA', 'Record modified by another user. Refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This damage claim was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This damage claim was modified by another user. Refresh and try again.']]);
 }
 
 // -----------------------------------------------------------------------
@@ -88,16 +95,15 @@ $newStatus = clean_string($body['status'] ?? null);
 if ($newStatus !== null && $newStatus !== $claim['status']) {
     $allowed = $allowedTransitions[$claim['status']] ?? [];
     if (!in_array($newStatus, $allowed, true)) {
-        json_error(
-            'INVALID_TRANSITION',
-            "Cannot transition from '{$claim['status']}' to '{$newStatus}'.",
-            409
-        );
+        json_error('INVALID_TRANSITION',
+            "Cannot move a damage claim from '{$claim['status']}' to '{$newStatus}'.", 409,
+            ['fields' => ['status' => "Cannot move a damage claim from '{$claim['status']}' to '{$newStatus}'."]]);
     }
 }
 
 // -----------------------------------------------------------------------
 // 3. Collect updatable fields (only apply if present in body)
+//    VALID-2: accumulate every field error before responding
 // -----------------------------------------------------------------------
 $updates = [];
 
@@ -110,18 +116,22 @@ if ($newStatus !== null) {
 if (array_key_exists('description', $body)) {
     $desc = clean_string($body['description'] ?? null, 5000);
     if (!$desc) {
-        json_error('VALIDATION_ERROR', 'description cannot be empty.', 422);
+        $fields['description'] = 'Description is required.';
+    } else {
+        $updates['description'] = $desc;
     }
-    $updates['description'] = $desc;
 }
 
 if (array_key_exists('severity', $body)) {
     $sev = clean_string($body['severity'] ?? null);
     $validSeverities = ['minor', 'moderate', 'major', 'total_loss'];
-    if (!$sev || !in_array($sev, $validSeverities, true)) {
-        json_error('VALIDATION_ERROR', 'severity must be one of: ' . implode(', ', $validSeverities) . '.', 422);
+    if (!$sev) {
+        $fields['severity'] = 'Please select a severity.';
+    } elseif (!in_array($sev, $validSeverities, true)) {
+        $fields['severity'] = 'Please select a valid severity.';
+    } else {
+        $updates['severity'] = $sev;
     }
-    $updates['severity'] = $sev;
 }
 
 if (array_key_exists('damage_location', $body)) {
@@ -134,10 +144,11 @@ if (array_key_exists('customer_id', $body)) {
     if ($cId) {
         $cCheck = db_row("SELECT id FROM customers WHERE id = ? AND deleted_at IS NULL", [$cId]);
         if (!$cCheck) {
-            json_error('NOT_FOUND', 'Customer not found.', 404);
+            $fields['customer_id'] = 'Customer not found.';
+        } else {
+            $updates['customer_id']   = $cId;
+            $updates['customer_name'] = null; // clear free-text when FK is set
         }
-        $updates['customer_id']   = $cId;
-        $updates['customer_name'] = null; // clear free-text when FK is set
     } else {
         $updates['customer_id'] = null;
     }
@@ -159,18 +170,27 @@ if (array_key_exists('resolution_notes', $body)) {
     $updates['resolution_notes'] = clean_string($body['resolution_notes'] ?? null, 5000);
 }
 
-// D16: monetary amounts
-foreach (['estimated_repair_cost', 'actual_repair_cost', 'customer_liable_amount', 'insurance_claim_amount'] as $field) {
-    if (array_key_exists($field, $body)) {
-        $val = clean_decimal($body[$field] ?? null);
-        if ($val !== null) {
-            if (bccomp($val, '0', 6) < 0) {
-                json_error('VALIDATION_ERROR', "{$field} must be a non-negative number.", 422);
-            }
-            $updates[$field] = bcround($val, 2);
-        } else {
-            $updates[$field] = null;
-        }
+// D16: monetary amounts — non-negative per field with friendly label
+$moneyLabels = [
+    'estimated_repair_cost'  => 'Estimated repair cost',
+    'actual_repair_cost'     => 'Actual repair cost',
+    'customer_liable_amount' => 'Customer liable amount',
+    'insurance_claim_amount' => 'Insurance claim amount',
+];
+foreach ($moneyLabels as $field => $label) {
+    if (!array_key_exists($field, $body)) {
+        continue;
+    }
+    $raw = $body[$field];
+    if ($raw === null || $raw === '') {
+        $updates[$field] = null;
+        continue;
+    }
+    $val = clean_decimal((string)$raw);
+    if ($val === null || bccomp($val, '0', 6) < 0) {
+        $fields[$field] = "{$label} cannot be negative.";
+    } else {
+        $updates[$field] = bcround($val, 2);
     }
 }
 
@@ -180,10 +200,13 @@ if (array_key_exists('work_order_id', $body)) {
     if ($woId) {
         $woCheck = db_row("SELECT id FROM maintenance_work_orders WHERE id = ?", [$woId]);
         if (!$woCheck) {
-            json_error('NOT_FOUND', 'Work order not found.', 404);
+            $fields['work_order_id'] = 'Work order not found.';
+        } else {
+            $updates['work_order_id'] = $woId;
         }
+    } else {
+        $updates['work_order_id'] = null;
     }
-    $updates['work_order_id'] = $woId;
 }
 
 if (array_key_exists('invoice_id', $body)) {
@@ -191,10 +214,13 @@ if (array_key_exists('invoice_id', $body)) {
     if ($invId) {
         $invCheck = db_row("SELECT id FROM invoices WHERE id = ? AND deleted_at IS NULL", [$invId]);
         if (!$invCheck) {
-            json_error('NOT_FOUND', 'Invoice not found.', 404);
+            $fields['invoice_id'] = 'Invoice not found.';
+        } else {
+            $updates['invoice_id'] = $invId;
         }
+    } else {
+        $updates['invoice_id'] = null;
     }
-    $updates['invoice_id'] = $invId;
 }
 
 if (array_key_exists('vendor_id', $body)) {
@@ -202,10 +228,17 @@ if (array_key_exists('vendor_id', $body)) {
     if ($vId) {
         $vCheck = db_row("SELECT id FROM vendors WHERE id = ? AND deleted_at IS NULL", [$vId]);
         if (!$vCheck) {
-            json_error('NOT_FOUND', 'Vendor not found.', 404);
+            $fields['vendor_id'] = 'Vendor not found.';
+        } else {
+            $updates['vendor_id'] = $vId;
         }
+    } else {
+        $updates['vendor_id'] = null;
     }
-    $updates['vendor_id'] = $vId;
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 if (empty($updates)) {

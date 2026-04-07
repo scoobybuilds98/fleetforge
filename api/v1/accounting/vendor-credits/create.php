@@ -25,31 +25,47 @@ require_permission('accounts_payable', 'create');
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
-$vendorId        = clean_int($_POST['vendor_id'] ?? null);
-$creditDate      = clean_date($_POST['credit_date'] ?? null);
-$amount          = clean_decimal($_POST['amount'] ?? null);
-$reason          = clean_string($_POST['reason'] ?? null, 500);
-$sourceBillId    = clean_int($_POST['source_bill_id'] ?? null);
-$expenseAcctId   = clean_int($_POST['expense_account_id'] ?? null);
-$notes           = clean_string($_POST['notes'] ?? null, 2000);
-$currency        = clean_string($_POST['currency'] ?? null) ?? 'CAD';
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$vendorId)    json_error('VALIDATION_ERROR', 'vendor_id is required.', 422);
-if (!$creditDate)  json_error('VALIDATION_ERROR', 'credit_date is required.', 422);
-if (!$amount || bccomp($amount, '0', 2) <= 0) {
-    json_error('VALIDATION_ERROR', 'amount must be greater than zero.', 422);
+$fields = [];
+
+$vendorId      = clean_int($input['vendor_id'] ?? null);
+$creditDate    = clean_date($input['credit_date'] ?? null);
+$amount        = clean_decimal($input['amount'] ?? null);
+$reason        = clean_string($input['reason'] ?? null, 500);
+$sourceBillId  = clean_int($input['source_bill_id'] ?? null);
+$expenseAcctId = clean_int($input['expense_account_id'] ?? null);
+$notes         = clean_string($input['notes'] ?? null, 2000);
+$currency      = clean_string($input['currency'] ?? null) ?? 'CAD';
+
+if (!$vendorId)   $fields['vendor_id']   = 'Please select a vendor.';
+if (!$creditDate) $fields['credit_date'] = 'Credit date is required.';
+if ($amount === null || $amount === '') {
+    $fields['amount'] = 'Credit amount is required.';
+} elseif (bccomp($amount, '0', 2) <= 0) {
+    $fields['amount'] = 'Credit amount must be greater than zero.';
 }
-if (!$reason)      json_error('VALIDATION_ERROR', 'reason is required.', 422);
+if (!$reason) $fields['reason'] = 'Please provide a reason for this credit.';
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $vendor = db_row("SELECT id, name FROM vendors WHERE id = ? AND deleted_at IS NULL", [$vendorId]);
-if (!$vendor) json_error('NOT_FOUND', 'Vendor not found.', 404);
+if (!$vendor) {
+    json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
+}
 
 // If linked to a source bill, validate it
 if ($sourceBillId) {
     $sourceBill = db_row("SELECT id, vendor_id FROM acc_bills WHERE id = ?", [$sourceBillId]);
-    if (!$sourceBill) json_error('NOT_FOUND', 'Source bill not found.', 404);
+    if (!$sourceBill) {
+        json_validation_error(['source_bill_id' => 'Source bill not found.'], 'Source bill not found.');
+    }
     if ((int) $sourceBill['vendor_id'] !== $vendorId) {
-        json_error('VALIDATION_ERROR', 'Source bill does not belong to this vendor.', 422);
+        json_validation_error(['source_bill_id' => 'Source bill does not belong to this vendor.']);
     }
 }
 

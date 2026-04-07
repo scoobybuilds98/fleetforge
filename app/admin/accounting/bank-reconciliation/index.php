@@ -56,23 +56,27 @@ require_once FF_ROOT . '/includes/header.php';
             <?php if ($canCreate): ?>
             <div class="card" style="padding:20px;margin-bottom:20px;">
                 <h3 class="h5" style="margin-bottom:12px;">Start New Reconciliation</h3>
+                <div class="form-error-banner" x-show="formError" x-cloak x-text="formError" style="margin-bottom:12px;"></div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end;">
                     <div>
                         <label class="form-label">Bank Account</label>
-                        <select class="form-select" x-model="newRecon.bank_account_id">
+                        <select class="form-select" :class="errors.bank_account_id ? 'is-invalid' : ''" x-model="newRecon.bank_account_id" @change="errors.bank_account_id = ''">
                             <option value="">Select...</option>
                             <?php foreach ($bankAccounts as $ba): ?>
                             <option value="<?= $ba['id'] ?>"><?= e($ba['name']) ?> (<?= e($ba['currency']) ?>)</option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="field-error" x-show="errors.bank_account_id" x-cloak x-text="errors.bank_account_id"></div>
                     </div>
                     <div>
                         <label class="form-label">Statement Date</label>
-                        <input type="date" class="form-input" x-model="newRecon.statement_date">
+                        <input type="date" class="form-input" :class="errors.statement_date ? 'is-invalid' : ''" x-model="newRecon.statement_date" @change="errors.statement_date = ''">
+                        <div class="field-error" x-show="errors.statement_date" x-cloak x-text="errors.statement_date"></div>
                     </div>
                     <div>
                         <label class="form-label">Statement Ending Balance</label>
-                        <input type="text" class="form-input font-mono" x-model="newRecon.statement_ending_balance" placeholder="0.00">
+                        <input type="text" class="form-input font-mono" :class="errors.statement_ending_balance ? 'is-invalid' : ''" x-model="newRecon.statement_ending_balance" @input="errors.statement_ending_balance = ''" placeholder="0.00">
+                        <div class="field-error" x-show="errors.statement_ending_balance" x-cloak x-text="errors.statement_ending_balance"></div>
                     </div>
                     <button class="btn btn-primary btn-sm" @click="startRecon()" :disabled="saving">Start</button>
                 </div>
@@ -231,12 +235,46 @@ function reconPage() {
         saving: false,
         historyAccountFilter: '',
         newRecon: { bank_account_id: '', statement_date: '', statement_ending_balance: '' },
+        formError: '',
+        errors: { bank_account_id: '', statement_date: '', statement_ending_balance: '' },
 
         _csrfHeaders() {
             return {
                 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '',
                 'X-Requested-With': 'XMLHttpRequest',
             };
+        },
+
+        _extractError(r, fallback) {
+            if (!r) return fallback || 'An unexpected error occurred.';
+            if (r.error && r.error.message) return r.error.message;
+            if (r.message) return r.message;
+            return fallback || 'An unexpected error occurred.';
+        },
+
+        _clearErrors() {
+            for (const k in this.errors) this.errors[k] = '';
+            this.formError = '';
+        },
+
+        _paintServerErrors(r, fallback) {
+            const err = r && r.error ? r.error : r;
+            const fields = (err && err.fields) || (r && r.fields) || {};
+            let painted = false;
+            for (const k in fields) {
+                if (k === '_general') continue;
+                if (k in this.errors) {
+                    this.errors[k] = fields[k];
+                    painted = true;
+                }
+            }
+            if (fields._general) {
+                this.formError = fields._general;
+            } else if (!painted) {
+                this.formError = this._extractError(r, fallback);
+            } else {
+                this.formError = this._extractError(r, 'Please correct the highlighted fields.');
+            }
         },
 
         fmtAmt(v) {
@@ -262,23 +300,49 @@ function reconPage() {
             this.history.sort((a,b) => b.statement_date.localeCompare(a.statement_date));
         },
 
+        validateNewRecon() {
+            this._clearErrors();
+            let ok = true;
+            if (!this.newRecon.bank_account_id) {
+                this.errors.bank_account_id = 'Please select a bank account.';
+                ok = false;
+            }
+            if (!this.newRecon.statement_date) {
+                this.errors.statement_date = 'Statement date is required.';
+                ok = false;
+            }
+            const bal = String(this.newRecon.statement_ending_balance || '').trim();
+            if (!bal) {
+                this.errors.statement_ending_balance = 'Statement ending balance is required.';
+                ok = false;
+            } else if (!/^-?\d+(\.\d{1,2})?$/.test(bal)) {
+                this.errors.statement_ending_balance = 'Statement ending balance must be a valid amount.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async startRecon() {
-            if (!this.newRecon.bank_account_id || !this.newRecon.statement_date || !this.newRecon.statement_ending_balance) {
-                window.FleetForge?.toast?.('error', 'Fill in all required fields.');
+            if (!this.validateNewRecon()) {
+                this.formError = 'Please correct the highlighted fields.';
                 return;
             }
             this.saving = true;
+            this.formError = '';
             const fd = new FormData();
             for (const [k,v] of Object.entries(this.newRecon)) fd.append(k, v);
             try {
                 const r = await fetch(`<?= base_url('api/v1/accounting/bank-reconciliations/create') ?>`, {method:'POST', body:fd, headers:this._csrfHeaders()});
                 const j = await r.json();
                 if (j.success) {
+                    this._clearErrors();
                     this.openRecon(j.data.id);
                 } else {
-                    window.FleetForge?.toast?.('error', j.error?.message || 'Failed');
+                    this._paintServerErrors(j, 'Failed to start reconciliation.');
                 }
-            } catch (e) { window.FleetForge?.toast?.('error', 'Network error'); }
+            } catch (e) {
+                this.formError = 'Network error. Please try again.';
+            }
             this.saving = false;
         },
 

@@ -29,13 +29,44 @@ if (!can('settings', 'view') && !in_array(current_user()['role_slug'] ?? '', ['s
     json_error('FORBIDDEN', 'Insufficient permissions to manage yards.', 403);
 }
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-// ── Required ────────────────────────────────────────────────────
+// ── Required ── VALID-2: accumulate every error before responding ──
 $name = clean_string($body['name'] ?? null, 255);
 if (!$name) {
-    json_error('VALIDATION_ERROR', 'Yard name is required.', 422,
-        ['errors' => ['name' => 'Yard name is required.']]);
+    $fields['name'] = 'Yard name is required.';
+}
+
+// ── Optional fields ───────────────────────────────────────────────
+$address    = clean_string($body['address']    ?? null, 500);
+$city       = clean_string($body['city']       ?? null, 100);
+$state      = clean_string($body['state']      ?? null, 100);
+$postalCode = clean_string($body['postal_code'] ?? null, 20);
+$phone      = clean_string($body['phone']      ?? null, 50);
+$notes      = clean_string($body['notes']      ?? null, 65535);
+$managerId  = clean_int($body['manager_id']    ?? null);
+
+// VALID-2: capacity (if provided) must be a non-negative integer
+$capacity = null;
+$rawCap   = $body['capacity'] ?? null;
+if ($rawCap !== null && $rawCap !== '') {
+    $c = clean_int($rawCap);
+    if ($c === null || $c < 0) {
+        $fields['capacity'] = 'Capacity must be a non-negative whole number.';
+    } else {
+        $capacity = $c;
+    }
+}
+
+// Validate manager if provided
+if ($managerId && !db_exists('users', 'id = ? AND deleted_at IS NULL', [$managerId])) {
+    $fields['manager_id'] = 'Manager user not found.';
+}
+
+// Short-circuit on collected validation errors
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Auto-generate slug from name ─────────────────────────────────
@@ -48,27 +79,17 @@ if (!$slug) {
 }
 
 // ── Uniqueness check (name + slug) ───────────────────────────────
+// VALID-2: report collisions through the standard fields envelope so
+// the client can highlight the offending input. (HTTP 422)
 if (db_exists('yards', 'name = ?', [$name])) {
-    json_error('ALREADY_EXISTS', "A yard named '{$name}' already exists.", 409);
+    json_validation_error(
+        ['name' => "A yard named '{$name}' already exists."],
+        "A yard named '{$name}' already exists."
+    );
 }
 if (db_exists('yards', 'slug = ?', [$slug])) {
     // Append numeric suffix to slug to resolve collision
     $slug = $slug . '-' . time();
-}
-
-// ── Optional fields ───────────────────────────────────────────────
-$address    = clean_string($body['address']    ?? null, 500);
-$city       = clean_string($body['city']       ?? null, 100);
-$state      = clean_string($body['state']      ?? null, 100);
-$postalCode = clean_string($body['postal_code'] ?? null, 20);
-$capacity   = clean_int($body['capacity']      ?? null);
-$phone      = clean_string($body['phone']      ?? null, 50);
-$notes      = clean_string($body['notes']      ?? null, 65535);
-$managerId  = clean_int($body['manager_id']    ?? null);
-
-// Validate manager if provided
-if ($managerId && !db_exists('users', 'id = ? AND deleted_at IS NULL', [$managerId])) {
-    json_error('NOT_FOUND', 'Manager user not found.', 404);
 }
 
 // ── Insert ────────────────────────────────────────────────────────

@@ -33,16 +33,23 @@ require_permission('maintenance', 'edit');
 // ── Input
 $id          = clean_int($_POST['id'] ?? null);
 $lockAt      = clean_string($_POST['created_at'] ?? null);
-$odometer    = isset($_POST['odometer_reading']) ? clean_int($_POST['odometer_reading']) : null;
-$unit        = clean_string($_POST['mileage_unit'] ?? null);
+$odometer    = isset($_POST['odometer_reading']) && $_POST['odometer_reading'] !== ''
+                    ? clean_int($_POST['odometer_reading']) : null;
+$unit        = isset($_POST['mileage_unit']) && $_POST['mileage_unit'] !== ''
+                    ? clean_string($_POST['mileage_unit']) : null;
 $logDate     = clean_date($_POST['log_date'] ?? null);
 $notes       = isset($_POST['notes']) ? clean_string($_POST['notes'], 1000) : null;
 
+// ── VALID-2: accumulate header errors first
+$fields = [];
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Mileage log ID is required.';
 }
 if (!$lockAt) {
-    json_error('MISSING_REQUIRED', 'created_at (optimistic lock) is required.', 422);
+    $fields['created_at'] = 'Optimistic lock token is required.';
+}
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Load existing record
@@ -58,22 +65,25 @@ if (!$log) {
 // ── Block system-generated types
 $immutableTypes = ['gps_sync', 'lease_start', 'lease_end'];
 if (in_array($log['log_type'], $immutableTypes, true)) {
-    json_error('IMMUTABLE_RECORD', "Log type '{$log['log_type']}' is system-generated and cannot be edited.", 422);
+    json_error('IMMUTABLE_RECORD',
+        "Log type '{$log['log_type']}' is system-generated and cannot be edited.", 422,
+        ['fields' => ['id' => "Cannot edit a {$log['log_type']} mileage log — these are system-generated."]]);
 }
 
 // ── Optimistic lock: compare created_at (D19 adapted for no updated_at)
 if ($log['created_at'] !== $lockAt) {
-    json_error('STALE_DATA', 'Record was modified by another process. Refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This mileage log was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['created_at' => 'This mileage log was modified by another user. Refresh and try again.']]);
 }
 
-// ── Build update set
-$updates = [];
+// ── Build update set (validate all then short-circuit)
+$updates      = [];
 $updateParams = [];
 
-if ($odometer !== null) {
-    if ($odometer < 0) {
-        json_error('VALIDATION_ERROR', 'Odometer reading must be non-negative.', 422);
-    }
+if ($odometer !== null && $odometer < 0) {
+    $fields['odometer_reading'] = 'Odometer cannot be negative.';
+} elseif ($odometer !== null) {
     $updates[]      = 'odometer_reading = ?';
     $updateParams[] = $odometer;
 }
@@ -81,18 +91,20 @@ if ($odometer !== null) {
 if ($unit !== null) {
     $validUnits = ['km', 'miles'];
     if (!in_array($unit, $validUnits, true)) {
-        json_error('VALIDATION_ERROR', "Invalid mileage_unit. Must be 'km' or 'miles'.", 422);
+        $fields['mileage_unit'] = "Please select a valid mileage unit ('km' or 'miles').";
+    } else {
+        $updates[]      = 'mileage_unit = ?';
+        $updateParams[] = $unit;
     }
-    $updates[]      = 'mileage_unit = ?';
-    $updateParams[] = $unit;
 }
 
 if ($logDate !== null) {
     if ($logDate > date('Y-m-d')) {
-        json_error('VALIDATION_ERROR', 'Log date cannot be in the future.', 422);
+        $fields['log_date'] = 'Log date cannot be in the future.';
+    } else {
+        $updates[]      = 'log_date = ?';
+        $updateParams[] = $logDate;
     }
-    $updates[]      = 'log_date = ?';
-    $updateParams[] = $logDate;
 }
 
 if ($notes !== null) {
@@ -100,8 +112,28 @@ if ($notes !== null) {
     $updateParams[] = $notes;
 }
 
+if ($fields) {
+    json_validation_error($fields);
+}
+
 if (empty($updates)) {
-    json_error('VALIDATION_ERROR', 'No fields to update.', 422);
+    json_validation_error(['_general' => 'No updatable fields provided.'], 'No updatable fields provided.');
+}
+
+// Advance-check: reject if new odometer is less than the most recent prior reading
+if ($odometer !== null) {
+    $effectiveDate = $logDate ?? $log['log_date'];
+    $prior = db_row(
+        "SELECT odometer_reading, log_date FROM mileage_logs
+         WHERE equipment_unit_id = ? AND id <> ? AND log_date <= ?
+         ORDER BY log_date DESC, id DESC LIMIT 1",
+        [$log['equipment_unit_id'], $id, $effectiveDate]
+    );
+    if ($prior && $odometer < (int)$prior['odometer_reading']) {
+        json_validation_error(
+            ['odometer_reading' => "Odometer ({$odometer}) cannot be less than the most recent reading of {$prior['odometer_reading']} on {$prior['log_date']}."]
+        );
+    }
 }
 
 // ── Execute update

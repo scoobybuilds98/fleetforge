@@ -25,35 +25,53 @@ require_permission('journal_entries', 'create');
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
-$customerId   = clean_int($_POST['customer_id'] ?? null);
-$amount       = clean_decimal($_POST['amount'] ?? null);
-$receivedDate = clean_date($_POST['received_date'] ?? null);
-$depositType  = clean_string($_POST['deposit_type'] ?? null) ?? 'security';
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$customerId)   json_error('VALIDATION_ERROR', 'customer_id is required.', 422);
-if (!$amount || bccomp($amount, '0', 2) <= 0) {
-    json_error('VALIDATION_ERROR', 'amount must be greater than zero.', 422);
+$fields = [];
+
+$customerId   = clean_int($input['customer_id'] ?? null);
+$amount       = clean_decimal($input['amount'] ?? null);
+$receivedDate = clean_date($input['received_date'] ?? null);
+$depositType  = clean_string($input['deposit_type'] ?? null) ?? 'security';
+
+if (!$customerId)   $fields['customer_id']   = 'Please select a customer.';
+if ($amount === null || $amount === '') {
+    $fields['amount'] = 'Deposit amount is required.';
+} elseif (bccomp($amount, '0', 2) <= 0) {
+    $fields['amount'] = 'Deposit amount must be greater than zero.';
 }
-if (!$receivedDate) json_error('VALIDATION_ERROR', 'received_date is required.', 422);
+if (!$receivedDate) $fields['received_date'] = 'Received date is required.';
 
 $validTypes = ['security', 'damage', 'advance_payment', 'other'];
 if (!in_array($depositType, $validTypes, true)) {
-    json_error('VALIDATION_ERROR', 'deposit_type must be one of: ' . implode(', ', $validTypes), 422);
+    $fields['deposit_type'] = 'Deposit type must be security, damage, advance payment, or other.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $customer = db_row(
     "SELECT id, company_name FROM customers WHERE id = ? AND deleted_at IS NULL",
     [$customerId]
 );
-if (!$customer) json_error('NOT_FOUND', 'Customer not found.', 404);
+if (!$customer) {
+    json_error('NOT_FOUND', 'Customer not found.', 404, [
+        'fields' => ['customer_id' => 'Customer not found.'],
+    ]);
+}
 
-$leaseId  = clean_int($_POST['lease_id'] ?? null);
-$notes    = clean_string($_POST['notes'] ?? null, 2000);
-$currency = clean_string($_POST['currency'] ?? null) ?? 'CAD';
+$leaseId  = clean_int($input['lease_id'] ?? null);
+$notes    = clean_string($input['notes'] ?? null, 2000);
+$currency = clean_string($input['currency'] ?? null) ?? 'CAD';
 
 if ($leaseId) {
     if (!db_exists('leases', 'id = ? AND customer_id = ? AND deleted_at IS NULL', [$leaseId, $customerId])) {
-        json_error('NOT_FOUND', 'Lease not found for this customer.', 404);
+        json_error('NOT_FOUND', 'Lease not found for this customer.', 404, [
+            'fields' => ['lease_id' => 'Lease not found for this customer.'],
+        ]);
     }
 }
 

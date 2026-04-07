@@ -323,9 +323,16 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:560px;width:95%;max-height:85vh;overflow-y:auto;">
             <div class="modal-header"><h2 class="h5">New CapEx Request</h2><button class="modal-close" @click="createOpen = false">×</button></div>
             <div class="modal-body">
-                <div class="form-group"><label>Title *</label><input type="text" class="form-control form-control-sm" x-model="createForm.title" placeholder="e.g. New Trailer Purchase"></div>
+                <div class="form-error-banner" x-show="createFormError" x-cloak x-text="createFormError"></div>
+                <div class="form-group"><label>Title *</label>
+                    <input type="text" class="form-control form-control-sm" x-model="createForm.title"
+                           :class="createErrors.title ? 'is-invalid' : ''" @input="createErrors.title = ''"
+                           placeholder="e.g. New Trailer Purchase">
+                    <div class="field-error" x-show="createErrors.title" x-cloak x-text="createErrors.title"></div>
+                </div>
                 <div class="form-group"><label>Asset Class *</label>
-                    <select class="form-select form-control-sm" x-model="createForm.asset_class">
+                    <select class="form-select form-control-sm" x-model="createForm.asset_class"
+                            :class="createErrors.asset_class ? 'is-invalid' : ''" @change="createErrors.asset_class = ''">
                         <option value="fleet_equipment">Fleet Equipment</option>
                         <option value="vehicles">Vehicles</option>
                         <option value="office_equipment">Office Equipment</option>
@@ -334,10 +341,24 @@ require_once FF_ROOT . '/includes/header.php';
                         <option value="building">Building</option>
                         <option value="other">Other</option>
                     </select>
+                    <div class="field-error" x-show="createErrors.asset_class" x-cloak x-text="createErrors.asset_class"></div>
                 </div>
-                <div class="form-group"><label>Budget Amount ($) *</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="createForm.budget_amount"></div>
-                <div class="form-group"><label>Description</label><textarea class="form-control form-control-sm" rows="2" x-model="createForm.description"></textarea></div>
-                <div class="form-group"><label>Justification</label><textarea class="form-control form-control-sm" rows="3" x-model="createForm.justification" placeholder="Why is this purchase needed?"></textarea></div>
+                <div class="form-group"><label>Budget Amount ($) *</label>
+                    <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="createForm.budget_amount"
+                           :class="createErrors.budget_amount ? 'is-invalid' : ''" @input="createErrors.budget_amount = ''">
+                    <div class="field-error" x-show="createErrors.budget_amount" x-cloak x-text="createErrors.budget_amount"></div>
+                </div>
+                <div class="form-group"><label>Description</label>
+                    <textarea class="form-control form-control-sm" rows="2" x-model="createForm.description"
+                              :class="createErrors.description ? 'is-invalid' : ''" @input="createErrors.description = ''"></textarea>
+                    <div class="field-error" x-show="createErrors.description" x-cloak x-text="createErrors.description"></div>
+                </div>
+                <div class="form-group"><label>Justification</label>
+                    <textarea class="form-control form-control-sm" rows="3" x-model="createForm.justification"
+                              :class="createErrors.justification ? 'is-invalid' : ''" @input="createErrors.justification = ''"
+                              placeholder="Why is this purchase needed?"></textarea>
+                    <div class="field-error" x-show="createErrors.justification" x-cloak x-text="createErrors.justification"></div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="createOpen = false">Cancel</button>
@@ -356,6 +377,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:680px;width:95%;max-height:85vh;overflow-y:auto;">
             <div class="modal-header"><h2 class="h5">Capitalize Work Order</h2><button class="modal-close" @click="capitalizeOpen = false">×</button></div>
             <div class="modal-body">
+                <div class="form-error-banner" x-show="capitalizeFormError" x-cloak x-text="capitalizeFormError"></div>
                 <p class="text-secondary text-sm" x-show="capitalizeWO">
                     Capitalizing <strong class="font-mono" x-text="capitalizeWO?.work_order_number"></strong>
                     — <span x-text="capitalizeWO?.title"></span>
@@ -364,9 +386,14 @@ require_once FF_ROOT . '/includes/header.php';
                 <p class="text-info text-sm">A new fixed asset will be created and linked to this work order. The expense already posted via the WO bill stays in 6190; this entry only registers the asset for depreciation.</p>
 
                 <h3 class="h6" style="margin-top:14px;">Asset Details</h3>
-                <div class="form-group"><label>Asset Name *</label><input type="text" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.name"></div>
+                <div class="form-group"><label>Asset Name *</label>
+                    <input type="text" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.name"
+                           :class="capitalizeErrors.name ? 'is-invalid' : ''" @input="capitalizeErrors.name = ''">
+                    <div class="field-error" x-show="capitalizeErrors.name" x-cloak x-text="capitalizeErrors.name"></div>
+                </div>
                 <div class="form-group"><label>Asset Class *</label>
-                    <select class="form-select form-control-sm" x-model="capitalizeForm.asset_data.asset_class">
+                    <select class="form-select form-control-sm" x-model="capitalizeForm.asset_data.asset_class"
+                            :class="capitalizeErrors.asset_class ? 'is-invalid' : ''" @change="capitalizeErrors.asset_class = ''">
                         <option value="fleet_equipment">Fleet Equipment</option>
                         <option value="vehicles">Vehicles</option>
                         <option value="office_equipment">Office Equipment</option>
@@ -374,27 +401,54 @@ require_once FF_ROOT . '/includes/header.php';
                         <option value="building">Building</option>
                         <option value="other">Other</option>
                     </select>
+                    <div class="field-error" x-show="capitalizeErrors.asset_class" x-cloak x-text="capitalizeErrors.asset_class"></div>
                 </div>
                 <div class="form-group"><label>Depreciation Method *</label>
-                    <select class="form-select form-control-sm" x-model="capitalizeForm.asset_data.depreciation_method">
+                    <select class="form-select form-control-sm" x-model="capitalizeForm.asset_data.depreciation_method"
+                            :class="capitalizeErrors.depreciation_method ? 'is-invalid' : ''" @change="capitalizeErrors.depreciation_method = ''">
                         <option value="straight_line">Straight Line</option>
                         <option value="declining_balance">Declining Balance (CRA CCA)</option>
                     </select>
+                    <div class="field-error" x-show="capitalizeErrors.depreciation_method" x-cloak x-text="capitalizeErrors.depreciation_method"></div>
                 </div>
                 <div class="form-group" x-show="capitalizeForm.asset_data.depreciation_method === 'straight_line'">
                     <label>Useful Life (years) *</label>
-                    <input type="number" step="0.5" min="0.5" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.useful_life_years">
+                    <input type="number" step="0.5" min="0.5" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.useful_life_years"
+                           :class="capitalizeErrors.useful_life_years ? 'is-invalid' : ''" @input="capitalizeErrors.useful_life_years = ''">
+                    <div class="field-error" x-show="capitalizeErrors.useful_life_years" x-cloak x-text="capitalizeErrors.useful_life_years"></div>
                 </div>
                 <div class="form-group" x-show="capitalizeForm.asset_data.depreciation_method === 'declining_balance'">
                     <label>CRA CCA Rate *</label>
-                    <input type="number" step="0.01" min="0.01" max="1" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.cra_cca_rate" placeholder="0.30 = 30%">
+                    <input type="number" step="0.01" min="0.01" max="1" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.cra_cca_rate"
+                           :class="capitalizeErrors.cra_cca_rate ? 'is-invalid' : ''" @input="capitalizeErrors.cra_cca_rate = ''"
+                           placeholder="0.30 = 30%">
+                    <div class="field-error" x-show="capitalizeErrors.cra_cca_rate" x-cloak x-text="capitalizeErrors.cra_cca_rate"></div>
                 </div>
-                <div class="form-group"><label>Salvage Value ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.salvage_value"></div>
+                <div class="form-group"><label>Salvage Value ($)</label>
+                    <input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.salvage_value"
+                           :class="capitalizeErrors.salvage_value ? 'is-invalid' : ''" @input="capitalizeErrors.salvage_value = ''">
+                    <div class="field-error" x-show="capitalizeErrors.salvage_value" x-cloak x-text="capitalizeErrors.salvage_value"></div>
+                </div>
 
                 <h3 class="h6" style="margin-top:14px;">GL Accounts</h3>
-                <div class="form-group"><label>Asset Account ID *</label><input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.asset_account_id" placeholder="e.g. 12 = 1210 Fleet Equipment"></div>
-                <div class="form-group"><label>Accumulated Depreciation Account ID *</label><input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.accum_depr_account_id" placeholder="e.g. 13 = 1220"></div>
-                <div class="form-group"><label>Depreciation Expense Account ID *</label><input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.depr_expense_account_id" placeholder="e.g. 50 = 5010"></div>
+                <div class="form-group"><label>Asset Account ID *</label>
+                    <input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.asset_account_id"
+                           :class="capitalizeErrors.asset_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.asset_account_id = ''"
+                           placeholder="e.g. 12 = 1210 Fleet Equipment">
+                    <div class="field-error" x-show="capitalizeErrors.asset_account_id" x-cloak x-text="capitalizeErrors.asset_account_id"></div>
+                </div>
+                <div class="form-group"><label>Accumulated Depreciation Account ID *</label>
+                    <input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.accum_depr_account_id"
+                           :class="capitalizeErrors.accum_depr_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.accum_depr_account_id = ''"
+                           placeholder="e.g. 13 = 1220">
+                    <div class="field-error" x-show="capitalizeErrors.accum_depr_account_id" x-cloak x-text="capitalizeErrors.accum_depr_account_id"></div>
+                </div>
+                <div class="form-group"><label>Depreciation Expense Account ID *</label>
+                    <input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.depr_expense_account_id"
+                           :class="capitalizeErrors.depr_expense_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.depr_expense_account_id = ''"
+                           placeholder="e.g. 50 = 5010">
+                    <div class="field-error" x-show="capitalizeErrors.depr_expense_account_id" x-cloak x-text="capitalizeErrors.depr_expense_account_id"></div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="capitalizeOpen = false">Cancel</button>
@@ -413,6 +467,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:520px;width:95%;">
             <div class="modal-header"><h2 class="h5">Expense Work Order</h2><button class="modal-close" @click="expenseOpen = false">×</button></div>
             <div class="modal-body">
+                <div class="form-error-banner" x-show="expenseFormError" x-cloak x-text="expenseFormError"></div>
                 <p class="text-secondary text-sm" x-show="expenseWO">
                     Expensing <strong class="font-mono" x-text="expenseWO?.work_order_number"></strong>
                     — <span x-text="expenseWO?.title"></span>
@@ -420,12 +475,15 @@ require_once FF_ROOT . '/includes/header.php';
                 </p>
                 <p class="text-info text-sm">This logs the decision to NOT capitalize this work order. No new asset, no JE — the spend stays in 6190 Repairs. The WO will disappear from the flagged list.</p>
                 <div class="form-group"><label>Reason *</label>
-                    <textarea class="form-control form-control-sm" rows="3" x-model="expenseForm.reason" placeholder="e.g. Repair to existing asset, no useful life extension"></textarea>
+                    <textarea class="form-control form-control-sm" rows="3" x-model="expenseForm.reason"
+                              :class="expenseErrors.reason ? 'is-invalid' : ''" @input="expenseErrors.reason = ''"
+                              placeholder="e.g. Repair to existing asset, no useful life extension"></textarea>
+                    <div class="field-error" x-show="expenseErrors.reason" x-cloak x-text="expenseErrors.reason"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="expenseOpen = false">Cancel</button>
-                <button class="btn btn-warning btn-sm" @click="submitExpense()" :disabled="expenseBusy || !expenseForm.reason">
+                <button class="btn btn-warning btn-sm" @click="submitExpense()" :disabled="expenseBusy">
                     <span x-show="!expenseBusy">Mark as Expense</span><span x-show="expenseBusy">Saving…</span>
                 </button>
             </div>
@@ -439,40 +497,90 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:680px;width:95%;max-height:85vh;overflow-y:auto;">
             <div class="modal-header"><h2 class="h5">Complete CapEx + Create Asset</h2><button class="modal-close" @click="completeOpen = false">×</button></div>
             <div class="modal-body">
+                <div class="form-error-banner" x-show="completeFormError" x-cloak x-text="completeFormError"></div>
                 <p class="text-secondary text-sm" x-show="detailReq" x-text="'Completing ' + (detailReq?.request_number ?? '') + ' — ' + (detailReq?.title ?? '')"></p>
 
                 <h3 class="h6" style="margin-top:8px;">Actuals</h3>
-                <div class="form-group"><label>Actual Amount ($) *</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="completeForm.actual_amount"></div>
+                <div class="form-group"><label>Actual Amount ($) *</label>
+                    <input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="completeForm.actual_amount"
+                           :class="completeErrors.actual_amount ? 'is-invalid' : ''" @input="completeErrors.actual_amount = ''">
+                    <div class="field-error" x-show="completeErrors.actual_amount" x-cloak x-text="completeErrors.actual_amount"></div>
+                </div>
 
                 <h3 class="h6" style="margin-top:16px;">New Asset Details</h3>
-                <div class="form-group"><label>Asset Name *</label><input type="text" class="form-control form-control-sm" x-model="completeForm.asset_data.name"></div>
-                <div class="form-group"><label>Acquisition Date *</label><input type="date" class="form-control form-control-sm" x-model="completeForm.asset_data.acquisition_date"></div>
-                <div class="form-group"><label>Acquisition Cost ($) *</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="completeForm.asset_data.acquisition_cost"></div>
-                <div class="form-group"><label>Salvage Value ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.salvage_value"></div>
+                <div class="form-group"><label>Asset Name *</label>
+                    <input type="text" class="form-control form-control-sm" x-model="completeForm.asset_data.name"
+                           :class="completeErrors.name ? 'is-invalid' : ''" @input="completeErrors.name = ''">
+                    <div class="field-error" x-show="completeErrors.name" x-cloak x-text="completeErrors.name"></div>
+                </div>
+                <div class="form-group"><label>Acquisition Date *</label>
+                    <input type="date" class="form-control form-control-sm" x-model="completeForm.asset_data.acquisition_date"
+                           :class="completeErrors.acquisition_date ? 'is-invalid' : ''" @input="completeErrors.acquisition_date = ''">
+                    <div class="field-error" x-show="completeErrors.acquisition_date" x-cloak x-text="completeErrors.acquisition_date"></div>
+                </div>
+                <div class="form-group"><label>Acquisition Cost ($) *</label>
+                    <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="completeForm.asset_data.acquisition_cost"
+                           :class="completeErrors.acquisition_cost ? 'is-invalid' : ''" @input="completeErrors.acquisition_cost = ''">
+                    <div class="field-error" x-show="completeErrors.acquisition_cost" x-cloak x-text="completeErrors.acquisition_cost"></div>
+                </div>
+                <div class="form-group"><label>Salvage Value ($)</label>
+                    <input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.salvage_value"
+                           :class="completeErrors.salvage_value ? 'is-invalid' : ''" @input="completeErrors.salvage_value = ''">
+                    <div class="field-error" x-show="completeErrors.salvage_value" x-cloak x-text="completeErrors.salvage_value"></div>
+                </div>
                 <div class="form-group"><label>Depreciation Method *</label>
-                    <select class="form-select form-control-sm" x-model="completeForm.asset_data.depreciation_method">
+                    <select class="form-select form-control-sm" x-model="completeForm.asset_data.depreciation_method"
+                            :class="completeErrors.depreciation_method ? 'is-invalid' : ''" @change="completeErrors.depreciation_method = ''">
                         <option value="straight_line">Straight Line</option>
                         <option value="declining_balance">Declining Balance (CRA CCA)</option>
                         <option value="units_of_production">Units of Production</option>
                     </select>
+                    <div class="field-error" x-show="completeErrors.depreciation_method" x-cloak x-text="completeErrors.depreciation_method"></div>
                 </div>
                 <div class="form-group" x-show="completeForm.asset_data.depreciation_method === 'straight_line'">
                     <label>Useful Life (years) *</label>
-                    <input type="number" step="0.5" min="0.5" class="form-control form-control-sm" x-model="completeForm.asset_data.useful_life_years">
+                    <input type="number" step="0.5" min="0.5" class="form-control form-control-sm" x-model="completeForm.asset_data.useful_life_years"
+                           :class="completeErrors.useful_life_years ? 'is-invalid' : ''" @input="completeErrors.useful_life_years = ''">
+                    <div class="field-error" x-show="completeErrors.useful_life_years" x-cloak x-text="completeErrors.useful_life_years"></div>
                 </div>
                 <div class="form-group" x-show="completeForm.asset_data.depreciation_method === 'declining_balance'">
                     <label>CRA CCA Rate *</label>
-                    <input type="number" step="0.01" min="0.01" max="1" class="form-control form-control-sm" x-model="completeForm.asset_data.cra_cca_rate" placeholder="0.30 = 30%">
+                    <input type="number" step="0.01" min="0.01" max="1" class="form-control form-control-sm" x-model="completeForm.asset_data.cra_cca_rate"
+                           :class="completeErrors.cra_cca_rate ? 'is-invalid' : ''" @input="completeErrors.cra_cca_rate = ''"
+                           placeholder="0.30 = 30%">
+                    <div class="field-error" x-show="completeErrors.cra_cca_rate" x-cloak x-text="completeErrors.cra_cca_rate"></div>
                 </div>
                 <div class="form-group" x-show="completeForm.asset_data.depreciation_method === 'units_of_production'">
                     <label>Total Expected Units *</label>
-                    <input type="number" step="1" min="1" class="form-control form-control-sm" x-model="completeForm.asset_data.total_expected_units">
+                    <input type="number" step="1" min="1" class="form-control form-control-sm" x-model="completeForm.asset_data.total_expected_units"
+                           :class="completeErrors.total_expected_units ? 'is-invalid' : ''" @input="completeErrors.total_expected_units = ''">
+                    <div class="field-error" x-show="completeErrors.total_expected_units" x-cloak x-text="completeErrors.total_expected_units"></div>
                 </div>
-                <div class="form-group"><label>Asset Account ID *</label><input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.asset_account_id"></div>
-                <div class="form-group"><label>Accum Depr Account ID *</label><input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.accum_depr_account_id"></div>
-                <div class="form-group"><label>Depreciation Expense Account ID *</label><input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.depr_expense_account_id"></div>
-                <div class="form-group"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="completeForm.asset_data.location"></div>
-                <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="completeForm.asset_data.serial_number"></div>
+                <div class="form-group"><label>Asset Account ID *</label>
+                    <input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.asset_account_id"
+                           :class="completeErrors.asset_account_id ? 'is-invalid' : ''" @input="completeErrors.asset_account_id = ''">
+                    <div class="field-error" x-show="completeErrors.asset_account_id" x-cloak x-text="completeErrors.asset_account_id"></div>
+                </div>
+                <div class="form-group"><label>Accum Depr Account ID *</label>
+                    <input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.accum_depr_account_id"
+                           :class="completeErrors.accum_depr_account_id ? 'is-invalid' : ''" @input="completeErrors.accum_depr_account_id = ''">
+                    <div class="field-error" x-show="completeErrors.accum_depr_account_id" x-cloak x-text="completeErrors.accum_depr_account_id"></div>
+                </div>
+                <div class="form-group"><label>Depreciation Expense Account ID *</label>
+                    <input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.depr_expense_account_id"
+                           :class="completeErrors.depr_expense_account_id ? 'is-invalid' : ''" @input="completeErrors.depr_expense_account_id = ''">
+                    <div class="field-error" x-show="completeErrors.depr_expense_account_id" x-cloak x-text="completeErrors.depr_expense_account_id"></div>
+                </div>
+                <div class="form-group"><label>Location</label>
+                    <input type="text" class="form-control form-control-sm" x-model="completeForm.asset_data.location"
+                           :class="completeErrors.location ? 'is-invalid' : ''" @input="completeErrors.location = ''">
+                    <div class="field-error" x-show="completeErrors.location" x-cloak x-text="completeErrors.location"></div>
+                </div>
+                <div class="form-group"><label>Serial Number</label>
+                    <input type="text" class="form-control form-control-sm" x-model="completeForm.asset_data.serial_number"
+                           :class="completeErrors.serial_number ? 'is-invalid' : ''" @input="completeErrors.serial_number = ''">
+                    <div class="field-error" x-show="completeErrors.serial_number" x-cloak x-text="completeErrors.serial_number"></div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="completeOpen = false">Cancel</button>
@@ -504,11 +612,19 @@ function FF_Capex() {
         createOpen: false,
         createBusy: false,
         createForm: {},
+        createFormError: '',
+        createErrors: { title: '', asset_class: '', budget_amount: '', description: '', justification: '' },
 
         // ── Complete ───────────────────────────────────────────
         completeOpen: false,
         completeBusy: false,
         completeForm: {},
+        completeFormError: '',
+        completeErrors: {
+            actual_amount: '', name: '', acquisition_date: '', acquisition_cost: '', salvage_value: '',
+            depreciation_method: '', useful_life_years: '', cra_cca_rate: '', total_expected_units: '',
+            asset_account_id: '', accum_depr_account_id: '', depr_expense_account_id: '', location: '', serial_number: ''
+        },
 
         // ── Flagged work orders ────────────────────────────────
         flaggedWorkOrders: [],
@@ -520,10 +636,202 @@ function FF_Capex() {
         capitalizeBusy: false,
         capitalizeWO: null,
         capitalizeForm: { asset_data: {} },
+        capitalizeFormError: '',
+        capitalizeErrors: {
+            name: '', asset_class: '', depreciation_method: '', useful_life_years: '', cra_cca_rate: '',
+            salvage_value: '', asset_account_id: '', accum_depr_account_id: '', depr_expense_account_id: ''
+        },
         expenseOpen: false,
         expenseBusy: false,
         expenseWO: null,
         expenseForm: { reason: '' },
+        expenseFormError: '',
+        expenseErrors: { reason: '' },
+
+        // ── VALID-2: Error helpers ──────────────────────────────
+        _extractError(r, fallback) {
+            if (r && r.error) {
+                if (typeof r.error === 'string') return r.error;
+                if (r.error.message) return r.error.message;
+            }
+            if (r && r.message) return r.message;
+            return fallback || 'Something went wrong.';
+        },
+        _clearErrors(errorsObj, bannerKey) {
+            this[bannerKey] = '';
+            for (const k in errorsObj) {
+                if (Object.prototype.hasOwnProperty.call(errorsObj, k)) errorsObj[k] = '';
+            }
+        },
+        _paintErrors(errorsObj, bannerKey, r, fallback) {
+            const fields = (r && r.error && r.error.fields) || (r && r.fields) || null;
+            if (fields && typeof fields === 'object') {
+                let any = false;
+                for (const k in fields) {
+                    if (!Object.prototype.hasOwnProperty.call(fields, k)) continue;
+                    const bare = k.replace(/^asset_data\./, '');
+                    if (Object.prototype.hasOwnProperty.call(errorsObj, bare)) {
+                        errorsObj[bare] = fields[k];
+                        any = true;
+                    } else if (k === '_general' || k === '') {
+                        this[bannerKey] = fields[k];
+                        any = true;
+                    }
+                }
+                if (!any) this[bannerKey] = this._extractError(r, fallback);
+            } else {
+                this[bannerKey] = this._extractError(r, fallback);
+            }
+        },
+
+        // ── VALID-2: Client validators ──────────────────────────
+        validateCreate() {
+            this._clearErrors(this.createErrors, 'createFormError');
+            let ok = true;
+            const f = this.createForm;
+            if (!f.title || !f.title.trim()) {
+                this.createErrors.title = 'Title is required.';
+                ok = false;
+            }
+            const classes = ['fleet_equipment','vehicles','office_equipment','leasehold_improvements','land','building','other'];
+            if (!f.asset_class) {
+                this.createErrors.asset_class = 'Please select an asset class.';
+                ok = false;
+            } else if (!classes.includes(f.asset_class)) {
+                this.createErrors.asset_class = 'Please select a valid asset class.';
+                ok = false;
+            }
+            const amt = String(f.budget_amount || '').trim();
+            if (!amt) {
+                this.createErrors.budget_amount = 'Budget amount is required.';
+                ok = false;
+            } else if (!/^\d+(\.\d{1,2})?$/.test(amt)) {
+                this.createErrors.budget_amount = 'Budget amount must be a valid amount.';
+                ok = false;
+            } else if (parseFloat(amt) <= 0) {
+                this.createErrors.budget_amount = 'Budget amount must be greater than zero.';
+                ok = false;
+            }
+            return ok;
+        },
+        validateAssetData(errorsObj, data) {
+            let ok = true;
+            if (!data.name || !data.name.trim()) {
+                errorsObj.name = 'Asset name is required.';
+                ok = false;
+            }
+            const methods = ['straight_line','declining_balance','double_declining','sum_of_years','units_of_production'];
+            if (!data.depreciation_method) {
+                errorsObj.depreciation_method = 'Please select a depreciation method.';
+                ok = false;
+            } else if (!methods.includes(data.depreciation_method)) {
+                errorsObj.depreciation_method = 'Please select a valid depreciation method.';
+                ok = false;
+            }
+            if (data.depreciation_method === 'straight_line' || data.depreciation_method === 'sum_of_years') {
+                const years = String(data.useful_life_years || '').trim();
+                if (!years) {
+                    errorsObj.useful_life_years = 'Useful life is required.';
+                    ok = false;
+                } else if (!/^\d+(\.\d{1,2})?$/.test(years) || parseFloat(years) <= 0) {
+                    errorsObj.useful_life_years = 'Useful life must be greater than zero.';
+                    ok = false;
+                }
+            }
+            if (data.depreciation_method === 'declining_balance' || data.depreciation_method === 'double_declining') {
+                const rate = String(data.cra_cca_rate || '').trim();
+                if (!rate) {
+                    errorsObj.cra_cca_rate = 'CCA rate is required for declining balance.';
+                    ok = false;
+                } else if (!/^\d+(\.\d{1,4})?$/.test(rate) || parseFloat(rate) <= 0 || parseFloat(rate) > 1) {
+                    errorsObj.cra_cca_rate = 'CCA rate must be between 0 and 1 (e.g. 0.30 = 30%).';
+                    ok = false;
+                }
+            }
+            if (data.depreciation_method === 'units_of_production') {
+                const units = String(data.total_expected_units || '').trim();
+                if (!units) {
+                    errorsObj.total_expected_units = 'Total expected units is required.';
+                    ok = false;
+                } else if (!/^\d+$/.test(units) || parseInt(units, 10) <= 0) {
+                    errorsObj.total_expected_units = 'Total expected units must be a positive integer.';
+                    ok = false;
+                }
+            }
+            const salvage = String(data.salvage_value || '').trim();
+            if (salvage !== '' && (!/^\d+(\.\d{1,2})?$/.test(salvage) || parseFloat(salvage) < 0)) {
+                errorsObj.salvage_value = 'Salvage value cannot be negative.';
+                ok = false;
+            }
+            if (!data.asset_account_id || !String(data.asset_account_id).trim()) {
+                errorsObj.asset_account_id = 'Asset account is required.';
+                ok = false;
+            } else if (!/^\d+$/.test(String(data.asset_account_id).trim())) {
+                errorsObj.asset_account_id = 'Asset account must be a valid ID.';
+                ok = false;
+            }
+            if (!data.accum_depr_account_id || !String(data.accum_depr_account_id).trim()) {
+                errorsObj.accum_depr_account_id = 'Accumulated depreciation account is required.';
+                ok = false;
+            } else if (!/^\d+$/.test(String(data.accum_depr_account_id).trim())) {
+                errorsObj.accum_depr_account_id = 'Accumulated depreciation account must be a valid ID.';
+                ok = false;
+            }
+            if (!data.depr_expense_account_id || !String(data.depr_expense_account_id).trim()) {
+                errorsObj.depr_expense_account_id = 'Depreciation expense account is required.';
+                ok = false;
+            } else if (!/^\d+$/.test(String(data.depr_expense_account_id).trim())) {
+                errorsObj.depr_expense_account_id = 'Depreciation expense account must be a valid ID.';
+                ok = false;
+            }
+            return ok;
+        },
+        validateCapitalize() {
+            this._clearErrors(this.capitalizeErrors, 'capitalizeFormError');
+            return this.validateAssetData(this.capitalizeErrors, this.capitalizeForm.asset_data);
+        },
+        validateExpense() {
+            this._clearErrors(this.expenseErrors, 'expenseFormError');
+            let ok = true;
+            if (!this.expenseForm.reason || !this.expenseForm.reason.trim()) {
+                this.expenseErrors.reason = 'Reason is required.';
+                ok = false;
+            }
+            return ok;
+        },
+        validateComplete() {
+            this._clearErrors(this.completeErrors, 'completeFormError');
+            let ok = true;
+            const amt = String(this.completeForm.actual_amount || '').trim();
+            if (!amt) {
+                this.completeErrors.actual_amount = 'Actual amount is required.';
+                ok = false;
+            } else if (!/^\d+(\.\d{1,2})?$/.test(amt)) {
+                this.completeErrors.actual_amount = 'Actual amount must be a valid amount.';
+                ok = false;
+            } else if (parseFloat(amt) < 0) {
+                this.completeErrors.actual_amount = 'Actual amount cannot be negative.';
+                ok = false;
+            }
+            const ad = this.completeForm.asset_data || {};
+            if (!ad.acquisition_date) {
+                this.completeErrors.acquisition_date = 'Acquisition date is required.';
+                ok = false;
+            }
+            const cost = String(ad.acquisition_cost || '').trim();
+            if (!cost) {
+                this.completeErrors.acquisition_cost = 'Acquisition cost is required.';
+                ok = false;
+            } else if (!/^\d+(\.\d{1,2})?$/.test(cost)) {
+                this.completeErrors.acquisition_cost = 'Acquisition cost must be a valid amount.';
+                ok = false;
+            } else if (parseFloat(cost) <= 0) {
+                this.completeErrors.acquisition_cost = 'Acquisition cost must be greater than zero.';
+                ok = false;
+            }
+            if (!this.validateAssetData(this.completeErrors, ad)) ok = false;
+            return ok;
+        },
 
         // ── Init ───────────────────────────────────────────────
         async init() {
@@ -620,6 +928,7 @@ function FF_Capex() {
 
         openComplete() {
             this.resetCompleteForm();
+            this._clearErrors(this.completeErrors, 'completeFormError');
             // Pre-fill from request
             if (this.detailReq) {
                 this.completeForm.actual_amount    = this.detailReq.budget_amount;
@@ -631,6 +940,7 @@ function FF_Capex() {
 
         async submitComplete() {
             if (!this.detailReq) return;
+            if (!this.validateComplete()) return;
             this.completeBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/capex/complete.php') ?>', {
@@ -644,9 +954,9 @@ function FF_Capex() {
                     this.detailOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Complete failed.');
+                    this._paintErrors(this.completeErrors, 'completeFormError', r, 'Failed to complete CapEx.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.completeFormError = 'Network error. Please try again.'; }
             this.completeBusy = false;
         },
 
@@ -678,11 +988,13 @@ function FF_Capex() {
                     depr_expense_account_id: '',
                 },
             };
+            this._clearErrors(this.capitalizeErrors, 'capitalizeFormError');
             this.capitalizeOpen = true;
         },
 
         async submitCapitalize() {
             if (!this.capitalizeWO) return;
+            if (!this.validateCapitalize()) return;
             this.capitalizeBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/capex/capitalize.php') ?>', {
@@ -694,20 +1006,22 @@ function FF_Capex() {
                     this.capitalizeOpen = false;
                     await Promise.all([this.load(), this.loadFlagged()]);
                 } else {
-                    FF_Toast.error(r.error?.message || 'Capitalize failed.');
+                    this._paintErrors(this.capitalizeErrors, 'capitalizeFormError', r, 'Failed to capitalize work order.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.capitalizeFormError = 'Network error. Please try again.'; }
             this.capitalizeBusy = false;
         },
 
         openExpense(wo) {
             this.expenseWO   = wo;
             this.expenseForm = { reason: '' };
+            this._clearErrors(this.expenseErrors, 'expenseFormError');
             this.expenseOpen = true;
         },
 
         async submitExpense() {
-            if (!this.expenseWO || !this.expenseForm.reason) return;
+            if (!this.expenseWO) return;
+            if (!this.validateExpense()) return;
             this.expenseBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/capex/expense.php') ?>', {
@@ -719,18 +1033,20 @@ function FF_Capex() {
                     this.expenseOpen = false;
                     await Promise.all([this.load(), this.loadFlagged()]);
                 } else {
-                    FF_Toast.error(r.error?.message || 'Expense action failed.');
+                    this._paintErrors(this.expenseErrors, 'expenseFormError', r, 'Failed to mark as expense.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.expenseFormError = 'Network error. Please try again.'; }
             this.expenseBusy = false;
         },
 
         // ── Create ─────────────────────────────────────────────
         openCreate() {
             this.resetCreateForm();
+            this._clearErrors(this.createErrors, 'createFormError');
             this.createOpen = true;
         },
         async submitCreate() {
+            if (!this.validateCreate()) return;
             this.createBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/capex/create.php') ?>', this.createForm);
@@ -739,9 +1055,9 @@ function FF_Capex() {
                     this.createOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Create failed.');
+                    this._paintErrors(this.createErrors, 'createFormError', r, 'Failed to create CapEx request.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.createFormError = 'Network error. Please try again.'; }
             this.createBusy = false;
         },
 

@@ -27,14 +27,24 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'create');
 
-$paymentId = clean_int($_POST['payment_id'] ?? null);
-$bankAccountId = clean_int($_POST['bank_account_id'] ?? null);
-$nsfFee = clean_decimal($_POST['nsf_fee'] ?? null) ?? '0.00';
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$paymentId) json_error('VALIDATION_ERROR', 'payment_id is required.', 422);
-if (!$bankAccountId) json_error('VALIDATION_ERROR', 'bank_account_id is required.', 422);
+$fields = [];
+
+$paymentId = clean_int($input['payment_id'] ?? null);
+$bankAccountId = clean_int($input['bank_account_id'] ?? null);
+$nsfFee = clean_decimal($input['nsf_fee'] ?? null) ?? '0.00';
+
+if (!$paymentId)     $fields['payment_id']      = 'Please select a payment.';
+if (!$bankAccountId) $fields['bank_account_id'] = 'Please select a bank account.';
 if (bccomp($nsfFee, '0.00', 2) < 0) {
-    json_error('VALIDATION_ERROR', 'nsf_fee cannot be negative.', 422);
+    $fields['nsf_fee'] = 'NSF fee cannot be negative.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $userId = current_user_id();
@@ -48,5 +58,10 @@ try {
     );
     json_success($result);
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $msg = $e->getMessage();
+    $slot = '_general';
+    if (stripos($msg, 'payment') !== false) $slot = 'payment_id';
+    elseif (stripos($msg, 'bank') !== false) $slot = 'bank_account_id';
+    elseif (stripos($msg, 'fee') !== false) $slot = 'nsf_fee';
+    json_validation_error([$slot => $msg], $msg);
 }

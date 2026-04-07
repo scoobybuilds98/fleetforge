@@ -25,16 +25,32 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'create');
 
-$bankAccountId = clean_int($_POST['bank_account_id'] ?? null);
-$statementDate = clean_date($_POST['statement_date'] ?? null);
-$statementEndingBalance = clean_decimal($_POST['statement_ending_balance'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$bankAccountId) json_error('VALIDATION_ERROR', 'bank_account_id is required.', 422);
-if (!$statementDate) json_error('VALIDATION_ERROR', 'statement_date is required.', 422);
-if ($statementEndingBalance === null) json_error('VALIDATION_ERROR', 'statement_ending_balance is required.', 422);
+$fields = [];
+
+$bankAccountId = clean_int($input['bank_account_id'] ?? null);
+$statementDate = clean_date($input['statement_date'] ?? null);
+$statementEndingBalance = clean_decimal($input['statement_ending_balance'] ?? null);
+
+if (!$bankAccountId) $fields['bank_account_id'] = 'Please select a bank account.';
+if (!$statementDate) $fields['statement_date'] = 'Statement date is required.';
+if ($statementEndingBalance === null || $statementEndingBalance === '') {
+    $fields['statement_ending_balance'] = 'Statement ending balance is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $bankAccount = db_row("SELECT * FROM acc_bank_accounts WHERE id = ? AND is_active = 1", [$bankAccountId]);
-if (!$bankAccount) json_error('NOT_FOUND', 'Bank account not found or inactive.', 404);
+if (!$bankAccount) {
+    json_error('NOT_FOUND', 'Bank account not found or inactive.', 404, [
+        'fields' => ['bank_account_id' => 'Bank account not found or inactive.'],
+    ]);
+}
 
 // Check for existing in_progress reconciliation
 $existing = db_row(
@@ -42,13 +58,18 @@ $existing = db_row(
     [$bankAccountId]
 );
 if ($existing) {
-    json_error('ALREADY_EXISTS', 'An in-progress reconciliation already exists for this account. Complete or delete it first.', 409);
+    json_error('ALREADY_EXISTS',
+        'An in-progress reconciliation already exists for this account. Complete or delete it first.', 409,
+        ['fields' => ['bank_account_id' => 'An in-progress reconciliation already exists for this account. Complete or delete it first.']]);
 }
 
 // Find the accounting period for the statement date
 $period = AccountingService::periodForDate($statementDate);
 if (!$period) {
-    json_error('VALIDATION_ERROR', "No accounting period found for date {$statementDate}.", 422);
+    json_validation_error(
+        ['statement_date' => "No accounting period found for date {$statementDate}."],
+        "No accounting period found for date {$statementDate}."
+    );
 }
 
 $userId = current_user_id();

@@ -337,8 +337,10 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label" for="res-email">Contact Email:</label>
                         <input id="res-email" type="email" class="form-input"
+                               :class="errors.contact_email ? 'is-invalid' : ''"
                                placeholder="e.g. bob@lotusterminals.com"
                                x-model="form.contact_email">
+                        <p class="form-error" x-show="errors.contact_email" x-text="errors.contact_email"></p>
                     </div>
 
                     <div class="form-group">
@@ -753,11 +755,73 @@ function FF_ReservationCreate() {
             };
         },
 
+        // ── Client-side validation ────────────────────────────────
+        // Populates this.errors and returns true if valid.
+        validate() {
+            this.errors    = {};
+            this.formError = '';
+            let ok = true;
+
+            // Contact name required
+            if (!this.form.contact_name || !this.form.contact_name.trim()) {
+                this.errors.contact_name = 'Contact name is required.';
+                ok = false;
+            }
+
+            // Company name required
+            if (!this.form.company_name || !this.form.company_name.trim()) {
+                this.errors.company_name = 'Company name is required.';
+                ok = false;
+            }
+
+            // Customer required when in customer mode
+            if (this.mode === 'customer' && !this.form.customer_id) {
+                this.errors.customer_id = 'Please select a customer.';
+                ok = false;
+            }
+
+            // Pickup date required + not in the past
+            if (!this.form.pickup_date) {
+                this.errors.pickup_date = 'Pickup date is required.';
+                ok = false;
+            } else {
+                const today = new Date().toISOString().split('T')[0];
+                if (this.form.pickup_date < today) {
+                    this.errors.pickup_date = 'Pickup date cannot be in the past.';
+                    ok = false;
+                }
+            }
+
+            // Quantity: 1–500
+            const q = parseInt(this.form.quantity);
+            if (isNaN(q) || q < 1) {
+                this.errors.quantity = 'Quantity must be at least 1.';
+                ok = false;
+            } else if (q > 500) {
+                this.errors.quantity = 'Quantity cannot exceed 500.';
+                ok = false;
+            }
+
+            // Email format check (optional field)
+            if (this.form.contact_email && this.form.contact_email.trim()) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(this.form.contact_email.trim())) {
+                    this.errors.contact_email = 'Please enter a valid email address.';
+                    ok = false;
+                }
+            }
+
+            if (!ok) {
+                this.formError = 'Please fix the errors below and try again.';
+            }
+            return ok;
+        },
+
         // ── Submit (standard — no override) ───────────────────────
         async submit() {
-            this.errors        = {};
-            this.formError     = '';
-            this.submitting    = true;
+            if (!this.validate()) return;
+
+            this.submitting = true;
 
             try {
                 const res = await FF_Api.post(
@@ -775,7 +839,9 @@ function FF_ReservationCreate() {
                         };
                         return; // Don't set formError — modal handles it
                     }
-                    if (res.error?.errors) this.errors = res.error.errors;
+                    // VALID-2: prefer .fields, fall back to legacy .errors
+                    if (res.error?.fields) this.errors = res.error.fields;
+                    else if (res.error?.errors) this.errors = res.error.errors;
                     throw new Error(res.error?.message || 'Failed to create reservation.');
                 }
 
@@ -807,7 +873,9 @@ function FF_ReservationCreate() {
                 );
 
                 if (!res.success) {
-                    if (res.error?.errors) this.errors = res.error.errors;
+                    // VALID-2: prefer .fields, fall back to legacy .errors
+                    if (res.error?.fields) this.errors = res.error.fields;
+                    else if (res.error?.errors) this.errors = res.error.errors;
                     throw new Error(res.error?.message || 'Failed to create reservation.');
                 }
 

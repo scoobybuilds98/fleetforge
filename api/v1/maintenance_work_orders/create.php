@@ -35,36 +35,62 @@ require_permission('maintenance', 'create');
 // -----------------------------------------------------------------------
 // 1. Parse JSON body
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 // -----------------------------------------------------------------------
-// 2. Validate required fields
+// 2. Validate required fields — VALID-2: accumulate every error
 // -----------------------------------------------------------------------
 $unitId = clean_int($body['equipment_unit_id'] ?? null);
 if (!$unitId) {
-    json_error('MISSING_REQUIRED', 'equipment_unit_id is required.', 422);
+    $fields['equipment_unit_id'] = 'Please select an equipment unit.';
 }
 
 $title = clean_string($body['title'] ?? null, 500);
 if (!$title) {
-    json_error('MISSING_REQUIRED', 'title is required.', 422);
+    $fields['title'] = 'Title is required.';
 }
 
-$workType = clean_string($body['work_type'] ?? null);
+$workType       = clean_string($body['work_type'] ?? null);
 $validWorkTypes = ['scheduled_service', 'repair', 'inspection', 'tire', 'electrical', 'body_damage', 'breakdown', 'other'];
-if (!$workType || !in_array($workType, $validWorkTypes, true)) {
-    json_error('VALIDATION_ERROR', 'work_type is required and must be one of: ' . implode(', ', $validWorkTypes) . '.', 422);
+if (!$workType) {
+    $fields['work_type'] = 'Please select a work type.';
+} elseif (!in_array($workType, $validWorkTypes, true)) {
+    $fields['work_type'] = 'Please select a valid work type.';
 }
 
-$priority = clean_string($body['priority'] ?? null);
+$priority        = clean_string($body['priority'] ?? null);
 $validPriorities = ['low', 'medium', 'high', 'emergency'];
-if (!$priority || !in_array($priority, $validPriorities, true)) {
-    json_error('VALIDATION_ERROR', 'priority is required and must be one of: ' . implode(', ', $validPriorities) . '.', 422);
+if (!$priority) {
+    $fields['priority'] = 'Please select a priority.';
+} elseif (!in_array($priority, $validPriorities, true)) {
+    $fields['priority'] = 'Please select a valid priority.';
 }
 
 $requestedDate = clean_date($body['requested_date'] ?? null);
 if (!$requestedDate) {
-    json_error('MISSING_REQUIRED', 'requested_date is required (Y-m-d).', 422);
+    $fields['requested_date'] = 'Requested date is required.';
+}
+
+// VALID-2: mileage_at_service must be >= 0 with specific message
+$mileageAtService = null;
+if (array_key_exists('mileage_at_service', $body) && $body['mileage_at_service'] !== null && $body['mileage_at_service'] !== '') {
+    $mi = clean_int($body['mileage_at_service']);
+    if ($mi === null || $mi < 0) {
+        $fields['mileage_at_service'] = 'Odometer cannot be negative.';
+    } else {
+        $mileageAtService = $mi;
+    }
+}
+
+// VALID-2: scheduled_date must not be before requested_date
+$scheduledDate = clean_date($body['scheduled_date'] ?? null);
+if ($scheduledDate && $requestedDate && strtotime($scheduledDate) < strtotime($requestedDate)) {
+    $fields['scheduled_date'] = 'Scheduled date cannot be before requested date.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // -----------------------------------------------------------------------
@@ -78,32 +104,38 @@ $unit = db_row(
     [$unitId]
 );
 if (!$unit) {
-    json_error('NOT_FOUND', 'Equipment unit not found.', 404);
+    json_validation_error(
+        ['equipment_unit_id' => 'Equipment unit not found.'],
+        'Equipment unit not found.'
+    );
 }
 
 // -----------------------------------------------------------------------
 // 4. Optional fields
 // -----------------------------------------------------------------------
-$vendorId         = clean_int($body['vendor_id'] ?? null);
-$description      = clean_string($body['description'] ?? null, 5000);
-// WHY: mileage must be >= 0 — a negative odometer reading is nonsensical
-$mileageAtService = clean_non_negative_int($body['mileage_at_service'] ?? null);
-$scheduledDate    = clean_date($body['scheduled_date'] ?? null);
-$notes            = clean_string($body['notes'] ?? null, 5000);
-$internalNotes    = clean_string($body['internal_notes'] ?? null, 5000);
-$assignedTo       = clean_int($body['assigned_to'] ?? null);
+$vendorId      = clean_int($body['vendor_id'] ?? null);
+$description   = clean_string($body['description'] ?? null, 5000);
+$notes         = clean_string($body['notes'] ?? null, 5000);
+$internalNotes = clean_string($body['internal_notes'] ?? null, 5000);
+$assignedTo    = clean_int($body['assigned_to'] ?? null);
 
 // Validate vendor exists if provided
 if ($vendorId !== null) {
     if (!db_exists('vendors', 'id = ? AND deleted_at IS NULL', [$vendorId])) {
-        json_error('NOT_FOUND', 'Vendor not found.', 404);
+        json_validation_error(
+            ['vendor_id' => 'Vendor not found.'],
+            'Vendor not found.'
+        );
     }
 }
 
 // Validate assigned_to user exists if provided
 if ($assignedTo !== null) {
     if (!db_exists('users', 'id = ? AND deleted_at IS NULL', [$assignedTo])) {
-        json_error('NOT_FOUND', 'Assigned user not found.', 404);
+        json_validation_error(
+            ['assigned_to' => 'Assigned user not found.'],
+            'Assigned user not found.'
+        );
     }
 }
 

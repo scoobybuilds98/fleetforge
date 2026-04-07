@@ -25,13 +25,38 @@ require_method('POST');
 require_auth_api();
 require_permission('fixed_assets', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
+
+$assetId        = clean_int($body['asset_id'] ?? null);
+$impairmentDate = clean_date($body['impairment_date'] ?? null);
+$impairmentLoss = clean_decimal($body['impairment_loss'] ?? null);
+$reason         = clean_string($body['reason'] ?? null, 2000);
+
+if (!$assetId) {
+    $fields['asset_id'] = 'Asset ID is required.';
+}
+if (!$impairmentDate) {
+    $fields['impairment_date'] = 'Impairment date is required.';
+}
+if ($impairmentLoss === null || $impairmentLoss === '') {
+    $fields['impairment_loss'] = 'Impairment loss amount is required.';
+} elseif (bccomp($impairmentLoss, '0.00', 2) <= 0) {
+    $fields['impairment_loss'] = 'Impairment loss must be greater than zero.';
+}
+if (!$reason) {
+    $fields['reason'] = 'Please provide a reason for the impairment.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $data = [
-    'asset_id'        => clean_int($body['asset_id'] ?? null),
-    'impairment_date' => clean_date($body['impairment_date'] ?? null),
-    'impairment_loss' => clean_decimal($body['impairment_loss'] ?? null),
-    'reason'          => clean_string($body['reason'] ?? null, 2000),
+    'asset_id'        => $assetId,
+    'impairment_date' => $impairmentDate,
+    'impairment_loss' => $impairmentLoss,
+    'reason'          => $reason,
 ];
 
 $user = current_user();
@@ -42,9 +67,17 @@ try {
 } catch (\RuntimeException $e) {
     $msg = $e->getMessage();
     if (str_contains($msg, 'Only managers')) {
-        json_error('FORBIDDEN', $msg, 403);
+        json_error('FORBIDDEN', $msg, 403,
+            ['fields' => ['_general' => 'Only managers can record an impairment.']]);
     }
-    json_error('VALIDATION_ERROR', $msg, 422);
+    $slot = '_general';
+    if (stripos($msg, 'not found') !== false)       $slot = 'asset_id';
+    elseif (stripos($msg, 'disposed') !== false)    $slot = 'asset_id';
+    elseif (stripos($msg, 'impairment_loss') !== false || stripos($msg, 'NBV') !== false)
+                                                    $slot = 'impairment_loss';
+    elseif (stripos($msg, 'period') !== false)      $slot = 'impairment_date';
+    elseif (stripos($msg, 'Impairment loss account') !== false) $slot = '_general';
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($impairment, 201);

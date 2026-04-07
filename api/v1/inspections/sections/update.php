@@ -31,10 +31,16 @@ require_method('POST');
 require_auth_api();
 require_permission('inspections', 'edit');
 
-$body = json_body();
+$body        = json_body();
+$fieldErrors = [];
 
 $sectionId = clean_int($body['section_id'] ?? null);
-if (!$sectionId) json_error('MISSING_REQUIRED', 'section_id is required.', 422);
+if (!$sectionId) {
+    $fieldErrors['section_id'] = 'Section ID is required.';
+}
+if ($fieldErrors) {
+    json_validation_error($fieldErrors);
+}
 
 // ── Fetch section and parent inspection in one query
 $section = db_row(
@@ -49,27 +55,29 @@ if (!$section) json_error('NOT_FOUND', 'Inspection section not found.', 404);
 
 // Signed inspections are terminal — no further edits allowed
 if ($section['inspection_status'] === 'signed') {
-    json_error('IMMUTABLE_RECORD', 'Signed inspections cannot be modified.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Signed inspections cannot be modified.', 422,
+        ['fields' => ['section_id' => 'Cannot edit a section on a signed inspection.']]);
 }
 
-// ── Build update fields
-$fields  = [];
-$params  = [];
+// ── Build update fields (validate first, accumulate errors, then build SQL)
+$sqlFields = [];
+$params    = [];
 
 if (array_key_exists('condition', $body)) {
     $condition = clean_string($body['condition'] ?? null);
     $validConds = ['ok', 'fair', 'damaged', 'missing', 'na'];
     if ($condition && !in_array($condition, $validConds, true)) {
-        json_error('VALIDATION_ERROR', 'Invalid condition value.', 422,
-            ['fields' => ['condition' => 'Must be ok, fair, damaged, missing, or na.']]);
+        $fieldErrors['condition'] = 'Please select a valid condition (ok, fair, damaged, missing, or na).';
+    } else {
+        $sqlFields[] = '`condition` = ?';
+        $params[]    = $condition;
     }
-    $fields[]  = '`condition` = ?';
-    $params[]  = $condition;
 }
 
 if (array_key_exists('notes', $body)) {
-    $fields[]  = 'notes = ?';
-    $params[]  = clean_string($body['notes'] ?? null, 5000);
+    $sqlFields[] = 'notes = ?';
+    $params[]    = clean_string($body['notes'] ?? null, 5000);
 }
 
 if (array_key_exists('section_data', $body)) {
@@ -77,22 +85,29 @@ if (array_key_exists('section_data', $body)) {
     if ($sectionData !== null) {
         // Validate it's encodable JSON (array or object)
         if (!is_array($sectionData)) {
-            json_error('VALIDATION_ERROR', 'section_data must be an object or null.', 422);
+            $fieldErrors['section_data'] = 'Section data must be an object or null.';
+        } else {
+            $sqlFields[] = 'section_data = ?';
+            $params[]    = json_encode($sectionData);
         }
-        $fields[]  = 'section_data = ?';
-        $params[]  = json_encode($sectionData);
     } else {
-        $fields[]  = 'section_data = NULL';
+        $sqlFields[] = 'section_data = NULL';
     }
 }
 
-if (!$fields) json_error('VALIDATION_ERROR', 'No updatable fields provided.', 422);
+if ($fieldErrors) {
+    json_validation_error($fieldErrors);
+}
+
+if (!$sqlFields) {
+    json_validation_error(['_general' => 'No updatable fields provided.'], 'No updatable fields provided.');
+}
 
 $params[] = $sectionId;
 
-db_transaction(function () use ($fields, $params, $sectionId, $section) {
+db_transaction(function () use ($sqlFields, $params, $sectionId, $section) {
     db_execute(
-        "UPDATE inspection_sections SET " . implode(', ', $fields) . " WHERE id = ?",
+        "UPDATE inspection_sections SET " . implode(', ', $sqlFields) . " WHERE id = ?",
         $params
     );
 

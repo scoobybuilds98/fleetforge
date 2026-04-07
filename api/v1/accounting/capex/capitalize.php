@@ -24,23 +24,44 @@ require_method('POST');
 require_auth_api();
 require_permission('fixed_assets', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-$woId = clean_int($body['work_order_id'] ?? null);
-if (!$woId) {
-    json_error('MISSING_REQUIRED', 'work_order_id is required.', 422);
-}
-
+$woId      = clean_int($body['work_order_id'] ?? null);
 $assetData = $body['asset_data'] ?? [];
+
+// ── Phase 1: required-field accumulator ──
+if (!$woId) {
+    $fields['work_order_id'] = 'Please select a work order to capitalize.';
+}
 if (!is_array($assetData)) {
-    json_error('VALIDATION_ERROR', 'asset_data must be an object.', 422);
+    $fields['_general'] = 'Asset data is missing or malformed.';
+    $assetData = [];
 }
 
 // Required GL accounts must always be supplied
-foreach (['asset_account_id', 'accum_depr_account_id', 'depr_expense_account_id'] as $k) {
+$slotMap = [
+    'asset_account_id'        => 'Please select an asset GL account.',
+    'accum_depr_account_id'   => 'Please select an accumulated depreciation account.',
+    'depr_expense_account_id' => 'Please select a depreciation expense account.',
+];
+foreach ($slotMap as $k => $msg) {
     if (empty($assetData[$k])) {
-        json_error('MISSING_REQUIRED', "asset_data.{$k} is required.", 422);
+        $fields["asset_data.{$k}"] = $msg;
     }
+}
+
+// Asset name & cost are always required at capitalize time
+if (empty($assetData['name'])) {
+    $fields['asset_data.name'] = 'Asset name is required.';
+}
+if (empty($assetData['acquisition_cost'])
+    || bccomp((string)$assetData['acquisition_cost'], '0.00', 2) <= 0) {
+    $fields['asset_data.acquisition_cost'] = 'Acquisition cost must be greater than zero.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 try {
@@ -52,7 +73,16 @@ try {
         (string) ($u['role_slug'] ?? '')
     );
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $msg  = $e->getMessage();
+    $slot = '_general';
+    if (stripos($msg, 'work order') !== false || stripos($msg, 'not found') !== false) {
+        $slot = 'work_order_id';
+    } elseif (stripos($msg, 'acquisition') !== false || stripos($msg, 'cost') !== false) {
+        $slot = 'asset_data.acquisition_cost';
+    } elseif (stripos($msg, 'manager') !== false) {
+        json_error('FORBIDDEN', $msg, 403, ['fields' => ['_general' => $msg]]);
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($result);

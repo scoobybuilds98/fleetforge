@@ -76,39 +76,44 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="showCreate">
         <div class="card" style="padding:16px;margin-bottom:16px;">
             <div style="font-weight:600;font-size:0.875rem;margin-bottom:12px;">Record New Deposit</div>
+            <div class="form-error-banner" x-show="formError" x-cloak x-text="formError" style="margin-bottom:12px;"></div>
             <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div>
                     <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Customer</label>
-                    <select x-model="createForm.customer_id" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <select x-model="createForm.customer_id" @change="errors.customer_id = ''" :class="errors.customer_id ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                         <option value="">Select...</option>
                         <?php foreach ($customers as $c): ?>
                             <option value="<?= (int)$c['id'] ?>"><?= e($c['company_name']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <div class="field-error" x-show="errors.customer_id" x-cloak x-text="errors.customer_id"></div>
                 </div>
                 <div>
                     <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Amount</label>
-                    <input type="number" step="0.01" min="0" x-model="createForm.amount" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <input type="number" step="0.01" min="0" x-model="createForm.amount" @input="errors.amount = ''" :class="errors.amount ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <div class="field-error" x-show="errors.amount" x-cloak x-text="errors.amount"></div>
                 </div>
                 <div>
                     <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Date Received</label>
-                    <input type="date" x-model="createForm.received_date" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <input type="date" x-model="createForm.received_date" @change="errors.received_date = ''" :class="errors.received_date ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <div class="field-error" x-show="errors.received_date" x-cloak x-text="errors.received_date"></div>
                 </div>
                 <div>
                     <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Type</label>
-                    <select x-model="createForm.deposit_type" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <select x-model="createForm.deposit_type" @change="errors.deposit_type = ''" :class="errors.deposit_type ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                         <option value="security">Security</option>
                         <option value="damage">Damage</option>
                         <option value="advance_payment">Advance Payment</option>
                         <option value="other">Other</option>
                     </select>
+                    <div class="field-error" x-show="errors.deposit_type" x-cloak x-text="errors.deposit_type"></div>
                 </div>
             </div>
             <div style="margin-bottom:10px;">
                 <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:3px;">Notes</label>
                 <input type="text" x-model="createForm.notes" class="form-input" style="width:100%;padding:6px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
             </div>
-            <button class="btn btn-primary btn-sm" @click="createDeposit()" :disabled="!createForm.customer_id || !createForm.amount">Record Deposit</button>
+            <button class="btn btn-primary btn-sm" @click="createDeposit()">Record Deposit</button>
         </div>
     </template>
 
@@ -178,6 +183,40 @@ function depositsPage() {
         totalApplied: '0.00',
         totalRefunded: '0.00',
         createForm: { customer_id: '', amount: '', received_date: new Date().toISOString().slice(0,10), deposit_type: 'security', notes: '' },
+        formError: '',
+        errors: { customer_id: '', amount: '', received_date: '', deposit_type: '' },
+
+        _extractError(r, fallback) {
+            if (!r) return fallback || 'An unexpected error occurred.';
+            if (r.error && r.error.message) return r.error.message;
+            if (r.message) return r.message;
+            return fallback || 'An unexpected error occurred.';
+        },
+
+        _clearErrors() {
+            for (const k in this.errors) this.errors[k] = '';
+            this.formError = '';
+        },
+
+        _paintServerErrors(r, fallback) {
+            const err = r && r.error ? r.error : r;
+            const fields = (err && err.fields) || (r && r.fields) || {};
+            let painted = false;
+            for (const k in fields) {
+                if (k === '_general') continue;
+                if (k in this.errors) {
+                    this.errors[k] = fields[k];
+                    painted = true;
+                }
+            }
+            if (fields._general) {
+                this.formError = fields._general;
+            } else if (!painted) {
+                this.formError = this._extractError(r, fallback);
+            } else {
+                this.formError = this._extractError(r, 'Please correct the highlighted fields.');
+            }
+        },
 
         async load() {
             this.loading = true;
@@ -207,16 +246,57 @@ function depositsPage() {
             this.totalRefunded = refunded.toFixed(2);
         },
 
+        validateCreate() {
+            this._clearErrors();
+            let ok = true;
+            if (!this.createForm.customer_id) {
+                this.errors.customer_id = 'Please select a customer.';
+                ok = false;
+            }
+            const amt = String(this.createForm.amount || '').trim();
+            if (!amt) {
+                this.errors.amount = 'Deposit amount is required.';
+                ok = false;
+            } else if (isNaN(parseFloat(amt))) {
+                this.errors.amount = 'Deposit amount must be a valid number.';
+                ok = false;
+            } else if (parseFloat(amt) <= 0) {
+                this.errors.amount = 'Deposit amount must be greater than zero.';
+                ok = false;
+            }
+            if (!this.createForm.received_date) {
+                this.errors.received_date = 'Received date is required.';
+                ok = false;
+            }
+            const validTypes = ['security', 'damage', 'advance_payment', 'other'];
+            if (!this.createForm.deposit_type || !validTypes.includes(this.createForm.deposit_type)) {
+                this.errors.deposit_type = 'Deposit type must be one of: security, damage, advance_payment, other.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async createDeposit() {
+            if (!this.validateCreate()) {
+                this.formError = 'Please correct the highlighted fields.';
+                return;
+            }
+            this.formError = '';
             const body = new FormData();
             Object.entries(this.createForm).forEach(([k,v]) => { if (v) body.append(k, v); });
             body.append('csrf_token', document.querySelector('meta[name="csrf-token"]')?.content || '');
             try {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ar/deposits/create.php'), { method: 'POST', body });
                 const j = await r.json();
-                if (j.success) { this.showCreate = false; this.load(); FF_Toast.success('Deposit recorded: ' + j.data.deposit_number); }
-                else FF_Toast.error(j.message || 'Failed.');
-            } catch(e) { FF_Toast.error('Error.'); }
+                if (j.success) {
+                    this.showCreate = false;
+                    this._clearErrors();
+                    this.load();
+                    FF_Toast.success('Deposit recorded: ' + j.data.deposit_number);
+                } else {
+                    this._paintServerErrors(j, 'Failed to record deposit.');
+                }
+            } catch(e) { this.formError = 'Network error. Please try again.'; }
         },
 
         async applyDeposit(dep) {
@@ -230,8 +310,8 @@ function depositsPage() {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ar/deposits/apply.php'), { method: 'POST', body });
                 const j = await r.json();
                 if (j.success) { this.load(); FF_Toast.success('Deposit applied.'); }
-                else FF_Toast.error(j.message || 'Failed.');
-            } catch(e) { FF_Toast.error('Error.'); }
+                else FF_Toast.error(this._extractError(j, 'Failed to apply deposit.'));
+            } catch(e) { FF_Toast.error('Network error.'); }
         },
 
         async refundDeposit(id) {
@@ -243,8 +323,8 @@ function depositsPage() {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ar/deposits/refund.php'), { method: 'POST', body });
                 const j = await r.json();
                 if (j.success) { this.load(); FF_Toast.success('Deposit refunded.'); }
-                else FF_Toast.error(j.message || 'Failed.');
-            } catch(e) { FF_Toast.error('Error.'); }
+                else FF_Toast.error(this._extractError(j, 'Failed to refund deposit.'));
+            } catch(e) { FF_Toast.error('Network error.'); }
         },
 
         statusBadge(s) {

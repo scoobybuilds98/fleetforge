@@ -21,27 +21,43 @@ require_method('POST');
 require_auth_api();
 require_permission('journal_entries', 'create');
 
-$customerId    = clean_int($_POST['customer_id'] ?? null);
-$promisedAmt   = clean_decimal($_POST['promised_amount'] ?? null);
-$promiseDate   = clean_date($_POST['promise_date'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$customerId)  json_error('VALIDATION_ERROR', 'customer_id is required.', 422);
-if (!$promisedAmt || bccomp($promisedAmt, '0', 2) <= 0) {
-    json_error('VALIDATION_ERROR', 'promised_amount must be greater than zero.', 422);
+$fields = [];
+
+$customerId    = clean_int($input['customer_id'] ?? null);
+$promisedAmt   = clean_decimal($input['promised_amount'] ?? null);
+$promiseDate   = clean_date($input['promise_date'] ?? null);
+
+if (!$customerId) $fields['customer_id'] = 'Please select a customer.';
+if ($promisedAmt === null || $promisedAmt === '') {
+    $fields['promised_amount'] = 'Promised amount is required.';
+} elseif (bccomp($promisedAmt, '0', 2) <= 0) {
+    $fields['promised_amount'] = 'Promised amount must be greater than zero.';
 }
-if (!$promiseDate) json_error('VALIDATION_ERROR', 'promise_date is required.', 422);
+if (!$promiseDate) $fields['promise_date'] = 'Promise date is required.';
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 if (!db_exists('customers', 'id = ? AND deleted_at IS NULL', [$customerId])) {
-    json_error('NOT_FOUND', 'Customer not found.', 404);
+    json_error('NOT_FOUND', 'Customer not found.', 404, [
+        'fields' => ['customer_id' => 'Customer not found.'],
+    ]);
 }
 
-$invoiceId  = clean_int($_POST['invoice_id'] ?? null);
-$promisedBy = clean_string($_POST['promised_by'] ?? null);
-$notes      = clean_string($_POST['notes'] ?? null, 2000);
+$invoiceId  = clean_int($input['invoice_id'] ?? null);
+$promisedBy = clean_string($input['promised_by'] ?? null);
+$notes      = clean_string($input['notes'] ?? null, 2000);
 
 if ($invoiceId) {
     if (!db_exists('invoices', 'id = ? AND customer_id = ? AND deleted_at IS NULL', [$invoiceId, $customerId])) {
-        json_error('NOT_FOUND', 'Invoice not found for this customer.', 404);
+        json_error('NOT_FOUND', 'Invoice not found for this customer.', 404, [
+            'fields' => ['invoice_id' => 'Invoice not found for this customer.'],
+        ]);
     }
 }
 

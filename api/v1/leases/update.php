@@ -70,7 +70,9 @@ if ($existing['updated_at'] !== $updatedAt) {
 }
 
 // ── Build partial update — only fields supplied in body ────────
-$data = [];
+// VALID-2: collect every error into $fields, one 422 response at the end.
+$data   = [];
+$fields = [];
 
 if (array_key_exists('end_date', $body))
     $data['end_date'] = clean_date($body['end_date']);
@@ -90,28 +92,64 @@ if (array_key_exists('notes', $body))
 if (array_key_exists('internal_notes', $body))
     $data['internal_notes'] = clean_string($body['internal_notes'], 5000);
 
-// FIX #12: mileage readings must be >= 0
-if (array_key_exists('mileage_at_start', $body))
-    $data['mileage_at_start'] = clean_non_negative_int($body['mileage_at_start']);
+// VALID-2: mileage readings must be >= 0 — use clean_int so we can surface a specific message
+if (array_key_exists('mileage_at_start', $body)) {
+    $raw = $body['mileage_at_start'];
+    if ($raw === null || $raw === '') {
+        $data['mileage_at_start'] = null;
+    } else {
+        $i = clean_int($raw);
+        if ($i === null || $i < 0) {
+            $fields['mileage_at_start'] = 'Starting mileage cannot be negative.';
+        } else {
+            $data['mileage_at_start'] = $i;
+        }
+    }
+}
 
-if (array_key_exists('mileage_at_end', $body))
-    $data['mileage_at_end'] = clean_non_negative_int($body['mileage_at_end']);
+if (array_key_exists('mileage_at_end', $body)) {
+    $raw = $body['mileage_at_end'];
+    if ($raw === null || $raw === '') {
+        $data['mileage_at_end'] = null;
+    } else {
+        $i = clean_int($raw);
+        if ($i === null || $i < 0) {
+            $fields['mileage_at_end'] = 'End mileage cannot be negative.';
+        } else {
+            $data['mileage_at_end'] = $i;
+        }
+    }
+}
 
-// FIX #14: estimated mileage and costs must be >= 0
-if (array_key_exists('estimated_mileage', $body))
-    $data['estimated_mileage'] = clean_non_negative_decimal($body['estimated_mileage']) ?? '0.00';
+if (array_key_exists('estimated_mileage', $body)) {
+    $d = clean_decimal($body['estimated_mileage']);
+    if ($d !== null && bccomp($d, '0', 4) < 0) {
+        $fields['estimated_mileage'] = 'Estimated mileage cannot be negative.';
+    }
+    $data['estimated_mileage'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
+}
 
 if (array_key_exists('insurance_opt_in', $body))
     $data['insurance_opt_in'] = (bool) $body['insurance_opt_in'] ? 1 : 0;
 
-if (array_key_exists('insurance_cost', $body))
-    $data['insurance_cost'] = clean_non_negative_decimal($body['insurance_cost']) ?? '0.00';
+if (array_key_exists('insurance_cost', $body)) {
+    $d = clean_decimal($body['insurance_cost']);
+    if ($d !== null && bccomp($d, '0', 4) < 0) {
+        $fields['insurance_cost'] = 'Insurance cost cannot be negative.';
+    }
+    $data['insurance_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
+}
 
 if (array_key_exists('warranty_opt_in', $body))
     $data['warranty_opt_in'] = (bool) $body['warranty_opt_in'] ? 1 : 0;
 
-if (array_key_exists('warranty_cost', $body))
-    $data['warranty_cost'] = clean_non_negative_decimal($body['warranty_cost']) ?? '0.00';
+if (array_key_exists('warranty_cost', $body)) {
+    $d = clean_decimal($body['warranty_cost']);
+    if ($d !== null && bccomp($d, '0', 4) < 0) {
+        $fields['warranty_cost'] = 'Warranty cost cannot be negative.';
+    }
+    $data['warranty_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
+}
 
 // D22: gst_exempt and pst_exempt can be changed via amendment (allow here for now)
 if (array_key_exists('gst_exempt', $body)) {
@@ -126,27 +164,25 @@ $currentLease = db_row("SELECT start_date, mileage_at_start FROM leases WHERE id
 
 if (isset($data['end_date']) && $data['end_date']) {
     if ($data['end_date'] < $currentLease['start_date']) {
-        json_error('VALIDATION_ERROR', 'end_date must be on or after start_date.', 422,
-            ['errors' => ['end_date' => 'End date must be on or after start date.']]);
+        $fields['end_date'] = 'End date must be after start date.';
     }
 }
 
-// FIX #16: minimum_end_date must be >= start_date
 if (array_key_exists('minimum_end_date', $data) && $data['minimum_end_date']) {
     if ($data['minimum_end_date'] < $currentLease['start_date']) {
-        json_error('VALIDATION_ERROR', 'minimum_end_date must be on or after start_date.', 422,
-            ['errors' => ['minimum_end_date' => 'Minimum end date must be on or after start date.']]);
+        $fields['minimum_end_date'] = 'Minimum end date must be on or after start date.';
     }
 }
 
-// FIX #13: mileage_at_end must be >= mileage_at_start
 if (array_key_exists('mileage_at_end', $data) && $data['mileage_at_end'] !== null) {
     $startMileage = (int) ($data['mileage_at_start'] ?? $currentLease['mileage_at_start'] ?? 0);
     if ((int) $data['mileage_at_end'] < $startMileage) {
-        json_error('VALIDATION_ERROR',
-            'mileage_at_end cannot be less than mileage_at_start.', 422,
-            ['errors' => ['mileage_at_end' => 'End mileage must be greater than or equal to start mileage.']]);
+        $fields['mileage_at_end'] = 'End mileage must be greater than or equal to start mileage.';
     }
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 if (empty($data)) {

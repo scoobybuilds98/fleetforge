@@ -24,16 +24,17 @@ require_method('POST');
 require_auth_api();
 require_permission('fixed_assets', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $woId   = clean_int($body['work_order_id'] ?? null);
 $reason = clean_string($body['reason'] ?? null);
 
-if (!$woId) {
-    json_error('MISSING_REQUIRED', 'work_order_id is required.', 422);
-}
-if (!$reason) {
-    json_error('MISSING_REQUIRED', 'reason is required.', 422);
+if (!$woId)   $fields['work_order_id'] = 'Please select a work order.';
+if (!$reason) $fields['reason']        = 'Please provide a reason for expensing.';
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 try {
@@ -45,7 +46,17 @@ try {
         (string) ($u['role_slug'] ?? '')
     );
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $msg  = $e->getMessage();
+    if (stripos($msg, 'manager') !== false) {
+        json_error('FORBIDDEN', $msg, 403, ['fields' => ['_general' => $msg]]);
+    }
+    $slot = '_general';
+    if (stripos($msg, 'work order') !== false || stripos($msg, 'not found') !== false) {
+        $slot = 'work_order_id';
+    } elseif (stripos($msg, 'reason') !== false) {
+        $slot = 'reason';
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($cr);

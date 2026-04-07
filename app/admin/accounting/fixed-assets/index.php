@@ -649,16 +649,35 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal-header"><h2 class="h5">Dispose Asset</h2><button class="modal-close" @click="disposeOpen = false">×</button></div>
             <div class="modal-body">
                 <p class="text-secondary text-sm" x-show="detailAsset" x-text="'Disposing ' + (detailAsset?.asset_number ?? '') + ' — ' + (detailAsset?.name ?? '')"></p>
-                <div class="form-group"><label>Disposal Date</label><input type="date" class="form-control form-control-sm" x-model="disposeForm.disposal_date"></div>
+
+                <!-- ── VALID-2: form-level error banner ── -->
+                <div class="form-error-banner" x-show="disposeFormError" x-text="disposeFormError" x-cloak></div>
+
+                <div class="form-group">
+                    <label>Disposal Date</label>
+                    <input type="date" class="form-control form-control-sm"
+                           :class="disposeErrors.disposal_date ? 'is-invalid' : ''"
+                           x-model="disposeForm.disposal_date">
+                    <div class="field-error" x-show="disposeErrors.disposal_date" x-text="disposeErrors.disposal_date" x-cloak></div>
+                </div>
                 <div class="form-group"><label>Disposal Type</label>
-                    <select class="form-select form-control-sm" x-model="disposeForm.disposal_type">
+                    <select class="form-select form-control-sm"
+                            :class="disposeErrors.disposal_type ? 'is-invalid' : ''"
+                            x-model="disposeForm.disposal_type">
                         <option value="sale">Sale</option>
                         <option value="scrap">Scrap</option>
                         <option value="donation">Donation</option>
                         <option value="trade_in">Trade-In</option>
                     </select>
+                    <div class="field-error" x-show="disposeErrors.disposal_type" x-text="disposeErrors.disposal_type" x-cloak></div>
                 </div>
-                <div class="form-group"><label>Proceeds ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="disposeForm.proceeds"></div>
+                <div class="form-group">
+                    <label>Proceeds ($)</label>
+                    <input type="number" step="0.01" min="0" class="form-control form-control-sm"
+                           :class="disposeErrors.proceeds ? 'is-invalid' : ''"
+                           x-model="disposeForm.proceeds">
+                    <div class="field-error" x-show="disposeErrors.proceeds" x-text="disposeErrors.proceeds" x-cloak></div>
+                </div>
                 <div class="form-group"><label>Buyer Name (optional)</label><input type="text" class="form-control form-control-sm" x-model="disposeForm.buyer_name"></div>
                 <div class="form-group"><label>Notes</label><textarea class="form-control form-control-sm" rows="2" x-model="disposeForm.notes"></textarea></div>
                 <p class="text-warning text-sm">Manager / super_admin only. This will post a JE.</p>
@@ -680,9 +699,32 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal-header"><h2 class="h5">Impair Asset</h2><button class="modal-close" @click="impairOpen = false">×</button></div>
             <div class="modal-body">
                 <p class="text-secondary text-sm" x-show="detailAsset" x-text="'Impairing ' + (detailAsset?.asset_number ?? '') + ' — ' + (detailAsset?.name ?? '')"></p>
-                <div class="form-group"><label>Impairment Date</label><input type="date" class="form-control form-control-sm" x-model="impairForm.impairment_date"></div>
-                <div class="form-group"><label>Impairment Loss ($)</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="impairForm.impairment_loss"></div>
-                <div class="form-group"><label>Reason</label><textarea class="form-control form-control-sm" rows="3" x-model="impairForm.reason" placeholder="Required — explain the impairment trigger"></textarea></div>
+
+                <!-- ── VALID-2: form-level error banner ── -->
+                <div class="form-error-banner" x-show="impairFormError" x-text="impairFormError" x-cloak></div>
+
+                <div class="form-group">
+                    <label>Impairment Date</label>
+                    <input type="date" class="form-control form-control-sm"
+                           :class="impairErrors.impairment_date ? 'is-invalid' : ''"
+                           x-model="impairForm.impairment_date">
+                    <div class="field-error" x-show="impairErrors.impairment_date" x-text="impairErrors.impairment_date" x-cloak></div>
+                </div>
+                <div class="form-group">
+                    <label>Impairment Loss ($)</label>
+                    <input type="number" step="0.01" min="0.01" class="form-control form-control-sm"
+                           :class="impairErrors.impairment_loss ? 'is-invalid' : ''"
+                           x-model="impairForm.impairment_loss">
+                    <div class="field-error" x-show="impairErrors.impairment_loss" x-text="impairErrors.impairment_loss" x-cloak></div>
+                </div>
+                <div class="form-group">
+                    <label>Reason</label>
+                    <textarea class="form-control form-control-sm" rows="3"
+                              :class="impairErrors.reason ? 'is-invalid' : ''"
+                              x-model="impairForm.reason"
+                              placeholder="Required — explain the impairment trigger"></textarea>
+                    <div class="field-error" x-show="impairErrors.reason" x-text="impairErrors.reason" x-cloak></div>
+                </div>
                 <p class="text-warning text-sm">Manager / super_admin only. This will post a JE and set status to "impaired".</p>
             </div>
             <div class="modal-footer">
@@ -702,14 +744,25 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal-header"><h2 class="h5">New Fixed Asset</h2><button class="modal-close" @click="createOpen = false">×</button></div>
             <div class="modal-body">
 
+                <!-- ── VALID-2: form-level error banner ── -->
+                <div class="form-error-banner" x-show="createFormError" x-text="createFormError" x-cloak></div>
+
                 <!-- ── Core Details ─────────────────────────────── -->
                 <div class="section-header">
                     <h3 class="section-title">Core Details</h3>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
-                    <div class="form-group" style="grid-column:1/-1;"><label>Name *</label><input type="text" class="form-control form-control-sm" x-model="createForm.name"></div>
+                    <div class="form-group" style="grid-column:1/-1;">
+                        <label>Name *</label>
+                        <input type="text" class="form-control form-control-sm"
+                               :class="createErrors.name ? 'is-invalid' : ''"
+                               x-model="createForm.name">
+                        <div class="field-error" x-show="createErrors.name" x-text="createErrors.name" x-cloak></div>
+                    </div>
                     <div class="form-group"><label>Asset Class *</label>
-                        <select class="form-select form-control-sm" x-model="createForm.asset_class">
+                        <select class="form-select form-control-sm"
+                                :class="createErrors.asset_class ? 'is-invalid' : ''"
+                                x-model="createForm.asset_class">
                             <option value="fleet_equipment">Fleet Equipment</option>
                             <option value="vehicles">Vehicles</option>
                             <option value="office_equipment">Office Equipment</option>
@@ -718,10 +771,29 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="building">Building</option>
                             <option value="other">Other</option>
                         </select>
+                        <div class="field-error" x-show="createErrors.asset_class" x-text="createErrors.asset_class" x-cloak></div>
                     </div>
-                    <div class="form-group"><label>Acquisition Date *</label><input type="date" class="form-control form-control-sm" x-model="createForm.acquisition_date"></div>
-                    <div class="form-group"><label>Acquisition Cost ($) *</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="createForm.acquisition_cost"></div>
-                    <div class="form-group"><label>Salvage Value ($)</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="createForm.salvage_value"></div>
+                    <div class="form-group">
+                        <label>Acquisition Date *</label>
+                        <input type="date" class="form-control form-control-sm"
+                               :class="createErrors.acquisition_date ? 'is-invalid' : ''"
+                               x-model="createForm.acquisition_date">
+                        <div class="field-error" x-show="createErrors.acquisition_date" x-text="createErrors.acquisition_date" x-cloak></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Acquisition Cost ($) *</label>
+                        <input type="number" step="0.01" min="0.01" class="form-control form-control-sm"
+                               :class="createErrors.acquisition_cost ? 'is-invalid' : ''"
+                               x-model="createForm.acquisition_cost">
+                        <div class="field-error" x-show="createErrors.acquisition_cost" x-text="createErrors.acquisition_cost" x-cloak></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Salvage Value ($)</label>
+                        <input type="number" step="0.01" min="0" class="form-control form-control-sm"
+                               :class="createErrors.salvage_value ? 'is-invalid' : ''"
+                               x-model="createForm.salvage_value">
+                        <div class="field-error" x-show="createErrors.salvage_value" x-text="createErrors.salvage_value" x-cloak></div>
+                    </div>
                 </div>
 
                 <!-- ── Depreciation ─────────────────────────────── -->
@@ -729,24 +801,36 @@ require_once FF_ROOT . '/includes/header.php';
                     <h3 class="section-title">Depreciation</h3>
                 </div>
                 <div class="form-group"><label>Method *</label>
-                    <select class="form-select form-control-sm" x-model="createForm.depreciation_method">
+                    <select class="form-select form-control-sm"
+                            :class="createErrors.depreciation_method ? 'is-invalid' : ''"
+                            x-model="createForm.depreciation_method">
                         <option value="straight_line">Straight Line</option>
                         <option value="declining_balance">Declining Balance (CRA CCA)</option>
                         <option value="units_of_production">Units of Production</option>
                         <option value="none">None (no depreciation)</option>
                     </select>
+                    <div class="field-error" x-show="createErrors.depreciation_method" x-text="createErrors.depreciation_method" x-cloak></div>
                 </div>
                 <div class="form-group" x-show="createForm.depreciation_method === 'straight_line'">
                     <label>Useful Life (years) *</label>
-                    <input type="number" step="0.5" min="0.5" class="form-control form-control-sm" x-model="createForm.useful_life_years">
+                    <input type="number" step="0.5" min="0.5" class="form-control form-control-sm"
+                           :class="createErrors.useful_life_years ? 'is-invalid' : ''"
+                           x-model="createForm.useful_life_years">
+                    <div class="field-error" x-show="createErrors.useful_life_years" x-text="createErrors.useful_life_years" x-cloak></div>
                 </div>
                 <div class="form-group" x-show="createForm.depreciation_method === 'declining_balance'">
                     <label>CRA CCA Rate (e.g. 0.30) *</label>
-                    <input type="number" step="0.01" min="0.01" max="1" class="form-control form-control-sm" x-model="createForm.cra_cca_rate">
+                    <input type="number" step="0.01" min="0.01" max="1" class="form-control form-control-sm"
+                           :class="createErrors.cra_cca_rate ? 'is-invalid' : ''"
+                           x-model="createForm.cra_cca_rate">
+                    <div class="field-error" x-show="createErrors.cra_cca_rate" x-text="createErrors.cra_cca_rate" x-cloak></div>
                 </div>
                 <div class="form-group" x-show="createForm.depreciation_method === 'units_of_production'">
                     <label>Total Expected Units *</label>
-                    <input type="number" step="1" min="1" class="form-control form-control-sm" x-model="createForm.total_expected_units">
+                    <input type="number" step="1" min="1" class="form-control form-control-sm"
+                           :class="createErrors.total_expected_units ? 'is-invalid' : ''"
+                           x-model="createForm.total_expected_units">
+                    <div class="field-error" x-show="createErrors.total_expected_units" x-text="createErrors.total_expected_units" x-cloak></div>
                 </div>
 
                 <!-- ── GL Accounts ──────────────────────────────── -->
@@ -755,9 +839,27 @@ require_once FF_ROOT . '/includes/header.php';
                     <span class="section-hint">Required for journal entries</span>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px;">
-                    <div class="form-group"><label>Asset Acct *</label><input type="number" class="form-control form-control-sm" x-model="createForm.asset_account_id" placeholder="e.g. 1210"></div>
-                    <div class="form-group"><label>Accum Depr Acct *</label><input type="number" class="form-control form-control-sm" x-model="createForm.accum_depr_account_id" placeholder="e.g. 1220"></div>
-                    <div class="form-group"><label>Depr Expense Acct *</label><input type="number" class="form-control form-control-sm" x-model="createForm.depr_expense_account_id" placeholder="e.g. 5010"></div>
+                    <div class="form-group">
+                        <label>Asset Acct *</label>
+                        <input type="number" class="form-control form-control-sm"
+                               :class="createErrors.asset_account_id ? 'is-invalid' : ''"
+                               x-model="createForm.asset_account_id" placeholder="e.g. 1210">
+                        <div class="field-error" x-show="createErrors.asset_account_id" x-text="createErrors.asset_account_id" x-cloak></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Accum Depr Acct *</label>
+                        <input type="number" class="form-control form-control-sm"
+                               :class="createErrors.accum_depr_account_id ? 'is-invalid' : ''"
+                               x-model="createForm.accum_depr_account_id" placeholder="e.g. 1220">
+                        <div class="field-error" x-show="createErrors.accum_depr_account_id" x-text="createErrors.accum_depr_account_id" x-cloak></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Depr Expense Acct *</label>
+                        <input type="number" class="form-control form-control-sm"
+                               :class="createErrors.depr_expense_account_id ? 'is-invalid' : ''"
+                               x-model="createForm.depr_expense_account_id" placeholder="e.g. 5010">
+                        <div class="field-error" x-show="createErrors.depr_expense_account_id" x-text="createErrors.depr_expense_account_id" x-cloak></div>
+                    </div>
                 </div>
 
                 <!-- ── Identification ───────────────────────────── -->
@@ -834,14 +936,25 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
             <div class="modal-body">
 
+                <!-- ── VALID-2: form-level error banner ── -->
+                <div class="form-error-banner" x-show="editFormError" x-text="editFormError" x-cloak></div>
+
                 <!-- ── Core Details ─────────────────────────────── -->
                 <div class="section-header">
                     <h3 class="section-title">Core Details</h3>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
-                    <div class="form-group" style="grid-column:1/-1;"><label>Name *</label><input type="text" class="form-control form-control-sm" x-model="editForm.name"></div>
+                    <div class="form-group" style="grid-column:1/-1;">
+                        <label>Name *</label>
+                        <input type="text" class="form-control form-control-sm"
+                               :class="editErrors.name ? 'is-invalid' : ''"
+                               x-model="editForm.name">
+                        <div class="field-error" x-show="editErrors.name" x-text="editErrors.name" x-cloak></div>
+                    </div>
                     <div class="form-group"><label>Asset Class</label>
-                        <select class="form-select form-control-sm" x-model="editForm.asset_class">
+                        <select class="form-select form-control-sm"
+                                :class="editErrors.asset_class ? 'is-invalid' : ''"
+                                x-model="editForm.asset_class">
                             <option value="fleet_equipment">Fleet Equipment</option>
                             <option value="vehicles">Vehicles</option>
                             <option value="office_equipment">Office Equipment</option>
@@ -850,6 +963,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="building">Building</option>
                             <option value="other">Other</option>
                         </select>
+                        <div class="field-error" x-show="editErrors.asset_class" x-text="editErrors.asset_class" x-cloak></div>
                     </div>
                     <div class="form-group"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="editForm.location"></div>
                     <div class="form-group" style="grid-column:1/-1;"><label>Description</label><textarea class="form-control form-control-sm" rows="2" x-model="editForm.description"></textarea></div>
@@ -952,18 +1066,41 @@ function FF_FixedAssets() {
         disposeOpen: false,
         disposeBusy: false,
         disposeForm: { disposal_date: '', disposal_type: 'sale', proceeds: '', buyer_name: '', notes: '' },
+        disposeErrors: {},
+        disposeFormError: '',
 
         impairOpen: false,
         impairBusy: false,
         impairForm: { impairment_date: '', impairment_loss: '', reason: '' },
+        impairErrors: {},
+        impairFormError: '',
 
         createOpen: false,
         createBusy: false,
         createForm: {},
+        createErrors: {},
+        createFormError: '',
 
         editOpen: false,
         editBusy: false,
         editForm: {},
+        editErrors: {},
+        editFormError: '',
+
+        // ── VALID-2: Unified error-envelope reader ─────────────
+        // WHY: The API uses `{success: false, error: {code, message,
+        // fields: {...}}}`. When a single field errored we want to
+        // show that message; when several did we join them. Falls
+        // back to the top-level error.message, then the caller's
+        // fallback string.
+        extractError(r, fallback) {
+            if (!r || !r.error) return fallback;
+            const f = r.error.fields || r.error.errors || {};
+            const keys = Object.keys(f);
+            if (keys.length === 1) return f[keys[0]];
+            if (keys.length > 1)   return keys.map(k => f[k]).join(' ');
+            return r.error.message || fallback;
+        },
 
         // ── Init ───────────────────────────────────────────────
         async init() {
@@ -1224,10 +1361,42 @@ function FF_FixedAssets() {
         // ── Dispose ────────────────────────────────────────────
         openDispose() {
             this.disposeForm = { disposal_date: new Date().toISOString().slice(0,10), disposal_type: 'sale', proceeds: '', buyer_name: '', notes: '' };
+            this.disposeErrors = {};
+            this.disposeFormError = '';
             this.disposeOpen = true;
         },
+
+        // VALID-2: client-side disposal form check mirrors the server.
+        validateDispose() {
+            this.disposeErrors = {};
+            this.disposeFormError = '';
+            let ok = true;
+            if (!this.disposeForm.disposal_date) {
+                this.disposeErrors.disposal_date = 'Disposal date is required.';
+                ok = false;
+            }
+            const validTypes = ['sale', 'scrap', 'donation', 'trade_in'];
+            if (!this.disposeForm.disposal_type) {
+                this.disposeErrors.disposal_type = 'Please select a disposal type.';
+                ok = false;
+            } else if (!validTypes.includes(this.disposeForm.disposal_type)) {
+                this.disposeErrors.disposal_type = 'Please select a valid disposal type (sale, scrap, donation, trade_in).';
+                ok = false;
+            }
+            if (this.disposeForm.proceeds !== '' && this.disposeForm.proceeds !== null) {
+                const p = parseFloat(this.disposeForm.proceeds);
+                if (isNaN(p) || p < 0) {
+                    this.disposeErrors.proceeds = 'Disposal proceeds cannot be negative.';
+                    ok = false;
+                }
+            }
+            if (!ok) this.disposeFormError = 'Please fix the errors below and try again.';
+            return ok;
+        },
+
         async submitDispose() {
             if (!this.detailAsset) return;
+            if (!this.validateDispose()) return;
             this.disposeBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/fixed_assets/dispose.php') ?>', {
@@ -1240,7 +1409,14 @@ function FF_FixedAssets() {
                     this.detailOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Disposal failed.');
+                    // VALID-2: paint server errors into field slots
+                    const fields = (r.error && (r.error.fields || r.error.errors)) || {};
+                    this.disposeErrors = {};
+                    for (const k in fields) {
+                        if (k !== '_general') this.disposeErrors[k] = fields[k];
+                    }
+                    this.disposeFormError = this.extractError(r, 'Disposal failed.');
+                    FF_Toast.error(this.disposeFormError);
                 }
             } catch (e) { FF_Toast.error('Network error.'); }
             this.disposeBusy = false;
@@ -1249,10 +1425,41 @@ function FF_FixedAssets() {
         // ── Impair ─────────────────────────────────────────────
         openImpair() {
             this.impairForm = { impairment_date: new Date().toISOString().slice(0,10), impairment_loss: '', reason: '' };
+            this.impairErrors = {};
+            this.impairFormError = '';
             this.impairOpen = true;
         },
+
+        // VALID-2: client-side impairment form check.
+        validateImpair() {
+            this.impairErrors = {};
+            this.impairFormError = '';
+            let ok = true;
+            if (!this.impairForm.impairment_date) {
+                this.impairErrors.impairment_date = 'Impairment date is required.';
+                ok = false;
+            }
+            if (this.impairForm.impairment_loss === '' || this.impairForm.impairment_loss === null) {
+                this.impairErrors.impairment_loss = 'Impairment loss amount is required.';
+                ok = false;
+            } else {
+                const v = parseFloat(this.impairForm.impairment_loss);
+                if (isNaN(v) || v <= 0) {
+                    this.impairErrors.impairment_loss = 'Impairment loss must be greater than zero.';
+                    ok = false;
+                }
+            }
+            if (!this.impairForm.reason || !this.impairForm.reason.trim()) {
+                this.impairErrors.reason = 'Please provide a reason for the impairment.';
+                ok = false;
+            }
+            if (!ok) this.impairFormError = 'Please fix the errors below and try again.';
+            return ok;
+        },
+
         async submitImpair() {
             if (!this.detailAsset) return;
+            if (!this.validateImpair()) return;
             this.impairBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/fixed_assets/impair.php') ?>', {
@@ -1265,7 +1472,13 @@ function FF_FixedAssets() {
                     this.detailOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Impairment failed.');
+                    const fields = (r.error && (r.error.fields || r.error.errors)) || {};
+                    this.impairErrors = {};
+                    for (const k in fields) {
+                        if (k !== '_general') this.impairErrors[k] = fields[k];
+                    }
+                    this.impairFormError = this.extractError(r, 'Impairment failed.');
+                    FF_Toast.error(this.impairFormError);
                 }
             } catch (e) { FF_Toast.error('Network error.'); }
             this.impairBusy = false;
@@ -1274,9 +1487,97 @@ function FF_FixedAssets() {
         // ── Create ─────────────────────────────────────────────
         openCreate() {
             this.resetCreateForm();
+            this.createErrors = {};
+            this.createFormError = '';
             this.createOpen = true;
         },
+
+        // VALID-2: client-side create form validation mirrors
+        // api/v1/accounting/fixed_assets/create.php exactly so
+        // users see identical messages before the round-trip.
+        validateCreate() {
+            this.createErrors = {};
+            this.createFormError = '';
+            let ok = true;
+            const f = this.createForm;
+
+            if (!f.name || !f.name.trim()) {
+                this.createErrors.name = 'Asset name is required.';
+                ok = false;
+            }
+            if (!f.asset_class) {
+                this.createErrors.asset_class = 'Please select an asset class.';
+                ok = false;
+            }
+            if (!f.acquisition_date) {
+                this.createErrors.acquisition_date = 'Acquisition date is required.';
+                ok = false;
+            }
+
+            let costNum = null;
+            if (f.acquisition_cost === '' || f.acquisition_cost === null || f.acquisition_cost === undefined) {
+                this.createErrors.acquisition_cost = 'Acquisition cost is required.';
+                ok = false;
+            } else {
+                costNum = parseFloat(f.acquisition_cost);
+                if (isNaN(costNum) || costNum <= 0) {
+                    this.createErrors.acquisition_cost = 'Acquisition cost must be greater than zero.';
+                    ok = false;
+                }
+            }
+
+            if (f.salvage_value !== '' && f.salvage_value !== null && f.salvage_value !== undefined) {
+                const sv = parseFloat(f.salvage_value);
+                if (isNaN(sv) || sv < 0) {
+                    this.createErrors.salvage_value = 'Salvage value cannot be negative.';
+                    ok = false;
+                } else if (costNum !== null && !isNaN(costNum) && sv > costNum) {
+                    this.createErrors.salvage_value = 'Salvage value cannot exceed acquisition cost.';
+                    ok = false;
+                }
+            }
+
+            if (!f.asset_account_id)    { this.createErrors.asset_account_id = 'Please select an asset GL account.'; ok = false; }
+            if (!f.accum_depr_account_id) { this.createErrors.accum_depr_account_id = 'Please select an accumulated depreciation account.'; ok = false; }
+            if (!f.depr_expense_account_id) { this.createErrors.depr_expense_account_id = 'Please select a depreciation expense account.'; ok = false; }
+
+            const validMethods = ['straight_line', 'declining_balance', 'units_of_production', 'none'];
+            if (!validMethods.includes(f.depreciation_method)) {
+                this.createErrors.depreciation_method = 'Please select a valid depreciation method.';
+                ok = false;
+            } else {
+                if (f.depreciation_method === 'straight_line') {
+                    const ul = parseFloat(f.useful_life_years);
+                    if (f.useful_life_years === '' || f.useful_life_years === null || isNaN(ul) || ul <= 0) {
+                        this.createErrors.useful_life_years = 'Useful life must be at least 1 year for straight-line depreciation.';
+                        ok = false;
+                    }
+                }
+                if (f.depreciation_method === 'declining_balance') {
+                    const cr = parseFloat(f.cra_cca_rate);
+                    if (f.cra_cca_rate === '' || f.cra_cca_rate === null || isNaN(cr) || cr <= 0) {
+                        this.createErrors.cra_cca_rate = 'CCA rate is required for declining balance.';
+                        ok = false;
+                    } else if (cr > 100) {
+                        this.createErrors.cra_cca_rate = 'CCA rate cannot exceed 100%.';
+                        ok = false;
+                    }
+                }
+                if (f.depreciation_method === 'units_of_production') {
+                    const tu = parseInt(f.total_expected_units);
+                    if (!tu || isNaN(tu) || tu <= 0) {
+                        this.createErrors.total_expected_units = 'Total expected units must be greater than zero for units-of-production.';
+                        ok = false;
+                    }
+                }
+            }
+
+            if (!ok) this.createFormError = 'Please fix the errors below and try again.';
+            return ok;
+        },
+
         async submitCreate() {
+            if (!this.validateCreate()) return;
             this.createBusy = true;
             try {
                 // Coerce is_financed checkbox to 1/0 for the API
@@ -1287,7 +1588,13 @@ function FF_FixedAssets() {
                     this.createOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Create failed.');
+                    const fields = (r.error && (r.error.fields || r.error.errors)) || {};
+                    this.createErrors = {};
+                    for (const k in fields) {
+                        if (k !== '_general') this.createErrors[k] = fields[k];
+                    }
+                    this.createFormError = this.extractError(r, 'Create failed.');
+                    FF_Toast.error(this.createFormError);
                 }
             } catch (e) { FF_Toast.error('Network error.'); }
             this.createBusy = false;
@@ -1319,10 +1626,72 @@ function FF_FixedAssets() {
                 monthly_licensing_cost: a.monthly_licensing_cost || '',
                 monthly_registration_cost: a.monthly_registration_cost || '',
             };
+            this.editErrors = {};
+            this.editFormError = '';
             this.editOpen = true;
         },
+
+        // VALID-2: client-side edit form check.
+        validateEdit() {
+            this.editErrors = {};
+            this.editFormError = '';
+            let ok = true;
+            const f = this.editForm;
+
+            if (!f.name || !f.name.trim()) {
+                this.editErrors.name = 'Asset name is required.';
+                ok = false;
+            }
+            if (f.purchase_tax_gst !== '' && f.purchase_tax_gst !== null && f.purchase_tax_gst !== undefined) {
+                const v = parseFloat(f.purchase_tax_gst);
+                if (isNaN(v) || v < 0) { this.editErrors.purchase_tax_gst = 'GST cannot be negative.'; ok = false; }
+            }
+            if (f.purchase_tax_pst !== '' && f.purchase_tax_pst !== null && f.purchase_tax_pst !== undefined) {
+                const v = parseFloat(f.purchase_tax_pst);
+                if (isNaN(v) || v < 0) { this.editErrors.purchase_tax_pst = 'PST cannot be negative.'; ok = false; }
+            }
+            if (f.delivery_cost !== '' && f.delivery_cost !== null && f.delivery_cost !== undefined) {
+                const v = parseFloat(f.delivery_cost);
+                if (isNaN(v) || v < 0) { this.editErrors.delivery_cost = 'Delivery cost cannot be negative.'; ok = false; }
+            }
+            if (f.setup_cost !== '' && f.setup_cost !== null && f.setup_cost !== undefined) {
+                const v = parseFloat(f.setup_cost);
+                if (isNaN(v) || v < 0) { this.editErrors.setup_cost = 'Setup cost cannot be negative.'; ok = false; }
+            }
+            if (f.monthly_insurance_cost !== '' && f.monthly_insurance_cost !== null && f.monthly_insurance_cost !== undefined) {
+                const v = parseFloat(f.monthly_insurance_cost);
+                if (isNaN(v) || v < 0) { this.editErrors.monthly_insurance_cost = 'Monthly insurance cost cannot be negative.'; ok = false; }
+            }
+            if (f.monthly_licensing_cost !== '' && f.monthly_licensing_cost !== null && f.monthly_licensing_cost !== undefined) {
+                const v = parseFloat(f.monthly_licensing_cost);
+                if (isNaN(v) || v < 0) { this.editErrors.monthly_licensing_cost = 'Monthly licensing cost cannot be negative.'; ok = false; }
+            }
+            if (f.monthly_registration_cost !== '' && f.monthly_registration_cost !== null && f.monthly_registration_cost !== undefined) {
+                const v = parseFloat(f.monthly_registration_cost);
+                if (isNaN(v) || v < 0) { this.editErrors.monthly_registration_cost = 'Monthly registration cost cannot be negative.'; ok = false; }
+            }
+            if (f.is_financed) {
+                if (f.financing_monthly_payment !== '' && f.financing_monthly_payment !== null) {
+                    const v = parseFloat(f.financing_monthly_payment);
+                    if (isNaN(v) || v < 0) { this.editErrors.financing_monthly_payment = 'Monthly payment cannot be negative.'; ok = false; }
+                }
+                if (f.financing_interest_rate !== '' && f.financing_interest_rate !== null) {
+                    const v = parseFloat(f.financing_interest_rate);
+                    if (isNaN(v) || v < 0) { this.editErrors.financing_interest_rate = 'Interest rate cannot be negative.'; ok = false; }
+                    else if (v > 1) { this.editErrors.financing_interest_rate = 'Interest rate must be entered as a decimal (e.g. 0.075 for 7.5%).'; ok = false; }
+                }
+                if (f.financing_remaining_months !== '' && f.financing_remaining_months !== null) {
+                    const v = parseInt(f.financing_remaining_months);
+                    if (isNaN(v) || v < 0) { this.editErrors.financing_remaining_months = 'Remaining months cannot be negative.'; ok = false; }
+                }
+            }
+            if (!ok) this.editFormError = 'Please fix the errors below and try again.';
+            return ok;
+        },
+
         async submitEdit() {
             if (!this.editForm.id) return;
+            if (!this.validateEdit()) return;
             this.editBusy = true;
             try {
                 const payload = { ...this.editForm, is_financed: this.editForm.is_financed ? 1 : 0 };
@@ -1336,10 +1705,19 @@ function FF_FixedAssets() {
                     this.detailOpen = false;
                     await this.load();
                     await this.openDetail(keepOpenId);
-                } else if (r.error?.code === 'STALE_DATA') {
-                    FF_Toast.error('This asset was modified by another user. Please close and reopen.');
+                } else if (r.error && r.error.code === 'STALE_DATA') {
+                    // VALID-2: STALE_DATA gets a dedicated friendly message
+                    this.editErrors = { updated_at: 'This asset was modified by another user. Refresh and try again.' };
+                    this.editFormError = 'This asset was modified by another user. Please close and reopen.';
+                    FF_Toast.error(this.editFormError);
                 } else {
-                    FF_Toast.error(r.error?.message || 'Update failed.');
+                    const fields = (r.error && (r.error.fields || r.error.errors)) || {};
+                    this.editErrors = {};
+                    for (const k in fields) {
+                        if (k !== '_general') this.editErrors[k] = fields[k];
+                    }
+                    this.editFormError = this.extractError(r, 'Update failed.');
+                    FF_Toast.error(this.editFormError);
                 }
             } catch (e) { FF_Toast.error('Network error.'); }
             this.editBusy = false;

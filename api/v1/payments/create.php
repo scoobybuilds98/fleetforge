@@ -36,34 +36,50 @@ require_auth_api();
 require_permission('payments', 'create');
 
 // -----------------------------------------------------------------------
-// 1. Input validation
+// 1. Input validation — VALID-2: accumulate errors into $fields, one 422
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $invoiceId = clean_int($body['invoice_id'] ?? null);
 if (!$invoiceId) {
-    json_error('MISSING_REQUIRED', 'invoice_id is required.', 422);
+    $fields['invoice_id'] = 'Please select an invoice.';
 }
 
-$amountRaw = clean_decimal($body['amount'] ?? null);
-if ($amountRaw === null || bccomp($amountRaw, '0', 6) <= 0) {
-    json_error('VALIDATION_ERROR', 'amount must be a positive number.', 422);
+// VALID-2: differentiate missing / negative / zero amounts with specific messages
+$rawAmount = $body['amount'] ?? null;
+$amountRaw = clean_decimal($rawAmount);
+if ($rawAmount === null || $rawAmount === '') {
+    $fields['amount'] = 'Please enter a payment amount.';
+} elseif ($amountRaw === null) {
+    $fields['amount'] = 'Please enter a valid payment amount.';
+} elseif (bccomp($amountRaw, '0', 6) < 0) {
+    $fields['amount'] = 'Payment amount cannot be negative.';
+} elseif (bccomp($amountRaw, '0', 6) === 0) {
+    $fields['amount'] = 'Payment amount must be greater than zero.';
 }
 
 $currency = strtoupper(clean_string($body['currency'] ?? 'CAD') ?? 'CAD');
 if (!in_array($currency, ['CAD', 'USD'], true)) {
-    json_error('VALIDATION_ERROR', 'currency must be CAD or USD.', 422);
+    $fields['currency'] = 'Currency must be CAD or USD.';
 }
 
 $paymentMethod = clean_string($body['payment_method'] ?? null);
 $validMethods  = ['check', 'ach', 'wire', 'credit_card', 'cash', 'e_transfer', 'account_credit', 'other'];
-if (!$paymentMethod || !in_array($paymentMethod, $validMethods, true)) {
-    json_error('VALIDATION_ERROR', 'payment_method is required and must be one of: ' . implode(', ', $validMethods) . '.', 422);
+if (!$paymentMethod) {
+    $fields['payment_method'] = 'Please select a payment method.';
+} elseif (!in_array($paymentMethod, $validMethods, true)) {
+    $fields['payment_method'] = 'Invalid payment method.';
 }
 
 $paymentDate = clean_date($body['payment_date'] ?? null);
 if (!$paymentDate) {
-    json_error('VALIDATION_ERROR', 'payment_date is required (YYYY-MM-DD).', 422);
+    $fields['payment_date'] = 'Payment date is required.';
+}
+
+// Short-circuit if required-field errors — cross-field checks need these values
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // Optional metadata
@@ -86,27 +102,41 @@ $invoiceCheck = db_row(
     [$invoiceId]
 );
 if (!$invoiceCheck) {
-    json_error('NOT_FOUND', 'Invoice not found.', 404);
+    json_error('NOT_FOUND', 'Invoice not found.', 404,
+        ['fields' => ['invoice_id' => 'Invoice not found.']]);
 }
+
+// VALID-2: accumulate cross-field errors (currency, status, balance) before returning
+$crossFieldErrors = [];
 
 // D18: Payment currency must match invoice currency
 if ($currency !== $invoiceCheck['currency']) {
-    json_error(
-        'CURRENCY_MISMATCH',
-        "Payment currency ({$currency}) does not match invoice currency ({$invoiceCheck['currency']}). " .
-        "Record a currency-matched payment or use the FX conversion workflow in the accounting module.",
-        422
-    );
+    $crossFieldErrors['currency'] =
+        "Payment currency must match invoice currency ({$invoiceCheck['currency']}).";
 }
 
 // Cannot pay a void invoice
 if ($invoiceCheck['status'] === 'void') {
-    json_error('INVOICE_VOID', 'Cannot allocate a payment to a voided invoice.', 422);
+    $crossFieldErrors['invoice_id'] = 'Cannot allocate a payment to a voided invoice.';
 }
 
 // Cannot pay an already-paid invoice
 if ($invoiceCheck['status'] === 'paid') {
-    json_error('ALLOCATION_EXCEEDS_BALANCE', 'This invoice is already fully paid.', 422);
+    $crossFieldErrors['invoice_id'] = 'This invoice is already fully paid.';
+}
+
+// VALID-2: Amount must not exceed balance due (overpayment is explicitly rejected).
+// The exact balance is echoed so staff know what to enter.
+if (empty($crossFieldErrors['currency'])
+    && empty($crossFieldErrors['invoice_id'])
+    && bccomp($amountRaw, (string) $invoiceCheck['balance_due'], 6) > 0) {
+    $balanceFormatted = '$' . number_format((float) $invoiceCheck['balance_due'], 2);
+    $crossFieldErrors['amount'] =
+        "Payment amount exceeds invoice balance of {$balanceFormatted}.";
+}
+
+if ($crossFieldErrors) {
+    json_validation_error($crossFieldErrors);
 }
 
 // -----------------------------------------------------------------------
@@ -135,24 +165,28 @@ db_transaction(function () use (
 
     // D18 re-check inside lock (paranoid but correct)
     if ($currency !== $invoice['currency']) {
-        json_error('CURRENCY_MISMATCH', 'Currency mismatch.', 422);
+        json_error('CURRENCY_MISMATCH',
+            "Payment currency must match invoice currency ({$invoice['currency']}).", 422,
+            ['fields' => ['currency' => "Payment currency must match invoice currency ({$invoice['currency']})."]]);
     }
     if ($invoice['status'] === 'void') {
-        json_error('INVOICE_VOID', 'Cannot allocate a payment to a voided invoice.', 422);
+        json_error('INVOICE_VOID', 'Cannot allocate a payment to a voided invoice.', 422,
+            ['fields' => ['invoice_id' => 'Cannot allocate a payment to a voided invoice.']]);
     }
 
     $balanceDue = (string) $invoice['balance_due'];  // bcmath string
 
-    // D20: Prevent over-allocation — amount must not exceed current balance_due
+    // VALID-2: D20 — strict rejection of over-allocation (defense in depth;
+    // pre-flight already caught this, but the FOR-UPDATE refetch may show a
+    // balance that changed under us). Exact balance is echoed in the error.
     if (bccomp($amountRaw, $balanceDue, 6) > 0) {
-        // Overpayment: allow it but track the overpayment_amount
-        // (spec §7.8: "Overpayment creates credit" — we record it, credit_note created separately)
-        $allocatedAmount   = $balanceDue;    // apply only up to balance
-        $overpaymentAmount = bcround(bcsub($amountRaw, $balanceDue, 6), 2);
-    } else {
-        $allocatedAmount   = bcround($amountRaw, 2);
-        $overpaymentAmount = '0.00';
+        $balanceFormatted = '$' . number_format((float) $balanceDue, 2);
+        json_error('ALLOCATION_EXCEEDS_BALANCE',
+            "Payment amount exceeds invoice balance of {$balanceFormatted}.", 422,
+            ['fields' => ['amount' => "Payment amount exceeds invoice balance of {$balanceFormatted}."]]);
     }
+    $allocatedAmount   = bcround($amountRaw, 2);
+    $overpaymentAmount = '0.00';
 
     // ------------------------------------------------------------------
     // 3b. Generate gap-free payment number via FOR UPDATE on settings row
@@ -245,7 +279,9 @@ db_transaction(function () use (
     $validPayableStatuses = ['sent', 'partially_paid', 'overdue'];
     if (!in_array($invoice['status'], $validPayableStatuses, true)) {
         // Guard: already paid or in invalid state (should not reach here due to pre-flight)
-        json_error('ALLOCATION_EXCEEDS_BALANCE', 'Invoice cannot accept further payments in its current status.', 422);
+        json_error('ALLOCATION_EXCEEDS_BALANCE',
+            'Invoice cannot accept further payments in its current status.', 422,
+            ['fields' => ['invoice_id' => 'Invoice cannot accept further payments in its current status.']]);
     }
 
     $newInvoiceStatus = (bccomp($newBalanceDue, '0', 2) === 0) ? 'paid' : 'partially_paid';

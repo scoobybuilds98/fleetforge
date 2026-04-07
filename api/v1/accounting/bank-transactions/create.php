@@ -24,31 +24,53 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'create');
 
-$bankAccountId = clean_int($_POST['bank_account_id'] ?? null);
-$txnDate = clean_date($_POST['transaction_date'] ?? null);
-$description = clean_string($_POST['description'] ?? null, 500);
-$amount = clean_decimal($_POST['amount'] ?? null);
-$txnType = clean_string($_POST['transaction_type'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$bankAccountId) json_error('VALIDATION_ERROR', 'bank_account_id is required.', 422);
-if (!$txnDate) json_error('VALIDATION_ERROR', 'transaction_date is required.', 422);
-if (!$description) json_error('VALIDATION_ERROR', 'description is required.', 422);
-if ($amount === null) json_error('VALIDATION_ERROR', 'amount is required.', 422);
-if (!$txnType || !in_array($txnType, ['deposit', 'withdrawal', 'bank_charge', 'interest', 'other'])) {
-    json_error('VALIDATION_ERROR', 'transaction_type must be deposit, withdrawal, bank_charge, interest, or other.', 422);
+$fields = [];
+
+$bankAccountId = clean_int($input['bank_account_id'] ?? null);
+$txnDate = clean_date($input['transaction_date'] ?? null);
+$description = clean_string($input['description'] ?? null, 500);
+$amount = clean_decimal($input['amount'] ?? null);
+$txnType = clean_string($input['transaction_type'] ?? null);
+
+if (!$bankAccountId) $fields['bank_account_id']  = 'Please select a bank account.';
+if (!$txnDate)       $fields['transaction_date'] = 'Transaction date is required.';
+if (!$description)   $fields['description']      = 'Description is required.';
+if ($amount === null || $amount === '') {
+    $fields['amount'] = 'Transaction amount is required.';
+} elseif (bccomp($amount, '0.00', 2) === 0) {
+    $fields['amount'] = 'Transaction amount cannot be zero.';
+}
+
+$validTypes = ['deposit', 'withdrawal', 'bank_charge', 'interest', 'other'];
+if (!$txnType) {
+    $fields['transaction_type'] = 'Please select a transaction type.';
+} elseif (!in_array($txnType, $validTypes, true)) {
+    $fields['transaction_type'] = 'Transaction type must be deposit, withdrawal, bank charge, interest, or other.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $bankAccount = db_row("SELECT * FROM acc_bank_accounts WHERE id = ? AND is_active = 1", [$bankAccountId]);
-if (!$bankAccount) json_error('NOT_FOUND', 'Bank account not found or inactive.', 404);
+if (!$bankAccount) {
+    json_error('NOT_FOUND', 'Bank account not found or inactive.', 404, [
+        'fields' => ['bank_account_id' => 'Bank account not found or inactive.'],
+    ]);
+}
 
 // Normalize amount sign: deposits positive, withdrawals/charges negative
-if (in_array($txnType, ['withdrawal', 'bank_charge']) && bccomp($amount, '0.00', 2) > 0) {
+if (in_array($txnType, ['withdrawal', 'bank_charge'], true) && bccomp($amount, '0.00', 2) > 0) {
     $amount = bcmul($amount, '-1', 2);
 }
 
-$reference = clean_string($_POST['reference'] ?? null);
-$expenseAccountId = clean_int($_POST['expense_account_id'] ?? null);
-$notes = clean_string($_POST['notes'] ?? null, 2000);
+$reference = clean_string($input['reference'] ?? null);
+$expenseAccountId = clean_int($input['expense_account_id'] ?? null);
+$notes = clean_string($input['notes'] ?? null, 2000);
 $userId = current_user_id();
 
 $newId = db_transaction(function () use (

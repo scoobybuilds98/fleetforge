@@ -23,9 +23,13 @@ require_method('POST');
 require_auth_api();
 require_permission('maintenance', 'delete');
 
+$fields = [];
 $id = clean_int($_POST['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Mileage log ID is required.';
+}
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $log = db_row(
@@ -45,7 +49,8 @@ if (in_array($log['log_type'], $protectedTypes, true)) {
         'IMMUTABLE_RECORD',
         "Log type '{$log['log_type']}' is billing-critical and cannot be deleted. " .
         "These entries are created automatically at lease activation and close.",
-        422
+        422,
+        ['fields' => ['id' => "Cannot delete a {$log['log_type']} mileage log — it is tied to invoicing."]]
     );
 }
 

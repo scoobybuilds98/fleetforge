@@ -23,14 +23,24 @@ require_method('POST');
 require_auth_api();
 require_permission('accounts_payable', 'delete');
 
-$id = clean_int($_POST['id'] ?? null);
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
+// VALID-2: accept both JSON and form-encoded payloads.
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
+
+$id = clean_int($input['id'] ?? null);
+if (!$id) {
+    json_validation_error(['id' => 'Bill ID is required.']);
+}
 
 $bill = db_row("SELECT * FROM acc_bills WHERE id = ?", [$id]);
-if (!$bill) json_error('NOT_FOUND', 'Bill not found.', 404);
+if (!$bill) {
+    json_validation_error(['id' => 'Bill not found.'], 'Bill not found.');
+}
 
 if ($bill['status'] !== 'draft') {
-    json_error('IMMUTABLE_RECORD', 'Only draft bills can be deleted. Use void for approved bills.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Only draft bills can be deleted. Use void for approved bills.', 422,
+        ['fields' => ['id' => "Cannot delete a bill in status '{$bill['status']}'. Use void instead."]]);
 }
 
 db_transaction(function () use ($id, $bill) {

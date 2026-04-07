@@ -42,10 +42,15 @@ require_auth_api();
 require_permission('reservations', 'edit');
 
 $body    = json_body();
+$fields  = [];
+
 $id      = clean_int($body['id'] ?? null);
 $leaseId = clean_int($body['lease_id'] ?? null);
 
-if (!$id) json_error('MISSING_REQUIRED', 'id is required.', 422);
+if (!$id) {
+    $fields['id'] = 'Reservation ID is required.';
+    json_validation_error($fields);
+}
 
 $result = null;
 
@@ -64,7 +69,8 @@ db_transaction(function () use ($id, $leaseId, &$result) {
     if ($reservation['status'] !== 'confirmed') {
         json_error('INVALID_TRANSITION',
             "Reservation #{$id} is '{$reservation['status']}'. Only confirmed reservations can be marked out.",
-            409
+            409,
+            ['fields' => ['status' => "Only confirmed reservations can be marked out. This reservation is '{$reservation['status']}'."]]
         );
     }
 
@@ -75,7 +81,7 @@ db_transaction(function () use ($id, $leaseId, &$result) {
             [$leaseId]
         );
         if (!$lease) {
-            json_error('NOT_FOUND', "Lease #{$leaseId} not found.", 404);
+            json_validation_error(['lease_id' => "Lease #{$leaseId} not found."]);
         }
     }
 

@@ -24,22 +24,36 @@ require_permission('accounts_payable', 'view');
 
 use FleetForge\Accounting\AccountingService;
 
-$vendorId = clean_int($_POST['vendor_id'] ?? null);
-$rawLines = $_POST['lines'] ?? null;
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
+
+$fields = [];
+
+$vendorId = clean_int($input['vendor_id'] ?? null);
+$rawLines = $input['lines'] ?? null;
 if (is_string($rawLines)) {
     $rawLines = json_decode($rawLines, true);
 }
 
-if (!$vendorId) json_error('VALIDATION_ERROR', 'vendor_id is required.', 422);
+if (!$vendorId) $fields['vendor_id'] = 'Please select a vendor.';
 if (!is_array($rawLines) || count($rawLines) === 0) {
-    json_error('VALIDATION_ERROR', 'At least one line is required.', 422);
+    $fields['lines'] = 'At least one line is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $vendor = db_row(
     "SELECT id, name, vendor_type FROM vendors WHERE id = ? AND deleted_at IS NULL",
     [$vendorId]
 );
-if (!$vendor) json_error('NOT_FOUND', 'Vendor not found.', 404);
+if (!$vendor) {
+    json_error('NOT_FOUND', 'Vendor not found.', 404, [
+        'fields' => ['vendor_id' => 'Vendor not found.'],
+    ]);
+}
 
 // Check if auto-categorization is enabled globally
 $enabled = AccountingService::setting('accounting.auto_categorization_enabled', true);

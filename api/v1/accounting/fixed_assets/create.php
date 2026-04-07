@@ -35,27 +35,90 @@ require_method('POST');
 require_auth_api();
 require_permission('fixed_assets', 'create');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
+
+// ── Sanitize inputs
+$name               = clean_string($body['name'] ?? null, 255);
+$assetClass         = clean_string($body['asset_class'] ?? null, 50);
+$acquisitionDate    = clean_date($body['acquisition_date'] ?? null);
+$acquisitionCost    = clean_decimal($body['acquisition_cost'] ?? null);
+$salvageValue       = clean_decimal($body['salvage_value'] ?? '0.00');
+$assetAccountId     = clean_int($body['asset_account_id'] ?? null);
+$accumDeprAcctId    = clean_int($body['accum_depr_account_id'] ?? null);
+$deprExpenseAcctId  = clean_int($body['depr_expense_account_id'] ?? null);
+$method             = clean_string($body['depreciation_method'] ?? 'straight_line', 50);
+$usefulLifeYears    = clean_decimal($body['useful_life_years'] ?? null);
+$ccaRate            = clean_decimal($body['cra_cca_rate'] ?? null);
+$totalExpectedUnits = clean_int($body['total_expected_units'] ?? null);
+
+// ── Required fields + ranges (VALID-2 accumulator)
+if (!$name)              $fields['name'] = 'Asset name is required.';
+if (!$assetClass)        $fields['asset_class'] = 'Please select an asset class.';
+if (!$acquisitionDate)   $fields['acquisition_date'] = 'Acquisition date is required.';
+if ($acquisitionCost === null || $acquisitionCost === '') {
+    $fields['acquisition_cost'] = 'Acquisition cost is required.';
+} elseif (bccomp($acquisitionCost, '0.00', 2) <= 0) {
+    $fields['acquisition_cost'] = 'Acquisition cost must be greater than zero.';
+}
+if ($salvageValue !== null && $salvageValue !== '') {
+    if (bccomp($salvageValue, '0.00', 2) < 0) {
+        $fields['salvage_value'] = 'Salvage value cannot be negative.';
+    } elseif ($acquisitionCost !== null && bccomp($salvageValue, $acquisitionCost, 2) > 0) {
+        $fields['salvage_value'] = 'Salvage value cannot exceed acquisition cost.';
+    }
+}
+if (!$assetAccountId)    $fields['asset_account_id'] = 'Please select an asset GL account.';
+if (!$accumDeprAcctId)   $fields['accum_depr_account_id'] = 'Please select an accumulated depreciation account.';
+if (!$deprExpenseAcctId) $fields['depr_expense_account_id'] = 'Please select a depreciation expense account.';
+
+$validMethods = ['straight_line', 'declining_balance', 'units_of_production', 'none'];
+if (!in_array($method, $validMethods, true)) {
+    $fields['depreciation_method'] = 'Please select a valid depreciation method.';
+} else {
+    // Method-specific checks
+    if ($method === 'straight_line') {
+        if ($usefulLifeYears === null || $usefulLifeYears === '' || bccomp($usefulLifeYears, '0', 2) <= 0) {
+            $fields['useful_life_years'] = 'Useful life must be at least 1 year for straight-line depreciation.';
+        }
+    }
+    if ($method === 'declining_balance') {
+        if ($ccaRate === null || $ccaRate === '' || bccomp($ccaRate, '0', 4) <= 0) {
+            $fields['cra_cca_rate'] = 'CCA rate is required for declining balance.';
+        } elseif (bccomp($ccaRate, '100', 4) > 0) {
+            $fields['cra_cca_rate'] = 'CCA rate cannot exceed 100%.';
+        }
+    }
+    if ($method === 'units_of_production') {
+        if (!$totalExpectedUnits || $totalExpectedUnits <= 0) {
+            $fields['total_expected_units'] = 'Total expected units must be greater than zero for units-of-production.';
+        }
+    }
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // Build a sanitized payload — service does its own validation
 $data = [
-    'name'                    => clean_string($body['name'] ?? null, 255),
+    'name'                    => $name,
     'description'             => clean_string($body['description'] ?? null, 2000),
-    'asset_class'             => clean_string($body['asset_class'] ?? null, 50),
+    'asset_class'             => $assetClass,
     'cra_class'               => clean_string($body['cra_class'] ?? null, 20),
-    'cra_cca_rate'            => clean_decimal($body['cra_cca_rate'] ?? null),
+    'cra_cca_rate'            => $ccaRate,
     'equipment_unit_id'       => clean_int($body['equipment_unit_id'] ?? null),
-    'acquisition_date'        => clean_date($body['acquisition_date'] ?? null),
+    'acquisition_date'        => $acquisitionDate,
     'depreciation_start_date' => clean_date($body['depreciation_start_date'] ?? null),
-    'acquisition_cost'        => clean_decimal($body['acquisition_cost'] ?? null),
+    'acquisition_cost'        => $acquisitionCost,
     'vendor_id'               => clean_int($body['vendor_id'] ?? null),
-    'depreciation_method'     => clean_string($body['depreciation_method'] ?? 'straight_line', 50),
-    'useful_life_years'       => clean_decimal($body['useful_life_years'] ?? null),
-    'salvage_value'           => clean_decimal($body['salvage_value'] ?? '0.00'),
-    'asset_account_id'        => clean_int($body['asset_account_id'] ?? null),
-    'accum_depr_account_id'   => clean_int($body['accum_depr_account_id'] ?? null),
-    'depr_expense_account_id' => clean_int($body['depr_expense_account_id'] ?? null),
-    'total_expected_units'    => clean_int($body['total_expected_units'] ?? null),
+    'depreciation_method'     => $method,
+    'useful_life_years'       => $usefulLifeYears,
+    'salvage_value'           => $salvageValue,
+    'asset_account_id'        => $assetAccountId,
+    'accum_depr_account_id'   => $accumDeprAcctId,
+    'depr_expense_account_id' => $deprExpenseAcctId,
+    'total_expected_units'    => $totalExpectedUnits,
     'location'                => clean_string($body['location'] ?? null, 255),
     'serial_number'           => clean_string($body['serial_number'] ?? null, 100),
     'notes'                   => clean_string($body['notes'] ?? null, 2000),
@@ -89,7 +152,16 @@ $data = [
 try {
     $asset = FixedAssetService::create($data, current_user_id());
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    // Map service errors back to field slots when possible
+    $msg  = $e->getMessage();
+    $slot = '_general';
+    if (stripos($msg, 'acquisition_cost') !== false)        $slot = 'acquisition_cost';
+    elseif (stripos($msg, 'salvage') !== false)             $slot = 'salvage_value';
+    elseif (stripos($msg, 'useful_life') !== false)         $slot = 'useful_life_years';
+    elseif (stripos($msg, 'cca') !== false || stripos($msg, 'declining') !== false) $slot = 'cra_cca_rate';
+    elseif (stripos($msg, 'total_expected_units') !== false) $slot = 'total_expected_units';
+    elseif (stripos($msg, 'depreciation_method') !== false) $slot = 'depreciation_method';
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($asset, 201);

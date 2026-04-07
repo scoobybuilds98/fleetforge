@@ -35,13 +35,18 @@ require_method('POST');
 require_auth_api();
 require_permission('equipment', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id        = clean_int($body['id'] ?? null);
 $updatedAt = clean_string($body['updated_at'] ?? null);
 
-if (!$id)        json_error('VALIDATION_ERROR', 'id is required.', 422);
-if (!$updatedAt) json_error('VALIDATION_ERROR', 'updated_at is required for optimistic locking.', 422);
+if (!$id)        $fields['id']         = 'Unit ID is required.';
+if (!$updatedAt) $fields['updated_at'] = 'Optimistic lock token is required.';
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // ── Fetch existing ─────────────────────────────────────────────
 $existing = db_row(
@@ -54,22 +59,31 @@ if (!$existing) {
 
 // ── D19: Optimistic lock ───────────────────────────────────────
 if ($existing['updated_at'] !== $updatedAt) {
-    json_error('STALE_DATA', 'This unit was modified by another user. Refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This unit was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This unit was modified by another user. Refresh and try again.']]);
 }
 
-// ── Collect updates ────────────────────────────────────────────
+// ── Collect updates — VALID-2: accumulate field errors ─────────
 $updates = [];
+$fields  = [];
 
 if (isset($body['unit_number'])) {
     $un = clean_string($body['unit_number'], 100);
-    if (!$un) json_error('VALIDATION_ERROR', 'unit_number cannot be empty.', 422);
-    // FIX #36: filter soft-deleted units so deleted unit_numbers can be reused
-    $conflict = db_row(
-        "SELECT id FROM equipment_units WHERE unit_number = ? AND id != ? AND deleted_at IS NULL",
-        [$un, $id]
-    );
-    if ($conflict) json_error('ALREADY_EXISTS', 'Another unit with this unit number already exists.', 409);
-    $updates['unit_number'] = $un;
+    if (!$un) {
+        $fields['unit_number'] = 'Unit number is required.';
+    } else {
+        // FIX #36: filter soft-deleted units so deleted unit_numbers can be reused
+        $conflict = db_row(
+            "SELECT id FROM equipment_units WHERE unit_number = ? AND id != ? AND deleted_at IS NULL",
+            [$un, $id]
+        );
+        if ($conflict) {
+            $fields['unit_number'] = 'Unit number already exists.';
+        } else {
+            $updates['unit_number'] = $un;
+        }
+    }
 }
 
 // String fields
@@ -93,47 +107,117 @@ foreach ($stringFields as $field => $maxLen) {
     }
 }
 
-// FIX #20: dimensions must be positive — zero or negative dimensions are nonsensical
-foreach (['length_ft','height_ft','width_ft'] as $f) {
+// VALID-2: dimensions must be > 0 with specific messages
+$dimensionLabels = [
+    'length_ft' => 'Length',
+    'height_ft' => 'Height',
+    'width_ft'  => 'Width',
+];
+foreach ($dimensionLabels as $f => $label) {
     if (array_key_exists($f, $body)) {
-        $updates[$f] = clean_positive_decimal($body[$f]);
+        $raw = $body[$f];
+        if ($raw === null || $raw === '') {
+            $updates[$f] = null;
+        } else {
+            $d = clean_decimal($raw);
+            if ($d === null || bccomp($d, '0', 4) <= 0) {
+                $fields[$f] = "{$label} must be greater than zero.";
+            } else {
+                $updates[$f] = $d;
+            }
+        }
     }
 }
 
-// FIX #19: acquisition_cost must be >= 0
+// VALID-2: acquisition_cost must be >= 0
 if (array_key_exists('acquisition_cost', $body)) {
-    $updates['acquisition_cost'] = clean_non_negative_decimal($body['acquisition_cost']);
+    $raw = $body['acquisition_cost'];
+    if ($raw === null || $raw === '') {
+        $updates['acquisition_cost'] = null;
+    } else {
+        $d = clean_decimal($raw);
+        if ($d === null || bccomp($d, '0', 4) < 0) {
+            $fields['acquisition_cost'] = 'Acquisition cost cannot be negative.';
+        } else {
+            $updates['acquisition_cost'] = $d;
+        }
+    }
 }
 
-// FIX #17: year must be a realistic vehicle model year (1900 – current year + 2)
+// VALID-2: year must be between 1900 and current+1
 if (array_key_exists('year', $body)) {
-    $yearRaw     = clean_int($body['year']);
-    $currentYear = (int) date('Y');
-    if ($yearRaw !== null && ($yearRaw < 1900 || $yearRaw > $currentYear + 2)) {
-        json_error('VALIDATION_ERROR',
-            "year must be between 1900 and " . ($currentYear + 2) . ".", 422,
-            ['errors' => ['year' => "Year must be between 1900 and " . ($currentYear + 2) . "."]]);
+    $yearRaw = null;
+    if ($body['year'] !== null && $body['year'] !== '') {
+        $yi = clean_int($body['year']);
+        $currentYear = (int) date('Y');
+        $maxYear     = $currentYear + 1;
+        if ($yi === null || $yi < 1900 || $yi > $maxYear) {
+            $fields['year'] = "Year must be between 1900 and {$maxYear}.";
+        } else {
+            $yearRaw = $yi;
+        }
     }
-    $updates['year'] = $yearRaw;
+    if (!isset($fields['year'])) {
+        $updates['year'] = $yearRaw;
+    }
 }
 
-// FIX #21 / #22: weight and axle count must be positive
-foreach (['weight_capacity_lbs','axle_count'] as $f) {
+// VALID-2: weight_capacity_lbs and axle_count must be > 0
+$positiveIntLabels = [
+    'weight_capacity_lbs' => 'Weight capacity',
+    'axle_count'          => 'Axle count',
+];
+foreach ($positiveIntLabels as $f => $label) {
     if (array_key_exists($f, $body)) {
-        $updates[$f] = clean_positive_int($body[$f]);
+        $raw = $body[$f];
+        if ($raw === null || $raw === '') {
+            $updates[$f] = null;
+        } else {
+            $i = clean_int($raw);
+            if ($i === null || $i <= 0) {
+                $fields[$f] = "{$label} must be greater than zero.";
+            } else {
+                $updates[$f] = $i;
+            }
+        }
     }
 }
 
-// FIX #18: mileage must be >= 0
+// VALID-2: mileage / odometer >= 0
 if (array_key_exists('mileage', $body)) {
-    $updates['mileage'] = clean_non_negative_int($body['mileage']) ?? 0;
+    $raw = $body['mileage'];
+    if ($raw === null || $raw === '') {
+        $updates['mileage'] = 0;
+    } else {
+        $i = clean_int($raw);
+        if ($i === null || $i < 0) {
+            $fields['mileage'] = 'Odometer cannot be negative.';
+        } else {
+            $updates['mileage'] = $i;
+        }
+    }
 }
 
-// FIX #23: interval days must be positive
-foreach (['cvi_interval_days','mvi_interval_days',
-          'registration_interval_days','insurance_interval_days'] as $f) {
+// VALID-2: interval days must be > 0
+$intervalLabels = [
+    'cvi_interval_days'          => 'CVI interval days',
+    'mvi_interval_days'          => 'MVI interval days',
+    'registration_interval_days' => 'Registration interval days',
+    'insurance_interval_days'    => 'Insurance interval days',
+];
+foreach ($intervalLabels as $f => $label) {
     if (array_key_exists($f, $body)) {
-        $updates[$f] = clean_positive_int($body[$f]);
+        $raw = $body[$f];
+        if ($raw === null || $raw === '') {
+            $updates[$f] = null;
+        } else {
+            $i = clean_int($raw);
+            if ($i === null || $i <= 0) {
+                $fields[$f] = "{$label} must be greater than zero.";
+            } else {
+                $updates[$f] = $i;
+            }
+        }
     }
 }
 
@@ -158,9 +242,10 @@ if (isset($body['tracking_provider'])) {
 if (isset($body['ownership_type'])) {
     $v = clean_string($body['ownership_type']);
     if (!in_array($v, ['owned','leased','brokered'], true)) {
-        json_error('VALIDATION_ERROR', 'ownership_type must be owned, leased, or brokered.', 422);
+        $fields['ownership_type'] = 'Please select an ownership type (owned, leased, or brokered).';
+    } else {
+        $updates['ownership_type'] = $v;
     }
-    $updates['ownership_type'] = $v;
 }
 
 // Tags — JSON column
@@ -170,8 +255,12 @@ if (array_key_exists('tags', $body)) {
     $updates['tags'] = !empty($tags) ? json_encode($tags) : null;
 }
 
+if ($fields) {
+    json_validation_error($fields);
+}
+
 if (empty($updates)) {
-    json_error('VALIDATION_ERROR', 'No fields provided to update.', 422);
+    json_validation_error([], 'No fields provided to update.');
 }
 
 // Add updated_by

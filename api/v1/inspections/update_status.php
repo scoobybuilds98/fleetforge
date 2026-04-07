@@ -34,14 +34,25 @@ require_method('POST');
 require_auth_api();
 require_permission('inspections', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id         = clean_int($body['id'] ?? null);
 $newStatus  = clean_string($body['status'] ?? null);
 $notes      = clean_string($body['notes'] ?? null, 1000);
 
-if (!$id)        json_error('MISSING_REQUIRED', 'id is required.', 422);
-if (!$newStatus) json_error('MISSING_REQUIRED', 'status is required.', 422);
+$allowedStatuses = ['draft', 'complete', 'signed'];
+if (!$id) {
+    $fields['id'] = 'Inspection ID is required.';
+}
+if (!$newStatus) {
+    $fields['status'] = 'Please select a status.';
+} elseif (!in_array($newStatus, $allowedStatuses, true)) {
+    $fields['status'] = 'Please select a valid status.';
+}
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $insp = db_row("SELECT id, inspection_number, status FROM inspections WHERE id = ?", [$id]);
 if (!$insp) json_error('NOT_FOUND', 'Inspection not found.', 404);
@@ -58,13 +69,16 @@ $transitions = [
 $allowed = $transitions[$currentStatus] ?? [];
 if (!in_array($newStatus, $allowed, true)) {
     json_error('INVALID_TRANSITION',
-        "Cannot transition from '$currentStatus' to '$newStatus'.", 409);
+        "Cannot transition from '$currentStatus' to '$newStatus'.", 409,
+        ['fields' => ['status' => "Cannot move an inspection from '{$currentStatus}' to '{$newStatus}'."]]);
 }
 
 // Re-opening a complete inspection requires Manager role (destructive reversal)
 if ($currentStatus === 'complete' && $newStatus === 'draft') {
     if (!can('inspections', 'settings')) {
-        json_error('FORBIDDEN', 'Re-opening a completed inspection requires manager access.', 403);
+        json_error('FORBIDDEN',
+            'Re-opening a completed inspection requires manager access.', 403,
+            ['fields' => ['status' => 'Re-opening a completed inspection requires manager access.']]);
     }
 }
 

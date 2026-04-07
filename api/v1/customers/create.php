@@ -44,17 +44,28 @@ require_method('POST');
 require_auth_api();
 require_permission('customers', 'create');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-// ── Required fields ────────────────────────────────────────────
+// ── Required fields ── VALID-2: accumulate every error ─────────
 $companyName = clean_string($body['company_name'] ?? null, 255);
 if (!$companyName) {
-    json_error('VALIDATION_ERROR', 'company_name is required.', 422, ['errors' => ['company_name' => 'Company name is required.']]);
+    $fields['company_name'] = 'Company name is required.';
 }
 
 // ── Optional scalar fields ─────────────────────────────────────
-$contactName  = clean_string($body['contact_name'] ?? null, 255);
-$email        = clean_email($body['email'] ?? null);
+$contactName = clean_string($body['contact_name'] ?? null, 255);
+
+// VALID-2: reject invalid email format with a clear message
+$rawEmail = $body['email'] ?? null;
+$email    = null;
+if ($rawEmail !== null && $rawEmail !== '') {
+    $email = clean_email($rawEmail);
+    if ($email === null) {
+        $fields['email'] = 'Please enter a valid email address.';
+    }
+}
+
 $phone        = clean_string($body['phone'] ?? null, 50);
 $altPhone     = clean_string($body['alt_phone'] ?? null, 50);
 $website      = clean_string($body['website'] ?? null, 500);
@@ -72,7 +83,17 @@ $pstNumber    = clean_string($body['pst_number'] ?? null, 50);
 
 // Billing
 $billingContactName = clean_string($body['billing_contact_name'] ?? null, 255);
-$billingEmail       = clean_email($body['billing_email'] ?? null);
+
+// VALID-2: validate billing_email format
+$rawBillingEmail = $body['billing_email'] ?? null;
+$billingEmail    = null;
+if ($rawBillingEmail !== null && $rawBillingEmail !== '') {
+    $billingEmail = clean_email($rawBillingEmail);
+    if ($billingEmail === null) {
+        $fields['billing_email'] = 'Please enter a valid billing email address.';
+    }
+}
+
 $billingPhone       = clean_string($body['billing_phone'] ?? null, 50);
 $billingAddress     = clean_string($body['billing_address'] ?? null, 5000);
 
@@ -94,21 +115,48 @@ $currency        = in_array($rawCurrency, ['CAD', 'USD'], true)                 
 $mileageUnit     = in_array($rawMileage, ['km', 'miles'], true)                              ? $rawMileage  : 'km';
 $billingCycle    = in_array($rawCycle, ['monthly', 'on_close_only'], true)                   ? $rawCycle    : 'monthly';
 $invoiceDelivery = in_array($rawDelivery, ['email', 'mail', 'portal', 'none'], true)         ? $rawDelivery : 'email';
-$invoiceEmail   = clean_email($body['invoice_email'] ?? null);
-$poRequired     = isset($body['po_required']) ? (bool) $body['po_required'] : false;
+// VALID-2: validate invoice_email format
+$rawInvoiceEmail = $body['invoice_email'] ?? null;
+$invoiceEmail    = null;
+if ($rawInvoiceEmail !== null && $rawInvoiceEmail !== '') {
+    $invoiceEmail = clean_email($rawInvoiceEmail);
+    if ($invoiceEmail === null) {
+        $fields['invoice_email'] = 'Please enter a valid invoice email address.';
+    }
+}
+
+$poRequired      = isset($body['po_required']) ? (bool) $body['po_required'] : false;
 $defaultPoNumber = clean_string($body['default_po_number'] ?? null, 100);
-$paymentTerms   = clean_string($body['payment_terms'] ?? null, 100);
-// FIX #1: credit_limit must be >= 0 (a negative limit is nonsensical)
-$creditLimit    = clean_non_negative_decimal($body['credit_limit'] ?? null);
+$paymentTerms    = clean_string($body['payment_terms'] ?? null, 100);
+
+// VALID-2: credit_limit must be >= 0 with a clear message
+$creditLimit = null;
+$rawCredit   = $body['credit_limit'] ?? null;
+if ($rawCredit !== null && $rawCredit !== '') {
+    $d = clean_decimal($rawCredit);
+    if ($d === null || bccomp($d, '0', 4) < 0) {
+        $fields['credit_limit'] = 'Credit limit cannot be negative.';
+    } else {
+        $creditLimit = $d;
+    }
+}
 
 // Discount
 $rawDiscountType = $body['discount_type'] ?? 'none';
 $discountType    = in_array($rawDiscountType, ['none', 'percentage', 'flat'], true) ? $rawDiscountType : 'none';
-// FIX #2 / #3: discount must be >= 0; percentage type capped at 100
-$discountValue   = clean_non_negative_decimal($body['discount_value'] ?? null) ?? '0.0000';
-if ($discountType === 'percentage' && bccomp($discountValue, '100', 4) > 0) {
-    json_error('VALIDATION_ERROR', 'Percentage discount cannot exceed 100%.', 422,
-        ['errors' => ['discount_value' => 'Percentage discount cannot exceed 100%.']]);
+
+// VALID-2: discount must be >= 0; percentage type capped at 100
+$discountValue = '0.0000';
+$rawDiscount   = $body['discount_value'] ?? null;
+if ($rawDiscount !== null && $rawDiscount !== '') {
+    $d = clean_decimal($rawDiscount);
+    if ($d === null || bccomp($d, '0', 4) < 0) {
+        $fields['discount_value'] = 'Discount cannot be negative.';
+    } elseif ($discountType === 'percentage' && bccomp($d, '100', 4) > 0) {
+        $fields['discount_value'] = 'Percentage discount cannot exceed 100%.';
+    } else {
+        $discountValue = $d;
+    }
 }
 
 // Status / risk
@@ -130,6 +178,11 @@ $tags      = array_values(array_filter($tagsInput, fn($t) => in_array($t, $valid
 // Initial note
 $noteText  = clean_string($body['notes'] ?? null, 10000);
 
+// Short-circuit before DB duplicate lookup if we already have errors
+if ($fields) {
+    json_validation_error($fields);
+}
+
 // ── Duplicate check ────────────────────────────────────────────
 // UNIQUE KEY uq_company_email (company_name, email)
 // WHY manual check: returns a clean 422 with field-level error instead of DB exception
@@ -139,9 +192,10 @@ $dupExists = db_exists(
     [$companyName, $email]
 );
 if ($dupExists) {
-    json_error('DUPLICATE', 'A customer with this company name and email already exists.', 422, [
-        'errors' => ['company_name' => 'Duplicate company name + email combination.'],
-    ]);
+    json_validation_error(
+        ['company_name' => 'A customer with this company name and email already exists.'],
+        'A customer with this company name and email already exists.'
+    );
 }
 
 $userId = current_user_id();

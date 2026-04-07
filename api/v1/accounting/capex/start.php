@@ -25,13 +25,18 @@ $body = json_body();
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    json_validation_error(['id' => 'CapEx request ID is required.']);
 }
 
 try {
     $capex = FixedAssetService::startCapex($id, current_user_id());
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $msg  = $e->getMessage();
+    $slot = '_general';
+    if (stripos($msg, 'not found') !== false || stripos($msg, 'already') !== false || stripos($msg, 'status') !== false) {
+        $slot = 'id';
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($capex);

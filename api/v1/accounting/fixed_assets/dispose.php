@@ -27,13 +27,39 @@ require_method('POST');
 require_auth_api();
 require_permission('fixed_assets', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
+
+$assetId      = clean_int($body['asset_id'] ?? null);
+$disposalDate = clean_date($body['disposal_date'] ?? null);
+$disposalType = clean_string($body['disposal_type'] ?? null, 50);
+$proceeds     = clean_decimal($body['proceeds'] ?? '0.00');
+
+if (!$assetId) {
+    $fields['asset_id'] = 'Asset ID is required.';
+}
+if (!$disposalDate) {
+    $fields['disposal_date'] = 'Disposal date is required.';
+}
+$validTypes = ['sale', 'scrap', 'donation', 'trade_in'];
+if (!$disposalType) {
+    $fields['disposal_type'] = 'Please select a disposal type.';
+} elseif (!in_array($disposalType, $validTypes, true)) {
+    $fields['disposal_type'] = 'Please select a valid disposal type (sale, scrap, donation, trade_in).';
+}
+if ($proceeds !== null && $proceeds !== '' && bccomp($proceeds, '0.00', 2) < 0) {
+    $fields['proceeds'] = 'Disposal proceeds cannot be negative.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $data = [
-    'asset_id'             => clean_int($body['asset_id'] ?? null),
-    'disposal_date'        => clean_date($body['disposal_date'] ?? null),
-    'disposal_type'        => clean_string($body['disposal_type'] ?? null, 50),
-    'proceeds'             => clean_decimal($body['proceeds'] ?? '0.00'),
+    'asset_id'             => $assetId,
+    'disposal_date'        => $disposalDate,
+    'disposal_type'        => $disposalType,
+    'proceeds'             => $proceeds,
     'buyer_name'           => clean_string($body['buyer_name'] ?? null, 255),
     'buyer_reference'      => clean_string($body['buyer_reference'] ?? null, 100),
     'proceeds_account_id'  => clean_int($body['proceeds_account_id'] ?? null),
@@ -49,9 +75,17 @@ try {
 } catch (\RuntimeException $e) {
     $msg = $e->getMessage();
     if (str_contains($msg, 'Only managers')) {
-        json_error('FORBIDDEN', $msg, 403);
+        json_error('FORBIDDEN', $msg, 403,
+            ['fields' => ['_general' => 'Only managers can record an asset disposal.']]);
     }
-    json_error('VALIDATION_ERROR', $msg, 422);
+    $slot = '_general';
+    if (stripos($msg, 'already disposed') !== false) $slot = 'asset_id';
+    elseif (stripos($msg, 'not found') !== false)    $slot = 'asset_id';
+    elseif (stripos($msg, 'proceeds') !== false)     $slot = 'proceeds';
+    elseif (stripos($msg, 'period') !== false)       $slot = 'disposal_date';
+    elseif (stripos($msg, 'cash account') !== false) $slot = 'proceeds_account_id';
+    elseif (stripos($msg, 'gain') !== false)         $slot = 'gain_loss_account_id';
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($disposal, 201);

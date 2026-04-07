@@ -392,12 +392,17 @@ function FF_RateCardShow() {
             this.globalError = null;
             this.saveSuccess = false;
 
-            if (!this.form.name.trim()) {
-                this.globalError = 'Name is required.';
+            // Client-side validation (mirrors server)
+            if (!this.form.name || !this.form.name.trim()) {
+                this.globalError = 'Rate card name is required.';
+                return;
+            }
+            if (!this.form.effective_from) {
+                this.globalError = 'Effective from date is required.';
                 return;
             }
             if (this.form.effective_to && this.form.effective_to < this.form.effective_from) {
-                this.globalError = 'Effective To must be on or after Effective From.';
+                this.globalError = 'End date must be on or after the start date.';
                 return;
             }
 
@@ -412,6 +417,17 @@ function FF_RateCardShow() {
                     effective_to:   this.form.effective_to || null,
                     is_default:     this.form.is_default ? 1 : 0,
                 });
+                if (!r.success) {
+                    // VALID-2: prefer field map
+                    if (r.error?.code === 'STALE_DATA') {
+                        this.globalError = 'This rate card was modified by another user. Please reload this page and try again.';
+                    } else if (r.error?.fields) {
+                        this.globalError = Object.values(r.error.fields).join(' ');
+                    } else {
+                        this.globalError = r.error?.message || 'Save failed. Please try again.';
+                    }
+                    return;
+                }
                 // Update snapshot with new updated_at
                 this.form.updated_at    = r.data.updated_at;
                 this.formSnapshot       = { ...this.form };
@@ -459,18 +475,42 @@ function FF_RateCardShow() {
             this.globalError = null;
             this.saveSuccess = false;
 
-            // Validate all items have equipment_type
+            // Client-side validation — equipment type + non-negative rates
             const seen = new Set();
-            for (const item of this.items) {
+            const rateLabels = {
+                daily_rate:   'Daily rate',
+                weekly_rate:  'Weekly rate',
+                monthly_rate: 'Monthly rate',
+                mileage_rate: 'Mileage rate',
+            };
+            const problems = [];
+            for (let i = 0; i < this.items.length; i++) {
+                const item = this.items[i];
+                const lineNum = i + 1;
                 if (!item.equipment_type) {
-                    this.globalError = 'All item rows must have an equipment type selected.';
-                    return;
+                    problems.push(`Item ${lineNum}: please select an equipment type.`);
+                    continue;
                 }
                 if (seen.has(item.equipment_type)) {
-                    this.globalError = `Duplicate equipment type: ${item.equipment_type}`;
-                    return;
+                    problems.push(`Item ${lineNum}: equipment type '${item.equipment_type}' is listed more than once.`);
+                    continue;
                 }
                 seen.add(item.equipment_type);
+
+                for (const [field, label] of Object.entries(rateLabels)) {
+                    const raw = item[field];
+                    if (raw === '' || raw === null || raw === undefined) continue;
+                    const n = parseFloat(raw);
+                    if (isNaN(n)) {
+                        problems.push(`Item ${lineNum}: ${label} must be a valid number.`);
+                    } else if (n < 0) {
+                        problems.push(`Item ${lineNum}: ${label} cannot be negative.`);
+                    }
+                }
+            }
+            if (problems.length > 0) {
+                this.globalError = problems.join(' ');
+                return;
             }
 
             this.saving = true;
@@ -492,6 +532,17 @@ function FF_RateCardShow() {
                     items:      itemPayload,
                 });
 
+                if (!r.success) {
+                    if (r.error?.code === 'STALE_DATA') {
+                        this.globalError = 'This rate card was modified by another user. Please reload this page and try again.';
+                    } else if (r.error?.fields) {
+                        this.globalError = Object.values(r.error.fields).join(' ');
+                    } else {
+                        this.globalError = r.error?.message || 'Save failed. Please try again.';
+                    }
+                    return;
+                }
+
                 // Update updated_at so next save doesn't get STALE_DATA
                 this.form.updated_at = r.data.updated_at;
                 this.formSnapshot    = { ...this.form };
@@ -512,7 +563,12 @@ function FF_RateCardShow() {
             this.deleteModal.saving = true;
             this.deleteModal.error  = '';
             try {
-                await FF_Api.post('<?= base_url('api/v1/rate_cards/delete') ?>', { id: this.form.id, updated_at: this.form.updated_at });
+                const r = await FF_Api.post('<?= base_url('api/v1/rate_cards/delete') ?>', { id: this.form.id, updated_at: this.form.updated_at });
+                if (!r.success) {
+                    this.deleteModal.error = r.error?.fields?.is_default || r.error?.message || 'Delete failed.';
+                    this.deleteModal.saving = false;
+                    return;
+                }
                 window.location = '<?= base_url('rates') ?>';
             } catch (e) {
                 this.deleteModal.error  = e.message || 'Delete failed.';

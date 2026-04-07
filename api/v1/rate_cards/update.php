@@ -38,16 +38,21 @@ require_permission('rates', 'edit');
 // -----------------------------------------------------------------------
 // 1. Parse body + resolve card
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Rate card ID is required.';
 }
 
 $submittedUpdatedAt = clean_string($body['updated_at'] ?? null);
 if (!$submittedUpdatedAt) {
-    json_error('MISSING_REQUIRED', 'updated_at is required for optimistic locking.', 422);
+    $fields['updated_at'] = 'Optimistic lock token is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $existing = db_row(
@@ -62,32 +67,27 @@ if (!$existing) {
 // 2. D19 optimistic lock
 // -----------------------------------------------------------------------
 if ($existing['updated_at'] !== $submittedUpdatedAt) {
-    json_error('STALE_DATA', 'Rate card was modified by another user. Refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This rate card was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This rate card was modified by another user. Refresh and try again.']]);
 }
 
 // -----------------------------------------------------------------------
-// 3. Validate fields
+// 3. Validate fields — VALID-2: accumulate every error
 // -----------------------------------------------------------------------
 $name = isset($body['name']) ? clean_string($body['name'], 255) : $existing['name'];
 if (!$name) {
-    json_error('VALIDATION_ERROR', 'name cannot be empty.', 422);
+    $fields['name'] = 'Rate card name is required.';
 }
 
-// Uniqueness excluding self
-if ($name !== $existing['name']) {
-    if (db_exists('rate_cards', 'name = ? AND id != ? AND deleted_at IS NULL', [$name, $id])) {
-        json_error('ALREADY_EXISTS', 'A rate card with that name already exists.', 409);
-    }
-}
-
-$description   = isset($body['description']) ? clean_string($body['description'], 1000) : $existing['description'];
-$isDefault     = isset($body['is_default'])  ? (int)(bool)$body['is_default']            : (int)$existing['is_default'];
+$description = isset($body['description']) ? clean_string($body['description'], 1000) : $existing['description'];
+$isDefault   = isset($body['is_default'])  ? (int)(bool)$body['is_default']            : (int)$existing['is_default'];
 
 $effectiveFrom = $existing['effective_from'];
 if (!empty($body['effective_from'])) {
     $effectiveFrom = clean_date($body['effective_from']);
     if (!$effectiveFrom) {
-        json_error('VALIDATION_ERROR', 'effective_from must be a valid date (Y-m-d).', 422);
+        $fields['effective_from'] = 'Effective from must be a valid date.';
     }
 }
 
@@ -98,12 +98,24 @@ if (array_key_exists('effective_to', $body)) {
     } else {
         $effectiveTo = clean_date($body['effective_to']);
         if (!$effectiveTo) {
-            json_error('VALIDATION_ERROR', 'effective_to must be a valid date (Y-m-d).', 422);
+            $fields['effective_to'] = 'Effective to must be a valid date.';
         }
     }
 }
-if ($effectiveTo !== null && $effectiveTo < $effectiveFrom) {
-    json_error('VALIDATION_ERROR', 'effective_to must be on or after effective_from.', 422);
+if ($effectiveTo !== null && $effectiveFrom && $effectiveTo < $effectiveFrom) {
+    $fields['effective_to'] = 'End date must be on or after the start date.';
+}
+
+// Short-circuit header validation before items
+if ($fields) {
+    json_validation_error($fields);
+}
+
+// Uniqueness excluding self
+if ($name !== $existing['name']) {
+    if (db_exists('rate_cards', 'name = ? AND id != ? AND deleted_at IS NULL', [$name, $id])) {
+        json_validation_error(['name' => 'A rate card with this name already exists.']);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -113,51 +125,82 @@ $validCurrencies   = ['CAD', 'USD'];
 $validMileageUnits = ['km', 'miles'];
 $replaceItems      = array_key_exists('items', $body);
 $itemsToInsert     = [];
+$itemErrors        = [];
+
+$rateLabels = [
+    'daily_rate'   => 'Daily rate',
+    'weekly_rate'  => 'Weekly rate',
+    'monthly_rate' => 'Monthly rate',
+    'mileage_rate' => 'Mileage rate',
+];
 
 if ($replaceItems && is_array($body['items'])) {
     $seenTypes = [];
     foreach ($body['items'] as $idx => $item) {
+        $lineNum   = $idx + 1;
         $equipType = clean_string($item['equipment_type'] ?? null, 255);
         if (!$equipType) {
-            json_error('VALIDATION_ERROR', "items[$idx].equipment_type is required.", 422);
+            $itemErrors[] = "Item {$lineNum}: equipment type is required.";
+            continue;
         }
         if (in_array($equipType, $seenTypes, true)) {
-            json_error('VALIDATION_ERROR', "Duplicate equipment_type '$equipType' in items.", 409);
+            $itemErrors[] = "Item {$lineNum}: equipment type '{$equipType}' is listed more than once.";
+            continue;
         }
         $seenTypes[] = $equipType;
 
-        foreach (['daily_rate', 'weekly_rate', 'monthly_rate', 'mileage_rate'] as $field) {
-            $$field = null;
-            if (!empty($item[$field])) {
-                $val = clean_decimal($item[$field]);
-                if ($val === null) {
-                    json_error('VALIDATION_ERROR', "items[$idx].$field must be a valid decimal.", 422);
-                }
-                $$field = $val;
+        $rates = [
+            'daily_rate'   => null,
+            'weekly_rate'  => null,
+            'monthly_rate' => null,
+            'mileage_rate' => null,
+        ];
+        $itemHadError = false;
+        foreach ($rateLabels as $field => $label) {
+            if (!isset($item[$field]) || $item[$field] === '' || $item[$field] === null) continue;
+            $val = clean_decimal((string)$item[$field]);
+            if ($val === null) {
+                $itemErrors[] = "Item {$lineNum}: {$label} must be a valid number.";
+                $itemHadError = true;
+                continue;
             }
+            if (bccomp($val, '0', 6) < 0) {
+                $itemErrors[] = "Item {$lineNum}: {$label} cannot be negative.";
+                $itemHadError = true;
+                continue;
+            }
+            $rates[$field] = $val;
         }
 
         $currency    = clean_string($item['currency'] ?? null, 10) ?? 'CAD';
         $mileageUnit = clean_string($item['mileage_unit'] ?? null, 10) ?? 'km';
 
         if (!in_array($currency, $validCurrencies, true)) {
-            json_error('VALIDATION_ERROR', "items[$idx].currency must be CAD or USD.", 422);
+            $itemErrors[] = "Item {$lineNum}: currency must be CAD or USD.";
+            $itemHadError = true;
         }
         if (!in_array($mileageUnit, $validMileageUnits, true)) {
-            json_error('VALIDATION_ERROR', "items[$idx].mileage_unit must be km or miles.", 422);
+            $itemErrors[] = "Item {$lineNum}: mileage unit must be km or miles.";
+            $itemHadError = true;
         }
+
+        if ($itemHadError) continue;
 
         $itemsToInsert[] = [
             'equipment_type' => $equipType,
-            'daily_rate'     => $daily_rate,
-            'weekly_rate'    => $weekly_rate,
-            'monthly_rate'   => $monthly_rate,
-            'mileage_rate'   => $mileage_rate,
+            'daily_rate'     => $rates['daily_rate'],
+            'weekly_rate'    => $rates['weekly_rate'],
+            'monthly_rate'   => $rates['monthly_rate'],
+            'mileage_rate'   => $rates['mileage_rate'],
             'mileage_unit'   => $mileageUnit,
             'currency'       => $currency,
             'notes'          => clean_string($item['notes'] ?? null, 1000),
         ];
     }
+}
+
+if ($itemErrors) {
+    json_validation_error(['items' => implode(' ', $itemErrors)], implode(' ', $itemErrors));
 }
 
 // -----------------------------------------------------------------------

@@ -184,23 +184,27 @@ require_once FF_ROOT . '/includes/header.php';
          @click.self="showModal = false">
             <div class="card" style="width:100%;max-width:900px;padding:24px;" x-show="showModal" x-transition>
                 <div style="font-weight:700;font-size:1rem;margin-bottom:16px;" x-text="form.id ? 'Edit Bill' : 'New Bill'"></div>
+                <div class="form-error-banner" x-show="saveFormError" x-cloak x-text="saveFormError" style="margin-bottom:12px;"></div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Vendor *</label>
-                        <select x-model="form.vendor_id" @change="onVendorChange()" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <select x-model="form.vendor_id" @change="saveErrors.vendor_id = ''; onVendorChange()" :class="saveErrors.vendor_id ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                             <option value="">Select vendor...</option>
                             <?php foreach ($vendors as $v): ?>
                             <option value="<?= (int)$v['id'] ?>" data-type="<?= e($v['vendor_type']) ?>"><?= e($v['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="field-error" x-show="saveErrors.vendor_id" x-cloak x-text="saveErrors.vendor_id"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Bill Date *</label>
-                        <input type="date" x-model="form.bill_date" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <input type="date" x-model="form.bill_date" :class="saveErrors.bill_date ? 'is-invalid' : ''" @change="saveErrors.bill_date = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <div class="field-error" x-show="saveErrors.bill_date" x-cloak x-text="saveErrors.bill_date"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Due Date *</label>
-                        <input type="date" x-model="form.due_date" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <input type="date" x-model="form.due_date" :class="saveErrors.due_date ? 'is-invalid' : ''" @change="saveErrors.due_date = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <div class="field-error" x-show="saveErrors.due_date" x-cloak x-text="saveErrors.due_date"></div>
                     </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
@@ -233,9 +237,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <tbody>
                             <template x-for="(line, li) in form.lines" :key="li">
                                 <tr style="border-bottom:1px solid var(--border-default);">
-                                    <td style="padding:4px 4px;">
+                                    <td style="padding:4px 4px;vertical-align:top;">
                                         <div style="position:relative;">
-                                            <select x-model="line.account_id" class="form-input" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;">
+                                            <select x-model="line.account_id" :class="(lineErrors[li] && lineErrors[li].account_id) ? 'is-invalid' : ''" @change="lineErrors[li] && (lineErrors[li].account_id = '')" class="form-input" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;">
                                                 <option value="">Select...</option>
                                                 <?php foreach ($glAccounts as $a): ?>
                                                 <option value="<?= (int)$a['id'] ?>"><?= e($a['code'] . ' — ' . $a['name']) ?></option>
@@ -244,15 +248,31 @@ require_once FF_ROOT . '/includes/header.php';
                                             <template x-if="line.is_auto_categorized">
                                                 <span style="position:absolute;top:-6px;right:2px;font-size:0.6rem;background:var(--badge-info-bg);color:var(--badge-info-text);padding:1px 4px;border-radius:3px;">Auto</span>
                                             </template>
+                                            <div class="field-error" x-show="lineErrors[li] && lineErrors[li].account_id" x-cloak x-text="lineErrors[li] && lineErrors[li].account_id"></div>
                                         </div>
                                     </td>
-                                    <td style="padding:4px;"><input type="text" x-model="line.description" class="form-input" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;" placeholder="Description"></td>
-                                    <td style="padding:4px;"><input type="number" x-model="line.quantity" @input="calcLineAmt(li)" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;"></td>
-                                    <td style="padding:4px;"><input type="number" x-model="line.unit_cost" @input="calcLineAmt(li)" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;"></td>
-                                    <td style="padding:4px;"><input type="number" x-model="line.tax_gst_amount" @input="calcTotals()" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;"></td>
-                                    <td style="padding:4px;"><input type="number" x-model="line.tax_pst_amount" @input="calcTotals()" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;"></td>
-                                    <td class="font-mono" style="padding:6px 8px;text-align:right;font-weight:500;" x-text="fmtAmt(line.amount)"></td>
-                                    <td style="padding:4px;text-align:center;"><button class="btn btn-ghost btn-xs" @click="removeLine(li)" title="Remove">&times;</button></td>
+                                    <td style="padding:4px;vertical-align:top;">
+                                        <input type="text" x-model="line.description" :class="(lineErrors[li] && lineErrors[li].description) ? 'is-invalid' : ''" @input="lineErrors[li] && (lineErrors[li].description = '')" class="form-input" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;" placeholder="Description">
+                                        <div class="field-error" x-show="lineErrors[li] && lineErrors[li].description" x-cloak x-text="lineErrors[li] && lineErrors[li].description"></div>
+                                    </td>
+                                    <td style="padding:4px;vertical-align:top;">
+                                        <input type="number" x-model="line.quantity" @input="calcLineAmt(li); lineErrors[li] && (lineErrors[li].quantity = '')" step="0.01" min="0" :class="(lineErrors[li] && lineErrors[li].quantity) ? 'is-invalid' : ''" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;">
+                                        <div class="field-error" x-show="lineErrors[li] && lineErrors[li].quantity" x-cloak x-text="lineErrors[li] && lineErrors[li].quantity"></div>
+                                    </td>
+                                    <td style="padding:4px;vertical-align:top;">
+                                        <input type="number" x-model="line.unit_cost" @input="calcLineAmt(li); lineErrors[li] && (lineErrors[li].unit_cost = '')" step="0.01" min="0" :class="(lineErrors[li] && lineErrors[li].unit_cost) ? 'is-invalid' : ''" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;">
+                                        <div class="field-error" x-show="lineErrors[li] && lineErrors[li].unit_cost" x-cloak x-text="lineErrors[li] && lineErrors[li].unit_cost"></div>
+                                    </td>
+                                    <td style="padding:4px;vertical-align:top;">
+                                        <input type="number" x-model="line.tax_gst_amount" @input="calcTotals(); lineErrors[li] && (lineErrors[li].tax_gst_amount = '')" step="0.01" min="0" :class="(lineErrors[li] && lineErrors[li].tax_gst_amount) ? 'is-invalid' : ''" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;">
+                                        <div class="field-error" x-show="lineErrors[li] && lineErrors[li].tax_gst_amount" x-cloak x-text="lineErrors[li] && lineErrors[li].tax_gst_amount"></div>
+                                    </td>
+                                    <td style="padding:4px;vertical-align:top;">
+                                        <input type="number" x-model="line.tax_pst_amount" @input="calcTotals(); lineErrors[li] && (lineErrors[li].tax_pst_amount = '')" step="0.01" min="0" :class="(lineErrors[li] && lineErrors[li].tax_pst_amount) ? 'is-invalid' : ''" class="form-input font-mono" style="width:100%;padding:6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.75rem;text-align:right;">
+                                        <div class="field-error" x-show="lineErrors[li] && lineErrors[li].tax_pst_amount" x-cloak x-text="lineErrors[li] && lineErrors[li].tax_pst_amount"></div>
+                                    </td>
+                                    <td class="font-mono" style="padding:6px 8px;text-align:right;font-weight:500;vertical-align:top;" x-text="fmtAmt(line.amount)"></td>
+                                    <td style="padding:4px;text-align:center;vertical-align:top;"><button class="btn btn-ghost btn-xs" @click="removeLine(li)" title="Remove">&times;</button></td>
                                 </tr>
                             </template>
                         </tbody>
@@ -284,11 +304,10 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
 
                 <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
-                    <button class="btn btn-secondary btn-sm" @click="showModal = false">Cancel</button>
+                    <button class="btn btn-secondary btn-sm" @click="cancelEditModal()">Cancel</button>
                     <button class="btn btn-primary btn-sm" @click="saveBill(false)" :disabled="saving">Save as Draft</button>
                     <button class="btn btn-success btn-sm" @click="saveBill(true)" :disabled="saving">Save & Approve</button>
                 </div>
-                <div x-show="saveError" style="margin-top:8px;padding:8px 12px;border-radius:6px;background:var(--badge-danger-bg);color:var(--badge-danger-text);font-size:0.8125rem;" x-text="saveError"></div>
             </div>
     </div>
 
@@ -300,43 +319,48 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="font-size:0.8125rem;color:var(--text-secondary);margin-bottom:12px;">
                     Bill: <span class="font-mono" x-text="payForm.bill_number"></span> — Balance: <span class="font-mono" x-text="fmtAmt(payForm.balance_due)"></span>
                 </div>
+                <div class="form-error-banner" x-show="payFormError" x-cloak x-text="payFormError" style="margin-bottom:12px;"></div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Amount *</label>
-                        <input type="number" x-model="payForm.amount" step="0.01" min="0.01" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <input type="number" x-model="payForm.amount" step="0.01" min="0.01" :class="payErrors.amount ? 'is-invalid' : ''" @input="payErrors.amount = ''" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <div class="field-error" x-show="payErrors.amount" x-cloak x-text="payErrors.amount"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Payment Date *</label>
-                        <input type="date" x-model="payForm.payment_date" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <input type="date" x-model="payForm.payment_date" :class="payErrors.payment_date ? 'is-invalid' : ''" @change="payErrors.payment_date = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <div class="field-error" x-show="payErrors.payment_date" x-cloak x-text="payErrors.payment_date"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Method *</label>
-                        <select x-model="payForm.payment_method" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <select x-model="payForm.payment_method" :class="payErrors.payment_method ? 'is-invalid' : ''" @change="payErrors.payment_method = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
                             <option value="check">Check</option>
                             <option value="eft">EFT</option>
                             <option value="wire">Wire</option>
                             <option value="credit_card">Credit Card</option>
                             <option value="cash">Cash</option>
                         </select>
+                        <div class="field-error" x-show="payErrors.payment_method" x-cloak x-text="payErrors.payment_method"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Bank Account *</label>
-                        <select x-model="payForm.bank_account_id" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <select x-model="payForm.bank_account_id" :class="payErrors.bank_account_id ? 'is-invalid' : ''" @change="payErrors.bank_account_id = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
                             <?php foreach ($bankAccounts as $ba): ?>
                             <option value="<?= (int)$ba['id'] ?>"><?= e($ba['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="field-error" x-show="payErrors.bank_account_id" x-cloak x-text="payErrors.bank_account_id"></div>
                     </div>
                 </div>
                 <div x-show="payForm.payment_method === 'check'" style="margin-bottom:12px;">
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Check Number *</label>
-                    <input type="text" x-model="payForm.check_number" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <input type="text" x-model="payForm.check_number" :class="payErrors.check_number ? 'is-invalid' : ''" @input="payErrors.check_number = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                    <div class="field-error" x-show="payErrors.check_number" x-cloak x-text="payErrors.check_number"></div>
                 </div>
                 <div style="display:flex;justify-content:flex-end;gap:8px;">
-                    <button class="btn btn-secondary btn-sm" @click="showPayModal = false">Cancel</button>
+                    <button class="btn btn-secondary btn-sm" @click="cancelPayModal()">Cancel</button>
                     <button class="btn btn-success btn-sm" @click="submitPay()" :disabled="payProcessing">Record Payment</button>
                 </div>
-                <div x-show="payError" style="margin-top:8px;padding:8px 12px;border-radius:6px;background:var(--badge-danger-bg);color:var(--badge-danger-text);font-size:0.8125rem;" x-text="payError"></div>
             </div>
     </div>
 
@@ -403,8 +427,15 @@ function billsPage() {
         tab: '', filterVendor: '', search: '',
         kpi: { outstanding: '0.00', dueThisWeek: '0.00', overdue: '0.00' },
         showModal: false, showPayModal: false, showDetail: false,
-        saving: false, saveError: '', payProcessing: false, payError: '',
+        saving: false, payProcessing: false,
         form: {}, payForm: {}, detail: {},
+
+        // VALID-2 per-form error state
+        saveFormError: '',
+        saveErrors: { vendor_id: '', bill_date: '', due_date: '', vendor_bill_number: '', notes: '', lines: '' },
+        lineErrors: [],
+        payFormError: '',
+        payErrors: { amount: '', payment_date: '', payment_method: '', bank_account_id: '', check_number: '' },
 
         tabs: [
             { label: 'All', value: '' },
@@ -421,6 +452,181 @@ function billsPage() {
                 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
                 'X-Requested-With': 'XMLHttpRequest',
             };
+        },
+
+        // VALID-2 helpers
+        _extractError(r, fallback) {
+            if (r && r.error) {
+                if (typeof r.error === 'string') return r.error;
+                if (r.error.message) return r.error.message;
+            }
+            return fallback || 'Request failed.';
+        },
+        _clearErrors(errorsObj, bannerKey) {
+            this[bannerKey] = '';
+            for (const k in errorsObj) errorsObj[k] = '';
+        },
+        _paintErrors(errorsObj, bannerKey, r, fallback) {
+            this._clearErrors(errorsObj, bannerKey);
+            const fields = r && r.error && r.error.fields;
+            if (fields && typeof fields === 'object') {
+                let mapped = false;
+                for (const k in fields) {
+                    if (k === '_general') {
+                        this[bannerKey] = String(fields[k]);
+                        mapped = true;
+                    } else if (k in errorsObj) {
+                        errorsObj[k] = String(fields[k]);
+                        mapped = true;
+                    }
+                }
+                if (mapped) return;
+            }
+            this[bannerKey] = this._extractError(r, fallback);
+        },
+        _paintSaveServerErrors(r, fallback) {
+            this._clearSaveErrors();
+            const fields = r && r.error && r.error.fields;
+            if (fields && typeof fields === 'object') {
+                let mapped = false;
+                const lineRe = /^lines\[(\d+)\]\.(.+)$/;
+                for (const k in fields) {
+                    const m = lineRe.exec(k);
+                    if (m) {
+                        const idx = parseInt(m[1], 10);
+                        const field = m[2];
+                        if (this.lineErrors[idx] && field in this.lineErrors[idx]) {
+                            this.lineErrors[idx][field] = String(fields[k]);
+                            mapped = true;
+                        }
+                    } else if (k === '_general') {
+                        this.saveFormError = String(fields[k]);
+                        mapped = true;
+                    } else if (k in this.saveErrors) {
+                        this.saveErrors[k] = String(fields[k]);
+                        mapped = true;
+                    }
+                }
+                if (mapped) return;
+            }
+            this.saveFormError = this._extractError(r, fallback);
+        },
+        _emptyLineErr() {
+            return { account_id: '', description: '', quantity: '', unit_cost: '', tax_gst_amount: '', tax_pst_amount: '' };
+        },
+        _syncLineErrors() {
+            while (this.lineErrors.length < this.form.lines.length) this.lineErrors.push(this._emptyLineErr());
+            while (this.lineErrors.length > this.form.lines.length) this.lineErrors.pop();
+        },
+        _clearSaveErrors() {
+            this.saveFormError = '';
+            for (const k in this.saveErrors) this.saveErrors[k] = '';
+            for (let i = 0; i < this.lineErrors.length; i++) {
+                for (const k in this.lineErrors[i]) this.lineErrors[i][k] = '';
+            }
+        },
+        _isValidAmount(v) {
+            if (v === null || v === undefined || v === '') return false;
+            return /^\d+(\.\d{1,2})?$/.test(String(v).trim());
+        },
+
+        validateBill() {
+            this._clearSaveErrors();
+            this._syncLineErrors();
+            let ok = true;
+            if (!this.form.vendor_id) {
+                this.saveErrors.vendor_id = 'Please select a vendor.';
+                ok = false;
+            }
+            if (!this.form.bill_date) {
+                this.saveErrors.bill_date = 'Bill date is required.';
+                ok = false;
+            }
+            if (!this.form.due_date) {
+                this.saveErrors.due_date = 'Due date is required.';
+                ok = false;
+            }
+            if (this.form.bill_date && this.form.due_date && this.form.due_date < this.form.bill_date) {
+                this.saveErrors.due_date = 'Due date must be on or after bill date.';
+                ok = false;
+            }
+            if (!this.form.lines || this.form.lines.length === 0) {
+                this.saveFormError = 'Bill must have at least one line item.';
+                ok = false;
+            }
+            // Per-line validation
+            this.form.lines.forEach((line, i) => {
+                if (!line.account_id) {
+                    this.lineErrors[i].account_id = 'Please select an account.';
+                    ok = false;
+                }
+                if (!line.description || String(line.description).trim() === '') {
+                    this.lineErrors[i].description = 'Description is required.';
+                    ok = false;
+                }
+                if (!this._isValidAmount(line.quantity) || Number(line.quantity) <= 0) {
+                    this.lineErrors[i].quantity = 'Quantity must be greater than zero.';
+                    ok = false;
+                }
+                if (!this._isValidAmount(line.unit_cost)) {
+                    this.lineErrors[i].unit_cost = 'Unit cost must be a valid amount.';
+                    ok = false;
+                } else if (Number(line.unit_cost) < 0) {
+                    this.lineErrors[i].unit_cost = 'Unit cost cannot be negative.';
+                    ok = false;
+                }
+                if (line.tax_gst_amount !== '' && !this._isValidAmount(line.tax_gst_amount)) {
+                    this.lineErrors[i].tax_gst_amount = 'GST must be a valid amount.';
+                    ok = false;
+                }
+                if (line.tax_pst_amount !== '' && !this._isValidAmount(line.tax_pst_amount)) {
+                    this.lineErrors[i].tax_pst_amount = 'PST must be a valid amount.';
+                    ok = false;
+                }
+            });
+            return ok;
+        },
+
+        validatePay() {
+            this._clearErrors(this.payErrors, 'payFormError');
+            let ok = true;
+            if (!this._isValidAmount(this.payForm.amount)) {
+                this.payErrors.amount = 'Amount must be a valid number with up to 2 decimal places.';
+                ok = false;
+            } else if (Number(this.payForm.amount) <= 0) {
+                this.payErrors.amount = 'Amount must be greater than zero.';
+                ok = false;
+            } else if (Number(this.payForm.amount) > Number(this.payForm.balance_due)) {
+                this.payErrors.amount = 'Amount cannot exceed bill balance.';
+                ok = false;
+            }
+            if (!this.payForm.payment_date) {
+                this.payErrors.payment_date = 'Payment date is required.';
+                ok = false;
+            }
+            const validMethods = ['check','eft','wire','credit_card','cash'];
+            if (!this.payForm.payment_method || !validMethods.includes(this.payForm.payment_method)) {
+                this.payErrors.payment_method = 'Please select a valid payment method.';
+                ok = false;
+            }
+            if (!this.payForm.bank_account_id) {
+                this.payErrors.bank_account_id = 'Please select a bank account.';
+                ok = false;
+            }
+            if (this.payForm.payment_method === 'check' && (!this.payForm.check_number || String(this.payForm.check_number).trim() === '')) {
+                this.payErrors.check_number = 'Check number is required for check payments.';
+                ok = false;
+            }
+            return ok;
+        },
+
+        cancelEditModal() {
+            this.showModal = false;
+            this._clearSaveErrors();
+        },
+        cancelPayModal() {
+            this.showPayModal = false;
+            this._clearErrors(this.payErrors, 'payFormError');
         },
 
         async load() {
@@ -462,7 +668,8 @@ function billsPage() {
                 due_date: '', vendor_bill_number: '', notes: '',
                 lines: [this.newLine()],
             };
-            this.saveError = '';
+            this.lineErrors = [this._emptyLineErr()];
+            this._clearSaveErrors();
             this.showModal = true;
         },
 
@@ -471,8 +678,14 @@ function billsPage() {
                      tax_gst_amount: '0.00', tax_pst_amount: '0.00', amount: '0.00',
                      is_auto_categorized: false };
         },
-        addLine() { this.form.lines.push(this.newLine()); },
-        removeLine(i) { if (this.form.lines.length > 1) this.form.lines.splice(i, 1); this.calcTotals(); },
+        addLine() { this.form.lines.push(this.newLine()); this._syncLineErrors(); },
+        removeLine(i) {
+            if (this.form.lines.length > 1) {
+                this.form.lines.splice(i, 1);
+                this.lineErrors.splice(i, 1);
+            }
+            this.calcTotals();
+        },
 
         calcLineAmt(i) {
             const l = this.form.lines[i];
@@ -505,7 +718,8 @@ function billsPage() {
         onVendorChange() { /* Could auto-set due date from vendor terms */ },
 
         async saveBill(autoApprove) {
-            this.saving = true; this.saveError = '';
+            if (!this.validateBill()) return;
+            this.saving = true;
             try {
                 const fd = new FormData();
                 fd.append('vendor_id', this.form.vendor_id);
@@ -519,9 +733,14 @@ function billsPage() {
                 if (this.form.id) { fd.append('id', this.form.id); fd.append('updated_at', this.form.updated_at || ''); }
                 const r = await fetch(FF_Api.url(url), {method: 'POST', body: fd, headers: this._csrfHeaders()});
                 const j = await r.json();
-                if (j.success) { this.showModal = false; this.load(); }
-                else this.saveError = j.error?.message || j.message || 'Save failed.';
-            } catch (e) { this.saveError = e.message; }
+                if (j.success) {
+                    this.showModal = false;
+                    this._clearSaveErrors();
+                    this.load();
+                } else {
+                    this._paintSaveServerErrors(j, 'Failed to save bill.');
+                }
+            } catch (e) { this.saveFormError = 'Network error. Please try again.'; }
             this.saving = false;
         },
 
@@ -564,12 +783,13 @@ function billsPage() {
                 bank_account_id: '<?= (int)($bankAccounts[0]['id'] ?? 1) ?>',
                 check_number: '', reference_number: '',
             };
-            this.payError = '';
+            this._clearErrors(this.payErrors, 'payFormError');
             this.showPayModal = true;
         },
 
         async submitPay() {
-            this.payProcessing = true; this.payError = '';
+            if (!this.validatePay()) return;
+            this.payProcessing = true;
             try {
                 const fd = new FormData();
                 fd.append('vendor_id', this.payForm.vendor_id);
@@ -580,9 +800,14 @@ function billsPage() {
                 fd.append('allocations', JSON.stringify([{bill_id: this.payForm.bill_id, amount_applied: this.payForm.amount}]));
                 const r = await fetch(FF_Api.url('/api/v1/accounting/ap-payments/create.php'), {method: 'POST', body: fd, headers: this._csrfHeaders()});
                 const j = await r.json();
-                if (j.success) { this.showPayModal = false; this.load(); }
-                else this.payError = j.error?.message || 'Payment failed.';
-            } catch (e) { this.payError = e.message; }
+                if (j.success) {
+                    this.showPayModal = false;
+                    this._clearErrors(this.payErrors, 'payFormError');
+                    this.load();
+                } else {
+                    this._paintErrors(this.payErrors, 'payFormError', j, 'Payment failed.');
+                }
+            } catch (e) { this.payFormError = 'Network error. Please try again.'; }
             this.payProcessing = false;
         },
 

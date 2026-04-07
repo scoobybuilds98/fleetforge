@@ -25,12 +25,24 @@ require_permission('journal_entries', 'create');
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
-$writeoffId     = clean_int($_POST['writeoff_id'] ?? null);
-$recoveredAmt   = clean_decimal($_POST['recovered_amount'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$writeoffId)   json_error('VALIDATION_ERROR', 'writeoff_id is required.', 422);
-if (!$recoveredAmt || bccomp($recoveredAmt, '0', 2) <= 0) {
-    json_error('VALIDATION_ERROR', 'recovered_amount must be greater than zero.', 422);
+$fields = [];
+
+$writeoffId   = clean_int($input['writeoff_id'] ?? null);
+$recoveredAmt = clean_decimal($input['recovered_amount'] ?? null);
+
+if (!$writeoffId) $fields['writeoff_id'] = 'Please select a write-off record.';
+if ($recoveredAmt === null || $recoveredAmt === '') {
+    $fields['recovered_amount'] = 'Recovery amount is required.';
+} elseif (bccomp($recoveredAmt, '0', 2) <= 0) {
+    $fields['recovered_amount'] = 'Recovery amount must be greater than zero.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $result = db_transaction(function () use ($writeoffId, $recoveredAmt) {
@@ -41,15 +53,24 @@ $result = db_transaction(function () use ($writeoffId, $recoveredAmt) {
          WHERE bw.id = ? FOR UPDATE",
         [$writeoffId]
     );
-    if (!$writeoff) json_error('NOT_FOUND', 'Write-off record not found.', 404);
+    if (!$writeoff) {
+        json_error('NOT_FOUND', 'Write-off record not found.', 404, [
+            'fields' => ['writeoff_id' => 'Write-off record not found.'],
+        ]);
+    }
 
     if ($writeoff['recovered']) {
-        json_error('IMMUTABLE_RECORD', 'This write-off has already been recovered.', 422);
+        json_error('IMMUTABLE_RECORD',
+            'This write-off has already been recovered.', 422,
+            ['fields' => ['writeoff_id' => 'This write-off has already been recovered.']]);
     }
 
     // Cannot recover more than original write-off amount
     if (bccomp($recoveredAmt, (string)$writeoff['amount'], 2) > 0) {
-        json_error('VALIDATION_ERROR', "Recovery amount cannot exceed original write-off amount ({$writeoff['amount']}).", 422);
+        json_validation_error(
+            ['recovered_amount' => "Recovery amount cannot exceed original write-off amount (\${$writeoff['amount']})."],
+            "Recovery amount cannot exceed original write-off amount (\${$writeoff['amount']})."
+        );
     }
 
     // Post reversal JE: DR 1030 AR / CR 6160 Bad Debt Expense

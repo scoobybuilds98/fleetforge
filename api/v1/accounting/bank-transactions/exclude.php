@@ -21,18 +21,36 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'edit');
 
-$id = clean_int($_POST['id'] ?? null);
-$exclude = clean_int($_POST['exclude'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
-if ($exclude === null || !in_array($exclude, [0, 1])) {
-    json_error('VALIDATION_ERROR', 'exclude must be 0 or 1.', 422);
+$fields = [];
+
+$id = clean_int($input['id'] ?? null);
+$rawExclude = $input['exclude'] ?? null;
+$exclude = $rawExclude === null ? null : (int) $rawExclude;
+
+if (!$id) $fields['id'] = 'Transaction ID is required.';
+if ($exclude === null || !in_array($exclude, [0, 1], true)) {
+    $fields['exclude'] = 'Exclude flag must be 0 or 1.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $txn = db_row("SELECT * FROM acc_bank_transactions WHERE id = ?", [$id]);
-if (!$txn) json_error('NOT_FOUND', 'Bank transaction not found.', 404);
+if (!$txn) {
+    json_error('NOT_FOUND', 'Bank transaction not found.', 404, [
+        'fields' => ['id' => 'Bank transaction not found.'],
+    ]);
+}
 if ($txn['is_cleared']) {
-    json_error('VALIDATION_ERROR', 'Cannot exclude a cleared/reconciled transaction.', 422);
+    json_validation_error(
+        ['id' => 'Cannot exclude a cleared/reconciled transaction.'],
+        'Cannot exclude a cleared/reconciled transaction.'
+    );
 }
 
 $userId = current_user_id();

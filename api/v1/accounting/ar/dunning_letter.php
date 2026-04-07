@@ -23,21 +23,32 @@ require_method('POST');
 require_auth_api();
 require_permission('journal_entries', 'create');
 
-$customerId = clean_int($_POST['customer_id'] ?? null);
-$letterType = clean_string($_POST['letter_type'] ?? null);
-$sentMethod = clean_string($_POST['sent_method'] ?? null) ?? 'email';
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$customerId) json_error('VALIDATION_ERROR', 'customer_id is required.', 422);
-if (!$letterType) json_error('VALIDATION_ERROR', 'letter_type is required.', 422);
+$fields = [];
+
+$customerId = clean_int($input['customer_id'] ?? null);
+$letterType = clean_string($input['letter_type'] ?? null);
+$sentMethod = clean_string($input['sent_method'] ?? null) ?? 'email';
+
+if (!$customerId) $fields['customer_id'] = 'Please select a customer.';
 
 $validTypes = ['reminder_30', 'reminder_60', 'warning_90', 'final_notice'];
-if (!in_array($letterType, $validTypes, true)) {
-    json_error('VALIDATION_ERROR', 'letter_type must be one of: ' . implode(', ', $validTypes), 422);
+if (!$letterType) {
+    $fields['letter_type'] = 'Please select a letter type.';
+} elseif (!in_array($letterType, $validTypes, true)) {
+    $fields['letter_type'] = 'Letter type must be one of: ' . implode(', ', $validTypes) . '.';
 }
 
 $validMethods = ['email', 'mail', 'both'];
 if (!in_array($sentMethod, $validMethods, true)) {
-    json_error('VALIDATION_ERROR', 'sent_method must be one of: ' . implode(', ', $validMethods), 422);
+    $fields['sent_method'] = 'Delivery method must be email, mail, or both.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // Fetch customer
@@ -47,7 +58,11 @@ $customer = db_row(
      FROM customers WHERE id = ? AND deleted_at IS NULL",
     [$customerId]
 );
-if (!$customer) json_error('NOT_FOUND', 'Customer not found.', 404);
+if (!$customer) {
+    json_error('NOT_FOUND', 'Customer not found.', 404, [
+        'fields' => ['customer_id' => 'Customer not found.'],
+    ]);
+}
 
 // Fetch overdue invoices
 $overdueInvoices = db_select(
@@ -62,7 +77,10 @@ $overdueInvoices = db_select(
 );
 
 if (count($overdueInvoices) === 0) {
-    json_error('VALIDATION_ERROR', 'No overdue invoices found for this customer.', 422);
+    json_validation_error(
+        ['customer_id' => 'No overdue invoices found for this customer.'],
+        'No overdue invoices found for this customer.'
+    );
 }
 
 $totalOverdue = '0.00';

@@ -211,62 +211,72 @@ require_once FF_ROOT . '/includes/header.php';
     <div x-show="showAccountModal" x-cloak class="modal-backdrop" @click.self="showAccountModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
         <div class="card" style="width:560px;max-height:90vh;overflow-y:auto;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;" x-text="editingAccount ? 'Edit Bank Account' : 'Add Bank Account'"></h3>
+            <div class="form-error-banner" x-show="accountFormError" x-cloak x-text="accountFormError" style="margin-bottom:12px;"></div>
             <div style="display:grid;gap:12px;">
                 <div>
                     <label class="form-label">Account Name *</label>
-                    <input type="text" class="form-input" x-model="accountForm.name" maxlength="255">
+                    <input type="text" class="form-input" :class="accountErrors.name ? 'is-invalid' : ''" x-model="accountForm.name" @input="accountErrors.name = ''" maxlength="255">
+                    <div class="field-error" x-show="accountErrors.name" x-cloak x-text="accountErrors.name"></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Institution</label>
-                        <input type="text" class="form-input" x-model="accountForm.institution" maxlength="255">
+                        <input type="text" class="form-input" :class="accountErrors.institution ? 'is-invalid' : ''" x-model="accountForm.institution" @input="accountErrors.institution = ''" maxlength="255">
+                        <div class="field-error" x-show="accountErrors.institution" x-cloak x-text="accountErrors.institution"></div>
                     </div>
                     <div>
                         <label class="form-label">Account Type *</label>
-                        <select class="form-select" x-model="accountForm.account_type">
+                        <select class="form-select" :class="accountErrors.account_type ? 'is-invalid' : ''" x-model="accountForm.account_type" @change="accountErrors.account_type = ''">
                             <option value="checking">Checking</option>
                             <option value="savings">Savings</option>
                             <option value="line_of_credit">Line of Credit</option>
                             <option value="credit_card">Credit Card</option>
                         </select>
+                        <div class="field-error" x-show="accountErrors.account_type" x-cloak x-text="accountErrors.account_type"></div>
                     </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Last 4 Digits</label>
-                        <input type="text" class="form-input" x-model="accountForm.account_number_last4" maxlength="4" placeholder="0000">
+                        <input type="text" class="form-input" :class="accountErrors.account_number_last4 ? 'is-invalid' : ''" x-model="accountForm.account_number_last4" @input="accountErrors.account_number_last4 = ''" maxlength="4" placeholder="0000">
+                        <div class="field-error" x-show="accountErrors.account_number_last4" x-cloak x-text="accountErrors.account_number_last4"></div>
                     </div>
                     <div>
                         <label class="form-label">Routing Number</label>
-                        <input type="text" class="form-input" x-model="accountForm.routing_number" maxlength="20">
+                        <input type="text" class="form-input" :class="accountErrors.routing_number ? 'is-invalid' : ''" x-model="accountForm.routing_number" @input="accountErrors.routing_number = ''" maxlength="20">
+                        <div class="field-error" x-show="accountErrors.routing_number" x-cloak x-text="accountErrors.routing_number"></div>
                     </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Currency *</label>
-                        <select class="form-select" x-model="accountForm.currency">
+                        <select class="form-select" :class="accountErrors.currency ? 'is-invalid' : ''" x-model="accountForm.currency" @change="accountErrors.currency = ''">
                             <option value="CAD">CAD</option>
                             <option value="USD">USD</option>
                         </select>
+                        <div class="field-error" x-show="accountErrors.currency" x-cloak x-text="accountErrors.currency"></div>
                     </div>
                     <div>
                         <label class="form-label">GL Cash Account *</label>
-                        <select class="form-select" x-model="accountForm.gl_account_id">
+                        <select class="form-select" :class="accountErrors.gl_account_id ? 'is-invalid' : ''" x-model="accountForm.gl_account_id" @change="accountErrors.gl_account_id = ''">
                             <option value="">Select...</option>
                             <?php foreach ($glAccounts as $ga): ?>
                             <option value="<?= $ga['id'] ?>"><?= e($ga['code']) ?> — <?= e($ga['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="field-error" x-show="accountErrors.gl_account_id" x-cloak x-text="accountErrors.gl_account_id"></div>
                     </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Opening Balance</label>
-                        <input type="text" class="form-input font-mono" x-model="accountForm.opening_balance" placeholder="0.00">
+                        <input type="text" class="form-input font-mono" :class="accountErrors.opening_balance ? 'is-invalid' : ''" x-model="accountForm.opening_balance" @input="accountErrors.opening_balance = ''" placeholder="0.00">
+                        <div class="field-error" x-show="accountErrors.opening_balance" x-cloak x-text="accountErrors.opening_balance"></div>
                     </div>
                     <div>
                         <label class="form-label">Opening Date</label>
-                        <input type="date" class="form-input" x-model="accountForm.opening_balance_date">
+                        <input type="date" class="form-input" :class="accountErrors.opening_balance_date ? 'is-invalid' : ''" x-model="accountForm.opening_balance_date" @change="accountErrors.opening_balance_date = ''">
+                        <div class="field-error" x-show="accountErrors.opening_balance_date" x-cloak x-text="accountErrors.opening_balance_date"></div>
                     </div>
                 </div>
                 <div>
@@ -295,22 +305,25 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- Step 1: Upload -->
             <template x-if="importStep === 1">
                 <div style="display:grid;gap:12px;">
+                    <div class="form-error-banner" x-show="importFormError" x-cloak x-text="importFormError"></div>
                     <div>
                         <label class="form-label">Bank Account *</label>
-                        <select class="form-select" x-model="importForm.bank_account_id">
+                        <select class="form-select" :class="importErrors.bank_account_id ? 'is-invalid' : ''" x-model="importForm.bank_account_id" @change="importErrors.bank_account_id = ''">
                             <option value="">Select account...</option>
                             <template x-for="a in accounts.filter(x=>x.is_active)" :key="a.id">
                                 <option :value="a.id" x-text="a.name + ' (' + a.currency + ')'"></option>
                             </template>
                         </select>
+                        <div class="field-error" x-show="importErrors.bank_account_id" x-cloak x-text="importErrors.bank_account_id"></div>
                     </div>
                     <div>
                         <label class="form-label">CSV File *</label>
-                        <input type="file" class="form-input" accept=".csv" @change="importForm.file = $event.target.files[0]">
+                        <input type="file" class="form-input" :class="importErrors.csv_file ? 'is-invalid' : ''" accept=".csv" @change="importForm.file = $event.target.files[0]; importErrors.csv_file = ''">
+                        <div class="field-error" x-show="importErrors.csv_file" x-cloak x-text="importErrors.csv_file"></div>
                     </div>
                     <div>
                         <label class="form-label">Bank Format (auto-detected if blank)</label>
-                        <select class="form-select" x-model="importForm.format">
+                        <select class="form-select" :class="importErrors.format ? 'is-invalid' : ''" x-model="importForm.format" @change="importErrors.format = ''">
                             <option value="">Auto-detect</option>
                             <option value="rbc">RBC Royal Bank</option>
                             <option value="td">TD Canada Trust</option>
@@ -318,6 +331,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="scotiabank">Scotiabank</option>
                             <option value="cibc">CIBC</option>
                         </select>
+                        <div class="field-error" x-show="importErrors.format" x-cloak x-text="importErrors.format"></div>
                     </div>
                     <div style="display:flex;justify-content:flex-end;gap:8px;">
                         <button class="btn btn-secondary btn-sm" @click="showImportModal=false">Cancel</button>
@@ -416,31 +430,36 @@ require_once FF_ROOT . '/includes/header.php';
     <div x-show="showManualTxnModal" x-cloak class="modal-backdrop" @click.self="showManualTxnModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
         <div class="card" style="width:480px;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;">Manual Bank Transaction</h3>
+            <div class="form-error-banner" x-show="manualTxnFormError" x-cloak x-text="manualTxnFormError" style="margin-bottom:12px;"></div>
             <div style="display:grid;gap:12px;">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Date *</label>
-                        <input type="date" class="form-input" x-model="manualTxnForm.transaction_date">
+                        <input type="date" class="form-input" :class="manualTxnErrors.transaction_date ? 'is-invalid' : ''" x-model="manualTxnForm.transaction_date" @change="manualTxnErrors.transaction_date = ''">
+                        <div class="field-error" x-show="manualTxnErrors.transaction_date" x-cloak x-text="manualTxnErrors.transaction_date"></div>
                     </div>
                     <div>
                         <label class="form-label">Type *</label>
-                        <select class="form-select" x-model="manualTxnForm.transaction_type">
+                        <select class="form-select" :class="manualTxnErrors.transaction_type ? 'is-invalid' : ''" x-model="manualTxnForm.transaction_type" @change="manualTxnErrors.transaction_type = ''">
                             <option value="deposit">Deposit</option>
                             <option value="withdrawal">Withdrawal</option>
                             <option value="bank_charge">Bank Charge</option>
                             <option value="interest">Interest</option>
                             <option value="other">Other</option>
                         </select>
+                        <div class="field-error" x-show="manualTxnErrors.transaction_type" x-cloak x-text="manualTxnErrors.transaction_type"></div>
                     </div>
                 </div>
                 <div>
                     <label class="form-label">Description *</label>
-                    <input type="text" class="form-input" x-model="manualTxnForm.description" maxlength="500">
+                    <input type="text" class="form-input" :class="manualTxnErrors.description ? 'is-invalid' : ''" x-model="manualTxnForm.description" @input="manualTxnErrors.description = ''" maxlength="500">
+                    <div class="field-error" x-show="manualTxnErrors.description" x-cloak x-text="manualTxnErrors.description"></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Amount *</label>
-                        <input type="text" class="form-input font-mono" x-model="manualTxnForm.amount" placeholder="0.00">
+                        <input type="text" class="form-input font-mono" :class="manualTxnErrors.amount ? 'is-invalid' : ''" x-model="manualTxnForm.amount" @input="manualTxnErrors.amount = ''" placeholder="0.00">
+                        <div class="field-error" x-show="manualTxnErrors.amount" x-cloak x-text="manualTxnErrors.amount"></div>
                     </div>
                     <div>
                         <label class="form-label">Reference</label>
@@ -468,39 +487,45 @@ require_once FF_ROOT . '/includes/header.php';
     <div x-show="showTransferModal" x-cloak class="modal-backdrop" @click.self="showTransferModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
         <div class="card" style="width:480px;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;">Transfer Between Accounts</h3>
+            <div class="form-error-banner" x-show="transferFormError" x-cloak x-text="transferFormError" style="margin-bottom:12px;"></div>
             <div style="display:grid;gap:12px;">
                 <div>
                     <label class="form-label">From Account *</label>
-                    <select class="form-select" x-model="transferForm.from_account_id">
+                    <select class="form-select" :class="transferErrors.from_account_id ? 'is-invalid' : ''" x-model="transferForm.from_account_id" @change="transferErrors.from_account_id = ''">
                         <option value="">Select...</option>
                         <template x-for="a in accounts.filter(x=>x.is_active)" :key="a.id">
                             <option :value="a.id" x-text="a.name + ' (' + a.currency + ')'"></option>
                         </template>
                     </select>
+                    <div class="field-error" x-show="transferErrors.from_account_id" x-cloak x-text="transferErrors.from_account_id"></div>
                 </div>
                 <div>
                     <label class="form-label">To Account *</label>
-                    <select class="form-select" x-model="transferForm.to_account_id">
+                    <select class="form-select" :class="transferErrors.to_account_id ? 'is-invalid' : ''" x-model="transferForm.to_account_id" @change="transferErrors.to_account_id = ''">
                         <option value="">Select...</option>
                         <template x-for="a in accounts.filter(x=>x.is_active)" :key="a.id">
                             <option :value="a.id" x-text="a.name + ' (' + a.currency + ')'"></option>
                         </template>
                     </select>
+                    <div class="field-error" x-show="transferErrors.to_account_id" x-cloak x-text="transferErrors.to_account_id"></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Amount From *</label>
-                        <input type="text" class="form-input font-mono" x-model="transferForm.from_amount" placeholder="0.00">
+                        <input type="text" class="form-input font-mono" :class="transferErrors.from_amount ? 'is-invalid' : ''" x-model="transferForm.from_amount" @input="transferErrors.from_amount = ''" placeholder="0.00">
+                        <div class="field-error" x-show="transferErrors.from_amount" x-cloak x-text="transferErrors.from_amount"></div>
                     </div>
                     <div>
                         <label class="form-label">Amount To</label>
-                        <input type="text" class="form-input font-mono" x-model="transferForm.to_amount" placeholder="Same if same currency">
+                        <input type="text" class="form-input font-mono" :class="transferErrors.to_amount ? 'is-invalid' : ''" x-model="transferForm.to_amount" @input="transferErrors.to_amount = ''" placeholder="Same if same currency">
+                        <div class="field-error" x-show="transferErrors.to_amount" x-cloak x-text="transferErrors.to_amount"></div>
                     </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <label class="form-label">Transfer Date *</label>
-                        <input type="date" class="form-input" x-model="transferForm.transfer_date">
+                        <input type="date" class="form-input" :class="transferErrors.transfer_date ? 'is-invalid' : ''" x-model="transferForm.transfer_date" @change="transferErrors.transfer_date = ''">
+                        <div class="field-error" x-show="transferErrors.transfer_date" x-cloak x-text="transferErrors.transfer_date"></div>
                     </div>
                     <div>
                         <label class="form-label">Reference</label>
@@ -522,14 +547,17 @@ require_once FF_ROOT . '/includes/header.php';
             <div style="padding:10px 14px;background:var(--badge-danger-bg);color:var(--badge-danger-text);border-radius:6px;font-size:0.8125rem;margin-bottom:16px;">
                 This will reverse the original payment, reopen associated invoices, and create a bank charge entry. This action cannot be undone.
             </div>
+            <div class="form-error-banner" x-show="nsfFormError" x-cloak x-text="nsfFormError" style="margin-bottom:12px;"></div>
             <div style="display:grid;gap:12px;">
                 <div>
                     <label class="form-label">Payment ID *</label>
-                    <input type="number" class="form-input" x-model="nsfForm.payment_id" placeholder="Enter payment ID">
+                    <input type="number" class="form-input" :class="nsfErrors.payment_id ? 'is-invalid' : ''" x-model="nsfForm.payment_id" @input="nsfErrors.payment_id = ''" placeholder="Enter payment ID">
+                    <div class="field-error" x-show="nsfErrors.payment_id" x-cloak x-text="nsfErrors.payment_id"></div>
                 </div>
                 <div>
                     <label class="form-label">NSF Fee (charged to customer)</label>
-                    <input type="text" class="form-input font-mono" x-model="nsfForm.nsf_fee" placeholder="0.00">
+                    <input type="text" class="form-input font-mono" :class="nsfErrors.nsf_fee ? 'is-invalid' : ''" x-model="nsfForm.nsf_fee" @input="nsfErrors.nsf_fee = ''" placeholder="0.00">
+                    <div class="field-error" x-show="nsfErrors.nsf_fee" x-cloak x-text="nsfErrors.nsf_fee"></div>
                 </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
@@ -575,6 +603,53 @@ function bankAccountsPage() {
         manualTxnForm: { transaction_date: new Date().toISOString().slice(0,10), description: '', amount: '', transaction_type: 'bank_charge', reference: '', expense_account_id: '' },
         transferForm: { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: new Date().toISOString().slice(0,10), reference: '' },
         nsfForm: { payment_id: '', nsf_fee: '0.00' },
+
+        // Per-form error state
+        accountFormError: '',
+        accountErrors: { name: '', institution: '', account_type: '', account_number_last4: '', routing_number: '', currency: '', gl_account_id: '', opening_balance: '', opening_balance_date: '' },
+        importFormError: '',
+        importErrors: { bank_account_id: '', csv_file: '', format: '' },
+        manualTxnFormError: '',
+        manualTxnErrors: { transaction_date: '', transaction_type: '', description: '', amount: '' },
+        transferFormError: '',
+        transferErrors: { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: '' },
+        nsfFormError: '',
+        nsfErrors: { payment_id: '', nsf_fee: '' },
+
+        // -- Helper: extract message from API response --------------
+        _extractError(r, fallback) {
+            if (!r) return fallback || 'An unexpected error occurred.';
+            if (r.error && r.error.message) return r.error.message;
+            if (r.message) return r.message;
+            return fallback || 'An unexpected error occurred.';
+        },
+
+        // -- Helper: paint server-side field errors ------------------
+        _paintErrors(errorsObj, bannerKey, r, fallback) {
+            const err = r && r.error ? r.error : r;
+            const fields = (err && err.fields) || (r && r.fields) || {};
+            for (const k in errorsObj) errorsObj[k] = '';
+            let painted = false;
+            for (const k in fields) {
+                if (k === '_general') continue;
+                if (k in errorsObj) {
+                    errorsObj[k] = fields[k];
+                    painted = true;
+                }
+            }
+            if (fields._general) {
+                this[bannerKey] = fields._general;
+            } else if (!painted) {
+                this[bannerKey] = this._extractError(r, fallback);
+            } else {
+                this[bannerKey] = this._extractError(r, 'Please correct the highlighted fields.');
+            }
+        },
+
+        _clearErrors(errorsObj, bannerKey) {
+            for (const k in errorsObj) errorsObj[k] = '';
+            this[bannerKey] = '';
+        },
 
         _csrfHeaders() {
             return {
@@ -651,11 +726,52 @@ function bankAccountsPage() {
         openAccountModal(account = null) {
             this.editingAccount = account;
             this.accountForm = account ? {...account, is_default: account.is_default ? 1 : 0} : this._emptyAccountForm();
+            this._clearErrors(this.accountErrors, 'accountFormError');
             this.showAccountModal = true;
         },
 
+        validateAccount() {
+            this._clearErrors(this.accountErrors, 'accountFormError');
+            let ok = true;
+            if (!this.accountForm.name || !this.accountForm.name.trim()) {
+                this.accountErrors.name = 'Account name is required.';
+                ok = false;
+            }
+            const validTypes = ['checking', 'savings', 'line_of_credit', 'credit_card'];
+            if (!this.accountForm.account_type || !validTypes.includes(this.accountForm.account_type)) {
+                this.accountErrors.account_type = 'Account type must be one of: checking, savings, line_of_credit, credit_card.';
+                ok = false;
+            }
+            if (this.accountForm.account_number_last4 && !/^\d{1,4}$/.test(this.accountForm.account_number_last4)) {
+                this.accountErrors.account_number_last4 = 'Last 4 digits must be numeric (up to 4 digits).';
+                ok = false;
+            }
+            if (this.accountForm.currency !== 'CAD' && this.accountForm.currency !== 'USD') {
+                this.accountErrors.currency = 'Currency must be CAD or USD.';
+                ok = false;
+            }
+            if (!this.accountForm.gl_account_id) {
+                this.accountErrors.gl_account_id = 'Please select a GL cash account.';
+                ok = false;
+            }
+            const ob = String(this.accountForm.opening_balance || '0.00').trim();
+            if (ob && !/^-?\d+(\.\d{1,2})?$/.test(ob)) {
+                this.accountErrors.opening_balance = 'Opening balance must be a valid amount.';
+                ok = false;
+            } else if (ob && parseFloat(ob) !== 0 && !this.accountForm.opening_balance_date) {
+                this.accountErrors.opening_balance_date = 'Opening date is required when opening balance is non-zero.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async saveAccount() {
+            if (!this.validateAccount()) {
+                this.accountFormError = 'Please correct the highlighted fields.';
+                return;
+            }
             this.saving = true;
+            this.accountFormError = '';
             const fd = new FormData();
             for (const [k,v] of Object.entries(this.accountForm)) {
                 if (v !== null && v !== undefined) fd.append(k, v);
@@ -672,9 +788,11 @@ function bankAccountsPage() {
                     window.FleetForge?.toast?.('success', this.editingAccount ? 'Account updated' : 'Account created');
                     this.load();
                 } else {
-                    window.FleetForge?.toast?.('error', j.error?.message || 'Save failed');
+                    this._paintErrors(this.accountErrors, 'accountFormError', j, 'Failed to save account.');
                 }
-            } catch (e) { window.FleetForge?.toast?.('error', 'Network error'); }
+            } catch (e) {
+                this.accountFormError = 'Network error. Please try again.';
+            }
             this.saving = false;
         },
 
@@ -702,8 +820,18 @@ function bankAccountsPage() {
         },
 
         async uploadCsv() {
-            if (!this.importForm.bank_account_id || !this.importForm.file) {
-                window.FleetForge?.toast?.('error', 'Select a bank account and CSV file.');
+            this._clearErrors(this.importErrors, 'importFormError');
+            let ok = true;
+            if (!this.importForm.bank_account_id) {
+                this.importErrors.bank_account_id = 'Please select a bank account.';
+                ok = false;
+            }
+            if (!this.importForm.file) {
+                this.importErrors.csv_file = 'Please choose a CSV file to upload.';
+                ok = false;
+            }
+            if (!ok) {
+                this.importFormError = 'Please correct the highlighted fields.';
                 return;
             }
             this.importing = true;
@@ -719,9 +847,11 @@ function bankAccountsPage() {
                     this.importSelected = (j.data.transactions || []).filter(t => !t.is_duplicate).map(t => t.row_number);
                     this.importStep = 2;
                 } else {
-                    window.FleetForge?.toast?.('error', j.error?.message || 'Upload failed');
+                    this._paintErrors(this.importErrors, 'importFormError', j, 'Upload failed.');
                 }
-            } catch (e) { window.FleetForge?.toast?.('error', 'Upload failed'); }
+            } catch (e) {
+                this.importFormError = 'Network error. Please try again.';
+            }
             this.importing = false;
         },
 
@@ -748,9 +878,47 @@ function bankAccountsPage() {
             this.importing = false;
         },
 
+        validateManualTxn() {
+            this._clearErrors(this.manualTxnErrors, 'manualTxnFormError');
+            let ok = true;
+            if (!this.manualTxnForm.transaction_date) {
+                this.manualTxnErrors.transaction_date = 'Transaction date is required.';
+                ok = false;
+            }
+            const validTypes = ['deposit', 'withdrawal', 'bank_charge', 'interest', 'other'];
+            if (!this.manualTxnForm.transaction_type || !validTypes.includes(this.manualTxnForm.transaction_type)) {
+                this.manualTxnErrors.transaction_type = 'Transaction type must be one of: deposit, withdrawal, bank_charge, interest, other.';
+                ok = false;
+            }
+            if (!this.manualTxnForm.description || !this.manualTxnForm.description.trim()) {
+                this.manualTxnErrors.description = 'Description is required.';
+                ok = false;
+            }
+            const amt = String(this.manualTxnForm.amount || '').trim();
+            if (!amt) {
+                this.manualTxnErrors.amount = 'Amount is required.';
+                ok = false;
+            } else if (!/^-?\d+(\.\d{1,2})?$/.test(amt)) {
+                this.manualTxnErrors.amount = 'Amount must be a valid number.';
+                ok = false;
+            } else if (parseFloat(amt) === 0) {
+                this.manualTxnErrors.amount = 'Amount cannot be zero.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async saveManualTxn() {
-            if (!this.selectedAccount) { window.FleetForge?.toast?.('error', 'Select a bank account first.'); return; }
+            if (!this.selectedAccount) {
+                this.manualTxnFormError = 'Select a bank account first.';
+                return;
+            }
+            if (!this.validateManualTxn()) {
+                this.manualTxnFormError = 'Please correct the highlighted fields.';
+                return;
+            }
             this.saving = true;
+            this.manualTxnFormError = '';
             const fd = new FormData();
             fd.append('bank_account_id', this.selectedAccount.id);
             for (const [k,v] of Object.entries(this.manualTxnForm)) {
@@ -764,19 +932,69 @@ function bankAccountsPage() {
                     window.FleetForge?.toast?.('success', 'Transaction created');
                     this.loadTransactions();
                 } else {
-                    window.FleetForge?.toast?.('error', j.error?.message || 'Failed');
+                    this._paintErrors(this.manualTxnErrors, 'manualTxnFormError', j, 'Failed to save transaction.');
                 }
-            } catch (e) { window.FleetForge?.toast?.('error', 'Network error'); }
+            } catch (e) {
+                this.manualTxnFormError = 'Network error. Please try again.';
+            }
             this.saving = false;
         },
 
         openTransferModal() {
             this.transferForm = { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: new Date().toISOString().slice(0,10), reference: '' };
+            this._clearErrors(this.transferErrors, 'transferFormError');
             this.showTransferModal = true;
         },
 
+        validateTransfer() {
+            this._clearErrors(this.transferErrors, 'transferFormError');
+            let ok = true;
+            if (!this.transferForm.from_account_id) {
+                this.transferErrors.from_account_id = 'Please select the source account.';
+                ok = false;
+            }
+            if (!this.transferForm.to_account_id) {
+                this.transferErrors.to_account_id = 'Please select the destination account.';
+                ok = false;
+            }
+            if (this.transferForm.from_account_id && this.transferForm.to_account_id
+                && this.transferForm.from_account_id === this.transferForm.to_account_id) {
+                this.transferErrors.to_account_id = 'Source and destination must be different.';
+                ok = false;
+            }
+            const fa = String(this.transferForm.from_amount || '').trim();
+            if (!fa) {
+                this.transferErrors.from_amount = 'Amount from is required.';
+                ok = false;
+            } else if (!/^\d+(\.\d{1,2})?$/.test(fa)) {
+                this.transferErrors.from_amount = 'Amount from must be a valid number.';
+                ok = false;
+            } else if (parseFloat(fa) <= 0) {
+                this.transferErrors.from_amount = 'Amount from must be greater than zero.';
+                ok = false;
+            }
+            const ta = String(this.transferForm.to_amount || '').trim();
+            if (ta && !/^\d+(\.\d{1,2})?$/.test(ta)) {
+                this.transferErrors.to_amount = 'Amount to must be a valid number.';
+                ok = false;
+            } else if (ta && parseFloat(ta) <= 0) {
+                this.transferErrors.to_amount = 'Amount to must be greater than zero.';
+                ok = false;
+            }
+            if (!this.transferForm.transfer_date) {
+                this.transferErrors.transfer_date = 'Transfer date is required.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async saveTransfer() {
+            if (!this.validateTransfer()) {
+                this.transferFormError = 'Please correct the highlighted fields.';
+                return;
+            }
             this.saving = true;
+            this.transferFormError = '';
             const fd = new FormData();
             for (const [k,v] of Object.entries(this.transferForm)) {
                 if (v) fd.append(k, v);
@@ -789,16 +1007,44 @@ function bankAccountsPage() {
                     window.FleetForge?.toast?.('success', 'Transfer recorded');
                     this.load();
                 } else {
-                    window.FleetForge?.toast?.('error', j.error?.message || 'Transfer failed');
+                    this._paintErrors(this.transferErrors, 'transferFormError', j, 'Transfer failed.');
                 }
-            } catch (e) { window.FleetForge?.toast?.('error', 'Network error'); }
+            } catch (e) {
+                this.transferFormError = 'Network error. Please try again.';
+            }
             this.saving = false;
         },
 
+        validateNsf() {
+            this._clearErrors(this.nsfErrors, 'nsfFormError');
+            let ok = true;
+            if (!this.nsfForm.payment_id || parseInt(this.nsfForm.payment_id, 10) <= 0) {
+                this.nsfErrors.payment_id = 'Please select a payment.';
+                ok = false;
+            }
+            const fee = String(this.nsfForm.nsf_fee || '0.00').trim();
+            if (fee && !/^\d+(\.\d{1,2})?$/.test(fee)) {
+                this.nsfErrors.nsf_fee = 'NSF fee must be a valid amount.';
+                ok = false;
+            } else if (fee && parseFloat(fee) < 0) {
+                this.nsfErrors.nsf_fee = 'NSF fee cannot be negative.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async processNsf() {
-            if (!this.selectedAccount) { window.FleetForge?.toast?.('error', 'Select a bank account first.'); return; }
+            if (!this.selectedAccount) {
+                this.nsfFormError = 'Select a bank account first.';
+                return;
+            }
+            if (!this.validateNsf()) {
+                this.nsfFormError = 'Please correct the highlighted fields.';
+                return;
+            }
             if (!confirm('Are you sure you want to process this NSF? This will reverse the payment and reopen associated invoices.')) return;
             this.saving = true;
+            this.nsfFormError = '';
             const fd = new FormData();
             fd.append('payment_id', this.nsfForm.payment_id);
             fd.append('bank_account_id', this.selectedAccount.id);
@@ -812,9 +1058,11 @@ function bankAccountsPage() {
                     this.loadTransactions();
                     this.load();
                 } else {
-                    window.FleetForge?.toast?.('error', j.error?.message || 'NSF failed');
+                    this._paintErrors(this.nsfErrors, 'nsfFormError', j, 'NSF failed.');
                 }
-            } catch (e) { window.FleetForge?.toast?.('error', 'Network error'); }
+            } catch (e) {
+                this.nsfFormError = 'Network error. Please try again.';
+            }
             this.saving = false;
         },
     };

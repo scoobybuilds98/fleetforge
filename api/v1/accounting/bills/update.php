@@ -22,44 +22,73 @@ require_method('POST');
 require_auth_api();
 require_permission('accounts_payable', 'edit');
 
-$id = clean_int($_POST['id'] ?? null);
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
+// VALID-2: accept both JSON and form-encoded payloads.
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-$submittedUpdatedAt = clean_string($_POST['updated_at'] ?? null);
-if (!$submittedUpdatedAt) json_error('VALIDATION_ERROR', 'updated_at is required for optimistic lock.', 422);
+// ── Phase 1: header validation accumulator ──
+$fields = [];
+
+$id = clean_int($input['id'] ?? null);
+if (!$id) {
+    $fields['id'] = 'Bill ID is required.';
+}
+$submittedUpdatedAt = clean_string($input['updated_at'] ?? null);
+if (!$submittedUpdatedAt) {
+    $fields['updated_at'] = 'Optimistic lock token is required.';
+}
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $bill = db_row("SELECT * FROM acc_bills WHERE id = ?", [$id]);
-if (!$bill) json_error('NOT_FOUND', 'Bill not found.', 404);
+if (!$bill) {
+    json_validation_error(['id' => 'Bill not found.'], 'Bill not found.');
+}
 
 // WHY: Only draft bills can be edited — approved bills have posted JEs
 if ($bill['status'] !== 'draft') {
-    json_error('IMMUTABLE_RECORD', 'Only draft bills can be edited.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Only draft bills can be edited.', 422,
+        ['fields' => ['id' => "Cannot edit a bill in status '{$bill['status']}'."]]);
 }
 
 // D19 optimistic lock
 if ($bill['updated_at'] !== $submittedUpdatedAt) {
-    json_error('STALE_DATA', 'Record modified by another user. Refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This bill was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This bill was modified by another user. Refresh and try again.']]);
 }
 
-$vendorId        = clean_int($_POST['vendor_id'] ?? null) ?? (int)$bill['vendor_id'];
-$billDate        = clean_date($_POST['bill_date'] ?? null) ?? $bill['bill_date'];
-$dueDate         = clean_date($_POST['due_date'] ?? null) ?? $bill['due_date'];
-$vendorBillNum   = clean_string($_POST['vendor_bill_number'] ?? null);
-$workOrderId     = clean_int($_POST['work_order_id'] ?? null);
-$equipmentUnitId = clean_int($_POST['equipment_unit_id'] ?? null);
-$notes           = clean_string($_POST['notes'] ?? null, 2000);
+$vendorId        = clean_int($input['vendor_id'] ?? null) ?? (int)$bill['vendor_id'];
+$billDate        = clean_date($input['bill_date'] ?? null) ?? $bill['bill_date'];
+$dueDate         = clean_date($input['due_date'] ?? null) ?? $bill['due_date'];
+$vendorBillNum   = clean_string($input['vendor_bill_number'] ?? null);
+$workOrderId     = clean_int($input['work_order_id'] ?? null);
+$equipmentUnitId = clean_int($input['equipment_unit_id'] ?? null);
+$notes           = clean_string($input['notes'] ?? null, 2000);
+
+// Cross-field date check
+if ($billDate && $dueDate && strtotime($dueDate) < strtotime($billDate)) {
+    json_validation_error(['due_date' => 'Due date cannot be before the bill date.']);
+}
 
 // Validate vendor
 $vendor = db_row("SELECT id, name FROM vendors WHERE id = ? AND deleted_at IS NULL", [$vendorId]);
-if (!$vendor) json_error('NOT_FOUND', 'Vendor not found.', 404);
+if (!$vendor) {
+    json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
+}
 
 // Parse lines
-$rawLines = $_POST['lines'] ?? null;
+$rawLines = $input['lines'] ?? null;
 if (is_string($rawLines)) {
     $rawLines = json_decode($rawLines, true);
 }
 if (!is_array($rawLines) || count($rawLines) === 0) {
-    json_error('VALIDATION_ERROR', 'At least one line item is required.', 422);
+    json_validation_error(['lines' => 'At least one line item is required.']);
+}
+if (count($rawLines) > 50) {
+    json_validation_error(['lines' => 'Maximum 50 line items per bill.']);
 }
 
 // Validate lines and compute totals (bcmath only — D16)
@@ -68,21 +97,45 @@ $taxGst   = '0.00';
 $taxPst   = '0.00';
 $taxHst   = '0.00';
 $validatedLines = [];
+$lineErrors     = [];
 
 foreach ($rawLines as $i => $line) {
+    $lineNum     = $i + 1;
     $accountId   = clean_int($line['account_id'] ?? null);
     $description = clean_string($line['description'] ?? null, 500);
     $quantity    = clean_decimal($line['quantity'] ?? '1') ?? '1.0000';
     $unitCost    = clean_decimal($line['unit_cost'] ?? null);
 
-    if (!$accountId) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": account_id is required.", 422);
-    if (!$description) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": description is required.", 422);
-    if (!$unitCost) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": unit_cost is required.", 422);
+    $hasError = false;
+    if (!$accountId)   { $lineErrors[] = "Line {$lineNum}: please select a GL account."; $hasError = true; }
+    if (!$description) { $lineErrors[] = "Line {$lineNum}: description is required."; $hasError = true; }
+    if ($unitCost === null || $unitCost === '') {
+        $lineErrors[] = "Line {$lineNum}: unit cost is required.";
+        $hasError = true;
+    } elseif (bccomp($unitCost, '0', 2) < 0) {
+        $lineErrors[] = "Line {$lineNum}: unit cost cannot be negative.";
+        $hasError = true;
+    }
+    if ($quantity !== null && $quantity !== '' && bccomp($quantity, '0', 4) <= 0) {
+        $lineErrors[] = "Line {$lineNum}: quantity must be greater than zero.";
+        $hasError = true;
+    }
 
-    $account = db_row("SELECT id, is_header, is_active FROM acc_accounts WHERE id = ?", [$accountId]);
-    if (!$account) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": GL account not found.", 422);
-    if ($account['is_header']) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": cannot post to header account.", 422);
-    if (!$account['is_active']) json_error('VALIDATION_ERROR', "Line " . ($i + 1) . ": GL account is inactive.", 422);
+    if ($accountId) {
+        $account = db_row("SELECT id, is_header, is_active FROM acc_accounts WHERE id = ?", [$accountId]);
+        if (!$account) {
+            $lineErrors[] = "Line {$lineNum}: GL account not found.";
+            $hasError = true;
+        } elseif ($account['is_header']) {
+            $lineErrors[] = "Line {$lineNum}: cannot post to a header account.";
+            $hasError = true;
+        } elseif (!$account['is_active']) {
+            $lineErrors[] = "Line {$lineNum}: GL account is inactive.";
+            $hasError = true;
+        }
+    }
+
+    if ($hasError) continue;
 
     $lineAmount = bcmul($quantity, $unitCost, 2);
     $lineGst = clean_decimal($line['tax_gst_amount'] ?? '0') ?? '0.00';
@@ -90,6 +143,10 @@ foreach ($rawLines as $i => $line) {
     $lineHst = clean_decimal($line['tax_hst_amount'] ?? '0') ?? '0.00';
     $isItc = (int)($line['is_tax_input_credit'] ?? 1);
     $isAutoCategorized = (int)($line['is_auto_categorized'] ?? 0);
+
+    if (bccomp($lineGst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: GST cannot be negative."; continue; }
+    if (bccomp($linePst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: PST cannot be negative."; continue; }
+    if (bccomp($lineHst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: HST cannot be negative."; continue; }
 
     $subtotal = bcadd($subtotal, $lineAmount, 2);
     $taxGst = bcadd($taxGst, $lineGst, 2);
@@ -109,6 +166,10 @@ foreach ($rawLines as $i => $line) {
         'is_auto_categorized' => $isAutoCategorized,
         'sort_order'          => $i,
     ];
+}
+
+if ($lineErrors) {
+    json_validation_error(['lines' => implode(' ', $lineErrors)]);
 }
 
 $taxTotal = bcadd(bcadd($taxGst, $taxPst, 2), $taxHst, 2);

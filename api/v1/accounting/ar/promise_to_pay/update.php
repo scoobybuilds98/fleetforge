@@ -21,22 +21,39 @@ require_method('POST');
 require_auth_api();
 require_permission('journal_entries', 'edit');
 
-$id     = clean_int($_POST['id'] ?? null);
-$status = clean_string($_POST['status'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$id)     json_error('VALIDATION_ERROR', 'id is required.', 422);
-if (!$status) json_error('VALIDATION_ERROR', 'status is required.', 422);
+$fields = [];
+
+$id     = clean_int($input['id'] ?? null);
+$status = clean_string($input['status'] ?? null);
+
+if (!$id) $fields['id'] = 'Promise ID is required.';
 
 $validStatuses = ['kept', 'broken', 'cancelled'];
-if (!in_array($status, $validStatuses, true)) {
-    json_error('VALIDATION_ERROR', 'status must be one of: ' . implode(', ', $validStatuses), 422);
+if (!$status) {
+    $fields['status'] = 'Please select a status.';
+} elseif (!in_array($status, $validStatuses, true)) {
+    $fields['status'] = 'Status must be kept, broken, or cancelled.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $promise = db_row("SELECT * FROM acc_promise_to_pay WHERE id = ?", [$id]);
-if (!$promise) json_error('NOT_FOUND', 'Promise record not found.', 404);
+if (!$promise) {
+    json_error('NOT_FOUND', 'Promise record not found.', 404, [
+        'fields' => ['id' => 'Promise record not found.'],
+    ]);
+}
 
 if ($promise['status'] !== 'pending') {
-    json_error('INVALID_TRANSITION', "Cannot change status from '{$promise['status']}' — only pending promises can be updated.", 409);
+    json_error('INVALID_TRANSITION',
+        "Cannot change status from '{$promise['status']}' — only pending promises can be updated.", 409,
+        ['fields' => ['status' => "Cannot change status from '{$promise['status']}' — only pending promises can be updated."]]);
 }
 
 $updateData = [
@@ -44,10 +61,10 @@ $updateData = [
 ];
 
 if ($status === 'kept') {
-    $updateData['actual_payment_date'] = clean_date($_POST['actual_payment_date'] ?? null) ?? date('Y-m-d');
+    $updateData['actual_payment_date'] = clean_date($input['actual_payment_date'] ?? null) ?? date('Y-m-d');
 }
 
-$notes = clean_string($_POST['notes'] ?? null, 2000);
+$notes = clean_string($input['notes'] ?? null, 2000);
 if ($notes !== null) {
     $updateData['notes'] = $notes;
 }

@@ -25,7 +25,7 @@ $body = json_body();
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    json_validation_error(['id' => 'CapEx request ID is required.']);
 }
 
 $user = current_user();
@@ -36,9 +36,14 @@ try {
 } catch (\RuntimeException $e) {
     $msg = $e->getMessage();
     if (str_contains($msg, 'Only managers')) {
-        json_error('FORBIDDEN', $msg, 403);
+        json_error('FORBIDDEN', $msg, 403,
+            ['fields' => ['_general' => 'Only managers can approve a CapEx request.']]);
     }
-    json_error('VALIDATION_ERROR', $msg, 422);
+    $slot = '_general';
+    if (stripos($msg, 'not found') !== false || stripos($msg, 'already') !== false) {
+        $slot = 'id';
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($capex);

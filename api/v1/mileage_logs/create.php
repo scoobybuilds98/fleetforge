@@ -35,19 +35,23 @@ $logDate   = clean_date($_POST['log_date'] ?? null);
 $notes     = clean_string($_POST['notes'] ?? null, 1000);
 $logType   = clean_string($_POST['log_type'] ?? 'manual');
 
-// ── Validation
-$errors = [];
+// ── Validation — accumulate every error (VALID-2)
+$fields = [];
 
 if (!$unitId) {
-    $errors['equipment_unit_id'] = 'Equipment unit is required.';
+    $fields['equipment_unit_id'] = 'Please select an equipment unit.';
 }
-if ($odometer === null || $odometer < 0) {
-    $errors['odometer_reading'] = 'Odometer reading must be a non-negative integer.';
+if (!isset($_POST['odometer_reading']) || $_POST['odometer_reading'] === '') {
+    $fields['odometer_reading'] = 'Odometer reading is required.';
+} elseif ($odometer === null) {
+    $fields['odometer_reading'] = 'Odometer reading must be a whole number.';
+} elseif ($odometer < 0) {
+    $fields['odometer_reading'] = 'Odometer cannot be negative.';
 }
 if (!$logDate) {
-    $errors['log_date'] = 'Log date is required (Y-m-d).';
+    $fields['log_date'] = 'Log date is required.';
 } elseif ($logDate > date('Y-m-d')) {
-    $errors['log_date'] = 'Log date cannot be in the future.';
+    $fields['log_date'] = 'Log date cannot be in the future.';
 }
 
 // log_type restricted to human-entry values
@@ -61,13 +65,13 @@ if (!in_array($unit, $validUnits, true)) {
     $unit = 'km'; // D34 default
 }
 
-if ($errors) {
-    json_error('VALIDATION_ERROR', 'Validation failed.', 422, ['fields' => $errors]);
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Verify unit exists
 if (!db_exists('equipment_units', 'id = ? AND deleted_at IS NULL', [$unitId])) {
-    json_error('NOT_FOUND', 'Equipment unit not found.', 404);
+    json_validation_error(['equipment_unit_id' => 'Equipment unit not found.']);
 }
 
 // ── Verify lease exists and belongs to this unit (if provided)
@@ -77,8 +81,22 @@ if ($leaseId) {
         [$leaseId, $unitId]
     );
     if (!$lease) {
-        json_error('NOT_FOUND', 'Lease not found or does not belong to this unit.', 404);
+        json_validation_error(['lease_id' => 'Lease not found or does not belong to this unit.']);
     }
+}
+
+// ── Odometer advance check: warn if new reading is LOWER than most recent on this unit
+// (MILEAGE_DATA_ERROR for lease_end; for manual/service we soft-block unless override)
+$latestPrior = db_row(
+    "SELECT odometer_reading, log_date FROM mileage_logs
+     WHERE equipment_unit_id = ? AND log_date <= ?
+     ORDER BY log_date DESC, id DESC LIMIT 1",
+    [$unitId, $logDate]
+);
+if ($latestPrior && $odometer < (int)$latestPrior['odometer_reading']) {
+    json_validation_error(
+        ['odometer_reading' => "Odometer ({$odometer}) cannot be less than the most recent reading of {$latestPrior['odometer_reading']} on {$latestPrior['log_date']}."]
+    );
 }
 
 // ── Validate odometer is not less than a same-day lease_start reading

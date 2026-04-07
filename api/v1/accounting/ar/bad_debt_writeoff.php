@@ -24,11 +24,21 @@ require_permission('journal_entries', 'create');
 
 use FleetForge\Accounting\AutoEntryBridge;
 
-$invoiceId = clean_int($_POST['invoice_id'] ?? null);
-$reason    = trim($_POST['reason'] ?? '');
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$invoiceId) json_error('VALIDATION_ERROR', 'invoice_id is required.', 422);
-if ($reason === '') json_error('VALIDATION_ERROR', 'reason is required.', 422);
+$fields = [];
+
+$invoiceId = clean_int($input['invoice_id'] ?? null);
+$reason    = clean_string($input['reason'] ?? null, 1000);
+
+if (!$invoiceId) $fields['invoice_id'] = 'Please select an invoice.';
+if (!$reason)    $fields['reason']     = 'Please provide a reason for write-off.';
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $result = db_transaction(function () use ($invoiceId, $reason) {
     // Lock invoice row to prevent concurrent modification
@@ -37,17 +47,26 @@ $result = db_transaction(function () use ($invoiceId, $reason) {
          FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$invoiceId]
     );
-    if (!$invoice) json_error('NOT_FOUND', 'Invoice not found.', 404);
+    if (!$invoice) {
+        json_error('NOT_FOUND', 'Invoice not found.', 404, [
+            'fields' => ['invoice_id' => 'Invoice not found.'],
+        ]);
+    }
 
     // Only overdue or partially_paid invoices can be written off
     $writableStatuses = ['sent', 'overdue', 'partially_paid'];
     if (!in_array($invoice['status'], $writableStatuses, true)) {
-        json_error('INVALID_TRANSITION', "Cannot write off invoice with status '{$invoice['status']}'. Must be sent, overdue, or partially_paid.", 409);
+        json_error('INVALID_TRANSITION',
+            "Cannot write off invoice with status '{$invoice['status']}'. Must be sent, overdue, or partially_paid.", 409,
+            ['fields' => ['invoice_id' => "Cannot write off invoice with status '{$invoice['status']}'."]]);
     }
 
     $amount = (string) $invoice['balance_due'];
     if (bccomp($amount, '0', 2) <= 0) {
-        json_error('VALIDATION_ERROR', 'Invoice has no balance to write off.', 422);
+        json_validation_error(
+            ['invoice_id' => 'Invoice has no balance to write off.'],
+            'Invoice has no balance to write off.'
+        );
     }
 
     // Record in acc_bad_debt_writeoffs

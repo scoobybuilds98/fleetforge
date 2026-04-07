@@ -353,7 +353,10 @@ require_once FF_ROOT . '/includes/header.php';
                                     <span x-show="!res.contact_email" class="text-secondary">—</span>
                                 </div>
                                 <input x-show="editing" id="edit-email" type="email"
-                                       class="form-input" x-model="editForm.contact_email">
+                                       class="form-input"
+                                       :class="editErrors.contact_email ? 'is-invalid' : ''"
+                                       x-model="editForm.contact_email">
+                                <p class="form-error" x-show="editErrors.contact_email" x-text="editErrors.contact_email"></p>
                             </div>
 
                             <!-- Pickup Date -->
@@ -877,14 +880,68 @@ function FF_ReservationShow(resId) {
             this.editErrors = {};
         },
 
+        // ── Client-side validation for edit form ─────────────────
+        validateEdit() {
+            this.editErrors = {};
+            let ok = true;
+
+            if (!this.editForm.contact_name || !this.editForm.contact_name.trim()) {
+                this.editErrors.contact_name = 'Contact name is required.';
+                ok = false;
+            }
+            if (!this.editForm.company_name || !this.editForm.company_name.trim()) {
+                this.editErrors.company_name = 'Company name is required.';
+                ok = false;
+            }
+            if (!this.editForm.pickup_date) {
+                this.editErrors.pickup_date = 'Pickup date is required.';
+                ok = false;
+            } else {
+                const today = new Date().toISOString().split('T')[0];
+                if (this.editForm.pickup_date < today) {
+                    this.editErrors.pickup_date = 'Pickup date cannot be in the past.';
+                    ok = false;
+                }
+            }
+            const q = parseInt(this.editForm.quantity);
+            if (isNaN(q) || q < 1) {
+                this.editErrors.quantity = 'Quantity must be at least 1.';
+                ok = false;
+            } else if (q > 500) {
+                this.editErrors.quantity = 'Quantity cannot exceed 500.';
+                ok = false;
+            }
+            if (this.editForm.contact_email && this.editForm.contact_email.trim()) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(this.editForm.contact_email.trim())) {
+                    this.editErrors.contact_email = 'Please enter a valid email address.';
+                    ok = false;
+                }
+            }
+
+            return ok;
+        },
+
         async saveEdit() {
+            if (!this.validateEdit()) {
+                this.actionError = 'Please fix the errors below and try again.';
+                return;
+            }
             this.saving     = true;
             this.editErrors = {};
             this.actionError = '';
             try {
                 const res  = await FF_Api.post('<?= base_url('api/v1/reservations/update.php') ?>', this.editForm);
                 if (!res.success) {
-                    if (res.error?.errors) this.editErrors = res.error.errors;
+                    // VALID-2: prefer .fields, fall back to legacy .errors
+                    if (res.error?.fields) this.editErrors = res.error.fields;
+                    else if (res.error?.errors) this.editErrors = res.error.errors;
+
+                    // STALE_DATA — tell user to reload
+                    if (res.error?.code === 'STALE_DATA') {
+                        this.actionError = 'This reservation was modified by another user. Please reload this page and try again.';
+                        return;
+                    }
                     throw new Error(res.error?.message || 'Failed to save');
                 }
                 // Refresh and exit edit mode
@@ -964,7 +1021,7 @@ function FF_ReservationShow(resId) {
 
         async submitCancel() {
             if (!this.cancelModal.reason.trim()) {
-                this.cancelModal.error = 'Please provide a cancellation reason.';
+                this.cancelModal.error = 'Please provide a reason for cancellation.';
                 return;
             }
             this.cancelModal.submitting = true;
@@ -975,7 +1032,11 @@ function FF_ReservationShow(resId) {
                     status:        'cancelled',
                     cancel_reason: this.cancelModal.reason,
                 });
-                if (!res.success) throw new Error(res.error?.message || 'Failed');
+                if (!res.success) {
+                    // Prefer the per-field message when available
+                    const fieldMsg = res.error?.fields?.cancel_reason || res.error?.fields?.status;
+                    throw new Error(fieldMsg || res.error?.message || 'Failed');
+                }
                 this.cancelModal.open = false;
                 await this.loadReservation();
                 this.actionSuccess = 'Reservation cancelled.';

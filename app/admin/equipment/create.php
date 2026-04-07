@@ -70,10 +70,9 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label required" for="template_id">Equipment Template</label>
-                        <select id="template_id" class="form-control form-select"
+                        <select id="template_id" name="template_id" class="form-control form-select"
                                 x-model="form.template_id"
-                                @change="onTemplateChange()"
-                                :class="errors.template_id ? 'is-invalid' : ''">
+                                @change="onTemplateChange()">
                             <option value="">— Select template —</option>
                             <?php foreach ($templates as $tpl): ?>
                             <option value="<?= $tpl['id'] ?>"
@@ -83,47 +82,46 @@ require_once FF_ROOT . '/includes/header.php';
                             </option>
                             <?php endforeach; ?>
                         </select>
-                        <div class="form-error" x-show="errors.template_id" x-text="errors.template_id"></div>
+                        <div class="field-error" data-error-for="template_id"></div>
                     </div>
 
                     <div class="form-group">
                         <label class="form-label required" for="unit_number">Unit Number</label>
-                        <input type="text" id="unit_number" class="form-control font-mono"
+                        <input type="text" id="unit_number" name="unit_number" class="form-control font-mono"
                                x-model="form.unit_number"
-                               :class="errors.unit_number ? 'is-invalid' : ''"
                                placeholder="e.g. T-1042"
                                maxlength="100">
                         <div class="form-hint">Must be unique across all units.</div>
-                        <div class="form-error" x-show="errors.unit_number" x-text="errors.unit_number"></div>
+                        <div class="field-error" data-error-for="unit_number"></div>
                     </div>
                 </div>
 
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label" for="vin">VIN</label>
-                        <input type="text" id="vin" class="form-control font-mono"
+                        <input type="text" id="vin" name="vin" class="form-control font-mono"
                                x-model="form.vin"
                                placeholder="17-char VIN"
                                maxlength="50">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="year">Year</label>
-                        <input type="number" id="year" class="form-control font-mono"
+                        <input type="number" id="year" name="year" class="form-control font-mono"
                                x-model="form.year"
-                               placeholder="e.g. 2022"
-                               min="1990" max="2030">
+                               placeholder="e.g. <?= date('Y') ?>"
+                               min="1900" max="<?= (int) date('Y') + 1 ?>">
+                        <div class="field-error" data-error-for="year"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label required" for="ownership_type">Ownership</label>
-                        <select id="ownership_type" class="form-control form-select"
-                                x-model="form.ownership_type"
-                                :class="errors.ownership_type ? 'is-invalid' : ''">
+                        <select id="ownership_type" name="ownership_type" class="form-control form-select"
+                                x-model="form.ownership_type">
                             <option value="">— Select —</option>
                             <option value="owned">Owned</option>
                             <option value="leased">Leased</option>
                             <option value="brokered">Brokered</option>
                         </select>
-                        <div class="form-error" x-show="errors.ownership_type" x-text="errors.ownership_type"></div>
+                        <div class="field-error" data-error-for="ownership_type"></div>
                     </div>
                 </div>
 
@@ -180,36 +178,41 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label" for="length_ft">Length (ft)</label>
-                        <input type="number" id="length_ft" class="form-control font-mono"
-                               x-model="form.length_ft" step="0.01" min="0">
+                        <input type="number" id="length_ft" name="length_ft" class="form-control font-mono"
+                               x-model="form.length_ft" step="0.01">
+                        <div class="field-error" data-error-for="length_ft"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="width_ft">Width (ft)</label>
-                        <input type="number" id="width_ft" class="form-control font-mono"
-                               x-model="form.width_ft" step="0.01" min="0">
+                        <input type="number" id="width_ft" name="width_ft" class="form-control font-mono"
+                               x-model="form.width_ft" step="0.01">
+                        <div class="field-error" data-error-for="width_ft"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="height_ft">Height (ft)</label>
-                        <input type="number" id="height_ft" class="form-control font-mono"
-                               x-model="form.height_ft" step="0.01" min="0">
+                        <input type="number" id="height_ft" name="height_ft" class="form-control font-mono"
+                               x-model="form.height_ft" step="0.01">
+                        <div class="field-error" data-error-for="height_ft"></div>
                     </div>
                 </div>
 
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label" for="axle_count">Axle Count</label>
-                        <input type="number" id="axle_count" class="form-control font-mono"
-                               x-model="form.axle_count" min="1" max="20">
+                        <input type="number" id="axle_count" name="axle_count" class="form-control font-mono"
+                               x-model="form.axle_count">
+                        <div class="field-error" data-error-for="axle_count"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="tire_size">Tire Size</label>
-                        <input type="text" id="tire_size" class="form-control font-mono"
+                        <input type="text" id="tire_size" name="tire_size" class="form-control font-mono"
                                x-model="form.tire_size" maxlength="50" placeholder="e.g. 275/70R22.5">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="weight_capacity_lbs">Weight Capacity (lbs)</label>
-                        <input type="number" id="weight_capacity_lbs" class="form-control font-mono"
-                               x-model="form.weight_capacity_lbs" min="0">
+                        <input type="number" id="weight_capacity_lbs" name="weight_capacity_lbs" class="form-control font-mono"
+                               x-model="form.weight_capacity_lbs">
+                        <div class="field-error" data-error-for="weight_capacity_lbs"></div>
                     </div>
                 </div>
 
@@ -229,8 +232,9 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="mileage">Current Mileage</label>
-                        <input type="number" id="mileage" class="form-control font-mono"
-                               x-model="form.mileage" min="0" placeholder="0">
+                        <input type="number" id="mileage" name="mileage" class="form-control font-mono"
+                               x-model="form.mileage" placeholder="0">
+                        <div class="field-error" data-error-for="mileage"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="acquired_date">Acquired Date</label>
@@ -348,12 +352,8 @@ require_once FF_ROOT . '/includes/header.php';
             </button>
         </div>
 
-        <!-- Top-level error -->
-        <template x-if="globalError">
-            <div class="card card-body" style="background:var(--color-danger-light);color:var(--color-danger-text);margin-bottom:1rem;">
-                <strong>Error:</strong> <span x-text="globalError"></span>
-            </div>
-        </template>
+        <!-- VALID-2: form-level error banner injected by FF_Validate.banner() -->
+        <div class="form-error-banner" data-form-error></div>
 
     </form>
 </div><!-- /x-data -->
@@ -396,8 +396,6 @@ function FF_CreateUnit() {
             notes:              '',
             internal_notes:     '',
         },
-        errors:             {},
-        globalError:        null,
         submitting:         false,
         showSuccessOverlay: false,
 
@@ -418,24 +416,92 @@ function FF_CreateUnit() {
             if (defaults.default_insurance_interval_days) this.form.insurance_interval_days = defaults.default_insurance_interval_days;
         },
 
+        // VALID-2: unified validation using FF_Validate, exact spec messages
         validate() {
-            this.errors = {};
-            if (!this.form.template_id)  this.errors.template_id  = 'Template is required.';
-            if (!this.form.unit_number)  this.errors.unit_number  = 'Unit number is required.';
-            if (!this.form.ownership_type) this.errors.ownership_type = 'Ownership type is required.';
-            return Object.keys(this.errors).length === 0;
+            const form = document.querySelector('form');
+            FF_Validate.clear(form);
+            let ok = true;
+
+            if (!this.form.template_id) {
+                FF_Validate.field(form, 'template_id', 'Please select an equipment template.');
+                ok = false;
+            }
+            if (!this.form.unit_number || !this.form.unit_number.trim()) {
+                FF_Validate.field(form, 'unit_number', 'Unit number is required.');
+                ok = false;
+            }
+            if (!this.form.ownership_type) {
+                FF_Validate.field(form, 'ownership_type', 'Please select an ownership type (owned, leased, or brokered).');
+                ok = false;
+            }
+
+            // Year 1900 – current+1
+            if (this.form.year !== '' && this.form.year !== null && this.form.year !== undefined) {
+                const y = parseInt(this.form.year, 10);
+                const maxY = new Date().getFullYear() + 1;
+                if (isNaN(y) || y < 1900 || y > maxY) {
+                    FF_Validate.field(form, 'year', `Year must be between 1900 and ${maxY}.`);
+                    ok = false;
+                }
+            }
+
+            // Odometer / mileage >= 0
+            if (this.form.mileage !== '' && this.form.mileage !== null && this.form.mileage !== undefined) {
+                const m = parseInt(this.form.mileage, 10);
+                if (!isNaN(m) && m < 0) {
+                    FF_Validate.field(form, 'mileage', 'Odometer cannot be negative.');
+                    ok = false;
+                }
+            }
+
+            // Dimensions > 0 if provided
+            const posDecChecks = [
+                ['length_ft', 'Length'],
+                ['width_ft',  'Width'],
+                ['height_ft', 'Height'],
+            ];
+            posDecChecks.forEach(([k, label]) => {
+                const v = this.form[k];
+                if (v !== '' && v !== null && v !== undefined) {
+                    const n = parseFloat(v);
+                    if (isNaN(n) || n <= 0) {
+                        FF_Validate.field(form, k, `${label} must be greater than zero.`);
+                        ok = false;
+                    }
+                }
+            });
+
+            // Weight capacity > 0 if provided
+            if (this.form.weight_capacity_lbs !== '' && this.form.weight_capacity_lbs !== null && this.form.weight_capacity_lbs !== undefined) {
+                const w = parseInt(this.form.weight_capacity_lbs, 10);
+                if (isNaN(w) || w <= 0) {
+                    FF_Validate.field(form, 'weight_capacity_lbs', 'Weight capacity must be greater than zero.');
+                    ok = false;
+                }
+            }
+
+            // Axle count > 0 if provided
+            if (this.form.axle_count !== '' && this.form.axle_count !== null && this.form.axle_count !== undefined) {
+                const a = parseInt(this.form.axle_count, 10);
+                if (isNaN(a) || a <= 0) {
+                    FF_Validate.field(form, 'axle_count', 'Axle count must be greater than zero.');
+                    ok = false;
+                }
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(form);
+            return ok;
         },
 
         async submit() {
             if (!this.validate()) return;
-            this.submitting  = true;
-            this.globalError = null;
-            const payload    = {};
-            // Only send non-empty fields
+            this.submitting = true;
+            const form = document.querySelector('form');
+
+            const payload = {};
             Object.entries(this.form).forEach(([k, v]) => {
                 if (v !== '' && v !== null && v !== undefined) payload[k] = v;
             });
-            // Numeric coercions
             if (payload.year)               payload.year               = parseInt(payload.year);
             if (payload.mileage)            payload.mileage            = parseInt(payload.mileage);
             if (payload.weight_capacity_lbs) payload.weight_capacity_lbs = parseInt(payload.weight_capacity_lbs);
@@ -449,12 +515,19 @@ function FF_CreateUnit() {
                     this.showSuccessOverlay = true;
                     const _newId = r.data.id;
                     setTimeout(() => { window.location.href = '<?= base_url('equipment/show') ?>?id=' + _newId; }, 3500);
+                } else if (r.error?.code === 'VALIDATION_ERROR' && r.error?.fields) {
+                    FF_Validate.applyApi(form, r.error);
+                    FF_Validate.scrollToFirst(form);
+                } else if (r.error?.fields) {
+                    FF_Validate.applyApi(form, r.error);
+                    FF_Validate.scrollToFirst(form);
                 } else {
-                    this.globalError = r.message || 'Failed to create unit.';
-                    if (r.errors) this.errors = r.errors;
+                    FF_Validate.banner(form, r.error?.message || r.message || 'Failed to create unit.');
+                    FF_Validate.scrollToFirst(form);
                 }
             } catch(e) {
-                this.globalError = 'Network error. Please try again.';
+                FF_Validate.banner(form, 'Network error. Please try again.');
+                FF_Validate.scrollToFirst(form);
             }
             this.submitting = false;
         },

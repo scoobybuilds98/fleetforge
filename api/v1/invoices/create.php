@@ -25,26 +25,32 @@ require_auth_api();
 require_permission('invoices', 'create');
 
 // --- Input validation ---
-$body = json_body();
+// VALID-2: collect every error into $fields, one 422 response at the end.
+$body   = json_body();
+$fields = [];
 
 $leaseId = clean_int($body['lease_id'] ?? null);
 if (!$leaseId) {
-    json_error('VALIDATION_ERROR', 'lease_id is required.', 422);
+    $fields['lease_id'] = 'Please select a lease.';
 }
 
 $periodStart = clean_date($body['period_start'] ?? null);
 if (!$periodStart) {
-    json_error('VALIDATION_ERROR', 'period_start is required (YYYY-MM-DD).', 422);
+    $fields['period_start'] = 'Invoice date (period start) is required.';
 }
 
 $periodEnd = clean_date($body['period_end'] ?? null);
 if (!$periodEnd) {
-    json_error('VALIDATION_ERROR', 'period_end is required (YYYY-MM-DD).', 422);
+    $fields['period_end'] = 'Due date (period end) is required.';
 }
 
 // Validate end >= start
-if ($periodEnd < $periodStart) {
-    json_error('VALIDATION_ERROR', 'period_end must be on or after period_start.', 422);
+if ($periodStart && $periodEnd && $periodEnd < $periodStart) {
+    $fields['period_end'] = 'Due date cannot be before invoice date.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // Verify lease exists and is active
@@ -53,10 +59,15 @@ $lease = db_row(
     [$leaseId]
 );
 if (!$lease) {
-    json_error('NOT_FOUND', 'Lease not found.', 404);
+    json_validation_error(['lease_id' => 'Lease not found.'], 'Lease not found.');
 }
 if (!in_array($lease['status'], ['active', 'completed'])) {
-    json_error('LEASE_NOT_ACTIVE', 'Invoices can only be created for active or completed leases.', 409);
+    json_error(
+        'LEASE_NOT_ACTIVE',
+        'Invoices can only be created for active or completed leases.',
+        409,
+        ['fields' => ['lease_id' => 'Invoices can only be created for active or completed leases.']]
+    );
 }
 
 $billingType = clean_string($body['billing_type'] ?? 'partial_start');

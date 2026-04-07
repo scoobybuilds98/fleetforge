@@ -25,10 +25,25 @@ require_permission('journal_entries', 'edit');
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
-$depositId    = clean_int($_POST['deposit_id'] ?? null);
-$refundMethod = clean_string($_POST['refund_method'] ?? null) ?? 'check';
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$depositId) json_error('VALIDATION_ERROR', 'deposit_id is required.', 422);
+$fields = [];
+
+$depositId    = clean_int($input['deposit_id'] ?? null);
+$refundMethod = clean_string($input['refund_method'] ?? null) ?? 'check';
+
+if (!$depositId) $fields['deposit_id'] = 'Please select a deposit.';
+
+$validRefundMethods = ['check', 'eft', 'wire', 'credit_card', 'cash', 'other'];
+if (!in_array($refundMethod, $validRefundMethods, true)) {
+    $fields['refund_method'] = 'Refund method must be check, EFT, wire, credit card, cash, or other.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $result = db_transaction(function () use ($depositId, $refundMethod) {
     $deposit = db_row(
@@ -38,10 +53,16 @@ $result = db_transaction(function () use ($depositId, $refundMethod) {
          WHERE d.id = ? FOR UPDATE",
         [$depositId]
     );
-    if (!$deposit) json_error('NOT_FOUND', 'Deposit not found.', 404);
+    if (!$deposit) {
+        json_error('NOT_FOUND', 'Deposit not found.', 404, [
+            'fields' => ['deposit_id' => 'Deposit not found.'],
+        ]);
+    }
 
     if ($deposit['status'] !== 'held') {
-        json_error('INVALID_TRANSITION', "Deposit status is '{$deposit['status']}' — only 'held' deposits can be refunded.", 409);
+        json_error('INVALID_TRANSITION',
+            "Deposit status is '{$deposit['status']}' — only 'held' deposits can be refunded.", 409,
+            ['fields' => ['deposit_id' => "Deposit status is '{$deposit['status']}' — only 'held' deposits can be refunded."]]);
     }
 
     $amount = (string) $deposit['amount'];

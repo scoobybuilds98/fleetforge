@@ -32,44 +32,104 @@ require_auth_api();
 require_permission('journal_entries', 'create');
 
 // --- Read and validate JSON body ---
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-if (empty($body['entry_date'])) {
-    json_error('VALIDATION_ERROR', 'entry_date is required.', 422);
+$entryDate = clean_date($body['entry_date'] ?? null);
+$desc      = clean_string($body['description'] ?? null, 1000);
+
+if (!$entryDate) {
+    $fields['entry_date'] = 'Entry date is required.';
 }
-
-if (empty($body['description'])) {
-    json_error('VALIDATION_ERROR', 'description is required.', 422);
+if (!$desc) {
+    $fields['description'] = 'Description is required.';
 }
-
 if (empty($body['lines']) || !is_array($body['lines'])) {
-    json_error('VALIDATION_ERROR', 'lines array is required and must contain at least 2 entries.', 422);
+    $fields['lines'] = 'At least 2 journal lines are required.';
+} elseif (count($body['lines']) < 2) {
+    $fields['lines'] = 'Journal entry must have at least 2 lines.';
+} elseif (count($body['lines']) > 50) {
+    $fields['lines'] = 'Journal entry cannot exceed 50 lines.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // --- Build header and lines for the service ---
 $header = [
-    'entry_date'       => clean_date($body['entry_date']),
-    'description'      => clean_string($body['description'] ?? '', 1000),
+    'entry_date'       => $entryDate,
+    'description'      => $desc,
     'reference'        => clean_string($body['reference'] ?? null, 255),
     'entry_type'       => clean_string($body['entry_type'] ?? 'manual', 50),
     'post_immediately' => (bool) ($body['post_immediately'] ?? false),
 ];
 
-$lines = [];
+// ── Per-line validation — accumulate line-level problems
+$lineErrors = [];
+$lines      = [];
+$totalDebit  = '0.00';
+$totalCredit = '0.00';
 foreach ($body['lines'] as $i => $raw) {
+    $lineNum    = $i + 1;
+    $accountId  = clean_int($raw['account_id'] ?? null) ?? 0;
+    $debit      = clean_decimal($raw['debit']  ?? null) ?? '0.00';
+    $credit     = clean_decimal($raw['credit'] ?? null) ?? '0.00';
+
+    if (!$accountId) {
+        $lineErrors[] = "Line {$lineNum}: please select an account.";
+    }
+    // Negative amounts — guard before summing
+    if (bccomp($debit, '0', 2) < 0) {
+        $lineErrors[] = "Line {$lineNum}: debit cannot be negative.";
+    }
+    if (bccomp($credit, '0', 2) < 0) {
+        $lineErrors[] = "Line {$lineNum}: credit cannot be negative.";
+    }
+    if (bccomp($debit, '0.00', 2) > 0 && bccomp($credit, '0.00', 2) > 0) {
+        $lineErrors[] = "Line {$lineNum}: cannot have both a debit and a credit on the same line.";
+    }
+    if (bccomp($debit, '0.00', 2) === 0 && bccomp($credit, '0.00', 2) === 0) {
+        $lineErrors[] = "Line {$lineNum}: must have either a debit or a credit.";
+    }
+
+    $totalDebit  = bcadd($totalDebit,  $debit,  2);
+    $totalCredit = bcadd($totalCredit, $credit, 2);
+
     $lines[] = [
-        'account_id'  => clean_int($raw['account_id'] ?? null) ?? 0,
-        'debit'       => clean_decimal($raw['debit'] ?? null) ?? '0.00',
-        'credit'      => clean_decimal($raw['credit'] ?? null) ?? '0.00',
+        'account_id'  => $accountId,
+        'debit'       => $debit,
+        'credit'      => $credit,
         'description' => clean_string($raw['description'] ?? null, 500),
     ];
+}
+
+// Balance check — debits must equal credits
+if (bccomp($totalDebit, $totalCredit, 2) !== 0) {
+    $lineErrors[] = "Entry is unbalanced: debits ({$totalDebit}) must equal credits ({$totalCredit}).";
+}
+if (bccomp($totalDebit, '0.00', 2) === 0) {
+    $lineErrors[] = "Entry total cannot be zero.";
+}
+
+if ($lineErrors) {
+    json_validation_error(
+        ['lines' => implode(' ', $lineErrors)],
+        'Please fix the line errors and try again.'
+    );
 }
 
 // --- Create via service (throws RuntimeException on validation failure) ---
 try {
     $entry = JournalEntryService::create($header, $lines, current_user_id());
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    // Map service errors to field slots when possible
+    $msg    = $e->getMessage();
+    $slot   = 'lines';
+    if (stripos($msg, 'period') !== false) {
+        $slot = 'entry_date';
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($entry, 201);

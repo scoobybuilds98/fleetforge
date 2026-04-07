@@ -24,20 +24,17 @@ require_method('POST');
 require_auth_api();
 require_permission('chart_of_accounts', 'create');
 
-$body = json_body();
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$body     = !empty($jsonBody) ? $jsonBody : $_POST;
+
+$fields = [];
 
 // -----------------------------------------------------------------------
 // 1. Required fields
 // -----------------------------------------------------------------------
 $code = clean_string($body['code'] ?? null, 20);
-if (!$code) {
-    json_error('VALIDATION_ERROR', 'code is required.', 422);
-}
-
 $name = clean_string($body['name'] ?? null, 255);
-if (!$name) {
-    json_error('VALIDATION_ERROR', 'name is required.', 422);
-}
 
 // WHY: Validate against the DB ENUM — reject anything the column would reject.
 $validTypes = [
@@ -45,8 +42,13 @@ $validTypes = [
     'cost_of_revenue', 'operating_expense', 'other_income', 'other_expense',
 ];
 $accountType = clean_string($body['account_type'] ?? null);
-if (!$accountType || !in_array($accountType, $validTypes, true)) {
-    json_error('VALIDATION_ERROR', 'account_type is required and must be one of: ' . implode(', ', $validTypes) . '.', 422);
+
+if (!$code) $fields['code'] = 'Account code is required.';
+if (!$name) $fields['name'] = 'Account name is required.';
+if (!$accountType) {
+    $fields['account_type'] = 'Please select an account type.';
+} elseif (!in_array($accountType, $validTypes, true)) {
+    $fields['account_type'] = 'Account type must be one of: ' . implode(', ', $validTypes) . '.';
 }
 
 // -----------------------------------------------------------------------
@@ -64,9 +66,9 @@ $description    = clean_string($body['description'] ?? null, 2000);
 // Normal balance: default by account type if not provided
 $normalBalance = clean_string($body['normal_balance'] ?? null);
 if ($normalBalance && !in_array($normalBalance, ['debit', 'credit'], true)) {
-    json_error('VALIDATION_ERROR', 'normal_balance must be debit or credit.', 422);
+    $fields['normal_balance'] = 'Normal balance must be debit or credit.';
 }
-if (!$normalBalance) {
+if (!$normalBalance && $accountType) {
     // WHY: Assets and expenses are debit-normal; liabilities, equity, and revenue are credit-normal.
     $normalBalance = in_array($accountType, ['asset', 'cost_of_revenue', 'operating_expense', 'other_expense'], true)
         ? 'debit'
@@ -75,7 +77,11 @@ if (!$normalBalance) {
 
 // Currency validation
 if (!in_array($currency, ['CAD', 'USD'], true)) {
-    json_error('VALIDATION_ERROR', 'currency must be CAD or USD.', 422);
+    $fields['currency'] = 'Currency must be CAD or USD.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // -----------------------------------------------------------------------
@@ -85,17 +91,23 @@ if (!in_array($currency, ['CAD', 'USD'], true)) {
 // Code must be unique
 $existing = db_row("SELECT id FROM acc_accounts WHERE code = ?", [$code]);
 if ($existing) {
-    json_error('DUPLICATE_CODE', "Account code '{$code}' already exists.", 422);
+    json_error('DUPLICATE_CODE', "Account code '{$code}' already exists.", 422, [
+        'fields' => ['code' => "Account code '{$code}' already exists."],
+    ]);
 }
 
 // If parent_id is set, the parent must exist and be a header account
 if ($parentId) {
     $parent = db_row("SELECT id, is_header, name FROM acc_accounts WHERE id = ?", [$parentId]);
     if (!$parent) {
-        json_error('INVALID_PARENT', 'Parent account not found.', 422);
+        json_error('INVALID_PARENT', 'Parent account not found.', 422, [
+            'fields' => ['parent_id' => 'Parent account not found.'],
+        ]);
     }
     if ((int) $parent['is_header'] !== 1) {
-        json_error('INVALID_PARENT', "Parent account '{$parent['name']}' is not a header account. Only header accounts can have children.", 422);
+        json_error('INVALID_PARENT', "Parent account '{$parent['name']}' is not a header account. Only header accounts can have children.", 422, [
+            'fields' => ['parent_id' => "Parent account '{$parent['name']}' is not a header account."],
+        ]);
     }
 }
 

@@ -28,21 +28,24 @@ require_method('POST');
 require_auth_api();
 require_permission('tax_management', 'edit');
 
-$body = json_body();
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$body     = !empty($jsonBody) ? $jsonBody : $_POST;
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    json_validation_error(['id' => 'Tax period ID is required.']);
 }
 
 try {
     $period = TaxFilingService::calculatePeriod($id, current_user_id());
 } catch (\RuntimeException $e) {
+    $msg = $e->getMessage();
     // PERIOD_LOCKED → 409, everything else → 422
-    if (str_starts_with($e->getMessage(), 'PERIOD_LOCKED')) {
-        json_error('PERIOD_LOCKED', $e->getMessage(), 409);
+    if (str_starts_with($msg, 'PERIOD_LOCKED')) {
+        json_error('PERIOD_LOCKED', $msg, 409, ['fields' => ['id' => $msg]]);
     }
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    json_validation_error(['id' => $msg], $msg);
 }
 
 json_success($period);

@@ -23,9 +23,16 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'create');
 
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
+
 // Retrieve previewed data from session
 if (!isset($_SESSION['bank_import_preview'])) {
-    json_error('VALIDATION_ERROR', 'No import preview found. Upload a CSV first.', 422);
+    json_validation_error(
+        ['_general' => 'No import preview found. Upload a CSV first.'],
+        'No import preview found. Upload a CSV first.'
+    );
 }
 
 $preview = $_SESSION['bank_import_preview'];
@@ -33,7 +40,10 @@ $preview = $_SESSION['bank_import_preview'];
 // Expire after 30 minutes
 if (time() - $preview['timestamp'] > 1800) {
     unset($_SESSION['bank_import_preview']);
-    json_error('VALIDATION_ERROR', 'Import preview has expired. Please re-upload the CSV.', 422);
+    json_validation_error(
+        ['_general' => 'Import preview has expired. Please re-upload the CSV.'],
+        'Import preview has expired. Please re-upload the CSV.'
+    );
 }
 
 $bankAccountId = $preview['bank_account_id'];
@@ -41,17 +51,24 @@ $transactions = $preview['transactions'];
 
 // Determine which rows to import
 $selectedRows = null;
-if (isset($_POST['selected_rows'])) {
-    $selectedRows = json_decode($_POST['selected_rows'], true);
+if (isset($input['selected_rows'])) {
+    $selectedRows = is_array($input['selected_rows'])
+        ? $input['selected_rows']
+        : json_decode((string) $input['selected_rows'], true);
     if (!is_array($selectedRows)) {
-        json_error('VALIDATION_ERROR', 'selected_rows must be a JSON array of row numbers.', 422);
+        json_validation_error(
+            ['selected_rows' => 'Selected rows must be a JSON array of row numbers.'],
+            'Selected rows must be a JSON array of row numbers.'
+        );
     }
 }
 
 // Accept match overrides — user can manually match/unmatch during review
 $matchOverrides = [];
-if (isset($_POST['match_overrides'])) {
-    $matchOverrides = json_decode($_POST['match_overrides'], true) ?? [];
+if (isset($input['match_overrides'])) {
+    $matchOverrides = is_array($input['match_overrides'])
+        ? $input['match_overrides']
+        : (json_decode((string) $input['match_overrides'], true) ?? []);
 }
 
 $userId = current_user_id();

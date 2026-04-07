@@ -28,7 +28,7 @@ $body = json_body();
 
 $periodId = clean_int($body['period_id'] ?? null);
 if (!$periodId) {
-    json_error('MISSING_REQUIRED', 'period_id is required.', 422);
+    json_validation_error(['period_id' => 'Please select an accounting period.']);
 }
 
 $overrides = [];
@@ -43,7 +43,14 @@ if (!empty($body['unit_overrides']) && is_array($body['unit_overrides'])) {
 try {
     $result = FixedAssetService::previewRun($periodId, current_user_id(), $overrides);
 } catch (\RuntimeException $e) {
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $msg  = $e->getMessage();
+    $slot = '_general';
+    if (stripos($msg, 'period') !== false || stripos($msg, 'not found') !== false) {
+        $slot = 'period_id';
+    } elseif (stripos($msg, 'units') !== false) {
+        $slot = 'unit_overrides';
+    }
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($result, 201);

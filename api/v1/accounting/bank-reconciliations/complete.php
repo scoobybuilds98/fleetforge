@@ -27,17 +27,33 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'edit');
 
-$id = clean_int($_POST['id'] ?? null);
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
+
+$id = clean_int($input['id'] ?? null);
+if (!$id) {
+    json_validation_error(['id' => 'Reconciliation ID is required.']);
+}
 
 $recon = db_row("SELECT * FROM acc_bank_reconciliations WHERE id = ?", [$id]);
-if (!$recon) json_error('NOT_FOUND', 'Reconciliation not found.', 404);
+if (!$recon) {
+    json_error('NOT_FOUND', 'Reconciliation not found.', 404, [
+        'fields' => ['id' => 'Reconciliation not found.'],
+    ]);
+}
 if ($recon['status'] !== 'in_progress') {
-    json_error('IMMUTABLE_RECORD', 'Reconciliation is already completed or locked.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Reconciliation is already completed or locked.', 422,
+        ['fields' => ['id' => 'Reconciliation is already completed or locked.']]);
 }
 
 $bankAccount = db_row("SELECT * FROM acc_bank_accounts WHERE id = ?", [(int) $recon['bank_account_id']]);
-if (!$bankAccount) json_error('NOT_FOUND', 'Bank account not found.', 404);
+if (!$bankAccount) {
+    json_error('NOT_FOUND', 'Bank account not found.', 404, [
+        'fields' => ['id' => 'Bank account not found.'],
+    ]);
+}
 
 // Calculate current difference
 $summary = BankService::reconciliationSummary(
@@ -49,8 +65,8 @@ $summary = BankService::reconciliationSummary(
 $difference = $summary['difference'];
 
 // Handle adjustment if provided
-$adjustmentAmount = clean_decimal($_POST['adjustment_amount'] ?? null);
-$adjustmentAccountId = clean_int($_POST['adjustment_account_id'] ?? null);
+$adjustmentAmount = clean_decimal($input['adjustment_amount'] ?? null);
+$adjustmentAccountId = clean_int($input['adjustment_account_id'] ?? null);
 
 if ($adjustmentAmount && bccomp($adjustmentAmount, '0.00', 2) !== 0) {
     // WHY: Small rounding differences can be written off with an adjustment entry
@@ -59,21 +75,33 @@ if ($adjustmentAmount && bccomp($adjustmentAmount, '0.00', 2) !== 0) {
         ? bcmul($adjustmentAmount, '-1', 2)
         : $adjustmentAmount;
     if (bccomp($absAdj, '5.00', 2) > 0) {
-        json_error('VALIDATION_ERROR', 'Adjustment amount cannot exceed $5.00. Investigate the difference.', 422);
+        json_validation_error(
+            ['adjustment_amount' => 'Adjustment amount cannot exceed $5.00. Investigate the difference.'],
+            'Adjustment amount cannot exceed $5.00. Investigate the difference.'
+        );
     }
     if (!$adjustmentAccountId) {
-        json_error('VALIDATION_ERROR', 'adjustment_account_id required for adjustment entries.', 422);
+        json_validation_error(
+            ['adjustment_account_id' => 'Please select an adjustment GL account.'],
+            'Adjustment GL account is required for adjustment entries.'
+        );
     }
 
     // After adjustment, difference should be zero
     $adjustedDiff = bcsub($difference, $adjustmentAmount, 2);
     if (bccomp($adjustedDiff, '0.00', 2) !== 0) {
-        json_error('VALIDATION_ERROR', "Adjustment of {$adjustmentAmount} does not resolve the difference of {$difference}.", 422);
+        json_validation_error(
+            ['adjustment_amount' => "Adjustment of \${$adjustmentAmount} does not resolve the difference of \${$difference}."],
+            "Adjustment does not resolve the difference."
+        );
     }
 } else {
     // No adjustment — difference must already be zero
     if (bccomp($difference, '0.00', 2) !== 0) {
-        json_error('VALIDATION_ERROR', "Cannot complete — difference is {$difference}. Must be \$0.00.", 422);
+        json_validation_error(
+            ['_general' => "Cannot complete — difference is \${$difference}. Must be \$0.00."],
+            "Cannot complete — difference is \${$difference}. Must be \$0.00."
+        );
     }
 }
 

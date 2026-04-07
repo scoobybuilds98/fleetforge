@@ -24,18 +24,31 @@ require_permission('accounts_payable', 'edit');
 
 use FleetForge\Accounting\JournalEntryService;
 
-$id = clean_int($_POST['id'] ?? null);
-$voidReason = clean_string($_POST['void_reason'] ?? null, 1000);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
-if (!$voidReason) json_error('VALIDATION_ERROR', 'void_reason is required.', 422);
+$fields = [];
+$id         = clean_int($input['id'] ?? null);
+$voidReason = clean_string($input['void_reason'] ?? null, 1000);
+
+if (!$id)         $fields['id']          = 'Payment ID is required.';
+if (!$voidReason) $fields['void_reason'] = 'Please provide a void reason.';
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $result = db_transaction(function () use ($id, $voidReason) {
     $payment = db_row("SELECT * FROM acc_ap_payments WHERE id = ? FOR UPDATE", [$id]);
-    if (!$payment) json_error('NOT_FOUND', 'AP payment not found.', 404);
+    if (!$payment) {
+        json_validation_error(['id' => 'AP payment not found.'], 'AP payment not found.');
+    }
 
     if ($payment['status'] === 'void') {
-        json_error('INVALID_TRANSITION', 'Payment is already void.', 409);
+        json_error('INVALID_TRANSITION',
+            'Payment is already void.', 409,
+            ['fields' => ['id' => 'Payment is already void.']]);
     }
 
     // Reverse the JE

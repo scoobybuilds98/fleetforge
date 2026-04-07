@@ -26,15 +26,22 @@ require_permission('payments', 'edit');
 
 $body = json_body();
 
+// VALID-2: accumulate required-field errors
+$fields = [];
+
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Payment ID is required.';
 }
 
 // D19: updated_at must be submitted so we can detect concurrent edits
 $submittedUpdatedAt = clean_string($body['updated_at'] ?? null);
 if (!$submittedUpdatedAt) {
-    json_error('MISSING_REQUIRED', 'updated_at is required for concurrency check.', 422);
+    $fields['updated_at'] = 'Optimistic lock token is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // Load existing payment
@@ -48,7 +55,9 @@ if (!$payment) {
 
 // D19: Optimistic lock — reject if record was modified since the form loaded
 if ($payment['updated_at'] !== $submittedUpdatedAt) {
-    json_error('STALE_DATA', 'This payment was modified by another user. Please refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This payment was modified by another user. Please refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This payment was modified by another user. Please refresh and try again.']]);
 }
 
 // D12: Financial fields on non-pending payments are immutable (CRA compliance)
@@ -75,7 +84,7 @@ if (array_key_exists('internal_notes', $body)) {
 }
 
 if (empty($updates)) {
-    json_error('VALIDATION_ERROR', 'No editable fields provided.', 422);
+    json_validation_error([], 'No editable fields provided.');
 }
 
 $updates['updated_at'] = date('Y-m-d H:i:s');

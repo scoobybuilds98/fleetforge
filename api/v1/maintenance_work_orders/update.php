@@ -35,16 +35,21 @@ require_permission('maintenance', 'edit');
 // -----------------------------------------------------------------------
 // 1. Parse body + resolve WO
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Work order ID is required.';
 }
 
 $submittedUpdatedAt = clean_string($body['updated_at'] ?? null);
 if (!$submittedUpdatedAt) {
-    json_error('MISSING_REQUIRED', 'updated_at is required for concurrency control.', 422);
+    $fields['updated_at'] = 'Optimistic lock token is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $existing = db_row(
@@ -59,61 +64,89 @@ if (!$existing) {
 // 2. D19 optimistic lock
 // -----------------------------------------------------------------------
 if ($existing['updated_at'] !== $submittedUpdatedAt) {
-    json_error('STALE_DATA', 'This work order was modified by another user. Please refresh and try again.', 409);
+    json_error('STALE_DATA',
+        'This work order was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This work order was modified by another user. Refresh and try again.']]);
 }
 
 // -----------------------------------------------------------------------
 // 3. Block edits on terminal states
 // -----------------------------------------------------------------------
 if (in_array($existing['status'], ['completed', 'cancelled'], true)) {
-    json_error('IMMUTABLE_RECORD', 'Cannot edit a completed or cancelled work order.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Cannot edit a completed or cancelled work order.', 422,
+        ['fields' => ['status' => 'Cannot edit a completed or cancelled work order.']]);
 }
 
 // -----------------------------------------------------------------------
-// 4. Resolve updatable fields (fall back to existing values)
+// 4. Resolve updatable fields — VALID-2: accumulate errors
 // -----------------------------------------------------------------------
-$title = clean_string($body['title'] ?? null, 500) ?? $existing['title'];
-if (!$title) {
-    json_error('MISSING_REQUIRED', 'title cannot be blank.', 422);
+if (array_key_exists('title', $body)) {
+    $title = clean_string($body['title'], 500);
+    if (!$title) {
+        $fields['title'] = 'Title is required.';
+        $title = $existing['title'];
+    }
+} else {
+    $title = $existing['title'];
 }
 
-$workType = clean_string($body['work_type'] ?? null);
 $validWorkTypes = ['scheduled_service', 'repair', 'inspection', 'tire', 'electrical', 'body_damage', 'breakdown', 'other'];
-if ($workType && !in_array($workType, $validWorkTypes, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid work_type.', 422);
+if (array_key_exists('work_type', $body)) {
+    $workType = clean_string($body['work_type']);
+    if (!$workType || !in_array($workType, $validWorkTypes, true)) {
+        $fields['work_type'] = 'Please select a valid work type.';
+        $workType = $existing['work_type'];
+    }
+} else {
+    $workType = $existing['work_type'];
 }
-$workType = $workType ?? $existing['work_type'];
 
-$priority = clean_string($body['priority'] ?? null);
 $validPriorities = ['low', 'medium', 'high', 'emergency'];
-if ($priority && !in_array($priority, $validPriorities, true)) {
-    json_error('VALIDATION_ERROR', 'Invalid priority.', 422);
+if (array_key_exists('priority', $body)) {
+    $priority = clean_string($body['priority']);
+    if (!$priority || !in_array($priority, $validPriorities, true)) {
+        $fields['priority'] = 'Please select a valid priority.';
+        $priority = $existing['priority'];
+    }
+} else {
+    $priority = $existing['priority'];
 }
-$priority = $priority ?? $existing['priority'];
 
 // vendor_id: explicit null clears it; absent key keeps existing
 $vendorId = array_key_exists('vendor_id', $body)
     ? ($body['vendor_id'] !== null ? clean_int($body['vendor_id']) : null)
     : $existing['vendor_id'];
 
-if ($vendorId !== null) {
-    if (!db_exists('vendors', 'id = ? AND deleted_at IS NULL', [$vendorId])) {
-        json_error('NOT_FOUND', 'Vendor not found.', 404);
-    }
-}
-
 $requestedDate = clean_date($body['requested_date'] ?? null) ?? $existing['requested_date'];
 $scheduledDate = array_key_exists('scheduled_date', $body)
     ? clean_date($body['scheduled_date'] ?? null)
     : $existing['scheduled_date'];
 
+// VALID-2: scheduled_date cannot be before requested_date
+if ($scheduledDate && $requestedDate && strtotime($scheduledDate) < strtotime($requestedDate)) {
+    $fields['scheduled_date'] = 'Scheduled date cannot be before requested date.';
+}
+
 $description   = array_key_exists('description', $body)
     ? clean_string($body['description'] ?? null, 5000)
     : $existing['description'];
 
-$mileageAtService = array_key_exists('mileage_at_service', $body)
-    ? clean_int($body['mileage_at_service'] ?? null)
-    : $existing['mileage_at_service'];
+// VALID-2: mileage_at_service must be >= 0
+$mileageAtService = $existing['mileage_at_service'];
+if (array_key_exists('mileage_at_service', $body)) {
+    $raw = $body['mileage_at_service'];
+    if ($raw === null || $raw === '') {
+        $mileageAtService = null;
+    } else {
+        $mi = clean_int($raw);
+        if ($mi === null || $mi < 0) {
+            $fields['mileage_at_service'] = 'Odometer cannot be negative.';
+        } else {
+            $mileageAtService = $mi;
+        }
+    }
+}
 
 $notes = array_key_exists('notes', $body)
     ? clean_string($body['notes'] ?? null, 5000)
@@ -127,9 +160,19 @@ $assignedTo = array_key_exists('assigned_to', $body)
     ? ($body['assigned_to'] !== null ? clean_int($body['assigned_to']) : null)
     : $existing['assigned_to'];
 
+if ($fields) {
+    json_validation_error($fields);
+}
+
+if ($vendorId !== null) {
+    if (!db_exists('vendors', 'id = ? AND deleted_at IS NULL', [$vendorId])) {
+        json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
+    }
+}
+
 if ($assignedTo !== null) {
     if (!db_exists('users', 'id = ? AND deleted_at IS NULL', [$assignedTo])) {
-        json_error('NOT_FOUND', 'Assigned user not found.', 404);
+        json_validation_error(['assigned_to' => 'Assigned user not found.'], 'Assigned user not found.');
     }
 }
 

@@ -84,7 +84,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <label class="form-label" for="invoice_id">
                         Invoice <span style="color:var(--color-danger);">*</span>
                     </label>
-                    <select id="invoice_id" class="form-input" x-model="form.invoice_id"
+                    <select id="invoice_id" name="invoice_id" class="form-input" x-model="form.invoice_id"
                             @change="onInvoiceChange()" required>
                         <option value="">— Select an invoice —</option>
                         <?php foreach ($outstandingInvoices as $inv): ?>
@@ -111,8 +111,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-show="selectedInvoice.status === 'overdue'"
                               style="color:var(--color-danger); margin-left:6px;">(Overdue)</span>
                     </p>
-                    <p x-show="errors.invoice_id" x-text="errors.invoice_id"
-                       style="color:var(--color-danger); font-size:0.85rem; margin-top:4px;"></p>
+                    <!-- VALID-2: FF_Validate slot -->
+                    <div class="field-error" data-error-for="invoice_id"></div>
                 </div>
 
                 <!-- Amount + currency row -->
@@ -121,11 +121,11 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="amount">
                             Amount <span style="color:var(--color-danger);">*</span>
                         </label>
-                        <input type="number" id="amount" class="form-input font-mono"
+                        <input type="number" id="amount" name="amount" class="form-input font-mono"
                                x-model="form.amount"
-                               step="0.01" min="0.01"
+                               step="0.01"
                                placeholder="0.00"
-                               @input="validateAmount()" required>
+                               required>
                         <!-- Quick-fill buttons -->
                         <div style="margin-top:6px; display:flex; gap:8px;" x-show="selectedInvoice.balance">
                             <button type="button" class="btn btn-secondary btn-xs"
@@ -133,15 +133,16 @@ require_once FF_ROOT . '/includes/header.php';
                                 Pay full balance (<?= '<?=' ?>  selectedInvoice.currency + ' ' + formatCurrency(selectedInvoice.balance) <?= '?>' ?>)
                             </button>
                         </div>
-                        <p x-show="errors.amount" x-text="errors.amount"
-                           style="color:var(--color-danger); font-size:0.85rem; margin-top:4px;"></p>
+                        <!-- VALID-2: FF_Validate slot -->
+                        <div class="field-error" data-error-for="amount"></div>
                     </div>
                     <div class="form-group" style="width:100px;">
-                        <label class="form-label">Currency</label>
-                        <select class="form-input" x-model="form.currency" :disabled="!!selectedInvoice.currency">
+                        <label class="form-label" for="currency">Currency</label>
+                        <select id="currency" name="currency" class="form-input" x-model="form.currency" :disabled="!!selectedInvoice.currency">
                             <option value="CAD">CAD</option>
                             <option value="USD">USD</option>
                         </select>
+                        <div class="field-error" data-error-for="currency"></div>
                     </div>
                 </div>
 
@@ -150,7 +151,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <label class="form-label" for="payment_method">
                         Payment Method <span style="color:var(--color-danger);">*</span>
                     </label>
-                    <select id="payment_method" class="form-input" x-model="form.payment_method" required>
+                    <select id="payment_method" name="payment_method" class="form-input" x-model="form.payment_method" required>
                         <option value="">— Select method —</option>
                         <option value="check">Cheque</option>
                         <option value="ach">ACH / Direct Deposit</option>
@@ -161,8 +162,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <option value="account_credit">Account Credit</option>
                         <option value="other">Other</option>
                     </select>
-                    <p x-show="errors.payment_method" x-text="errors.payment_method"
-                       style="color:var(--color-danger); font-size:0.85rem; margin-top:4px;"></p>
+                    <!-- VALID-2: FF_Validate slot -->
+                    <div class="field-error" data-error-for="payment_method"></div>
                 </div>
 
                 <!-- Payment date -->
@@ -171,7 +172,7 @@ require_once FF_ROOT . '/includes/header.php';
                         Payment Date <span style="color:var(--color-danger);">*</span>
                     </label>
                     <div style="display:flex;gap:6px;align-items:center;">
-                        <input type="date" id="payment_date" class="form-input"
+                        <input type="date" id="payment_date" name="payment_date" class="form-input"
                                x-model="form.payment_date" required
                                max="<?= date('Y-m-d') ?>"
                                x-ref="pmtDate" style="flex:1;">
@@ -179,8 +180,8 @@ require_once FF_ROOT . '/includes/header.php';
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
                         </button>
                     </div>
-                    <p x-show="errors.payment_date" x-text="errors.payment_date"
-                       style="color:var(--color-danger); font-size:0.85rem; margin-top:4px;"></p>
+                    <!-- VALID-2: FF_Validate slot -->
+                    <div class="field-error" data-error-for="payment_date"></div>
                 </div>
 
                 <!-- Reference fields — conditional by method -->
@@ -271,17 +272,8 @@ require_once FF_ROOT . '/includes/header.php';
                              x-text="(form.currency || 'CAD') + ' ' + formatCurrency(form.amount)"></div>
                     </div>
 
-                    <!-- Overpayment warning -->
-                    <div x-show="isOverpayment()"
-                         style="background:rgba(217,119,6,0.1); border:1px solid var(--color-warning);
-                                border-radius:8px; padding:10px; font-size:0.85rem; color:var(--color-warning);">
-                        ⚠ Amount exceeds invoice balance. The excess will be recorded as an overpayment.
-                    </div>
-
-                    <!-- API error -->
-                    <p x-show="apiError" x-text="apiError"
-                       style="color:var(--color-danger); font-size:0.875rem; background:rgba(220,38,38,0.08);
-                              border-radius:6px; padding:8px;"></p>
+                    <!-- VALID-2: form-level error banner injected by FF_Validate.banner() -->
+                    <div class="form-error-banner" data-form-error></div>
 
                     <button type="submit" class="btn btn-primary btn-md" :disabled="submitting">
                         <?= heroicon('credit-card', 'icon-sm') ?>
@@ -360,8 +352,6 @@ function FF_CreatePayment() {
                 'due'      => $preInv['due_date'],
             ]) : '{}';
         ?>,
-        errors:             {},
-        apiError:           '',
         submitting:         false,
         showSuccessOverlay: false,
 
@@ -373,40 +363,81 @@ function FF_CreatePayment() {
             } else {
                 this.selectedInvoice  = {};
             }
-            this.errors.invoice_id = '';
+            // VALID-2: clear any prior invoice error on change
+            const form = document.querySelector('form');
+            if (form) FF_Validate.clear(form);
         },
 
         fillBalance() {
             this.form.amount = this.selectedInvoice.balance;
+            // VALID-2: clear any prior amount error when auto-filling
+            const form = document.querySelector('form');
+            if (form) FF_Validate.clear(form);
         },
 
-        validateAmount() {
-            const a = parseFloat(this.form.amount);
-            if (isNaN(a) || a <= 0) {
-                this.errors.amount = 'Amount must be a positive number.';
-            } else {
-                this.errors.amount = '';
-            }
-        },
-
-        isOverpayment() {
-            if (!this.selectedInvoice.balance || !this.form.amount) return false;
-            return parseFloat(this.form.amount) > parseFloat(this.selectedInvoice.balance);
-        },
-
+        // VALID-2: unified client-side validation — exact spec messages, all in one pass
         validate() {
-            this.errors = {};
-            if (!this.form.invoice_id) this.errors.invoice_id = 'Please select an invoice.';
-            if (!this.form.amount || parseFloat(this.form.amount) <= 0) this.errors.amount = 'Amount is required and must be positive.';
-            if (!this.form.payment_method) this.errors.payment_method = 'Payment method is required.';
-            if (!this.form.payment_date) this.errors.payment_date = 'Payment date is required.';
-            return Object.keys(this.errors).length === 0;
+            const form = document.querySelector('form');
+            FF_Validate.clear(form);
+            let ok = true;
+
+            if (!this.form.invoice_id) {
+                FF_Validate.field(form, 'invoice_id', 'Please select an invoice.');
+                ok = false;
+            }
+
+            // Amount — exact spec messages for missing / negative / zero / exceed
+            const rawAmt = this.form.amount;
+            if (rawAmt === '' || rawAmt === null || rawAmt === undefined) {
+                FF_Validate.field(form, 'amount', 'Please enter a payment amount.');
+                ok = false;
+            } else {
+                const a = parseFloat(rawAmt);
+                if (isNaN(a)) {
+                    FF_Validate.field(form, 'amount', 'Please enter a valid payment amount.');
+                    ok = false;
+                } else if (a < 0) {
+                    FF_Validate.field(form, 'amount', 'Payment amount cannot be negative.');
+                    ok = false;
+                } else if (a === 0) {
+                    FF_Validate.field(form, 'amount', 'Payment amount must be greater than zero.');
+                    ok = false;
+                } else if (this.selectedInvoice.balance
+                           && a > parseFloat(this.selectedInvoice.balance)) {
+                    const bal = '$' + parseFloat(this.selectedInvoice.balance)
+                        .toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    FF_Validate.field(form, 'amount',
+                        `Payment amount exceeds invoice balance of ${bal}.`);
+                    ok = false;
+                }
+            }
+
+            // Currency mismatch — spec message
+            if (this.selectedInvoice.currency
+                && this.form.currency !== this.selectedInvoice.currency) {
+                FF_Validate.field(form, 'currency',
+                    `Payment currency must match invoice currency (${this.selectedInvoice.currency}).`);
+                ok = false;
+            }
+
+            if (!this.form.payment_method) {
+                FF_Validate.field(form, 'payment_method', 'Please select a payment method.');
+                ok = false;
+            }
+
+            if (!this.form.payment_date) {
+                FF_Validate.field(form, 'payment_date', 'Payment date is required.');
+                ok = false;
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(form);
+            return ok;
         },
 
         async submitPayment() {
             if (!this.validate()) return;
             this.submitting = true;
-            this.apiError   = '';
+            const form = document.querySelector('form');
 
             const payload = {
                 invoice_id:      parseInt(this.form.invoice_id, 10),
@@ -422,17 +453,30 @@ function FF_CreatePayment() {
                 internal_notes:  this.form.internal_notes || null,
             };
 
-            const res = await FF_Api.post('<?= base_url('api/v1/payments/create.php') ?>', payload);
-            this.submitting = false;
-
-            if (res.success) {
-                // Show success overlay then redirect to the new payment's detail page
-                this.showSuccessOverlay = true;
-                const _newId = res.data.id;
-                setTimeout(() => { window.location.href = '<?= base_url('/payments/show') ?>?id=' + _newId; }, 3500);
-            } else {
-                this.apiError = res.message ?? 'Failed to record payment. Please try again.';
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/payments/create.php') ?>', payload);
+                if (res.success) {
+                    this.showSuccessOverlay = true;
+                    const _newId = res.data.id;
+                    setTimeout(() => {
+                        window.location.href = '<?= base_url('/payments/show') ?>?id=' + _newId;
+                    }, 3500);
+                } else if (res.error?.code === 'VALIDATION_ERROR' && res.error?.fields) {
+                    FF_Validate.applyApi(form, res.error);
+                    FF_Validate.scrollToFirst(form);
+                } else if (res.error?.fields) {
+                    // Server returned specific field errors with a non-422 error code
+                    FF_Validate.applyApi(form, res.error);
+                    FF_Validate.scrollToFirst(form);
+                } else {
+                    FF_Validate.banner(form, res.error?.message || res.message || 'Failed to record payment. Please try again.');
+                    FF_Validate.scrollToFirst(form);
+                }
+            } catch (e) {
+                FF_Validate.banner(form, 'Network error. Please try again.');
+                FF_Validate.scrollToFirst(form);
             }
+            this.submitting = false;
         },
 
         formatCurrency(val) {

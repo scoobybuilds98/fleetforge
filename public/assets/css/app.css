@@ -1838,6 +1838,60 @@ textarea.form-input {
     color: var(--color-danger-text);
 }
 
+/* ============================================================
+   VALID-2 — Field-level + form-level validation messaging
+   ============================================================
+   .field-error          per-input error shown directly below
+   .form-error-banner    form-level banner (e.g. unbalanced JE)
+   .form-control.ff-invalid  same as .is-invalid, added by FF_Validate
+   ============================================================ */
+.field-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-danger-text);
+    line-height: 1.4;
+}
+.field-error .icon {
+    flex-shrink: 0;
+    font-size: 0.9375rem;
+    line-height: 1;
+    margin-top: 1px;
+}
+.field-error:empty { display: none; }
+
+.form-error-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-text);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+.form-error-banner strong { font-weight: 600; }
+.form-error-banner .icon {
+    flex-shrink: 0;
+    font-size: 1.125rem;
+    line-height: 1;
+    margin-top: 1px;
+}
+.form-error-banner:empty { display: none; }
+
+.form-control.ff-invalid,
+.form-input.ff-invalid,
+.form-select.ff-invalid {
+    border-color: var(--color-danger);
+    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.08);
+}
+
 /* Inline alert banners — used in forms and modals */
 .alert {
     padding: 12px 16px;

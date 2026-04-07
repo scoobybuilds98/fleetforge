@@ -62,9 +62,9 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
     <div class="card-body">
 
-        <div class="alert alert-danger" id="js-error" style="display:none;"></div>
+        <div class="form-error-banner" id="js-error" style="display:none;"></div>
 
-        <form id="mileage-form">
+        <form id="mileage-form" novalidate>
             <!-- Equipment Unit -->
             <div class="form-group">
                 <label class="form-label" for="equipment_unit_id">Equipment Unit <span style="color:var(--danger);">*</span></label>
@@ -77,6 +77,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                     </option>
                     <?php endforeach; ?>
                 </select>
+                <div class="field-error" id="err-equipment_unit_id"></div>
             </div>
 
             <!-- Lease (optional) -->
@@ -97,6 +98,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                 <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
                     Only active/pending leases shown. Links this reading to the lease's mileage history.
                 </div>
+                <div class="field-error" id="err-lease_id"></div>
             </div>
 
             <!-- Log Type -->
@@ -109,6 +111,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                 <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
                     System types (GPS Sync, Lease Start/End) are recorded automatically.
                 </div>
+                <div class="field-error" id="err-log_type"></div>
             </div>
 
             <!-- Odometer + Unit row -->
@@ -117,6 +120,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                     <label class="form-label" for="odometer_reading">Odometer Reading <span style="color:var(--danger);">*</span></label>
                     <input type="number" class="form-control" id="odometer_reading" name="odometer_reading"
                            min="0" step="1" placeholder="e.g. 84200" required>
+                    <div class="field-error" id="err-odometer_reading"></div>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="mileage_unit">Unit</label>
@@ -124,6 +128,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                         <option value="km" selected>km (kilometres)</option>
                         <option value="miles">mi (miles)</option>
                     </select>
+                    <div class="field-error" id="err-mileage_unit"></div>
                 </div>
             </div>
 
@@ -139,6 +144,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
                     </button>
                 </div>
+                <div class="field-error" id="err-log_date"></div>
             </div>
 
             <!-- Notes -->
@@ -149,6 +155,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                           oninput="document.getElementById('notes-count').textContent=this.value.length+' / 1000'"
                           placeholder="e.g. Reading taken at yard inspection"></textarea>
                 <div class="form-hint" style="text-align:right;" id="notes-count">0 / 1000</div>
+                <div class="field-error" id="err-notes"></div>
             </div>
 
             <!-- Submit -->
@@ -172,12 +179,69 @@ require_once FF_ROOT . '/includes/success_overlay.php';
 </div><!-- /mileage-page-wrapper -->
 
 <script>
+// ── Clear all inline errors + banner
+function mileageClearErrors() {
+    document.getElementById('js-error').style.display = 'none';
+    document.getElementById('js-error').textContent   = '';
+    ['equipment_unit_id','lease_id','log_type','odometer_reading','mileage_unit','log_date','notes'].forEach(f => {
+        const el = document.getElementById('err-' + f);
+        if (el) { el.textContent = ''; el.style.display = 'none'; }
+        const inp = document.getElementById(f);
+        if (inp) inp.classList.remove('is-invalid');
+    });
+}
+
+// ── Paint errors into their inline slots
+function mileagePaintErrors(fieldMap, topMessage) {
+    const errEl = document.getElementById('js-error');
+    errEl.textContent = topMessage || 'Please fix the errors below and try again.';
+    errEl.style.display = 'block';
+
+    for (const [field, msg] of Object.entries(fieldMap || {})) {
+        const slot = document.getElementById('err-' + field);
+        if (slot) { slot.textContent = msg; slot.style.display = 'block'; }
+        const inp = document.getElementById(field);
+        if (inp) inp.classList.add('is-invalid');
+    }
+}
+
+// ── Client-side validation — mirrors api/v1/mileage_logs/create.php
+function mileageValidate() {
+    const errs = {};
+    const f = {
+        equipment_unit_id: document.getElementById('equipment_unit_id').value,
+        odometer_reading:  document.getElementById('odometer_reading').value,
+        log_date:          document.getElementById('log_date').value,
+    };
+    if (!f.equipment_unit_id) errs.equipment_unit_id = 'Please select an equipment unit.';
+    if (f.odometer_reading === '' || f.odometer_reading === null || f.odometer_reading === undefined) {
+        errs.odometer_reading = 'Odometer reading is required.';
+    } else {
+        const n = parseInt(f.odometer_reading);
+        if (isNaN(n)) errs.odometer_reading = 'Odometer reading must be a whole number.';
+        else if (n < 0) errs.odometer_reading = 'Odometer cannot be negative.';
+    }
+    if (!f.log_date) {
+        errs.log_date = 'Log date is required.';
+    } else {
+        const today = new Date().toISOString().split('T')[0];
+        if (f.log_date > today) errs.log_date = 'Log date cannot be in the future.';
+    }
+    return errs;
+}
+
 document.getElementById('mileage-form').addEventListener('submit', async function(e) {
     e.preventDefault();
 
-    const btn   = document.getElementById('submit-btn');
-    const errEl = document.getElementById('js-error');
-    errEl.style.display = 'none';
+    mileageClearErrors();
+
+    const clientErrs = mileageValidate();
+    if (Object.keys(clientErrs).length) {
+        mileagePaintErrors(clientErrs, 'Please fix the errors below and try again.');
+        return;
+    }
+
+    const btn = document.getElementById('submit-btn');
     btn.disabled = true;
     btn.textContent = 'Saving…';
 
@@ -197,12 +261,11 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
         const data = await res.json();
 
         if (!data.success) {
-            errEl.textContent = data.message || 'Failed to save. Please check your input.';
-            if (data.data?.fields) {
-                const fields = data.data.fields;
-                errEl.textContent = Object.values(fields).join(' ');
-            }
-            errEl.style.display = 'block';
+            // VALID-2 envelope: data.error = {code, message, fields}
+            const err = data.error || {};
+            const fields = err.fields || data.data?.fields || {};
+            const top = err.message || data.message || 'Failed to save. Please check your input.';
+            mileagePaintErrors(fields, top);
             btn.disabled = false;
             btn.textContent = 'Save Entry';
             return;
@@ -214,6 +277,7 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
         setTimeout(() => { window.location.href = '<?= base_url('mileage_logs/show') ?>?id=' + _newId; }, 3500);
 
     } catch (err) {
+        const errEl = document.getElementById('js-error');
         errEl.textContent = 'Network error. Please try again.';
         errEl.style.display = 'block';
         btn.disabled = false;

@@ -42,12 +42,25 @@ require_auth_api();
 require_permission('reservations', 'edit');
 
 $body         = json_body();
+$fields       = [];
+
 $id           = clean_int($body['id'] ?? null);
 $targetStatus = clean_string($body['status'] ?? null, 20);
 $cancelReason = clean_string($body['cancel_reason'] ?? null, 1000);
 
-if (!$id)           json_error('MISSING_REQUIRED', 'id is required.', 422);
-if (!$targetStatus) json_error('MISSING_REQUIRED', 'status is required.', 422);
+// ── VALID-2: accumulate required field errors ─────────────────
+$allowedStatuses = ['pending', 'confirmed', 'cancelled', 'completed'];
+if (!$id) {
+    $fields['id'] = 'Reservation ID is required.';
+}
+if (!$targetStatus) {
+    $fields['status'] = 'Please select a status.';
+} elseif (!in_array($targetStatus, $allowedStatuses, true)) {
+    $fields['status'] = 'Please select a valid status.';
+}
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // ── Valid state machine transitions ────────────────────────────
 // Key = current status, value = allowed next statuses
@@ -77,10 +90,12 @@ db_transaction(function () use ($id, $targetStatus, $cancelReason, &$result) {
     global $validTransitions;
     $allowed = $validTransitions[$currentStatus] ?? [];
     if (!in_array($targetStatus, $allowed)) {
+        $allowedText = empty($allowed) ? 'none (terminal state)' : implode(', ', $allowed);
         json_error('INVALID_TRANSITION',
             "Cannot transition reservation #{$id} from '{$currentStatus}' to '{$targetStatus}'. " .
-            "Allowed: " . (empty($allowed) ? 'none (terminal state)' : implode(', ', $allowed)) . ".",
-            409
+            "Allowed: {$allowedText}.",
+            409,
+            ['fields' => ['status' => "Cannot move a reservation from '{$currentStatus}' to '{$targetStatus}'."]]
         );
     }
 
@@ -90,14 +105,14 @@ db_transaction(function () use ($id, $targetStatus, $cancelReason, &$result) {
         $user = current_user();
         if (!in_array($user['role_slug'] ?? '', ['super_admin', 'manager'])) {
             json_error('FORBIDDEN',
-                'Reversing a completed reservation requires Manager role.', 403);
+                'Reversing a completed reservation requires Manager role.', 403,
+                ['fields' => ['status' => 'Reversing a completed reservation requires Manager role.']]);
         }
     }
 
     // ── Cancel reason required ─────────────────────────────────
     if ($targetStatus === 'cancelled' && !$cancelReason) {
-        json_error('VALIDATION_ERROR', 'cancel_reason is required when cancelling.', 422,
-            ['errors' => ['cancel_reason' => 'Please provide a reason for cancellation.']]);
+        json_validation_error(['cancel_reason' => 'Please provide a reason for cancellation.']);
     }
 
     // ── Fetch system-linked units for this reservation ─────────
@@ -128,12 +143,11 @@ db_transaction(function () use ($id, $targetStatus, $cancelReason, &$result) {
                 [$u['equipment_unit_id'], $id]
             );
             if ($conflict) {
-                json_error('CONFLICT',
-                    "Unit {$u['unit_number']} is already in an active reservation " .
+                $conflictMsg = "Unit {$u['unit_number']} is already in an active reservation " .
                     "(Res #{$conflict['id']} — {$conflict['company_name']} — " .
-                    date('M j, Y', strtotime($conflict['pickup_date'])) . ").",
-                    409
-                );
+                    date('M j, Y', strtotime($conflict['pickup_date'])) . ").";
+                json_error('CONFLICT', $conflictMsg, 409,
+                    ['fields' => ['status' => $conflictMsg]]);
             }
         }
     }

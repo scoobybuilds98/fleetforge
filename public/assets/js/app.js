@@ -330,6 +330,207 @@ window.FF_Confirm = FF_Confirm;
 
 
 // ============================================================
+// 06b. FF_Validate — form error messaging (VALID-2)
+// ============================================================
+// Shared helpers every create/edit form uses to show clear,
+// specific validation errors. No magic — just a few functions
+// pages can call directly.
+//
+// USAGE — client-side (before submit):
+//   FF_Validate.clear(form);
+//   if (!amount || Number(amount) < 0) {
+//       FF_Validate.field(form, 'amount', 'Payment amount cannot be negative');
+//   }
+//   if (FF_Validate.hasErrors(form)) {
+//       FF_Validate.scrollToFirst(form);
+//       return;
+//   }
+//
+// USAGE — after API call returns VALIDATION_ERROR:
+//   const res = await FF_Api.post('/api/v1/leases', body);
+//   if (!res.success && res.error?.code === 'VALIDATION_ERROR') {
+//       FF_Validate.applyApi(form, res.error);   // wires up fields[]
+//       return;
+//   }
+//
+// Element markup — pages must render an error slot for each field:
+//   <input id="daily_rate" name="daily_rate" ...>
+//   <div class="field-error" data-error-for="daily_rate"></div>
+//
+// Or opt into auto-slot (FF_Validate creates the slot on-the-fly):
+//   <input id="daily_rate" name="daily_rate" ...>
+//   — a <div class="field-error"> will be inserted after the input.
+//
+// For form-level errors (e.g. unbalanced JE):
+//   <div class="form-error-banner" data-form-error></div>
+// ============================================================
+
+const FF_Validate = {
+    /**
+     * Clear every field + form-level error in the given form.
+     * Accepts a <form> element, a selector, or null → document.
+     */
+    clear(form) {
+        const root = typeof form === 'string'
+            ? document.querySelector(form)
+            : (form || document);
+        if (!root) return;
+
+        root.querySelectorAll('.field-error').forEach((el) => {
+            el.textContent = '';
+            el.innerHTML = '';
+        });
+        root.querySelectorAll('[data-form-error], .form-error-banner')
+            .forEach((el) => {
+                el.textContent = '';
+                el.innerHTML = '';
+            });
+        root.querySelectorAll('.ff-invalid').forEach((el) => {
+            el.classList.remove('ff-invalid', 'is-invalid');
+        });
+    },
+
+    /**
+     * Mark a specific field as invalid and show a message beneath it.
+     * Looks up the input by name (preferred) or id.
+     */
+    field(form, nameOrId, message) {
+        const root = typeof form === 'string'
+            ? document.querySelector(form)
+            : (form || document);
+        if (!root || !message) return;
+
+        // Find the input — try name first, then id
+        let input = root.querySelector(
+            `[name="${CSS.escape(nameOrId)}"]`
+        );
+        if (!input) {
+            input = root.querySelector(`#${CSS.escape(nameOrId)}`);
+        }
+        if (input) {
+            input.classList.add('ff-invalid');
+        }
+
+        // Find or create the error slot
+        let slot = root.querySelector(
+            `.field-error[data-error-for="${CSS.escape(nameOrId)}"]`
+        );
+        if (!slot && input) {
+            // Insert a slot right after the input or its wrapper
+            slot = document.createElement('div');
+            slot.className = 'field-error';
+            slot.setAttribute('data-error-for', nameOrId);
+            const container = input.closest('.form-group, .mb-3, .col') || input.parentElement;
+            if (container) {
+                container.appendChild(slot);
+            } else {
+                input.insertAdjacentElement('afterend', slot);
+            }
+        }
+        if (slot) {
+            slot.innerHTML =
+                '<span class="icon">⚠</span>' +
+                '<span>' + FF_Validate._escape(message) + '</span>';
+        }
+    },
+
+    /**
+     * Show a form-level error banner at the top of the form.
+     */
+    banner(form, message, opts = {}) {
+        const root = typeof form === 'string'
+            ? document.querySelector(form)
+            : (form || document);
+        if (!root) return;
+
+        let banner = root.querySelector('.form-error-banner, [data-form-error]');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.className = 'form-error-banner';
+            banner.setAttribute('data-form-error', '');
+            root.prepend(banner);
+        }
+        const title = opts.title || 'Cannot save:';
+        banner.innerHTML =
+            '<span class="icon">⚠</span>' +
+            '<div><strong>' + FF_Validate._escape(title) + '</strong> ' +
+            FF_Validate._escape(message) + '</div>';
+    },
+
+    /**
+     * Apply an API VALIDATION_ERROR response to the form.
+     * Accepts the `error` object from FF_Api — can have either
+     * `fields: {name: message, ...}` OR `errors: [...]` OR a plain
+     * message.
+     */
+    applyApi(form, errorObj) {
+        if (!errorObj) return;
+        const fields = errorObj.fields || {};
+        let any = false;
+        Object.keys(fields).forEach((name) => {
+            FF_Validate.field(form, name, fields[name]);
+            any = true;
+        });
+        if (!any && errorObj.message) {
+            FF_Validate.banner(form, errorObj.message);
+        }
+        FF_Validate.scrollToFirst(form);
+    },
+
+    /**
+     * Scroll the first invalid field into view + focus it.
+     */
+    scrollToFirst(form) {
+        const root = typeof form === 'string'
+            ? document.querySelector(form)
+            : (form || document);
+        if (!root) return;
+
+        const firstBad = root.querySelector('.ff-invalid, .is-invalid');
+        const firstBanner = root.querySelector('.form-error-banner, [data-form-error]');
+        const target = firstBad || firstBanner;
+        if (!target) return;
+
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (firstBad && typeof firstBad.focus === 'function') {
+            setTimeout(() => firstBad.focus({ preventScroll: true }), 250);
+        }
+    },
+
+    /**
+     * True if any .ff-invalid or non-empty .field-error exists.
+     */
+    hasErrors(form) {
+        const root = typeof form === 'string'
+            ? document.querySelector(form)
+            : (form || document);
+        if (!root) return false;
+
+        if (root.querySelector('.ff-invalid, .is-invalid')) return true;
+        const slots = root.querySelectorAll('.field-error');
+        for (const s of slots) {
+            if (s.textContent.trim() !== '') return true;
+        }
+        return false;
+    },
+
+    /**
+     * Internal — escape for safe innerHTML interpolation.
+     */
+    _escape(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    },
+};
+
+window.FF_Validate = FF_Validate;
+
+
+// ============================================================
 // 07. FF_Notifications — notification dropdown
 // ============================================================
 

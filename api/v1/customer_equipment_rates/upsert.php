@@ -36,21 +36,32 @@ require_auth_api();
 require_permission('rates', 'edit');
 
 // -----------------------------------------------------------------------
-// 1. Parse body
+// 1. Parse body — VALID-2: accumulate every error
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-$customerId   = clean_int($body['customer_id'] ?? null);
-$equipType    = clean_string($body['equipment_type'] ?? null, 255);
+$customerId    = clean_int($body['customer_id'] ?? null);
+$equipType     = clean_string($body['equipment_type'] ?? null, 255);
 $effectiveFrom = clean_date($body['effective_from'] ?? null);
 
-if (!$customerId)    json_error('MISSING_REQUIRED', 'customer_id is required.', 422);
-if (!$equipType)     json_error('MISSING_REQUIRED', 'equipment_type is required.', 422);
-if (!$effectiveFrom) json_error('MISSING_REQUIRED', 'effective_from is required (Y-m-d).', 422);
+if (!$customerId) {
+    $fields['customer_id'] = 'Please select a customer.';
+}
+if (!$equipType) {
+    $fields['equipment_type'] = 'Equipment type is required.';
+}
+if (!$effectiveFrom) {
+    $fields['effective_from'] = 'Effective from date is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // Verify customer exists
 if (!db_exists('customers', 'id = ? AND deleted_at IS NULL', [$customerId])) {
-    json_error('NOT_FOUND', 'Customer not found.', 404);
+    json_validation_error(['customer_id' => 'Customer not found.']);
 }
 
 // -----------------------------------------------------------------------
@@ -72,25 +83,24 @@ if ($isUpdate) {
     // D19 optimistic lock on update
     $submittedUpdatedAt = clean_string($body['updated_at'] ?? null);
     if (!$submittedUpdatedAt) {
-        json_error('MISSING_REQUIRED', 'updated_at is required when updating an existing rate.', 422);
+        json_validation_error(['updated_at' => 'Optimistic lock token is required.']);
     }
     if ($existing['updated_at'] !== $submittedUpdatedAt) {
-        json_error('STALE_DATA', 'Rate was modified by another user. Refresh and try again.', 409);
+        json_error('STALE_DATA',
+            'This rate was modified by another user. Refresh and try again.', 409,
+            ['fields' => ['updated_at' => 'This rate was modified by another user. Refresh and try again.']]);
     }
 } else {
     // Create path — ensure no existing record for this combination
-    $existing = db_row(
+    $duplicate = db_row(
         "SELECT id FROM customer_equipment_rates
          WHERE customer_id = ? AND equipment_type = ? AND effective_from = ?",
         [$customerId, $equipType, $effectiveFrom]
     );
-    if ($existing) {
-        json_error(
-            'ALREADY_EXISTS',
-            "A rate override for this customer, equipment type, and effective date already exists. " .
-            "Pass id + updated_at to update it.",
-            409
-        );
+    if ($duplicate) {
+        json_validation_error([
+            'equipment_type' => 'A rate override for this customer, equipment type, and effective date already exists.',
+        ], 'A rate override for this customer, equipment type, and effective date already exists.');
     }
 }
 
@@ -106,25 +116,30 @@ $monthlyRate   = null;
 $mileageRate   = null;
 $minimumCharge = null;
 
-// Map snake_case field name → camelCase variable name for clarity
+// Friendly labels for rate fields
 $rateFieldMap = [
-    'daily_rate'     => 'dailyRate',
-    'weekly_rate'    => 'weeklyRate',
-    'monthly_rate'   => 'monthlyRate',
-    'mileage_rate'   => 'mileageRate',
-    'minimum_charge' => 'minimumCharge',
+    'daily_rate'     => ['var' => 'dailyRate',     'label' => 'Daily rate'],
+    'weekly_rate'    => ['var' => 'weeklyRate',    'label' => 'Weekly rate'],
+    'monthly_rate'   => ['var' => 'monthlyRate',   'label' => 'Monthly rate'],
+    'mileage_rate'   => ['var' => 'mileageRate',   'label' => 'Mileage rate'],
+    'minimum_charge' => ['var' => 'minimumCharge', 'label' => 'Minimum charge'],
 ];
 
-foreach ($rateFieldMap as $field => $varName) {
+foreach ($rateFieldMap as $field => $info) {
+    $varName = $info['var'];
+    $label   = $info['label'];
     if (array_key_exists($field, $body)) {
         if ($body[$field] === null || $body[$field] === '') {
             $$varName = null;
         } else {
-            $val = clean_decimal($body[$field]);
+            $val = clean_decimal((string)$body[$field]);
             if ($val === null) {
-                json_error('VALIDATION_ERROR', "$field must be a valid decimal number.", 422);
+                $fields[$field] = "{$label} must be a valid number.";
+            } elseif (bccomp($val, '0', 6) < 0) {
+                $fields[$field] = "{$label} cannot be negative.";
+            } else {
+                $$varName = $val;
             }
-            $$varName = $val;
         }
     } elseif ($isUpdate && $existing) {
         $$varName = $existing[$field];
@@ -137,10 +152,10 @@ $mileageUnit = clean_string($body['mileage_unit'] ?? null, 10)
                ?? ($isUpdate ? $existing['mileage_unit'] : 'km');
 
 if (!in_array($currency, $validCurrencies, true)) {
-    json_error('VALIDATION_ERROR', 'currency must be CAD or USD.', 422);
+    $fields['currency'] = 'Currency must be CAD or USD.';
 }
 if (!in_array($mileageUnit, $validMileageUnits, true)) {
-    json_error('VALIDATION_ERROR', 'mileage_unit must be km or miles.', 422);
+    $fields['mileage_unit'] = 'Mileage unit must be km or miles.';
 }
 
 $notes       = clean_string($body['notes'] ?? null, 2000)
@@ -150,13 +165,17 @@ $effectiveTo = null;
 if (array_key_exists('effective_to', $body)) {
     $effectiveTo = !empty($body['effective_to']) ? clean_date($body['effective_to']) : null;
     if (!empty($body['effective_to']) && !$effectiveTo) {
-        json_error('VALIDATION_ERROR', 'effective_to must be a valid date (Y-m-d).', 422);
+        $fields['effective_to'] = 'Effective to must be a valid date.';
     }
     if ($effectiveTo && $effectiveTo < $effectiveFrom) {
-        json_error('VALIDATION_ERROR', 'effective_to must be on or after effective_from.', 422);
+        $fields['effective_to'] = 'End date must be on or after the start date.';
     }
 } elseif ($isUpdate && $existing) {
     $effectiveTo = $existing['effective_to'];
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // -----------------------------------------------------------------------

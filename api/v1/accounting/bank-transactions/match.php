@@ -22,30 +22,55 @@ require_method('POST');
 require_auth_api();
 require_permission('bank_accounts', 'edit');
 
-$id = clean_int($_POST['id'] ?? null);
-$matchedType = clean_string($_POST['matched_type'] ?? null);
-$matchedId = clean_int($_POST['matched_id'] ?? null);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
 
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
-if (!$matchedType || !in_array($matchedType, ['payment', 'ap_payment', 'journal_entry', 'bank_transfer', 'other'])) {
-    json_error('VALIDATION_ERROR', 'matched_type is invalid.', 422);
+$fields = [];
+
+$id = clean_int($input['id'] ?? null);
+$matchedType = clean_string($input['matched_type'] ?? null);
+$matchedId = clean_int($input['matched_id'] ?? null);
+
+if (!$id) $fields['id'] = 'Transaction ID is required.';
+
+$validMatchedTypes = ['payment', 'ap_payment', 'journal_entry', 'bank_transfer', 'other'];
+if (!$matchedType) {
+    $fields['matched_type'] = 'Please select what to match to.';
+} elseif (!in_array($matchedType, $validMatchedTypes, true)) {
+    $fields['matched_type'] = 'Match type must be payment, AP payment, journal entry, bank transfer, or other.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 $txn = db_row("SELECT * FROM acc_bank_transactions WHERE id = ?", [$id]);
-if (!$txn) json_error('NOT_FOUND', 'Bank transaction not found.', 404);
+if (!$txn) {
+    json_error('NOT_FOUND', 'Bank transaction not found.', 404, [
+        'fields' => ['id' => 'Bank transaction not found.'],
+    ]);
+}
 if ($txn['status'] === 'matched') {
-    json_error('VALIDATION_ERROR', 'Transaction is already matched. Unmatch first.', 422);
+    json_validation_error(
+        ['id' => 'Transaction is already matched. Unmatch first.'],
+        'Transaction is already matched. Unmatch first.'
+    );
 }
 
 // Validate the matched record exists
 if ($matchedId) {
     $valid = match ($matchedType) {
-        'payment'      => db_row("SELECT id FROM payments WHERE id = ? AND deleted_at IS NULL", [$matchedId]),
-        'ap_payment'   => db_row("SELECT id FROM acc_ap_payments WHERE id = ?", [$matchedId]),
-        'journal_entry'=> db_row("SELECT id FROM acc_journal_entries WHERE id = ?", [$matchedId]),
-        default        => ['id' => $matchedId],
+        'payment'       => db_row("SELECT id FROM payments WHERE id = ? AND deleted_at IS NULL", [$matchedId]),
+        'ap_payment'    => db_row("SELECT id FROM acc_ap_payments WHERE id = ?", [$matchedId]),
+        'journal_entry' => db_row("SELECT id FROM acc_journal_entries WHERE id = ?", [$matchedId]),
+        default         => ['id' => $matchedId],
     };
-    if (!$valid) json_error('NOT_FOUND', 'Matched record not found.', 404);
+    if (!$valid) {
+        json_error('NOT_FOUND', 'Matched record not found.', 404, [
+            'fields' => ['matched_id' => 'Matched record not found.'],
+        ]);
+    }
 }
 
 $userId = current_user_id();

@@ -26,19 +26,22 @@ require_method('POST');
 require_auth_api();
 require_permission('tax_management', 'edit');
 
-require_input([
-    'id'         => 'Period ID',
-    'filed_date' => 'Filed date',
-    'updated_at' => 'updated_at (optimistic lock)',
-]);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$body     = !empty($jsonBody) ? $jsonBody : $_POST;
 
-$body       = json_body();
-$id         = clean_int($body['id']);
-$filedDate  = clean_date($body['filed_date']);
-$updatedAt  = clean_string($body['updated_at']);
+$fields = [];
 
-if (!$id) {
-    json_error('MISSING_REQUIRED', 'id must be a positive integer.', 422);
+$id        = clean_int($body['id'] ?? null);
+$filedDate = clean_date($body['filed_date'] ?? null);
+$updatedAt = clean_string($body['updated_at'] ?? null);
+
+if (!$id)        $fields['id']         = 'Tax period ID is required.';
+if (!$filedDate) $fields['filed_date'] = 'Filed date is required.';
+if (!$updatedAt) $fields['updated_at'] = 'Concurrency token (updated_at) is required.';
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // D19 optimistic lock check — read current updated_at and compare
@@ -49,23 +52,30 @@ $current = db_row(
     [$id]
 );
 if (!$current) {
-    json_error('NOT_FOUND', 'Tax filing period not found.', 404);
+    json_error('NOT_FOUND', 'Tax filing period not found.', 404, [
+        'fields' => ['id' => 'Tax filing period not found.'],
+    ]);
 }
 if ((string) $current['updated_at'] !== $updatedAt) {
     json_error(
         'STALE_DATA',
         'This tax period was modified by another user. Please refresh and try again.',
-        409
+        409,
+        ['fields' => ['updated_at' => 'This tax period was modified by another user. Please refresh and try again.']]
     );
 }
 
 try {
     $period = TaxFilingService::markFiled($id, $filedDate, current_user_id());
 } catch (\RuntimeException $e) {
-    if (str_starts_with($e->getMessage(), 'INVALID_TRANSITION')) {
-        json_error('INVALID_TRANSITION', $e->getMessage(), 409);
+    $msg = $e->getMessage();
+    if (str_starts_with($msg, 'INVALID_TRANSITION')) {
+        json_error('INVALID_TRANSITION', $msg, 409, ['fields' => ['id' => $msg]]);
     }
-    json_error('VALIDATION_ERROR', $e->getMessage(), 422);
+    $slot = '_general';
+    if (stripos($msg, 'date') !== false || stripos($msg, 'filed') !== false) $slot = 'filed_date';
+    elseif (stripos($msg, 'period') !== false || stripos($msg, 'not') !== false) $slot = 'id';
+    json_validation_error([$slot => $msg], $msg);
 }
 
 json_success($period);

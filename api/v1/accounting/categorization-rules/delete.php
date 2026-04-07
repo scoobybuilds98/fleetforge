@@ -20,11 +20,21 @@ require_method('POST');
 require_auth_api();
 require_permission('accounts_payable', 'delete');
 
-$id = clean_int($_POST['id'] ?? null);
-if (!$id) json_error('VALIDATION_ERROR', 'id is required.', 422);
+// VALID-2: accept JSON or form-encoded payloads
+$jsonBody = json_body();
+$input    = !empty($jsonBody) ? $jsonBody : $_POST;
+
+$id = clean_int($input['id'] ?? null);
+if (!$id) {
+    json_validation_error(['id' => 'Rule ID is required.']);
+}
 
 $rule = db_row("SELECT * FROM acc_categorization_rules WHERE id = ?", [$id]);
-if (!$rule) json_error('NOT_FOUND', 'Rule not found.', 404);
+if (!$rule) {
+    json_error('NOT_FOUND', 'Rule not found.', 404, [
+        'fields' => ['id' => 'Rule not found.'],
+    ]);
+}
 
 db_execute("DELETE FROM acc_categorization_rules WHERE id = ?", [$id]);
 

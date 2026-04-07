@@ -35,19 +35,59 @@ require_method('POST');
 require_auth_api();
 require_permission('equipment', 'create');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-// ── Required fields ────────────────────────────────────────────
-$templateId  = clean_int($body['template_id'] ?? null);
-$unitNumber  = clean_string($body['unit_number'] ?? null, 100);
-$rawOwnership = $body['ownership_type'] ?? null;
+// ── Required fields — VALID-2: accumulate errors, one 422 at end ─
+$templateId   = clean_int($body['template_id'] ?? null);
+if (!$templateId) {
+    $fields['template_id'] = 'Please select an equipment template.';
+}
 
-$validOwnership = ['owned','leased','brokered'];
+$unitNumber   = clean_string($body['unit_number'] ?? null, 100);
+if (!$unitNumber) {
+    $fields['unit_number'] = 'Unit number is required.';
+}
+
+$rawOwnership   = $body['ownership_type'] ?? null;
+$validOwnership = ['owned', 'leased', 'brokered'];
 $ownershipType  = ($rawOwnership && in_array($rawOwnership, $validOwnership, true)) ? $rawOwnership : null;
+if (!$ownershipType) {
+    $fields['ownership_type'] = 'Please select an ownership type (owned, leased, or brokered).';
+}
 
-if (!$templateId)   json_error('VALIDATION_ERROR', 'template_id is required.', 422);
-if (!$unitNumber)   json_error('VALIDATION_ERROR', 'unit_number is required.', 422);
-if (!$ownershipType) json_error('VALIDATION_ERROR', 'ownership_type must be one of: owned, leased, brokered.', 422);
+// VALID-2: year must be 1900 – current+1 with specific message
+$currentYear = (int) date('Y');
+$maxYear     = $currentYear + 1;
+$yearRaw     = null;
+if (isset($body['year']) && $body['year'] !== '' && $body['year'] !== null) {
+    $yearRaw = clean_int($body['year']);
+    if ($yearRaw === null || $yearRaw < 1900 || $yearRaw > $maxYear) {
+        $fields['year'] = "Year must be between 1900 and {$maxYear}.";
+        $yearRaw = null;
+    }
+}
+$year = $yearRaw;
+
+// VALID-2: mileage/odometer >= 0 with specific message
+$mileageRaw = null;
+if (isset($body['mileage']) && $body['mileage'] !== '' && $body['mileage'] !== null) {
+    $mi = clean_int($body['mileage']);
+    if ($mi === null || $mi < 0) {
+        $fields['mileage'] = 'Odometer cannot be negative.';
+        $mileageRaw = 0;
+    } else {
+        $mileageRaw = $mi;
+    }
+} else {
+    $mileageRaw = 0;
+}
+
+// Short-circuit if required-field / format errors — the uniqueness / FK
+// checks below require valid values for template_id and unit_number
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // ── Verify template exists ─────────────────────────────────────
 $template = db_row(
@@ -55,26 +95,20 @@ $template = db_row(
     [$templateId]
 );
 if (!$template) {
-    json_error('NOT_FOUND', 'Equipment template not found or inactive.', 404);
+    json_error('NOT_FOUND', 'Equipment template not found or inactive.', 404,
+        ['fields' => ['template_id' => 'Equipment template not found or inactive.']]);
 }
 
 // ── Unique unit_number check ───────────────────────────────────
 // FIX #25: exclude soft-deleted units so a deleted unit_number can be reused
 if (db_exists('equipment_units', 'unit_number = ? AND deleted_at IS NULL', [$unitNumber])) {
-    json_error('ALREADY_EXISTS', 'A unit with this unit number already exists.', 409);
+    json_error('ALREADY_EXISTS', 'Unit number already exists.', 409,
+        ['fields' => ['unit_number' => 'Unit number already exists.']]);
 }
 
 // ── Optional fields ────────────────────────────────────────────
 $vin             = clean_string($body['vin'] ?? null, 50);
-// FIX #17: year must be a realistic vehicle model year (1900 – current year + 2)
-$yearRaw         = clean_int($body['year'] ?? null);
-$currentYear     = (int) date('Y');
-if ($yearRaw !== null && ($yearRaw < 1900 || $yearRaw > $currentYear + 2)) {
-    json_error('VALIDATION_ERROR',
-        "year must be between 1900 and " . ($currentYear + 2) . ".", 422,
-        ['errors' => ['year' => "Year must be between 1900 and " . ($currentYear + 2) . "."]]);
-}
-$year            = $yearRaw;
+// (year + mileage already validated and stored in $year / $mileageRaw above)
 $gpsDeviceId     = clean_string($body['gps_device_id'] ?? null, 100);
 $samsaraUrl      = clean_string($body['samsara_vehicle_url'] ?? null, 500);
 
@@ -106,8 +140,8 @@ $mviInterval     = isset($body['mvi_interval_days'])          ? clean_positive_i
 $regInterval     = isset($body['registration_interval_days']) ? clean_positive_int($body['registration_interval_days']) : null;
 $insInterval     = isset($body['insurance_interval_days'])    ? clean_positive_int($body['insurance_interval_days'])    : null;
 
-// FIX #18: mileage must be >= 0
-$mileage         = clean_non_negative_int($body['mileage'] ?? null) ?? 0;
+// Mileage already validated above into $mileageRaw
+$mileage         = $mileageRaw;
 $notes           = clean_string($body['notes'] ?? null, 5000);
 $inspNotes       = clean_string($body['inspection_notes'] ?? null, 5000);
 $internalNotes   = clean_string($body['internal_notes'] ?? null, 5000);

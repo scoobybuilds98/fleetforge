@@ -470,11 +470,8 @@ require_once FF_ROOT . '/includes/header.php';
             </button>
         </div>
 
-        <template x-if="globalError">
-            <div class="card card-body" style="background:var(--color-danger-light);color:var(--color-danger-text);margin-bottom:1rem;">
-                <strong>Error:</strong> <span x-text="globalError"></span>
-            </div>
-        </template>
+        <!-- VALID-2: form-level error banner is injected by FF_Validate.banner() -->
+        <div class="form-error-banner" data-form-error></div>
 
     </form>
 </div>
@@ -609,19 +606,73 @@ function FF_CreateLease() {
         },
 
         validate() {
-            this.errors = {};
-            if (!this.form.customer_id)       this.errors.customer_id = 'Customer is required.';
-            if (!this.form.equipment_unit_id) this.errors.equipment_unit_id = 'Equipment unit is required.';
-            if (!this.form.start_date)        this.errors.start_date = 'Start date is required.';
-            if (this.form.end_date && this.form.end_date < this.form.start_date)
-                this.errors.end_date = 'End date must be on or after start date.';
-            return Object.keys(this.errors).length === 0;
+            // VALID-2: use FF_Validate for consistent, per-field error display.
+            const form = document.querySelector('form');
+            FF_Validate.clear(form);
+            let ok = true;
+
+            if (!this.form.customer_id) {
+                FF_Validate.field(form, 'customer_id', 'Please select a customer.');
+                ok = false;
+            }
+            if (!this.form.equipment_unit_id) {
+                FF_Validate.field(form, 'equipment_unit_id', 'Please select an equipment unit.');
+                ok = false;
+            }
+            if (!this.form.start_date) {
+                FF_Validate.field(form, 'start_date', 'Start date is required.');
+                ok = false;
+            }
+            if (this.form.end_date && this.form.start_date &&
+                this.form.end_date < this.form.start_date) {
+                FF_Validate.field(form, 'end_date', 'End date must be after start date.');
+                ok = false;
+            }
+
+            // Numeric rate fields: reject negatives up-front so the user gets an
+            // immediate message instead of a server round-trip.
+            const numChecks = [
+                ['daily_rate',        'Daily rate cannot be negative.'],
+                ['weekly_rate',       'Weekly rate cannot be negative.'],
+                ['monthly_rate',      'Monthly rate cannot be negative.'],
+                ['mileage_rate',      'Mileage rate cannot be negative.'],
+                ['estimated_mileage', 'Estimated mileage cannot be negative.'],
+                ['mileage_at_start',  'Starting mileage cannot be negative.'],
+                ['discount_value',    'Discount value cannot be negative.'],
+                ['insurance_cost',    'Insurance cost cannot be negative.'],
+                ['warranty_cost',     'Warranty cost cannot be negative.'],
+            ];
+            numChecks.forEach(([k, msg]) => {
+                const v = this.form[k];
+                if (v !== '' && v !== null && v !== undefined && Number(v) < 0) {
+                    FF_Validate.field(form, k, msg);
+                    ok = false;
+                }
+            });
+            if (this.form.discount_type === 'percentage' &&
+                Number(this.form.discount_value || 0) > 100) {
+                FF_Validate.field(form, 'discount_value', 'Discount cannot exceed 100%.');
+                ok = false;
+            }
+
+            // At least one rate must be > 0
+            const anyRate = ['daily_rate','weekly_rate','monthly_rate','mileage_rate']
+                .some(k => Number(this.form[k] || 0) > 0);
+            if (!anyRate) {
+                FF_Validate.field(form, 'daily_rate',
+                    'At least one rate (daily, weekly, monthly, or mileage) must be greater than zero.');
+                ok = false;
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(form);
+            return ok;
         },
 
         async submit() {
             if (!this.validate()) return;
             this.submitting  = true;
-            this.globalError = null;
+
+            const form = document.querySelector('form');
 
             // Build payload — omit empty strings
             const payload = {};
@@ -641,11 +692,17 @@ function FF_CreateLease() {
                     const _newId = r.data.id;
                     setTimeout(() => { window.location.href = '<?= base_url('leases/show') ?>?id=' + _newId; }, 3500);
                 } else {
-                    this.globalError = r.message || 'Failed to create lease.';
-                    if (r.errors) this.errors = r.errors;
+                    // VALID-2: server returned a validation error — show field-level messages
+                    if (r.error && (r.error.code === 'VALIDATION_ERROR' || r.error.code === 'UNIT_UNAVAILABLE') && r.error.fields) {
+                        FF_Validate.applyApi(form, r.error);
+                    } else {
+                        FF_Validate.banner(form, r.error?.message || r.message || 'Failed to create lease.');
+                        FF_Validate.scrollToFirst(form);
+                    }
                 }
             } catch(e) {
-                this.globalError = 'Network error. Please try again.';
+                FF_Validate.banner(form, 'Network error. Please try again.');
+                FF_Validate.scrollToFirst(form);
             }
             this.submitting = false;
         },

@@ -44,38 +44,36 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="statementsPage()">
 
     <div class="card" style="padding:20px;margin-bottom:20px;">
+        <div class="form-error-banner" x-show="formError" x-cloak x-text="formError" style="margin-bottom:12px;"></div>
         <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:14px;align-items:end;">
             <div>
                 <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px;">Customer</label>
-                <select x-model="customerId" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                <select x-model="customerId" :class="errors.customer_id ? 'is-invalid' : ''" @change="errors.customer_id = ''" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                     <option value="">Select customer...</option>
                     <?php foreach ($customers as $c): ?>
                         <option value="<?= (int)$c['id'] ?>"><?= e($c['company_name']) ?> (<?= format_currency($c['outstanding_balance']) ?>)</option>
                     <?php endforeach; ?>
                 </select>
+                <div class="field-error" x-show="errors.customer_id" x-cloak x-text="errors.customer_id"></div>
             </div>
             <div>
                 <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px;">From</label>
-                <input type="date" x-model="dateFrom" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                <input type="date" x-model="dateFrom" :class="errors.date_from ? 'is-invalid' : ''" @change="errors.date_from = ''" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                <div class="field-error" x-show="errors.date_from" x-cloak x-text="errors.date_from"></div>
             </div>
             <div>
                 <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px;">To</label>
-                <input type="date" x-model="dateTo" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                <input type="date" x-model="dateTo" :class="errors.date_to ? 'is-invalid' : ''" @change="errors.date_to = ''" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                <div class="field-error" x-show="errors.date_to" x-cloak x-text="errors.date_to"></div>
             </div>
             <div>
-                <button class="btn btn-primary btn-md" @click="generate()" :disabled="!customerId || busy" style="white-space:nowrap;">
+                <button class="btn btn-primary btn-md" @click="generate()" :disabled="busy" style="white-space:nowrap;">
                     <span x-show="!busy">Generate PDF</span>
                     <span x-show="busy">Generating...</span>
                 </button>
             </div>
         </div>
     </div>
-
-    <template x-if="error">
-        <div class="card" style="padding:16px;background:var(--badge-danger-bg);border:1px solid var(--color-danger);border-radius:8px;">
-            <div style="color:var(--badge-danger-text);font-size:0.875rem;" x-text="error"></div>
-        </div>
-    </template>
 
     <div class="card" style="padding:48px;text-align:center;" x-show="!customerId">
         <div style="font-size:1rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;">Generate a Statement</div>
@@ -92,12 +90,66 @@ function statementsPage() {
         dateFrom: threeMonthsAgo.toISOString().slice(0, 10),
         dateTo: now.toISOString().slice(0, 10),
         busy: false,
-        error: null,
+
+        // VALID-2 error state
+        formError: '',
+        errors: { customer_id: '', date_from: '', date_to: '' },
+
+        _extractError(r, fallback) {
+            if (r && r.error) {
+                if (typeof r.error === 'string') return r.error;
+                if (r.error.message) return r.error.message;
+            }
+            return fallback || 'Request failed.';
+        },
+        _clearErrors() {
+            this.formError = '';
+            for (const k in this.errors) this.errors[k] = '';
+        },
+        _paintErrors(r, fallback) {
+            this._clearErrors();
+            const fields = r && r.error && r.error.fields;
+            if (fields && typeof fields === 'object') {
+                let mapped = false;
+                for (const k in fields) {
+                    if (k === '_general') {
+                        this.formError = String(fields[k]);
+                        mapped = true;
+                    } else if (k in this.errors) {
+                        this.errors[k] = String(fields[k]);
+                        mapped = true;
+                    }
+                }
+                if (mapped) return;
+            }
+            this.formError = this._extractError(r, fallback);
+        },
+
+        validate() {
+            this._clearErrors();
+            let ok = true;
+            if (!this.customerId) {
+                this.errors.customer_id = 'Please select a customer.';
+                ok = false;
+            }
+            if (!this.dateFrom) {
+                this.errors.date_from = 'Start date is required.';
+                ok = false;
+            }
+            if (!this.dateTo) {
+                this.errors.date_to = 'End date is required.';
+                ok = false;
+            }
+            if (this.dateFrom && this.dateTo && this.dateTo < this.dateFrom) {
+                this.errors.date_to = 'End date must be on or after start date.';
+                ok = false;
+            }
+            return ok;
+        },
 
         async generate() {
-            if (!this.customerId) return;
+            if (!this.validate()) return;
             this.busy = true;
-            this.error = null;
             try {
                 const params = new URLSearchParams({
                     customer_id: this.customerId,
@@ -108,7 +160,7 @@ function statementsPage() {
                 const resp = await fetch(url);
                 if (!resp.ok) {
                     const j = await resp.json().catch(() => ({}));
-                    this.error = j.error?.message || j.message || 'Failed to generate statement.';
+                    this._paintErrors(j, 'Failed to generate statement.');
                     this.busy = false;
                     return;
                 }
@@ -120,7 +172,7 @@ function statementsPage() {
                 URL.revokeObjectURL(link.href);
                 FF_Toast.success('Statement generated.');
             } catch (e) {
-                this.error = 'Error generating statement: ' + e.message;
+                this.formError = 'Network error. Please try again.';
             }
             this.busy = false;
         },

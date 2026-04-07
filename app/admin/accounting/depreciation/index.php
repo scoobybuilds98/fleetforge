@@ -264,20 +264,24 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:560px;width:95%;">
             <div class="modal-header"><h2 class="h5">Generate Depreciation Preview</h2><button class="modal-close" @click="previewOpen = false">×</button></div>
             <div class="modal-body">
+                <div class="form-error-banner" x-show="previewFormError" x-cloak x-text="previewFormError"></div>
                 <p class="text-secondary text-sm">Select an open period. A preview run will be generated showing each active asset's depreciation. You can then review and post it to create the consolidated JE.</p>
                 <div class="form-group"><label>Period *</label>
-                    <select class="form-select form-control-sm" x-model="previewForm.period_id">
+                    <select class="form-select form-control-sm" x-model="previewForm.period_id"
+                            :class="previewErrors.period_id ? 'is-invalid' : ''"
+                            @change="previewErrors.period_id = ''">
                         <option value="">— Choose period —</option>
                         <template x-for="p in periods.filter(p => p.status === 'open')" :key="p.id">
                             <option :value="p.id" x-text="p.name"></option>
                         </template>
                     </select>
+                    <div class="field-error" x-show="previewErrors.period_id" x-cloak x-text="previewErrors.period_id"></div>
                 </div>
                 <p class="text-warning text-sm">Re-running on a period with an existing preview will replace it. Periods with a posted run are blocked.</p>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="previewOpen = false">Cancel</button>
-                <button class="btn btn-primary btn-sm" @click="submitPreview()" :disabled="previewBusy || !previewForm.period_id">
+                <button class="btn btn-primary btn-sm" @click="submitPreview()" :disabled="previewBusy">
                     <span x-show="!previewBusy">Generate Preview</span><span x-show="previewBusy">Generating…</span>
                 </button>
             </div>
@@ -307,6 +311,52 @@ function FF_DepreciationRuns() {
         previewOpen: false,
         previewBusy: false,
         previewForm: { period_id: '' },
+        previewFormError: '',
+        previewErrors: { period_id: '' },
+
+        // ── VALID-2: Error helpers ──────────────────────────────
+        _extractError(r, fallback) {
+            if (r && r.error) {
+                if (typeof r.error === 'string') return r.error;
+                if (r.error.message) return r.error.message;
+            }
+            if (r && r.message) return r.message;
+            return fallback || 'Something went wrong.';
+        },
+        _clearErrors(errorsObj, bannerKey) {
+            this[bannerKey] = '';
+            for (const k in errorsObj) {
+                if (Object.prototype.hasOwnProperty.call(errorsObj, k)) errorsObj[k] = '';
+            }
+        },
+        _paintErrors(errorsObj, bannerKey, r, fallback) {
+            const fields = (r && r.error && r.error.fields) || (r && r.fields) || null;
+            if (fields && typeof fields === 'object') {
+                let any = false;
+                for (const k in fields) {
+                    if (!Object.prototype.hasOwnProperty.call(fields, k)) continue;
+                    if (Object.prototype.hasOwnProperty.call(errorsObj, k)) {
+                        errorsObj[k] = fields[k];
+                        any = true;
+                    } else if (k === '_general' || k === '') {
+                        this[bannerKey] = fields[k];
+                        any = true;
+                    }
+                }
+                if (!any) this[bannerKey] = this._extractError(r, fallback);
+            } else {
+                this[bannerKey] = this._extractError(r, fallback);
+            }
+        },
+        validatePreview() {
+            this._clearErrors(this.previewErrors, 'previewFormError');
+            let ok = true;
+            if (!this.previewForm.period_id) {
+                this.previewErrors.period_id = 'Please select a period.';
+                ok = false;
+            }
+            return ok;
+        },
 
         // ── Init ───────────────────────────────────────────────
         async init() {
@@ -371,10 +421,11 @@ function FF_DepreciationRuns() {
         // ── Preview generation ─────────────────────────────────
         openPreview() {
             this.previewForm = { period_id: '' };
+            this._clearErrors(this.previewErrors, 'previewFormError');
             this.previewOpen = true;
         },
         async submitPreview() {
-            if (!this.previewForm.period_id) return;
+            if (!this.validatePreview()) return;
             this.previewBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/depreciation/preview.php') ?>', {
@@ -385,9 +436,9 @@ function FF_DepreciationRuns() {
                     this.previewOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Preview failed.');
+                    this._paintErrors(this.previewErrors, 'previewFormError', r, 'Failed to generate preview.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.previewFormError = 'Network error. Please try again.'; }
             this.previewBusy = false;
         },
 

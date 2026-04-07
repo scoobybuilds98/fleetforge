@@ -136,61 +136,71 @@ require_once FF_ROOT . '/includes/header.php';
          @click.self="showForm = false">
             <div class="card" style="width:100%;max-width:600px;padding:24px;" x-show="showForm" x-transition>
                 <div style="font-weight:700;font-size:1rem;margin-bottom:16px;" x-text="form.id ? 'Edit Rule' : 'New Rule'"></div>
+                <div class="form-error-banner" x-show="formError" x-cloak x-text="formError" style="margin-bottom:12px;"></div>
                 <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px;">
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Rule Name *</label>
-                        <input type="text" x-model="form.name" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. Tire vendors → Tires expense">
+                        <input type="text" x-model="form.name" @input="errors.name = ''" :class="errors.name ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. Tire vendors → Tires expense">
+                        <div class="field-error" x-show="errors.name" x-cloak x-text="errors.name"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Priority</label>
-                        <input type="number" x-model="form.priority" min="0" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <input type="number" x-model="form.priority" @input="errors.priority = ''" :class="errors.priority ? 'is-invalid' : ''" min="0" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <div class="field-error" x-show="errors.priority" x-cloak x-text="errors.priority"></div>
                     </div>
                 </div>
                 <div style="font-weight:600;font-size:0.8125rem;margin-bottom:8px;color:var(--text-secondary);">Match Conditions (all non-empty conditions must match)</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Specific Vendor</label>
-                        <select x-model="form.vendor_id" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <select x-model="form.vendor_id" @change="errors.vendor_id = ''" :class="errors.vendor_id ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                             <option value="">Any vendor</option>
                             <?php foreach ($vendors as $v): ?>
                             <option value="<?= (int)$v['id'] ?>"><?= e($v['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="field-error" x-show="errors.vendor_id" x-cloak x-text="errors.vendor_id"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Vendor Type</label>
-                        <select x-model="form.vendor_type" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                        <select x-model="form.vendor_type" @change="errors.vendor_type = ''" :class="errors.vendor_type ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                             <option value="">Any type</option>
                             <?php foreach ($vendorTypes as $vt): ?>
                             <option value="<?= e($vt) ?>"><?= e(ucfirst($vt)) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="field-error" x-show="errors.vendor_type" x-cloak x-text="errors.vendor_type"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Vendor Name Contains</label>
-                        <input type="text" x-model="form.vendor_name_pattern" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. tire, brake">
+                        <input type="text" x-model="form.vendor_name_pattern" @input="errors.vendor_name_pattern = ''" :class="errors.vendor_name_pattern ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. tire, brake">
+                        <div class="field-error" x-show="errors.vendor_name_pattern" x-cloak x-text="errors.vendor_name_pattern"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Description Keywords (comma-sep)</label>
-                        <input type="text" x-model="form.description_keywords" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. oil change, filter">
+                        <input type="text" x-model="form.description_keywords" @input="errors.description_keywords = ''" :class="errors.description_keywords ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);" placeholder="e.g. oil change, filter">
+                        <div class="field-error" x-show="errors.description_keywords" x-cloak x-text="errors.description_keywords"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Amount Min ($)</label>
-                        <input type="number" x-model="form.amount_min" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <input type="number" x-model="form.amount_min" @input="errors.amount_min = ''" :class="errors.amount_min ? 'is-invalid' : ''" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <div class="field-error" x-show="errors.amount_min" x-cloak x-text="errors.amount_min"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Amount Max ($)</label>
-                        <input type="number" x-model="form.amount_max" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <input type="number" x-model="form.amount_max" @input="errors.amount_max = ''" :class="errors.amount_max ? 'is-invalid' : ''" step="0.01" min="0" class="form-input font-mono" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);">
+                        <div class="field-error" x-show="errors.amount_max" x-cloak x-text="errors.amount_max"></div>
                     </div>
                 </div>
                 <div style="margin-bottom:12px;">
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Target GL Account *</label>
-                    <select x-model="form.account_id" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <select x-model="form.account_id" @change="errors.account_id = ''" :class="errors.account_id ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
                         <option value="">Select account...</option>
                         <?php foreach ($glAccounts as $a): ?>
                         <option value="<?= (int)$a['id'] ?>"><?= e($a['code'] . ' — ' . $a['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <div class="field-error" x-show="errors.account_id" x-cloak x-text="errors.account_id"></div>
                 </div>
                 <div style="margin-bottom:16px;">
                     <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;cursor:pointer;">
@@ -202,7 +212,6 @@ require_once FF_ROOT . '/includes/header.php';
                     <button class="btn btn-secondary btn-sm" @click="showForm = false">Cancel</button>
                     <button class="btn btn-success btn-sm" @click="saveRule()" :disabled="saving">Save Rule</button>
                 </div>
-                <div x-show="formError" style="margin-top:8px;padding:8px;border-radius:6px;background:var(--badge-danger-bg);color:var(--badge-danger-text);font-size:0.8125rem;" x-text="formError"></div>
             </div>
     </div>
 </div>
@@ -213,12 +222,49 @@ function rulesPage() {
         rules: [], loading: false, globalEnabled: true,
         showForm: false, saving: false, formError: '',
         form: {},
+        errors: {
+            name: '', priority: '', vendor_id: '', vendor_type: '',
+            vendor_name_pattern: '', description_keywords: '',
+            amount_min: '', amount_max: '', account_id: ''
+        },
 
         _csrfHeaders() {
             return {
                 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
                 'X-Requested-With': 'XMLHttpRequest',
             };
+        },
+
+        _clearErrors() {
+            for (const k in this.errors) this.errors[k] = '';
+            this.formError = '';
+        },
+
+        _extractError(r, fallback) {
+            if (!r) return fallback || 'An unexpected error occurred.';
+            if (r.error && r.error.message) return r.error.message;
+            if (r.message) return r.message;
+            return fallback || 'An unexpected error occurred.';
+        },
+
+        _paintServerErrors(r, fallback) {
+            const err = r && r.error ? r.error : r;
+            const fields = (err && err.fields) || (r && r.fields) || {};
+            let painted = false;
+            for (const k in fields) {
+                if (k === '_general') continue;
+                if (k in this.errors) {
+                    this.errors[k] = fields[k];
+                    painted = true;
+                }
+            }
+            if (fields._general) {
+                this.formError = fields._general;
+            } else if (!painted) {
+                this.formError = this._extractError(r, fallback);
+            } else {
+                this.formError = this._extractError(r, 'Please correct the highlighted fields.');
+            }
         },
 
         async load() {
@@ -247,13 +293,59 @@ function rulesPage() {
                 description_keywords: '', amount_min: '', amount_max: '',
                 vendor_type: '', account_id: '', priority: 0, is_active: true,
             };
-            this.formError = '';
+            this._clearErrors();
             this.showForm = true;
         },
 
         editRule(r) { this.openForm(r); },
 
+        validateRule() {
+            this._clearErrors();
+            let ok = true;
+            if (!this.form.name || !String(this.form.name).trim()) {
+                this.errors.name = 'Rule name is required.';
+                ok = false;
+            }
+            if (!this.form.account_id) {
+                this.errors.account_id = 'Please select a target GL account.';
+                ok = false;
+            }
+            const priority = this.form.priority;
+            if (priority !== '' && priority !== null && priority !== undefined) {
+                const p = Number(priority);
+                if (!Number.isInteger(p) || p < 0) {
+                    this.errors.priority = 'Priority must be zero or a positive integer.';
+                    ok = false;
+                }
+            }
+            const min = this.form.amount_min;
+            const max = this.form.amount_max;
+            if (min !== '' && min !== null && min !== undefined) {
+                if (isNaN(parseFloat(min)) || parseFloat(min) < 0) {
+                    this.errors.amount_min = 'Minimum amount must be zero or positive.';
+                    ok = false;
+                }
+            }
+            if (max !== '' && max !== null && max !== undefined) {
+                if (isNaN(parseFloat(max)) || parseFloat(max) < 0) {
+                    this.errors.amount_max = 'Maximum amount must be zero or positive.';
+                    ok = false;
+                }
+            }
+            if (min !== '' && max !== '' && min != null && max != null
+                && !isNaN(parseFloat(min)) && !isNaN(parseFloat(max))
+                && parseFloat(min) > parseFloat(max)) {
+                this.errors.amount_max = 'Maximum amount must be greater than or equal to minimum amount.';
+                ok = false;
+            }
+            return ok;
+        },
+
         async saveRule() {
+            if (!this.validateRule()) {
+                this.formError = 'Please correct the highlighted fields.';
+                return;
+            }
             this.saving = true; this.formError = '';
             try {
                 const fd = new FormData();
@@ -264,8 +356,8 @@ function rulesPage() {
                 const r = await fetch(FF_Api.url('/api/v1/accounting/categorization-rules/save.php'), { method: 'POST', body: fd, headers: this._csrfHeaders() });
                 const j = await r.json();
                 if (j.success) { this.showForm = false; this.load(); }
-                else this.formError = j.error?.message || 'Save failed.';
-            } catch (e) { this.formError = e.message; }
+                else this._paintServerErrors(j, 'Failed to save rule.');
+            } catch (e) { this.formError = 'Network error. Please try again.'; }
             this.saving = false;
         },
 

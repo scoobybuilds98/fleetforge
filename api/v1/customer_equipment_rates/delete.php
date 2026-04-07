@@ -32,11 +32,13 @@ require_permission('rates', 'delete');
 // -----------------------------------------------------------------------
 // 1. Parse body + resolve record
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $id = clean_int($body['id'] ?? null);
 if (!$id) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Rate override ID is required.';
+    json_validation_error($fields);
 }
 
 $rate = db_row(

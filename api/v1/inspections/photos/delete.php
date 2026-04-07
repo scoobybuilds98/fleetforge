@@ -31,10 +31,16 @@ require_method('POST');
 require_auth_api();
 require_permission('inspections', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $photoId = clean_int($body['photo_id'] ?? null);
-if (!$photoId) json_error('MISSING_REQUIRED', 'photo_id is required.', 422);
+if (!$photoId) {
+    $fields['photo_id'] = 'Photo ID is required.';
+}
+if ($fields) {
+    json_validation_error($fields);
+}
 
 // Fetch photo with parent inspection status
 $photo = db_row(
@@ -48,7 +54,9 @@ if (!$photo) json_error('NOT_FOUND', 'Photo not found.', 404);
 
 // Signed inspections are terminal — photos cannot be removed
 if ($photo['inspection_status'] === 'signed') {
-    json_error('IMMUTABLE_RECORD', 'Signed inspections cannot be modified.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Signed inspections cannot be modified.', 422,
+        ['fields' => ['photo_id' => 'Cannot delete photos from a signed inspection.']]);
 }
 
 // Delete DB record first — if storage delete fails, we don't want a dangling DB record

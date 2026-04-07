@@ -32,10 +32,13 @@ require_permission('maintenance', 'delete');
 // -----------------------------------------------------------------------
 // 1. Load claim
 // -----------------------------------------------------------------------
-$body    = json_body();
+$body   = json_body();
+$fields = [];
+
 $claimId = clean_int($body['id'] ?? null);
 if (!$claimId) {
-    json_error('MISSING_REQUIRED', 'id is required.', 422);
+    $fields['id'] = 'Damage claim ID is required.';
+    json_validation_error($fields);
 }
 
 $claim = db_row(
@@ -49,11 +52,9 @@ if (!$claim) {
 // Only allow deletion of early-stage claims
 $deletableStatuses = ['reported', 'assessed'];
 if (!in_array($claim['status'], $deletableStatuses, true)) {
-    json_error(
-        'INVALID_TRANSITION',
-        "Claims in '{$claim['status']}' status cannot be deleted. Use 'written_off' status transition instead.",
-        422
-    );
+    json_error('INVALID_TRANSITION',
+        "Claims in '{$claim['status']}' status cannot be deleted. Use the 'written_off' status transition instead.", 422,
+        ['fields' => ['id' => "Claims in '{$claim['status']}' status cannot be deleted."]]);
 }
 
 // -----------------------------------------------------------------------

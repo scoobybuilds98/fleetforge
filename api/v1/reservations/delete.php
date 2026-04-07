@@ -31,9 +31,14 @@ require_method('POST');
 require_auth_api();
 require_permission('reservations', 'delete');
 
-$body = json_body();
-$id   = clean_int($body['id'] ?? null);
-if (!$id) json_error('MISSING_REQUIRED', 'id is required.', 422);
+$body   = json_body();
+$fields = [];
+
+$id = clean_int($body['id'] ?? null);
+if (!$id) {
+    $fields['id'] = 'Reservation ID is required.';
+    json_validation_error($fields);
+}
 
 db_transaction(function () use ($id) {
     // ── Fetch with lock ────────────────────────────────────────
@@ -49,7 +54,8 @@ db_transaction(function () use ($id) {
     // ── Guard: only pending or cancelled can be hard-deleted ───
     if (!in_array($reservation['status'], ['pending', 'cancelled'])) {
         json_error('IMMUTABLE_RECORD',
-            "Reservation #{$id} is '{$reservation['status']}'. Cancel it first before deleting.", 422);
+            "Reservation #{$id} is '{$reservation['status']}'. Cancel it first before deleting.", 422,
+            ['fields' => ['id' => "Cannot delete a {$reservation['status']} reservation. Cancel it first."]]);
     }
 
     // ── Release any 'reserved' units back to 'available' ──────

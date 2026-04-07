@@ -299,27 +299,63 @@ function FF_RateCardCreate() {
         },
 
         validate() {
-            this.errors = {};
-            if (!this.form.name.trim())           this.errors.name = 'Name is required.';
-            if (!this.form.effective_from)        this.errors.effective_from = 'Effective From is required.';
-            if (this.form.effective_to && this.form.effective_to < this.form.effective_from) {
-                this.errors.effective_to = 'Effective To must be on or after Effective From.';
+            this.errors     = {};
+            this.globalError = null;
+            let ok = true;
+
+            if (!this.form.name || !this.form.name.trim()) {
+                this.errors.name = 'Rate card name is required.';
+                ok = false;
             }
-            // Items: each must have an equipment_type selected
+            if (!this.form.effective_from) {
+                this.errors.effective_from = 'Effective from date is required.';
+                ok = false;
+            }
+            if (this.form.effective_to && this.form.effective_from &&
+                this.form.effective_to < this.form.effective_from) {
+                this.errors.effective_to = 'End date must be on or after the start date.';
+                ok = false;
+            }
+
+            // Items: each must have an equipment_type selected + non-negative rates
             const seen = new Set();
+            const rateLabels = {
+                daily_rate:   'Daily rate',
+                weekly_rate:  'Weekly rate',
+                monthly_rate: 'Monthly rate',
+                mileage_rate: 'Mileage rate',
+            };
+            const itemProblems = [];
             for (let i = 0; i < this.items.length; i++) {
-                if (!this.items[i].equipment_type) {
-                    this.errors[`item_type_${i}`] = true;
-                    this.globalError = 'All item rows must have an equipment type selected.';
-                    return false;
+                const item = this.items[i];
+                const lineNum = i + 1;
+                if (!item.equipment_type) {
+                    itemProblems.push(`Item ${lineNum}: please select an equipment type.`);
+                    continue;
                 }
-                if (seen.has(this.items[i].equipment_type)) {
-                    this.globalError = `Duplicate equipment type: ${this.items[i].equipment_type}`;
-                    return false;
+                if (seen.has(item.equipment_type)) {
+                    itemProblems.push(`Item ${lineNum}: equipment type '${item.equipment_type}' is listed more than once.`);
+                    continue;
                 }
-                seen.add(this.items[i].equipment_type);
+                seen.add(item.equipment_type);
+
+                for (const [field, label] of Object.entries(rateLabels)) {
+                    const raw = item[field];
+                    if (raw === '' || raw === null || raw === undefined) continue;
+                    const n = parseFloat(raw);
+                    if (isNaN(n)) {
+                        itemProblems.push(`Item ${lineNum}: ${label} must be a valid number.`);
+                    } else if (n < 0) {
+                        itemProblems.push(`Item ${lineNum}: ${label} cannot be negative.`);
+                    }
+                }
             }
-            return Object.keys(this.errors).length === 0;
+            if (itemProblems.length > 0) {
+                this.globalError = itemProblems.join(' ');
+                ok = false;
+            }
+
+            return ok;
         },
 
         async submit() {
@@ -351,6 +387,16 @@ function FF_RateCardCreate() {
 
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/rate_cards/create') ?>', payload);
+                if (!r.success) {
+                    // VALID-2: read per-field map from server response
+                    if (r.error?.fields) {
+                        this.errors = r.error.fields;
+                        if (r.error.fields.items) this.globalError = r.error.fields.items;
+                    }
+                    this.globalError = this.globalError || r.error?.message || 'Failed to create rate card.';
+                    this.submitting = false;
+                    return;
+                }
                 window.location = '<?= base_url('rates/show') ?>?id=' + r.data.id;
             } catch (e) {
                 this.globalError = e.message || 'An error occurred. Please try again.';

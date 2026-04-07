@@ -37,9 +37,16 @@ require_method('POST');
 require_auth_api();
 require_permission('inspections', 'edit');
 
-// ── 1. Validate inspection exists and is not signed (terminal)
+// ── 1. Validate inspection_id (accumulate all errors — VALID-2)
+$fields = [];
+
 $inspectionId = clean_int($_POST['inspection_id'] ?? null);
-if (!$inspectionId) json_error('MISSING_REQUIRED', 'inspection_id is required.', 422);
+if (!$inspectionId) {
+    $fields['inspection_id'] = 'Inspection ID is required.';
+}
+if ($fields) {
+    json_validation_error($fields);
+}
 
 $insp = db_row(
     "SELECT id, inspection_number, status FROM inspections WHERE id = ?",
@@ -48,7 +55,9 @@ $insp = db_row(
 if (!$insp) json_error('NOT_FOUND', 'Inspection not found.', 404);
 
 if ($insp['status'] === 'signed') {
-    json_error('IMMUTABLE_RECORD', 'Signed inspections cannot be modified.', 422);
+    json_error('IMMUTABLE_RECORD',
+        'Signed inspections cannot be modified.', 422,
+        ['fields' => ['inspection_id' => 'Cannot add photos to a signed inspection.']]);
 }
 
 // ── 2. Optional section_id — must belong to this inspection if provided
@@ -58,7 +67,9 @@ if ($sectionId) {
         "SELECT id FROM inspection_sections WHERE id = ? AND inspection_id = ?",
         [$sectionId, $inspectionId]
     );
-    if (!$sec) json_error('NOT_FOUND', 'Section not found on this inspection.', 404);
+    if (!$sec) {
+        json_validation_error(['section_id' => 'Section not found on this inspection.']);
+    }
 }
 
 // ── 3. Check photo count limit (max 20 per inspection — spec §4.6)
@@ -67,25 +78,34 @@ $photoCount = db_count(
     [$inspectionId]
 );
 if ($photoCount >= 20) {
-    json_error('VALIDATION_ERROR', 'Maximum 20 photos per inspection.', 422);
+    json_validation_error(
+        ['photo' => 'Maximum 20 photos per inspection. Delete an existing photo first.'],
+        'Maximum 20 photos per inspection.'
+    );
 }
 
 // ── 4. Validate uploaded file
 if (empty($_FILES['photo']) || $_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
     $uploadError = $_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE;
     $errMsg = match ($uploadError) {
-        UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File exceeds maximum upload size (10 MB).',
-        UPLOAD_ERR_NO_FILE                        => 'No file was uploaded.',
+        UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File exceeds maximum upload size of 10 MB.',
+        UPLOAD_ERR_NO_FILE                        => 'Please select a photo to upload.',
+        UPLOAD_ERR_PARTIAL                        => 'The upload was interrupted. Please try again.',
+        UPLOAD_ERR_NO_TMP_DIR                     => 'Server upload directory is missing. Contact support.',
+        UPLOAD_ERR_CANT_WRITE                     => 'Server could not save the upload. Contact support.',
         default                                   => 'File upload failed (error code ' . $uploadError . ').',
     };
-    json_error('VALIDATION_ERROR', $errMsg, 422);
+    json_validation_error(['photo' => $errMsg], $errMsg);
 }
 
 $tmpPath = $_FILES['photo']['tmp_name'];
 
 // Size check — 10 MB
 if ($_FILES['photo']['size'] > 10 * 1024 * 1024) {
-    json_error('VALIDATION_ERROR', 'File must be 10 MB or smaller.', 422);
+    json_validation_error(
+        ['photo' => 'Photo must be 10 MB or smaller.'],
+        'Photo must be 10 MB or smaller.'
+    );
 }
 
 // Server-side MIME detection — never trust client type (Trap 5)
@@ -102,7 +122,10 @@ $allowedMimes = [
 
 $ext = $allowedMimes[$mimeType] ?? null;
 if (!$ext) {
-    json_error('VALIDATION_ERROR', 'Unsupported file type. Allowed: JPEG, PNG, HEIC.', 422);
+    json_validation_error(
+        ['photo' => 'Unsupported file type. Allowed formats: JPEG, PNG, HEIC.'],
+        'Unsupported file type.'
+    );
 }
 
 // ── 5. Build safe filename and upload via StorageClient (D9)

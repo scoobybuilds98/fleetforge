@@ -215,44 +215,60 @@ require_once FF_ROOT . '/includes/header.php';
                 <button class="modal-close" @click="createOpen = false">×</button>
             </div>
             <div class="modal-body">
+                <div class="form-error-banner" x-show="createFormError" x-cloak x-text="createFormError"></div>
                 <div class="form-group">
                     <label>Tax Type *</label>
-                    <select class="form-select form-control-sm" x-model="createForm.tax_type">
+                    <select class="form-select form-control-sm" x-model="createForm.tax_type"
+                            :class="createErrors.tax_type ? 'is-invalid' : ''"
+                            @change="createErrors.tax_type = ''">
                         <option value="">— Choose tax type —</option>
                         <option value="gst_hst">GST / HST (federal)</option>
                         <option value="pst_bc">PST — British Columbia</option>
                         <option value="pst_sk">PST — Saskatchewan</option>
                         <option value="pst_mb">PST — Manitoba (RST)</option>
                     </select>
+                    <div class="field-error" x-show="createErrors.tax_type" x-cloak x-text="createErrors.tax_type"></div>
                 </div>
                 <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div class="form-group">
                         <label>Period Start *</label>
-                        <input type="date" class="form-control form-control-sm" x-model="createForm.period_start">
+                        <input type="date" class="form-control form-control-sm" x-model="createForm.period_start"
+                               :class="createErrors.period_start ? 'is-invalid' : ''"
+                               @input="createErrors.period_start = ''">
+                        <div class="field-error" x-show="createErrors.period_start" x-cloak x-text="createErrors.period_start"></div>
                     </div>
                     <div class="form-group">
                         <label>Period End *</label>
-                        <input type="date" class="form-control form-control-sm" x-model="createForm.period_end">
+                        <input type="date" class="form-control form-control-sm" x-model="createForm.period_end"
+                               :class="createErrors.period_end ? 'is-invalid' : ''"
+                               @input="createErrors.period_end = ''">
+                        <div class="field-error" x-show="createErrors.period_end" x-cloak x-text="createErrors.period_end"></div>
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Frequency *</label>
-                    <select class="form-select form-control-sm" x-model="createForm.frequency">
+                    <select class="form-select form-control-sm" x-model="createForm.frequency"
+                            :class="createErrors.frequency ? 'is-invalid' : ''"
+                            @change="createErrors.frequency = ''">
                         <option value="">— Choose frequency —</option>
                         <option value="monthly">Monthly (filing due 1 month after end)</option>
                         <option value="quarterly">Quarterly (filing due 1 month after end)</option>
                         <option value="annually">Annually (filing due 3 months after end)</option>
                     </select>
+                    <div class="field-error" x-show="createErrors.frequency" x-cloak x-text="createErrors.frequency"></div>
                 </div>
                 <div class="form-group">
                     <label>Notes</label>
                     <textarea class="form-control form-control-sm" rows="2" x-model="createForm.notes"
+                              :class="createErrors.notes ? 'is-invalid' : ''"
+                              @input="createErrors.notes = ''"
                               placeholder="Optional internal notes..."></textarea>
+                    <div class="field-error" x-show="createErrors.notes" x-cloak x-text="createErrors.notes"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="createOpen = false">Cancel</button>
-                <button class="btn btn-primary btn-sm" @click="submitCreate()" :disabled="createBusy || !createValid()">
+                <button class="btn btn-primary btn-sm" @click="submitCreate()" :disabled="createBusy">
                     <span x-show="!createBusy">Create Period</span>
                     <span x-show="createBusy">Creating…</span>
                 </button>
@@ -270,16 +286,20 @@ require_once FF_ROOT . '/includes/header.php';
                 <button class="modal-close" @click="filedOpen = false">×</button>
             </div>
             <div class="modal-body">
+                <div class="form-error-banner" x-show="filedFormError" x-cloak x-text="filedFormError"></div>
                 <p class="text-sm" x-text="filedTarget ? formatTaxType(filedTarget.tax_type) + ' ' + filedTarget.period_start + ' → ' + filedTarget.period_end : ''"></p>
                 <p class="text-secondary text-sm">Records who filed it and when. Does <strong>not</strong> post any JE — payment is recorded separately via "Remit".</p>
                 <div class="form-group">
                     <label>Filed Date *</label>
-                    <input type="date" class="form-control form-control-sm" x-model="filedForm.filed_date">
+                    <input type="date" class="form-control form-control-sm" x-model="filedForm.filed_date"
+                           :class="filedErrors.filed_date ? 'is-invalid' : ''"
+                           @input="filedErrors.filed_date = ''">
+                    <div class="field-error" x-show="filedErrors.filed_date" x-cloak x-text="filedErrors.filed_date"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="filedOpen = false">Cancel</button>
-                <button class="btn btn-success btn-sm" @click="submitMarkFiled()" :disabled="filedBusy || !filedForm.filed_date">
+                <button class="btn btn-success btn-sm" @click="submitMarkFiled()" :disabled="filedBusy">
                     <span x-show="!filedBusy">Mark Filed</span>
                     <span x-show="filedBusy">Saving…</span>
                 </button>
@@ -297,51 +317,71 @@ require_once FF_ROOT . '/includes/header.php';
                 <button class="modal-close" @click="remitOpen = false">×</button>
             </div>
             <div class="modal-body">
+                <div class="form-error-banner" x-show="remitFormError" x-cloak x-text="remitFormError"></div>
                 <p class="text-sm" x-text="remitTarget ? formatTaxType(remitTarget.tax_type) + ' ' + remitTarget.period_start + ' → ' + remitTarget.period_end : ''"></p>
                 <p class="text-secondary text-sm">Records the CRA / authority payment and posts a JE: <code>DR Tax Payable / CR Cash</code>. The period status flips to <strong>remitted</strong>.</p>
                 <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div class="form-group">
                         <label>Remittance Date *</label>
-                        <input type="date" class="form-control form-control-sm" x-model="remitForm.remittance_date">
+                        <input type="date" class="form-control form-control-sm" x-model="remitForm.remittance_date"
+                               :class="remitErrors.remittance_date ? 'is-invalid' : ''"
+                               @input="remitErrors.remittance_date = ''">
+                        <div class="field-error" x-show="remitErrors.remittance_date" x-cloak x-text="remitErrors.remittance_date"></div>
                     </div>
                     <div class="form-group">
                         <label>Amount *</label>
-                        <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="remitForm.amount">
+                        <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="remitForm.amount"
+                               :class="remitErrors.amount ? 'is-invalid' : ''"
+                               @input="remitErrors.amount = ''">
+                        <div class="field-error" x-show="remitErrors.amount" x-cloak x-text="remitErrors.amount"></div>
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Payment Method *</label>
-                    <select class="form-select form-control-sm" x-model="remitForm.payment_method">
+                    <select class="form-select form-control-sm" x-model="remitForm.payment_method"
+                            :class="remitErrors.payment_method ? 'is-invalid' : ''"
+                            @change="remitErrors.payment_method = ''">
                         <option value="">— Choose method —</option>
                         <option value="online_banking">Online Banking</option>
                         <option value="check">Cheque</option>
                         <option value="wire">Wire Transfer</option>
                         <option value="other">Other</option>
                     </select>
+                    <div class="field-error" x-show="remitErrors.payment_method" x-cloak x-text="remitErrors.payment_method"></div>
                 </div>
                 <div class="form-group">
                     <label>Bank Account</label>
-                    <select class="form-select form-control-sm" x-model="remitForm.bank_account_id">
+                    <select class="form-select form-control-sm" x-model="remitForm.bank_account_id"
+                            :class="remitErrors.bank_account_id ? 'is-invalid' : ''"
+                            @change="remitErrors.bank_account_id = ''">
                         <option value="">— Default Cash 1010 —</option>
                         <template x-for="b in bankAccounts" :key="b.id">
                             <option :value="b.id" x-text="b.name"></option>
                         </template>
                     </select>
+                    <div class="field-error" x-show="remitErrors.bank_account_id" x-cloak x-text="remitErrors.bank_account_id"></div>
                 </div>
                 <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div class="form-group">
                         <label>Reference Number</label>
-                        <input type="text" class="form-control form-control-sm" x-model="remitForm.reference_number" placeholder="CRA confirmation #">
+                        <input type="text" class="form-control form-control-sm" x-model="remitForm.reference_number"
+                               :class="remitErrors.reference_number ? 'is-invalid' : ''"
+                               @input="remitErrors.reference_number = ''"
+                               placeholder="CRA confirmation #">
+                        <div class="field-error" x-show="remitErrors.reference_number" x-cloak x-text="remitErrors.reference_number"></div>
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Notes</label>
-                    <textarea class="form-control form-control-sm" rows="2" x-model="remitForm.notes"></textarea>
+                    <textarea class="form-control form-control-sm" rows="2" x-model="remitForm.notes"
+                              :class="remitErrors.notes ? 'is-invalid' : ''"
+                              @input="remitErrors.notes = ''"></textarea>
+                    <div class="field-error" x-show="remitErrors.notes" x-cloak x-text="remitErrors.notes"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="remitOpen = false">Cancel</button>
-                <button class="btn btn-warning btn-sm" @click="submitRemit()" :disabled="remitBusy || !remitValid()">
+                <button class="btn btn-warning btn-sm" @click="submitRemit()" :disabled="remitBusy">
                     <span x-show="!remitBusy">Record &amp; Post JE</span>
                     <span x-show="remitBusy">Posting…</span>
                 </button>
@@ -367,11 +407,15 @@ function FF_TaxPeriods() {
         createOpen: false,
         createBusy: false,
         createForm: { tax_type: '', period_start: '', period_end: '', frequency: '', notes: '' },
+        createFormError: '',
+        createErrors: { tax_type: '', period_start: '', period_end: '', frequency: '', notes: '' },
 
         filedOpen: false,
         filedBusy: false,
         filedTarget: null,
         filedForm: { filed_date: new Date().toISOString().slice(0, 10) },
+        filedFormError: '',
+        filedErrors: { filed_date: '' },
 
         remitOpen: false,
         remitBusy: false,
@@ -383,6 +427,117 @@ function FF_TaxPeriods() {
             bank_account_id: '',
             reference_number: '',
             notes: '',
+        },
+        remitFormError: '',
+        remitErrors: { remittance_date: '', amount: '', payment_method: '', bank_account_id: '', reference_number: '', notes: '' },
+
+        // ── VALID-2: Error helpers ──────────────────────────────
+        _extractError(r, fallback) {
+            if (r && r.error) {
+                if (typeof r.error === 'string') return r.error;
+                if (r.error.message) return r.error.message;
+            }
+            if (r && r.message) return r.message;
+            return fallback || 'Something went wrong.';
+        },
+        _clearErrors(errorsObj, bannerKey) {
+            this[bannerKey] = '';
+            for (const k in errorsObj) {
+                if (Object.prototype.hasOwnProperty.call(errorsObj, k)) errorsObj[k] = '';
+            }
+        },
+        _paintErrors(errorsObj, bannerKey, r, fallback) {
+            const fields = (r && r.error && r.error.fields) || (r && r.fields) || null;
+            if (fields && typeof fields === 'object') {
+                let any = false;
+                for (const k in fields) {
+                    if (!Object.prototype.hasOwnProperty.call(fields, k)) continue;
+                    if (Object.prototype.hasOwnProperty.call(errorsObj, k)) {
+                        errorsObj[k] = fields[k];
+                        any = true;
+                    } else if (k === '_general' || k === '') {
+                        this[bannerKey] = fields[k];
+                        any = true;
+                    }
+                }
+                if (!any) this[bannerKey] = this._extractError(r, fallback);
+            } else {
+                this[bannerKey] = this._extractError(r, fallback);
+            }
+        },
+
+        // ── VALID-2: Client-side validators ────────────────────
+        validateCreate() {
+            this._clearErrors(this.createErrors, 'createFormError');
+            let ok = true;
+            const f = this.createForm;
+            const taxTypes = ['gst_hst','pst_bc','pst_sk','pst_mb'];
+            if (!f.tax_type) {
+                this.createErrors.tax_type = 'Tax type is required.';
+                ok = false;
+            } else if (!taxTypes.includes(f.tax_type)) {
+                this.createErrors.tax_type = 'Tax type must be one of: gst_hst, pst_bc, pst_sk, pst_mb.';
+                ok = false;
+            }
+            if (!f.period_start) {
+                this.createErrors.period_start = 'Period start date is required.';
+                ok = false;
+            }
+            if (!f.period_end) {
+                this.createErrors.period_end = 'Period end date is required.';
+                ok = false;
+            }
+            if (f.period_start && f.period_end && f.period_end < f.period_start) {
+                this.createErrors.period_end = 'Period end must be on or after period start.';
+                ok = false;
+            }
+            const freqs = ['monthly','quarterly','annually'];
+            if (!f.frequency) {
+                this.createErrors.frequency = 'Frequency is required.';
+                ok = false;
+            } else if (!freqs.includes(f.frequency)) {
+                this.createErrors.frequency = 'Frequency must be monthly, quarterly, or annually.';
+                ok = false;
+            }
+            return ok;
+        },
+        validateMarkFiled() {
+            this._clearErrors(this.filedErrors, 'filedFormError');
+            let ok = true;
+            if (!this.filedForm.filed_date) {
+                this.filedErrors.filed_date = 'Filed date is required.';
+                ok = false;
+            }
+            return ok;
+        },
+        validateRemit() {
+            this._clearErrors(this.remitErrors, 'remitFormError');
+            let ok = true;
+            const f = this.remitForm;
+            if (!f.remittance_date) {
+                this.remitErrors.remittance_date = 'Remittance date is required.';
+                ok = false;
+            }
+            const amt = String(f.amount || '').trim();
+            if (!amt) {
+                this.remitErrors.amount = 'Amount is required.';
+                ok = false;
+            } else if (!/^\d+(\.\d{1,2})?$/.test(amt)) {
+                this.remitErrors.amount = 'Amount must be a valid amount.';
+                ok = false;
+            } else if (parseFloat(amt) <= 0) {
+                this.remitErrors.amount = 'Amount must be greater than zero.';
+                ok = false;
+            }
+            const methods = ['online_banking','check','wire','other'];
+            if (!f.payment_method) {
+                this.remitErrors.payment_method = 'Payment method is required.';
+                ok = false;
+            } else if (!methods.includes(f.payment_method)) {
+                this.remitErrors.payment_method = 'Payment method must be one of: online_banking, check, wire, other.';
+                ok = false;
+            }
+            return ok;
         },
 
         // ── Init ───────────────────────────────────────────────
@@ -426,14 +581,11 @@ function FF_TaxPeriods() {
         // ── Create ─────────────────────────────────────────────
         openCreate() {
             this.createForm = { tax_type: '', period_start: '', period_end: '', frequency: '', notes: '' };
+            this._clearErrors(this.createErrors, 'createFormError');
             this.createOpen = true;
         },
-        createValid() {
-            const f = this.createForm;
-            return f.tax_type && f.period_start && f.period_end && f.frequency;
-        },
         async submitCreate() {
-            if (!this.createValid()) return;
+            if (!this.validateCreate()) return;
             this.createBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/tax/periods/create.php') ?>', this.createForm);
@@ -442,9 +594,9 @@ function FF_TaxPeriods() {
                     this.createOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Create failed.');
+                    this._paintErrors(this.createErrors, 'createFormError', r, 'Failed to create period.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.createFormError = 'Network error. Please try again.'; }
             this.createBusy = false;
         },
 
@@ -466,10 +618,11 @@ function FF_TaxPeriods() {
         openMarkFiled(p) {
             this.filedTarget = p;
             this.filedForm = { filed_date: new Date().toISOString().slice(0, 10) };
+            this._clearErrors(this.filedErrors, 'filedFormError');
             this.filedOpen  = true;
         },
         async submitMarkFiled() {
-            if (!this.filedForm.filed_date) return;
+            if (!this.validateMarkFiled()) return;
             this.filedBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/tax/periods/mark_filed.php') ?>', {
@@ -482,9 +635,9 @@ function FF_TaxPeriods() {
                     this.filedOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Mark filed failed.');
+                    this._paintErrors(this.filedErrors, 'filedFormError', r, 'Failed to mark period filed.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.filedFormError = 'Network error. Please try again.'; }
             this.filedBusy = false;
         },
 
@@ -500,14 +653,11 @@ function FF_TaxPeriods() {
                 reference_number: '',
                 notes: '',
             };
+            this._clearErrors(this.remitErrors, 'remitFormError');
             this.remitOpen = true;
         },
-        remitValid() {
-            const f = this.remitForm;
-            return f.remittance_date && f.amount && parseFloat(f.amount) > 0 && f.payment_method;
-        },
         async submitRemit() {
-            if (!this.remitValid()) return;
+            if (!this.validateRemit()) return;
             this.remitBusy = true;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/tax/remittances/create.php') ?>', {
@@ -525,9 +675,9 @@ function FF_TaxPeriods() {
                     this.remitOpen = false;
                     await this.load();
                 } else {
-                    FF_Toast.error(r.error?.message || 'Remittance failed.');
+                    this._paintErrors(this.remitErrors, 'remitFormError', r, 'Failed to record remittance.');
                 }
-            } catch (e) { FF_Toast.error('Network error.'); }
+            } catch (e) { this.remitFormError = 'Network error. Please try again.'; }
             this.remitBusy = false;
         },
 

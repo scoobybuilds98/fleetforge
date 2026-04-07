@@ -371,85 +371,99 @@ require_once FF_ROOT . '/includes/header.php';
         <!-- Edit form (visible when showEditForm) -->
         <?php if (can('maintenance', 'edit')): ?>
         <div x-show="showEditForm" style="display:none;">
-            <template x-if="editError">
-                <div class="alert alert-danger" style="margin-bottom:12px;" x-text="editError"></div>
+            <template x-if="staleError">
+                <div class="alert alert-danger" style="margin-bottom:12px;">
+                    This damage claim was modified by another user. Please reload this page to get the latest version.
+                </div>
             </template>
-            <form @submit.prevent="saveEdit()">
+            <form id="dmg-edit-form" @submit.prevent="saveEdit()" novalidate>
+                <div class="form-error-banner" data-form-error></div>
 
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
                     <div class="form-group">
-                        <label class="form-label">Severity</label>
-                        <select class="form-select" x-model="editForm.severity">
+                        <label class="form-label" for="edit_severity">Severity</label>
+                        <select id="edit_severity" name="severity" class="form-select" x-model="editForm.severity">
                             <option value="minor">Minor</option>
                             <option value="moderate">Moderate</option>
                             <option value="major">Major</option>
                             <option value="total_loss">Total Loss</option>
                         </select>
+                        <div class="field-error" data-error-for="severity"></div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Damage Location</label>
-                        <input type="text" class="form-input" x-model="editForm.damage_location" maxlength="255">
+                        <label class="form-label" for="edit_damage_location">Damage Location</label>
+                        <input type="text" id="edit_damage_location" name="damage_location" class="form-control" x-model="editForm.damage_location" maxlength="255">
+                        <div class="field-error" data-error-for="damage_location"></div>
                     </div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:16px;">
-                    <label class="form-label">Description</label>
-                    <textarea class="form-textarea" rows="4" x-model="editForm.description"></textarea>
+                    <label class="form-label" for="edit_description">Description</label>
+                    <textarea id="edit_description" name="description" class="form-control" rows="4" x-model="editForm.description"></textarea>
+                    <div class="field-error" data-error-for="description"></div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:16px;">
-                    <label class="form-label">Customer</label>
-                    <select class="form-select" x-model="editForm.customer_id"
+                    <label class="form-label" for="edit_customer_id">Customer</label>
+                    <select id="edit_customer_id" name="customer_id" class="form-select" x-model="editForm.customer_id"
                             @change="if(editForm.customer_id) editForm.customer_name = ''">
                         <option value="">— Select existing —</option>
                         <?php foreach ($customersList as $c): ?>
                         <option value="<?= e($c['id']) ?>"><?= e($c['company_name']) ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <input type="text" class="form-input" style="margin-top:6px;"
+                    <input type="text" name="customer_name" class="form-control" style="margin-top:6px;"
                            placeholder="Or type customer name…"
                            x-model="editForm.customer_name"
                            maxlength="255"
                            @input="if(editForm.customer_name) editForm.customer_id = ''">
+                    <div class="field-error" data-error-for="customer_id"></div>
                 </div>
 
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
                     <div class="form-group">
-                        <label class="form-label">Est. Repair Cost</label>
-                        <input type="number" class="form-input" step="0.01" min="0" x-model="editForm.estimated_repair_cost">
+                        <label class="form-label" for="edit_estimated_repair_cost">Est. Repair Cost</label>
+                        <input type="number" id="edit_estimated_repair_cost" name="estimated_repair_cost" class="form-control" step="0.01" x-model="editForm.estimated_repair_cost">
+                        <div class="field-error" data-error-for="estimated_repair_cost"></div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Actual Repair Cost</label>
-                        <input type="number" class="form-input" step="0.01" min="0" x-model="editForm.actual_repair_cost">
+                        <label class="form-label" for="edit_actual_repair_cost">Actual Repair Cost</label>
+                        <input type="number" id="edit_actual_repair_cost" name="actual_repair_cost" class="form-control" step="0.01" x-model="editForm.actual_repair_cost">
+                        <div class="field-error" data-error-for="actual_repair_cost"></div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Liable Amount ($)</label>
-                        <input type="number" class="form-input" step="0.01" min="0" x-model="editForm.customer_liable_amount">
+                        <label class="form-label" for="edit_customer_liable_amount">Liable Amount ($)</label>
+                        <input type="number" id="edit_customer_liable_amount" name="customer_liable_amount" class="form-control" step="0.01" x-model="editForm.customer_liable_amount">
+                        <div class="field-error" data-error-for="customer_liable_amount"></div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Insurance Claim</label>
-                        <input type="number" class="form-input" step="0.01" min="0" x-model="editForm.insurance_claim_amount">
+                        <label class="form-label" for="edit_insurance_claim_amount">Insurance Claim</label>
+                        <input type="number" id="edit_insurance_claim_amount" name="insurance_claim_amount" class="form-control" step="0.01" x-model="editForm.insurance_claim_amount">
+                        <div class="field-error" data-error-for="insurance_claim_amount"></div>
                     </div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:16px;">
-                    <label class="form-label">Notes</label>
-                    <textarea class="form-textarea" rows="3" x-model="editForm.notes"></textarea>
+                    <label class="form-label" for="edit_notes">Notes</label>
+                    <textarea id="edit_notes" name="notes" class="form-control" rows="3" x-model="editForm.notes"></textarea>
+                    <div class="field-error" data-error-for="notes"></div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:16px;">
-                    <label class="form-label">Resolution Notes</label>
-                    <textarea class="form-textarea" rows="3" x-model="editForm.resolution_notes"></textarea>
+                    <label class="form-label" for="edit_resolution_notes">Resolution Notes</label>
+                    <textarea id="edit_resolution_notes" name="resolution_notes" class="form-control" rows="3" x-model="editForm.resolution_notes"></textarea>
+                    <div class="field-error" data-error-for="resolution_notes"></div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:16px;">
-                    <label class="form-label">Vendor Sent To</label>
-                    <select class="form-select" x-model="editForm.vendor_id">
+                    <label class="form-label" for="edit_vendor_id">Vendor Sent To</label>
+                    <select id="edit_vendor_id" name="vendor_id" class="form-select" x-model="editForm.vendor_id">
                         <option value="">— None —</option>
                         <?php foreach ($vendorsList as $v): ?>
                         <option value="<?= e($v['id']) ?>"><?= e($v['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <div class="field-error" data-error-for="vendor_id"></div>
                 </div>
 
                 <div style="display:flex;gap:12px;">
@@ -457,7 +471,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-text="editSaving ? 'Saving…' : 'Save Changes'"></span>
                     </button>
                     <button type="button" class="btn btn-secondary"
-                            @click="showEditForm = false; editError = ''">Cancel</button>
+                            @click="cancelEdit()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -611,7 +625,7 @@ function damageClaimShow() {
             vendor_id:              <?= json_encode($claim['vendor_id'] ? (string)$claim['vendor_id'] : '') ?>,
         },
         editSaving: false,
-        editError:  '',
+        staleError: false,
 
         // Photo upload
         uploadFile:      null,
@@ -644,23 +658,65 @@ function damageClaimShow() {
                 id:         <?= (int)$claim['id'] ?>,
                 updated_at: this.updatedAt,
                 status:     this.newStatus,
-            }).then(d => {
-                if (d && d.error) {
-                    this.statusError  = d.message ?? d.data?.message ?? 'Failed to change status.';
+            }).then(r => {
+                if (!r.success) {
+                    this.statusError  = (r.error && r.error.message) || 'Failed to change status.';
                     this.statusSaving = false;
                 } else {
                     window.location.reload();
                 }
-            }).catch(err => {
-                this.statusError  = err?.message ?? 'Failed to change status.';
+            }).catch(() => {
+                this.statusError  = 'Network error. Please try again.';
                 this.statusSaving = false;
             });
         },
 
+        cancelEdit() {
+            this.showEditForm = false;
+            const form = document.getElementById('dmg-edit-form');
+            if (form) FF_Validate.clear(form);
+        },
+
+        validateEdit(form) {
+            FF_Validate.clear(form);
+            let ok = true;
+
+            if (!this.editForm.description || !this.editForm.description.trim()) {
+                FF_Validate.field(form, 'description', 'Description is required.');
+                ok = false;
+            }
+            if (!this.editForm.severity) {
+                FF_Validate.field(form, 'severity', 'Please select a severity.');
+                ok = false;
+            }
+
+            const moneyFields = {
+                estimated_repair_cost:  'Estimated repair cost',
+                actual_repair_cost:     'Actual repair cost',
+                customer_liable_amount: 'Customer liable amount',
+                insurance_claim_amount: 'Insurance claim amount',
+            };
+            for (const [field, label] of Object.entries(moneyFields)) {
+                const raw = this.editForm[field];
+                if (raw === '' || raw === null || raw === undefined) continue;
+                const n = parseFloat(raw);
+                if (isNaN(n) || n < 0) {
+                    FF_Validate.field(form, field, `${label} cannot be negative.`);
+                    ok = false;
+                }
+            }
+
+            if (!ok) FF_Validate.scrollToFirst(form);
+            return ok;
+        },
+
         // ── Edit form save ───────────────────────────────────────────────
         saveEdit() {
+            const form = document.getElementById('dmg-edit-form');
+            if (!form) return;
+            if (!this.validateEdit(form)) return;
+
             this.editSaving = true;
-            this.editError  = '';
 
             const payload = {
                 id:         <?= (int)$claim['id'] ?>,
@@ -679,18 +735,23 @@ function damageClaimShow() {
             payload.customer_name = this.editForm.customer_name ? this.editForm.customer_name.trim() || null : null;
             payload.vendor_id     = this.editForm.vendor_id     ? parseInt(this.editForm.vendor_id)     : null;
 
-            // FF_Api.post always resolves — check response body for errors
             FF_Api.post('<?= base_url('api/v1/damage_claims/update.php') ?>', payload)
-                .then(d => {
-                    if (d && d.error) {
-                        this.editError  = d.message ?? d.data?.message ?? 'Save failed.';
+                .then(r => {
+                    if (!r.success) {
+                        if (r.error && r.error.code === 'STALE_DATA') {
+                            this.staleError = true;
+                        } else if (r.error && r.error.code === 'VALIDATION_ERROR') {
+                            FF_Validate.applyApi(form, r.error);
+                        } else {
+                            FF_Validate.banner(form, (r.error && r.error.message) || 'Save failed.');
+                        }
                         this.editSaving = false;
-                    } else {
-                        window.location.reload();
+                        return;
                     }
+                    window.location.reload();
                 })
-                .catch(err => {
-                    this.editError  = err?.message ?? 'Save failed.';
+                .catch(() => {
+                    FF_Validate.banner(form, 'Network error. Please try again.');
                     this.editSaving = false;
                 });
         },

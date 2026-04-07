@@ -36,61 +36,81 @@ require_auth_api();
 require_permission('maintenance', 'create');
 
 // -----------------------------------------------------------------------
-// 1. Input validation
+// 1. Input validation — VALID-2: accumulate every error
 // -----------------------------------------------------------------------
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
 $unitId = clean_int($body['equipment_unit_id'] ?? null);
 if (!$unitId) {
-    json_error('MISSING_REQUIRED', 'equipment_unit_id is required.', 422);
+    $fields['equipment_unit_id'] = 'Please select an equipment unit.';
 }
 
 $description = clean_string($body['description'] ?? null, 5000);
 if (!$description) {
-    json_error('MISSING_REQUIRED', 'description is required.', 422);
+    $fields['description'] = 'Description is required.';
 }
 
-$severity = clean_string($body['severity'] ?? null);
+$severity        = clean_string($body['severity'] ?? null);
 $validSeverities = ['minor', 'moderate', 'major', 'total_loss'];
-if (!$severity || !in_array($severity, $validSeverities, true)) {
-    json_error('VALIDATION_ERROR', 'severity is required and must be one of: ' . implode(', ', $validSeverities) . '.', 422);
+if (!$severity) {
+    $fields['severity'] = 'Please select a severity.';
+} elseif (!in_array($severity, $validSeverities, true)) {
+    $fields['severity'] = 'Please select a valid severity.';
 }
 
 // Optional fields
-$customerId            = clean_int($body['customer_id'] ?? null);
-$customerName          = clean_string($body['customer_name'] ?? null, 255);   // free-text fallback
-$leaseId               = clean_int($body['lease_id'] ?? null);
-$vendorId              = clean_int($body['vendor_id'] ?? null);
+$customerId   = clean_int($body['customer_id'] ?? null);
+$customerName = clean_string($body['customer_name'] ?? null, 255);   // free-text fallback
+$leaseId      = clean_int($body['lease_id'] ?? null);
+$vendorId     = clean_int($body['vendor_id'] ?? null);
 
 // customer_id and customer_name are mutually exclusive — clear name when ID is set
 if ($customerId) {
     $customerName = null;
 }
-$damageLocation        = clean_string($body['damage_location'] ?? null);
-$notes                 = clean_string($body['notes'] ?? null, 5000);
+$damageLocation = clean_string($body['damage_location'] ?? null);
+$notes          = clean_string($body['notes'] ?? null, 5000);
 
-// D16: monetary amounts — positive or null
-$estimatedRepairCost   = clean_decimal($body['estimated_repair_cost'] ?? null);
-$customerLiableAmount  = clean_decimal($body['customer_liable_amount'] ?? null);
-$insuranceClaimAmount  = clean_decimal($body['insurance_claim_amount'] ?? null);
+// D16: monetary amounts — non-negative or null
+$estimatedRepairCost = null;
+if (array_key_exists('estimated_repair_cost', $body)
+    && $body['estimated_repair_cost'] !== null
+    && $body['estimated_repair_cost'] !== '') {
+    $d = clean_decimal((string)$body['estimated_repair_cost']);
+    if ($d === null || bccomp($d, '0', 6) < 0) {
+        $fields['estimated_repair_cost'] = 'Estimated repair cost cannot be negative.';
+    } else {
+        $estimatedRepairCost = bcround($d, 2);
+    }
+}
 
-if ($estimatedRepairCost !== null) {
-    if (bccomp($estimatedRepairCost, '0', 6) < 0) {
-        json_error('VALIDATION_ERROR', 'estimated_repair_cost must be a non-negative number.', 422);
+$customerLiableAmount = null;
+if (array_key_exists('customer_liable_amount', $body)
+    && $body['customer_liable_amount'] !== null
+    && $body['customer_liable_amount'] !== '') {
+    $d = clean_decimal((string)$body['customer_liable_amount']);
+    if ($d === null || bccomp($d, '0', 6) < 0) {
+        $fields['customer_liable_amount'] = 'Customer liable amount cannot be negative.';
+    } else {
+        $customerLiableAmount = bcround($d, 2);
     }
-    $estimatedRepairCost = bcround($estimatedRepairCost, 2);
 }
-if ($customerLiableAmount !== null) {
-    if (bccomp($customerLiableAmount, '0', 6) < 0) {
-        json_error('VALIDATION_ERROR', 'customer_liable_amount must be a non-negative number.', 422);
+
+$insuranceClaimAmount = null;
+if (array_key_exists('insurance_claim_amount', $body)
+    && $body['insurance_claim_amount'] !== null
+    && $body['insurance_claim_amount'] !== '') {
+    $d = clean_decimal((string)$body['insurance_claim_amount']);
+    if ($d === null || bccomp($d, '0', 6) < 0) {
+        $fields['insurance_claim_amount'] = 'Insurance claim amount cannot be negative.';
+    } else {
+        $insuranceClaimAmount = bcround($d, 2);
     }
-    $customerLiableAmount = bcround($customerLiableAmount, 2);
 }
-if ($insuranceClaimAmount !== null) {
-    if (bccomp($insuranceClaimAmount, '0', 6) < 0) {
-        json_error('VALIDATION_ERROR', 'insurance_claim_amount must be a non-negative number.', 422);
-    }
-    $insuranceClaimAmount = bcround($insuranceClaimAmount, 2);
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // -----------------------------------------------------------------------
@@ -101,7 +121,7 @@ $unit = db_row(
     [$unitId]
 );
 if (!$unit) {
-    json_error('NOT_FOUND', 'Equipment unit not found.', 404);
+    json_validation_error(['equipment_unit_id' => 'Equipment unit not found.'], 'Equipment unit not found.');
 }
 
 if ($customerId) {
@@ -110,7 +130,7 @@ if ($customerId) {
         [$customerId]
     );
     if (!$customer) {
-        json_error('NOT_FOUND', 'Customer not found.', 404);
+        json_validation_error(['customer_id' => 'Customer not found.'], 'Customer not found.');
     }
 } else {
     $customer = null;
@@ -122,7 +142,7 @@ if ($leaseId) {
         [$leaseId]
     );
     if (!$lease) {
-        json_error('NOT_FOUND', 'Lease not found.', 404);
+        json_validation_error(['lease_id' => 'Lease not found.'], 'Lease not found.');
     }
 }
 
@@ -132,7 +152,7 @@ if ($vendorId) {
         [$vendorId]
     );
     if (!$vendor) {
-        json_error('NOT_FOUND', 'Vendor not found.', 404);
+        json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
     }
 } else {
     $vendor = null;

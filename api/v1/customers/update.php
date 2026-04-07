@@ -34,17 +34,22 @@ require_method('POST');
 require_auth_api();
 require_permission('customers', 'edit');
 
-$body = json_body();
+$body   = json_body();
+$fields = [];
 
-// ── Required: id + updated_at ──────────────────────────────────
+// ── Required: id + updated_at ──── VALID-2: accumulate ─────────
 $id = clean_int($body['id'] ?? null);
 if (!$id || $id <= 0) {
-    json_error('INVALID_ID', 'A valid customer ID is required.', 400);
+    $fields['id'] = 'A valid customer ID is required.';
 }
 
 $submittedUpdatedAt = clean_string($body['updated_at'] ?? null, 30);
 if (!$submittedUpdatedAt) {
-    json_error('MISSING_LOCK', 'updated_at is required for optimistic locking (D19).', 422);
+    $fields['updated_at'] = 'Optimistic lock token is required.';
+}
+
+if ($fields) {
+    json_validation_error($fields);
 }
 
 // ── Load existing record ────────────────────────────────────────
@@ -61,13 +66,37 @@ if (!$existing) {
 // Compare submitted updated_at against DB — reject if stale.
 // WHY: prevents overwriting changes made by another user since the form was loaded.
 if ($submittedUpdatedAt !== $existing['updated_at']) {
-    json_error('STALE_DATA', 'This record was modified by another user. Please reload and try again.', 409);
+    json_error('STALE_DATA',
+        'This customer was modified by another user. Refresh and try again.', 409,
+        ['fields' => ['updated_at' => 'This customer was modified by another user. Refresh and try again.']]);
 }
 
 // ── Optional scalar fields ─────────────────────────────────────
-$companyName = clean_string($body['company_name'] ?? $existing['company_name'], 255) ?? $existing['company_name'];
+// Track whether company_name was explicitly sent so we know whether to enforce non-empty
+if (array_key_exists('company_name', $body)) {
+    $companyName = clean_string($body['company_name'], 255);
+    if (!$companyName) {
+        $fields['company_name'] = 'Company name is required.';
+        $companyName = $existing['company_name'];
+    }
+} else {
+    $companyName = $existing['company_name'];
+}
 $contactName  = array_key_exists('contact_name', $body)  ? clean_string($body['contact_name'], 255) : null;
-$email        = array_key_exists('email', $body)         ? clean_email($body['email']) : null;
+
+// VALID-2: validate email format if provided
+$email = null;
+if (array_key_exists('email', $body)) {
+    $rawEmail = $body['email'];
+    if ($rawEmail === null || $rawEmail === '') {
+        $email = null;
+    } else {
+        $email = clean_email($rawEmail);
+        if ($email === null) {
+            $fields['email'] = 'Please enter a valid email address.';
+        }
+    }
+}
 $phone        = array_key_exists('phone', $body)         ? clean_string($body['phone'], 50) : null;
 $altPhone     = array_key_exists('alt_phone', $body)     ? clean_string($body['alt_phone'], 50) : null;
 $website      = array_key_exists('website', $body)       ? clean_string($body['website'], 500) : null;
@@ -84,7 +113,19 @@ $gstNumber    = array_key_exists('gst_number', $body)    ? clean_string($body['g
 $pstNumber    = array_key_exists('pst_number', $body)    ? clean_string($body['pst_number'], 50) : null;
 
 $billingContactName = array_key_exists('billing_contact_name', $body) ? clean_string($body['billing_contact_name'], 255) : null;
-$billingEmail       = array_key_exists('billing_email', $body)        ? clean_email($body['billing_email']) : null;
+
+// VALID-2: validate billing_email format if provided
+$billingEmail = null;
+if (array_key_exists('billing_email', $body)) {
+    $rawBillingEmail = $body['billing_email'];
+    if ($rawBillingEmail !== null && $rawBillingEmail !== '') {
+        $billingEmail = clean_email($rawBillingEmail);
+        if ($billingEmail === null) {
+            $fields['billing_email'] = 'Please enter a valid billing email address.';
+        }
+    }
+}
+
 $billingPhone       = array_key_exists('billing_phone', $body)        ? clean_string($body['billing_phone'], 50) : null;
 $billingAddress     = array_key_exists('billing_address', $body)      ? clean_string($body['billing_address'], 5000) : null;
 
@@ -111,21 +152,59 @@ $billingCycle = array_key_exists('billing_cycle', $body)
 $invoiceDelivery = array_key_exists('invoice_delivery', $body)
     ? (in_array($body['invoice_delivery'], ['email', 'mail', 'portal', 'none'], true) ? $body['invoice_delivery'] : null)
     : null;
-$invoiceEmail    = array_key_exists('invoice_email', $body)    ? clean_email($body['invoice_email']) : null;
+// VALID-2: validate invoice_email format if provided
+$invoiceEmail = null;
+if (array_key_exists('invoice_email', $body)) {
+    $rawInvoiceEmail = $body['invoice_email'];
+    if ($rawInvoiceEmail !== null && $rawInvoiceEmail !== '') {
+        $invoiceEmail = clean_email($rawInvoiceEmail);
+        if ($invoiceEmail === null) {
+            $fields['invoice_email'] = 'Please enter a valid invoice email address.';
+        }
+    }
+}
+
 $poRequired      = array_key_exists('po_required', $body)      ? (bool) $body['po_required'] : null;
 $defaultPoNumber = array_key_exists('default_po_number', $body)? clean_string($body['default_po_number'], 100) : null;
 $paymentTerms    = array_key_exists('payment_terms', $body)    ? clean_string($body['payment_terms'], 100) : null;
-// FIX #7: credit_limit must be >= 0
-$creditLimit     = array_key_exists('credit_limit', $body)     ? clean_non_negative_decimal($body['credit_limit']) : null;
-$discountType    = array_key_exists('discount_type', $body)
-    ? (in_array($body['discount_type'], ['none', 'percentage', 'flat'], true) ? $body['discount_type'] : null)
-    : null;
-// FIX #8: discount must be >= 0
-$discountValue   = array_key_exists('discount_value', $body)   ? clean_non_negative_decimal($body['discount_value']) : null;
-// FIX #8: percentage discount capped at 100
-if ($discountType === 'percentage' && $discountValue !== null && bccomp($discountValue, '100', 4) > 0) {
-    json_error('VALIDATION_ERROR', 'Percentage discount cannot exceed 100%.', 422,
-        ['errors' => ['discount_value' => 'Percentage discount cannot exceed 100%.']]);
+
+// VALID-2: credit_limit must be >= 0 with clear message
+$creditLimit = null;
+if (array_key_exists('credit_limit', $body)) {
+    $raw = $body['credit_limit'];
+    if ($raw !== null && $raw !== '') {
+        $d = clean_decimal($raw);
+        if ($d === null || bccomp($d, '0', 4) < 0) {
+            $fields['credit_limit'] = 'Credit limit cannot be negative.';
+        } else {
+            $creditLimit = $d;
+        }
+    }
+}
+
+$discountType = null;
+if (array_key_exists('discount_type', $body)) {
+    if (in_array($body['discount_type'], ['none', 'percentage', 'flat'], true)) {
+        $discountType = $body['discount_type'];
+    } else {
+        $fields['discount_type'] = 'Please select a valid discount type.';
+    }
+}
+
+// VALID-2: discount must be >= 0; percentage type capped at 100
+$discountValue = null;
+if (array_key_exists('discount_value', $body)) {
+    $raw = $body['discount_value'];
+    if ($raw !== null && $raw !== '') {
+        $d = clean_decimal($raw);
+        if ($d === null || bccomp($d, '0', 4) < 0) {
+            $fields['discount_value'] = 'Discount cannot be negative.';
+        } elseif ($discountType === 'percentage' && bccomp($d, '100', 4) > 0) {
+            $fields['discount_value'] = 'Percentage discount cannot exceed 100%.';
+        } else {
+            $discountValue = $d;
+        }
+    }
 }
 
 $validStatuses = ['active', 'inactive', 'pending', 'suspended', 'credit_hold'];
@@ -138,14 +217,20 @@ $riskScore = array_key_exists('risk_score', $body)
     : null;
 $riskNotes = array_key_exists('risk_notes', $body) ? clean_string($body['risk_notes'], 5000) : null;
 
+// Short-circuit if any single-field errors accumulated
+if ($fields) {
+    json_validation_error($fields);
+}
+
 // FIX #10: check for duplicate company_name when it's being changed
 if (array_key_exists('company_name', $body) && $companyName !== $existing['company_name']) {
     // Use the email being set (or the existing email from DB) for the dupe check
     $checkEmail = $email ?? $existing['email'];
     if (db_exists('customers', 'company_name = ? AND email = ? AND id != ?', [$companyName, $checkEmail, $id])) {
-        json_error('DUPLICATE',
-            'Another customer with this company name and email already exists.', 422,
-            ['errors' => ['company_name' => 'Duplicate company name + email combination.']]);
+        json_validation_error(
+            ['company_name' => 'Another customer with this company name and email already exists.'],
+            'Another customer with this company name and email already exists.'
+        );
     }
 }
 
@@ -163,7 +248,8 @@ if ($status !== null && $status !== $existing['status']) {
     $allowed = $allowedTransitions[$currentStatus] ?? [];
     if (!in_array($status, $allowed, true)) {
         json_error('INVALID_TRANSITION',
-            "Cannot change customer status from '{$currentStatus}' to '{$status}'.", 409);
+            "Cannot change customer status from '{$currentStatus}' to '{$status}'.", 409,
+            ['fields' => ['status' => "Cannot change status from '{$currentStatus}' to '{$status}'."]]);
     }
 }
 
