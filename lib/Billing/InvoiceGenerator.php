@@ -230,11 +230,14 @@ class InvoiceGenerator
             $invoiceDate = date('Y-m-d');
             $dueDate = date('Y-m-d', strtotime("+{$dueDays} days"));
 
-            // Exchange rate for USD invoices
+            // Exchange rate for USD invoices — exchange_rates has no is_active/effective_date
+            // columns, just from_currency/to_currency/rate/rate_date. Pull the latest rate by
+            // rate_date DESC. If no row exists, leave exchange rate null (invoice still bills
+            // in USD but has no CAD conversion snapshot).
             $exchangeRate = null;
             if ($lease['currency'] === 'USD') {
                 $fxRow = db_row(
-                    "SELECT rate FROM exchange_rates WHERE from_currency = 'USD' AND to_currency = 'CAD' AND is_active = 1 ORDER BY effective_date DESC LIMIT 1",
+                    "SELECT rate FROM exchange_rates WHERE from_currency = 'USD' AND to_currency = 'CAD' ORDER BY rate_date DESC LIMIT 1",
                     []
                 );
                 $exchangeRate = $fxRow ? $fxRow['rate'] : null;

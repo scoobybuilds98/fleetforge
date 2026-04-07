@@ -58,6 +58,9 @@ coverage/
 *.swo
 claude-fleetforge-api-key
 
+# --- DB snapshots (pre-demo restore points, seed dumps, etc.) ---
+backups/
+
 # --- Local secret scratch files (never commit) ---
 samsara api
 samsara_api*

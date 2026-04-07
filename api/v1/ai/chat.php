@@ -88,17 +88,29 @@ if ($messageText === '') {
 }
 
 // ── Initialize AI client ──────────────────────────────────
+// Pre-flight checks: distinguishes "not enabled" from "no key"
+// from "token limit hit" so the UI can branch on the code.
+// emitErrorResponse() does the http_response_code + JSON write,
+// we just need to call exit; afterwards. Done via setError() inside
+// the client itself when sendMessage() runs, but we mirror the
+// pre-flight checks here so the user gets an immediate message
+// instead of going through a no-op call to Claude.
 $ai = new \FleetForge\AI\ClaudeClient();
 if (!$ai->isEnabled()) {
-    http_response_code(503);
-    echo json_encode(['error' => true, 'message' => 'AI features are not enabled. Configure your API key in Settings.']);
+    // Trigger setError() by attempting a no-op call so getLastError() is populated
+    $ai->sendMessage([['role' => 'user', 'content' => 'ping']], '', [], 1, $userId, 'preflight');
+    \FleetForge\AI\ClaudeClient::emitErrorResponse($ai);
     exit;
 }
 
 // ── Check daily token limit ────────────────────────────────
 if (!\FleetForge\AI\TokenTracker::canSpend($userId)) {
     http_response_code(429);
-    echo json_encode(['error' => true, 'message' => 'Daily AI token limit reached. Try again tomorrow.']);
+    echo json_encode([
+        'error'   => true,
+        'message' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
+        'code'    => 'TOKEN_LIMIT',
+    ]);
     exit;
 }
 
@@ -182,8 +194,7 @@ while ($iteration < $maxIterations) {
     );
 
     if ($response === null) {
-        http_response_code(502);
-        echo json_encode(['error' => true, 'message' => 'AI service unavailable. Please try again.']);
+        \FleetForge\AI\ClaudeClient::emitErrorResponse($ai);
         exit;
     }
 

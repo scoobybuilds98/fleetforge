@@ -2438,8 +2438,11 @@ class FleetForgeTools
         // WHY: System/cron calls (no user) always have full access
         if ($userId === null) return true;
 
-        // WHY: can() reads from session — works when a user is logged in
-        return can('payments', 'view');
+        // WHY: can() reads from session — works when a user is logged in.
+        // Leading backslash forces global namespace resolution — without it,
+        // PHP tries FleetForge\AI\Tools\can() first and can fail in edge
+        // cases (opcache, autoloader interference, partial bootstrap).
+        return \can('payments', 'view');
     }
 
     // ────────────────────────────────────────────────────────────

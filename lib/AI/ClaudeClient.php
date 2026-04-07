@@ -50,6 +50,18 @@ class ClaudeClient
     private bool $enabled;
     private string $projectRoot;
 
+    /**
+     * Last failure reason, set whenever sendMessage/sendMessageStreaming
+     * /makeRequest returns null. Consumers call getLastError() to
+     * surface a human-readable, mode-specific error to the UI instead
+     * of the generic "AI service unavailable" blanket message.
+     *
+     * Shape: ['code' => string, 'message' => string, 'http_code' => ?int]
+     * Codes: NO_KEY | DISABLED | TOKEN_LIMIT | RATE_LIMIT |
+     *        NETWORK  | API_ERROR | PARSE_ERROR
+     */
+    private ?array $lastError = null;
+
     public function __construct()
     {
         // INT-1: settings table FIRST, then .env fallback. The Settings →
@@ -89,6 +101,112 @@ class ClaudeClient
     }
 
     // ────────────────────────────────────────────────────────────
+    // getLastError()
+    //
+    // Returns the structured failure reason for the most recent
+    // null-returning call. Endpoints use this to map failure modes
+    // to user-facing error messages instead of showing the generic
+    // "AI service unavailable" blanket. Returns null if the last
+    // call succeeded or no call has been made yet.
+    //
+    // Shape: ['code' => string, 'message' => string, 'http_code' => ?int]
+    // Codes:
+    //   NO_KEY       — API key is empty in both settings and .env
+    //   DISABLED     — ai.enabled toggle is off
+    //   TOKEN_LIMIT  — per-user daily token budget exhausted
+    //   RATE_LIMIT   — Anthropic API returned HTTP 429
+    //   NETWORK      — curl error / timeout / DNS failure
+    //   API_ERROR    — Anthropic API returned non-200 (not 429)
+    //   PARSE_ERROR  — Anthropic response body was not valid JSON
+    // ────────────────────────────────────────────────────────────
+    public function getLastError(): ?array
+    {
+        return $this->lastError;
+    }
+
+    // Internal helper so every null-returning code path records
+    // the same structured failure reason. Also clears on success.
+    private function setError(string $code, string $message, ?int $httpCode = null): void
+    {
+        $this->lastError = [
+            'code'      => $code,
+            'message'   => $message,
+            'http_code' => $httpCode,
+        ];
+    }
+
+    private function clearError(): void
+    {
+        $this->lastError = null;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // emitErrorResponse()
+    //
+    // Helper for HTTP endpoints — call this when sendMessage()
+    // returns null. Reads getLastError() and emits a JSON error
+    // response with the right HTTP status + a human-readable
+    // message keyed off the failure code. Always exits/returns;
+    // caller still has to call exit; for safety.
+    //
+    // Codes → HTTP status + user-facing message:
+    //   NO_KEY      → 503 "AI is not configured. Set your Anthropic
+    //                       API key in Settings → Integrations."
+    //   DISABLED    → 503 "AI features are disabled. Enable in
+    //                       Settings → AI / Machine Learning."
+    //   TOKEN_LIMIT → 429 "Daily AI token limit reached. Try again
+    //                       tomorrow or raise the limit in settings."
+    //   RATE_LIMIT  → 429 "Too many requests. Wait a minute and
+    //                       try again."
+    //   NETWORK     → 502 "Could not reach Anthropic. Check your
+    //                       internet and try again."
+    //   API_ERROR   → 502 "Anthropic returned an error: {message}"
+    //   PARSE_ERROR → 502 "Anthropic returned an invalid response."
+    //   (no error)  → 502 "AI service unavailable."  (legacy fallback)
+    //
+    // The response body always contains {error, message, code} so
+    // the front-end can branch on `code` for inline UI handling
+    // (e.g. show a "Configure API key" button for NO_KEY).
+    // ────────────────────────────────────────────────────────────
+    public static function emitErrorResponse(self $client): void
+    {
+        $err  = $client->getLastError();
+        $code = $err['code'] ?? null;
+
+        $statusMap = [
+            'NO_KEY'       => 503,
+            'DISABLED'     => 503,
+            'TOKEN_LIMIT'  => 429,
+            'RATE_LIMIT'   => 429,
+            'NETWORK'      => 502,
+            'API_ERROR'    => 502,
+            'PARSE_ERROR'  => 502,
+        ];
+        $messageMap = [
+            'NO_KEY'      => 'AI is not configured. Set your Anthropic API key in Settings → Integrations.',
+            'DISABLED'    => 'AI features are disabled. Enable them in Settings → AI / Machine Learning.',
+            'TOKEN_LIMIT' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
+            'RATE_LIMIT'  => 'Too many requests. Please wait a minute and try again.',
+            'NETWORK'     => 'Could not reach Anthropic. Check your internet connection and try again.',
+            'API_ERROR'   => 'Anthropic returned an error: ' . ($err['message'] ?? 'unknown'),
+            'PARSE_ERROR' => 'Anthropic returned an invalid response. Please try again.',
+        ];
+
+        $httpStatus = $statusMap[$code]   ?? 502;
+        $userMsg    = $messageMap[$code]  ?? 'AI service unavailable. Please try again.';
+
+        if (!headers_sent()) {
+            http_response_code($httpStatus);
+            header('Content-Type: application/json');
+        }
+        echo json_encode([
+            'error'   => true,
+            'message' => $userMsg,
+            'code'    => $code,
+        ]);
+    }
+
+    // ────────────────────────────────────────────────────────────
     // sendMessage()
     //
     // Sends a messages request to the Anthropic API and returns
@@ -115,13 +233,22 @@ class ClaudeClient
         ?int    $userId = null,
         string  $queryType = 'chat'
     ): ?array {
-        if (!$this->isEnabled()) {
-            $this->log('AI_DISABLED', 'AI features not enabled or API key missing.');
+        $this->clearError();
+
+        if (!$this->enabled) {
+            $this->setError('DISABLED', 'AI features are disabled in settings.');
+            $this->log('AI_DISABLED', 'AI features toggled off.');
+            return null;
+        }
+        if ($this->apiKey === '') {
+            $this->setError('NO_KEY', 'Anthropic API key is not configured.');
+            $this->log('AI_NO_KEY', 'Anthropic API key missing from settings and .env.');
             return null;
         }
 
         // WHY: Check daily token limit before making the API call
         if ($userId !== null && !TokenTracker::canSpend($userId)) {
+            $this->setError('TOKEN_LIMIT', 'Daily AI token budget exhausted.');
             $this->log('AI_LIMIT_REACHED', "User $userId hit daily token limit.");
             return null;
         }
@@ -203,11 +330,19 @@ class ClaudeClient
         string   $queryType,
         callable $onChunk
     ): ?array {
-        if (!$this->isEnabled()) {
+        $this->clearError();
+
+        if (!$this->enabled) {
+            $this->setError('DISABLED', 'AI features are disabled in settings.');
+            return null;
+        }
+        if ($this->apiKey === '') {
+            $this->setError('NO_KEY', 'Anthropic API key is not configured.');
             return null;
         }
 
         if ($userId !== null && !TokenTracker::canSpend($userId)) {
+            $this->setError('TOKEN_LIMIT', 'Daily AI token budget exhausted.');
             return null;
         }
 
@@ -313,6 +448,23 @@ class ClaudeClient
         $latencyMs = (int) round((microtime(true) - $startTime) * 1000);
 
         if ($err !== '' || $code !== 200) {
+            // SAMSARA-3 error parity: streaming path now sets structured
+            // error codes the same way the non-streaming sendMessage does,
+            // so emitErrorResponse() / stream.php's match-statement gives
+            // the right user-facing message instead of "AI service unavailable".
+            //
+            // We can't easily parse Anthropic's error.message field here
+            // because the response body was consumed by the WRITEFUNCTION
+            // chunked callback above (which expects SSE, not a single JSON
+            // error blob). So we just key off the HTTP status / curl error
+            // and emit a code; the endpoint maps that to a friendly message.
+            if ($err !== '') {
+                $this->setError('NETWORK', 'Could not reach Anthropic API: ' . $err);
+            } elseif ($code === 429) {
+                $this->setError('RATE_LIMIT', 'Anthropic rate limit hit. Wait a minute and try again.', 429);
+            } else {
+                $this->setError('API_ERROR', "Anthropic API returned HTTP {$code}.", $code);
+            }
             $this->log('AI_STREAM_ERROR', "HTTP=$code error=$err");
             return null;
         }
@@ -545,17 +697,43 @@ class ClaudeClient
         curl_close($ch);
 
         if ($raw === false || $err !== '') {
+            $this->setError('NETWORK', 'Could not reach Anthropic API: ' . ($err ?: 'unknown network error'));
             $this->log('AI_CURL_ERROR', "error={$err}");
             return null;
         }
 
         if ($code !== 200) {
-            $this->log('AI_HTTP_ERROR', "HTTP={$code} body=" . substr((string)$raw, 0, 500));
+            // 429 = rate-limit, distinguished from other API errors so the
+            // UI can suggest "wait a minute and try again" rather than the
+            // generic "service unavailable" message. Body usually contains
+            // a human-readable error.message field from Anthropic.
+            $bodyPreview = substr((string)$raw, 0, 500);
+            $apiMessage  = '';
+            $decoded     = json_decode((string)$raw, true);
+            if (is_array($decoded) && isset($decoded['error']['message'])) {
+                $apiMessage = (string) $decoded['error']['message'];
+            }
+
+            if ($code === 429) {
+                $this->setError(
+                    'RATE_LIMIT',
+                    $apiMessage !== '' ? $apiMessage : 'Anthropic rate limit hit. Wait a minute and try again.',
+                    $code
+                );
+            } else {
+                $this->setError(
+                    'API_ERROR',
+                    $apiMessage !== '' ? $apiMessage : "Anthropic API returned HTTP {$code}.",
+                    $code
+                );
+            }
+            $this->log('AI_HTTP_ERROR', "HTTP={$code} body={$bodyPreview}");
             return null;
         }
 
         $data = json_decode((string) $raw, true);
         if (!is_array($data)) {
+            $this->setError('PARSE_ERROR', 'Anthropic returned an invalid response body.');
             $this->log('AI_PARSE_ERROR', 'Invalid JSON response');
             return null;
         }

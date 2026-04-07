@@ -68,14 +68,23 @@ $userName = $_SESSION['ff_user']['name'] ?? 'User';
 // ── Initialize AI client ──────────────────────────────────
 $ai = new \FleetForge\AI\ClaudeClient();
 if (!$ai->isEnabled()) {
-    http_response_code(503);
-    echo json_encode(['error' => true, 'message' => 'AI features are not enabled.']);
+    // SAMSARA-3 error parity: distinguish "no key" from "disabled".
+    // Pre-flight check fires before SSE headers are sent so we can
+    // emit a regular JSON error response (the front-end uses
+    // EventSource for SSE but a 4xx/5xx prevents the stream from
+    // even starting — handled in the widget's `error` handler).
+    $ai->sendMessage([['role' => 'user', 'content' => 'ping']], '', [], 1, $userId, 'preflight');
+    \FleetForge\AI\ClaudeClient::emitErrorResponse($ai);
     exit;
 }
 
 if (!\FleetForge\AI\TokenTracker::canSpend($userId)) {
     http_response_code(429);
-    echo json_encode(['error' => true, 'message' => 'Daily AI token limit reached.']);
+    echo json_encode([
+        'error'   => true,
+        'message' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
+        'code'    => 'TOKEN_LIMIT',
+    ]);
     exit;
 }
 
@@ -178,7 +187,21 @@ while ($iteration < $maxIterations) {
     );
 
     if ($response === null) {
-        sendSSE('error', ['message' => 'AI service unavailable']);
+        // SAMSARA-3 error parity: read structured error from ClaudeClient
+        // and surface a code + human message via SSE so the chat widget
+        // can branch on `code` (e.g. show "Configure API key" inline).
+        $err = $ai->getLastError();
+        $msg = match ($err['code'] ?? null) {
+            'NO_KEY'      => 'AI is not configured. Set your Anthropic API key in Settings → Integrations.',
+            'DISABLED'    => 'AI features are disabled. Enable them in Settings → AI / Machine Learning.',
+            'TOKEN_LIMIT' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
+            'RATE_LIMIT'  => 'Too many requests. Please wait a minute and try again.',
+            'NETWORK'     => 'Could not reach Anthropic. Check your internet connection and try again.',
+            'API_ERROR'   => 'Anthropic returned an error: ' . ($err['message'] ?? 'unknown'),
+            'PARSE_ERROR' => 'Anthropic returned an invalid response. Please try again.',
+            default       => 'AI service unavailable. Please try again.',
+        };
+        sendSSE('error', ['message' => $msg, 'code' => $err['code'] ?? null]);
         exit;
     }
 

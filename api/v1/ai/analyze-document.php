@@ -84,14 +84,18 @@ if (!isset($allowedTypes[$mimeType])) {
 // ── Initialize AI ──────────────────────────────────────────
 $ai = new \FleetForge\AI\ClaudeClient();
 if (!$ai->isEnabled()) {
-    http_response_code(503);
-    echo json_encode(['error' => true, 'message' => 'AI features are not enabled.']);
+    $ai->sendMessage([['role' => 'user', 'content' => 'ping']], '', [], 1, $userId, 'preflight');
+    \FleetForge\AI\ClaudeClient::emitErrorResponse($ai);
     exit;
 }
 
 if (!\FleetForge\AI\TokenTracker::canSpend($userId)) {
     http_response_code(429);
-    echo json_encode(['error' => true, 'message' => 'Daily AI token limit reached.']);
+    echo json_encode([
+        'error'   => true,
+        'message' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
+        'code'    => 'TOKEN_LIMIT',
+    ]);
     exit;
 }
 
@@ -171,8 +175,7 @@ $response = $ai->sendMessage(
 );
 
 if ($response === null) {
-    http_response_code(502);
-    echo json_encode(['error' => true, 'message' => 'AI service unavailable.']);
+    \FleetForge\AI\ClaudeClient::emitErrorResponse($ai);
     exit;
 }
 
