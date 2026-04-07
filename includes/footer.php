@@ -8,7 +8,7 @@
              user scrolls far enough; on short pages it sits naturally at the
              bottom of the content area. -->
         <footer class="app-footer">
-            <span>&copy; <?= date('Y') ?> Avi Nanda. All rights reserved.</span>
+            <span>&copy; <?= date('Y') ?> A software by Avi Nanda. All rights reserved.</span>
             <span>FleetForge <?= e(FF_VERSION) ?></span>
         </footer>
 
