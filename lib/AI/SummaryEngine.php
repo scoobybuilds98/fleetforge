@@ -10,13 +10,15 @@ namespace FleetForge\AI;
  * Summaries are stored in the ai_summaries table with expiration.
  *
  * Summary types (from ai_summaries.summary_type ENUM):
- *   - lease_summary     — Key lease info, billing status, risk factors
- *   - customer_insights — Customer health, payment patterns, risk
- *   - fleet_health      — Overall fleet status, utilization, maintenance
- *   - unit_analysis     — Individual unit condition, cost analysis
- *   - payment_risk      — Payment behavior patterns, overdue risk
- *   - forecast          — Revenue/demand forecasting
- *   - anomaly           — Detected anomalies explanation
+ *   - lease_summary       — Key lease info, billing status, risk factors
+ *   - customer_insights   — Customer health, payment patterns, risk
+ *   - fleet_health        — Overall fleet status, utilization, maintenance
+ *   - unit_analysis       — Individual unit condition, cost analysis
+ *   - payment_risk        — Payment behavior patterns, overdue risk
+ *   - forecast            — Revenue/demand forecasting
+ *   - anomaly             — Detected anomalies explanation
+ *   - accounting_overview — Trial balance, AR/AP, P&L, cash position
+ *                           (fleet-wide, no entity_id required)
  *
  * Caching:
  *   - Summaries cached in ai_summaries table (is_current = 1)
@@ -181,12 +183,13 @@ class SummaryEngine
     {
         try {
             return match ($summaryType) {
-                'customer_insights' => self::gatherCustomerContext($entityId, $userId),
-                'lease_summary'     => self::gatherLeaseContext($entityId, $userId),
-                'unit_analysis'     => self::gatherUnitContext($entityId),
-                'fleet_health'      => self::gatherFleetContext(),
-                'payment_risk'      => self::gatherPaymentRiskContext($entityId, $userId),
-                default             => null,
+                'customer_insights'   => self::gatherCustomerContext($entityId, $userId),
+                'lease_summary'       => self::gatherLeaseContext($entityId, $userId),
+                'unit_analysis'       => self::gatherUnitContext($entityId),
+                'fleet_health'        => self::gatherFleetContext(),
+                'payment_risk'        => self::gatherPaymentRiskContext($entityId, $userId),
+                'accounting_overview' => self::gatherAccountingContext($userId),
+                default               => null,
             };
         } catch (\Throwable) {
             return null;
@@ -244,6 +247,40 @@ class SummaryEngine
         return [
             'customer' => $details,
             'invoices' => is_array($invoices) ? $invoices : [],
+        ];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // gatherAccountingContext()
+    //
+    // Pulls the data needed for a fleet-wide accounting overview:
+    //   - Trial balance (current period)
+    //   - AR aging bucket totals
+    //   - AP aging / overdue bills
+    //   - Recent posted journal entries
+    //   - Bank account balances
+    //   - Payment summary (recent collections)
+    //   - Overdue invoice list
+    //
+    // Cached by SummaryEngine, so all of these tool calls only run
+    // once per TTL window (24h by default).
+    // ────────────────────────────────────────────────────────────
+    private static function gatherAccountingContext(?int $userId): array
+    {
+        $trial     = Tools\FleetForgeTools::run('get_trial_balance', [], $userId);
+        $arAging   = Tools\FleetForgeTools::run('get_ar_aging', [], $userId);
+        $overdue   = Tools\FleetForgeTools::run('get_overdue_invoices', [], $userId);
+        $paySum    = Tools\FleetForgeTools::run('get_payment_summary', [], $userId);
+        $banks     = Tools\FleetForgeTools::run('get_bank_accounts', [], $userId);
+        $recentJes = Tools\FleetForgeTools::run('get_journal_entries', ['limit' => 15], $userId);
+
+        return [
+            'trial_balance'         => $trial,
+            'ar_aging'              => $arAging,
+            'overdue_invoices'      => is_array($overdue) ? array_slice($overdue, 0, 10) : $overdue,
+            'payment_summary'       => $paySum,
+            'bank_accounts'         => $banks,
+            'recent_journal_entries'=> is_array($recentJes) ? $recentJes : [],
         ];
     }
 
@@ -314,6 +351,21 @@ Assess the payment risk for this customer (3-4 bullet points). Cover:
 - Recommended collection actions if needed
 
 Customer payment data:
+{$dataJson}
+PROMPT,
+
+            'accounting_overview' => <<<PROMPT
+Provide a concise accounting health snapshot for the CFO/controller (5-7 bullet points). Cover:
+- Cash position across bank accounts (flag any low balances)
+- AR aging — total outstanding, current vs overdue buckets, any concentration risk
+- AP aging — overdue vendor bills and their impact on cash
+- Revenue vs expenses (from the trial balance) and net position
+- Unusual or notable items in recent journal entries (large adjustments, manual entries, etc.)
+- Top 1-2 actions the finance team should take this week
+
+Format monetary values with \$ and currency (CAD/USD). Include specific customer/vendor names where relevant. Do NOT just repeat the numbers — summarize what they mean.
+
+Accounting data:
 {$dataJson}
 PROMPT,
 

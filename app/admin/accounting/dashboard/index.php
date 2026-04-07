@@ -228,6 +228,21 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
 </div>
 
 <!-- ============================================================
+     AI Accounting Overview — same summary-card component used on
+     the equipment unit / customer / lease show pages, but with a
+     fleet-wide accounting_overview summary type. Generates a brief
+     CFO/controller-style health snapshot from the trial balance,
+     AR/AP aging, cash position, and recent journal entries.
+     ============================================================ -->
+<?php
+$aiSummaryEntityType = 'fleet';
+$aiSummaryEntityId   = 0;  // fleet-level summaries don't need an entity_id
+$aiSummaryType       = 'accounting_overview';
+$aiSummaryTitle      = 'AI Accounting Overview';
+include FF_ROOT . '/includes/partials/ai-summary-card.php';
+?>
+
+<!-- ============================================================
      Period Status Bar — color-coded months for current fiscal year
      ============================================================ -->
 <div class="card" style="margin-bottom:24px;padding:16px 20px;">

@@ -36,7 +36,13 @@ $_entityId    = $aiSummaryEntityId ?? 0;
 $_summaryType = $aiSummaryType ?? '';
 $_title       = $aiSummaryTitle ?? 'AI Insights';
 
-if ($_entityType === '' || $_entityId <= 0 || $_summaryType === '') return;
+// Fleet-level summaries (fleet_health, accounting_overview) are scoped to
+// the whole company, not a single entity — they don't need an entity_id.
+$_fleetLevelTypes = ['fleet_health', 'accounting_overview'];
+$_requiresEntityId = !in_array($_summaryType, $_fleetLevelTypes, true);
+
+if ($_entityType === '' || $_summaryType === '') return;
+if ($_requiresEntityId && $_entityId <= 0) return;
 
 // WHY: Unique component ID to avoid Alpine.js conflicts if multiple cards on one page
 $_componentId = 'aiSummary_' . $_entityType . '_' . $_entityId . '_' . $_summaryType;

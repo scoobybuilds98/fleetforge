@@ -61,15 +61,16 @@ if (!in_array($entityType, $validEntityTypes, true)) {
 }
 
 // Validate summary_type
-$validSummaryTypes = ['customer_insights', 'lease_summary', 'unit_analysis', 'fleet_health', 'payment_risk', 'forecast', 'anomaly'];
+$validSummaryTypes = ['customer_insights', 'lease_summary', 'unit_analysis', 'fleet_health', 'payment_risk', 'forecast', 'anomaly', 'accounting_overview'];
 if (!in_array($summaryType, $validSummaryTypes, true)) {
     http_response_code(400);
     echo json_encode(['error' => true, 'message' => 'Invalid summary_type. Must be one of: ' . implode(', ', $validSummaryTypes)]);
     exit;
 }
 
-// fleet-level summaries don't need an entity_id
-if ($entityType !== 'fleet' && $entityId <= 0) {
+// fleet-level summaries (fleet_health, accounting_overview) don't need an entity_id
+$fleetLevelTypes = ['fleet_health', 'accounting_overview'];
+if (!in_array($summaryType, $fleetLevelTypes, true) && $entityType !== 'fleet' && $entityId <= 0) {
     http_response_code(400);
     echo json_encode(['error' => true, 'message' => 'entity_id is required']);
     exit;
