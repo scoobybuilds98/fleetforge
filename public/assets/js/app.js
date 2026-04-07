@@ -768,11 +768,12 @@ const _SEARCH_TYPE_ICONS = {
 };
 
 const _SEARCH_GROUP_LABELS = {
-    customer:  'Customers',
-    equipment: 'Equipment',
-    lease:     'Leases',
-    invoice:   'Invoices',
-    payment:   'Payments',
+    customer:    'Customers',
+    equipment:   'Equipment',
+    lease:       'Leases',
+    invoice:     'Invoices',
+    payment:     'Payments',
+    reservation: 'Reservations',
 };
 
 const FF_Search = {
@@ -810,12 +811,30 @@ const FF_Search = {
 
         try {
             const data = await FF_Api.get(
-                FF_Api.url('/api/v1/search?q=' + encodeURIComponent(term))
+                FF_Api.url('/api/v1/search?q=' + encodeURIComponent(term) + '&limit=10')
             );
 
             if (!resultsEl) return;
 
-            const results = data.success ? (data.data?.results ?? []) : [];
+            // SEARCH-1: API now returns grouped results
+            // { results: { customers: [], equipment: [], leases: [], ... } }
+            // Flatten back to a single array for the modal's _renderResults()
+            // which already does its own grouping by item.type.
+            let results = [];
+            if (data.success && data.data) {
+                const raw = data.data.results;
+                if (Array.isArray(raw)) {
+                    // Legacy flat array shape — keep working if anyone still returns it
+                    results = raw;
+                } else if (raw && typeof raw === 'object') {
+                    // New grouped shape — flatten preserving group order
+                    for (const groupKey of Object.keys(raw)) {
+                        if (Array.isArray(raw[groupKey])) {
+                            results = results.concat(raw[groupKey]);
+                        }
+                    }
+                }
+            }
 
             if (!results.length) {
                 resultsEl.innerHTML =
@@ -849,12 +868,15 @@ const FF_Search = {
             html += `<div class="search-result-group-label">${ffEsc(label)}</div>`;
 
             for (const item of items) {
+                // SEARCH-1: new API uses `subtitle`; legacy API used `meta`.
+                // Prefer subtitle, fall back to meta.
+                const subtitle = item.subtitle ?? item.meta ?? '';
                 html +=
                     `<a href="${ffEsc(item.url ?? '#')}" class="search-result-item">` +
                     `<div class="search-result-icon">${icon}</div>` +
                     `<div class="search-result-body">` +
                     `<div class="search-result-title">${ffEsc(item.title ?? '')}</div>` +
-                    (item.meta ? `<div class="search-result-meta">${ffEsc(item.meta)}</div>` : '') +
+                    (subtitle ? `<div class="search-result-meta">${ffEsc(subtitle)}</div>` : '') +
                     `</div></a>`;
             }
         }
@@ -911,6 +933,103 @@ const FF_Search = {
 };
 
 window.FF_Search = FF_Search;
+
+
+/**
+ * FF_SearchWidget — Alpine factory for the inline topbar search dropdown.
+ *
+ * SEARCH-1 (2026-04-08): replaces the old "button that opens ⌘K modal"
+ * topbar pattern with an actual text input + dropdown per spec.
+ *
+ * API contract (see api/v1/search.php):
+ *   Response: { success, data: { query, total, results: { customers:[], equipment:[], leases:[], invoices:[], reservations:[] } } }
+ *
+ * Each result item: { id, type, title, subtitle, url, badge, badge_class }
+ *
+ * Consumed via:  <div x-data="FF_SearchWidget()" @click.outside="close()">
+ */
+window.FF_SearchWidget = function () {
+    return {
+        query:   '',
+        open:    false,
+        loading: false,
+        total:   0,
+        groups: [
+            { type: 'customers',    label: 'Customers',    items: [] },
+            { type: 'equipment',    label: 'Equipment',    items: [] },
+            { type: 'leases',       label: 'Leases',       items: [] },
+            { type: 'invoices',     label: 'Invoices',     items: [] },
+            { type: 'reservations', label: 'Reservations', items: [] },
+        ],
+
+        async search() {
+            const term = (this.query || '').trim();
+
+            // Min 2 chars — hide dropdown on shorter input without an API call
+            if (term.length < 2) {
+                this.open  = false;
+                this.total = 0;
+                this.groups.forEach(g => (g.items = []));
+                return;
+            }
+
+            this.loading = true;
+            this.open    = true;
+
+            try {
+                const resp = await FF_Api.get(
+                    FF_Api.url('/api/v1/search?q=' + encodeURIComponent(term) + '&limit=3')
+                );
+
+                if (!resp.success) {
+                    this.total = 0;
+                    this.groups.forEach(g => (g.items = []));
+                    return;
+                }
+
+                const data = resp.data ?? {};
+                this.total = Number(data.total ?? 0);
+
+                // Server is authoritative for per-type ordering and caps.
+                const res = data.results ?? {};
+                this.groups.forEach((g) => {
+                    g.items = Array.isArray(res[g.type]) ? res[g.type] : [];
+                });
+            } catch (_e) {
+                this.total = 0;
+                this.groups.forEach(g => (g.items = []));
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        /** Close the dropdown without clearing the query (keeps it re-openable). */
+        close() {
+            this.open = false;
+        },
+
+        /**
+         * Escape hatch for power users: "See all N results" click falls
+         * through to the full-screen ⌘K modal which has pagination /
+         * recent searches / keyboard nav already built.
+         */
+        openFullSearch() {
+            this.close();
+            try {
+                FF_Search.open();
+                // Pre-populate the modal's input + re-run the query
+                setTimeout(() => {
+                    const modalInput = document.getElementById('ff-search-input');
+                    if (modalInput) {
+                        modalInput.value = this.query;
+                        modalInput.focus();
+                    }
+                    FF_Search.query(this.query);
+                }, 50);
+            } catch (_e) { /* modal unavailable — noop */ }
+        },
+    };
+};
 
 
 // ============================================================

@@ -173,20 +173,103 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
         </div>
         <?php endif; ?>
 
-        <!-- ── Global search ─────────────────────────────────────────── -->
-        <button class="topbar-search-btn"
-                id="ff-search-trigger"
-                aria-label="Global search"
-                title="Search (⌘K)">
-            <?= heroicon('magnifying-glass', 'search-icon') ?>
-            <span class="search-hint" aria-hidden="true">
-                Search
-                <kbd class="search-kbd">
+        <!-- ── Global search (SEARCH-1 — inline input with dropdown) ─── -->
+        <!-- WHY FF_SearchWidget: Alpine component owns query/open/loading/groups
+             state; @input.debounce.300ms throttles API calls; Enter + icon-click
+             force-fire search; Escape/click-outside close the dropdown. -->
+        <div class="search-wrapper"
+             x-data="FF_SearchWidget()"
+             @click.outside="close()">
+
+            <div class="search-input-wrap">
+                <button type="button"
+                        class="search-input-icon"
+                        @click="search()"
+                        aria-label="Search">
+                    <?= heroicon('magnifying-glass', 'search-icon') ?>
+                </button>
+
+                <input type="text"
+                       class="search-input"
+                       placeholder="Search customers, units, leases…"
+                       x-model="query"
+                       @input.debounce.300ms="search()"
+                       @keydown.enter.prevent="search()"
+                       @keydown.escape="close()"
+                       @focus="if (total > 0) open = true"
+                       autocomplete="off"
+                       spellcheck="false"
+                       aria-label="Global search"
+                       aria-controls="ff-search-results-inline">
+
+                <span class="search-spinner"
+                      x-show="loading"
+                      aria-hidden="true"></span>
+
+                <kbd class="search-kbd search-kbd--inline" aria-hidden="true">
                     <span class="mac-only">⌘K</span>
                     <span class="non-mac-only">Ctrl+K</span>
                 </kbd>
-            </span>
-        </button>
+            </div>
+
+            <!-- Results dropdown -->
+            <div class="search-dropdown"
+                 id="ff-search-results-inline"
+                 x-show="open"
+                 x-transition.opacity.duration.150ms
+                 x-cloak
+                 role="listbox"
+                 aria-label="Search results">
+
+                <!-- Loading state -->
+                <div class="search-loading"
+                     x-show="loading && total === 0">
+                    Searching…
+                </div>
+
+                <!-- No results -->
+                <div class="search-empty"
+                     x-show="!loading && total === 0">
+                    No results for &ldquo;<span x-text="query"></span>&rdquo;
+                </div>
+
+                <!-- Grouped results -->
+                <template x-if="!loading && total > 0">
+                    <div>
+                        <template x-for="group in groups" :key="group.type">
+                            <div class="search-group" x-show="group.items.length > 0">
+                                <div class="search-group-label" x-text="group.label"></div>
+                                <template x-for="item in group.items" :key="item.type + '-' + item.id">
+                                    <a :href="item.url"
+                                       class="search-result-item"
+                                       @click="close()"
+                                       role="option">
+                                        <div class="search-result-main">
+                                            <span class="search-result-title" x-text="item.title"></span>
+                                            <span x-show="item.badge"
+                                                  :class="'badge ' + item.badge_class"
+                                                  x-text="item.badge"></span>
+                                        </div>
+                                        <div class="search-result-sub"
+                                             x-show="item.subtitle"
+                                             x-text="item.subtitle"></div>
+                                    </a>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- See-all footer: reuses the ⌘K modal for the full list view -->
+                        <button type="button"
+                                class="search-see-all"
+                                @click="openFullSearch()">
+                            See all <span x-text="total"></span>
+                            result<span x-show="total !== 1">s</span>
+                            for &ldquo;<span x-text="query"></span>&rdquo;
+                        </button>
+                    </div>
+                </template>
+            </div>
+        </div>
 
         <!-- ── Theme toggle ──────────────────────────────────────────── -->
         <!-- Initialises from <html data-theme>; tracks state locally so  -->

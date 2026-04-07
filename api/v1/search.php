@@ -5,23 +5,42 @@ declare(strict_types=1);
  * FleetForge — Global Search API
  *
  * @file        api/v1/search.php
- * @description Global search endpoint for the topbar FF_Search component.
- *              Accepts ?q= (min 2 chars) and searches across customers,
- *              equipment units, leases, invoices, and vendors using LIKE
- *              substring matching. Returns up to 5 results per entity type.
+ * @description Grouped global search across customers, equipment units,
+ *              leases, invoices, and reservations. Drives both the inline
+ *              topbar search widget (FF_SearchWidget in app.js) and the
+ *              full-screen ⌘K modal (FF_Search.query in app.js).
+ *
+ *              Response shape is grouped by type so the Alpine widget can
+ *              render per-module sections without re-grouping client-side.
  *
  * @method      GET
- * @params      q   (required, string, min 2 chars) — search term
+ * @params      q     (required, string, min 2 chars) — search term
+ *              limit (optional, int 1..10, default 3) — items per group
  * @auth        Session required (require_auth_api)
- * @returns     { success: true, data: { results: [{ type, title, meta, url }] } }
- *              - type:  customer | equipment | lease | invoice | vendor
- *              - title: primary identifier (company name, unit number, etc.)
- *              - meta:  secondary info string (contact, status, amount, etc.)
- *              - url:   absolute URL to the detail show page
+ * @permissions Per-module: only groups the user can view are queried and
+ *              returned. A dispatcher with no invoices access will never
+ *              see invoices in the response.
  *
- * @depends     api/bootstrap.php
- * @spec        FLEETFORGE_SPEC_FINAL.md §7 (cross-module)
- * @session     S017
+ * @returns {
+ *   success: true,
+ *   data: {
+ *     query: "abc",
+ *     total: 12,
+ *     results: {
+ *       customers:    [{ id, type, title, subtitle, url, badge, badge_class }],
+ *       equipment:    [...],
+ *       leases:       [...],
+ *       invoices:     [...],
+ *       reservations: [...]
+ *     }
+ *   }
+ * }
+ *
+ * @error   QUERY_TOO_SHORT 422  — q is empty, missing, or < 2 chars
+ *
+ * @depends api/bootstrap.php
+ * @spec    FLEETFORGE_SPEC_FINAL.md §7 — cross-module search
+ * @session SEARCH-1 (2026-04-08)
  */
 
 // dirname(__DIR__, 2): api/v1/ → api/ → project root
@@ -32,158 +51,268 @@ require_auth_api();
 
 // ── Input validation ──────────────────────────────────────────────────────────
 // WHY min 2: single-character searches return too many results to be useful and
-// are expensive without a FULLTEXT index.
-// WHY ?? null not '': clean_string returns null for empty/whitespace strings
+// overload the LIKE scans on every table.
 $q = clean_string($_GET['q'] ?? null, 255);
 
 if ($q === null || strlen($q) < 2) {
-    json_error('QUERY_TOO_SHORT', 'Search query must be at least 2 characters.', 400);
+    json_error('QUERY_TOO_SHORT', 'Search query must be at least 2 characters.', 422);
 }
+
+// Per-group cap: client can request 1..10, defaults to 3 for the dropdown.
+$limit = (int) ($_GET['limit'] ?? 3);
+if ($limit < 1) $limit = 3;
+if ($limit > 10) $limit = 10;
 
 // FIX #37: escape LIKE metacharacters so a search for "50%" doesn't match
 // everything, and "unit_1" doesn't wildcard-match "unit01".
 $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q);
 $like    = '%' . $escaped . '%';
-$results = [];
+
+// ── Badge class helper ────────────────────────────────────────────────────────
+// WHY keep this here rather than importing: the badge-class mapping is a
+// presentation concern that only the search endpoint cares about, and the
+// UI strings are tightly coupled to the enum values below.
+$badge_class = static function (string $status): string {
+    return match ($status) {
+        'active', 'available', 'paid', 'confirmed', 'completed'
+            => 'badge-success',
+        'pending', 'reserved', 'draft', 'assessed', 'repair_ordered'
+            => 'badge-warning',
+        'overdue', 'cancelled', 'decommissioned', 'voided', 'written_off'
+            => 'badge-danger',
+        'inactive', 'on_lease', 'maintenance'
+            => 'badge-info',
+        default => 'badge-neutral',
+    };
+};
+
+$humanize = static function (?string $s): string {
+    return $s === null || $s === ''
+        ? ''
+        : ucfirst(str_replace('_', ' ', $s));
+};
+
+// ── Response scaffold ─────────────────────────────────────────────────────────
+// Keys are always present even when empty so the Alpine widget can iterate
+// without null checks.
+$results = [
+    'customers'    => [],
+    'equipment'    => [],
+    'leases'       => [],
+    'invoices'     => [],
+    'reservations' => [],
+];
+$total = 0;
 
 // ── Customers ─────────────────────────────────────────────────────────────────
-// Searches company_name, contact_name, email — the fields most commonly used
-// when dispatchers look up a customer account.
-$customers = db_select(
-    "SELECT id, company_name, contact_name, email, status
-       FROM customers
-      WHERE deleted_at IS NULL
-        AND (company_name LIKE ? OR contact_name LIKE ? OR email LIKE ?)
-      ORDER BY company_name ASC
-      LIMIT 5",
-    [$like, $like, $like]
-);
-foreach ($customers as $row) {
-    $metaParts = array_filter([
-        $row['contact_name'] ?? '',
-        $row['email']        ?? '',
-    ]);
-    $results[] = [
-        'type'  => 'customer',
-        'title' => $row['company_name'],
-        'meta'  => implode(' · ', $metaParts),
-        'url'   => base_url('customers/show') . '?id=' . (int) $row['id'],
-    ];
+if (can('customers', 'view')) {
+    $rows = db_select(
+        "SELECT id, company_name, contact_name, email, phone, status
+           FROM customers
+          WHERE deleted_at IS NULL
+            AND (
+                company_name LIKE ?
+                OR contact_name LIKE ?
+                OR email        LIKE ?
+                OR phone        LIKE ?
+            )
+          ORDER BY company_name ASC
+          LIMIT {$limit}",
+        [$like, $like, $like, $like]
+    );
+    foreach ($rows as $row) {
+        $sub = $row['email'] ?: ($row['phone'] ?: ($row['contact_name'] ?? ''));
+        $results['customers'][] = [
+            'id'          => (int) $row['id'],
+            'type'        => 'customer',
+            'title'       => $row['company_name'],
+            'subtitle'    => (string) $sub,
+            'url'         => base_url('customers/show') . '?id=' . (int) $row['id'],
+            'badge'       => $humanize($row['status'] ?? ''),
+            'badge_class' => $badge_class($row['status'] ?? ''),
+        ];
+        $total++;
+    }
 }
 
 // ── Equipment Units ───────────────────────────────────────────────────────────
-// Searches unit_number (primary), VIN, make, and model so technicians can
-// find a unit by any identifier they have on hand.
-$units = db_select(
-    "SELECT id, unit_number, vin, make, model, status
-       FROM equipment_units
-      WHERE deleted_at IS NULL
-        AND (unit_number LIKE ? OR vin LIKE ? OR make LIKE ? OR model LIKE ?)
-      ORDER BY unit_number ASC
-      LIMIT 5",
-    [$like, $like, $like, $like]
-);
-foreach ($units as $row) {
-    $metaParts = array_filter([
-        $row['make']  ?? '',
-        $row['model'] ?? '',
-        $row['vin']   ?? '',
-    ]);
-    $results[] = [
-        'type'  => 'equipment',
-        'title' => $row['unit_number'],
-        'meta'  => implode(' · ', $metaParts),
-        'url'   => base_url('equipment/show') . '?id=' . (int) $row['id'],
-    ];
+// WHY join equipment_templates: make/model live on the template, not the unit.
+// The existing api/v1/search.php queried eu.make/eu.model which don't exist —
+// that's the root cause of every search throwing a 500 today.
+if (can('equipment', 'view')) {
+    $rows = db_select(
+        "SELECT eu.id,
+                eu.unit_number,
+                eu.vin,
+                eu.license_plate,
+                eu.yard_location,
+                eu.status,
+                et.name  AS template_name,
+                et.brand AS brand,
+                et.model AS model
+           FROM equipment_units eu
+           LEFT JOIN equipment_templates et ON et.id = eu.template_id
+          WHERE eu.deleted_at IS NULL
+            AND (
+                eu.unit_number   LIKE ?
+                OR eu.vin         LIKE ?
+                OR eu.license_plate LIKE ?
+                OR et.name        LIKE ?
+                OR et.brand       LIKE ?
+                OR et.model       LIKE ?
+            )
+          ORDER BY eu.unit_number ASC
+          LIMIT {$limit}",
+        [$like, $like, $like, $like, $like, $like]
+    );
+    foreach ($rows as $row) {
+        $subParts = array_filter([
+            $row['template_name'] ?? '',
+            $row['yard_location'] ?? '',
+            $row['vin'] ?? '',
+        ]);
+        $results['equipment'][] = [
+            'id'          => (int) $row['id'],
+            'type'        => 'equipment',
+            'title'       => $row['unit_number'],
+            'subtitle'    => implode(' · ', $subParts),
+            'url'         => base_url('equipment/show') . '?id=' . (int) $row['id'],
+            'badge'       => $humanize($row['status'] ?? ''),
+            'badge_class' => $badge_class($row['status'] ?? ''),
+        ];
+        $total++;
+    }
 }
 
 // ── Leases ────────────────────────────────────────────────────────────────────
-// Searches contract_number and company_name_snapshot so users can find leases
-// by contract reference or by customer name (snapshot survives customer edits).
-$leases = db_select(
-    "SELECT id, contract_number, status, company_name_snapshot, unit_number_snapshot
-       FROM leases
-      WHERE deleted_at IS NULL
-        AND (contract_number LIKE ? OR company_name_snapshot LIKE ?)
-      ORDER BY created_at DESC
-      LIMIT 5",
-    [$like, $like]
-);
-foreach ($leases as $row) {
-    $metaParts = array_filter([
-        $row['company_name_snapshot'] ?? '',
-        $row['unit_number_snapshot']  ? 'Unit ' . $row['unit_number_snapshot'] : '',
-        ucfirst($row['status']        ?? ''),
-    ]);
-    $results[] = [
-        'type'  => 'lease',
-        'title' => $row['contract_number'],
-        'meta'  => implode(' · ', $metaParts),
-        'url'   => base_url('leases/show') . '?id=' . (int) $row['id'],
-    ];
+// Snapshot columns on leases (company_name_snapshot, unit_number_snapshot) make
+// this search resilient to customer or unit renames after the lease is signed.
+if (can('leases', 'view')) {
+    $rows = db_select(
+        "SELECT id,
+                contract_number,
+                company_name_snapshot,
+                unit_number_snapshot,
+                status
+           FROM leases
+          WHERE deleted_at IS NULL
+            AND (
+                contract_number       LIKE ?
+                OR company_name_snapshot LIKE ?
+                OR unit_number_snapshot  LIKE ?
+            )
+          ORDER BY created_at DESC
+          LIMIT {$limit}",
+        [$like, $like, $like]
+    );
+    foreach ($rows as $row) {
+        $subParts = array_filter([
+            $row['company_name_snapshot'] ?? '',
+            $row['unit_number_snapshot']
+                ? 'Unit ' . $row['unit_number_snapshot']
+                : '',
+        ]);
+        $results['leases'][] = [
+            'id'          => (int) $row['id'],
+            'type'        => 'lease',
+            'title'       => $row['contract_number'],
+            'subtitle'    => implode(' · ', $subParts),
+            'url'         => base_url('leases/show') . '?id=' . (int) $row['id'],
+            'badge'       => $humanize($row['status'] ?? ''),
+            'badge_class' => $badge_class($row['status'] ?? ''),
+        ];
+        $total++;
+    }
 }
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
-// Searches invoice_number and company name (live join + snapshot fallback).
-// WHY company_name_snapshot not customer_name_snapshot: that is the column name
-// on the invoices table (mirrors the leases table snapshot naming convention).
-$invoices = db_select(
-    "SELECT i.id,
-            i.invoice_number,
-            i.status,
-            i.total_amount,
-            COALESCE(c.company_name, i.company_name_snapshot) AS customer_name
-       FROM invoices i
-       LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
-      WHERE i.deleted_at IS NULL
-        AND (
-            i.invoice_number LIKE ?
-            OR COALESCE(c.company_name, i.company_name_snapshot) LIKE ?
-        )
-      ORDER BY i.created_at DESC
-      LIMIT 5",
-    [$like, $like]
-);
-foreach ($invoices as $row) {
-    $metaParts = array_filter([
-        $row['customer_name'] ?? '',
-        $row['total_amount'] !== null
-            ? '$' . number_format((float) $row['total_amount'], 2)
-            : '',
-        ucfirst(str_replace('_', ' ', $row['status'] ?? '')),
-    ]);
-    $results[] = [
-        'type'  => 'invoice',
-        'title' => $row['invoice_number'],
-        'meta'  => implode(' · ', $metaParts),
-        'url'   => base_url('invoices/show') . '?id=' . (int) $row['id'],
-    ];
+// COALESCE live customer name over the snapshot so a rename on the customer
+// surfaces in search results without a historical rewrite of every invoice.
+if (can('invoices', 'view')) {
+    $rows = db_select(
+        "SELECT i.id,
+                i.invoice_number,
+                i.status,
+                i.total_amount,
+                COALESCE(c.company_name, i.company_name_snapshot) AS customer_name
+           FROM invoices i
+           LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
+          WHERE i.deleted_at IS NULL
+            AND (
+                i.invoice_number LIKE ?
+                OR COALESCE(c.company_name, i.company_name_snapshot) LIKE ?
+            )
+          ORDER BY i.created_at DESC
+          LIMIT {$limit}",
+        [$like, $like]
+    );
+    foreach ($rows as $row) {
+        $subParts = array_filter([
+            $row['customer_name'] ?? '',
+            $row['total_amount'] !== null
+                ? '$' . number_format((float) $row['total_amount'], 2)
+                : '',
+        ]);
+        $results['invoices'][] = [
+            'id'          => (int) $row['id'],
+            'type'        => 'invoice',
+            'title'       => $row['invoice_number'],
+            'subtitle'    => implode(' · ', $subParts),
+            'url'         => base_url('invoices/show') . '?id=' . (int) $row['id'],
+            'badge'       => $humanize($row['status'] ?? ''),
+            'badge_class' => $badge_class($row['status'] ?? ''),
+        ];
+        $total++;
+    }
 }
 
-// ── Vendors ───────────────────────────────────────────────────────────────────
-// WHY include vendors: dispatchers frequently search for vendors by name to
-// look up contact details or check open work orders.
-$vendors = db_select(
-    "SELECT id, name, contact_name, city
-       FROM vendors
-      WHERE deleted_at IS NULL
-        AND (name LIKE ? OR contact_name LIKE ?)
-      ORDER BY name ASC
-      LIMIT 5",
-    [$like, $like]
-);
-foreach ($vendors as $row) {
-    $metaParts = array_filter([
-        $row['contact_name'] ?? '',
-        $row['city']         ?? '',
-    ]);
-    $results[] = [
-        'type'  => 'vendor',
-        'title' => $row['name'],
-        'meta'  => implode(' · ', $metaParts),
-        'url'   => base_url('vendors/show') . '?id=' . (int) $row['id'],
-    ];
+// ── Reservations ──────────────────────────────────────────────────────────────
+// NOTE: reservations table has no reservation_number — lookups are by numeric
+// id (supports "R123" or "123") plus company/contact name. Casting id to CHAR
+// lets us LIKE-match the digits inside the query string even if the user
+// typed "R" prefixes or partial numbers.
+if (can('reservations', 'view')) {
+    $rows = db_select(
+        "SELECT id,
+                contact_name,
+                company_name,
+                pickup_date,
+                status
+           FROM reservations
+          WHERE deleted_at IS NULL
+            AND (
+                CAST(id AS CHAR)   LIKE ?
+                OR company_name    LIKE ?
+                OR contact_name    LIKE ?
+            )
+          ORDER BY pickup_date DESC, id DESC
+          LIMIT {$limit}",
+        [$like, $like, $like]
+    );
+    foreach ($rows as $row) {
+        $subParts = array_filter([
+            $row['company_name'] ?? '',
+            $row['pickup_date']
+                ? 'Pickup ' . $row['pickup_date']
+                : '',
+        ]);
+        $results['reservations'][] = [
+            'id'          => (int) $row['id'],
+            'type'        => 'reservation',
+            'title'       => '#' . (int) $row['id']
+                . ($row['contact_name'] ? ' — ' . $row['contact_name'] : ''),
+            'subtitle'    => implode(' · ', $subParts),
+            'url'         => base_url('reservations/show') . '?id=' . (int) $row['id'],
+            'badge'       => $humanize($row['status'] ?? ''),
+            'badge_class' => $badge_class($row['status'] ?? ''),
+        ];
+        $total++;
+    }
 }
 
 // ── Respond ───────────────────────────────────────────────────────────────────
-json_success(['results' => $results]);
+json_success([
+    'query'   => $q,
+    'total'   => $total,
+    'results' => $results,
+]);
