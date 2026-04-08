@@ -67,24 +67,28 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- ── KPI Tiles ───────────────────────────────────────────────── -->
+<!-- TILES-1: each tile dispatches `ff-depr-filter` to toggle filterStatus -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-depr-filter',{detail:{status:''}}))">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Total Runs</div>
         <div class="stat-value font-mono"><?= e((string) $totalRuns) ?></div>
     </div>
-    <div class="stat-card stat-card--amber">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-depr-filter',{detail:{status:'preview'}}))">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">Preview</div>
         <div class="stat-value font-mono"><?= e((string) $previewRuns) ?></div>
     </div>
-    <div class="stat-card stat-card--green">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-depr-filter',{detail:{status:'posted'}}))">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Posted</div>
         <div class="stat-value font-mono"><?= e((string) $postedRuns) ?></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-depr-filter',{detail:{status:'posted'}}))">
         <span class="stat-icon"><svg><use href="#icon-banknotes"/></svg></span>
         <div class="stat-label">YTD Posted Depreciation</div>
         <div class="stat-value font-mono">$<?= number_format((float) $ytdTotal, 2) ?></div>
@@ -94,7 +98,9 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      DEPRECIATION RUNS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_DepreciationRuns()" x-init="init()" @open-depr-preview.window="openPreview()">
+<div x-data="FF_DepreciationRuns()" x-init="init()"
+     @open-depr-preview.window="openPreview()"
+     @ff-depr-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; load()">
 
     <!-- ── Filter toolbar ────────────────────────────────────── -->
     <div class="table-toolbar" style="margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">

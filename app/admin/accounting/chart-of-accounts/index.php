@@ -62,24 +62,28 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- -- KPI Tiles -------------------------------------------------- -->
+<!-- TILES-1: KPI tiles dispatch `ff-coa-filter` to set filters.active -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-coa-filter',{detail:{active:''}}))">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Total Accounts</div>
         <div class="stat-value font-mono"><?= e((string) $totalAccounts) ?></div>
     </div>
-    <div class="stat-card stat-card--green">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-coa-filter',{detail:{active:'1'}}))">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Active Accounts</div>
         <div class="stat-value font-mono"><?= e((string) $activeAccounts) ?></div>
     </div>
-    <div class="stat-card stat-card--amber">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-coa-filter',{detail:{active:''}}))">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-tag"/></svg></span>
         <div class="stat-label">Header Accounts</div>
         <div class="stat-value font-mono"><?= e((string) $headerAccounts) ?></div>
     </div>
-    <div class="stat-card stat-card--purple">
+    <div class="stat-card stat-card--purple" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-coa-filter',{detail:{active:''}}))">
         <span class="stat-icon stat-icon--purple"><svg><use href="#icon-collection"/></svg></span>
         <div class="stat-label">Account Types</div>
         <div class="stat-value font-mono"><?= e((string) $accountTypes) ?></div>
@@ -89,7 +93,9 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ================================================================
      CHART OF ACCOUNTS -- ALPINE COMPONENT
      ================================================================ -->
-<div x-data="FF_ChartOfAccounts()" x-init="init()" @open-coa-create.window="openCreate()">
+<div x-data="FF_ChartOfAccounts()" x-init="init()"
+     @open-coa-create.window="openCreate()"
+     @ff-coa-filter.window="filters.active = $event.detail.active">
 
     <!-- -- Search / Filter Bar ------------------------------------ -->
     <div class="table-toolbar">

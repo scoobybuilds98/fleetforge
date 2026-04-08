@@ -61,23 +61,28 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      KPI Tiles
      ============================================================ -->
+<!-- TILES-1: KPI tiles dispatch `ff-je-filter` to set the JE tab -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-je-filter',{detail:{tab:'all'}}))">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Total Entries</div>
         <div class="stat-value font-mono"><?= e((string) $totalJE) ?></div>
     </div>
-    <div class="stat-card stat-card--amber">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-je-filter',{detail:{tab:'draft'}}))">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-pencil-square"/></svg></span>
         <div class="stat-label">Drafts</div>
         <div class="stat-value font-mono"><?= e((string) $draftJE) ?></div>
     </div>
-    <div class="stat-card stat-card--green">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-je-filter',{detail:{tab:'posted'}}))">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Posted</div>
         <div class="stat-value font-mono"><?= e((string) $postedJE) ?></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="(function(){var d=new Date();var iso=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');window.dispatchEvent(new CustomEvent('ff-je-filter',{detail:{tab:'all',date:iso}}));})()">
         <span class="stat-icon"><svg><use href="#icon-calendar"/></svg></span>
         <div class="stat-label">Today's Entries</div>
         <div class="stat-value font-mono"><?= e((string) $todayJE) ?></div>
@@ -87,7 +92,14 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      JOURNAL ENTRIES -- ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_JournalEntries()" x-init="init()" @open-je-create.window="openCreate()">
+<div x-data="FF_JournalEntries()" x-init="init()"
+     @open-je-create.window="openCreate()"
+     @ff-je-filter.window="
+        if ($event.detail.date) { filters.date_from = $event.detail.date; filters.date_to = $event.detail.date; }
+        else { filters.date_from = ''; filters.date_to = ''; }
+        if (typeof setTab === 'function') setTab($event.detail.tab);
+        else { activeTab = $event.detail.tab; load(); }
+     ">
 
     <!-- -- TAB BAR ------------------------------------------------ -->
     <div class="tab-bar" role="tablist">

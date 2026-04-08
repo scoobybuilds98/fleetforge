@@ -77,7 +77,10 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-delta">awaiting signature</div>
     </div>
 
-    <div class="stat-card stat-card--teal">
+    <!-- TILES-1: Signed This Month drills to the complete status -->
+    <div class="stat-card stat-card--teal" style="cursor:pointer"
+         :class="{ 'ring-active': activeTile === 'signed' }"
+         @click="activeTile = activeTile === 'signed' ? '' : 'signed'; drill('status', activeTile === 'signed' ? 'complete' : '')">
         <span class="stat-icon stat-icon--teal"><svg><use href="#icon-pencil-square"/></svg></span>
         <div class="stat-label">Signed This Month</div>
         <div class="stat-value font-mono" x-text="kpis.signed_this_month"></div>

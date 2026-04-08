@@ -94,24 +94,34 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-delta" x-text="kpis.collected_cnt + ' payments'"></div>
     </div>
 
-    <!-- Total AR Outstanding — aggregate from invoices table, display-only -->
-    <div class="stat-card stat-card--blue" title="Outstanding AR across all invoices (display only)">
+    <!-- TILES-1: Total AR Outstanding drills to outstanding invoices -->
+    <a class="stat-card stat-card--blue"
+       href="<?= base_url('invoices') ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="Click to view outstanding invoices">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-chart-bar"/></svg></span>
         <div class="stat-label">Total AR Outstanding</div>
         <div class="stat-value font-mono" x-text="fmt(kpis.ar_outstanding_total)"></div>
         <div class="stat-delta" x-text="kpis.ar_outstanding_cnt + ' invoices'"></div>
-    </div>
+    </a>
 
-    <!-- Overdue AR — aggregate from invoices table, display-only -->
-    <div class="stat-card stat-card--red" title="Overdue AR across invoices past due date (display only)">
+    <!-- TILES-1: Overdue AR drills to overdue-status invoice list -->
+    <a class="stat-card stat-card--red"
+       href="<?= base_url('invoices') ?>?status=overdue"
+       style="cursor:pointer;text-decoration:none"
+       title="Click to view overdue invoices">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">Overdue AR</div>
         <div class="stat-value font-mono" x-text="fmt(kpis.ar_overdue_total)"></div>
         <div class="stat-delta" x-text="kpis.ar_overdue_cnt + ' invoices past due'"></div>
-    </div>
+    </a>
 
-    <!-- Recorded Today — all payments created today, display-only -->
-    <div class="stat-card stat-card--slate" title="All payments recorded today (display only)">
+    <!-- TILES-1: Recorded Today drills payments list to today's date range -->
+    <div class="stat-card stat-card--slate"
+         :class="{ 'ring-active': activeTile === 'today' }"
+         style="cursor:pointer;"
+         title="Click to filter payments recorded today"
+         @click="activeTile = activeTile === 'today' ? '' : 'today'; drill('date_from', activeTile ? todayIso() : ''); drill('date_to', activeTile ? todayIso() : '')">
         <span class="stat-icon stat-icon--slate"><svg><use href="#icon-pencil-square"/></svg></span>
         <div class="stat-label">Recorded Today</div>
         <div class="stat-value font-mono" x-text="kpis.recorded_today_cnt"></div>
@@ -262,11 +272,22 @@ function paymentsKpis() {
         },
         fmt(n) { return '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
 
-        /** Cross-component drill: toggle a filter on the payments table */
+        /** TILES-1: ISO-format today's date so the date range drill can set filters.date_from/date_to */
+        todayIso() {
+            const d = new Date();
+            return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        },
+
+        /** Cross-component drill: toggle a filter on the payments table.
+         *  TILES-1: auto-registers unknown filter keys (e.g. date_from/date_to)
+         *  so the "Recorded Today" tile can write date filters that the
+         *  payments API already supports even if the FF_Payments component
+         *  didn't pre-declare them in its filters object. */
         drill(filter, val) {
             const el = document.getElementById('payments-table');
             if (!el) return;
             const d = Alpine.$data(el);
+            if (!(filter in d.filters)) d.filters[filter] = '';
             d.filters[filter] = d.filters[filter] === val ? '' : val;
             d.pagination.page = 1;
             d.load();

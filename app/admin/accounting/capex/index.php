@@ -57,24 +57,28 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- ── KPI Tiles ───────────────────────────────────────────────── -->
+<!-- TILES-1: KPI tiles dispatch `ff-capex-filter` to set filterStatus -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-capex-filter',{detail:{status:''}}))">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Total Requests</div>
         <div class="stat-value font-mono"><?= e((string) $totalCapex) ?></div>
     </div>
-    <div class="stat-card stat-card--amber">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-capex-filter',{detail:{status:'pending_approval'}}))">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">Pending Approval</div>
         <div class="stat-value font-mono"><?= e((string) $pendingCapex) ?></div>
     </div>
-    <div class="stat-card stat-card--green">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-capex-filter',{detail:{status:'approved'}}))">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Approved + In Progress</div>
         <div class="stat-value font-mono"><?= e((string) ($approvedCapex + $inProgress)) ?></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-capex-filter',{detail:{status:''}}))">
         <span class="stat-icon"><svg><use href="#icon-banknotes"/></svg></span>
         <div class="stat-label">Active Budget</div>
         <div class="stat-value font-mono">$<?= number_format((float) $totalBudget, 2) ?></div>
@@ -84,7 +88,9 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CAPEX REQUESTS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Capex()" x-init="init()" @open-capex-create.window="openCreate()">
+<div x-data="FF_Capex()" x-init="init()"
+     @open-capex-create.window="openCreate()"
+     @ff-capex-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; load()">
 
     <!-- ============================================================
          FLAGGED WORK ORDERS PANEL

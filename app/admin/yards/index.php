@@ -55,22 +55,27 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 </div>
 
-<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<!-- TILES-1: KPI tiles dispatch `ff-yards-filter` to the Alpine component
+     below. Total Yards → showAll=true, Active → showAll=false, Inactive →
+     showAll=true + a second inactive-only hint consumed by the table. -->
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-yards-filter',{detail:{view:'all'}}))">
         <div class="stat-label">Total Yards</div>
         <div class="stat-value font-mono"><?= e($totalYards) ?></div>
         <div class="stat-delta">configured in system</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-yards-filter',{detail:{view:'active'}}))">
         <div class="stat-label">Active</div>
         <div class="stat-value font-mono" style="color:var(--color-success);"><?= e($activeYards) ?></div>
         <div class="stat-delta">available for reservations</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-yards-filter',{detail:{view:'inactive'}}))">
         <div class="stat-label">Inactive</div>
         <div class="stat-value font-mono" style="color:var(--text-secondary);"><?= e($inactiveYards) ?></div>
         <div class="stat-delta">hidden from dropdowns</div>
@@ -79,9 +84,19 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Yards Table + Modals — Alpine.js ──────────────────────────────────── -->
+<!-- TILES-1: @ff-yards-filter.window reacts to KPI tile clicks. view='all' →
+     showAll=true + quickFilter=''; view='active' → showAll=false;
+     view='inactive' → showAll=true + quickFilter='inactive' which the
+     filteredYards getter uses to show only deactivated yards. -->
 <div x-data="FF_YardsManager()"
      x-init="init()"
-     @open-create-yard.window="openCreate()">
+     @open-create-yard.window="openCreate()"
+     @ff-yards-filter.window="
+        const v = $event.detail.view;
+        if (v === 'active')    { showAll = false; quickFilter = ''; }
+        else if (v === 'inactive') { showAll = true;  quickFilter = 'inactive'; }
+        else                    { showAll = true;  quickFilter = ''; }
+     ">
 
     <!-- Global feedback banners -->
     <div class="alert alert-success" x-show="actionSuccess" x-text="actionSuccess"
@@ -485,11 +500,17 @@ function FF_YardsManager() {
             form:       {},
         },
 
+        // TILES-1: extra quick-filter driven by the Inactive KPI tile.
+        // Value is '' (no filter) or 'inactive' (show only deactivated).
+        quickFilter: '',
+
         // ── Computed: filtered yards list ─────────────────────────────
         get filteredYards() {
-            return this.showAll
-                ? this.yards
-                : this.yards.filter(y => y.is_active);
+            let list = this.showAll ? this.yards : this.yards.filter(y => y.is_active);
+            if (this.quickFilter === 'inactive') {
+                list = list.filter(y => !y.is_active);
+            }
+            return list;
         },
 
         // ── Init ─────────────────────────────────────────────────────

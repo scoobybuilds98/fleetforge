@@ -79,7 +79,10 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-delta">in progress / waiting parts</div>
     </div>
 
-    <div class="stat-card stat-card--green">
+    <!-- TILES-1: clickable drill → status=completed -->
+    <div class="stat-card stat-card--green" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'completed' ? '' : 'completed'; setFilter('status', activeTile === 'completed' ? 'completed' : '')"
+         :class="{ 'ring-active': activeTile === 'completed' }">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Completed This Month</div>
         <div class="stat-value font-mono" x-text="kpis.completed_this_month"></div>

@@ -101,7 +101,10 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-value font-mono" x-text="fmt(kpis.active_balance)"></div>
         <div class="stat-delta" x-text="kpis.active_cnt + ' active note' + (kpis.active_cnt !== 1 ? 's' : '')"></div>
     </div>
-    <div class="stat-card stat-card--teal">
+    <!-- TILES-1: Issued This Month shows all credit notes (clear status filter) -->
+    <div class="stat-card stat-card--teal" style="cursor:pointer;"
+         @click="activeTile = activeTile === 'issued' ? '' : 'issued'; drill('status', '')"
+         :class="{ 'ring-active': activeTile === 'issued' }">
         <span class="stat-icon stat-icon--teal"><svg><use href="#icon-arrow-up-tray"/></svg></span>
         <div class="stat-label">Issued This Month</div>
         <div class="stat-value font-mono" x-text="fmt(kpis.issued_total)"></div>

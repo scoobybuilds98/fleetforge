@@ -65,24 +65,29 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- ── KPI Tiles ───────────────────────────────────────────────── -->
+<!-- TILES-1: KPI tiles dispatch `ff-assets-filter` to set filterStatus below -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-assets-filter',{detail:{status:''}}))">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Total Assets</div>
         <div class="stat-value font-mono"><?= e((string) $totalAssets) ?></div>
     </div>
-    <div class="stat-card stat-card--green">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-assets-filter',{detail:{status:'active'}}))">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Active</div>
         <div class="stat-value font-mono"><?= e((string) $activeAssets) ?></div>
     </div>
-    <div class="stat-card stat-card--amber">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-assets-filter',{detail:{status:'disposed'}}))">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">Disposed</div>
         <div class="stat-value font-mono"><?= e((string) $disposedAssets) ?></div>
     </div>
-    <div class="stat-card">
+    <!-- Total NBV drills to active+impaired subset -->
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-assets-filter',{detail:{status:'active'}}))">
         <span class="stat-icon"><svg><use href="#icon-banknotes"/></svg></span>
         <div class="stat-label">Total NBV (Active+Impaired)</div>
         <div class="stat-value font-mono">$<?= number_format((float) $totalNbv, 2) ?></div>
@@ -92,7 +97,9 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      FIXED ASSETS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_FixedAssets()" x-init="init()" @open-asset-create.window="openCreate()">
+<div x-data="FF_FixedAssets()" x-init="init()"
+     @open-asset-create.window="openCreate()"
+     @ff-assets-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; load()">
 
     <!-- ── Filter toolbar (wrapped in card for visual containment) ── -->
     <div class="card" style="margin-bottom:20px;padding:14px 16px;">

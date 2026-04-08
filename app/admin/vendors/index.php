@@ -83,19 +83,28 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-delta">marked preferred</div>
     </div>
 
-    <div class="stat-card stat-card--teal">
+    <!-- TILES-1: Active Work Orders drills to the maintenance list filtered
+         to open statuses; Top Vendor by Spend jumps to that vendor's show page
+         when a top vendor exists, otherwise falls back to the maintenance list. -->
+    <a class="stat-card stat-card--teal"
+       href="<?= base_url('maintenance_work_orders') ?>?status=open"
+       style="cursor:pointer;text-decoration:none"
+       title="Click to view open work orders">
         <span class="stat-icon stat-icon--teal"><svg><use href="#icon-wrench"/></svg></span>
         <div class="stat-label">Active Work Orders</div>
         <div class="stat-value font-mono" x-text="kpis.active_wo"></div>
         <div class="stat-delta">open / in progress / waiting parts</div>
-    </div>
+    </a>
 
-    <div class="stat-card stat-card--purple">
+    <a class="stat-card stat-card--purple"
+       :href="kpis.top_vendor_id ? '<?= base_url('vendors/show') ?>?id=' + kpis.top_vendor_id : '<?= base_url('maintenance_work_orders') ?>'"
+       style="cursor:pointer;text-decoration:none"
+       title="Click to open the top vendor">
         <span class="stat-icon stat-icon--purple"><svg><use href="#icon-trophy"/></svg></span>
         <div class="stat-label">Top Vendor by Spend</div>
         <div class="stat-value font-mono" x-text="fmt(kpis.top_vendor_spent)"></div>
         <div class="stat-delta" x-text="kpis.top_vendor_name || 'No spend recorded'"></div>
-    </div>
+    </a>
 
 </div>
 </div>

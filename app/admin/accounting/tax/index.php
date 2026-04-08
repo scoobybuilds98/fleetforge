@@ -74,24 +74,28 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- ── KPI Tiles ───────────────────────────────────────────────── -->
+<!-- TILES-1: KPI tiles dispatch `ff-tax-filter` to toggle filterStatus -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-tax-filter',{detail:{status:'open'}}))">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Open Periods</div>
         <div class="stat-value font-mono"><?= e((string) $openCount) ?></div>
     </div>
-    <div class="stat-card stat-card--amber">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-tax-filter',{detail:{status:'calculated'}}))">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">Calculated</div>
         <div class="stat-value font-mono"><?= e((string) $calculatedCount) ?></div>
     </div>
-    <div class="stat-card stat-card--green">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-tax-filter',{detail:{status:'filed'}}))">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Filed (Awaiting Remit)</div>
         <div class="stat-value font-mono"><?= e((string) $filedCount) ?></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-tax-filter',{detail:{status:''}}))">
         <span class="stat-icon"><svg><use href="#icon-banknotes"/></svg></span>
         <div class="stat-label">YTD GST/HST Net Owing</div>
         <div class="stat-value font-mono">$<?= number_format((float) $ytdNetOwing, 2) ?></div>
@@ -101,7 +105,9 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      TAX PERIODS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_TaxPeriods()" x-init="init()" @open-tax-create.window="openCreate()">
+<div x-data="FF_TaxPeriods()" x-init="init()"
+     @open-tax-create.window="openCreate()"
+     @ff-tax-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; reload()">
 
     <!-- ── Filter toolbar ────────────────────────────────────── -->
     <div class="table-toolbar" style="margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">

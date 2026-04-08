@@ -60,17 +60,26 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <?php endif; ?>
 </div>
 
-<!-- KPI Tiles -->
+<!-- TILES-1: KPI tiles now dispatch `ff-mileage-filter` events that the
+     FF_MileageLogs Alpine component below listens for. Each click toggles
+     the matching log_type filter and reloads page 1. The "Last GPS Sync"
+     tile is display-only (no log_type to filter by). -->
 <div class="stat-grid" style="margin-bottom:1.5rem;">
-    <div class="stat-card">
+    <div class="stat-card"
+         style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-mileage-filter', { detail: { log_type: '' } }))">
         <div class="stat-value"><?= number_format($totalLogs) ?></div>
         <div class="stat-label">Total Entries</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card"
+         style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-mileage-filter', { detail: { log_type: 'manual' } }))">
         <div class="stat-value"><?= number_format($manualCount) ?></div>
         <div class="stat-label">Manual Entries</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card"
+         style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-mileage-filter', { detail: { log_type: 'gps_sync' } }))">
         <div class="stat-value"><?= number_format($gpsSyncCount) ?></div>
         <div class="stat-label">GPS Sync Entries</div>
     </div>
@@ -81,7 +90,10 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 </div>
 
 <!-- Filter + Table (Alpine.js) -->
-<div class="card" x-data="FF_MileageLogs()" x-init="load()">
+<!-- TILES-1: @ff-mileage-filter.window listens for the KPI tile clicks above
+     and sets filters.log_type from event.detail.log_type, then reloads. -->
+<div class="card" x-data="FF_MileageLogs()" x-init="load()"
+     @ff-mileage-filter.window="filters.log_type = (filters.log_type === $event.detail.log_type) ? '' : $event.detail.log_type; load(1)">
 
     <!-- Filter bar -->
     <div class="card-header" style="flex-wrap:wrap;gap:.75rem;">

@@ -60,7 +60,12 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── KPI TILES ─────────────────────────────────────────────── -->
     <div class="stat-grid" style="--stat-cols:4;">
 
-        <div class="stat-card">
+        <!-- TILES-1: every tile is now a drill-down filter. Pending/Confirmed
+             use client-side quickStatus filter since the reservations list
+             already merges both statuses via two server requests. -->
+        <div class="stat-card" style="cursor:pointer;"
+             :class="{ 'ring-active': !quickStatus && !filters.pickup_date }"
+             @click="quickStatus=''; filters.pickup_date=''; applyFilters()">
             <div class="stat-label">Total Active</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -73,7 +78,9 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card" style="cursor:pointer;"
+             :class="{ 'ring-active': quickStatus === 'pending' }"
+             @click="quickStatus = quickStatus === 'pending' ? '' : 'pending'">
             <div class="stat-label">Pending</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.pending"></div>
@@ -83,7 +90,9 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card" style="cursor:pointer;"
+             :class="{ 'ring-active': quickStatus === 'confirmed' }"
+             @click="quickStatus = quickStatus === 'confirmed' ? '' : 'confirmed'">
             <div class="stat-label">Confirmed</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.confirmed"></div>
@@ -95,7 +104,8 @@ require_once FF_ROOT . '/includes/header.php';
 
         <div class="stat-card"
              style="cursor:pointer;"
-             @click="filters.pickup_date = todayDate(); applyFilters()">
+             :class="{ 'ring-active': filters.pickup_date === todayDate() }"
+             @click="filters.pickup_date = filters.pickup_date === todayDate() ? '' : todayDate(); applyFilters()">
             <div class="stat-label">Today's Pickups</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -509,7 +519,8 @@ require_once FF_ROOT . '/includes/header.php';
                     </thead>
                     <tbody>
                         <template x-for="r in inRows" :key="r.id">
-                            <tr :class="r.priority === 'urgent' ? 'row-highlight-danger' : (r.priority === 'high' ? 'row-highlight-warning' : '')">
+                            <tr x-show="!quickStatus || r.status === quickStatus"
+                                :class="r.priority === 'urgent' ? 'row-highlight-danger' : (r.priority === 'high' ? 'row-highlight-warning' : '')">
                                 <td class="font-mono text-sm"
                                     :style="r.priority === 'urgent'
                                         ? 'border-left:3px solid var(--color-danger);padding-left:10px;'
@@ -841,6 +852,11 @@ function FF_Reservations() {
             sort:        'pickup_date',
             dir:         'ASC',
         },
+
+        // TILES-1: client-side quick-filter set by the Pending/Confirmed tiles.
+        // Applied via x-show on each row so we don't need two API roundtrips
+        // (the list is already pre-merged from pending + confirmed endpoints).
+        quickStatus: '',
 
         inPage:  1,
         outPage: 1,

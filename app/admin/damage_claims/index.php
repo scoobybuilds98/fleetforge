@@ -93,14 +93,21 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-delta">invoiced status</div>
     </div>
 
-    <div class="stat-card stat-card--teal">
+    <!-- TILES-1: "Claims This Year" clears status/date filters so all
+         this-year claims are shown; toggles an active ring for feedback. -->
+    <div class="stat-card stat-card--teal" style="cursor:pointer;"
+         :class="{ 'ring-active': activeTile === 'year' }"
+         @click="activeTile = activeTile === 'year' ? '' : 'year'; setFilter('status', '')">
         <span class="stat-icon stat-icon--teal"><svg><use href="#icon-arrow-trending-up"/></svg></span>
         <div class="stat-label">Claims This Year</div>
         <div class="stat-value font-mono" x-text="kpis.year_total"></div>
         <div class="stat-delta" x-text="new Date().getFullYear()"></div>
     </div>
 
-    <div class="stat-card stat-card--purple">
+    <!-- TILES-1: Avg Repair Cost drills to the repair_ordered subset -->
+    <div class="stat-card stat-card--purple" style="cursor:pointer;"
+         :class="{ 'ring-active': activeTile === 'avg' }"
+         @click="activeTile = activeTile === 'avg' ? '' : 'avg'; setFilter('status', activeTile === 'avg' ? 'repair_ordered' : '')">
         <span class="stat-icon stat-icon--purple"><svg><use href="#icon-currency-dollar"/></svg></span>
         <div class="stat-label">Avg Repair Cost</div>
         <div class="stat-value font-mono" x-text="fmt(kpis.avg_repair)"></div>

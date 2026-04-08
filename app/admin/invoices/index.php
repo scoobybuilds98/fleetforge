@@ -88,10 +88,14 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="invoicesKpis()" x-init="loadKpis()">
 <div class="stat-grid">
 
+    <!-- TILES-1: each aging tile now drills to the matching bucket via the
+         new `aging` query param (current | ar30 | ar60 | ar90) so clicking
+         "31-60 Days Overdue" actually shows 31-60 day invoices instead of
+         the generic overdue list. Clicking again clears. -->
     <div class="stat-card stat-card--blue"
          style="cursor:pointer"
          :class="{ 'ring-active': activeTile === 'current' }"
-         @click="activeTile = activeTile === 'current' ? '' : 'current'; setFilter('status', activeTile ? 'sent' : '')">
+         @click="activeTile = activeTile === 'current' ? '' : 'current'; setAging(activeTile)">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Current</div>
         <div class="stat-value currency" x-text="fmt(kpis.current_total)"></div>
@@ -101,7 +105,7 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="stat-card stat-card--amber"
          style="cursor:pointer"
          :class="{ 'ring-active': activeTile === 'ar30' }"
-         @click="activeTile = activeTile === 'ar30' ? '' : 'ar30'; setFilter('status', activeTile ? 'overdue' : '')">
+         @click="activeTile = activeTile === 'ar30' ? '' : 'ar30'; setAging(activeTile)">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">1–30 Days Overdue</div>
         <div class="stat-value currency" style="color:var(--color-warning);" x-text="fmt(kpis.ar30_total)"></div>
@@ -111,7 +115,7 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="stat-card stat-card--red"
          style="cursor:pointer"
          :class="{ 'ring-active': activeTile === 'ar60' }"
-         @click="activeTile = activeTile === 'ar60' ? '' : 'ar60'; setFilter('status', activeTile ? 'overdue' : '')">
+         @click="activeTile = activeTile === 'ar60' ? '' : 'ar60'; setAging(activeTile)">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">31–60 Days Overdue</div>
         <div class="stat-value currency" style="color:var(--color-danger);" x-text="fmt(kpis.ar60_total)"></div>
@@ -121,7 +125,7 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="stat-card stat-card--red"
          style="cursor:pointer"
          :class="{ 'ring-active': activeTile === 'ar90' }"
-         @click="activeTile = activeTile === 'ar90' ? '' : 'ar90'; setFilter('status', activeTile ? 'overdue' : '')">
+         @click="activeTile = activeTile === 'ar90' ? '' : 'ar90'; setAging(activeTile)">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-fire"/></svg></span>
         <div class="stat-label">60+ Days Overdue</div>
         <div class="stat-value currency" style="color:var(--color-danger);" x-text="fmt(kpis.ar90_total)"></div>
@@ -404,6 +408,24 @@ function invoicesKpis() {
             d.load();
         },
 
+        /**
+         * TILES-1: AR-aging bucket drilldown. Used by the 4 invoice KPI tiles
+         * (Current / 1-30 / 31-60 / 60+). Passes the tile key through to the
+         * invoices list filter so the list narrows to the exact bucket the
+         * user clicked instead of the generic overdue status filter.
+         * Empty bucket clears the filter.
+         */
+        setAging(bucket) {
+            const el = document.getElementById('invoices-table-card');
+            if (!el) return;
+            const d = Alpine.$data(el);
+            d.filters.aging  = bucket || '';
+            d.filters.status = '';
+            d.activeTab      = 'all';
+            d.currentPage    = 1;
+            d.load();
+        },
+
         async loadKpis() {
             const r = await FF_Api.get('<?= base_url('api/v1/invoices/kpis') ?>');
             if (r.success) Object.assign(this.kpis, r.data);
@@ -422,6 +444,7 @@ function FF_Invoices() {
         filters: {
             search: '',
             status: '',
+            aging:  '',   // TILES-1: AR aging bucket filter (current|ar30|ar60|ar90)
             sort:   'created_at',
             dir:    'DESC',
         },
@@ -434,6 +457,10 @@ function FF_Invoices() {
         setTab(tab) {
             this.activeTab      = tab;
             this.filters.status = '';
+            this.filters.aging  = '';   // TILES-1: clear aging drill when switching tabs
+            // Also reset the tile active-ring state held in invoicesKpis()
+            const kpisEl = document.querySelector('[x-data="invoicesKpis()"]');
+            if (kpisEl) { try { Alpine.$data(kpisEl).activeTile = ''; } catch (_e) {} }
             this.currentPage    = 1;
             this.load();
         },
@@ -453,6 +480,14 @@ function FF_Invoices() {
                 params.set('status', this.filters.status);
             }
             // outstanding: no API status param — filter client-side after fetch
+
+            // TILES-1: AR aging bucket from tile click. API translates this
+            // into due_date range + status constraint so we DON'T also send
+            // the status filter when aging is set (the API already scopes it).
+            if (this.filters.aging) {
+                params.set('aging', this.filters.aging);
+                params.delete('status');
+            }
 
             if (this.filters.search) params.set('q',    this.filters.search);
             params.set('sort',     this.filters.sort);

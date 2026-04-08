@@ -50,6 +50,41 @@ if ($search = clean_string($_GET['q'] ?? null)) {
     array_push($params, $like, $like);
 }
 
+// TILES-1: AR-aging bucket filter used by the invoice-list KPI tiles.
+// The tile click sets aging=current|ar30|ar60|ar90 which translates to
+// a due_date range + an outstanding-status constraint so the list shows
+// only the invoices contributing to that bucket.
+//
+// Buckets mirror the aggregates in app/admin/invoices/index.php:
+//   current → status='sent'  AND due_date >= today
+//   ar30    → status IN ('sent','overdue') AND today-30d <= due_date < today
+//   ar60    → status IN ('sent','overdue') AND today-60d <= due_date < today-30d
+//   ar90    → status IN ('sent','overdue') AND due_date < today-60d
+$aging = clean_string($_GET['aging'] ?? null);
+if ($aging !== null && $aging !== '') {
+    switch ($aging) {
+        case 'current':
+            $where[] = "i.status = 'sent'";
+            $where[] = "i.due_date >= CURDATE()";
+            break;
+        case 'ar30':
+            $where[] = "i.status IN ('sent','overdue')";
+            $where[] = "i.due_date <  CURDATE()";
+            $where[] = "i.due_date >= CURDATE() - INTERVAL 30 DAY";
+            break;
+        case 'ar60':
+            $where[] = "i.status IN ('sent','overdue')";
+            $where[] = "i.due_date <  CURDATE() - INTERVAL 30 DAY";
+            $where[] = "i.due_date >= CURDATE() - INTERVAL 60 DAY";
+            break;
+        case 'ar90':
+            $where[] = "i.status IN ('sent','overdue')";
+            $where[] = "i.due_date <  CURDATE() - INTERVAL 60 DAY";
+            break;
+        // any other value silently ignored — keeps the filter forgiving
+    }
+}
+
 $whereSQL = implode(' AND ', $where);
 $page = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
 $perPage = min(100, max(10, clean_int($_GET['per_page'] ?? 25) ?? 25));

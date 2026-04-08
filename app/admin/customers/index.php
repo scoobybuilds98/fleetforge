@@ -46,10 +46,12 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <div x-data="FF_Customers()" x-init="init()">
 
-    <!-- ── KPI TILES ────────────────────────────────────────── -->
+    <!-- ── KPI TILES — all clickable drill-down filters (TILES-1) ── -->
     <div class="stat-grid">
 
-        <div class="stat-card">
+        <div class="stat-card" style="cursor:pointer"
+             :class="{ 'ring-active': !filters.status }"
+             @click="filters.status = ''; resetPage()">
             <div class="stat-label">Total Customers</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.total"></div>
@@ -59,7 +61,9 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card" style="cursor:pointer"
+             :class="{ 'ring-active': filters.status === 'active' }"
+             @click="filters.status = filters.status === 'active' ? '' : 'active'; resetPage()">
             <div class="stat-label">Active</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -74,19 +78,24 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card">
+        <!-- Overdue Balance drills into /invoices?status=overdue since the
+             overdue AR lives on invoices, not customers. -->
+        <a class="stat-card" :href="'<?= base_url('invoices') ?>?status=overdue'"
+           style="cursor:pointer;text-decoration:none">
             <div class="stat-label">Overdue Balance</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value currency"
-                     x-text="kpis.overdue_balance > 0 ? '$' + formatMoney(kpis.overdue_balance) : '—'">
+                     x-text="Number(kpis.overdue_balance) > 0 ? '$' + formatMoney(kpis.overdue_balance) : '$0.00'">
                 </div>
             </template>
             <template x-if="!kpisLoaded">
                 <div class="skeleton skeleton-text-lg" style="width:65%;margin-top:8px;"></div>
             </template>
-        </div>
+        </a>
 
-        <div class="stat-card">
+        <div class="stat-card" style="cursor:pointer"
+             :class="{ 'ring-active': filters.status === 'credit_hold' }"
+             @click="filters.status = filters.status === 'credit_hold' ? '' : 'credit_hold'; resetPage()">
             <div class="stat-label">Credit Hold</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.credit_hold"></div>
@@ -357,27 +366,29 @@ function FF_Customers() {
         },
 
         async loadKpis() {
-            // WHY: no dedicated customers KPI endpoint; compute from list API pagination totals
+            // TILES-1: use the dedicated /api/v1/customers/kpis endpoint so
+            // overdue_balance is computed server-side from invoices.balance_due
+            // instead of being stubbed to 0 (which made the tile render "—"
+            // forever regardless of real overdue AR).
             try {
-                const [allRes, activeRes, creditHoldRes] = await Promise.all([
-                    fetch(`<?= base_url('api/v1/customers') ?>?per_page=1`),
-                    fetch(`<?= base_url('api/v1/customers') ?>?per_page=1&status=active`),
-                    fetch(`<?= base_url('api/v1/customers') ?>?per_page=1&status=credit_hold`),
-                ]);
-
-                const [all, active, creditHold] = await Promise.all([
-                    allRes.json(), activeRes.json(), creditHoldRes.json()
-                ]);
-
-                this.kpis = {
-                    total:           all.data?.pagination?.total        ?? 0,
-                    active:          active.data?.pagination?.total     ?? 0,
-                    credit_hold:     creditHold.data?.pagination?.total ?? 0,
-                    overdue_balance: 0, // aggregate not available without dedicated endpoint
-                };
-                this.kpisLoaded = true;
+                const r = await fetch(`<?= base_url('api/v1/customers/kpis') ?>`, {
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const j = await r.json();
+                if (j.success) {
+                    this.kpis = {
+                        total:           Number(j.data.total)           || 0,
+                        active:          Number(j.data.active)          || 0,
+                        credit_hold:     Number(j.data.credit_hold)     || 0,
+                        // keep as number so x-text comparisons work
+                        overdue_balance: Number(j.data.overdue_balance) || 0,
+                    };
+                }
             } catch (e) {
-                this.kpisLoaded = true; // show zeros rather than skeleton forever
+                /* swallow — kpisLoaded still flips so skeleton doesn't hang */
+            } finally {
+                this.kpisLoaded = true;
             }
         },
 

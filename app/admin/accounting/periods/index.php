@@ -47,24 +47,29 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- ── KPI Tiles ───────────────────────────────────────────────── -->
+<!-- TILES-1: KPI tiles dispatch `ff-periods-filter` to set a client-side
+     statusFilter that x-show filters the 12 period cards below. -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-periods-filter',{detail:{status:''}}))">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Total Periods</div>
         <div class="stat-value font-mono"><?= e((string) $totalPeriods) ?></div>
     </div>
-    <div class="stat-card stat-card--green">
+    <div class="stat-card stat-card--green" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-periods-filter',{detail:{status:'open'}}))">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Open</div>
         <div class="stat-value font-mono"><?= e((string) $openPeriods) ?></div>
     </div>
-    <div class="stat-card stat-card--amber">
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-periods-filter',{detail:{status:'closed'}}))">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">Closed</div>
         <div class="stat-value font-mono"><?= e((string) $closedPeriods) ?></div>
     </div>
-    <div class="stat-card stat-card--red">
+    <div class="stat-card stat-card--red" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-periods-filter',{detail:{status:'locked'}}))">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-shield-check"/></svg></span>
         <div class="stat-label">Locked</div>
         <div class="stat-value font-mono"><?= e((string) $lockedPeriods) ?></div>
@@ -74,7 +79,8 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      ACCOUNTING PERIODS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Periods()" x-init="init()">
+<div x-data="FF_Periods()" x-init="init()"
+     @ff-periods-filter.window="statusFilter = (statusFilter === $event.detail.status && statusFilter !== '') ? '' : $event.detail.status">
 
     <!-- ── Year Filter ────────────────────────────────────────── -->
     <div class="table-toolbar" style="margin-bottom:20px;">
@@ -133,7 +139,8 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="!loading && !loadError && periods.length > 0">
         <div class="stat-grid">
             <template x-for="period in periods" :key="period.id">
-                <div class="card" style="padding:20px;">
+                <div class="card" style="padding:20px;"
+                     x-show="!statusFilter || period.status === statusFilter">
 
                     <!-- Header: month name + status badge -->
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -199,6 +206,10 @@ function FF_Periods() {
         periods:     [],
         loading:     true,
         loadError:   null,
+
+        // TILES-1: client-side filter set by the KPI tiles above.
+        // Empty string → show all; 'open' | 'closed' | 'locked' → filter.
+        statusFilter: '',
 
         // ── Init ───────────────────────────────────────────────
         async init() {

@@ -50,28 +50,33 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 </div>
 
-<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<!-- TILES-1: KPI tiles dispatch `ff-users-filter` to the Alpine component
+     below. Each tile toggles the matching status filter. -->
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-users-filter',{detail:{status:''}}))">
         <div class="stat-label">Total Users</div>
         <div class="stat-value font-mono"><?= e($kpis['total']) ?></div>
         <div class="stat-delta">active, invited &amp; suspended</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-users-filter',{detail:{status:'active'}}))">
         <div class="stat-label">Active</div>
         <div class="stat-value font-mono"><?= e($kpis['active']) ?></div>
         <div class="stat-delta">can log in</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-users-filter',{detail:{status:'invited'}}))">
         <div class="stat-label">Invited</div>
         <div class="stat-value font-mono"><?= e($kpis['invited']) ?></div>
         <div class="stat-delta">pending activation</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-users-filter',{detail:{status:'suspended'}}))">
         <div class="stat-label">Suspended</div>
         <div class="stat-value font-mono"><?= e($kpis['suspended']) ?></div>
         <div class="stat-delta">access revoked</div>
@@ -80,9 +85,14 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
+<!-- TILES-1: @ff-users-filter.window toggles the status filter and reloads. -->
 <div class="card"
      x-data="usersList()"
-     x-init="init()">
+     x-init="init()"
+     @ff-users-filter.window="
+        filters.status = (filters.status === $event.detail.status && filters.status !== '') ? '' : $event.detail.status;
+        load();
+     ">
 
     <!-- Filter bar -->
     <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
