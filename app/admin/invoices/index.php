@@ -442,15 +442,34 @@ function FF_Invoices() {
         activeTab:   'outstanding',
 
         filters: {
-            search: '',
-            status: '',
-            aging:  '',   // TILES-1: AR aging bucket filter (current|ar30|ar60|ar90)
-            sort:   'created_at',
-            dir:    'DESC',
+            search:     '',
+            status:     '',
+            aging:      '',   // TILES-1: AR aging bucket filter (current|ar30|ar60|ar90)
+            sort:       'created_at',
+            dir:        'DESC',
+            leaseId:    '',   // BUGFIX-1: from ?lease_id= URL param (tile drill-through)
+            customerId: '',   // BUGFIX-1: from ?customer_id= URL param (tile drill-through)
         },
         currentPage: 1,
 
         async init() {
+            // BUGFIX-1: Read context params set by tiles on lease/customer show pages.
+            // e.g. invoices?lease_id=3&status=overdue from the "Outstanding" tile on a lease.
+            const sp = new URLSearchParams(location.search);
+            const urlLeaseId    = sp.get('lease_id');
+            const urlCustomerId = sp.get('customer_id');
+            const urlStatus     = sp.get('status');
+
+            if (urlLeaseId)    this.filters.leaseId    = urlLeaseId;
+            if (urlCustomerId) this.filters.customerId = urlCustomerId;
+
+            // When a status param is passed alongside lease/customer context,
+            // switch to the 'all' tab with that status so the filter applies.
+            if (urlStatus) {
+                this.activeTab      = 'all';
+                this.filters.status = urlStatus;
+            }
+
             await this.load();
         },
 
@@ -489,7 +508,9 @@ function FF_Invoices() {
                 params.delete('status');
             }
 
-            if (this.filters.search) params.set('q',    this.filters.search);
+            if (this.filters.search)     params.set('q',           this.filters.search);
+            if (this.filters.leaseId)    params.set('lease_id',    this.filters.leaseId);
+            if (this.filters.customerId) params.set('customer_id', this.filters.customerId);
             params.set('sort',     this.filters.sort);
             params.set('dir',      this.filters.dir);
             params.set('page',     this.currentPage);

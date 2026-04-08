@@ -400,7 +400,8 @@ require_once FF_ROOT . '/includes/header.php';
     <span class="breadcrumb-current"><?= e($invoice['invoice_number']) ?></span>
 </nav>
 
-<div class="page-header" x-data="FF_InvoiceShow()" x-cloak>
+<div x-data="FF_InvoiceShow()" x-cloak>
+<div class="page-header">
     <div>
         <h1 class="page-header-title h4">
             <?= e($invoice['invoice_number']) ?>
@@ -452,8 +453,8 @@ require_once FF_ROOT . '/includes/header.php';
                 class="btn btn-primary btn-sm no-print"
                 onclick="openEmailCompose({
                     customerId:   <?= (int)$invoice['customer_id'] ?>,
-                    toEmail:      <?= json_encode((string)($invoice['customer_email_snapshot'] ?? '')) ?>,
-                    toName:       <?= json_encode((string)($invoice['customer_name_snapshot'] ?? $invoice['company_name_snapshot'])) ?>,
+                    toEmail:      <?= e(json_encode((string)($invoice['customer_email_snapshot'] ?? ''))) ?>,
+                    toName:       <?= e(json_encode((string)($invoice['customer_name_snapshot'] ?? $invoice['company_name_snapshot']))) ?>,
                     templateSlug: 'invoice_ready',
                     entityType:   'invoice',
                     entityId:     <?= (int)$invoice['id'] ?>
@@ -498,10 +499,11 @@ require_once FF_ROOT . '/includes/header.php';
             <button class="btn btn-danger btn-sm" @click="showDeleteModal = true">Delete</button>
         <?php endif; ?>
     </div>
+</div><!-- end .page-header -->
 
-    <!-- ============================================================
-         MODALS — Void, Delete
-         ============================================================ -->
+<!-- ============================================================
+     MODALS — Void, Delete
+     ============================================================ -->
 
     <!-- Void modal -->
     <template x-if="showVoidModal">
@@ -631,7 +633,7 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
 <!-- ================================================================
      KPI STAT CARDS
      ================================================================ -->
-<div class="stat-grid" style="grid-template-columns: repeat(5, 1fr);">
+<div class="stat-grid">
     <div class="stat-card">
         <div class="stat-label">Invoice Date</div>
         <div class="stat-value font-mono"><?= format_date($invoice['invoice_date']) ?></div>
@@ -703,7 +705,7 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
 <!-- ================================================================
      FROM / TO ADDRESSES + INVOICE METADATA
      ================================================================ -->
-<div class="invoice-addresses" style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+<div class="invoice-addresses">
 
     <!-- Left: Customer Billing Info (the "Bill To" section) -->
     <div class="card" style="padding:20px;">

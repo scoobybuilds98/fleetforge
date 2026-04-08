@@ -900,6 +900,1559 @@ window.FF_PortalNotifications = FF_PortalNotifications;
 
 
 // ============================================================
+// 07c. FF_ChatBadge — topbar chat icon unread counter
+// ============================================================
+// Polls /api/v1/chat/unread/index.php every 5 seconds.
+// Used by includes/topbar.php chat icon.
+
+function FF_ChatBadge() {
+    return {
+        totalUnread: 0,
+        _timer: null,
+
+        async init() {
+            await this.fetchUnread();
+            // WHY: 5s poll as specified in CHAT-1 — gives Slack-like real-time feel
+            this._timer = setInterval(() => this.fetchUnread(), 5000);
+            this.$el.addEventListener('alpine:destroyed', () => clearInterval(this._timer));
+        },
+
+        async fetchUnread() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php'));
+                this.totalUnread = data.data?.total_unread || 0;
+            } catch (e) {
+                // Silent — badge just doesn't update if API fails
+            }
+        },
+    };
+}
+
+window.FF_ChatBadge = FF_ChatBadge;
+
+
+// ============================================================
+// 07d. FF_Chat — full-page chat component (app/admin/chat/index.php)
+// ============================================================
+
+function FF_Chat() {
+    return {
+        // ── State ────────────────────────────────────────────────────────
+        channels:          [],
+        directMessages:    [],
+        activeChannel:     null,
+        messages:          [],
+        channelMembers:    [],
+        composing:         '',
+        attachments:       [],       // pending attachments to send
+        replyingTo:        null,     // message object being replied to
+        editingMessage:    null,     // message being edited
+        lastMessageId:     0,
+        hasMore:           false,
+        loadingMessages:   false,
+        loadingMore:       false,
+        sending:           false,
+        showInfo:          false,
+        showSearch:        false,
+        showCreateChannel: false,
+        showBrowse:        false,
+        showNewDM:         false,
+        searchQuery:       '',
+        searchResults:     [],
+        browseQuery:       '',
+        browseChannels:    [],
+        dmUserQuery:       '',
+        dmUserResults:     [],
+        newChannel:        { name: '', description: '', is_private: false },
+        // Mention / record picker state
+        showMentions:      false,
+        mentionResults:    [],
+        mentionQuery:      '',
+        showRecordPicker:  false,
+        recordPickerType:  null,
+        recordSearchQuery: '',
+        recordSearchResults: [],
+        // Emoji picker
+        emojiPickerMessageId: null,
+        commonEmojis: ['👍','❤️','😂','🎉','🔥','👏','✅','🚀','😮','🙏','💯','👀'],
+        // Polling
+        _pollTimer: null,
+
+        // ── Lifecycle ────────────────────────────────────────────────────
+
+        async init(channelIdParam = 0, messageIdParam = 0) {
+            await this.loadChannels();
+            // If URL has ?channel= param, open that channel
+            if (channelIdParam) {
+                const target = [...this.channels, ...this.directMessages]
+                    .find(c => c.id == channelIdParam);
+                if (target) {
+                    await this.selectChannel(target);
+                    // BUGFIX-1: scroll to and highlight the specific message if provided.
+                    // $nextTick queued here runs after selectChannel's scrollToBottom,
+                    // so our scroll wins and the user lands on the notified message.
+                    if (messageIdParam) {
+                        this.$nextTick(() => {
+                            const el = document.querySelector('[data-message-id="' + messageIdParam + '"]');
+                            if (el) {
+                                el.scrollIntoView({ block: 'center' });
+                                el.classList.add('chat-message--highlight');
+                                setTimeout(() => el.classList.remove('chat-message--highlight'), 3000);
+                            }
+                        });
+                    }
+                } else if (this.channels.length > 0) {
+                    await this.selectChannel(this.channels[0]);
+                }
+            } else if (this.channels.length > 0) {
+                await this.selectChannel(this.channels[0]);
+            }
+            // Start polling for new messages
+            this._pollTimer = setInterval(() => this.poll(), 5000);
+        },
+
+        // ── Channel loading ───────────────────────────────────────────────
+
+        async loadChannels() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/channels/index.php'));
+                this.channels       = data.data?.channels       || [];
+                this.directMessages = data.data?.direct_messages || [];
+            } catch (e) {
+                FF_Toast.error('Failed to load channels.');
+            }
+        },
+
+        async selectChannel(ch) {
+            this.activeChannel  = ch;
+            this.messages       = [];
+            this.lastMessageId  = 0;
+            this.hasMore        = false;
+            this.replyingTo     = null;
+            this.editingMessage = null;
+            this.composing      = '';
+            this.attachments    = [];
+            this.showInfo       = false;
+            await this.loadMessages(ch.id);
+            await this.markRead(ch.id);
+            await this.loadMembers(ch.id);
+            this.$nextTick(() => this.scrollToBottom());
+        },
+
+        async selectChannelById(id) {
+            const ch = [...this.channels, ...this.directMessages].find(c => c.id == id);
+            if (ch) await this.selectChannel(ch);
+        },
+
+        isChannelMember(id) {
+            return [...this.channels, ...this.directMessages].some(c => c.id == id);
+        },
+
+        // ── Message loading ───────────────────────────────────────────────
+
+        async loadMessages(channelId) {
+            this.loadingMessages = true;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/messages/index.php') + '?channel_id=' + channelId + '&limit=50'
+                );
+                this.messages      = data.data?.messages  || [];
+                this.hasMore       = data.data?.has_more   || false;
+                this.lastMessageId = this.messages.length > 0
+                    ? Math.max(...this.messages.map(m => m.id))
+                    : 0;
+            } catch (e) {
+                FF_Toast.error('Failed to load messages.');
+            } finally {
+                this.loadingMessages = false;
+            }
+        },
+
+        async loadMore() {
+            if (!this.activeChannel || this.loadingMore) return;
+            const firstId = this.messages[0]?.id;
+            if (!firstId) return;
+            this.loadingMore = true;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/messages/index.php') + '?channel_id=' + this.activeChannel.id +
+                    '&before_id=' + firstId + '&limit=50'
+                );
+                const older = data.data?.messages || [];
+                this.messages  = [...older, ...this.messages];
+                this.hasMore   = data.data?.has_more || false;
+            } catch (e) {
+                FF_Toast.error('Failed to load older messages.');
+            } finally {
+                this.loadingMore = false;
+            }
+        },
+
+        async loadMembers(channelId) {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/channels/members.php') + '?channel_id=' + channelId);
+                this.channelMembers = data.data || [];
+            } catch (e) {
+                this.channelMembers = [];
+            }
+        },
+
+        // ── Polling ───────────────────────────────────────────────────────
+
+        async poll() {
+            if (!this.activeChannel) return;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/messages/poll.php') + '?channel_id=' + this.activeChannel.id +
+                    '&after_id=' + this.lastMessageId
+                );
+                const newMsgs = data.data?.messages || [];
+                if (newMsgs.length > 0) {
+                    this.messages = [...this.messages, ...newMsgs];
+                    this.lastMessageId = Math.max(...this.messages.map(m => m.id));
+                    this.$nextTick(() => this.scrollToBottom());
+                    // Update channel unread in sidebar (reset since we're viewing)
+                    await this.markRead(this.activeChannel.id);
+                }
+                // Refresh unread counts in sidebar
+                await this.refreshUnreadCounts();
+            } catch (e) {
+                // Silent — poll failures are expected on network issues
+            }
+        },
+
+        async refreshUnreadCounts() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php'));
+                const map  = {};
+                (data.data?.channels || []).forEach(c => { map[c.id] = c.unread; });
+                this.channels.forEach(ch => {
+                    ch.unread_count = map[ch.id] || 0;
+                });
+                this.directMessages.forEach(dm => {
+                    dm.unread_count = map[dm.id] || 0;
+                });
+            } catch (e) {}
+        },
+
+        // ── Send message ─────────────────────────────────────────────────
+
+        async send() {
+            if (!this.activeChannel || this.sending) return;
+            if (this.editingMessage) {
+                await this.submitEdit();
+                return;
+            }
+            const text = this.composing.trim();
+            if (!text && this.attachments.length === 0) return;
+
+            this.sending = true;
+            const fd = new FormData();
+            fd.append('channel_id', this.activeChannel.id);
+            if (text) fd.append('message', text);
+            if (this.replyingTo) fd.append('reply_to_id', this.replyingTo.id);
+
+            // Extract mentions from text
+            const mentioned = this.channelMembers
+                .filter(m => text.includes('@' + m.name))
+                .map(m => m.id);
+            mentioned.forEach(id => fd.append('mentions[]', id));
+
+            // Attachments
+            this.attachments.forEach((att, i) => {
+                fd.append('attachments[' + i + '][type]',      att.type);
+                fd.append('attachments[' + i + '][entity_id]', att.entity_id || '');
+                fd.append('attachments[' + i + '][preview_data][title]',    (att.preview_data || {}).title    || att.type);
+                fd.append('attachments[' + i + '][preview_data][subtitle]', (att.preview_data || {}).subtitle || '');
+                fd.append('attachments[' + i + '][preview_data][badge]',    (att.preview_data || {}).badge    || '');
+            });
+
+            try {
+                // WHY: use fetch directly with FormData to avoid JSON serialisation
+                //      of the nested attachments array
+                const token  = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                const base   = (window.FF_BASE_URL || '/fleetforge') + '/api/';
+                const resp   = await fetch(base + 'v1/chat/messages/create.php', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': token },
+                    body: fd,
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.message || 'Send failed');
+
+                this.messages.push(data.data);
+                this.lastMessageId = data.data.id;
+                this.composing     = '';
+                this.attachments   = [];
+                this.replyingTo    = null;
+
+                // Reset compose textarea height
+                this.$nextTick(() => {
+                    if (this.$refs.composeInput) {
+                        this.$refs.composeInput.style.height = 'auto';
+                    }
+                    this.scrollToBottom();
+                });
+
+                // Update channel preview in sidebar
+                const ch = this.channels.find(c => c.id === this.activeChannel.id)
+                        || this.directMessages.find(c => c.id === this.activeChannel.id);
+                if (ch) {
+                    ch.last_message_at      = new Date().toISOString();
+                    ch.last_message_preview = text || '[attachment]';
+                }
+            } catch (e) {
+                FF_Toast.error('Failed to send message.');
+            } finally {
+                this.sending = false;
+            }
+        },
+
+        // ── Edit message ─────────────────────────────────────────────────
+
+        editMessage(msg) {
+            this.editingMessage = msg;
+            this.composing      = msg.message || '';
+            this.$nextTick(() => this.$refs.composeInput?.focus());
+        },
+
+        cancelEdit() {
+            this.editingMessage = null;
+            this.composing      = '';
+        },
+
+        async submitEdit() {
+            if (!this.editingMessage) return;
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/chat/messages/update.php'), {
+                    message_id: this.editingMessage.id,
+                    message:    this.composing.trim(),
+                });
+                const idx = this.messages.findIndex(m => m.id === this.editingMessage.id);
+                if (idx !== -1) {
+                    this.messages[idx] = { ...this.messages[idx], ...data };
+                }
+                this.editingMessage = null;
+                this.composing      = '';
+            } catch (e) {
+                FF_Toast.error('Failed to edit message.');
+            } finally {
+                this.sending = false;
+            }
+        },
+
+        // ── Delete message ────────────────────────────────────────────────
+
+        async deleteMessage(id) {
+            if (!confirm('Delete this message?')) return;
+            try {
+                await FF_Api.post(FF_Api.url('/api/v1/chat/messages/delete.php'), { message_id: id });
+                const idx = this.messages.findIndex(m => m.id === id);
+                if (idx !== -1) {
+                    this.messages[idx] = { ...this.messages[idx], is_archived: 1 };
+                }
+            } catch (e) {
+                FF_Toast.error('Failed to delete message.');
+            }
+        },
+
+        // ── Reactions ────────────────────────────────────────────────────
+
+        async addReaction(messageId, emoji) {
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/chat/reactions/toggle.php'), {
+                    message_id: messageId,
+                    emoji:      emoji,
+                });
+                // Update reactions in the message
+                const idx = this.messages.findIndex(m => m.id === messageId);
+                if (idx !== -1) {
+                    this.messages[idx].reactions = data.reactions || [];
+                }
+            } catch (e) {
+                FF_Toast.error('Failed to add reaction.');
+            }
+        },
+
+        showEmojiPicker(messageId) {
+            this.emojiPickerMessageId = this.emojiPickerMessageId === messageId ? null : messageId;
+        },
+
+        // ── Reply ────────────────────────────────────────────────────────
+
+        setReply(msg) {
+            this.replyingTo = msg;
+            this.$nextTick(() => this.$refs.composeInput?.focus());
+        },
+
+        // ── Mark read ────────────────────────────────────────────────────
+
+        async markRead(channelId) {
+            try {
+                await FF_Api.post(FF_Api.url('/api/v1/chat/unread/mark_read.php'), { channel_id: channelId });
+                const ch = [...this.channels, ...this.directMessages].find(c => c.id == channelId);
+                if (ch) ch.unread_count = 0;
+            } catch (e) {}
+        },
+
+        // ── Compose input handlers ────────────────────────────────────────
+
+        handleComposeKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.send();
+                return;
+            }
+            if (e.key === 'Escape') {
+                if (this.replyingTo)     this.replyingTo     = null;
+                if (this.editingMessage) this.cancelEdit();
+                if (this.showMentions)   this.showMentions   = false;
+                if (this.showRecordPicker) this.showRecordPicker = false;
+                return;
+            }
+            if (e.key === 'ArrowUp' && !this.composing.trim()) {
+                // Edit last own message
+                const myId = parseInt(document.body.dataset.userId || '0');
+                const last = [...this.messages].reverse().find(m => m.user_id == myId && !m.is_archived);
+                if (last) this.editMessage(last);
+                return;
+            }
+        },
+
+        handleComposeInput() {
+            const val = this.composing;
+            const pos = this.$refs.composeInput?.selectionStart || val.length;
+            const before = val.substring(0, pos);
+
+            // Detect @ mention trigger
+            const mentionMatch = before.match(/@(\w*)$/);
+            if (mentionMatch) {
+                this.mentionQuery   = mentionMatch[1];
+                this.showMentions   = true;
+                this.showRecordPicker = false;
+                this.searchMentions(mentionMatch[1]);
+                return;
+            }
+            // Detect / record attachment trigger at start of empty line
+            const slashMatch = before.match(/(?:^|\n)\/([\w]*)$/);
+            if (slashMatch && !this.composing.trim().replace('/' + slashMatch[1], '').trim()) {
+                this.showRecordPicker = true;
+                this.showMentions     = false;
+                if (slashMatch[1]) {
+                    const known = ['invoice','lease','customer','equipment','work_order','damage_claim','reservation'];
+                    const match = known.find(t => t.startsWith(slashMatch[1].toLowerCase()));
+                    if (match) {
+                        this.recordPickerType  = match;
+                        this.recordSearchQuery = '';
+                        this.$nextTick(() => this.$refs.recordSearchInput?.focus());
+                    }
+                }
+                return;
+            }
+            this.showMentions     = false;
+            this.showRecordPicker = false;
+        },
+
+        async searchMentions(query) {
+            // Filter from loaded members
+            const q = query.toLowerCase();
+            this.mentionResults = this.channelMembers
+                .filter(m => m.name.toLowerCase().includes(q))
+                .slice(0, 8);
+        },
+
+        insertMention(user) {
+            const val = this.composing;
+            const pos = this.$refs.composeInput?.selectionStart || val.length;
+            const before = val.substring(0, pos).replace(/@\w*$/, '@' + user.name + ' ');
+            const after  = val.substring(pos);
+            this.composing    = before + after;
+            this.showMentions = false;
+            this.$nextTick(() => this.$refs.composeInput?.focus());
+        },
+
+        setRecordType(type) {
+            this.recordPickerType    = type;
+            this.recordSearchQuery   = '';
+            this.recordSearchResults = [];
+            this.$nextTick(() => this.$refs.recordSearchInput?.focus());
+        },
+
+        async searchRecords() {
+            if (!this.recordPickerType) return;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/attachments/available.php') + '?type=' + this.recordPickerType +
+                    '&query=' + encodeURIComponent(this.recordSearchQuery)
+                );
+                this.recordSearchResults = data.data?.results || [];
+            } catch (e) {
+                this.recordSearchResults = [];
+            }
+        },
+
+        attachRecord(record) {
+            const type = this.recordPickerType;
+            this.attachments.push({
+                type:       type,
+                entity_id:  record.id,
+                preview_data: {
+                    title:    record.title,
+                    subtitle: record.subtitle || '',
+                    badge:    record.badge    || '',
+                },
+            });
+            // Remove the /command from composing
+            this.composing = this.composing.replace(/(?:^|\n)\/([\w]*)$/, '');
+            this.showRecordPicker  = false;
+            this.recordPickerType  = null;
+            this.recordSearchQuery = '';
+            this.recordSearchResults = [];
+            this.$nextTick(() => this.$refs.composeInput?.focus());
+        },
+
+        removeAttachment(i) {
+            this.attachments.splice(i, 1);
+        },
+
+        // ── File upload ───────────────────────────────────────────────────
+
+        async handleFileUpload(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const maxSize = 10 * 1024 * 1024; // 10MB
+            if (file.size > maxSize) {
+                FF_Toast.error('File must be under 10MB.');
+                return;
+            }
+            const allowed = ['application/pdf','image/jpeg','image/png','image/gif',
+                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                             'application/vnd.ms-excel',
+                             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                             'application/msword'];
+            // Note: MIME is checked server-side too; this is UX feedback only
+            this.attachments.push({
+                type:      'file',
+                entity_id: null,
+                preview_data: { title: file.name, subtitle: this.formatFileSize(file.size), badge: 'file' },
+                _file: file,
+            });
+            event.target.value = '';
+        },
+
+        // ── Channel management ────────────────────────────────────────────
+
+        async createChannel() {
+            if (!this.newChannel.name.trim()) return;
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/chat/channels/create.php'), {
+                    name:        this.newChannel.name.trim(),
+                    description: this.newChannel.description.trim(),
+                    is_private:  this.newChannel.is_private ? 1 : 0,
+                });
+                this.channels.push({ ...data, unread_count: 0 });
+                this.showCreateChannel = false;
+                this.newChannel = { name: '', description: '', is_private: false };
+                await this.selectChannel(data);
+                FF_Toast.success('Channel created!');
+            } catch (e) {
+                FF_Toast.error('Failed to create channel.');
+            }
+        },
+
+        openCreateChannel() {
+            this.newChannel = { name: '', description: '', is_private: false };
+            this.showCreateChannel = true;
+        },
+
+        async loadBrowseChannels() {
+            try {
+                const all  = await FF_Api.get(FF_Api.url('/api/v1/chat/channels/index.php'));
+                const mine = new Set([...this.channels, ...this.directMessages].map(c => c.id));
+                // For browse, we'd need a separate "all channels" endpoint;
+                // for now reuse existing channels + show join option for non-members
+                // This is a simplified browse — shows channels from the current list
+                this.browseChannels = this.channels.filter(c =>
+                    !this.browseQuery || c.name.toLowerCase().includes(this.browseQuery.toLowerCase())
+                );
+            } catch (e) {
+                this.browseChannels = this.channels;
+            }
+        },
+
+        openBrowseChannels() {
+            this.browseQuery    = '';
+            this.browseChannels = [...this.channels];
+            this.showBrowse     = true;
+        },
+
+        async joinChannel(ch) {
+            try {
+                await FF_Api.post(FF_Api.url('/api/v1/chat/channels/join.php'), { channel_id: ch.id });
+                await this.loadChannels();
+                this.showBrowse = false;
+                await this.selectChannelById(ch.id);
+                FF_Toast.success('Joined #' + ch.name);
+            } catch (e) {
+                FF_Toast.error('Failed to join channel.');
+            }
+        },
+
+        // ── Direct messages ───────────────────────────────────────────────
+
+        openNewDM() {
+            this.dmUserQuery   = '';
+            this.dmUserResults = [];
+            this.showNewDM     = true;
+        },
+
+        async searchDMUsers() {
+            if (!this.dmUserQuery) { this.dmUserResults = []; return; }
+            try {
+                const data = await FF_Api.get(
+                    'v1/users/index.php?q=' + encodeURIComponent(this.dmUserQuery) + '&per_page=10'
+                );
+                this.dmUserResults = (data.data || []).slice(0, 10);
+            } catch (e) {
+                this.dmUserResults = [];
+            }
+        },
+
+        async startDM(userId) {
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/chat/dm/create.php'), { user_id: userId });
+                this.showNewDM = false;
+                // Add to DMs if not already there
+                if (!this.directMessages.find(d => d.id === data.id)) {
+                    this.directMessages.push({ ...data, unread_count: 0 });
+                }
+                await this.selectChannel(data);
+            } catch (e) {
+                FF_Toast.error('Failed to open direct message.');
+            }
+        },
+
+        // ── Search ────────────────────────────────────────────────────────
+
+        toggleSearch() {
+            this.showSearch   = !this.showSearch;
+            this.searchQuery  = '';
+            this.searchResults = [];
+            if (this.showSearch) {
+                this.$nextTick(() => this.$el.querySelector('.chat-search-input')?.focus());
+            }
+        },
+
+        async searchMessages() {
+            if (this.searchQuery.length < 2) { this.searchResults = []; return; }
+            try {
+                const chParam = this.activeChannel ? '&channel_id=' + this.activeChannel.id : '';
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/search.php') + '?q=' + encodeURIComponent(this.searchQuery) + chParam
+                );
+                this.searchResults = data.data?.results || [];
+            } catch (e) {
+                this.searchResults = [];
+            }
+        },
+
+        jumpToMessage(id) {
+            const el = document.querySelector('[data-message-id="' + id + '"]');
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('chat-message--highlight');
+                setTimeout(() => el.classList.remove('chat-message--highlight'), 2000);
+            }
+        },
+
+        // ── Scroll ────────────────────────────────────────────────────────
+
+        scrollToBottom() {
+            const el = document.getElementById('chat-messages-scroll');
+            if (el) el.scrollTop = el.scrollHeight;
+        },
+
+        handleScroll(e) {
+            // Load more when scrolled near top
+            if (e.target.scrollTop < 80 && this.hasMore && !this.loadingMore) {
+                this.loadMore();
+            }
+        },
+
+        handleKeydown(e) {
+            // Global Escape closes dropdowns
+            if (e.key === 'Escape') {
+                this.showCreateChannel = false;
+                this.showBrowse        = false;
+                this.showNewDM         = false;
+                this.emojiPickerMessageId = null;
+            }
+        },
+
+        // ── Formatting helpers ─────────────────────────────────────────────
+
+        initials(name) {
+            if (!name) return '?';
+            return name.split(' ').map(p => p[0]).join('').substring(0, 2).toUpperCase();
+        },
+
+        formatTime(ts) {
+            if (!ts) return '';
+            const d = new Date(ts);
+            const now = new Date();
+            const diffMs = now - d;
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 1)  return 'just now';
+            if (diffMins < 60) return diffMins + 'm ago';
+            const diffHrs = Math.floor(diffMins / 60);
+            if (diffHrs < 24)  return diffHrs + 'h ago';
+            // Older — show date + time
+            return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) +
+                   ' ' + d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+        },
+
+        truncate(text, max) {
+            if (!text) return '';
+            return text.length > max ? text.substring(0, max) + '…' : text;
+        },
+
+        formatFileSize(bytes) {
+            if (bytes < 1024)       return bytes + ' B';
+            if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        },
+
+        formatMessageHtml(text) {
+            if (!text) return '';
+            // Escape HTML first
+            let html = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            // Bold @mentions
+            html = html.replace(/@(\w+(?:\s+\w+)?)/g,
+                '<span class="chat-mention">@$1</span>');
+            // URLs
+            html = html.replace(/(https?:\/\/[^\s]+)/g,
+                '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1</a>');
+            // Newlines
+            html = html.replace(/\n/g, '<br>');
+            return html;
+        },
+
+        // ── Attachment helpers ────────────────────────────────────────────
+
+        attachmentIcon(type) {
+            const icons = {
+                invoice:      '📄',
+                lease:        '📋',
+                customer:     '👤',
+                equipment:    '🚛',
+                work_order:   '🔧',
+                damage_claim: '⚠️',
+                reservation:  '📅',
+                payment:      '💰',
+                document:     '📁',
+                file:         '📎',
+            };
+            return icons[type] || '📎';
+        },
+
+        attachmentTitle(att) {
+            if (att.preview_data) {
+                try {
+                    const d = typeof att.preview_data === 'string'
+                        ? JSON.parse(att.preview_data) : att.preview_data;
+                    return d.title || att.type;
+                } catch (e) {}
+            }
+            return att.file_name || att.type;
+        },
+
+        attachmentSubtitle(att) {
+            if (att.preview_data) {
+                try {
+                    const d = typeof att.preview_data === 'string'
+                        ? JSON.parse(att.preview_data) : att.preview_data;
+                    return d.subtitle || '';
+                } catch (e) {}
+            }
+            return att.file_size ? this.formatFileSize(att.file_size) : '';
+        },
+
+        attachmentUrl(att) {
+            if (!att.entity_id) return '#';
+            const routes = {
+                invoice:      '/fleetforge/invoices/show?id=',
+                lease:        '/fleetforge/leases/show?id=',
+                customer:     '/fleetforge/customers/show?id=',
+                equipment:    '/fleetforge/equipment/show?id=',
+                work_order:   '/fleetforge/maintenance/show?id=',
+                damage_claim: '/fleetforge/damage-claims/show?id=',
+                reservation:  '/fleetforge/reservations/show?id=',
+                payment:      '/fleetforge/payments/show?id=',
+            };
+            return (routes[att.type] || '#') + att.entity_id;
+        },
+    };
+}
+
+window.FF_Chat = FF_Chat;
+
+
+// ============================================================
+// 07e. FF_ChatWidget — mini bottom-right chat widget
+// ============================================================
+
+function FF_ChatWidget() {
+    return {
+        open:           false,
+        channels:       [],
+        directMessages: [],
+        activeChannel:  null,
+        messages:       [],
+        composing:      '',
+        sending:        false,
+        loading:        false,
+        totalUnread:    0,
+        lastMessageId:  0,
+        _pollTimer:     null,
+
+        async init() {
+            // Don't show widget on the full chat page
+            if (window.location.pathname.includes('/chat')) return;
+            await this.loadChannels();
+            // Poll for unread count every 5s
+            this._pollTimer = setInterval(() => this.pollUnread(), 5000);
+        },
+
+        async loadChannels() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/channels/index.php'));
+                this.channels       = data.data?.channels       || [];
+                this.directMessages = data.data?.direct_messages || [];
+                this.computeTotal();
+            } catch (e) {}
+        },
+
+        computeTotal() {
+            const sum = (arr) => arr.reduce((t, c) => t + (c.unread_count || 0), 0);
+            this.totalUnread = sum(this.channels) + sum(this.directMessages);
+        },
+
+        async pollUnread() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php'));
+                this.totalUnread = data.data?.total_unread || 0;
+                const map = {};
+                (data.data?.channels || []).forEach(c => { map[c.id] = c.unread; });
+                this.channels.forEach(ch       => { ch.unread_count = map[ch.id] || 0; });
+                this.directMessages.forEach(dm => { dm.unread_count = map[dm.id] || 0; });
+                // If a channel is open, poll for new messages
+                if (this.open && this.activeChannel) {
+                    await this.pollMessages();
+                }
+            } catch (e) {}
+        },
+
+        async pollMessages() {
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/messages/poll.php') + '?channel_id=' + this.activeChannel.id +
+                    '&after_id=' + this.lastMessageId
+                );
+                const newMsgs = data.data?.messages || [];
+                if (newMsgs.length > 0) {
+                    this.messages     = [...this.messages, ...newMsgs];
+                    this.lastMessageId = Math.max(...this.messages.map(m => m.id));
+                    this.$nextTick(() => this.scrollToBottom());
+                }
+            } catch (e) {}
+        },
+
+        toggle() {
+            this.open = !this.open;
+            if (this.open && this.channels.length === 0) {
+                this.loadChannels();
+            }
+        },
+
+        async openChannel(ch) {
+            this.activeChannel = ch;
+            this.messages      = [];
+            this.lastMessageId = 0;
+            this.loading       = true;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/messages/index.php') + '?channel_id=' + ch.id + '&limit=30'
+                );
+                this.messages      = data.data?.messages || [];
+                this.lastMessageId = this.messages.length > 0
+                    ? Math.max(...this.messages.map(m => m.id)) : 0;
+                await FF_Api.post(FF_Api.url('/api/v1/chat/unread/mark_read.php'), { channel_id: ch.id });
+                ch.unread_count = 0;
+                this.computeTotal();
+                this.$nextTick(() => this.scrollToBottom());
+            } catch (e) {
+                FF_Toast.error('Failed to load messages.');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async widgetSend() {
+            if (!this.activeChannel || !this.composing.trim() || this.sending) return;
+            this.sending = true;
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/chat/messages/create.php'), {
+                    channel_id: this.activeChannel.id,
+                    message:    this.composing.trim(),
+                });
+                this.messages.push(data.data);
+                this.lastMessageId = data.data?.id;
+                this.composing     = '';
+                this.$nextTick(() => this.scrollToBottom());
+            } catch (e) {
+                FF_Toast.error('Failed to send.');
+            } finally {
+                this.sending = false;
+            }
+        },
+
+        scrollToBottom() {
+            const el = document.getElementById('chat-widget-scroll');
+            if (el) el.scrollTop = el.scrollHeight;
+        },
+
+        formatTime(ts) {
+            if (!ts) return '';
+            const d = new Date(ts);
+            const diffMins = Math.floor((new Date() - d) / 60000);
+            if (diffMins < 1)  return 'now';
+            if (diffMins < 60) return diffMins + 'm';
+            return d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+        },
+
+        initials(name) {
+            if (!name) return '?';
+            return name.split(' ').map(p => p[0]).join('').substring(0, 2).toUpperCase();
+        },
+    };
+}
+
+window.FF_ChatWidget = FF_ChatWidget;
+
+
+// ============================================================
+// 07f. FF_MessengerBadge — topbar messenger icon unread counter
+// ============================================================
+// Polls /api/v1/messenger/unread.php every 5s.
+// Badges the admin topbar messenger icon when a customer has replied
+// to a thread and no admin has opened it yet. Shared inbox — the badge
+// reflects cross-team unread, not just the current user's.
+
+function FF_MessengerBadge() {
+    return {
+        totalUnread: 0,
+        _timer: null,
+
+        async init() {
+            await this.fetchUnread();
+            this._timer = setInterval(() => this.fetchUnread(), 5000);
+            this.$el.addEventListener('alpine:destroyed', () => clearInterval(this._timer));
+        },
+
+        async fetchUnread() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/messenger/unread.php'));
+                this.totalUnread = data.data?.total_unread || 0;
+            } catch (e) {
+                // Silent — badge simply won't update if the API is unreachable
+            }
+        },
+    };
+}
+
+window.FF_MessengerBadge = FF_MessengerBadge;
+
+
+// ============================================================
+// 07f2. FF_ChatHubBadge — unified topbar chat-hub unread counter
+// ============================================================
+// WHY: the topbar now has a single "Chat" icon that represents BOTH
+// the internal team chat (CHAT-1 /api/v1/chat/unread) and the customer
+// messenger inbox (MSGR-1 /api/v1/messenger/unread). This factory polls
+// both endpoints in parallel and sums them into one totalUnread value
+// so the topbar badge reflects everything the user has to read.
+//
+// Each sub-inbox also has its own badge inside the widget panel so the
+// user can see the breakdown once they open it; this factory only cares
+// about the single rollup number for the topbar icon.
+//
+// Used by includes/topbar.php unified Chat icon.
+
+function FF_ChatHubBadge() {
+    return {
+        totalUnread: 0,
+        _timer: null,
+
+        async init() {
+            await this.fetchUnread();
+            // WHY: 5s matches FF_ChatBadge + FF_MessengerBadge cadence so
+            // all three stay visually in sync when a message lands.
+            this._timer = setInterval(() => this.fetchUnread(), 5000);
+            this.$el.addEventListener('alpine:destroyed', () => clearInterval(this._timer));
+        },
+
+        async fetchUnread() {
+            // WHY Promise.all w/ .catch per-leg: if one inbox API is down
+            // (e.g. messenger not yet migrated on a fresh install) we still
+            // want the other half of the badge to keep working.
+            try {
+                const [chatData, msgrData] = await Promise.all([
+                    FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php')).catch(() => null),
+                    FF_Api.get(FF_Api.url('/api/v1/messenger/unread.php')).catch(() => null),
+                ]);
+                const chatUnread = (chatData && chatData.data && chatData.data.total_unread) || 0;
+                const msgrUnread = (msgrData && msgrData.data && msgrData.data.total_unread) || 0;
+                this.totalUnread = chatUnread + msgrUnread;
+            } catch (e) {
+                // Silent — badge simply doesn't update if both APIs fail
+            }
+        },
+    };
+}
+
+window.FF_ChatHubBadge = FF_ChatHubBadge;
+
+
+// ============================================================
+// 07g. FF_Messenger — admin customer messenger page (app/admin/messenger/index.php)
+// ============================================================
+// Facebook-Messenger-style inbox for admin↔customer conversations.
+// Completely separate from FF_Chat (team chat) — different endpoints,
+// different schema, different access model (shared inbox, no membership).
+
+function FF_Messenger() {
+    return {
+        // ── State ────────────────────────────────────────────────────────
+        threads:            [],
+        activeThread:       null,
+        activeThreadDetail: null,   // { thread, participants } from threads/show.php
+        messages:           [],
+        composing:          '',
+        showInfo:           true,
+        showNewThread:      false,
+        loadingThreads:     false,
+        loadingMessages:    false,
+        loadingMore:        false,
+        hasMore:            false,
+        sending:            false,
+        lastMessageId:      0,
+        // Contact picker
+        contactQuery:       '',
+        contactResults:     { customers: [], portal_users: [] },
+        loadingContacts:    false,
+        // Polling
+        _threadsTimer:      null,
+        _messagesTimer:     null,
+
+        // ── Lifecycle ────────────────────────────────────────────────────
+
+        async init(threadIdParam = 0) {
+            await this.loadThreads();
+            if (threadIdParam) {
+                const target = this.threads.find(t => t.id == threadIdParam);
+                if (target) {
+                    await this.selectThread(target);
+                } else {
+                    // Thread not in list (maybe brand new) — fetch detail anyway
+                    await this.loadThreadDirect(threadIdParam);
+                }
+            }
+            // Poll the thread list every 10s for new threads + last-message updates.
+            this._threadsTimer = setInterval(() => this.loadThreads(true), 10000);
+        },
+
+        // ── Thread list ─────────────────────────────────────────────────
+
+        async loadThreads(silent = false) {
+            if (!silent) this.loadingThreads = true;
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/messenger/threads/index.php'));
+                this.threads = data.data?.threads || [];
+            } catch (e) {
+                if (!silent && window.FF_Toast) FF_Toast.error('Failed to load conversations.');
+            } finally {
+                this.loadingThreads = false;
+            }
+        },
+
+        async selectThread(thread) {
+            this.activeThread  = thread;
+            this.messages      = [];
+            this.lastMessageId = 0;
+            this.hasMore       = false;
+            await Promise.all([
+                this.loadMessages(),
+                this.loadThreadDetail(thread.id),
+            ]);
+            // Zero out unread in the sidebar optimistically
+            const row = this.threads.find(t => t.id === thread.id);
+            if (row) row.unread_count = 0;
+            // Start message-level polling
+            if (this._messagesTimer) clearInterval(this._messagesTimer);
+            this._messagesTimer = setInterval(() => this.pollNewMessages(), 5000);
+            this.$nextTick(() => {
+                this.scrollToBottom();
+                if (this.$refs.composeInput) this.$refs.composeInput.focus();
+            });
+        },
+
+        async loadThreadDirect(threadId) {
+            // Used when the URL points at a thread that isn't in the list yet
+            // (e.g. admin just created it and the list poll hasn't caught up).
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/messenger/threads/show.php') + '?id=' + threadId);
+                if (data.data?.thread) {
+                    // Fabricate a list-shaped object so selectThread can run
+                    const t = data.data.thread;
+                    t.unread_count = 0;
+                    await this.selectThread(t);
+                }
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Could not open that conversation.');
+            }
+        },
+
+        async loadThreadDetail(threadId) {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/messenger/threads/show.php') + '?id=' + threadId);
+                this.activeThreadDetail = data.data || null;
+            } catch (e) { /* non-fatal */ }
+        },
+
+        // ── Messages ────────────────────────────────────────────────────
+
+        async loadMessages() {
+            if (!this.activeThread) return;
+            this.loadingMessages = true;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/messenger/messages/index.php') +
+                    '?thread_id=' + this.activeThread.id + '&limit=50'
+                );
+                this.messages = data.data?.messages || [];
+                this.hasMore  = data.data?.has_more || false;
+                if (this.messages.length > 0) {
+                    this.lastMessageId = this.messages[this.messages.length - 1].id;
+                }
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Failed to load messages.');
+            } finally {
+                this.loadingMessages = false;
+            }
+        },
+
+        async loadMore() {
+            if (!this.activeThread || !this.hasMore || this.loadingMore) return;
+            this.loadingMore = true;
+            try {
+                const firstId = this.messages[0]?.id;
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/messenger/messages/index.php') +
+                    '?thread_id=' + this.activeThread.id +
+                    '&before_id=' + firstId + '&limit=50'
+                );
+                const older = data.data?.messages || [];
+                this.messages = [...older, ...this.messages];
+                this.hasMore  = data.data?.has_more || false;
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Failed to load older messages.');
+            } finally {
+                this.loadingMore = false;
+            }
+        },
+
+        async pollNewMessages() {
+            if (!this.activeThread) return;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/messenger/messages/poll.php') +
+                    '?thread_id=' + this.activeThread.id +
+                    '&after_id=' + this.lastMessageId
+                );
+                const newMsgs = data.data?.messages || [];
+                if (newMsgs.length > 0) {
+                    this.messages.push(...newMsgs);
+                    this.lastMessageId = newMsgs[newMsgs.length - 1].id;
+                    this.$nextTick(() => this.scrollToBottom());
+                }
+            } catch (e) { /* silent — next tick will retry */ }
+        },
+
+        handleScroll(e) {
+            // Hook point for future "scroll to top to load more" behavior.
+        },
+
+        scrollToBottom() {
+            const el = document.getElementById('msgr-messages-scroll');
+            if (el) el.scrollTop = el.scrollHeight;
+        },
+
+        // ── Compose ─────────────────────────────────────────────────────
+
+        handleComposeKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.send();
+            }
+        },
+
+        async send() {
+            const body = this.composing.trim();
+            if (!body || !this.activeThread || this.sending) return;
+            this.sending = true;
+            try {
+                const data = await FF_Api.post(
+                    FF_Api.url('/api/v1/messenger/messages/create.php'),
+                    { thread_id: this.activeThread.id, body }
+                );
+                if (data.success && data.data) {
+                    this.messages.push(data.data);
+                    this.lastMessageId = data.data.id;
+                    this.composing = '';
+                    // Reset textarea height
+                    if (this.$refs.composeInput) this.$refs.composeInput.style.height = 'auto';
+                    // Update the thread's sidebar preview optimistically
+                    const row = this.threads.find(t => t.id === this.activeThread.id);
+                    if (row) {
+                        row.last_message_at      = data.data.created_at;
+                        row.last_message_preview = (data.data.display_text || '').substring(0, 255);
+                        row.last_message_by      = 'admin';
+                    }
+                    this.$nextTick(() => this.scrollToBottom());
+                }
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Failed to send message.');
+            } finally {
+                this.sending = false;
+            }
+        },
+
+        // ── New thread / contact picker ─────────────────────────────────
+
+        openNewThread() {
+            this.showNewThread   = true;
+            this.contactQuery    = '';
+            this.contactResults  = { customers: [], portal_users: [] };
+            this.$nextTick(() => {
+                if (this.$refs.contactSearchInput) this.$refs.contactSearchInput.focus();
+            });
+            this.searchContacts(); // initial populated list
+        },
+
+        async searchContacts() {
+            this.loadingContacts = true;
+            try {
+                const q = encodeURIComponent(this.contactQuery || '');
+                const data = await FF_Api.get(FF_Api.url('/api/v1/messenger/contacts.php') + '?q=' + q);
+                this.contactResults = {
+                    customers:    data.data?.customers    || [],
+                    portal_users: data.data?.portal_users || [],
+                };
+            } catch (e) {
+                this.contactResults = { customers: [], portal_users: [] };
+            } finally {
+                this.loadingContacts = false;
+            }
+        },
+
+        async pickCustomer(customer) {
+            await this.startThread({ scope: 'customer', customer_id: customer.id });
+        },
+
+        async pickPortalUser(pu) {
+            await this.startThread({ scope: 'portal_user', portal_user_id: pu.id });
+        },
+
+        async startThread(payload) {
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/messenger/threads/create.php'), payload);
+                if (data.success && data.data?.thread) {
+                    this.showNewThread = false;
+                    // Refresh list so the new thread appears at the top
+                    await this.loadThreads(true);
+                    const fresh = this.threads.find(t => t.id === data.data.thread.id);
+                    if (fresh) {
+                        await this.selectThread(fresh);
+                    } else {
+                        await this.selectThread(data.data.thread);
+                    }
+                }
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Failed to start conversation.');
+            }
+        },
+
+        // ── Helpers ─────────────────────────────────────────────────────
+
+        threadDisplayName(t) {
+            if (!t) return '';
+            if (t.scope === 'portal_user') {
+                return (t.portal_user_name || 'Contact') + ' (' + t.customer_name + ')';
+            }
+            return t.customer_name;
+        },
+
+        initials(name) {
+            if (!name) return '?';
+            return name.split(/\s+/).filter(Boolean).map(p => p[0]).join('').substring(0, 2).toUpperCase();
+        },
+
+        formatTime(ts) {
+            if (!ts) return '';
+            const d = new Date(ts.replace(' ', 'T'));
+            return d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+        },
+
+        formatTimeShort(ts) {
+            if (!ts) return '';
+            const d = new Date(ts.replace(' ', 'T'));
+            const now = new Date();
+            const sameDay = d.toDateString() === now.toDateString();
+            if (sameDay) {
+                return d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+            }
+            const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+            if (diffDays < 7) {
+                return d.toLocaleDateString('en-CA', { weekday: 'short' });
+            }
+            return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+        },
+    };
+}
+
+window.FF_Messenger = FF_Messenger;
+
+
+// ============================================================
+// 07h. FF_PortalMessenger — customer-portal side of MSGR-1
+// ============================================================
+// Mirror of FF_Messenger() but talks to /portal/api/messenger/* endpoints
+// instead of /api/v1/messenger/*. Portal users can ONLY reply to threads
+// admins have started — there is no contact picker, no thread creation.
+// The portal CSRF token is read automatically from the <meta> tag in
+// app/portal/includes/header.php, so FF_Api.post() Just Works here.
+
+function FF_PortalMessenger() {
+    return {
+        // ── State ────────────────────────────────────────────────────────
+        threads:          [],
+        activeThread:     null,
+        messages:         [],
+        composing:        '',
+        loadingThreads:   false,
+        loadingMessages:  false,
+        loadingMore:      false,
+        hasMore:          false,
+        sending:          false,
+        lastMessageId:    0,
+        // Polling timers
+        _threadsTimer:    null,
+        _messagesTimer:   null,
+
+        // ── Lifecycle ────────────────────────────────────────────────────
+
+        async init(threadIdParam = 0) {
+            await this.loadThreads();
+            // Deep-link support — admin notifications use ?thread=N to jump
+            // a customer straight into the right conversation.
+            if (threadIdParam) {
+                const target = this.threads.find(t => t.id == threadIdParam);
+                if (target) await this.selectThread(target);
+            } else if (this.threads.length > 0) {
+                // Auto-select most recent so the page never lands on a blank pane
+                await this.selectThread(this.threads[0]);
+            }
+            // Refresh thread list every 10s for new messages from admins
+            this._threadsTimer = setInterval(() => this.loadThreads(true), 10000);
+        },
+
+        // ── Thread list ─────────────────────────────────────────────────
+
+        async loadThreads(silent = false) {
+            if (!silent) this.loadingThreads = true;
+            try {
+                const data = await FF_Api.get(FF_Api.url('/portal/api/messenger/threads.php'));
+                this.threads = data.data?.threads || [];
+            } catch (e) {
+                if (!silent && window.FF_Toast) FF_Toast.error('Failed to load conversations.');
+            } finally {
+                this.loadingThreads = false;
+            }
+        },
+
+        async selectThread(thread) {
+            this.activeThread  = thread;
+            this.messages      = [];
+            this.lastMessageId = 0;
+            this.hasMore       = false;
+            await this.loadMessages();
+            // Optimistically clear the unread badge — head fetch already
+            // marked the thread read on the server side.
+            const row = this.threads.find(t => t.id === thread.id);
+            if (row) row.unread_count = 0;
+            // Restart message polling against the newly opened thread
+            if (this._messagesTimer) clearInterval(this._messagesTimer);
+            this._messagesTimer = setInterval(() => this.pollNewMessages(), 5000);
+            this.$nextTick(() => {
+                this.scrollToBottom();
+                if (this.$refs.composeInput) this.$refs.composeInput.focus();
+            });
+        },
+
+        // ── Messages ────────────────────────────────────────────────────
+
+        async loadMessages() {
+            if (!this.activeThread) return;
+            this.loadingMessages = true;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/portal/api/messenger/messages.php') +
+                    '?thread_id=' + this.activeThread.id + '&limit=50'
+                );
+                this.messages = data.data?.messages || [];
+                this.hasMore  = data.data?.has_more || false;
+                if (this.messages.length > 0) {
+                    this.lastMessageId = this.messages[this.messages.length - 1].id;
+                }
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Failed to load messages.');
+            } finally {
+                this.loadingMessages = false;
+            }
+        },
+
+        async loadMore() {
+            if (!this.activeThread || !this.hasMore || this.loadingMore) return;
+            this.loadingMore = true;
+            try {
+                const firstId = this.messages[0]?.id;
+                const data = await FF_Api.get(
+                    FF_Api.url('/portal/api/messenger/messages.php') +
+                    '?thread_id=' + this.activeThread.id +
+                    '&before_id=' + firstId + '&limit=50'
+                );
+                const older = data.data?.messages || [];
+                this.messages = [...older, ...this.messages];
+                this.hasMore  = data.data?.has_more || false;
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Failed to load older messages.');
+            } finally {
+                this.loadingMore = false;
+            }
+        },
+
+        async pollNewMessages() {
+            if (!this.activeThread) return;
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/portal/api/messenger/poll.php') +
+                    '?thread_id=' + this.activeThread.id +
+                    '&after_id=' + this.lastMessageId
+                );
+                const newMsgs = data.data?.messages || [];
+                if (newMsgs.length > 0) {
+                    this.messages.push(...newMsgs);
+                    this.lastMessageId = newMsgs[newMsgs.length - 1].id;
+                    this.$nextTick(() => this.scrollToBottom());
+                }
+            } catch (e) { /* silent — next tick will retry */ }
+        },
+
+        scrollToBottom() {
+            const el = document.getElementById('portal-msgr-scroll');
+            if (el) el.scrollTop = el.scrollHeight;
+        },
+
+        // ── Compose ─────────────────────────────────────────────────────
+
+        handleComposeKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.send();
+            }
+        },
+
+        async send() {
+            const body = this.composing.trim();
+            if (!body || !this.activeThread || this.sending) return;
+            this.sending = true;
+            try {
+                const data = await FF_Api.post(
+                    FF_Api.url('/portal/api/messenger/send.php'),
+                    { thread_id: this.activeThread.id, body }
+                );
+                if (data.success && data.data) {
+                    this.messages.push(data.data);
+                    this.lastMessageId = data.data.id;
+                    this.composing = '';
+                    if (this.$refs.composeInput) this.$refs.composeInput.style.height = 'auto';
+                    // Mirror the new message into the sidebar preview right away
+                    const row = this.threads.find(t => t.id === this.activeThread.id);
+                    if (row) {
+                        row.last_message_at      = data.data.created_at;
+                        row.last_message_preview = (data.data.display_text || '').substring(0, 255);
+                        row.last_message_by      = 'portal';
+                    }
+                    this.$nextTick(() => this.scrollToBottom());
+                }
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Failed to send message.');
+            } finally {
+                this.sending = false;
+            }
+        },
+
+        // ── Helpers ─────────────────────────────────────────────────────
+
+        threadDisplayName(t) {
+            if (!t) return 'Conversation';
+            // Customers always see "Support" as the display name — they
+            // don't need (or care) which scope the thread is on.
+            return t.subject && t.subject.trim() !== ''
+                ? t.subject
+                : 'Support';
+        },
+
+        formatTime(ts) {
+            if (!ts) return '';
+            const d = new Date(ts.replace(' ', 'T'));
+            return d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+        },
+
+        formatTimeShort(ts) {
+            if (!ts) return '';
+            const d = new Date(ts.replace(' ', 'T'));
+            const now = new Date();
+            const sameDay = d.toDateString() === now.toDateString();
+            if (sameDay) {
+                return d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+            }
+            const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+            if (diffDays < 7) {
+                return d.toLocaleDateString('en-CA', { weekday: 'short' });
+            }
+            return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+        },
+    };
+}
+
+window.FF_PortalMessenger = FF_PortalMessenger;
+
+
+// ============================================================
 // 08. FF_Search — global search (⌘K / Ctrl+K)
 // ============================================================
 

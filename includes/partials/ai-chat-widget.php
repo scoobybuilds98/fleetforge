@@ -30,13 +30,34 @@ $widgetAiEnabled = (bool) settings_get('ai.enabled', false);
 $widgetHasApiKey = (bool) (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
 if (!$widgetAiEnabled || !$widgetHasApiKey) return;
 
-// WHY: Don't show on the AI page itself — it has a full chat interface
-$currentPath = $_SERVER['REQUEST_URI'] ?? '';
-if (str_contains($currentPath, '/ai')) return;
+// WHY: Widget is now rendered on every admin page — including the /ai
+// full-chat page — so the topbar AI icon works as a global launcher.
+// The old `str_contains($currentPath, '/ai')` exclusion was dropped
+// because (a) it false-matched any path segment containing "ai" and
+// (b) we want one consistent global UI.
 ?>
 
-<!-- ── AI Chat Widget ─────────────────────────────────────────────────────── -->
-<div x-data="FF_ChatWidget()" x-init="$watch('open', v => { if(v && !minimized) $nextTick(() => $refs.wInput?.focus()) })">
+<!--
+  ── AI Chat Widget ───────────────────────────────────────────────────────
+  NOTE: Uses FF_AiChatWidget() (not FF_ChatWidget) to avoid a name collision
+  with the Team Chat widget in includes/partials/chat-widget.php, which uses
+  the factory FF_ChatWidget() defined in public/assets/js/app.js. Because
+  app.js is loaded AFTER this inline <script>, the team-chat factory would
+  otherwise clobber this one and the AI chatbox would silently render as
+  display:none on every page.
+
+  Topbar wiring: x-init below also registers the widget's toggle callback
+  as the plain global `window.FF_OpenAiChat`. The topbar AI icon calls that
+  function directly instead of going through Alpine's $dispatch system.
+  This eliminates any risk that a sibling button with a similarly-named
+  @click (such as the theme toggle's `toggle()` method) could accidentally
+  open the AI panel via scope-chain lookup or event bubbling.
+-->
+<div x-data="FF_AiChatWidget()"
+     x-init="
+        $watch('open', v => { if(v && !minimized) $nextTick(() => $refs.wInput?.focus()) });
+        window.FF_OpenAiChat = () => aiWidgetToggle();
+     ">
 
     <!-- ── FAB (floating action button) — visible when panel is closed ──── -->
     <button x-show="!open && !minimized" @click="openChat()"
@@ -51,10 +72,15 @@ if (str_contains($currentPath, '/ai')) return;
     </button>
 
     <!-- ── Minimized strip — header only ───────────────────────────────── -->
+    <!--
+      NOTE: x-transition removed on purpose. The previous version used
+      Tailwind-style utility classes (opacity-0/translate-y-2/etc) that
+      don't exist in this codebase's CSS, so Alpine would apply no-op
+      classes, wait for a transitionend event that never fires, and leave
+      the element stuck with inline display:none even after x-show flipped
+      back to true. Plain x-show toggling is all we need.
+    -->
     <div x-show="minimized" x-cloak
-         x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0 translate-y-2"
-         x-transition:enter-end="opacity-100 translate-y-0"
          class="ff-chat-minimized"
          @click="expandChat()">
         <div class="ff-chat-minimized-inner">
@@ -75,13 +101,9 @@ if (str_contains($currentPath, '/ai')) return;
     </div>
 
     <!-- ── Full panel ──────────────────────────────────────────────────── -->
+    <!-- x-transition removed for the same reason as the minimized strip
+         above — see the explanation there. -->
     <div x-show="open && !minimized" x-cloak
-         x-transition:enter="transition ease-out duration-250"
-         x-transition:enter-start="opacity-0 translate-y-4 scale-95"
-         x-transition:enter-end="opacity-100 translate-y-0 scale-100"
-         x-transition:leave="transition ease-in duration-150"
-         x-transition:leave-start="opacity-100 translate-y-0 scale-100"
-         x-transition:leave-end="opacity-0 translate-y-4 scale-95"
          class="ff-chat-panel">
 
         <!-- Header -->
@@ -537,8 +559,13 @@ if (str_contains($currentPath, '/ai')) return;
 </style>
 
 <!-- ── Alpine Component ───────────────────────────────────────────────────── -->
+<!--
+  NOTE: renamed from FF_ChatWidget to FF_AiChatWidget to avoid colliding
+  with the Team Chat factory in public/assets/js/app.js. See the comment
+  on the outer <div x-data> above for the full explanation.
+-->
 <script>
-function FF_ChatWidget() {
+function FF_AiChatWidget() {
     return {
         open: false,
         minimized: false,
@@ -565,9 +592,17 @@ function FF_ChatWidget() {
             this.minimized = false;
         },
 
-        // WHY: Keep old toggle() for backward compat with any keyboard shortcuts
-        toggle() {
-            if (this.open && !this.minimized) {
+        // WHY: aiWidgetToggle is the unique-named toggle handler exposed
+        // via window.FF_OpenAiChat. Deliberately NOT called `toggle` or
+        // `toggleChat` because those names collide with the theme button's
+        // inline toggle() method and the team-chat widget's toggle()
+        // method — both in the same DOM/Alpine universe. A unique name
+        // makes it impossible for Alpine's scope chain to dispatch the
+        // wrong handler.
+        aiWidgetToggle() {
+            if (this.minimized) {
+                this.expandChat();
+            } else if (this.open) {
                 this.closeChat();
             } else {
                 this.openChat();

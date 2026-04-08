@@ -112,8 +112,8 @@ require_once FF_ROOT . '/includes/header.php';
                 class="btn btn-secondary btn-sm"
                 onclick="openEmailCompose({
                     customerId: <?= (int)$customer['id'] ?>,
-                    toEmail:    <?= json_encode((string)($customer['email'] ?? '')) ?>,
-                    toName:     <?= json_encode((string)($customer['contact_name'] ?? $customer['company_name'])) ?>
+                    toEmail:    <?= e(json_encode((string)($customer['email'] ?? ''))) ?>,
+                    toName:     <?= e(json_encode((string)($customer['contact_name'] ?? $customer['company_name']))) ?>
                 })"
                 title="Send email to this customer">
             <?= heroicon('envelope', 'btn-icon') ?>
@@ -1131,8 +1131,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 <button class="btn btn-sm btn-primary"
                         onclick="openEmailCompose({
                             customerId: <?= (int)$customer['id'] ?>,
-                            toEmail:    <?= json_encode((string)($customer['email'] ?? '')) ?>,
-                            toName:     <?= json_encode((string)($customer['contact_name'] ?? $customer['company_name'])) ?>
+                            toEmail:    <?= e(json_encode((string)($customer['email'] ?? ''))) ?>,
+                            toName:     <?= e(json_encode((string)($customer['contact_name'] ?? $customer['company_name']))) ?>
                         })">
                     + Compose Email
                 </button>

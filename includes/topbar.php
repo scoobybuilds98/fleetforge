@@ -398,6 +398,63 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             </div>
         </div>
 
+        <!--
+          ── Chat icon (unified: Team Chat + Customer Messenger) ─────
+          Single entry point for both the Slack-style internal team
+          chat (CHAT-1) and the customer DM messenger (MSGR-1). Clicking
+          dispatches a window event the combined FF_ChatHub widget
+          listens for. Both sub-inboxes share one topbar icon with a
+          combined unread badge — the per-inbox badges live inside the
+          widget panel itself.
+        -->
+        <div class="chat-topbar"
+             x-data="FF_ChatHubBadge()"
+             x-init="init()">
+            <a href="<?= base_url('chat') ?>"
+               class="chat-topbar-btn topbar-chat-btn"
+               :class="{ 'has-unread': totalUnread > 0 }"
+               @click.prevent.stop="window.FF_OpenChatHub && window.FF_OpenChatHub()"
+               :aria-label="totalUnread > 0 ? 'Chat (' + totalUnread + ' unread)' : 'Chat'"
+               title="Chat (team + customers)">
+                <?= heroicon('chat-bubble-left-right', 'nav-icon') ?>
+                <span class="chat-badge"
+                      x-show="totalUnread > 0"
+                      x-text="totalUnread > 99 ? '99+' : totalUnread"
+                      aria-hidden="true"></span>
+            </a>
+        </div>
+
+        <!--
+          ── AI Assistant icon (global launcher) ──────────────────────
+          Always visible on every admin page for users with ai:view.
+          Uses a plain global window function (no Alpine $dispatch) to
+          guarantee there is zero chance of event-name collision with
+          nearby buttons like the theme toggle. @click.stop.prevent
+          blocks default link navigation and stops event propagation
+          so sibling handlers can never see this click.
+
+          Middle-click / cmd-click falls back to the <a href="/ai">
+          full-page link for users who want the dedicated page.
+        -->
+        <?php if (can('ai', 'view')): ?>
+        <div class="chat-topbar">
+            <a href="<?= base_url('ai') ?>"
+               class="chat-topbar-btn topbar-ai-btn"
+               @click.stop.prevent="window.FF_OpenAiChat && window.FF_OpenAiChat()"
+               aria-label="AI Assistant"
+               title="AI Assistant">
+                <!-- Inline sparkles/AI icon — matches the FAB glyph style -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                     class="nav-icon" aria-hidden="true">
+                    <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>
+                    <circle cx="12" cy="12" r="4"/>
+                </svg>
+            </a>
+        </div>
+        <?php endif; ?>
+
         <!-- ── Notifications bell (NOTIF-1 — Alpine factory) ────────── -->
         <!-- FF_Notifications() factory is in public/assets/js/app.js.
              It owns: open, loading, notifications[], unreadCount, _pollTimer.

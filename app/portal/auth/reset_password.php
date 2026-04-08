@@ -22,16 +22,16 @@ $success = false;
 $tokenValid = false;
 
 $tokenParam = trim((string) ($_GET['token'] ?? $_POST['token'] ?? ''));
-$emailParam = trim((string) ($_GET['email'] ?? $_POST['email'] ?? ''));
 
-// Validate token exists and is not expired
-if ($tokenParam !== '' && $emailParam !== '') {
+// WHY: look up by token alone — invite/reset URLs don't include email in the link.
+// Token is a SHA256 hash of 32 random bytes so lookup is safe without email.
+if ($tokenParam !== '') {
     $tokenHash = hash('sha256', $tokenParam);
     $user = db_row(
         "SELECT id, name, email, password_reset_token, password_reset_expiry
          FROM portal_users
-         WHERE email = ? AND password_reset_token = ? AND status IN ('active','invited')",
-        [$emailParam, $tokenHash]
+         WHERE password_reset_token = ? AND status IN ('active','invited')",
+        [$tokenHash]
     );
 
     if ($user && $user['password_reset_expiry'] && strtotime($user['password_reset_expiry']) > time()) {

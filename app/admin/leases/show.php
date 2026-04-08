@@ -34,7 +34,7 @@ if (!$leaseId) {
 // Server-side pre-load for hero render and page title
 $lease = db_row(
     "SELECT l.id, l.contract_number, l.status, l.start_date, l.end_date,
-            l.equipment_unit_id,
+            l.customer_id, l.equipment_unit_id,
             l.company_name_snapshot, l.customer_name_snapshot,
             l.unit_number_snapshot, l.template_name_snapshot,
             l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
@@ -103,7 +103,7 @@ require_once FF_ROOT . '/includes/header.php';
                 class="btn btn-secondary btn-sm"
                 onclick="openEmailCompose({
                     customerId:   <?= (int)$lease['customer_id'] ?>,
-                    templateSlug: <?= json_encode($lease['status'] === 'completed' ? 'lease_closing' : 'lease_activation') ?>,
+                    templateSlug: <?= e(json_encode($lease['status'] === 'completed' ? 'lease_closing' : 'lease_activation')) ?>,
                     entityType:   'lease',
                     entityId:     <?= (int)$lease['id'] ?>
                 })"
@@ -210,7 +210,10 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                   x-text="lease && lease.status_log ? lease.status_log.length : ''"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'amendments' }"
-                @click="tab = 'amendments'" :aria-selected="tab === 'amendments'" role="tab">Amendments</button>
+                @click="tab = 'amendments'; loadAmendments()" :aria-selected="tab === 'amendments'" role="tab">
+            Amendments
+            <span class="tab-count" x-show="amendments.length > 0" x-text="amendments.length"></span>
+        </button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'invoices' }"
                 @click="tab = 'invoices'; loadInvoices()" :aria-selected="tab === 'invoices'" role="tab">Invoices</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'damage_claims' }"
@@ -519,12 +522,143 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         </div>
     </template>
 
-    <!-- ── TAB: AMENDMENTS ────────────────────────────────────── -->
+    <!-- ── TAB: AMENDMENTS (AMEND-1) ─────────────────────────── -->
     <template x-if="tab === 'amendments'">
         <div class="card ff-tab-animated">
-            <div class="empty-state">
-                <p class="empty-state-title">Amendments coming soon</p>
-                <p class="empty-state-text">Rate change and date extension amendments will be available in a future session.</p>
+
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="card-title">Amendments</div>
+                <?php if (can('leases', 'edit')): ?>
+                <button class="btn btn-primary btn-sm"
+                        @click="amendModal.open = true; prefillAmendOldValues()">
+                    + Record Amendment
+                </button>
+                <?php endif; ?>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="amendmentsLoading" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading amendments…</span>
+            </div>
+
+            <!-- Empty -->
+            <div x-show="!amendmentsLoading && amendments.length === 0" class="empty-state">
+                <p class="empty-state-title">No amendments recorded</p>
+                <p class="empty-state-text">Use the button above to record rate changes, date extensions, or other lease modifications.</p>
+            </div>
+
+            <!-- Table -->
+            <div x-show="!amendmentsLoading && amendments.length > 0" class="tab-table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Description</th>
+                            <th>Previous</th>
+                            <th>Updated to</th>
+                            <th>Recorded by</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="a in amendments" :key="a.id">
+                            <tr>
+                                <td>
+                                    <span class="badge badge-neutral badge-no-dot"
+                                          x-text="amendTypeLabel(a.amendment_type)"></span>
+                                </td>
+                                <td x-text="a.description" style="max-width:280px;word-break:break-word;"></td>
+                                <td class="text-sm text-secondary" style="max-width:160px;word-break:break-word;"
+                                    x-text="a.old_values ? formatAmendValues(a.old_values) : '—'"></td>
+                                <td class="text-sm" style="max-width:160px;word-break:break-word;"
+                                    x-text="a.new_values ? formatAmendValues(a.new_values) : '—'"></td>
+                                <td class="text-sm text-secondary" x-text="a.created_by_name"></td>
+                                <td class="text-sm text-secondary" x-text="formatDateTime(a.created_at)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </template>
+
+    <!-- ── AMENDMENT RECORD MODAL (AMEND-1) ─────────────────── -->
+    <template x-if="amendModal.open">
+        <div class="modal-overlay" @click.self="amendModal.open = false">
+            <div class="modal modal-md" @click.stop>
+                <div class="modal-header">
+                    <h3 class="modal-title">Record Amendment</h3>
+                    <button class="modal-close-btn" @click="amendModal.open = false" aria-label="Close">
+                        <?= heroicon('x-mark', 'modal-icon') ?>
+                    </button>
+                </div>
+                <div class="modal-body">
+
+                    <!-- Error -->
+                    <div x-show="amendModal.error" class="alert alert-danger" style="margin-bottom:12px;">
+                        <span x-text="amendModal.error"></span>
+                    </div>
+
+                    <!-- Type -->
+                    <div class="form-group">
+                        <label class="form-label">Amendment Type <span class="required">*</span></label>
+                        <select class="form-control" x-model="amendModal.amendment_type"
+                                @change="prefillAmendOldValues()">
+                            <option value="rate_change">Rate Change</option>
+                            <option value="date_extension">Date Extension</option>
+                            <option value="unit_swap">Unit Swap</option>
+                            <option value="add_on">Add-On</option>
+                            <option value="tax_change">Tax Change</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="form-group">
+                        <label class="form-label">Description <span class="required">*</span></label>
+                        <textarea class="form-control"
+                                  x-model="amendModal.description"
+                                  rows="3"
+                                  placeholder="Briefly describe what changed and why…"
+                                  maxlength="2000"></textarea>
+                        <div class="form-hint" x-text="amendModal.description.length + '/2000'"></div>
+                    </div>
+
+                    <!-- Old / New values side by side -->
+                    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group">
+                            <label class="form-label">Previous Values
+                                <span class="form-hint" style="font-weight:400;">(optional)</span>
+                            </label>
+                            <textarea class="form-control"
+                                      x-model="amendModal.old_values_text"
+                                      rows="4"
+                                      placeholder="e.g. Monthly rate: $2,200&#10;End date: 2027-02-08"
+                                      style="font-family:ui-monospace,monospace;font-size:12px;"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">New Values
+                                <span class="form-hint" style="font-weight:400;">(optional)</span>
+                            </label>
+                            <textarea class="form-control"
+                                      x-model="amendModal.new_values_text"
+                                      rows="4"
+                                      placeholder="e.g. Monthly rate: $2,400&#10;End date: 2027-08-08"
+                                      style="font-family:ui-monospace,monospace;font-size:12px;"></textarea>
+                        </div>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost btn-sm" @click="amendModal.open = false">Cancel</button>
+                    <button class="btn btn-primary btn-sm"
+                            @click="submitAmendment()"
+                            :disabled="amendModal.saving">
+                        <span x-show="!amendModal.saving">Save Amendment</span>
+                        <span x-show="amendModal.saving">Saving…</span>
+                    </button>
+                </div>
             </div>
         </div>
     </template>
@@ -1096,6 +1230,18 @@ function FF_LeaseDetail() {
         inspectionsPage:     1,
         inspectionsFilters:  { inspection_type: '', status: '', dir: 'ASC' },
 
+        // Amendments tab state (AMEND-1)
+        amendments:          [],
+        amendmentsLoading:   false,
+        amendmentsLoaded:    false,
+        amendModal: {
+            open: false, saving: false, error: '',
+            amendment_type: 'rate_change',
+            description:    '',
+            old_values_text: '',
+            new_values_text: '',
+        },
+
         // Documents tab state
         documents:           [],
         docsLoading:         false,
@@ -1134,6 +1280,101 @@ function FF_LeaseDetail() {
 
         async init() {
             await this.loadLease();
+        },
+
+        // ── Amendments (AMEND-1) ─────────────────────────────────
+        async loadAmendments() {
+            if (this.amendmentsLoaded) return; // cached — only reload after submit
+            this.amendmentsLoading = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/leases/amendments') ?>?lease_id=<?= $leaseId ?>');
+                if (r.success) {
+                    this.amendments       = r.data.amendments || [];
+                    this.amendmentsLoaded = true;
+                }
+            } catch (e) { /* non-fatal */ }
+            this.amendmentsLoading = false;
+        },
+
+        // Pre-fill the "Previous Values" textarea with current lease fields
+        // relevant to the selected amendment type, so the manager doesn't have
+        // to type them manually.
+        prefillAmendOldValues() {
+            if (!this.lease) return;
+            const l = this.lease;
+            if (this.amendModal.amendment_type === 'rate_change') {
+                const lines = [];
+                if (l.daily_rate   && parseFloat(l.daily_rate)   > 0) lines.push('Daily rate: $'   + parseFloat(l.daily_rate).toFixed(2));
+                if (l.weekly_rate  && parseFloat(l.weekly_rate)  > 0) lines.push('Weekly rate: $'  + parseFloat(l.weekly_rate).toFixed(2));
+                if (l.monthly_rate && parseFloat(l.monthly_rate) > 0) lines.push('Monthly rate: $' + parseFloat(l.monthly_rate).toFixed(2));
+                this.amendModal.old_values_text = lines.join('\n');
+            } else if (this.amendModal.amendment_type === 'date_extension') {
+                this.amendModal.old_values_text = l.end_date ? 'End date: ' + l.end_date : '';
+            } else if (this.amendModal.amendment_type === 'unit_swap') {
+                this.amendModal.old_values_text = l.unit_number_snapshot ? 'Unit: ' + l.unit_number_snapshot : '';
+            } else {
+                // Don't overwrite for other types — let manager fill manually
+            }
+        },
+
+        async submitAmendment() {
+            this.amendModal.error = '';
+            if (!this.amendModal.description.trim()) {
+                this.amendModal.error = 'Description is required.';
+                return;
+            }
+            this.amendModal.saving = true;
+            try {
+                // Convert plain-text value snapshots to simple {text} objects
+                const oldVal = this.amendModal.old_values_text.trim()
+                    ? { text: this.amendModal.old_values_text.trim() } : null;
+                const newVal = this.amendModal.new_values_text.trim()
+                    ? { text: this.amendModal.new_values_text.trim() } : null;
+
+                const r = await FF_Api.post('<?= base_url('api/v1/leases/amendments/create') ?>', {
+                    lease_id:       <?= $leaseId ?>,
+                    amendment_type: this.amendModal.amendment_type,
+                    description:    this.amendModal.description.trim(),
+                    old_values:     oldVal,
+                    new_values:     newVal,
+                });
+                if (r.success) {
+                    // Prepend new record immediately — no reload
+                    this.amendments.unshift(r.data.amendment);
+                    this.amendModal = {
+                        open: false, saving: false, error: '',
+                        amendment_type: 'rate_change',
+                        description: '', old_values_text: '', new_values_text: '',
+                    };
+                    if (window.FF_Toast) FF_Toast.success('Amendment recorded', 'The amendment has been saved.');
+                } else {
+                    this.amendModal.error = (r.error && r.error.message) || 'Could not save amendment.';
+                }
+            } catch (e) {
+                this.amendModal.error = 'Network error — please try again.';
+            }
+            this.amendModal.saving = false;
+        },
+
+        amendTypeLabel(type) {
+            const map = {
+                rate_change:    'Rate Change',
+                date_extension: 'Date Extension',
+                unit_swap:      'Unit Swap',
+                add_on:         'Add-On',
+                tax_change:     'Tax Change',
+                other:          'Other',
+            };
+            return map[type] || type;
+        },
+
+        // Format old_values/new_values for display.
+        // We store plain {text: "..."} objects, so just return the text.
+        formatAmendValues(obj) {
+            if (!obj) return '—';
+            if (obj.text) return obj.text;
+            // Fallback: stringify any other shape
+            return Object.entries(obj).map(([k, v]) => k + ': ' + v).join(', ');
         },
 
         // ── Invoices ──────────────────────────────────────────────

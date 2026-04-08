@@ -66,7 +66,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isSuperAdmin) {
                     ], 'id = ?', [$targetId]);
 
                     // Log reset URL (dev mode)
-                    $resetUrl = base_url('portal/auth/reset_password?token=' . $plainToken);
+                    // WHY: include email so reset_password.php has context for display;
+                    // token lookup itself doesn't require it but it helps UX.
+                    $resetUrl = base_url('portal/auth/reset_password') . '?token=' . $plainToken . '&email=' . urlencode($target['email']);
                     $logDir = FF_ROOT . '/logs';
                     if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
                     file_put_contents($logDir . '/mail.log', sprintf(
@@ -148,18 +150,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isSuperAdmin) {
                     $plainToken = bin2hex(random_bytes(32));
                     $tokenHash  = hash('sha256', $plainToken);
 
+                    // WHY: use password_reset_token (not invite_token) so reset_password.php
+                    // can validate the link. invite_token is reserved for remember-me cookies.
                     $newId = db_insert('portal_users', [
-                        'customer_id'         => $custId,
-                        'name'                => $puName,
-                        'email'               => $puEmail,
-                        'status'              => 'invited',
-                        'is_primary'          => $isPrimary,
-                        'invite_token'        => $tokenHash,
-                        'invite_token_expiry' => date('Y-m-d H:i:s', strtotime('+7 days')),
-                        'invite_sent_at'      => date('Y-m-d H:i:s'),
+                        'customer_id'           => $custId,
+                        'name'                  => $puName,
+                        'email'                 => $puEmail,
+                        'status'                => 'invited',
+                        'is_primary'            => $isPrimary,
+                        'password_reset_token'  => $tokenHash,
+                        'password_reset_expiry' => date('Y-m-d H:i:s', strtotime('+7 days')),
+                        'invite_sent_at'        => date('Y-m-d H:i:s'),
                     ]);
 
-                    $resetUrl = base_url('portal/auth/reset_password?token=' . $plainToken);
+                    $resetUrl = base_url('portal/auth/reset_password') . '?token=' . $plainToken . '&email=' . urlencode($puEmail);
                     $logDir = FF_ROOT . '/logs';
                     if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
                     file_put_contents($logDir . '/mail.log', sprintf(

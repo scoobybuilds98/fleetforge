@@ -49,6 +49,7 @@ class NotificationService
         'samsara'     => 'equipment',    // GPS is part of equipment
         'accounting'  => 'reports',      // accounting module not in user_permissions seed → accountant has reports view
         'system'      => null,           // null = all active users
+        'chat'        => null,           // CHAT-1: always targeted via $specificUserIds
     ];
 
     /**
@@ -67,6 +68,7 @@ class NotificationService
         'samsara'     => 'samsara',
         'accounting'  => 'accounting',
         'system'      => 'system',
+        'chat'        => 'system',       // CHAT-1: chat notifications use system icon
     ];
 
     /**

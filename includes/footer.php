@@ -121,6 +121,9 @@
     <div class="modal-backdrop" @click="cancel()" aria-hidden="true"></div>
 </div>
 
+<!-- ── Team Chat Widget (CHAT-1 — floating bubble) ──────────── -->
+<?php require_once FF_ROOT . '/includes/partials/chat-widget.php'; ?>
+
 <!-- ── AI Chat Widget (floating bubble) ─────────────────────── -->
 <?php require_once FF_ROOT . '/includes/partials/ai-chat-widget.php'; ?>
 
