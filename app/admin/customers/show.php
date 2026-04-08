@@ -136,37 +136,56 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 ?>
 
 <!-- ============================================================
-     STATS ROW — 4 quick-stat tiles
+     TABS — Alpine.js tab switcher
+     STATS ROW is now INSIDE the Alpine scope so every tile can
+     drive activeTab. TILES-2: each tile is a drill-down that
+     switches to the matching profile tab (Leases / Invoices /
+     Documents) instead of being display-only.
+     ============================================================ -->
+<div x-data="FF_CustomerProfile()" x-init="init()">
+
+<!-- ============================================================
+     STATS ROW — 4 clickable quick-stat tiles (TILES-2)
      ============================================================ -->
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         :class="{ 'ring-active': activeTab === 'leases' }"
+         @click="activeTab = 'leases'"
+         title="View active leases for this customer">
         <div class="stat-label">Active Leases</div>
         <div class="stat-value font-mono"><?= e($customer['active_lease_count']) ?></div>
         <div class="stat-delta text-secondary">of <?= e($customer['lease_count']) ?> total</div>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card" style="cursor:pointer"
+         :class="{ 'ring-active': activeTab === 'invoices' }"
+         @click="activeTab = 'invoices'"
+         title="View outstanding invoices">
         <div class="stat-label">Outstanding Balance</div>
         <div class="stat-value currency"><?= e(format_currency($customer['outstanding_balance'])) ?></div>
     </div>
 
-    <div class="stat-card">
+    <!-- Total Revenue drills to the system-wide revenue report scoped to
+         this customer so the user can see the full payment history, not
+         just what's visible on the profile page. -->
+    <a class="stat-card"
+       href="<?= base_url('reports') ?>?tab=customer&customer_id=<?= (int)$customer['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View this customer's revenue report">
         <div class="stat-label">Total Revenue</div>
         <div class="stat-value currency"><?= e(format_currency($customer['total_revenue'])) ?></div>
-    </div>
+    </a>
 
-    <div class="stat-card">
+    <a class="stat-card"
+       href="<?= base_url('credit_notes') ?>?customer_id=<?= (int)$customer['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View credit notes for this customer">
         <div class="stat-label">Account Credit</div>
         <div class="stat-value currency"><?= e(format_currency($customer['account_credit_balance'])) ?></div>
-    </div>
+    </a>
 
 </div>
-
-<!-- ============================================================
-     TABS — Alpine.js tab switcher
-     ============================================================ -->
-<div x-data="FF_CustomerProfile()" x-init="init()">
 
     <!-- Tab nav -->
     <div class="tab-bar" role="tablist">

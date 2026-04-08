@@ -132,6 +132,22 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <div class="stat-grid" style="grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px;">
 
+    <!-- TILES-2: Amount Received drills to all payments for this customer;
+         Payment Method + Payment Date stay as display-only metadata;
+         Customer becomes a full clickable <a> tile that drills to the
+         customer profile (was a nested link inside a div before). -->
+    <?php if ($payment['customer_id']): ?>
+    <a class="stat-card"
+       href="<?= base_url('payments') ?>?customer_id=<?= (int)$payment['customer_id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View all payments from this customer">
+        <div class="stat-label">Amount Received</div>
+        <div class="stat-value font-mono">
+            <?= format_currency($payment['amount']) ?>
+            <span style="font-size:0.8rem; color:var(--text-muted);"><?= e($payment['currency']) ?></span>
+        </div>
+    </a>
+    <?php else: ?>
     <div class="stat-card">
         <div class="stat-label">Amount Received</div>
         <div class="stat-value font-mono">
@@ -139,6 +155,7 @@ require_once FF_ROOT . '/includes/header.php';
             <span style="font-size:0.8rem; color:var(--text-muted);"><?= e($payment['currency']) ?></span>
         </div>
     </div>
+    <?php endif; ?>
 
     <div class="stat-card">
         <div class="stat-label">Payment Method</div>
@@ -150,18 +167,20 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-value font-mono"><?= format_date($payment['payment_date']) ?></div>
     </div>
 
+    <?php if ($payment['customer_id']): ?>
+    <a class="stat-card"
+       href="<?= base_url('customers/show') ?>?id=<?= (int)$payment['customer_id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="Open customer profile">
+        <div class="stat-label">Customer</div>
+        <div class="stat-value"><?= e($payment['company_name'] ?? '—') ?></div>
+    </a>
+    <?php else: ?>
     <div class="stat-card">
         <div class="stat-label">Customer</div>
-        <div class="stat-value">
-            <?php if ($payment['customer_id']): ?>
-                <a href="<?= base_url('/customers/show') ?>?id=<?= (int) $payment['customer_id'] ?>" class="link">
-                    <?= e($payment['company_name'] ?? '—') ?>
-                </a>
-            <?php else: ?>
-                —
-            <?php endif; ?>
-        </div>
+        <div class="stat-value">—</div>
     </div>
+    <?php endif; ?>
 
 </div>
 

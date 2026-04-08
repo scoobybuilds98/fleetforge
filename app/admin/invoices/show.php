@@ -642,15 +642,35 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
             </div>
         <?php endif; ?>
     </div>
-    <div class="stat-card">
+    <!-- TILES-2: Amount Paid drills to payments scoped to this invoice.
+         Invoice Date / Due Date / Total Amount stay as display-only info. -->
+    <a class="stat-card"
+       href="<?= base_url('payments') ?>?invoice_id=<?= (int)$invoice['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View payments applied to this invoice">
         <div class="stat-label">Amount Paid</div>
         <div class="stat-value font-mono" style="<?= bccomp($invoice['amount_paid'], '0', 2) > 0 ? 'color:var(--color-success);' : '' ?>">
             <?= format_currency($invoice['amount_paid']) ?>
         </div>
-    </div>
+    </a>
+
+    <!-- TILES-2: Balance Due jumps to the Record Payment form pre-loaded
+         with this invoice when there's still an outstanding balance.
+         When fully paid the tile stays as display-only (nothing to pay). -->
+    <?php if (bccomp($invoice['balance_due'], '0', 2) > 0 && can('payments', 'create')): ?>
+    <a class="stat-card"
+       href="<?= base_url('payments/create') ?>?invoice_id=<?= (int)$invoice['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="Record a payment against this invoice">
+        <div class="stat-label">Balance Due</div>
+        <div class="stat-value font-mono" style="color:var(--color-danger);">
+            <?= format_currency($invoice['balance_due']) ?>
+        </div>
+    </a>
+    <?php else: ?>
     <div class="stat-card">
         <div class="stat-label">Balance Due</div>
-        <div class="stat-value font-mono" <?php if (bccomp($invoice['balance_due'], '0', 2) > 0): ?>style="color:var(--color-danger);"<?php endif; ?>>
+        <div class="stat-value font-mono">
             <?= format_currency($invoice['balance_due']) ?>
         </div>
         <?php if ($isPaid): ?>
@@ -659,6 +679,7 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
             </div>
         <?php endif; ?>
     </div>
+    <?php endif; ?>
 </div>
 
 

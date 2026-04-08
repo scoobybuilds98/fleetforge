@@ -120,23 +120,35 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
      STATS ROW — server-rendered so tiles are always visible
      across all tabs, not just Overview.
      ============================================================ -->
+<!-- TILES-2: lease-level financial tiles now drill to invoices / payments
+     filtered by this specific lease. Currency tile remains display-only. -->
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card">
+    <a class="stat-card"
+       href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View all invoices for this lease">
         <div class="stat-label">Total Invoiced</div>
         <div class="stat-value currency"><?= e(format_currency($lease['total_invoiced'] ?? 0)) ?></div>
-    </div>
+    </a>
 
-    <div class="stat-card">
+    <a class="stat-card"
+       href="<?= base_url('payments') ?>?lease_id=<?= (int)$lease['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View all payments against this lease">
         <div class="stat-label">Total Paid</div>
         <div class="stat-value currency"><?= e(format_currency($lease['total_paid'] ?? 0)) ?></div>
-    </div>
+    </a>
 
-    <div class="stat-card<?= (float)($lease['outstanding_balance'] ?? 0) > 0 ? ' stat-card--danger' : '' ?>">
+    <a class="stat-card<?= (float)($lease['outstanding_balance'] ?? 0) > 0 ? ' stat-card--danger' : '' ?>"
+       href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>&status=overdue"
+       style="cursor:pointer;text-decoration:none"
+       title="View outstanding invoices for this lease">
         <div class="stat-label">Outstanding</div>
         <div class="stat-value currency"><?= e(format_currency($lease['outstanding_balance'] ?? 0)) ?></div>
-    </div>
+    </a>
 
+    <!-- Currency is metadata, not a drill target — stays display-only -->
     <div class="stat-card">
         <div class="stat-label">Currency</div>
         <div class="stat-value"><?= e($lease['currency']) ?></div>

@@ -130,32 +130,46 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<!-- TILES-2: vendor-level tiles drill to the maintenance work orders list
+     filtered by this vendor. Each tile applies a different status filter
+     so the user lands on exactly the subset represented by the counter. -->
 <div class="stat-grid" style="margin-bottom:24px;">
 
-    <div class="stat-card">
+    <a class="stat-card"
+       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View all work orders for this vendor">
         <div class="stat-label">Total Spent</div>
         <div class="stat-value font-mono"><?= format_currency($vendor['total_spent']) ?></div>
         <div class="stat-delta">all work orders</div>
-    </div>
+    </a>
 
-    <div class="stat-card">
+    <a class="stat-card"
+       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>&status=open"
+       style="cursor:pointer;text-decoration:none"
+       title="View open / in-progress / waiting-parts work orders">
         <div class="stat-label">Active Work Orders</div>
         <div class="stat-value font-mono"><?= e($woOpen) ?></div>
         <div class="stat-delta">open / in progress / waiting parts</div>
-    </div>
+    </a>
 
-    <div class="stat-card">
+    <a class="stat-card"
+       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>&status=completed"
+       style="cursor:pointer;text-decoration:none"
+       title="View completed work orders for this vendor">
         <div class="stat-label">Completed</div>
         <div class="stat-value font-mono"><?= e($woCompleted) ?></div>
         <div class="stat-delta">finished work orders</div>
-    </div>
+    </a>
 
-    <div class="stat-card">
+    <a class="stat-card"
+       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>"
+       style="cursor:pointer;text-decoration:none"
+       title="View every work order for this vendor">
         <div class="stat-label">Total Work Orders</div>
         <div class="stat-value font-mono"><?= e($woTotal) ?></div>
         <div class="stat-delta">all time</div>
-    </div>
+    </a>
 
 </div>
 
