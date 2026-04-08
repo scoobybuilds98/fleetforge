@@ -248,20 +248,98 @@ hr {
 }
 
 /* Dark mode — deeper blacks for explicit dark-mode toggle */
+/* ============================================================
+   THEME-1 (2026-04-08) — Dark theme refresh
+   Warm brownish-black palette replaces the previous cool blue-black.
+   STRICTLY scoped to [data-theme="dark"]; light theme is untouched.
+
+   Why every variable lives here:
+   - Existing names (--bg-body, --bg-surface, --topbar-bg, etc.) keep
+     their meaning so the rest of the codebase rendering doesn't move.
+     Their VALUES are simply rebased onto the warm palette.
+   - The new spec names (--bg-card, --bg-page, --bg-muted, --bg-hover,
+     --bg-input, --bg-secondary, --text-disabled, --input-focus-bg,
+     --scrollbar-*, --table-*, --sidebar-text-muted, --sidebar-hover,
+     --sidebar-active, --sidebar-icon) are added so the spec selectors
+     work without rewriting every existing rule.
+   - --bg-card and --bg-page are *redefined* here (overriding the
+     :root aliases) so cards get the deep #141413 instead of the
+     fall-through default of var(--bg-surface).
+   - We never touch --color-accent / --color-success / --color-warning
+     / --color-danger / --color-info — those stay theme-agnostic.
+   ============================================================ */
 [data-theme="dark"] {
-    --bg-body:               #060709;
-    --bg-surface:            #0d0f14;
-    --bg-surface-2:          #12151d;
-    --bg-surface-hover:      #181c28;
+    /* ── Page backgrounds ─────────────────────────── */
+    --bg-body:               #262624;
+    --bg-page:               #262624;
+    --bg-surface:            #141413;
+    --bg-card:               #141413;
+    --bg-surface-2:          #1f1e1d;
+    --bg-muted:              #1f1e1d;
+    --bg-secondary:          #1f1e1d;
+    --bg-input:              #1f1e1d;
+    --bg-surface-hover:      #2a2927;
+    --bg-hover:              #2a2927;
+    --bg-selected:           #2e2d2b;
 
-    --border-color:          #161926;
-    --border-color-strong:   #22293b;
+    /* ── Sidebar — always dark regardless of theme ── */
+    --sidebar-bg:            #1f1e1d;
+    --sidebar-text:          #c2c0b6;
+    --sidebar-text-muted:    #8a8880;
+    --sidebar-section-text:  #8a8880;
+    --sidebar-text-hover:    #ffffff;
+    --sidebar-text-active:   #ffffff;
+    --sidebar-brand-text:    #ffffff;
+    --sidebar-hover:         #2a2927;
+    --sidebar-active:        #2e2d2b;
+    --sidebar-item-hover-bg: #2a2927;
+    --sidebar-item-active-bg: #2e2d2b;
+    --sidebar-border:        #333330;
+    --sidebar-icon:          #8a8880;
+    --sidebar-icon-active:   #ffffff;
 
-    --topbar-bg:             #0d0f14;
-    --topbar-border:         #161926;
+    /* ── Text colors ─────────────────────────────── */
+    --text-primary:          #ffffff;
+    --text-secondary:        #c2c0b6;
+    --text-tertiary:         #8a8880;
+    --text-muted:            #8a8880;
+    --text-inverse:          #141413;
+    --text-disabled:         #5a5855;
 
-    --input-bg:              #0d0f14;
-    --input-border:          #22293b;
+    /* ── Border colors ───────────────────────────── */
+    --border-color:          #333330;
+    --border-color-strong:   #4a4845;
+    --border-strong:         #4a4845;
+    --border-focus:          var(--color-accent);
+
+    /* ── Topbar ──────────────────────────────────── */
+    --topbar-bg:             #1f1e1d;
+    --topbar-border:         #333330;
+    --topbar-text:           #c2c0b6;
+
+    /* ── Input fields ────────────────────────────── */
+    --input-bg:              #1f1e1d;
+    --input-border:          #333330;
+    --input-text:            #ffffff;
+    --input-placeholder:     #5a5855;
+    --input-focus-bg:        #262624;
+
+    /* ── Shadows — warmer tones ──────────────────── */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.4),
+                 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-lg: 0 10px 15px rgba(0,0,0,0.5),
+                 0 4px 6px rgba(0,0,0,0.4);
+
+    /* ── Scrollbar ───────────────────────────────── */
+    --scrollbar-bg:          #1f1e1d;
+    --scrollbar-thumb:       #4a4845;
+
+    /* ── Table ───────────────────────────────────── */
+    --table-header-bg:       #1f1e1d;
+    --table-row-hover:       #2a2927;
+    --table-border:          #333330;
+    --table-stripe:          #1a1918;
 }
 
 
@@ -5289,4 +5367,67 @@ dl.detail-grid dd {
     .search-wrapper {
         display: none;
     }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   THEME-1 — SESSION 2026-04-08
+   Spacing tokens (theme-agnostic) + scrollbar styling.
+   These rules are strictly additive — they introduce new tokens
+   in :root and lightweight global rules; existing selectors are
+   unchanged unless explicitly overridden below.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+    /* New spacing tokens — used by .page-content / .card / .section /
+       .kpi-grid / table cells. Defined here (not in [data-theme=*])
+       because spacing is theme-agnostic. */
+    --section-gap:    28px;
+    --card-gap:       20px;
+    --card-padding:   24px;
+    --page-padding:   28px;
+    --table-cell-px:  16px;
+    --table-cell-py:  12px;
+}
+
+/* Apply spacing tokens to layout primitives. Source order > existing
+   .page-content / .card rules above so these win the cascade. */
+.page-content,
+.main-content {
+    padding: var(--page-padding);
+}
+.card,
+.card-body {
+    padding: var(--card-padding);
+}
+.section + .section {
+    margin-top: var(--section-gap);
+}
+.kpi-grid,
+.stat-grid--4,
+.stat-grid--3,
+.stat-grid--2 {
+    gap: var(--card-gap);
+}
+table th,
+table td {
+    padding: var(--table-cell-py) var(--table-cell-px);
+}
+
+/* ── Global scrollbar styling (Firefox + WebKit) ─────────────────
+   Variables fall back to the previous look in light mode where
+   --scrollbar-bg / --scrollbar-thumb are not defined (browser
+   uses its native scrollbar). Dark mode uses the warm palette. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb, #4a4845)
+                     var(--scrollbar-bg, transparent);
+}
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg, transparent);
+}
+*::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb, #4a4845);
+    border-radius: 3px;
 }
