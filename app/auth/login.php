@@ -208,14 +208,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </script>
 
     <style>
-        /* Auth-page layout — centred card, no sidebar */
+        /* ──────────────────────────────────────────────────────
+           MEDIA-1 — Background video layer.
+           WHY inline: the video is only used on this login page
+           so there's no reason to bloat app.css with it. Fallback
+           background keeps the page readable if the mp4 fails.
+           ────────────────────────────────────────────────────── */
+        .video-bg-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            overflow: hidden;
+            background: #0f0f0f; /* fallback if video fails */
+        }
+        .video-bg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            transform: translate(-50%, -50%);
+            object-fit: cover;
+        }
+        .video-bg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.55);
+        }
+
+        /* Auth-page layout — centred card, no sidebar.
+           z-index raises it above the video-bg-wrapper (z:0). */
         .auth-page {
+            position: relative;
+            z-index: 10;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 24px 16px;
-            background-color: var(--bg-body);
+            background-color: transparent; /* let the video show through */
+        }
+
+        /* Glass-morphism effect on the card so the form is
+           clearly readable but the video is still visible
+           behind it. Uses the same bg-surface var but at 92% so
+           the fallback dark color still works if --bg-surface
+           isn't in rgb form. */
+        .auth-card {
+            position: relative;
+            z-index: 11;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        @media (max-width: 767px) {
+            .auth-card {
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+            }
         }
 
         .auth-card {
@@ -314,6 +371,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 </head>
 <body>
+
+<!--
+  MEDIA-1 — Background video layer.
+  Sits behind everything via z-index:0; form card above via z-index:10+.
+  Muted + playsinline + autoplay are required for modern browser
+  auto-play policies. preload="auto" because the file is local and
+  small-ish; if file grows, bump to preload="metadata".
+  Fallback: if the <video> element can't play the source, the
+  wrapper keeps its solid dark background color so the form stays
+  readable.
+-->
+<div class="video-bg-wrapper" aria-hidden="true">
+    <video class="video-bg"
+           autoplay
+           muted
+           loop
+           playsinline
+           preload="auto">
+        <source src="<?= asset_url('media/video1.mp4') ?>" type="video/mp4">
+    </video>
+    <div class="video-bg-overlay"></div>
+</div>
 
 <div class="auth-page">
     <div class="auth-card">

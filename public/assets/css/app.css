@@ -6220,6 +6220,39 @@ table td {
 
 
 /* ============================================================
+   MEDIA-1 — Sound mute toggle (topbar)
+   Matches the visual language of .chat-topbar-btn so the
+   group of topbar icons stays cohesive.
+   ============================================================ */
+.sound-toggle-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.sound-toggle-btn:hover {
+  background: var(--bg-hover);
+}
+.sound-toggle-btn.is-muted {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+.sound-toggle-btn .nav-icon {
+  width: 18px;
+  height: 18px;
+}
+
+
+/* ============================================================
    CHAT-1 — Team Chat styles
    chat-topbar-btn, chat-badge, chat-layout, chat-sidebar,
    chat-main, chat-compose, chat-message, chat-widget

@@ -399,6 +399,36 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
         </div>
 
         <!--
+          ── MEDIA-1 — Sound mute toggle ─────────────────────────
+          Mutes / unmutes the FF_Sound notification cue. State is
+          seeded from localStorage so the user's preference survives
+          reloads. Calls FF_Sound.toggleMute() which persists the
+          new state and returns the fresh boolean.
+        -->
+        <button type="button"
+                class="btn-icon sound-toggle-btn"
+                x-data="{ muted: (function(){ try { return localStorage.getItem('ff_sound_muted') === 'true'; } catch(e) { return false; } })() }"
+                x-init="$el.classList.toggle('is-muted', muted)"
+                @click="muted = (window.FF_Sound ? FF_Sound.toggleMute() : !muted); $el.classList.toggle('is-muted', muted)"
+                :aria-label="muted ? 'Unmute notification sounds' : 'Mute notification sounds'"
+                :title="muted ? 'Unmute sounds' : 'Mute sounds'">
+            <!-- Speaker wave (unmuted) -->
+            <svg x-show="!muted" xmlns="http://www.w3.org/2000/svg"
+                 fill="none" viewBox="0 0 24 24" stroke-width="1.6"
+                 stroke="currentColor" aria-hidden="true" class="nav-icon">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z"/>
+            </svg>
+            <!-- Speaker-x (muted) -->
+            <svg x-show="muted" xmlns="http://www.w3.org/2000/svg"
+                 fill="none" viewBox="0 0 24 24" stroke-width="1.6"
+                 stroke="currentColor" aria-hidden="true" class="nav-icon">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M17.25 9.75 19.5 12m0 0 2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z"/>
+            </svg>
+        </button>
+
+        <!--
           ── Chat icon (unified: Team Chat + Customer Messenger) ─────
           Single entry point for both the Slack-style internal team
           chat (CHAT-1) and the customer DM messenger (MSGR-1). Clicking
@@ -410,10 +440,25 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
         <div class="chat-topbar"
              x-data="FF_ChatHubBadge()"
              x-init="init()">
+            <!--
+              @click uses Alpine.$data(el).toggle() directly instead of
+              going through a window.FF_OpenChatHub global. WHY: a
+              previous iteration stashed an arrow function inside
+              x-init like `window.FF_OpenChatHub = () => { open = !open; }`,
+              but Alpine's x-init evaluates inside a `with(scope)` block
+              — bare identifiers like `open` resolve at EVAL time, not
+              call time. When the arrow function was invoked later by
+              the topbar click, `open` no longer referred to the
+              reactive component property, so Alpine's x-show never
+              fired and the panel stayed at display:none even though
+              the open flag appeared to change. Calling toggle()
+              through Alpine.$data() is the documented, scope-safe way
+              to invoke a factory method from outside the component.
+            -->
             <a href="<?= base_url('chat') ?>"
                class="chat-topbar-btn topbar-chat-btn"
                :class="{ 'has-unread': totalUnread > 0 }"
-               @click.prevent.stop="window.FF_OpenChatHub && window.FF_OpenChatHub()"
+               @click.prevent.stop="(() => { const el = document.getElementById('ff-chat-widget'); if (el && window.Alpine) Alpine.$data(el).toggle(); })()"
                :aria-label="totalUnread > 0 ? 'Chat (' + totalUnread + ' unread)' : 'Chat'"
                title="Chat (team + customers)">
                 <?= heroicon('chat-bubble-left-right', 'nav-icon') ?>
@@ -427,29 +472,38 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
         <!--
           ── AI Assistant icon (global launcher) ──────────────────────
           Always visible on every admin page for users with ai:view.
-          Uses a plain global window function (no Alpine $dispatch) to
-          guarantee there is zero chance of event-name collision with
-          nearby buttons like the theme toggle. @click.stop.prevent
-          blocks default link navigation and stops event propagation
-          so sibling handlers can never see this click.
+          This is a PLAIN NAVIGATION LINK to the full /ai page — no
+          floating widget, no Alpine wiring, no @click handler.
 
-          Middle-click / cmd-click falls back to the <a href="/ai">
-          full-page link for users who want the dedicated page.
+          WHY plain link: a previous iteration opened a floating
+          ai-chat-widget panel via a @click global function, but that
+          caused Alpine scope-chain collisions where clicking the
+          theme toggle button would also open the AI panel. Removing
+          the floating widget entirely + making this a normal anchor
+          guarantees the bottom-right of every page is reserved for
+          the team chat widget only, and no topbar button can ever
+          accidentally summon the AI panel.
         -->
         <?php if (can('ai', 'view')): ?>
         <div class="chat-topbar">
             <a href="<?= base_url('ai') ?>"
                class="chat-topbar-btn topbar-ai-btn"
-               @click.stop.prevent="window.FF_OpenAiChat && window.FF_OpenAiChat()"
                aria-label="AI Assistant"
                title="AI Assistant">
-                <!-- Inline sparkles/AI icon — matches the FAB glyph style -->
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
-                     viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
-                     class="nav-icon" aria-hidden="true">
-                    <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>
-                    <circle cx="12" cy="12" r="4"/>
+                <!--
+                  Heroicons "sparkles" 24 outline.
+                  WHY this specific glyph: previously used a sun-like
+                  radial icon that was visually confusable with the
+                  dark/light mode moon button sitting a few pixels away.
+                  Users were clicking the wrong one. Sparkles is unique
+                  on the topbar, clearly signals "AI", and matches what
+                  the AI page itself uses.
+                -->
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none"
+                     viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"
+                     class="nav-icon" aria-hidden="true"
+                     style="width:20px;height:20px">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"/>
                 </svg>
             </a>
         </div>

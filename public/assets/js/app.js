@@ -66,6 +66,89 @@ function ffDebounce(fn, wait) {
 
 
 // ============================================================
+// 02b. FF_Sound — notification / chat audio cue manager (MEDIA-1)
+// ============================================================
+// Plays a short mp3 when a new notification or chat message
+// arrives. Rules baked in:
+//   - Never plays on first page load (only for NEW deltas).
+//   - Never plays while the browser tab has never received a
+//     user gesture — required by modern autoplay policies.
+//   - Respects a mute flag stored in localStorage.
+//   - Source URL read from <meta name="notification-sound">.
+//     If the meta tag isn't present (e.g. login page) the
+//     utility is a no-op.
+//
+// Public surface:
+//   FF_Sound.play()        — attempt to play the cue
+//   FF_Sound.toggleMute()  — flip mute, persist, return new state
+//   FF_Sound.muted         — current mute state
+//   FF_Sound.hasInteracted — did the user interact yet?
+// ============================================================
+
+const FF_Sound = {
+    audio: null,
+    muted: false,
+    hasInteracted: false,
+
+    init() {
+        // localStorage read wrapped in try/catch — some privacy modes
+        // throw instead of returning null.
+        try {
+            this.muted = localStorage.getItem('ff_sound_muted') === 'true';
+        } catch (e) { this.muted = false; }
+
+        // Satisfy autoplay policy: the first user gesture unblocks audio.
+        // `once: true` removes the listener after it fires so we don't
+        // pay for every future click.
+        const markInteracted = () => { this.hasInteracted = true; };
+        document.addEventListener('click',   markInteracted, { once: true });
+        document.addEventListener('keydown', markInteracted, { once: true });
+        document.addEventListener('touchstart', markInteracted, { once: true, passive: true });
+
+        // Preload the audio element once so play() is instant.
+        const metaEl = document.querySelector('meta[name="notification-sound"]');
+        const src    = metaEl?.content || '';
+        if (src) {
+            try {
+                this.audio = new Audio(src);
+                this.audio.volume = 0.5; // gentle, not startling
+                this.audio.preload = 'auto';
+            } catch (e) { this.audio = null; }
+        }
+    },
+
+    play() {
+        if (this.muted)         return;
+        if (!this.hasInteracted) return;
+        if (!this.audio)        return;
+        if (!this.audio.src)    return;
+        try {
+            // Rewind so rapid-fire messages still fire a sound each time
+            this.audio.currentTime = 0;
+            const p = this.audio.play();
+            if (p && typeof p.catch === 'function') {
+                p.catch(() => { /* autoplay blocked — silent */ });
+            }
+        } catch (e) { /* silent */ }
+    },
+
+    toggleMute() {
+        this.muted = !this.muted;
+        try {
+            localStorage.setItem('ff_sound_muted', this.muted.toString());
+        } catch (e) { /* localStorage blocked — in-memory only */ }
+        return this.muted;
+    },
+};
+
+// Initialise on DOMContentLoaded — must run after the meta tag
+// is in the DOM but before Alpine calls any fetchCount() handlers.
+document.addEventListener('DOMContentLoaded', () => FF_Sound.init());
+
+window.FF_Sound = FF_Sound;
+
+
+// ============================================================
 // 03. CSRF token & API helper
 // ============================================================
 
@@ -701,6 +784,10 @@ function FF_Notifications() {
         notifications: [],
         unreadCount: 0,
         _pollTimer: null,
+        // MEDIA-1: _initialized gates sound playback so we don't
+        // ding the user on first page load just for seeing the
+        // current unread total.
+        _initialized: false,
 
         async init() {
             await this.fetchCount();
@@ -717,7 +804,15 @@ function FF_Notifications() {
             try {
                 const data = await FF_Api.get(FF_Api.url('/api/v1/notifications/count.php'));
                 if (data?.success) {
-                    this.unreadCount = data.data?.unread_count ?? 0;
+                    const newCount = data.data?.unread_count ?? 0;
+                    // MEDIA-1: only ding when the count INCREASES and
+                    // only after the first successful poll has primed
+                    // _initialized. First-load is always silent.
+                    if (this._initialized && newCount > this.unreadCount) {
+                        if (window.FF_Sound) FF_Sound.play();
+                    }
+                    this.unreadCount = newCount;
+                    this._initialized = true;
                 }
             } catch { /* silent — bell never crashes the page */ }
         },
@@ -909,6 +1004,8 @@ function FF_ChatBadge() {
     return {
         totalUnread: 0,
         _timer: null,
+        // MEDIA-1: gate sound playback so we don't ding on first load.
+        _initialized: false,
 
         async init() {
             await this.fetchUnread();
@@ -920,7 +1017,16 @@ function FF_ChatBadge() {
         async fetchUnread() {
             try {
                 const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php'));
-                this.totalUnread = data.data?.total_unread || 0;
+                const newCount = data.data?.total_unread || 0;
+                // MEDIA-1: only ding when unread INCREASES, after first
+                // load, and when the user isn't already viewing the chat
+                // page (where the new message is immediately visible).
+                const onChatPage = window.location.pathname.includes('/chat');
+                if (this._initialized && newCount > this.totalUnread && !onChatPage) {
+                    if (window.FF_Sound) FF_Sound.play();
+                }
+                this.totalUnread = newCount;
+                this._initialized = true;
             } catch (e) {
                 // Silent — badge just doesn't update if API fails
             }
@@ -1895,6 +2001,9 @@ function FF_ChatHubBadge() {
     return {
         totalUnread: 0,
         _timer: null,
+        // MEDIA-1: first-load gate so unread counts don't fire audio
+        // the moment the page hydrates.
+        _initialized: false,
 
         async init() {
             await this.fetchUnread();
@@ -1915,7 +2024,17 @@ function FF_ChatHubBadge() {
                 ]);
                 const chatUnread = (chatData && chatData.data && chatData.data.total_unread) || 0;
                 const msgrUnread = (msgrData && msgrData.data && msgrData.data.total_unread) || 0;
-                this.totalUnread = chatUnread + msgrUnread;
+                const newTotal   = chatUnread + msgrUnread;
+
+                // MEDIA-1: ding on any increase (team or customer)
+                // unless the user is already on /chat or /messenger
+                // where the new message is visible immediately.
+                const onRelatedPage = /\/(chat|messenger)(\/|$|\?)/.test(window.location.pathname);
+                if (this._initialized && newTotal > this.totalUnread && !onRelatedPage) {
+                    if (window.FF_Sound) FF_Sound.play();
+                }
+                this.totalUnread = newTotal;
+                this._initialized = true;
             } catch (e) {
                 // Silent — badge simply doesn't update if both APIs fail
             }

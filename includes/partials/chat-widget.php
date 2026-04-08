@@ -12,27 +12,33 @@
  */
 ?>
 <!--
-  Topbar wiring: x-init also registers a plain `window.FF_OpenChatHub`
-  global that the topbar Chat icon calls directly. Same defensive
-  pattern used by the AI widget — avoid Alpine $dispatch and any chance
-  of event-name collision with sibling topbar buttons.
+  Topbar wiring: the topbar Chat icon opens this widget by calling
+  Alpine.$data(document.getElementById('ff-chat-widget')).toggle()
+  directly — no window globals, no arrow-function scope tricks, no
+  dispatched events. That's the only way Alpine reactivity reliably
+  triggers x-show from an external click handler because x-init's
+  `with(scope)` block does not persist beyond the init phase.
 -->
 <div id="ff-chat-widget"
      class="chat-widget"
      x-data="FF_ChatWidget()"
-     x-init="init(); window.FF_OpenChatHub = () => { open = !open; if (open && channels.length === 0) loadChannels(); };"
+     x-init="init()"
      @keydown.escape.window="if(open) open = false">
 
-    <!-- Expanded panel -->
+    <!--
+      Expanded panel.
+      NOTE: x-transition removed intentionally. Alpine was getting stuck
+      in the middle of the enter transition (panel left with inline
+      display:none + enter-start class applied and never cleared),
+      which made the whole chat widget invisible on every click. The
+      CSS classes exist but Alpine's transition state-machine doesn't
+      recover when the user clicks the topbar icon while another
+      widget is also animating. Showing/hiding instantly is zero
+      regression vs. the previous 200ms fade.
+    -->
     <div class="chat-widget-panel"
          x-show="open"
-         x-cloak
-         x-transition:enter="chat-widget-enter"
-         x-transition:enter-start="chat-widget-enter-start"
-         x-transition:enter-end="chat-widget-enter-end"
-         x-transition:leave="chat-widget-leave"
-         x-transition:leave-start="chat-widget-leave-start"
-         x-transition:leave-end="chat-widget-leave-end">
+         x-cloak>
 
         <!-- Panel header -->
         <div class="chat-widget-header">

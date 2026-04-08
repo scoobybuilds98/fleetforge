@@ -88,6 +88,11 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
     <!-- CSRF token — read by app.js for all API requests -->
     <meta name="csrf-token" content="<?= e($_csrfToken) ?>">
 
+    <!-- MEDIA-1 — notification sound URL picked up by FF_Sound.init().
+         Absent on the login/portal pages on purpose: the audio cue is
+         admin-only and should never fire during sign-in. -->
+    <meta name="notification-sound" content="<?= asset_url('media/notification.mp3') ?>">
+
     <title><?= e($_pageTitle) ?> — <?= e($_appName) ?></title>
 
     <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
