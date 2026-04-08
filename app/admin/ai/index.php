@@ -870,10 +870,27 @@ function FF_AiChat() {
                                 this.streamText = '';
                                 this.loadSessions(); // refresh sidebar
                             } else if (event.type === 'error') {
-                                this.messages.push({
-                                    role: 'assistant',
-                                    content: 'Error: ' + (event.message || 'Something went wrong.'),
-                                });
+                                // SEARCH-2: when the stream fails mid-response,
+                                // preserve any partial text that was already shown
+                                // to the user. The backend now also returns
+                                // partial_text in the error event so we always
+                                // get the right value even if the local
+                                // streamText buffer was cleared by a race.
+                                const partial = event.partial_text || this.streamText || '';
+                                if (event.session_id) this.currentSessionId = event.session_id;
+                                if (partial) {
+                                    this.messages.push({
+                                        role: 'assistant',
+                                        content: partial + '\n\n_(' + (event.message || 'Response cut off.') + ')_',
+                                    });
+                                } else {
+                                    this.messages.push({
+                                        role: 'assistant',
+                                        content: 'Error: ' + (event.message || 'Something went wrong.'),
+                                    });
+                                }
+                                this.streamText = '';
+                                this.loadSessions();
                             }
                         } catch(e) { /* skip unparseable lines */ }
                     }

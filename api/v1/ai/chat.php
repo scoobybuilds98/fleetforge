@@ -179,9 +179,19 @@ $tools = \FleetForge\AI\ToolRegistry::getTools('chat');
 // WHY: Claude may request multiple tools before giving a final answer.
 // We loop up to MAX_TOOL_ITERATIONS, executing each tool and sending
 // results back. The loop ends when Claude responds with text (end_turn).
+//
+// SEARCH-2 fix: We accumulate ALL text fragments across iterations into
+// $accumulatedText, not just the final iteration. Previously we extracted
+// text only from the LAST $response — so any "Let me check..." preambles
+// from earlier iterations were silently thrown away. When the loop fails
+// part-way through (typically a 429 burst rate limit on iter 2-4), the
+// accumulated text is now persisted to the DB so the user sees the partial
+// answer instead of nothing.
 $iteration = 0;
 $maxIterations = \FleetForge\AI\ClaudeClient::MAX_TOOL_ITERATIONS;
 $response = null;
+$accumulatedText = '';
+$totalTokensAll  = 0;
 
 while ($iteration < $maxIterations) {
     $response = $ai->sendMessage(
@@ -194,9 +204,49 @@ while ($iteration < $maxIterations) {
     );
 
     if ($response === null) {
+        // SEARCH-2: persist whatever Claude said in earlier iterations
+        // before failing, so the user sees the partial answer rather
+        // than the response disappearing entirely.
+        if ($accumulatedText !== '') {
+            $err  = $ai->getLastError();
+            $note = match ($err['code'] ?? null) {
+                'RATE_LIMIT' => 'Response cut off — AI rate limit hit mid-response. Try again in a moment.',
+                'NETWORK'    => 'Response cut off — could not reach the AI service.',
+                default      => 'Response cut off — ' . ($err['message'] ?? 'AI service error') . '.',
+            };
+            $partialMsgId = db_insert('ai_chat_messages', [
+                'session_id'  => $sessionId,
+                'role'        => 'assistant',
+                'content'     => $accumulatedText . "\n\n_(" . $note . ")_",
+                'tokens_used' => $totalTokensAll,
+            ]);
+            db_update('ai_chat_sessions', [
+                'last_message_at' => date('Y-m-d H:i:s'),
+            ], 'id = ?', [$sessionId]);
+            // Return 200 with the partial content so the widget renders
+            // it the same way as a successful response. The content
+            // already explains it was cut off.
+            echo json_encode([
+                'session_id'  => $sessionId,
+                'message_id'  => $partialMsgId,
+                'content'     => $accumulatedText . "\n\n_(" . $note . ")_",
+                'tokens_used' => $totalTokensAll,
+                'partial'     => true,
+            ]);
+            exit;
+        }
         \FleetForge\AI\ClaudeClient::emitErrorResponse($ai);
         exit;
     }
+
+    // SEARCH-2: capture any text in this response BEFORE checking tool_use
+    // so preambles like "Let me check..." aren't lost when Claude chains
+    // tool calls.
+    $iterText = \FleetForge\AI\ClaudeClient::extractTextContent($response);
+    if ($iterText !== '') {
+        $accumulatedText .= ($accumulatedText === '' ? '' : "\n\n") . $iterText;
+    }
+    $totalTokensAll += ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0);
 
     // WHY: If Claude doesn't want to use a tool, we're done
     if (!\FleetForge\AI\ClaudeClient::hasToolUse($response)) {
@@ -237,7 +287,12 @@ while ($iteration < $maxIterations) {
 }
 
 // ── Extract final text response ────────────────────────────
-$assistantText = \FleetForge\AI\ClaudeClient::extractTextContent($response);
+// SEARCH-2: prefer the accumulated text (which captures every iteration)
+// over single-iteration extractTextContent so chained-tool-call answers
+// don't lose their preambles.
+$assistantText = $accumulatedText !== ''
+    ? $accumulatedText
+    : \FleetForge\AI\ClaudeClient::extractTextContent($response);
 
 if ($assistantText === '') {
     $assistantText = "I'm sorry, I wasn't able to generate a response. Please try rephrasing your question.";

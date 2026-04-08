@@ -362,18 +362,33 @@ class ClaudeClient
         }
 
         $startTime = microtime(true);
-
-        // WHY: For streaming we use a custom curl callback to process SSE events
-        $ch = curl_init(self::API_URL);
         $jsonPayload = json_encode($payload, JSON_THROW_ON_ERROR);
 
-        // Accumulate the full response for post-processing
+        // SEARCH-1 follow-up SEARCH-2: One-shot retry on 429 to absorb the
+        // most common failure mode — Anthropic's 30K-input-tokens-per-minute
+        // organisation rate limit. We honour the Retry-After header (capped
+        // at 30s so the request doesn't hang the SSE channel forever).
+        // The retry only fires when NO text has been streamed yet for THIS
+        // particular request — once a single token has been emitted via
+        // $onChunk we can't safely re-issue the request without showing the
+        // user duplicated text.
+        $maxRetries = 1;
+        $attempt    = 0;
+
+        retry_loop:
+
+        // Accumulate the full response for post-processing. Reset on each
+        // attempt because a 429 retry restarts streaming from scratch.
         $fullText       = '';
         $toolUseBlocks  = [];
         $inputTokens    = 0;
         $outputTokens   = 0;
         $stopReason     = '';
         $currentBlock   = null;
+        $responseHeaders = [];
+
+        // WHY: For streaming we use a custom curl callback to process SSE events
+        $ch = curl_init(self::API_URL);
 
         // WHY: CURLOPT_WRITEFUNCTION processes each chunk as it arrives from Anthropic
         curl_setopt_array($ch, [
@@ -383,6 +398,16 @@ class ClaudeClient
             CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_RETURNTRANSFER => false,
+            // SEARCH-2: capture response headers so we can read Retry-After
+            // when Anthropic returns 429. Headers are appended one per call.
+            CURLOPT_HEADERFUNCTION => function ($ch, $headerLine) use (&$responseHeaders): int {
+                $len = strlen($headerLine);
+                $parts = explode(':', trim($headerLine), 2);
+                if (count($parts) === 2) {
+                    $responseHeaders[strtolower(trim($parts[0]))] = trim($parts[1]);
+                }
+                return $len;
+            },
             CURLOPT_WRITEFUNCTION  => function ($ch, $data) use (
                 &$fullText, &$toolUseBlocks, &$inputTokens, &$outputTokens,
                 &$stopReason, &$currentBlock, $onChunk
@@ -448,6 +473,19 @@ class ClaudeClient
         $latencyMs = (int) round((microtime(true) - $startTime) * 1000);
 
         if ($err !== '' || $code !== 200) {
+            // SEARCH-2: one-shot retry on 429 — only safe to retry if NO text
+            // was streamed yet (otherwise the user would see duplicated text).
+            // Honours Retry-After header from Anthropic (capped at 30s).
+            if ($code === 429 && $fullText === '' && $attempt < $maxRetries) {
+                $retryAfter = (int) ($responseHeaders['retry-after'] ?? 5);
+                if ($retryAfter < 1)  $retryAfter = 1;
+                if ($retryAfter > 30) $retryAfter = 30;
+                $this->log('AI_STREAM_RETRY', "HTTP=429 sleeping {$retryAfter}s before retry (attempt " . ($attempt + 1) . "/{$maxRetries})");
+                sleep($retryAfter);
+                $attempt++;
+                goto retry_loop;
+            }
+
             // SAMSARA-3 error parity: streaming path now sets structured
             // error codes the same way the non-streaming sendMessage does,
             // so emitErrorResponse() / stream.php's match-statement gives
@@ -461,11 +499,15 @@ class ClaudeClient
             if ($err !== '') {
                 $this->setError('NETWORK', 'Could not reach Anthropic API: ' . $err);
             } elseif ($code === 429) {
-                $this->setError('RATE_LIMIT', 'Anthropic rate limit hit. Wait a minute and try again.', 429);
+                $retryAfter = (int) ($responseHeaders['retry-after'] ?? 0);
+                $msg = $retryAfter > 0
+                    ? "Anthropic rate limit hit. Try again in {$retryAfter}s."
+                    : 'Anthropic rate limit hit. Wait a minute and try again.';
+                $this->setError('RATE_LIMIT', $msg, 429);
             } else {
                 $this->setError('API_ERROR', "Anthropic API returned HTTP {$code}.", $code);
             }
-            $this->log('AI_STREAM_ERROR', "HTTP=$code error=$err");
+            $this->log('AI_STREAM_ERROR', "HTTP=$code error=$err attempt=$attempt");
             return null;
         }
 

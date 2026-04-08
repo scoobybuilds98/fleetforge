@@ -190,18 +190,54 @@ while ($iteration < $maxIterations) {
         // SAMSARA-3 error parity: read structured error from ClaudeClient
         // and surface a code + human message via SSE so the chat widget
         // can branch on `code` (e.g. show "Configure API key" inline).
+        //
+        // SEARCH-2 root-cause fix for "AI stops mid-response" bug:
+        // When the request fails AFTER some text was already streamed
+        // (typical 429 burst-rate-limit on iter 2+ of a tool chain),
+        // we now:
+        //   1. Save the partial $finalText to ai_chat_messages so the
+        //      user can see it on chat reload — previously the partial
+        //      streamed text was discarded entirely on error.
+        //   2. Include the partial text in the error event payload so
+        //      the widget can preserve what was already shown instead
+        //      of vanishing it when the streaming indicator hides.
+        //   3. Append a (cut off) marker so the user knows the response
+        //      was incomplete.
         $err = $ai->getLastError();
         $msg = match ($err['code'] ?? null) {
             'NO_KEY'      => 'AI is not configured. Set your Anthropic API key in Settings → Integrations.',
             'DISABLED'    => 'AI features are disabled. Enable them in Settings → AI / Machine Learning.',
             'TOKEN_LIMIT' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
-            'RATE_LIMIT'  => 'Too many requests. Please wait a minute and try again.',
+            'RATE_LIMIT'  => 'Hit the AI rate limit mid-response. ' . ($finalText !== '' ? 'Above is what we got so far — try again in a moment to continue.' : 'Please wait a minute and try again.'),
             'NETWORK'     => 'Could not reach Anthropic. Check your internet connection and try again.',
             'API_ERROR'   => 'Anthropic returned an error: ' . ($err['message'] ?? 'unknown'),
             'PARSE_ERROR' => 'Anthropic returned an invalid response. Please try again.',
             default       => 'AI service unavailable. Please try again.',
         };
-        sendSSE('error', ['message' => $msg, 'code' => $err['code'] ?? null]);
+
+        // Persist whatever was successfully streamed before the failure
+        // so a refresh / reload still shows the partial answer rather
+        // than dropping it on the floor.
+        $partialMsgId = null;
+        if ($finalText !== '') {
+            $partialMsgId = db_insert('ai_chat_messages', [
+                'session_id'  => $sessionId,
+                'role'        => 'assistant',
+                'content'     => $finalText . "\n\n_(Response cut off — " . $msg . ")_",
+                'tokens_used' => $totalTokensAll,
+            ]);
+            db_update('ai_chat_sessions', [
+                'last_message_at' => date('Y-m-d H:i:s'),
+            ], 'id = ?', [$sessionId]);
+        }
+
+        sendSSE('error', [
+            'message'      => $msg,
+            'code'         => $err['code'] ?? null,
+            'partial_text' => $finalText,
+            'session_id'   => $sessionId,
+            'message_id'   => $partialMsgId,
+        ]);
         exit;
     }
 
