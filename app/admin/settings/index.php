@@ -200,9 +200,20 @@ if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
         <h1 class="page-header-title">Settings</h1>
         <p style="margin:4px 0 0;font-size:0.8125rem;color:var(--text-muted);">System configuration, user management, and administration</p>
     </div>
-    <?php if (!$canEdit): ?>
-    <span class="badge badge-neutral">View Only</span>
-    <?php endif; ?>
+    <div class="page-header-actions">
+        <?php /* EMAIL-1: link to standalone email templates manager */ ?>
+        <a href="<?= base_url('settings/email_templates') ?>" class="btn btn-secondary btn-sm">
+            <?= heroicon('envelope', 'btn-icon') ?>
+            Email Templates
+        </a>
+        <a href="<?= base_url('email/bulk') ?>" class="btn btn-secondary btn-sm">
+            <?= heroicon('paper-airplane', 'btn-icon') ?>
+            Bulk Email
+        </a>
+        <?php if (!$canEdit): ?>
+        <span class="badge badge-neutral">View Only</span>
+        <?php endif; ?>
+    </div>
 </div>
 
 <?php if ($saveFlash): ?>

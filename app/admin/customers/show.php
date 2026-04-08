@@ -107,6 +107,19 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <div class="page-header-actions">
+        <?php if (can('customers', 'create')): /* EMAIL-1: send-email button */ ?>
+        <button type="button"
+                class="btn btn-secondary btn-sm"
+                onclick="openEmailCompose({
+                    customerId: <?= (int)$customer['id'] ?>,
+                    toEmail:    <?= json_encode((string)($customer['email'] ?? '')) ?>,
+                    toName:     <?= json_encode((string)($customer['contact_name'] ?? $customer['company_name'])) ?>
+                })"
+                title="Send email to this customer">
+            <?= heroicon('envelope', 'btn-icon') ?>
+            Send Email
+        </button>
+        <?php endif; ?>
         <?php if (can('customers', 'edit')): ?>
         <a href="<?= base_url('customers/edit') ?>?id=<?= $customerId ?>"
            class="btn btn-secondary btn-sm">Edit</a>
@@ -228,6 +241,11 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
             Documents
             <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'emails' }"
+                @click="activeTab = 'emails'; loadEmails()" :aria-selected="activeTab === 'emails'" role="tab">
+            Email History
+            <span class="tab-badge" x-show="emails.length > 0" x-text="emails.length"></span>
         </button>
     </div>
 
@@ -1103,6 +1121,132 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
     </div><!-- /documents tab -->
 
+    <!-- ── TAB: EMAIL HISTORY (EMAIL-1) ─────────────────────────── -->
+    <div x-show="activeTab === 'emails'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
+
+        <div class="card" style="margin-bottom:1rem;">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <h3 class="card-title">Email History</h3>
+                <?php if (can('customers', 'create')): ?>
+                <button class="btn btn-sm btn-primary"
+                        onclick="openEmailCompose({
+                            customerId: <?= (int)$customer['id'] ?>,
+                            toEmail:    <?= json_encode((string)($customer['email'] ?? '')) ?>,
+                            toName:     <?= json_encode((string)($customer['contact_name'] ?? $customer['company_name'])) ?>
+                        })">
+                    + Compose Email
+                </button>
+                <?php endif; ?>
+            </div>
+
+            <div x-show="emailsLoading && emails.length === 0" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading email history…</span>
+            </div>
+
+            <div x-show="emailsLoaded && !emailsLoading && emails.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No emails sent</p>
+                    <p class="empty-state-text">Use the Compose Email button above to send your first email to this customer.</p>
+                </div>
+            </div>
+
+            <div x-show="emailsLoaded && emails.length > 0" class="tab-table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>To</th>
+                            <th>Subject</th>
+                            <th>Template</th>
+                            <th>Status</th>
+                            <th>Sent by</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="email in emails" :key="email.id">
+                            <tr>
+                                <td class="text-sm" x-text="formatEmailDate(email.created_at)"></td>
+                                <td class="text-sm">
+                                    <div x-text="email.to_name || email.to_email"></div>
+                                    <div class="text-secondary text-sm" x-show="email.to_name" x-text="email.to_email"></div>
+                                </td>
+                                <td>
+                                    <span x-text="email.subject"></span>
+                                    <span class="badge badge-neutral ml-2" x-show="email.attachment_count > 0"
+                                          x-text="email.attachment_count + ' file' + (email.attachment_count > 1 ? 's' : '')"></span>
+                                </td>
+                                <td class="text-sm text-secondary" x-text="email.template_name || '—'"></td>
+                                <td>
+                                    <span class="badge" :class="'badge-' + email.status_class" x-text="email.status"></span>
+                                </td>
+                                <td class="text-sm text-secondary" x-text="email.sent_by_name || '—'"></td>
+                                <td>
+                                    <button class="btn btn-xs btn-ghost" @click="viewEmail(email.id)">View</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Email view modal -->
+        <div x-show="emailViewModal.open" x-cloak class="modal-overlay" style="z-index:var(--z-modal);">
+            <div class="modal-backdrop" @click="emailViewModal.open = false"></div>
+            <div class="modal modal-lg" @click.stop style="max-height:calc(100vh - 32px);">
+                <div class="modal-header">
+                    <h3 class="modal-title">Email Details</h3>
+                    <button class="modal-close-btn" @click="emailViewModal.open = false">×</button>
+                </div>
+                <div class="modal-body">
+                    <div x-show="emailViewModal.loading" class="text-center" style="padding:32px;">Loading…</div>
+                    <template x-if="emailViewModal.log && !emailViewModal.loading">
+                        <div>
+                            <dl style="display:grid; grid-template-columns:max-content 1fr; gap:6px 16px; margin:0 0 12px 0;">
+                                <dt class="text-secondary text-sm">From:</dt>
+                                <dd style="margin:0;" x-text="emailViewModal.log.from_email"></dd>
+                                <dt class="text-secondary text-sm">To:</dt>
+                                <dd style="margin:0;" x-text="(emailViewModal.log.to_name ? emailViewModal.log.to_name + ' &lt;' : '') + emailViewModal.log.to_email + (emailViewModal.log.to_name ? '&gt;' : '')"></dd>
+                                <dt class="text-secondary text-sm">Subject:</dt>
+                                <dd style="margin:0; font-weight:600;" x-text="emailViewModal.log.subject"></dd>
+                                <dt class="text-secondary text-sm">Status:</dt>
+                                <dd style="margin:0;"><span class="badge" :class="'badge-' + (emailViewModal.log.status === 'sent' ? 'success' : (emailViewModal.log.status === 'failed' ? 'danger' : 'warning'))" x-text="emailViewModal.log.status"></span></dd>
+                                <dt class="text-secondary text-sm">Sent at:</dt>
+                                <dd style="margin:0;" x-text="formatEmailDate(emailViewModal.log.sent_at || emailViewModal.log.created_at)"></dd>
+                                <template x-if="emailViewModal.log.error_message">
+                                    <dt class="text-secondary text-sm">Error:</dt>
+                                </template>
+                                <template x-if="emailViewModal.log.error_message">
+                                    <dd style="margin:0;color:var(--color-danger);" x-text="emailViewModal.log.error_message"></dd>
+                                </template>
+                            </dl>
+                            <template x-if="emailViewModal.log.attachments && emailViewModal.log.attachments.length > 0">
+                                <div style="margin-bottom:12px;">
+                                    <div class="text-secondary text-sm" style="margin-bottom:4px;">Attachments:</div>
+                                    <template x-for="att in emailViewModal.log.attachments">
+                                        <div class="email-attachment-item">
+                                            <span class="email-attachment-name" x-text="att.file_name"></span>
+                                            <span class="email-attachment-size" x-text="att.file_size ? Math.round(att.file_size/1024) + ' KB' : ''"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                            <div class="email-preview-frame">
+                                <div class="email-preview-label">Body</div>
+                                <div class="email-preview-body" x-html="emailViewModal.log.body_html"></div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" @click="emailViewModal.open = false">Close</button>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /emails tab -->
+
     <!-- ── Document Upload Modal ────────────────────────────────── -->
     <?php if (can('customers', 'edit')): ?>
     <div x-show="docUploadModal.open" x-cloak
@@ -1223,6 +1367,12 @@ function FF_CustomerProfile() {
         documents:       [],
         docsLoaded:      false,
         docsLoading:     false,
+
+        // ── Email History (EMAIL-1) ───────────────────────────────
+        emails:          [],
+        emailsLoaded:    false,
+        emailsLoading:   false,
+        emailViewModal: { open: false, log: null, loading: false },
         docUploadModal: {
             open:            false,
             saving:          false,
@@ -1255,6 +1405,7 @@ function FF_CustomerProfile() {
 
         init() {
             this.loadNoteCount();
+            this.loadEmailCount();
             this.$watch('activeTab', (tab) => {
                 if (tab === 'leases'        && !this.leasesLoaded)         this.loadLeases();
                 if (tab === 'invoices'      && !this.invoicesLoaded)       this.loadInvoices();
@@ -1262,7 +1413,57 @@ function FF_CustomerProfile() {
                 if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)    this.loadMileageLogs();
                 if (tab === 'rates'         && !this.rateOverridesLoaded)  this.loadRateOverrides();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
+                if (tab === 'emails'        && !this.emailsLoaded)            this.loadEmails();
             });
+            // EMAIL-1: refresh email history when an email is sent globally
+            window.addEventListener('ff-email-sent', (ev) => {
+                if (ev.detail && Number(ev.detail.customer_id) === <?= (int)$customerId ?>) {
+                    this.emailsLoaded = false;
+                    this.loadEmails();
+                    this.loadEmailCount();
+                }
+            });
+        },
+
+        // ── Email History (EMAIL-1) ───────────────────────────────
+        async loadEmailCount() {
+            try {
+                const r = await FF_Api.get(FF_Api.url('/api/v1/email/logs/?customer_id=<?= (int)$customerId ?>&per_page=1'));
+                if (r.success && r.data && r.data.pagination) {
+                    // Use pagination total as the badge count
+                    if (r.data.pagination.total) {
+                        // Use a sentinel array with length so the badge shows
+                        this.emails = new Array(r.data.pagination.total).fill(null);
+                    }
+                }
+            } catch (e) { /* silent */ }
+        },
+        async loadEmails() {
+            if (this.emailsLoading) return;
+            this.emailsLoading = true;
+            try {
+                const r = await FF_Api.get(FF_Api.url('/api/v1/email/logs/?customer_id=<?= (int)$customerId ?>&per_page=50'));
+                if (r.success) {
+                    this.emails       = r.data.items;
+                    this.emailsLoaded = true;
+                }
+            } catch (e) { console.error(e); }
+            finally { this.emailsLoading = false; }
+        },
+        async viewEmail(id) {
+            this.emailViewModal.open    = true;
+            this.emailViewModal.loading = true;
+            this.emailViewModal.log     = null;
+            try {
+                const r = await FF_Api.get(FF_Api.url('/api/v1/email/logs/show.php?id=' + id));
+                if (r.success) this.emailViewModal.log = r.data;
+            } catch (e) { console.error(e); }
+            finally { this.emailViewModal.loading = false; }
+        },
+        formatEmailDate(d) {
+            if (!d) return '';
+            const dt = new Date(d.replace(' ', 'T'));
+            return dt.toLocaleString();
         },
 
         // ── Notes ──────────────────────────────────────────────────

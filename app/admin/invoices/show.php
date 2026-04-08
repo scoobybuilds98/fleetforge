@@ -447,6 +447,23 @@ require_once FF_ROOT . '/includes/header.php';
             Print
         </button>
 
+        <?php if (can('customers', 'create')): /* EMAIL-1: email this invoice */ ?>
+        <button type="button"
+                class="btn btn-primary btn-sm no-print"
+                onclick="openEmailCompose({
+                    customerId:   <?= (int)$invoice['customer_id'] ?>,
+                    toEmail:      <?= json_encode((string)($invoice['customer_email_snapshot'] ?? '')) ?>,
+                    toName:       <?= json_encode((string)($invoice['customer_name_snapshot'] ?? $invoice['company_name_snapshot'])) ?>,
+                    templateSlug: 'invoice_ready',
+                    entityType:   'invoice',
+                    entityId:     <?= (int)$invoice['id'] ?>
+                })"
+                title="Email invoice to customer">
+            <?= heroicon('envelope', 'icon-sm') ?>
+            Email Invoice
+        </button>
+        <?php endif; ?>
+
         <?php if ($canEdit): ?>
             <!-- Edit Notes -->
             <button class="btn btn-secondary btn-sm" @click="startEdit()">

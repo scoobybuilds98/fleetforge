@@ -124,6 +124,20 @@ require_once FF_ROOT . '/includes/header.php';
         <span class="badge <?= $statusBadge ?>" style="font-size:1rem; padding:6px 14px;">
             <?= e(strtoupper($payment['status'])) ?>
         </span>
+        <?php if ($payment['customer_id'] && can('customers', 'create')): /* EMAIL-1: send receipt */ ?>
+        <button type="button"
+                class="btn btn-secondary btn-sm"
+                onclick="openEmailCompose({
+                    customerId:   <?= (int)$payment['customer_id'] ?>,
+                    templateSlug: 'payment_received',
+                    entityType:   'payment',
+                    entityId:     <?= (int)$payment['id'] ?>
+                })"
+                title="Send payment receipt to customer">
+            <?= heroicon('envelope', 'btn-icon') ?>
+            Send Receipt
+        </button>
+        <?php endif; ?>
     </div>
 </div>
 

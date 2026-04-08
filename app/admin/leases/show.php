@@ -98,6 +98,20 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <div class="page-header-actions">
+        <?php if (can('customers', 'create')): /* EMAIL-1: send lease confirmation email */ ?>
+        <button type="button"
+                class="btn btn-secondary btn-sm"
+                onclick="openEmailCompose({
+                    customerId:   <?= (int)$lease['customer_id'] ?>,
+                    templateSlug: <?= json_encode($lease['status'] === 'completed' ? 'lease_closing' : 'lease_activation') ?>,
+                    entityType:   'lease',
+                    entityId:     <?= (int)$lease['id'] ?>
+                })"
+                title="Email customer about this lease">
+            <?= heroicon('envelope', 'btn-icon') ?>
+            Email Customer
+        </button>
+        <?php endif; ?>
         <?php if (can('leases', 'edit') && $lease['status'] === 'pending'): ?>
         <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary btn-sm">Edit</a>
         <?php endif; ?>

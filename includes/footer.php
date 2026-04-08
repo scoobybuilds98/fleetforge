@@ -124,6 +124,12 @@
 <!-- ── AI Chat Widget (floating bubble) ─────────────────────── -->
 <?php require_once FF_ROOT . '/includes/partials/ai-chat-widget.php'; ?>
 
+<!-- ── Global Email Compose Modal (EMAIL-1) ──────────────────
+     Available on every admin page. Open via:
+       window.openEmailCompose({customerId, toEmail, ..., templateSlug, entityType, entityId})
+     ────────────────────────────────────────────────────────── -->
+<?php require_once FF_ROOT . '/includes/partials/email-compose-modal.php'; ?>
+
 <!-- ============================================================
      CDN SCRIPTS
      Order: ApexCharts → app.js → Alpine.js

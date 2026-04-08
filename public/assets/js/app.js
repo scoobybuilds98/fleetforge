@@ -1232,6 +1232,360 @@ window.FF_ConfirmModal = function () {
 
 
 // ============================================================
+// FF_EmailCompose — Alpine factory for the global compose modal
+//
+// EMAIL-1: backing component for includes/partials/email-compose-modal.php
+//
+// The modal is rendered ONCE in includes/footer.php so any page can
+// open it via:
+//   window.openEmailCompose({
+//     customerId:   5,
+//     toEmail:      'john@abc.com',
+//     toName:       'John Smith',
+//     templateSlug: 'invoice_ready',
+//     entityType:   'invoice',
+//     entityId:     42,
+//   });
+//
+// Behavior:
+//   - Loads templates + customer contacts/documents/invoices on first open
+//   - Renders a live preview wrapped in the same brand shell the server uses
+//   - Validates required fields client-side before POSTing
+//   - Surfaces success/failure via FF_Toast
+// ============================================================
+window.FF_EmailCompose = function () {
+    return {
+        // ── visibility ──
+        show: false,
+        sending: false,
+        showPreview: false,
+        showVariables: false,
+        showDocumentPicker: false,
+        showInvoicePicker: false,
+
+        // ── pre-filled context ──
+        customerId: null,
+        entityType: null,
+        entityId:   null,
+
+        // ── form fields ──
+        toEmail: '',
+        toName:  '',
+        replyTo: '',
+        subject: '',
+        bodyHtml: '',
+        selectedTemplateId: '',
+
+        // ── data ──
+        templates: [],
+        contacts: [],
+        availableDocs: [],
+        invoices: [],
+        availableVariables: [],
+        attachments: [],
+        defaultReplyTo: '',
+        docSearch: '',
+
+        // Helpful for x-html preview inside the modal
+        get bodyHtmlPreview() {
+            // Show a minimal company shell so the user can see structure
+            const company = (window.FF_COMPANY_NAME) || 'FleetForge';
+            return '<div style="background:#1c1c1a;color:#fff;padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-weight:600;font-size:14px;">'
+                + this.ffEsc(company)
+                + '</div>'
+                + '<div style="padding:16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1c1c1a;background:#fff;line-height:1.6;">'
+                + (this.bodyHtml || '<em style="color:#999;">No body yet…</em>')
+                + '</div>';
+        },
+
+        get filteredDocs() {
+            const q = (this.docSearch || '').toLowerCase().trim();
+            if (!q) return this.availableDocs;
+            return this.availableDocs.filter((d) =>
+                ((d.name || '') + ' ' + (d.entity_label || '')).toLowerCase().includes(q)
+            );
+        },
+
+        ffEsc(s) { return ffEsc(s); },
+
+        // ── opener ──
+        async open(opts) {
+            opts = opts || {};
+            this.reset();
+
+            this.customerId = opts.customerId || null;
+            this.entityType = opts.entityType || null;
+            this.entityId   = opts.entityId   || null;
+            this.toEmail    = opts.toEmail || '';
+            this.toName     = opts.toName  || '';
+            this.subject    = opts.subject || '';
+            this.bodyHtml   = opts.body    || '';
+
+            // Always show modal first so the user sees the spinner/empty state
+            this.show = true;
+
+            // Parallel preload of templates + contacts/docs/invoices
+            const promises = [this.loadTemplates()];
+            if (this.customerId || this.entityType) {
+                promises.push(this.loadAttachmentsAndContacts());
+            }
+            await Promise.all(promises);
+
+            // If a template slug was passed in, find + activate it
+            if (opts.templateSlug) {
+                const t = this.templates.find((x) => x.slug === opts.templateSlug);
+                if (t) {
+                    this.selectedTemplateId = t.id;
+                    await this.loadTemplate();
+                }
+            }
+        },
+
+        async loadTemplates() {
+            try {
+                const r = await FF_Api.get(FF_Api.url('/api/v1/email/templates/'));
+                if (r && r.success) {
+                    this.templates = r.data.templates || [];
+                }
+            } catch (e) {
+                console.error('[FF_EmailCompose] loadTemplates failed', e);
+            }
+        },
+
+        async loadAttachmentsAndContacts() {
+            try {
+                const params = new URLSearchParams();
+                if (this.customerId) params.set('customer_id', this.customerId);
+                if (this.entityType) params.set('entity_type', this.entityType);
+                if (this.entityId)   params.set('entity_id',   this.entityId);
+
+                const r = await FF_Api.get(FF_Api.url('/api/v1/email/attachments/available.php?' + params.toString()));
+                if (r && r.success) {
+                    this.availableDocs = r.data.documents || [];
+                    this.invoices      = r.data.invoices  || [];
+                    this.contacts      = r.data.contacts  || [];
+
+                    // Auto-pick the first contact email if none was supplied
+                    if (!this.toEmail && this.contacts.length > 0) {
+                        this.toEmail = this.contacts[0].email;
+                        this.toName  = this.contacts[0].name;
+                    }
+                }
+            } catch (e) {
+                console.error('[FF_EmailCompose] loadAttachmentsAndContacts failed', e);
+            }
+        },
+
+        async loadTemplate() {
+            if (!this.selectedTemplateId) {
+                // Reset to a clean slate if user picks "Custom message"
+                return;
+            }
+            try {
+                const params = new URLSearchParams();
+                params.set('template_id', this.selectedTemplateId);
+                if (this.customerId) params.set('customer_id', this.customerId);
+                if (this.entityType) params.set('entity_type', this.entityType);
+                if (this.entityId)   params.set('entity_id',   this.entityId);
+
+                const r = await FF_Api.get(FF_Api.url('/api/v1/email/templates/preview.php?' + params.toString()));
+                if (r && r.success) {
+                    this.subject  = r.data.subject  || '';
+                    this.bodyHtml = r.data.body_html || '';
+                    this.availableVariables = r.data.variables || [];
+                } else if (r && r.error) {
+                    FF_Toast.error('Template', r.error.message || 'Could not load template.');
+                }
+            } catch (e) {
+                console.error('[FF_EmailCompose] loadTemplate failed', e);
+                FF_Toast.error('Template', 'Could not load template.');
+            }
+        },
+
+        fillContact(c) {
+            this.toEmail = c.email;
+            this.toName  = c.name;
+        },
+
+        insertVariable(v) {
+            const ta = this.$refs.bodyField;
+            const token = '{' + v + '}';
+            if (ta && typeof ta.selectionStart === 'number') {
+                const start = ta.selectionStart;
+                const end   = ta.selectionEnd;
+                this.bodyHtml = (this.bodyHtml || '').slice(0, start) + token + (this.bodyHtml || '').slice(end);
+                this.$nextTick(() => {
+                    ta.focus();
+                    ta.selectionStart = ta.selectionEnd = start + token.length;
+                });
+            } else {
+                this.bodyHtml = (this.bodyHtml || '') + token;
+            }
+        },
+
+        addDocumentAttachment(doc) {
+            // De-dupe by source_type + source_id
+            const key = 'document:' + doc.source_id;
+            if (this.attachments.some((a) => a._key === key)) return;
+            this.attachments.push({
+                _key: key,
+                document_id: doc.source_id,
+                name: doc.name,
+                size: doc.size,
+                type: doc.type,
+            });
+            FF_Toast.success('Attached', doc.name);
+        },
+
+        addInvoiceAttachment(inv) {
+            const key = 'invoice:' + inv.id;
+            if (this.attachments.some((a) => a._key === key)) return;
+            this.attachments.push({
+                _key: key,
+                invoice_id: inv.id,
+                name: inv.invoice_number + '.pdf',
+                size: null,
+                type: 'application/pdf',
+            });
+            FF_Toast.success('Attached', inv.invoice_number + '.pdf');
+        },
+
+        async uploadAttachment(ev) {
+            const files = ev?.target?.files;
+            if (!files || files.length === 0) return;
+            for (let i = 0; i < files.length; i++) {
+                const f = files[i];
+                const fd = new FormData();
+                fd.append('file', f);
+                try {
+                    const r = await FF_Api.upload(FF_Api.url('/api/v1/email/attachments/upload.php'), fd);
+                    if (r && r.success) {
+                        this.attachments.push({
+                            _key: 'upload:' + r.data.upload_path,
+                            upload_path: r.data.upload_path,
+                            name: r.data.name,
+                            size: r.data.size,
+                            type: r.data.type,
+                        });
+                        FF_Toast.success('Uploaded', r.data.name);
+                    } else {
+                        FF_Toast.error('Upload failed', (r && r.error && r.error.message) || 'Unknown error');
+                    }
+                } catch (e) {
+                    console.error('[FF_EmailCompose] upload failed', e);
+                    FF_Toast.error('Upload failed', 'Network error');
+                }
+            }
+            ev.target.value = ''; // allow re-selecting the same file
+        },
+
+        removeAttachment(i) {
+            this.attachments.splice(i, 1);
+        },
+
+        formatSize(bytes) {
+            if (!bytes && bytes !== 0) return '';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        },
+
+        togglePreview() {
+            this.showPreview = !this.showPreview;
+        },
+
+        async send() {
+            if (!this.toEmail || !this.subject || !this.bodyHtml) {
+                FF_Toast.error('Missing fields', 'Please fill in To, Subject, and Message.');
+                return;
+            }
+            this.sending = true;
+            try {
+                const payload = {
+                    to_email:    this.toEmail,
+                    to_name:     this.toName,
+                    reply_to:    this.replyTo,
+                    subject:     this.subject,
+                    body_html:   this.bodyHtml,
+                    customer_id: this.customerId,
+                    entity_type: this.entityType,
+                    entity_id:   this.entityId,
+                    template_id: this.selectedTemplateId || null,
+                    attachments: this.attachments.map((a) => {
+                        const o = {};
+                        if (a.document_id) o.document_id = a.document_id;
+                        if (a.invoice_id)  o.invoice_id  = a.invoice_id;
+                        if (a.upload_path) {
+                            o.upload_path = a.upload_path;
+                            o.name = a.name;
+                            o.size = a.size;
+                            o.type = a.type;
+                        }
+                        return o;
+                    }),
+                };
+                const r = await FF_Api.post(FF_Api.url('/api/v1/email/send.php'), payload);
+                if (r && r.success) {
+                    FF_Toast.success('Email sent', 'Delivered to ' + this.toEmail);
+                    // Notify the page so it can refresh its email history tab
+                    window.dispatchEvent(new CustomEvent('ff-email-sent', {
+                        detail: { log_id: r.data.log_id, customer_id: this.customerId },
+                    }));
+                    this.close();
+                } else {
+                    FF_Toast.error('Send failed', (r && r.error && r.error.message) || 'Unknown error');
+                }
+            } catch (e) {
+                console.error('[FF_EmailCompose] send failed', e);
+                FF_Toast.error('Send failed', 'Network error');
+            } finally {
+                this.sending = false;
+            }
+        },
+
+        close() {
+            this.show = false;
+            // Defer reset until the close animation finishes
+            setTimeout(() => this.reset(), 200);
+        },
+
+        reset() {
+            this.toEmail = '';
+            this.toName  = '';
+            this.replyTo = '';
+            this.subject = '';
+            this.bodyHtml = '';
+            this.selectedTemplateId = '';
+            this.attachments = [];
+            this.contacts = [];
+            this.availableDocs = [];
+            this.invoices = [];
+            this.availableVariables = [];
+            this.showPreview = false;
+            this.showVariables = false;
+            this.showDocumentPicker = false;
+            this.showInvoicePicker = false;
+            this.docSearch = '';
+            this.customerId = null;
+            this.entityType = null;
+            this.entityId   = null;
+            this.sending = false;
+        },
+    };
+};
+
+// Convenience opener — call from any page:
+//   window.openEmailCompose({customerId, toEmail, toName, templateSlug, entityType, entityId})
+//
+// Uses an Alpine custom event so the modal can be opened before
+// Alpine has hydrated. The @ff-email-compose.window listener inside
+// the modal partial picks it up.
+window.openEmailCompose = function (opts) {
+    window.dispatchEvent(new CustomEvent('ff-email-compose', { detail: opts || {} }));
+};
+
+
+// ============================================================
 // RESPONSIVE-1 — ApexCharts global responsive patch
 //
 // Monkey-patches the ApexCharts constructor so every chart instance
