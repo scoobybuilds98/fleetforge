@@ -345,6 +345,39 @@ db_transaction(function () use (&$data, $id, $replaceTags, $newTags, $userId, $e
         'new_values'   => json_encode(array_intersect_key($data, array_flip(['company_name', 'status', 'risk_score']))),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
+
+    // ── In-app status-change notifications (NOTIF-1) ───────────
+    // Only fire when the status actually changed and is one we care about.
+    try {
+        $newStatus = $data['status'] ?? null;
+        $oldStatus = $existing['status'] ?? null;
+        $name      = $data['company_name'] ?? $existing['company_name'];
+        if ($newStatus && $newStatus !== $oldStatus) {
+            if ($newStatus === 'credit_hold') {
+                \FleetForge\Notifications\NotificationService::notify(
+                    type:       'customer.credit_hold',
+                    title:      "{$name} placed on credit hold",
+                    message:    "{$name} placed on credit hold",
+                    entityType: 'customer',
+                    entityId:   $id,
+                    url:        '/fleetforge/customers/show?id=' . $id,
+                    severity:   'warning'
+                );
+            } elseif ($newStatus === 'suspended') {
+                \FleetForge\Notifications\NotificationService::notify(
+                    type:       'customer.suspended',
+                    title:      "{$name} suspended",
+                    message:    "{$name} account suspended",
+                    entityType: 'customer',
+                    entityId:   $id,
+                    url:        '/fleetforge/customers/show?id=' . $id,
+                    severity:   'critical'
+                );
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF customer.status_change] ' . $e->getMessage());
+    }
 });
 
 // Re-fetch updated_at after the update

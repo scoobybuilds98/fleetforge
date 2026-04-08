@@ -50,6 +50,20 @@ try {
     }
 } catch (Throwable) {}
 
+// [NOTIF-1] Portal unread notification count for the bell badge
+$_portalUnread = 0;
+try {
+    $_pid = portal_user_id();
+    if ($_pid) {
+        $_portalUnread = db_count(
+            'SELECT COUNT(*) FROM notifications
+              WHERE portal_user_id = ? AND is_read = 0 AND deleted_at IS NULL',
+            [$_pid]
+        );
+    }
+    unset($_pid);
+} catch (Throwable) {}
+
 // User initials for avatar
 $_initials = 'U';
 if (!empty($_portalUser['name'])) {
@@ -101,6 +115,74 @@ if (!empty($_portalUser['name'])) {
                 <h1 class="portal-topbar-title"><?= e($_pageTitle) ?></h1>
             </div>
             <div class="portal-topbar-right">
+                <!-- [NOTIF-1] Portal notifications bell — uses FF_PortalNotifications() factory -->
+                <div class="notif-wrapper"
+                     x-data="FF_PortalNotifications()"
+                     x-init="init(); unreadCount = <?= (int) $_portalUnread ?>;"
+                     @click.outside="open = false"
+                     @keydown.escape.window="open = false">
+
+                    <button type="button"
+                            class="btn-icon notif-bell-btn"
+                            :class="{ 'has-unread': unreadCount > 0 }"
+                            @click="toggleDropdown()"
+                            :aria-expanded="open"
+                            :aria-label="unreadCount > 0
+                                ? 'Notifications (' + unreadCount + ' unread)'
+                                : 'Notifications'">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/>
+                        </svg>
+                        <span class="notif-badge"
+                              x-show="unreadCount > 0"
+                              x-text="unreadCount > 99 ? '99+' : unreadCount"
+                              aria-hidden="true"></span>
+                    </button>
+
+                    <div class="notif-dropdown"
+                         x-show="open"
+                         x-cloak
+                         x-transition.opacity.duration.150ms
+                         role="menu"
+                         aria-label="Notifications">
+
+                        <div class="notif-dropdown-header">
+                            <span class="notif-dropdown-title">Notifications</span>
+                            <button type="button" class="notif-mark-all"
+                                    @click="markAllRead()"
+                                    x-show="unreadCount > 0">Mark all read</button>
+                        </div>
+
+                        <div class="notif-loading" x-show="loading" x-cloak>Loading…</div>
+                        <div class="notif-empty"
+                             x-show="!loading && notifications.length === 0"
+                             x-cloak>
+                            <p>No notifications yet</p>
+                        </div>
+
+                        <template x-for="n in notifications" :key="n.id">
+                            <a :href="n.url || '#'"
+                               class="notif-item"
+                               :class="{ 'notif-item--unread': !n.is_read }"
+                               @click="markRead(n.id)">
+                                <div class="notif-icon notif-icon--info">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>
+                                </div>
+                                <div class="notif-content">
+                                    <div class="notif-title" x-text="n.title"></div>
+                                    <div class="notif-message" x-text="n.message"></div>
+                                    <div class="notif-time" x-text="n.time_ago"></div>
+                                </div>
+                                <div class="notif-unread-dot" x-show="!n.is_read"></div>
+                            </a>
+                        </template>
+
+                        <a href="<?= e(base_url('portal/notifications')) ?>" class="notif-dropdown-footer">
+                            See all notifications
+                        </a>
+                    </div>
+                </div>
+
                 <!-- Theme toggle -->
                 <div x-data="{ dark: document.documentElement.getAttribute('data-theme') === 'dark' }">
                     <button class="btn-icon" @click="dark = !dark; document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light'); try { localStorage.setItem('ff-theme', dark ? 'dark' : 'light') } catch(e) {}" :title="dark ? 'Light mode' : 'Dark mode'" :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'">
@@ -129,5 +211,5 @@ if (!empty($_portalUser['name'])) {
 
         <div class="portal-content">
 <?php
-unset($_theme, $_pageTitle, $_companyName, $_initials, $_overdueCount, $_overdueTotal);
+unset($_theme, $_pageTitle, $_companyName, $_initials, $_overdueCount, $_overdueTotal, $_portalUnread);
 ?>

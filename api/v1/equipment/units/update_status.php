@@ -126,6 +126,32 @@ db_transaction(function () use ($id, $newStatus, $reason, &$result) {
     ]);
 
     $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus];
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        if ($newStatus === 'decommissioned') {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'equipment.decommissioned',
+                title:      "Unit {$unit['unit_number']} decommissioned",
+                message:    "Unit {$unit['unit_number']} has been decommissioned",
+                entityType: 'equipment_unit',
+                entityId:   $id,
+                url:        '/fleetforge/equipment/units/show?id=' . $id,
+                severity:   'warning'
+            );
+        } else {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'equipment.status_changed',
+                title:      "Unit {$unit['unit_number']} → {$newStatus}",
+                message:    "Unit {$unit['unit_number']} status changed to {$newStatus}",
+                entityType: 'equipment_unit',
+                entityId:   $id,
+                url:        '/fleetforge/equipment/units/show?id=' . $id
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF equipment.status_changed] ' . $e->getMessage());
+    }
 });
 
 json_success($result);

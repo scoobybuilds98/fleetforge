@@ -73,6 +73,34 @@ try {
                     'notes'        => "Invoice {$invoice['invoice_number']} marked overdue (due {$invoice['due_date']}, status was {$invoice['status']})",
                     'ip_address'   => '127.0.0.1',
                 ]);
+
+                // [NOTIF-1] Fan out invoice.overdue to staff with invoice view
+                try {
+                    $daysPast = max(1, (int) floor((strtotime($today) - strtotime($invoice['due_date'])) / 86400));
+                    \FleetForge\Notifications\NotificationService::notify(
+                        type:       'invoice.overdue',
+                        title:      "Invoice {$invoice['invoice_number']} is overdue",
+                        message:    "Invoice {$invoice['invoice_number']} is overdue — {$daysPast} day" . ($daysPast === 1 ? '' : 's') . " past due",
+                        entityType: 'invoice',
+                        entityId:   $invoiceId,
+                        url:        '/fleetforge/invoices/show?id=' . $invoiceId,
+                        severity:   'warning'
+                    );
+                    if (!empty($invoice['customer_id'])) {
+                        \FleetForge\Notifications\NotificationService::notifyPortal(
+                            type:       'invoice.overdue',
+                            customerId: (int) $invoice['customer_id'],
+                            title:      "Invoice overdue — please contact us",
+                            message:    "Invoice {$invoice['invoice_number']} is overdue. Please contact us to arrange payment.",
+                            entityType: 'invoice',
+                            entityId:   $invoiceId,
+                            url:        '/fleetforge/portal/invoices/show?id=' . $invoiceId,
+                            severity:   'warning'
+                        );
+                    }
+                } catch (\Throwable $notifErr) {
+                    error_log('[NOTIF invoice.overdue] ' . $notifErr->getMessage());
+                }
             });
 
             $marked++;

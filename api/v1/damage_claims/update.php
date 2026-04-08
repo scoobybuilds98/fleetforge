@@ -279,6 +279,20 @@ db_transaction(function () use ($claimId, $claim, $updates, $newStatus, &$result
     ]);
 
     $resultRow = $fresh;
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'damage.updated',
+            title:      "Damage claim {$claim['claim_number']} updated",
+            message:    "Damage claim {$claim['claim_number']} updated",
+            entityType: 'damage_claim',
+            entityId:   $claimId,
+            url:        '/fleetforge/damage_claims/show?id=' . $claimId
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF damage.updated] ' . $e->getMessage());
+    }
 });
 
 json_success($resultRow);

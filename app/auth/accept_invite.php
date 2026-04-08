@@ -142,6 +142,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
                         'notes'        => 'Account activated via invite link',
                     ]);
+
+                    // ── In-app notification (NOTIF-1) ──────────
+                    // Note: this fires inside the activation transaction.
+                    // notify() catches its own errors so it cannot rollback.
+                    try {
+                        \FleetForge\Notifications\NotificationService::notify(
+                            type:       'system.user_joined',
+                            title:      "{$nameVal} has joined",
+                            message:    "{$nameVal} has joined FleetForge",
+                            entityType: 'user',
+                            entityId:   (int) $invite['user_id'],
+                            url:        '/fleetforge/users/show?id=' . (int) $invite['user_id']
+                        );
+                    } catch (\Throwable $e) {
+                        error_log('[NOTIF system.user_joined] ' . $e->getMessage());
+                    }
                 });
 
                 $appName = settings_get('company.name', 'FleetForge');

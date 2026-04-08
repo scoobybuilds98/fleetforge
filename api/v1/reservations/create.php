@@ -336,6 +336,20 @@ db_transaction(function () use (
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'reservation.created',
+            title:      "New reservation #{$newId}",
+            message:    "New reservation #{$newId} for {$companyName}",
+            entityType: 'reservation',
+            entityId:   $newId,
+            url:        '/fleetforge/reservations/show?id=' . $newId
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF reservation.created] ' . $e->getMessage());
+    }
 });
 
 json_success(['id' => $newId], 201);

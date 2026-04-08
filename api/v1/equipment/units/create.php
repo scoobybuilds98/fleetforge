@@ -238,6 +238,20 @@ db_transaction(function () use (
         'new_values'   => json_encode(['unit_number' => $unitNumber, 'status' => 'available']),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'equipment.created',
+            title:      "New unit added",
+            message:    "New unit {$unitNumber} added to fleet",
+            entityType: 'equipment_unit',
+            entityId:   $newId,
+            url:        '/fleetforge/equipment/units/show?id=' . $newId
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF equipment.created] ' . $e->getMessage());
+    }
 });
 
 // ── SAMSARA-3: Mirror the new unit to Samsara ──────────────────

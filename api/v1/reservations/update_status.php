@@ -233,6 +233,32 @@ db_transaction(function () use ($id, $targetStatus, $cancelReason, &$result) {
     ]);
 
     $result = ['id' => $id, 'status' => $targetStatus];
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        if ($targetStatus === 'confirmed') {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'reservation.confirmed',
+                title:      "Reservation #{$id} confirmed",
+                message:    "Reservation #{$id} confirmed for {$reservation['company_name']}",
+                entityType: 'reservation',
+                entityId:   $id,
+                url:        '/fleetforge/reservations/show?id=' . $id
+            );
+        } elseif ($targetStatus === 'cancelled') {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'reservation.cancelled',
+                title:      "Reservation #{$id} cancelled",
+                message:    "Reservation #{$id} cancelled" . ($cancelReason ? ": {$cancelReason}" : ''),
+                entityType: 'reservation',
+                entityId:   $id,
+                url:        '/fleetforge/reservations/show?id=' . $id,
+                severity:   'warning'
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF reservation.status_change] ' . $e->getMessage());
+    }
 });
 
 json_success($result);

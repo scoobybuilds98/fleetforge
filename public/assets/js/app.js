@@ -674,84 +674,229 @@ window.FF_Validate = FF_Validate;
 
 
 // ============================================================
-// 07. FF_Notifications — notification dropdown
+// 07. FF_Notifications — Alpine factory for the topbar bell + dropdown
 // ============================================================
+//
+// Used by includes/topbar.php as:
+//   <div x-data="FF_Notifications()" x-init="init()">
+//
+// Features:
+//   - Initial fetch of recent 10 notifications + unread count
+//   - 60s polling for unread count (lightweight)
+//   - Mark single read on click-through
+//   - Mark all read
+//   - Category icon + colour mapping
+//   - Cleans up the polling timer on Alpine destroy
+//
+// Endpoint contract (api/v1/notifications/):
+//   GET  index.php?per_page=10  → { items[], pagination, meta.total_unread, total_unread }
+//   GET  count.php              → { unread_count }
+//   POST mark_read.php { notification_id | mark_all }
+//
 
-const FF_Notifications = {
-    _loaded: false,
+function FF_Notifications() {
+    return {
+        open: false,
+        loading: false,
+        notifications: [],
+        unreadCount: 0,
+        _pollTimer: null,
 
-    /**
-     * Fetch and render the notification list.
-     * Idempotent — only fetches once per page load.
-     */
-    async load() {
-        if (this._loaded) return;
-
-        const list = document.getElementById('ff-notification-list');
-        if (!list) return;
-
-        try {
-            const data = await FF_Api.get(FF_Api.url('/api/v1/notifications?limit=10'));
-
-            if (!data.success) {
-                list.innerHTML = '<div class="notification-empty">Could not load notifications.</div>';
-                return;
-            }
-
-            const items = data.data?.items ?? [];
-
-            if (!items.length) {
-                list.innerHTML = '<div class="notification-empty">No new notifications.</div>';
-                this._loaded = true;
-                return;
-            }
-
-            list.innerHTML = items.map(n => {
-                const href = ffEsc(n.url ?? '#');
-                const unread = n.is_read ? '' : ' is-unread';
-                return (
-                    `<a href="${href}" class="notification-item${unread}" data-id="${ffEsc(String(n.id ?? ''))}">` +
-                    `<div class="notification-item-body">` +
-                    `<div class="notification-item-text">${ffEsc(n.message ?? '')}</div>` +
-                    `<div class="notification-item-time">${ffEsc(n.time_ago ?? '')}</div>` +
-                    `</div></a>`
-                );
-            }).join('');
-
-            this._loaded = true;
-
-        } catch {
-            list.innerHTML = '<div class="notification-empty">Could not load notifications.</div>';
-        }
-    },
-
-    /** Mark all notifications read, clear the badge dot. */
-    async markAllRead() {
-        try {
-            const data = await FF_Api.post(FF_Api.url('/api/v1/notifications/mark-read'));
-
-            if (!data.success) {
-                FF_Toast.error('Error', data.error?.message ?? 'Could not mark notifications as read.');
-                return;
-            }
-
-            // Remove unread styling
-            document.querySelectorAll('.notification-item.is-unread').forEach(el => {
-                el.classList.remove('is-unread');
+        async init() {
+            await this.fetchCount();
+            // Refresh badge every 60s — lightweight COUNT only.
+            this._pollTimer = setInterval(() => { this.fetchCount(); }, 60000);
+            // Stop polling when Alpine tears the component down.
+            // Without this, navigating away leaks the timer until GC.
+            this.$el?.addEventListener?.('alpine:destroyed', () => {
+                if (this._pollTimer) clearInterval(this._pollTimer);
             });
+        },
 
-            // Remove the red dot from the bell button
-            document.querySelectorAll('.notification-dot').forEach(el => el.remove());
+        async fetchCount() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/notifications/count.php'));
+                if (data?.success) {
+                    this.unreadCount = data.data?.unread_count ?? 0;
+                }
+            } catch { /* silent — bell never crashes the page */ }
+        },
 
-            FF_Toast.success('Done', 'All notifications marked as read.');
+        async fetchNotifications() {
+            this.loading = true;
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/notifications/index.php?per_page=10'));
+                if (data?.success) {
+                    this.notifications = data.data?.items ?? [];
+                    this.unreadCount = data.data?.total_unread
+                                     ?? data.data?.meta?.total_unread
+                                     ?? this.unreadCount;
+                } else {
+                    this.notifications = [];
+                }
+            } catch {
+                this.notifications = [];
+            } finally {
+                this.loading = false;
+            }
+        },
 
-        } catch {
-            FF_Toast.error('Error', 'Could not mark notifications as read.');
-        }
-    },
+        async toggleDropdown() {
+            this.open = !this.open;
+            if (this.open) {
+                // Always refetch on open so we don't show stale data after polling
+                await this.fetchNotifications();
+            }
+        },
+
+        async markRead(id) {
+            // Optimistic UI: flip the local flag immediately
+            const n = this.notifications.find(x => x.id === id);
+            if (n && !n.is_read) {
+                n.is_read = true;
+                this.unreadCount = Math.max(0, this.unreadCount - 1);
+            }
+            try {
+                await FF_Api.post(FF_Api.url('/api/v1/notifications/mark_read.php'),
+                    { notification_id: id });
+            } catch { /* server-side error doesn't undo optimistic UI */ }
+        },
+
+        async markAllRead() {
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/notifications/mark_read.php'),
+                    { mark_all: true });
+                if (data?.success) {
+                    this.notifications.forEach(n => { n.is_read = true; });
+                    this.unreadCount = 0;
+                    if (window.FF_Toast) FF_Toast.success('Done', 'All notifications marked as read.');
+                }
+            } catch {
+                if (window.FF_Toast) FF_Toast.error('Error', 'Could not mark notifications as read.');
+            }
+        },
+
+        // Inline SVG by category — kept compact so the dropdown is one round-trip
+        iconFor(category) {
+            return _NOTIF_ICONS[category] ?? _NOTIF_ICONS.system;
+        },
+
+        categoryClass(n) {
+            // Map (type, severity) to a CSS class for the icon background colour
+            const t = n.type ?? '';
+            if (t === 'compliance.expired'      || n.severity === 'critical') return 'notif-icon--danger';
+            if (t === 'compliance.expiring_7'   || n.severity === 'warning')  return 'notif-icon--warning';
+            if (t === 'samsara.battery_critical') return 'notif-icon--danger';
+            if (t === 'samsara.battery_low')      return 'notif-icon--warning';
+            const cat = n.category ?? 'system';
+            return 'notif-icon--' + cat;
+        },
+    };
+}
+
+// Inline SVG icons keyed by notification category. Outline Heroicons.
+const _NOTIF_ICONS = {
+    leases:       '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9z"/></svg>',
+    invoices:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>',
+    payments:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"/></svg>',
+    customers:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg>',
+    equipment:    '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>',
+    compliance:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z"/></svg>',
+    maintenance:  '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z"/></svg>',
+    damage:       '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.008v.008H12v-.008Z"/></svg>',
+    reservations: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>',
+    samsara:      '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/></svg>',
+    accounting:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V13.5Zm0 2.25h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V18Zm2.498-6.75h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V13.5Zm0 2.25h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V18Zm2.504-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5Zm0 2.25h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V18Zm2.498-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5ZM8.25 6h7.5v2.25h-7.5V6ZM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 0 0 2.25 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0 0 12 2.25Z"/></svg>',
+    system:       '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>',
 };
 
 window.FF_Notifications = FF_Notifications;
+
+
+// ============================================================
+// 07b. FF_PortalNotifications — same shape, portal endpoints
+// ============================================================
+//
+// Used by app/portal/includes/header.php — talks to the portal-scoped
+// notification endpoints which filter by portal_user_id (not user_id).
+//
+
+function FF_PortalNotifications() {
+    return {
+        open: false,
+        loading: false,
+        notifications: [],
+        unreadCount: 0,
+        _pollTimer: null,
+
+        async init() {
+            await this.fetchCount();
+            this._pollTimer = setInterval(() => { this.fetchCount(); }, 60000);
+            this.$el?.addEventListener?.('alpine:destroyed', () => {
+                if (this._pollTimer) clearInterval(this._pollTimer);
+            });
+        },
+
+        async fetchCount() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/portal/api/notifications/count.php'));
+                if (data?.success) {
+                    this.unreadCount = data.data?.unread_count ?? 0;
+                }
+            } catch { /* silent */ }
+        },
+
+        async fetchNotifications() {
+            this.loading = true;
+            try {
+                const data = await FF_Api.get(FF_Api.url('/portal/api/notifications/index.php?per_page=10'));
+                if (data?.success) {
+                    this.notifications = data.data?.items ?? [];
+                    this.unreadCount = data.data?.total_unread ?? this.unreadCount;
+                } else {
+                    this.notifications = [];
+                }
+            } catch {
+                this.notifications = [];
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async toggleDropdown() {
+            this.open = !this.open;
+            if (this.open) await this.fetchNotifications();
+        },
+
+        async markRead(id) {
+            const n = this.notifications.find(x => x.id === id);
+            if (n && !n.is_read) {
+                n.is_read = true;
+                this.unreadCount = Math.max(0, this.unreadCount - 1);
+            }
+            try {
+                await FF_Api.post(FF_Api.url('/portal/api/notifications/mark_read.php'),
+                    { notification_id: id });
+            } catch { /* silent */ }
+        },
+
+        async markAllRead() {
+            try {
+                const data = await FF_Api.post(FF_Api.url('/portal/api/notifications/mark_read.php'),
+                    { mark_all: true });
+                if (data?.success) {
+                    this.notifications.forEach(n => { n.is_read = true; });
+                    this.unreadCount = 0;
+                    if (window.FF_Toast) FF_Toast.success('Done', 'All notifications marked as read.');
+                }
+            } catch {
+                if (window.FF_Toast) FF_Toast.error('Error', 'Could not mark notifications as read.');
+            }
+        },
+    };
+}
+
+window.FF_PortalNotifications = FF_PortalNotifications;
 
 
 // ============================================================
@@ -1212,15 +1357,9 @@ document.addEventListener('DOMContentLoaded', function () {
         FF_Search.query(term);
     });
 
-    // ── Notification: load on first bell open ──────────────
-
-    document.querySelector('.topbar-bell-btn')
-        ?.addEventListener('click', () => FF_Notifications.load(), { once: true });
-
-    // ── Notification: mark all read ────────────────────────
-
-    document.getElementById('ff-mark-all-read')
-        ?.addEventListener('click', () => FF_Notifications.markAllRead());
+    // ── Notification bell + dropdown ───────────────────────
+    // FF_Notifications is now an Alpine factory consumed by includes/topbar.php
+    // via x-data="FF_Notifications()" — no DOM-ready wiring needed here.
 
     // ── Mobile sidebar overlay ─────────────────────────────
     // The overlay element is rendered by app.js (not in PHP templates)

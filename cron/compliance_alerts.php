@@ -149,23 +149,29 @@ try {
         $url      = '/compliance?q=' . urlencode($unitNumber);
 
         // -----------------------------------------------------------------------
-        // Write notification + notification_log inside a transaction
+        // [NOTIF-1] Fan out via NotificationService — one row per user with
+        // compliance.view permission, then write the dedup log entry.
         // -----------------------------------------------------------------------
         try {
             db_transaction(function() use ($unitId, $unitNumber, $title, $message, $url, $maxSeverity) {
-                // Write in-app notification (user_id = null broadcasts to all staff;
-                // a future notification rules module will target specific users/roles)
-                db_insert('notifications', [
-                    'user_id'     => null,
-                    'rule_id'     => null,
-                    'title'       => $title,
-                    'message'     => $message,
-                    'url'         => $url,
-                    'entity_type' => 'equipment_unit',
-                    'entity_id'   => $unitId,
-                    'severity'    => $maxSeverity,
-                    'is_read'     => 0,
-                ]);
+                // Pick the right type from severity so the UI can use the
+                // correct icon color (compliance.expired = red, expiring_7 = orange,
+                // expiring_30 = yellow).
+                $type = match($maxSeverity) {
+                    'critical' => 'compliance.expired',
+                    'warning'  => 'compliance.expiring_7',
+                    default    => 'compliance.expiring_30',
+                };
+
+                \FleetForge\Notifications\NotificationService::notify(
+                    type:       $type,
+                    title:      $title,
+                    message:    $message,
+                    entityType: 'equipment_unit',
+                    entityId:   $unitId,
+                    url:        '/fleetforge/compliance?q=' . urlencode($unitNumber),
+                    severity:   $maxSeverity
+                );
 
                 // Write deduplication log entry so we don't re-alert within 24h
                 db_insert('notification_log', [

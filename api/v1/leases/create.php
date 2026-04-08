@@ -445,6 +445,21 @@ db_transaction(function () use (
         'new_values'   => json_encode(['contract_number' => $contractNumber, 'status' => 'pending']),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    // Wrapped in try/catch so notification failure NEVER rolls back the lease.
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'lease.created',
+            title:      "New lease {$contractNumber}",
+            message:    "Lease {$contractNumber} created for {$companyNameSnapshot}",
+            entityType: 'lease',
+            entityId:   $leaseId,
+            url:        '/fleetforge/leases/show?id=' . $leaseId
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF lease.created] ' . $e->getMessage());
+    }
 });
 
 json_success(['id' => $leaseId, 'contract_number' => $contractNumber], 201);

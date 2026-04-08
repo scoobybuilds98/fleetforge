@@ -90,7 +90,7 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
     // start odometer for the final invoice when the user supplies a
     // closing odometer without an explicit start value.
     $lease = db_row(
-        "SELECT id, status, contract_number, company_name_snapshot,
+        "SELECT id, status, contract_number, company_name_snapshot, customer_id,
                 equipment_unit_id, unit_number_snapshot, mileage_at_start,
                 mileage_rate, mileage_unit, estimated_mileage, mileage_precharge_amount,
                 start_date, last_billed_date, odometer_start_km
@@ -271,6 +271,32 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
     ]);
 
     $result = ['id' => $id, 'status' => 'completed', 'invoice_id' => $invoiceResult['invoice_id']];
+
+    // ── In-app notifications (NOTIF-1) ─────────────────────────
+    try {
+        $unitNumber = $unit['unit_number'] ?? ($lease['unit_number_snapshot'] ?? '');
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'lease.closed',
+            title:      "Lease {$lease['contract_number']} closed",
+            message:    "Lease {$lease['contract_number']} closed — unit {$unitNumber} returned",
+            entityType: 'lease',
+            entityId:   $id,
+            url:        '/fleetforge/leases/show?id=' . $id
+        );
+        if (!empty($lease['customer_id'])) {
+            \FleetForge\Notifications\NotificationService::notifyPortal(
+                type:       'lease.closed',
+                customerId: (int) $lease['customer_id'],
+                title:      "Your lease has been closed",
+                message:    "Lease {$lease['contract_number']} has been closed.",
+                entityType: 'lease',
+                entityId:   $id,
+                url:        '/fleetforge/portal/leases/show?id=' . $id
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF lease.closed] ' . $e->getMessage());
+    }
 });
 
 json_success($result);

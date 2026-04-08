@@ -97,7 +97,8 @@ $internalNotes   = clean_string($body['internal_notes'] ?? null, 2000);
 // Verify the invoice exists
 $invoiceCheck = db_row(
     "SELECT id, status, currency, balance_due, amount_paid, credits_applied,
-            customer_id, lease_id, invoice_number, total_amount
+            customer_id, lease_id, invoice_number, total_amount,
+            company_name_snapshot
      FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$invoiceId]
 );
@@ -355,6 +356,60 @@ db_transaction(function () use (
         'invoice_status'   => $newInvoiceStatus,
         'balance_due'      => $newBalanceDue,
     ];
+
+    // ── In-app notifications (NOTIF-1) ─────────────────────────
+    // Three notifications fire from a payment.create call:
+    //   1. payment.received — staff with payments view
+    //   2. invoice.paid OR invoice.partially_paid — depends on new status
+    //   3. portal payment.received — confirms to the customer
+    try {
+        $companyName = $invoiceCheck['company_name_snapshot'] ?? 'customer';
+        $amtFmt      = '$' . number_format((float) $amountRaw, 2);
+
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'payment.received',
+            title:      "Payment received from {$companyName}",
+            message:    "Payment {$paymentNumber} of {$amtFmt} received from {$companyName} — {$paymentMethod}",
+            entityType: 'payment',
+            entityId:   (int) $paymentId,
+            url:        '/fleetforge/payments/show?id=' . $paymentId
+        );
+
+        if ($newInvoiceStatus === 'paid') {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'invoice.paid',
+                title:      "Invoice {$invoice['invoice_number']} paid",
+                message:    "Invoice {$invoice['invoice_number']} paid in full by {$companyName}",
+                entityType: 'invoice',
+                entityId:   (int) $invoiceId,
+                url:        '/fleetforge/invoices/show?id=' . $invoiceId
+            );
+        } else {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'invoice.partially_paid',
+                title:      "Partial payment received",
+                message:    "Partial payment received on invoice {$invoice['invoice_number']} ({$amtFmt})",
+                entityType: 'invoice',
+                entityId:   (int) $invoiceId,
+                url:        '/fleetforge/invoices/show?id=' . $invoiceId
+            );
+        }
+
+        // Portal confirmation
+        if (!empty($invoiceCheck['customer_id'])) {
+            \FleetForge\Notifications\NotificationService::notifyPortal(
+                type:       'payment.received',
+                customerId: (int) $invoiceCheck['customer_id'],
+                title:      "Payment received — thank you!",
+                message:    "Payment received. Invoice {$invoice['invoice_number']} is now {$newInvoiceStatus}.",
+                entityType: 'invoice',
+                entityId:   (int) $invoiceId,
+                url:        '/fleetforge/portal/invoices/show?id=' . $invoiceId
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF payment.received] ' . $e->getMessage());
+    }
 });
 
 json_success($result, 201);

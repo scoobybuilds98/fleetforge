@@ -249,6 +249,22 @@ db_transaction(function () use (
         'claim_number' => $claimNumber,
         'status'       => 'reported',
     ];
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        $costFmt = $estimatedRepairCost !== null ? '$' . number_format((float) $estimatedRepairCost, 2) : 'TBD';
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'damage.created',
+            title:      "Damage claim {$claimNumber}",
+            message:    "Damage claim {$claimNumber} filed for unit {$unit['unit_number']} — {$costFmt}",
+            entityType: 'damage_claim',
+            entityId:   $claimId,
+            url:        '/fleetforge/damage_claims/show?id=' . $claimId,
+            severity:   'warning'
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF damage.created] ' . $e->getMessage());
+    }
 });
 
 json_success($result, 201);

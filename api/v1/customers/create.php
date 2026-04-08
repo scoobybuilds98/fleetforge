@@ -294,6 +294,20 @@ db_transaction(function () use (
         'new_values'   => json_encode(['company_name' => $companyName, 'status' => $status]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'customer.created',
+            title:      "New customer added",
+            message:    "New customer {$companyName} added",
+            entityType: 'customer',
+            entityId:   $newId,
+            url:        '/fleetforge/customers/show?id=' . $newId
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF customer.created] ' . $e->getMessage());
+    }
 });
 
 json_success(['id' => $newId, 'company_name' => $companyName], 201);

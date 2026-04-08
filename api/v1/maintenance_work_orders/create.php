@@ -205,6 +205,20 @@ db_transaction(function() use (
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'maintenance.created',
+            title:      "New work order {$woNumber}",
+            message:    "Work order {$woNumber} created for unit {$unit['unit_number']}",
+            entityType: 'work_order',
+            entityId:   $newId,
+            url:        '/fleetforge/maintenance_work_orders/show?id=' . $newId
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF maintenance.created] ' . $e->getMessage());
+    }
 });
 
 json_success(['id' => $newId, 'work_order_number' => $woNumber], 201);

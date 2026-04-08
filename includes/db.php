@@ -32,6 +32,7 @@ const SOFT_DELETE_TABLES = [
     'reservations',
     'rate_cards',
     'payments',
+    'notifications',  // [NOTIF-1] in-app notifications support soft-delete so users can clear without losing audit
 ];
 
 // ============================================================

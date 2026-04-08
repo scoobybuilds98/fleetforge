@@ -57,8 +57,8 @@ db_transaction(function () use ($id, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     $lease = db_row(
         "SELECT id, status, contract_number, company_name_snapshot,
-                equipment_unit_id, start_date, billing_cycle, unit_number_snapshot,
-                last_billed_date
+                customer_id, equipment_unit_id, start_date, billing_cycle,
+                unit_number_snapshot, last_billed_date
          FROM leases WHERE id = ? AND deleted_at IS NULL",
         [$id]
     );
@@ -176,6 +176,36 @@ db_transaction(function () use ($id, &$result) {
     ]);
 
     $result = ['id' => $id, 'status' => 'active', 'invoice_id' => $invoiceResult['invoice_id']];
+
+    // ── In-app notifications (NOTIF-1) ─────────────────────────
+    // Two notifications fire here: lease.activated for staff, and a portal
+    // notification to the customer that their lease is live.
+    try {
+        $unitNumber = $unit['unit_number'] ?? ($lease['unit_number_snapshot'] ?? '');
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'lease.activated',
+            title:      "Lease {$lease['contract_number']} activated",
+            message:    "Lease {$lease['contract_number']} activated — unit {$unitNumber} is now on lease",
+            entityType: 'lease',
+            entityId:   $id,
+            url:        '/fleetforge/leases/show?id=' . $id
+        );
+
+        // Portal notification: only if we know the customer_id
+        if (!empty($lease['customer_id'])) {
+            \FleetForge\Notifications\NotificationService::notifyPortal(
+                type:       'lease.activated',
+                customerId: (int) $lease['customer_id'],
+                title:      "Your lease is now active",
+                message:    "Lease {$lease['contract_number']} is now active.",
+                entityType: 'lease',
+                entityId:   $id,
+                url:        '/fleetforge/portal/leases/show?id=' . $id
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF lease.activated] ' . $e->getMessage());
+    }
 });
 
 json_success($result);

@@ -195,6 +195,72 @@ try {
             } else {
                 ff_samsara_log('CRON_SYNC', "Unit $unitNum: telemetry updated (no movement)");
             }
+
+            // ── [NOTIF-1] Battery + connectivity alerts ───────
+            // Dedup via notification_log so we only fire each alert once
+            // per (unit + type) per 6 hours.
+            try {
+                $batteryPct = isset($stats['battery_pct']) ? (int) $stats['battery_pct'] : null;
+                $lastConn   = $update['samsara_last_connected_at'];
+
+                $alerts = [];
+                if ($batteryPct !== null) {
+                    if ($batteryPct < 10) {
+                        $alerts[] = ['type' => 'samsara.battery_critical', 'sev' => 'critical',
+                            'title' => "Unit {$unitNum} battery CRITICAL",
+                            'msg'   => "Unit {$unitNum} battery CRITICAL at {$batteryPct}%"];
+                    } elseif ($batteryPct < 20) {
+                        $alerts[] = ['type' => 'samsara.battery_low', 'sev' => 'warning',
+                            'title' => "Unit {$unitNum} battery low",
+                            'msg'   => "Unit {$unitNum} battery at {$batteryPct}% — charge needed"];
+                    }
+                }
+                if ($lastConn !== null) {
+                    $hoursSince = (int) floor((time() - strtotime($lastConn . ' UTC')) / 3600);
+                    if ($hoursSince > 8) {
+                        $alerts[] = ['type' => 'samsara.not_connected', 'sev' => 'warning',
+                            'title' => "Unit {$unitNum} offline",
+                            'msg'   => "Unit {$unitNum} not connected for {$hoursSince} hours"];
+                    }
+                }
+
+                foreach ($alerts as $a) {
+                    // 6h dedup
+                    $recent = db_row(
+                        "SELECT id FROM notification_log
+                          WHERE entity_type = 'equipment_unit' AND entity_id = ?
+                            AND notification_type = ?
+                            AND created_at >= NOW() - INTERVAL 6 HOUR
+                          LIMIT 1",
+                        [$unitId, $a['type']]
+                    );
+                    if ($recent) continue;
+
+                    \FleetForge\Notifications\NotificationService::notify(
+                        type:       $a['type'],
+                        title:      $a['title'],
+                        message:    $a['msg'],
+                        entityType: 'equipment_unit',
+                        entityId:   $unitId,
+                        url:        '/fleetforge/equipment/units/show?id=' . $unitId,
+                        severity:   $a['sev']
+                    );
+                    db_insert('notification_log', [
+                        'rule_id'           => null,
+                        'channel'           => 'in_app',
+                        'recipient'         => 'all_staff',
+                        'subject'           => $a['title'],
+                        'body'              => $a['msg'],
+                        'entity_type'       => 'equipment_unit',
+                        'entity_id'         => $unitId,
+                        'notification_type' => $a['type'],
+                        'status'            => 'sent',
+                        'sent_at'           => $now,
+                    ]);
+                }
+            } catch (\Throwable $notifErr) {
+                error_log('[NOTIF samsara] ' . $notifErr->getMessage());
+            }
         } catch (\Throwable $e) {
             // DB or unexpected error for this unit only — keep going.
             $failed++;

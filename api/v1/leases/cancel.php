@@ -143,6 +143,21 @@ db_transaction(function () use ($id, $cancelReason, &$result) {
     ]);
 
     $result = ['id' => $id, 'status' => 'cancelled'];
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'lease.cancelled',
+            title:      "Lease {$lease['contract_number']} cancelled",
+            message:    "Lease {$lease['contract_number']} cancelled" . ($cancelReason ? ": {$cancelReason}" : ''),
+            entityType: 'lease',
+            entityId:   $id,
+            url:        '/fleetforge/leases/show?id=' . $id,
+            severity:   'warning'
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF lease.cancelled] ' . $e->getMessage());
+    }
 });
 
 json_success($result);

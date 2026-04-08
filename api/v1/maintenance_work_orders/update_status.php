@@ -146,6 +146,33 @@ db_transaction(function() use ($id, $newStatus, $reason, $resNotes, &$result) {
     ]);
 
     $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus];
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        if ($newStatus === 'completed') {
+            $cost = '$' . number_format((float) $wo['total_cost'], 2);
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'maintenance.completed',
+                title:      "Work order {$wo['work_order_number']} completed",
+                message:    "Work order {$wo['work_order_number']} completed — {$cost}",
+                entityType: 'work_order',
+                entityId:   $id,
+                url:        '/fleetforge/maintenance_work_orders/show?id=' . $id
+            );
+        } elseif ($newStatus === 'waiting_parts') {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'maintenance.waiting_parts',
+                title:      "Work order {$wo['work_order_number']} waiting for parts",
+                message:    "Work order {$wo['work_order_number']} waiting for parts",
+                entityType: 'work_order',
+                entityId:   $id,
+                url:        '/fleetforge/maintenance_work_orders/show?id=' . $id,
+                severity:   'warning'
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF maintenance.status_change] ' . $e->getMessage());
+    }
 });
 
 json_success($result);

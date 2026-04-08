@@ -57,7 +57,8 @@ if ($fields) {
 
 // Verify lease exists and is active
 $lease = db_row(
-    "SELECT id, status FROM leases WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, status, customer_id, contract_number, company_name_snapshot
+       FROM leases WHERE id = ? AND deleted_at IS NULL",
     [$leaseId]
 );
 if (!$lease) {
@@ -168,6 +169,21 @@ db_transaction(function () use (
         'notes'        => "Invoice {$result['invoice_number']} created for lease #{$leaseId}",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        $companyName = $lease['company_name_snapshot'] ?? 'customer';
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'invoice.created',
+            title:      "New invoice {$result['invoice_number']}",
+            message:    "Invoice {$result['invoice_number']} created for {$companyName} — \$" . number_format((float) $result['total_amount'], 2),
+            entityType: 'invoice',
+            entityId:   (int) $result['invoice_id'],
+            url:        '/fleetforge/invoices/show?id=' . $result['invoice_id']
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF invoice.created] ' . $e->getMessage());
+    }
 });
 
 json_success([

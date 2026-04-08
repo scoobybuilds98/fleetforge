@@ -115,6 +115,21 @@ $newId = db_transaction(function () use (
         'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
     ]);
 
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        $invitedBy = current_user()['name'] ?? 'system';
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'system.user_invited',
+            title:      "User invited",
+            message:    "New user {$email} invited by {$invitedBy}",
+            entityType: 'user',
+            entityId:   $id,
+            url:        '/fleetforge/users/show?id=' . $id
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF system.user_invited] ' . $e->getMessage());
+    }
+
     return $id;
 });
 

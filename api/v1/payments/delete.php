@@ -170,6 +170,26 @@ db_transaction(function () use ($id, $payment, $allocations, $reason, &$reverted
         'notes'        => "Payment {$payment['payment_number']} soft-deleted. Reason: {$reason}. Reversed allocations for: {$invoiceList}.",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        $companyName = '';
+        if (!empty($payment['customer_id'])) {
+            $cust = \db_row("SELECT company_name FROM customers WHERE id = ?", [$payment['customer_id']]);
+            $companyName = $cust['company_name'] ?? '';
+        }
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'payment.reversed',
+            title:      "Payment {$payment['payment_number']} reversed",
+            message:    "Payment {$payment['payment_number']} reversed" . ($companyName ? " for {$companyName}" : '') . ". Reason: {$reason}",
+            entityType: 'payment',
+            entityId:   $id,
+            url:        '/fleetforge/payments',
+            severity:   'warning'
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF payment.reversed] ' . $e->getMessage());
+    }
 });
 
 json_success([

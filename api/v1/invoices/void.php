@@ -91,6 +91,21 @@ db_transaction(function () use ($id, $invoice, $voidReason) {
     // Auto-JE: Reverse the original invoice JE (if one exists)
     // WHY: Inside same transaction — reversal failure rolls back the void (A8, §16)
     \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, current_user_id());
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'invoice.voided',
+            title:      "Invoice {$invoice['invoice_number']} voided",
+            message:    "Invoice {$invoice['invoice_number']} voided: {$voidReason}",
+            entityType: 'invoice',
+            entityId:   $id,
+            url:        '/fleetforge/invoices/show?id=' . $id,
+            severity:   'warning'
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF invoice.voided] ' . $e->getMessage());
+    }
 });
 
 json_success(['id' => $id, 'status' => 'void']);

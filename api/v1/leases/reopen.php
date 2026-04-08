@@ -156,6 +156,21 @@ db_transaction(function () use ($id, $reopenReason, &$result) {
     ]);
 
     $result = ['id' => $id, 'status' => 'active'];
+
+    // ── In-app notification (NOTIF-1) ──────────────────────────
+    try {
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'lease.reopened',
+            title:      "Lease {$lease['contract_number']} reopened",
+            message:    "Lease {$lease['contract_number']} reopened by {$changedBy}: {$reopenReason}",
+            entityType: 'lease',
+            entityId:   $id,
+            url:        '/fleetforge/leases/show?id=' . $id,
+            severity:   'warning'
+        );
+    } catch (\Throwable $e) {
+        error_log('[NOTIF lease.reopened] ' . $e->getMessage());
+    }
 });
 
 json_success($result);

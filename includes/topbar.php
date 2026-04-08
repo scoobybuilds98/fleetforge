@@ -27,13 +27,16 @@ declare(strict_types=1);
  */
 
 // ── Notification unread count ─────────────────────────────────────────────────
-// Wrapped in try/catch so the topbar renders before the notifications table exists.
+// [NOTIF-1] Initial count for first paint. After load, FF_Notifications() Alpine
+// factory polls /api/v1/notifications/count.php every 60s to refresh the badge.
+// Wrapped in try/catch so the topbar renders even if the table is missing.
 $_unreadCount = 0;
 try {
     $_uid = current_user_id();
     if ($_uid) {
         $_unreadCount = db_count(
-            "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0",
+            'SELECT COUNT(*) FROM notifications
+              WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL',
             [$_uid]
         );
     }
@@ -395,27 +398,36 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             </div>
         </div>
 
-        <!-- ── Notifications bell ────────────────────────────────────── -->
-        <div class="topbar-notifications"
-             x-data="{ open: false }"
+        <!-- ── Notifications bell (NOTIF-1 — Alpine factory) ────────── -->
+        <!-- FF_Notifications() factory is in public/assets/js/app.js.
+             It owns: open, loading, notifications[], unreadCount, _pollTimer.
+             Initial $_unreadCount is rendered server-side for first paint;
+             Alpine.init() then refreshes it via /api/v1/notifications/count.php
+             every 60s. -->
+        <div class="notif-wrapper"
+             x-data="FF_Notifications()"
+             x-init="init(); unreadCount = <?= (int) $_unreadCount ?>;"
              @click.outside="open = false"
              @keydown.escape.window="open = false">
 
-            <button class="btn-icon topbar-bell-btn"
-                    @click="open = !open"
-                    aria-label="Notifications<?= $_unreadCount > 0 ? ' (' . e((string)$_unreadCount) . ' unread)' : '' ?>"
-                    :aria-expanded="open">
+            <button type="button"
+                    class="btn-icon topbar-bell-btn notif-bell-btn"
+                    :class="{ 'has-unread': unreadCount > 0 }"
+                    @click="toggleDropdown()"
+                    :aria-expanded="open"
+                    :aria-label="unreadCount > 0
+                        ? 'Notifications (' + unreadCount + ' unread)'
+                        : 'Notifications'">
                 <?= heroicon('bell', 'nav-icon') ?>
-                <?php if ($_unreadCount > 0): ?>
-                    <span class="notification-dot" aria-hidden="true">
-                        <?= e($_unreadCount > 99 ? '99+' : (string) $_unreadCount) ?>
-                    </span>
-                <?php endif; ?>
+                <span class="notif-badge"
+                      x-show="unreadCount > 0"
+                      x-text="unreadCount > 99 ? '99+' : unreadCount"
+                      aria-hidden="true"></span>
             </button>
 
-            <!-- Populated by FF_Notifications.load() in app.js -->
-            <div class="notification-dropdown"
+            <div class="notif-dropdown"
                  x-show="open"
+                 x-cloak
                  x-transition:enter="dropdown-enter"
                  x-transition:enter-start="dropdown-enter-start"
                  x-transition:enter-end="dropdown-enter-end"
@@ -425,23 +437,59 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
                  role="menu"
                  aria-label="Notifications">
 
-                <div class="notification-header">
-                    <span class="notification-heading">Notifications</span>
-                    <button class="btn-link btn-xs" id="ff-mark-all-read" type="button">
+                <!-- Header -->
+                <div class="notif-dropdown-header">
+                    <span class="notif-dropdown-title">Notifications</span>
+                    <button type="button"
+                            class="notif-mark-all"
+                            @click="markAllRead()"
+                            x-show="unreadCount > 0">
                         Mark all read
                     </button>
                 </div>
 
-                <div class="notification-list" id="ff-notification-list">
-                    <div class="notification-empty">Loading…</div>
+                <!-- Loading -->
+                <div class="notif-loading" x-show="loading" x-cloak>
+                    Loading notifications…
                 </div>
 
-                <div class="notification-footer">
-                    <a href="<?= e(base_url('notifications')) ?>" class="btn-link btn-sm">
-                        View all notifications
+                <!-- Empty -->
+                <div class="notif-empty"
+                     x-show="!loading && notifications.length === 0"
+                     x-cloak>
+                    <?= heroicon('bell', 'nav-icon') ?>
+                    <p>No notifications yet</p>
+                </div>
+
+                <!-- Items -->
+                <template x-for="n in notifications" :key="n.id">
+                    <a :href="n.url || '#'"
+                       class="notif-item"
+                       :class="{ 'notif-item--unread': !n.is_read }"
+                       @click="markRead(n.id)">
+
+                        <div class="notif-icon"
+                             :class="categoryClass(n)"
+                             x-html="iconFor(n.category)"></div>
+
+                        <div class="notif-content">
+                            <div class="notif-title" x-text="n.title"></div>
+                            <div class="notif-message" x-text="n.message"></div>
+                            <div class="notif-time" x-text="n.time_ago"></div>
+                        </div>
+
+                        <div class="notif-unread-dot" x-show="!n.is_read"></div>
                     </a>
-                </div>
+                </template>
 
+                <!-- Footer -->
+                <a href="<?= e(base_url('notifications')) ?>"
+                   class="notif-dropdown-footer">
+                    See all notifications
+                    <span x-show="unreadCount > 0">
+                        (<span x-text="unreadCount"></span> unread)
+                    </span>
+                </a>
             </div>
         </div>
 
@@ -451,13 +499,20 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
              @click.outside="open = false"
              @keydown.escape.window="open = false">
 
-            <!-- Initials circle acts as the trigger button -->
-            <button class="user-avatar"
+            <!-- Avatar + name/role acts as the trigger button.
+                 NOTIF-1 follow-up: show the logged-in user's name in the
+                 topbar (was initials-only). Name + role are hidden on
+                 mobile via .user-trigger-meta to save horizontal space. -->
+            <button class="user-trigger"
                     @click="open = !open"
                     :aria-expanded="open"
                     aria-haspopup="true"
                     aria-label="Account menu for <?= e($_me['name'] ?? 'user') ?>">
-                <?= e($_initials) ?>
+                <span class="user-avatar" aria-hidden="true"><?= e($_initials) ?></span>
+                <span class="user-trigger-meta">
+                    <span class="user-trigger-name"><?= e($_me['name'] ?? 'User') ?></span>
+                    <span class="user-trigger-role"><?= e($_roleLabel) ?></span>
+                </span>
             </button>
 
             <div class="user-dropdown"

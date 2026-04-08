@@ -32,7 +32,8 @@ if (!$id) {
 }
 
 $invoice = db_row(
-    "SELECT id, status, invoice_number, customer_email_snapshot
+    "SELECT id, status, invoice_number, customer_email_snapshot,
+            customer_id, company_name_snapshot, total_amount, due_date
      FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -76,6 +77,33 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
     // Auto-JE: DR 1030 AR / CR 4xxx Revenue / CR 2030 GST / CR 2040 PST
     // WHY: Posted inside same transaction — JE failure rolls back the send (A8, §16)
     \FleetForge\Accounting\AutoEntryBridge::onInvoiceSent($id, current_user_id());
+
+    // ── In-app notifications (NOTIF-1) ─────────────────────────
+    try {
+        $companyName = $invoice['company_name_snapshot'] ?? 'customer';
+        \FleetForge\Notifications\NotificationService::notify(
+            type:       'invoice.sent',
+            title:      "Invoice {$invoice['invoice_number']} sent",
+            message:    "Invoice {$invoice['invoice_number']} sent to {$companyName}",
+            entityType: 'invoice',
+            entityId:   $id,
+            url:        '/fleetforge/invoices/show?id=' . $id
+        );
+        if (!empty($invoice['customer_id'])) {
+            $amt = '$' . number_format((float) $invoice['total_amount'], 2);
+            \FleetForge\Notifications\NotificationService::notifyPortal(
+                type:       'invoice.sent',
+                customerId: (int) $invoice['customer_id'],
+                title:      "Your invoice is ready",
+                message:    "Invoice {$invoice['invoice_number']} — {$amt} due " . ($invoice['due_date'] ?? 'on receipt'),
+                entityType: 'invoice',
+                entityId:   $id,
+                url:        '/fleetforge/portal/invoices/show?id=' . $id
+            );
+        }
+    } catch (\Throwable $e) {
+        error_log('[NOTIF invoice.sent] ' . $e->getMessage());
+    }
 });
 
 json_success(['id' => $id, 'status' => 'sent']);
