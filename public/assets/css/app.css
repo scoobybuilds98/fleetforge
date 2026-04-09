@@ -432,12 +432,13 @@ kbd {
     height: 100vh;
     position: sticky;
     top: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    /* SIDEBAR-SCROLL-1: outer sidebar clips, inner .sidebar-nav owns the scroll.
+       Previously this element scrolled as a whole, which dragged the brand
+       header off-screen on short viewports. Now .sidebar-brand + .sidebar-footer
+       stay pinned and only the middle .sidebar-nav scrolls. */
+    overflow: hidden;
     transition: width var(--transition-slow);
     z-index: var(--z-sidebar);
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.1) transparent;
 }
 
 /* ── Brand / Logo ──────────────────────── */
@@ -521,12 +522,51 @@ kbd {
 }
 
 /* ── Navigation ─────────────────────────── */
+/* SIDEBAR-SCROLL-1: this is the real scroll container inside the flex column.
+   `min-height: 0` is REQUIRED — without it a `flex: 1` child refuses to
+   shrink below its content height, so `overflow: auto` never triggers and
+   bottom items (Settings, Users, etc.) get cut off on short viewports.
+   Scrollbar is transparent until hover for a cleaner look. */
 .sidebar-nav {
-    flex: 1;
+    flex: 1 1 0;
+    min-height: 0;
     padding: 12px 8px;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+/* SIDEBAR-SCROLL-1: lock direct children to their natural size. When the
+   parent has `min-height: 0` and the total children height exceeds the
+   container, default `flex-shrink: 1` would squish each nav item vertically.
+   This was the regression that made the sidebar look compressed on tall
+   desktops after the initial scroll fix. */
+.sidebar-nav > * {
+    flex-shrink: 0;
+}
+
+.sidebar-nav:hover {
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+    width: 4px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+.sidebar-nav:hover::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
 }
 
 .nav-section-label {
@@ -4968,7 +5008,11 @@ dl.detail-grid dd {
         width: var(--sidebar-width-collapsed);
         height: 100%;
         transform: translateX(0);
-        overflow: visible;
+        /* SIDEBAR-SCROLL-1: was `overflow: visible` — which killed sidebar-nav
+           scrolling because the outer element refused to clip, so the inner
+           scroll container never had a bounded parent to scroll against.
+           Clip here; inner .sidebar-nav still scrolls via its own overflow. */
+        overflow: hidden;
     }
     .sidebar .sidebar-brand-name,
     .sidebar .nav-item-label,
@@ -7738,3 +7782,113 @@ body:has(.chat-page-content) #ff-chat-widget {
   }
 }
 
+
+/* ============================================================
+   FF_RecordPicker — reusable search-as-you-type record selector
+   Used by admin forms (invoices, leases, payments, maintenance,
+   reservations, inspections, mileage, damage claims, credit notes)
+   to replace static <select> dropdowns with a debounced autocomplete.
+   ============================================================ */
+
+.ff-picker                 { position: relative; width: 100%; }
+.ff-picker-input           { width: 100%; padding-right: 36px; }
+.ff-picker-input.is-selected {
+    background-color: var(--bg-muted, rgba(0,0,0,.02));
+    font-weight: 500;
+}
+.ff-picker-clear {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 2px 6px;
+    font-size: 14px;
+    line-height: 1;
+    border-radius: 4px;
+}
+.ff-picker-clear:hover {
+    background: var(--bg-muted, rgba(0,0,0,.05));
+    color: var(--text-primary);
+}
+
+.ff-picker-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: var(--bg-surface, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.12);
+    z-index: 1000;
+    max-height: 320px;
+    overflow-y: auto;
+}
+.ff-picker-dropdown::-webkit-scrollbar { width: 6px; }
+.ff-picker-dropdown::-webkit-scrollbar-thumb { background: var(--border-color, #e0e0e0); border-radius: 3px; }
+
+.ff-picker-option {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color, #f0f0f0);
+    transition: background .08s;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.ff-picker-option:last-child { border-bottom: none; }
+.ff-picker-option:hover,
+.ff-picker-option.is-highlighted {
+    background: var(--bg-muted, #f5f5f5);
+}
+.ff-picker-option-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.ff-picker-option-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.ff-picker-option-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-muted);
+    color: var(--text-secondary);
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.ff-picker-empty {
+    padding: 14px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.ff-picker-loading {
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.ff-picker-loading::before {
+    content: '';
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--color-accent);
+    border-radius: 50%;
+    animation: ff-picker-spin .8s linear infinite;
+}
+@keyframes ff-picker-spin {
+    to { transform: rotate(360deg); }
+}

@@ -333,6 +333,57 @@ $_sidebarUser = current_user();
 
 </aside>
 
+<script>
+// ============================================================
+// SIDEBAR-SCROLL-1 — scroll active nav item into view
+//
+// On short viewports the active item lives below the fold of
+// .sidebar-nav so the user can't see which page they're on.
+// Chrome's `scrollIntoView({block:'nearest'})` silently no-ops
+// in some layouts when the element is below a scrollable flex
+// child — so we compute the target scrollTop manually (center
+// the active item in the nav slot) which works reliably in
+// every engine.
+//
+// Runs once after DOM is ready. `behavior: auto` (instant)
+// avoids a visible scroll animation on initial paint while
+// Alpine is still mounting group state.
+// ============================================================
+(function () {
+    var scrollActiveIntoView = function () {
+        var nav = document.querySelector('#ff-sidebar .sidebar-nav');
+        if (!nav) return;
+        var active = nav.querySelector('.nav-item.is-active, .nav-child-item.is-active');
+        if (!active) return;
+
+        // If the active item is already fully visible inside the nav's
+        // scroll viewport, bail — no need to scroll.
+        var navBox    = nav.getBoundingClientRect();
+        var activeBox = active.getBoundingClientRect();
+        if (activeBox.top >= navBox.top && activeBox.bottom <= navBox.bottom) {
+            return;
+        }
+
+        // Compute a scrollTop that centers the active item in the nav.
+        // Clamp to [0, maxScroll] so we never overshoot.
+        var targetTop = active.offsetTop - (nav.clientHeight / 2) + (active.offsetHeight / 2);
+        var maxScroll = nav.scrollHeight - nav.clientHeight;
+        targetTop = Math.max(0, Math.min(targetTop, maxScroll));
+
+        var prevBehavior = nav.style.scrollBehavior;
+        nav.style.scrollBehavior = 'auto';
+        nav.scrollTop = targetTop;
+        nav.style.scrollBehavior = prevBehavior;
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', scrollActiveIntoView, { once: true });
+    } else {
+        scrollActiveIntoView();
+    }
+})();
+</script>
+
 <?php
 // Clean up sidebar-scoped variables
 unset($_nav, $_vis, $_nCount, $_i, $_j, $_item, $_currentPath,
