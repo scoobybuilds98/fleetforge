@@ -584,11 +584,12 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── Update modal — From + Expiry ─────────────────────────────────── -->
     <?php if (can('compliance', 'edit')): ?>
-    <div class="modal-backdrop" x-show="modal.open" x-cloak>
+    <div class="modal-overlay" x-show="modal.open" x-cloak @click.self="closeModal()"
+         style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);">
         <div class="modal modal-sm">
             <div class="modal-header">
                 <h3 class="modal-title" x-text="'Update ' + modal.docLabel + ' Dates'"></h3>
-                <button class="modal-close" @click="closeModal()">×</button>
+                <button class="modal-close-btn" @click="closeModal()">×</button>
             </div>
             <div class="modal-body">
                 <p class="text-secondary" style="font-size:0.875rem;margin-bottom:16px;">
