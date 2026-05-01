@@ -49,6 +49,7 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 ('credit_note.prefix',             'CN-CR','string',  'invoices',      'Credit Note Number Prefix',  'Prefix for all credit note numbers (e.g. CN-CR → CN-CR-2025-00001).', 0),
 ('damage_claim.prefix',            'DMG',  'string',  'maintenance',   'Damage Claim Number Prefix', 'Prefix for all damage claim numbers (e.g. DMG → DMG-2025-00001).', 0),
 ('lease.prefix',                   'CN',   'string',  'leases',        'Contract Number Prefix',     'Prefix for lease contract numbers (e.g. CN → CN-ABC123-2025).',    0),
+('billing.max_advance_periods',    '24',   'integer', 'invoices',      'Max Advance Billing Periods','Hard cap on advance_billing_periods at lease creation (ADV-BILL-1). Lease APIs reject values above this; lease form clamps the input. 0 disables advance billing entirely.', 0),
 
 -- ----------------------------------------------------------------
 -- Alerts & Compliance

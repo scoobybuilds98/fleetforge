@@ -255,6 +255,18 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                         <tr><td class="text-secondary">End Date</td><td x-text="lease.end_date ? formatDate(lease.end_date) : 'Open-ended'"></td></tr>
                                         <tr x-show="lease.actual_return_date"><td class="text-secondary">Return Date</td><td x-text="formatDate(lease.actual_return_date)"></td></tr>
                                         <tr><td class="text-secondary">Billing Cycle</td><td x-text="lease.billing_cycle === 'monthly' ? 'Monthly' : 'On Close Only'"></td></tr>
+                                        <!-- ADV-BILL-1: only show when activation generated a prepaid batch -->
+                                        <tr x-show="(lease.advance_billing_periods || 0) > 0">
+                                            <td class="text-secondary">Advance Billing</td>
+                                            <td>
+                                                <span x-text="lease.advance_billing_periods"></span>
+                                                future period<span x-show="lease.advance_billing_periods != 1">s</span>
+                                                prepaid at activation
+                                                <span style="color:var(--color-text-muted,#6b7280);">
+                                                    (Invoice 1 + <span x-text="lease.advance_billing_periods"></span> advance)
+                                                </span>
+                                            </td>
+                                        </tr>
                                         <tr x-show="lease.po_number"><td class="text-secondary">PO Number</td><td class="font-mono" x-text="lease.po_number"></td></tr>
                                         <tr x-show="lease.next_billing_date"><td class="text-secondary">Next Billing</td><td x-text="formatDate(lease.next_billing_date)"></td></tr>
                                     </tbody>
@@ -983,6 +995,45 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         <textarea id="close_notes" class="form-control"
                                   x-model="closeForm.close_notes" rows="2"></textarea>
                     </div>
+
+                    <!-- ADV-BILL-1 D-H: only relevant for leases that activated with prepaid future periods. -->
+                    <template x-if="lease && (lease.advance_billing_periods || 0) > 0">
+                        <div class="form-group" style="border-top:1px solid var(--border-color);padding-top:0.75rem;margin-top:0.75rem;">
+                            <label class="form-label">Advance-Billing Reconciliation</label>
+                            <div class="text-xs text-secondary" style="margin-bottom:0.5rem;">
+                                This lease prepaid <strong x-text="lease.advance_billing_periods"></strong>
+                                future period<span x-show="lease.advance_billing_periods != 1">s</span> at activation.
+                                Choose how to handle the unused portion.
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:6px;">
+                                <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                                    <input type="radio" value="refund_unused"
+                                           x-model="closeForm.reconciliation_mode"
+                                           style="margin-top:3px;">
+                                    <span>
+                                        <strong>Refund unused</strong>
+                                        <span class="text-secondary text-xs" style="display:block;">
+                                            Void or credit unused future invoices and refund the unused
+                                            portion of the period containing the return date.
+                                        </span>
+                                    </span>
+                                </label>
+                                <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                                    <input type="radio" value="no_refund"
+                                           x-model="closeForm.reconciliation_mode"
+                                           style="margin-top:3px;">
+                                    <span>
+                                        <strong>No refund</strong>
+                                        <span class="text-secondary text-xs" style="display:block;">
+                                            Leave every advance invoice intact — customer keeps the
+                                            full prepaid coverage even though the lease is closing.
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+                    </template>
+
                     <template x-if="actionError">
                         <div class="form-error" x-text="actionError"></div>
                     </template>
@@ -1261,6 +1312,8 @@ function FF_LeaseDetail() {
             odometer_at_close_km:  '',
             odometer_source:       null,   // 'gps' | 'manual'
             odometer_fetched_at:   null,   // ISO datetime if GPS
+            // ADV-BILL-1 D-H: only sent for advance leases; ignored otherwise.
+            reconciliation_mode:   'refund_unused',
         },
         // SAMSARA-1: hint shown beneath End Mileage explaining where the
         // value came from (e.g. "Pulled from Samsara: 184,233 km").
@@ -1862,6 +1915,10 @@ function FF_LeaseDetail() {
                 if (this.closeForm.odometer_fetched_at) {
                     payload.odometer_fetched_at = this.closeForm.odometer_fetched_at;
                 }
+            }
+            // ADV-BILL-1 D-H: only meaningful when this lease has prepaid advance periods.
+            if ((this.lease?.advance_billing_periods || 0) > 0) {
+                payload.reconciliation_mode = this.closeForm.reconciliation_mode || 'refund_unused';
             }
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/close') ?>', payload);

@@ -510,6 +510,7 @@ CREATE TABLE leases (
     warranty_opt_in             TINYINT(1) NOT NULL DEFAULT 0,
     warranty_cost               DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     billing_cycle               ENUM('monthly','on_close_only') NOT NULL DEFAULT 'monthly',
+    advance_billing_periods     TINYINT UNSIGNED NOT NULL DEFAULT 0,  -- ADV-BILL-1: prepaid future periods generated at activation (monthly only, capped via billing.max_advance_periods)
     po_number                   VARCHAR(100) NULL,
     last_billed_date            DATE NULL,
     last_billed_invoice_id      INT UNSIGNED NULL,   -- FK added via ALTER (circular)
@@ -941,7 +942,7 @@ CREATE TABLE invoices (
     written_off_at              DATETIME NULL,
     auto_generated              TINYINT(1) NOT NULL DEFAULT 0,
     auto_generated_at           DATETIME NULL,
-    generation_source           ENUM('cron','manual','lease_close','late_fee_cron') NULL,
+    generation_source           ENUM('cron','manual','lease_close','late_fee_cron','advance') NULL,  -- ADV-BILL-1: 'advance' = pre-paid future-period invoice from lease activation batch
     created_by                  INT UNSIGNED NULL,
     updated_by                  INT UNSIGNED NULL,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2391,3 +2392,6 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- [CURRENCY-MARKUP-1] invoices: added currency_markup_pct DECIMAL(6,4) DEFAULT 0.0000 AFTER exchange_rate_to_cad
 -- [CURRENCY-MARKUP-1] payments: added currency_markup_pct DECIMAL(6,4) DEFAULT 0.0000 AFTER exchange_rate_to_cad
 -- [CURRENCY-MARKUP-1] settings: added currency.usd_cad_markup_pct seed row (group=currency)
+-- [ADV-BILL-1] leases: added advance_billing_periods TINYINT UNSIGNED DEFAULT 0 AFTER billing_cycle
+-- [ADV-BILL-1] invoices: extended generation_source ENUM with 'advance' value (lease activation prepayment batch)
+-- [ADV-BILL-1] settings: added billing.max_advance_periods seed row (default 24, group=invoices)

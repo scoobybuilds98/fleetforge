@@ -77,6 +77,7 @@ $lease = db_row(
         l.warranty_opt_in,
         l.warranty_cost,
         l.billing_cycle,
+        l.advance_billing_periods,
         l.po_number,
         l.last_billed_date,
         l.next_billing_date,

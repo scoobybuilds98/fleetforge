@@ -94,10 +94,17 @@ class InvoiceGenerator
             $days = (int)$startDt->diff($endDt)->days + 1;
 
             // --- Step 1: Base rental via ProRateCalculator ---
+            // ADV-BILL-1: 'mileage_only' (used by close.php for advance leases when
+            // mileage overage needs its own invoice) skips the base rental entirely —
+            // the only line items come from extra_lines.
             $lineItems = [];
             $sortOrder = 0;
 
-            if ($billingType === 'full_month') {
+            if ($billingType === 'mileage_only') {
+                $rentalAmount = '0.00';
+                $rateMethod   = 'none';
+                $explanation  = ['Mileage-only adjustment — no base rental.'];
+            } elseif ($billingType === 'full_month') {
                 // Full month = flat monthly rate, no formula
                 $rentalAmount = bcround((string)$lease['monthly_rate'], 2);
                 $rateMethod = 'monthly';
@@ -115,25 +122,31 @@ class InvoiceGenerator
                 $explanation = $result['explanation'];
             }
 
-            $lineItems[] = [
-                'sort_order'   => $sortOrder++,
-                'item_type'    => 'base_rental',
-                'description'  => "Base rental: {$periodStart} to {$periodEnd} ({$days} days)",
-                'detail_lines' => json_encode($explanation),
-                'quantity'     => '1.0000',
-                'unit'         => 'period',
-                'unit_price'   => $rentalAmount,
-                'amount'       => $rentalAmount,
-                'is_credit'    => 0,
-                'taxable'      => 1,
-                'billing_days' => $days,
-                'rate_method'  => $rateMethod,
-                'period_start' => $periodStart,
-                'period_end'   => $periodEnd,
-            ];
+            // ADV-BILL-1: skip the base_rental and insurance/warranty lines on
+            // mileage_only adjustment invoices — they only carry mileage extra_lines.
+            if ($billingType !== 'mileage_only') {
+                $lineItems[] = [
+                    'sort_order'   => $sortOrder++,
+                    'item_type'    => 'base_rental',
+                    'description'  => "Base rental: {$periodStart} to {$periodEnd} ({$days} days)",
+                    'detail_lines' => json_encode($explanation),
+                    'quantity'     => '1.0000',
+                    'unit'         => 'period',
+                    'unit_price'   => $rentalAmount,
+                    'amount'       => $rentalAmount,
+                    'is_credit'    => 0,
+                    'taxable'      => 1,
+                    'billing_days' => $days,
+                    'rate_method'  => $rateMethod,
+                    'period_start' => $periodStart,
+                    'period_end'   => $periodEnd,
+                ];
+            }
 
             // --- Step 3: Insurance add-on ---
-            if ($lease['insurance_opt_in'] && bccomp((string)$lease['insurance_cost'], '0', 2) > 0) {
+            if ($billingType !== 'mileage_only'
+                && $lease['insurance_opt_in']
+                && bccomp((string)$lease['insurance_cost'], '0', 2) > 0) {
                 $lineItems[] = [
                     'sort_order'  => $sortOrder++,
                     'item_type'   => 'insurance',
@@ -147,7 +160,9 @@ class InvoiceGenerator
             }
 
             // --- Step 3: Warranty add-on ---
-            if ($lease['warranty_opt_in'] && bccomp((string)$lease['warranty_cost'], '0', 2) > 0) {
+            if ($billingType !== 'mileage_only'
+                && $lease['warranty_opt_in']
+                && bccomp((string)$lease['warranty_cost'], '0', 2) > 0) {
                 $lineItems[] = [
                     'sort_order'  => $sortOrder++,
                     'item_type'   => 'warranty',
@@ -422,6 +437,158 @@ class InvoiceGenerator
                 'invoice_number' => $invoiceNumber,
                 'total_amount'   => $totalAmount,
                 'balance_due'    => $balanceDue,
+            ];
+        });
+    }
+
+    /**
+     * Generate an advance-billing batch for a lease at activation time.
+     *
+     * Produces Invoice 1 (current period — full_month if start is the 1st,
+     * else partial_start) PLUS the lease's `advance_billing_periods` future
+     * full-month invoices, all in a single transaction. All N+1 invoices
+     * share the same invoice_date, FX snapshot, currency_markup_pct, and
+     * tax rates — that's CRA-correct for a prepayment (tax rate in force at
+     * the time of payment, not at the time of period). Sequential invoice
+     * numbering is preserved by the existing FOR UPDATE counter in
+     * generateInvoiceNumber() (called N+1 times inside this transaction).
+     *
+     * Side effects in the same transaction:
+     *  - N+1 rows inserted into invoices (generation_source='advance')
+     *  - line items + lease_billing_periods rows for each
+     *  - Trap-6 counters (lease.total_invoiced/outstanding_balance,
+     *    customer.outstanding_balance) accumulated by createFromLease()
+     *  - lease.next_billing_date advanced past the final period
+     *  - One audit_log row per generated invoice (module='billing')
+     *
+     * Caller responsibilities (NOT done here, by design):
+     *  - Validate that lease.advance_billing_periods > 0 and billing_cycle = 'monthly'
+     *  - Send the batched portal/staff notification (D-D)
+     *
+     * @param int      $leaseId    Lease to bill (must be 'pending' or 'active')
+     * @param int|null $createdBy  Staff user_id, or null for system
+     * @return array{
+     *   invoices: array<int, array{invoice_id:int, invoice_number:string, total_amount:string, balance_due:string}>,
+     *   next_billing_date: string,
+     *   first_period_start: string,
+     *   last_period_end: string,
+     *   total_count: int,
+     *   batch_total_amount: string
+     * }
+     */
+    public function generateAdvanceBatch(int $leaseId, ?int $createdBy = null): array
+    {
+        return db_transaction(function () use ($leaseId, $createdBy) {
+            $lease = db_row(
+                "SELECT id, status, contract_number, start_date, billing_cycle,
+                        advance_billing_periods
+                 FROM leases WHERE id = ? AND deleted_at IS NULL",
+                [$leaseId]
+            );
+            if (!$lease) {
+                json_error('NOT_FOUND', 'Lease not found.', 404);
+            }
+
+            $advance = (int) $lease['advance_billing_periods'];
+            if ($advance <= 0) {
+                throw new \RuntimeException(
+                    'generateAdvanceBatch called for lease #' . $leaseId
+                    . ' with advance_billing_periods=0 — caller should branch on this.'
+                );
+            }
+            if ($lease['billing_cycle'] !== 'monthly') {
+                throw new \RuntimeException(
+                    'Advance billing supported only for monthly billing_cycle (lease #' . $leaseId . ').'
+                );
+            }
+
+            $totalCount = $advance + 1; // Invoice 1 + N future invoices
+            $startDate  = (string) $lease['start_date'];
+            $startDt    = new \DateTimeImmutable($startDate);
+            $firstOfStartMonth = $startDt->format('Y-m-01');
+            $lastOfStartMonth  = $startDt->format('Y-m-t');
+
+            // Period 1: start_date → end of start month
+            $periods = [[
+                'start' => $startDate,
+                'end'   => $lastOfStartMonth,
+                'type'  => ($startDate === $firstOfStartMonth) ? 'full_month' : 'partial_start',
+            ]];
+
+            // Periods 2..N+1: each subsequent full month
+            $cursor = new \DateTimeImmutable($lastOfStartMonth);
+            for ($i = 2; $i <= $totalCount; $i++) {
+                $cursor    = $cursor->modify('+1 day'); // first of next month
+                $periodEnd = $cursor->format('Y-m-t');
+                $periods[] = [
+                    'start' => $cursor->format('Y-m-d'),
+                    'end'   => $periodEnd,
+                    'type'  => 'full_month',
+                ];
+                $cursor = new \DateTimeImmutable($periodEnd);
+            }
+
+            $invoices = [];
+            $batchTotal = '0.00';
+            $idx = 1;
+            $userName = (function_exists('current_user') && current_user())
+                ? (current_user()['name'] ?? 'system')
+                : 'system';
+
+            foreach ($periods as $p) {
+                $note = sprintf(
+                    'Advance billing %d of %d (lease %s)',
+                    $idx, $totalCount, $lease['contract_number']
+                );
+
+                // Internal call — same transaction (db.php nesting guard).
+                $inv = $this->createFromLease([
+                    'lease_id'          => $leaseId,
+                    'period_start'      => $p['start'],
+                    'period_end'        => $p['end'],
+                    'billing_type'      => $p['type'],
+                    'invoice_type'      => 'regular',
+                    'created_by'        => $createdBy,
+                    'auto_generated'    => 1,
+                    'generation_source' => 'advance',
+                    'internal_notes'    => $note,
+                ]);
+                $invoices[]  = $inv;
+                $batchTotal  = bcadd($batchTotal, (string) ($inv['total_amount'] ?? '0.00'), 2);
+
+                db_insert('audit_log', [
+                    'user_id'      => $createdBy,
+                    'user_name'    => $userName,
+                    'action'       => 'create',
+                    'module'       => 'billing',
+                    'entity_type'  => 'invoice',
+                    'entity_id'    => $inv['invoice_id'],
+                    'entity_label' => $inv['invoice_number'],
+                    'notes'        => $note,
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+                $idx++;
+            }
+
+            // next_billing_date = day after the final advance period.
+            // Cron skips this lease until that date, which is precisely the
+            // intent: the customer has prepaid through the final period_end.
+            $lastEnd = $periods[count($periods) - 1]['end'];
+            $newNext = (new \DateTimeImmutable($lastEnd))
+                ->modify('+1 day')
+                ->format('Y-m-d');
+            db_execute(
+                "UPDATE leases SET next_billing_date = ?, updated_by = ? WHERE id = ?",
+                [$newNext, $createdBy, $leaseId]
+            );
+
+            return [
+                'invoices'           => $invoices,
+                'next_billing_date'  => $newNext,
+                'first_period_start' => $periods[0]['start'],
+                'last_period_end'    => $lastEnd,
+                'total_count'        => $totalCount,
+                'batch_total_amount' => $batchTotal,
             ];
         });
     }

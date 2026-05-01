@@ -30,15 +30,23 @@ if (!$id) {
 }
 
 $invoice = db_row(
-    "SELECT id, status, updated_at, invoice_number FROM invoices WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, status, updated_at, invoice_number, generation_source
+     FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
 if (!$invoice) {
     json_error('NOT_FOUND', 'Invoice not found.', 404);
 }
 
+// ADV-BILL-1 D-C: advance-batch invoices have period/billing/financial fields locked
+// regardless of status. Only po_number / notes / internal_notes are editable, but those
+// remain editable in any status (a customer may add a PO weeks after the prepaid invoice
+// was sent). Super-admin override does NOT apply — these are CRA-correct prepaid records.
+$isAdvance = ($invoice['generation_source'] ?? '') === 'advance';
+
 // D12 / VALID-2: Only draft invoices are editable. Sent/paid/etc get a specific message.
-if ($invoice['status'] !== 'draft' && !is_super_admin()) {
+// Advance invoices skip this check (allowed in any status, but field list is restricted below).
+if (!$isAdvance && $invoice['status'] !== 'draft' && !is_super_admin()) {
     json_error(
         'IMMUTABLE_RECORD',
         'Sent invoices cannot be edited. Void and recreate.',
@@ -61,17 +69,39 @@ if ($invoice['updated_at'] !== $submittedUpdatedAt) {
     );
 }
 
-// Only allow updating non-financial metadata on draft
+// Only allow updating non-financial metadata on draft.
+// ADV-BILL-1 D-C: advance invoices are restricted to po_number / notes / internal_notes
+// even on draft — period/billing/financial fields are immutable from the moment the batch
+// is created so the prepaid CRA snapshot stays intact.
 $updateData = [];
 $updatable = [
     'po_number'      => clean_string($body['po_number'] ?? null),
     'notes'          => clean_string($body['notes'] ?? null, 2000),
     'internal_notes' => clean_string($body['internal_notes'] ?? null, 2000),
-    'sent_to_email'  => clean_email($body['sent_to_email'] ?? null),
 ];
+if (!$isAdvance) {
+    $updatable['sent_to_email'] = clean_email($body['sent_to_email'] ?? null);
+}
+
+// D-C reject: advance invoice request supplied any forbidden field.
+if ($isAdvance) {
+    $forbidden = ['period_start', 'period_end', 'billing_type', 'subtotal',
+                  'tax_amount', 'total_amount', 'line_items', 'amount',
+                  'sent_to_email'];
+    $sent = array_intersect($forbidden, array_keys($body));
+    if (!empty($sent)) {
+        json_error(
+            'IMMUTABLE_RECORD',
+            'Advance-billing invoices have period and financial fields frozen at batch creation. Only po_number, notes, and internal_notes are editable.',
+            422,
+            ['fields' => array_fill_keys($sent, 'Field is locked on advance-billing invoices.')]
+        );
+    }
+}
 
 // VALID-2: specific email-format error
-if (array_key_exists('sent_to_email', $body)
+if (!$isAdvance
+    && array_key_exists('sent_to_email', $body)
     && ($body['sent_to_email'] !== null && $body['sent_to_email'] !== '')
     && $updatable['sent_to_email'] === null) {
     json_validation_error(['sent_to_email' => 'Please enter a valid email address.']);

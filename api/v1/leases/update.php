@@ -159,6 +159,36 @@ if (array_key_exists('pst_exempt', $body)) {
     $data['pst_exempt'] = (bool) $body['pst_exempt'] ? 1 : 0;
 }
 
+// ADV-BILL-1: advance_billing_periods is editable ONLY while the lease is pending.
+// Once activated, the prepaid invoice batch is locked in and changing the count
+// would break invoice numbering / next_billing_date / customer notifications.
+if (array_key_exists('advance_billing_periods', $body)) {
+    if ($existing['status'] !== 'pending') {
+        $fields['advance_billing_periods'] =
+            'Advance billing periods cannot be changed after the lease is activated.';
+    } else {
+        $advIn = clean_int($body['advance_billing_periods']) ?? 0;
+        if ($advIn < 0) {
+            $fields['advance_billing_periods'] = 'Advance billing periods cannot be negative.';
+        } else {
+            $cap = (int) settings_get('billing.max_advance_periods', '24');
+            if ($advIn > $cap) {
+                $fields['advance_billing_periods'] = "Advance billing periods cannot exceed {$cap}.";
+            } else {
+                // Cross-field: monthly-only.
+                $cycleRow = db_row("SELECT billing_cycle FROM leases WHERE id = ?", [$id]);
+                $cycle    = $cycleRow['billing_cycle'] ?? null;
+                if ($advIn > 0 && $cycle !== 'monthly') {
+                    $fields['advance_billing_periods'] =
+                        'Advance billing is only available for monthly billing cycles.';
+                } else {
+                    $data['advance_billing_periods'] = $advIn;
+                }
+            }
+        }
+    }
+}
+
 // Validate end_date and mileage cross-field rules
 $currentLease = db_row("SELECT start_date, mileage_at_start FROM leases WHERE id = ?", [$id]);
 

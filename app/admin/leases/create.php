@@ -226,6 +226,31 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="on_close_only">On Close Only</option>
                         </select>
                     </div>
+                    <!-- ADV-BILL-1: prepay future periods at activation. Monthly only. -->
+                    <div class="form-group" x-show="form.billing_cycle === 'monthly'" x-cloak>
+                        <label class="form-label" for="advance_billing_periods">
+                            Advance Billing Periods
+                            <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);font-size:0.8125rem;">
+                                (extra months prepaid at activation)
+                            </span>
+                        </label>
+                        <input id="advance_billing_periods" type="number" min="0"
+                               :max="advanceBillingCap"
+                               class="form-control"
+                               x-model.number="form.advance_billing_periods"
+                               @input="clampAdvancePeriods()" />
+                        <div class="form-help" x-show="form.advance_billing_periods > 0" x-cloak>
+                            Activation will generate
+                            <strong x-text="(form.advance_billing_periods + 1)"></strong>
+                            invoices in one batch
+                            (Invoice 1 + <span x-text="form.advance_billing_periods"></span>
+                            future-period prepayments).
+                        </div>
+                        <div class="form-help" style="color:var(--color-text-muted,#6b7280);">
+                            Cap: <span x-text="advanceBillingCap"></span>.
+                            Leave at 0 for normal monthly billing.
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -600,7 +625,12 @@ function FF_CreateLease() {
             odometer_start_km:         '',
             odometer_start_source:     null,  // 'gps' | 'manual' | null
             odometer_start_fetched_at: null,  // ISO datetime when GPS fetched
+            // ADV-BILL-1: prepay future periods at activation (monthly cycle only)
+            advance_billing_periods:   0,
         },
+        // ADV-BILL-1: cap from billing.max_advance_periods setting (server-side
+        // re-validates regardless). 24 mirrors the seed default.
+        advanceBillingCap: <?= (int) settings_get('billing.max_advance_periods', '24') ?>,
         errors:             {},
         globalError:        null,
         submitting:         false,
@@ -623,6 +653,20 @@ function FF_CreateLease() {
         init() {
             // Default start date to today
             this.form.start_date = new Date().toISOString().slice(0, 10);
+
+            // ADV-BILL-1: zero out advance periods if cycle leaves monthly.
+            this.$watch('form.billing_cycle', (v) => {
+                if (v !== 'monthly') this.form.advance_billing_periods = 0;
+            });
+        },
+
+        // ADV-BILL-1: clamp the advance-periods input to [0, cap] on every change.
+        // The server re-validates, but clamping here gives instant feedback.
+        clampAdvancePeriods() {
+            let n = parseInt(this.form.advance_billing_periods, 10);
+            if (isNaN(n) || n < 0) n = 0;
+            if (n > this.advanceBillingCap) n = this.advanceBillingCap;
+            this.form.advance_billing_periods = n;
         },
 
         onCustomerChange() {

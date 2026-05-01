@@ -152,6 +152,22 @@ if ($mileageAtStartRaw !== null && $mileageAtStartRaw !== '') {
 
 $minimumEndDate    = clean_date($body['minimum_end_date'] ?? null);
 
+// ADV-BILL-1: advance_billing_periods — extra prepaid future periods generated
+// at activation in addition to Invoice 1. Monthly only; capped by setting.
+$advancePeriodsRaw = $body['advance_billing_periods'] ?? 0;
+$advancePeriods    = clean_int($advancePeriodsRaw) ?? 0;
+if ($advancePeriods < 0) {
+    $fields['advance_billing_periods'] = 'Advance billing periods cannot be negative.';
+    $advancePeriods = 0;
+}
+$advanceCap = (int) settings_get('billing.max_advance_periods', '24');
+if ($advancePeriods > $advanceCap) {
+    $fields['advance_billing_periods'] = "Advance billing periods cannot exceed {$advanceCap}.";
+}
+if ($advancePeriods > 0 && $billingCycle !== 'monthly') {
+    $fields['advance_billing_periods'] = 'Advance billing is only available for monthly billing cycles.';
+}
+
 // ── SAMSARA-3: starting odometer (optional) ────────────────────
 // odometer_start_km    — decimal km (allow negatives? no — odometer is monotonic)
 // odometer_start_source— 'gps' or 'manual'; null when odometer_start_km is empty
@@ -298,6 +314,7 @@ db_transaction(function () use (
     $poNumber, $notes, $internalNotes,
     $estimatedMileage, $mileageAtStart,
     $odometerStartKm, $odometerStartSource, $odometerStartFetchedAt,
+    $advancePeriods,
     &$leaseId
 ) {
     // D20: FOR UPDATE — lock the unit row before status check
@@ -396,6 +413,7 @@ db_transaction(function () use (
         'internal_notes'           => $internalNotes,
         'estimated_mileage'        => $estimatedMileage,
         'mileage_at_start'         => $mileageAtStart,
+        'advance_billing_periods'  => $advancePeriods,
         // SAMSARA-3: starting odometer captured at lease start (decimal km)
         'odometer_start_km'        => $odometerStartKm,
         'odometer_start_source'    => $odometerStartSource,
