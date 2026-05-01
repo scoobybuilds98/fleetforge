@@ -59,6 +59,11 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 ('alerts.overdue_invoice_days',     '15', 'integer', 'alerts', 'Overdue Escalation Days',       'Days past due before an escalation notification fires.',  0),
 
 -- ----------------------------------------------------------------
+-- Currency Conversion
+-- ----------------------------------------------------------------
+('currency.usd_cad_markup_pct', '0.0000', 'decimal', 'currency', 'USD → CAD Markup', 'Markup % applied on top of the bank exchange rate when generating USD invoices. Frozen per invoice at creation. Visible on invoice and PDF. 0 = no markup.', 0),
+
+-- ----------------------------------------------------------------
 -- GPS Integration (keys left blank — filled in by admin)
 -- ----------------------------------------------------------------
 ('gps.primary_provider',    '',  'string', 'gps', 'GPS Primary Provider',    'samsara or geotab.',                                            0),

@@ -1168,8 +1168,18 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
         <div class="stat-label">Total Amount</div>
         <div class="stat-value font-mono"><?= format_currency($invoice['total_amount']) ?></div>
         <?php if ($invoice['currency'] !== 'CAD' && !empty($invoice['exchange_rate_to_cad'])): ?>
+            <?php
+                // CURRENCY-MARKUP-1: use effective rate (bank + markup) for CAD display
+                $_tileMarkup = (string)($invoice['currency_markup_pct'] ?? '0.0000');
+                if (bccomp($_tileMarkup, '0', 4) > 0) {
+                    $_tileFactor = bcadd('1', bcdiv($_tileMarkup, '100', 10), 10);
+                    $_tileEffRate = bcmul((string)$invoice['exchange_rate_to_cad'], $_tileFactor, 6);
+                } else {
+                    $_tileEffRate = (string)$invoice['exchange_rate_to_cad'];
+                }
+            ?>
             <div class="text-sm text-secondary" style="margin-top:2px; font-size:11px;">
-                ≈ <?= format_currency(bcmul($invoice['total_amount'], $invoice['exchange_rate_to_cad'], 2)) ?> CAD
+                ≈ <?= format_currency(bcmul($invoice['total_amount'], $_tileEffRate, 2)) ?> CAD
             </div>
         <?php endif; ?>
     </div>
@@ -1699,11 +1709,57 @@ if ($rateExplanation) {
             </tbody>
         </table>
 
-        <!-- Exchange rate note -->
+        <!-- FX block: shown for USD invoices that have a frozen exchange rate -->
         <?php if ($invoice['currency'] !== 'CAD' && !empty($invoice['exchange_rate_to_cad'])): ?>
-        <div class="text-sm text-secondary" style="text-align:right; margin-top:12px; max-width:480px; margin-left:auto;">
-            Exchange rate: 1 <?= e($invoice['currency']) ?> = <?= e(rtrim(rtrim(number_format((float)$invoice['exchange_rate_to_cad'], 6), '0'), '.')) ?> CAD ·
-            CAD equivalent: <?= format_currency(bcmul($invoice['total_amount'], $invoice['exchange_rate_to_cad'], 2)) ?> CAD
+        <?php
+            // CURRENCY-MARKUP-1: compute CAD equivalent via effective rate (bank + markup).
+            // bank rate and markup_pct are both frozen at invoice creation time.
+            $fxBankRate  = (string) $invoice['exchange_rate_to_cad'];
+            $fxMarkupPct = (string) ($invoice['currency_markup_pct'] ?? '0.0000');
+            $fxHasMarkup = bccomp($fxMarkupPct, '0', 4) > 0;
+            if ($fxHasMarkup) {
+                // effective_rate = bank_rate × (1 + markup_pct / 100)
+                $fxFactor        = bcadd('1', bcdiv($fxMarkupPct, '100', 10), 10);
+                $fxEffectiveRate = bcmul($fxBankRate, $fxFactor, 6);
+                $fxCadEquiv      = bcmul($invoice['total_amount'], $fxEffectiveRate, 2);
+            } else {
+                $fxEffectiveRate = $fxBankRate;
+                $fxCadEquiv      = bcmul($invoice['total_amount'], $fxBankRate, 2);
+            }
+            $fxFmtRate = static fn(string $r): string => rtrim(rtrim(number_format((float)$r, 6), '0'), '.');
+        ?>
+        <div style="text-align:right; margin-top:12px; max-width:480px; margin-left:auto;">
+        <?php if ($fxHasMarkup): ?>
+            <!-- Full breakdown: bank rate + markup + effective rate + CAD equivalent -->
+            <table style="margin-left:auto; border-collapse:collapse; font-size:0.8125rem; width:100%;">
+                <tr>
+                    <td class="text-secondary" style="padding:2px 12px 2px 0; white-space:nowrap;">Bank rate (<?= e($invoice['currency']) ?> → CAD):</td>
+                    <td class="font-mono" style="text-align:right;"><?= e($fxFmtRate($fxBankRate)) ?></td>
+                </tr>
+                <tr>
+                    <td class="text-secondary" style="padding:2px 12px 2px 0; white-space:nowrap;">Markup applied:</td>
+                    <td class="font-mono" style="text-align:right;"><?= e(rtrim(rtrim(number_format((float)$fxMarkupPct, 4), '0'), '.')) ?>%</td>
+                </tr>
+                <tr>
+                    <td class="text-secondary" style="padding:2px 12px 2px 0; white-space:nowrap;">Effective rate:</td>
+                    <td class="font-mono" style="text-align:right;"><?= e($fxFmtRate($fxEffectiveRate)) ?></td>
+                </tr>
+                <tr>
+                    <td class="text-secondary" style="padding:2px 12px 2px 0; white-space:nowrap;">USD total:</td>
+                    <td class="font-mono" style="text-align:right;"><?= format_currency($invoice['total_amount']) ?> USD</td>
+                </tr>
+                <tr style="border-top:1px solid var(--border-default); font-weight:600;">
+                    <td class="text-secondary" style="padding:4px 12px 2px 0; white-space:nowrap;">CAD equivalent:</td>
+                    <td class="font-mono" style="text-align:right;"><?= format_currency($fxCadEquiv) ?> CAD</td>
+                </tr>
+            </table>
+        <?php else: ?>
+            <!-- No markup — show existing compact note -->
+            <span class="text-sm text-secondary">
+                Exchange rate: 1 <?= e($invoice['currency']) ?> = <?= e($fxFmtRate($fxBankRate)) ?> CAD ·
+                CAD equivalent: <?= format_currency($fxCadEquiv) ?> CAD
+            </span>
+        <?php endif; ?>
         </div>
         <?php endif; ?>
 

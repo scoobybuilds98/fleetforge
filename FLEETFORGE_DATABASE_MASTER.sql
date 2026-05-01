@@ -887,6 +887,7 @@ CREATE TABLE invoices (
     po_number                   VARCHAR(100) NULL,
     currency                    ENUM('CAD','USD') NOT NULL DEFAULT 'CAD',
     exchange_rate_to_cad        DECIMAL(10,6) NULL,
+    currency_markup_pct         DECIMAL(6,4) NOT NULL DEFAULT 0.0000, -- [CURRENCY-MARKUP-1] markup % frozen at invoice creation
     billing_period_start        DATE NOT NULL,
     billing_period_end          DATE NOT NULL,
     billing_period_days         SMALLINT UNSIGNED NOT NULL,
@@ -1041,6 +1042,7 @@ CREATE TABLE payments (
     amount                  DECIMAL(12,2) NOT NULL,
     currency                ENUM('CAD','USD') NOT NULL DEFAULT 'CAD',
     exchange_rate_to_cad    DECIMAL(10,6) NULL,
+    currency_markup_pct     DECIMAL(6,4) NOT NULL DEFAULT 0.0000, -- [CURRENCY-MARKUP-1] markup % frozen at payment receipt
     amount_in_cad           DECIMAL(12,2) NULL,
     payment_method          ENUM('check','ach','wire','credit_card','cash',
                                  'e_transfer','account_credit','other') NOT NULL,
@@ -2386,3 +2388,6 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- [PASS-5:1H]  damage_claims: added idx_customer_created composite index (risk score calc)
 -- [CVI-EMAIL-1] portal_users: added notification_preferences JSON column (compliance email opt-out)
 -- ALTER TABLE portal_users ADD COLUMN notification_preferences JSON NULL DEFAULT NULL AFTER is_primary;
+-- [CURRENCY-MARKUP-1] invoices: added currency_markup_pct DECIMAL(6,4) DEFAULT 0.0000 AFTER exchange_rate_to_cad
+-- [CURRENCY-MARKUP-1] payments: added currency_markup_pct DECIMAL(6,4) DEFAULT 0.0000 AFTER exchange_rate_to_cad
+-- [CURRENCY-MARKUP-1] settings: added currency.usd_cad_markup_pct seed row (group=currency)

@@ -140,6 +140,28 @@ if ($crossFieldErrors) {
     json_validation_error($crossFieldErrors);
 }
 
+// CURRENCY-MARKUP-1: freeze exchange rate + markup for USD payments at receipt time
+$paymentExchangeRate = null;
+$paymentMarkupPct    = '0.0000';
+$paymentAmountInCad  = null;
+if ($currency === 'USD') {
+    $fxRow = db_row(
+        "SELECT rate FROM exchange_rates WHERE from_currency = 'USD' AND to_currency = 'CAD' ORDER BY rate_date DESC, id DESC LIMIT 1",
+        []
+    );
+    if ($fxRow) {
+        $paymentExchangeRate = (string) $fxRow['rate'];
+        $paymentMarkupPct    = (string) (settings_get('currency.usd_cad_markup_pct', '0.0000') ?? '0.0000');
+        if (bccomp($paymentMarkupPct, '0', 4) > 0) {
+            $_pFactor           = bcadd('1', bcdiv($paymentMarkupPct, '100', 10), 10);
+            $_pEffRate          = bcmul($paymentExchangeRate, $_pFactor, 6);
+            $paymentAmountInCad = bcmul($amountRaw, $_pEffRate, 2);
+        } else {
+            $paymentAmountInCad = bcmul($amountRaw, $paymentExchangeRate, 2);
+        }
+    }
+}
+
 // -----------------------------------------------------------------------
 // 3. Main transaction — lock, allocate, update counters, transition status
 // -----------------------------------------------------------------------
@@ -148,7 +170,8 @@ $result = null;
 db_transaction(function () use (
     $invoiceId, $amountRaw, $currency, $paymentMethod, $paymentDate,
     $referenceNumber, $bankName, $checkNumber, $cardLastFour, $notes,
-    $internalNotes, $invoiceCheck, &$result
+    $internalNotes, $invoiceCheck, &$result,
+    $paymentExchangeRate, $paymentMarkupPct, $paymentAmountInCad
 ) {
     // ------------------------------------------------------------------
     // 3a. Re-fetch invoice WITH FOR UPDATE (D20 — prevents race condition
@@ -236,9 +259,12 @@ db_transaction(function () use (
         'overpayment_amount'   => $overpaymentAmount,
         'overpayment_action'   => bccomp($overpaymentAmount, '0', 2) > 0 ? 'credit_to_account' : null,
         'overpayment_resolved' => 0,
-        'notes'            => $notes,
-        'internal_notes'   => $internalNotes,
-        'recorded_by'      => current_user_id(),
+        'notes'                => $notes,
+        'internal_notes'       => $internalNotes,
+        'exchange_rate_to_cad' => $paymentExchangeRate,
+        'currency_markup_pct'  => $paymentMarkupPct,
+        'amount_in_cad'        => $paymentAmountInCad,
+        'recorded_by'          => current_user_id(),
     ]);
 
     // ------------------------------------------------------------------

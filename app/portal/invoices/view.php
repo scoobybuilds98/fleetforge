@@ -141,6 +141,34 @@ require_once dirname(__DIR__) . '/includes/header.php';
             <li><span class="portal-info-label">PST</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['pst_amount'])) ?></span></li>
             <?php endif; ?>
             <li style="font-weight:700;font-size:0.875rem;"><span class="portal-info-label">Total</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['total_amount'])) ?></span></li>
+            <?php
+            // CURRENCY-MARKUP-1: D-D — show FX breakdown when USD + markup > 0 (transparency)
+            $_portalCurrency  = $inv['currency'] ?? 'CAD';
+            $_portalBankRate  = (string)($inv['exchange_rate_to_cad'] ?? '');
+            $_portalMarkupPct = (string)($inv['currency_markup_pct'] ?? '0.0000');
+            $_portalHasFx     = $_portalCurrency !== 'CAD' && $_portalBankRate !== '';
+            $_portalHasMarkup = $_portalHasFx && bccomp($_portalMarkupPct, '0', 4) > 0;
+            if ($_portalHasFx):
+                if ($_portalHasMarkup) {
+                    $_pFactor   = bcadd('1', bcdiv($_portalMarkupPct, '100', 10), 10);
+                    $_pEffRate  = bcmul($_portalBankRate, $_pFactor, 6);
+                    $_pCadTotal = bcmul($inv['total_amount'], $_pEffRate, 2);
+                } else {
+                    $_pEffRate  = $_portalBankRate;
+                    $_pCadTotal = bcmul($inv['total_amount'], $_portalBankRate, 2);
+                }
+                $fmtR = static fn(string $r): string => rtrim(rtrim(number_format((float)$r, 6), '0'), '.');
+            ?>
+            <?php if ($_portalHasMarkup): ?>
+            <li><span class="portal-info-label">Bank Rate (USD→CAD)</span><span class="portal-info-value font-mono"><?= e($fmtR($_portalBankRate)) ?></span></li>
+            <li><span class="portal-info-label">Markup Applied</span><span class="portal-info-value font-mono"><?= e(rtrim(rtrim(number_format((float)$_portalMarkupPct, 4), '0'), '.')) ?>%</span></li>
+            <li><span class="portal-info-label">Effective Rate</span><span class="portal-info-value font-mono"><?= e($fmtR($_pEffRate)) ?></span></li>
+            <li style="font-weight:600;"><span class="portal-info-label">CAD Equivalent</span><span class="portal-info-value font-mono"><?= e(format_currency($_pCadTotal)) ?> CAD</span></li>
+            <?php else: ?>
+            <li><span class="portal-info-label">Exchange Rate</span><span class="portal-info-value font-mono">1 USD = <?= e($fmtR($_portalBankRate)) ?> CAD</span></li>
+            <li><span class="portal-info-label">CAD Equivalent</span><span class="portal-info-value font-mono"><?= e(format_currency($_pCadTotal)) ?> CAD</span></li>
+            <?php endif; ?>
+            <?php endif; ?>
             <li style="font-weight:700;"><span class="portal-info-label" style="color:var(--color-danger);">Balance Due</span><span class="portal-info-value font-mono" style="color:var(--color-danger);"><?= e(format_currency($inv['balance_due'])) ?></span></li>
         </ul>
     </div>

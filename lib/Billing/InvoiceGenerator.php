@@ -235,12 +235,16 @@ class InvoiceGenerator
             // rate_date DESC. If no row exists, leave exchange rate null (invoice still bills
             // in USD but has no CAD conversion snapshot).
             $exchangeRate = null;
+            // CURRENCY-MARKUP-1: markup % frozen at creation — same immutability as bank rate.
+            // Changing the setting later does NOT affect existing invoices (CRA defensibility).
+            $markupPct = '0.0000';
             if ($lease['currency'] === 'USD') {
                 $fxRow = db_row(
                     "SELECT rate FROM exchange_rates WHERE from_currency = 'USD' AND to_currency = 'CAD' ORDER BY rate_date DESC LIMIT 1",
                     []
                 );
                 $exchangeRate = $fxRow ? $fxRow['rate'] : null;
+                $markupPct = (string) (settings_get('currency.usd_cad_markup_pct', '0.0000') ?? '0.0000');
             }
 
             // --- SAMSARA-3: odometer + distance (optional) ---
@@ -306,6 +310,7 @@ class InvoiceGenerator
                 'po_number'                 => $params['po_number'] ?? $lease['po_number'] ?? null,
                 'currency'                  => $lease['currency'],
                 'exchange_rate_to_cad'       => $exchangeRate,
+                'currency_markup_pct'        => $markupPct,
                 'billing_period_start'      => $periodStart,
                 'billing_period_end'        => $periodEnd,
                 'billing_period_days'       => $days,
@@ -566,6 +571,7 @@ class InvoiceGenerator
                 'tax_exempt_snapshot'            => $orig['tax_exempt_snapshot'],
                 'currency'                       => $orig['currency'],
                 'exchange_rate_to_cad'           => $orig['exchange_rate_to_cad'],
+                'currency_markup_pct'            => $orig['currency_markup_pct'] ?? '0.0000',
                 'billing_period_start'           => $today,
                 'billing_period_end'             => $today,
                 'billing_period_days'            => 1,

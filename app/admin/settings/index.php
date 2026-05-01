@@ -43,7 +43,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
     } else {
         $groupName = clean_string($_POST['_group'] ?? null);
 
-        if ($groupName) {
+        if ($groupName === 'currency') {
+            // CURRENCY-MARKUP-1: step=0.0001 precision, range 0–20, old/new audit log
+            $oldMarkup = (string) (settings_get('currency.usd_cad_markup_pct', '0.0000') ?? '0.0000');
+            $rawMarkup = $_POST['currency_usd_cad_markup_pct'] ?? null;
+            $newMarkup = $rawMarkup !== null
+                ? (string) preg_replace('/[^0-9.]/', '', (string) $rawMarkup)
+                : '0.0000';
+            if (!is_numeric($newMarkup) || $newMarkup === '') {
+                $newMarkup = '0.0000';
+            }
+            $newMarkup = number_format((float) $newMarkup, 4, '.', '');
+
+            if (bccomp($newMarkup, '0', 4) < 0 || bccomp($newMarkup, '20', 4) > 0) {
+                $saveError = 'USD → CAD markup must be between 0% and 20%.';
+            } else {
+                db_execute(
+                    "UPDATE settings SET `value` = ?, updated_by = ?, updated_at = NOW() WHERE `key` = 'currency.usd_cad_markup_pct'",
+                    [$newMarkup, current_user_id()]
+                );
+                db_insert('audit_log', [
+                    'user_id'      => current_user_id(),
+                    'user_name'    => current_user()['name'] ?? 'system',
+                    'action'       => 'update',
+                    'module'       => 'settings',
+                    'entity_type'  => 'settings_group',
+                    'entity_label' => 'currency',
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                    'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                    'notes'        => "USD → CAD markup updated: {$oldMarkup}% → {$newMarkup}%",
+                ]);
+                $saveFlash = 'Currency settings saved.';
+            }
+
+        } elseif ($groupName) {
             // Fetch all keys belonging to this group
             $groupKeys = db_select(
                 "SELECT `key`, value_type FROM settings WHERE group_name = ?",
@@ -126,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -160,6 +193,7 @@ $groupLabels = [
     'notifications' => 'Notifications & Email',
     'gps'           => 'GPS Integration',
     'ai'            => 'AI / Machine Learning',
+    'currency'      => 'Currency Conversion',
     'yards'         => 'Yards',
     'email'         => 'Email (SMTP / SES)',
     'storage'       => 'Storage Driver',
@@ -321,6 +355,52 @@ if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
     </div>
 </div>
 <?php endforeach; ?>
+
+<!-- CURRENCY-MARKUP-1: custom card — step=0.0001, max=20, % suffix, old/new audit -->
+<?php
+$_curMarkup = '0.0000';
+if (!empty($grouped['currency'])) {
+    foreach ($grouped['currency'] as $_cs) {
+        if ($_cs['key'] === 'currency.usd_cad_markup_pct') {
+            $_curMarkup = $_cs['value'] ?? '0.0000';
+            break;
+        }
+    }
+}
+?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;">Currency Conversion</div>
+    <div class="card-body">
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="currency">
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="currency_usd_cad_markup_pct">USD → CAD Markup</label>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="number" id="currency_usd_cad_markup_pct" name="currency_usd_cad_markup_pct"
+                               class="form-control" style="max-width:160px;"
+                               value="<?= e($_curMarkup) ?>"
+                               step="0.0001" min="0" max="20"
+                               <?= !$canEdit ? 'readonly' : '' ?>>
+                        <span style="font-size:0.875rem;color:var(--text-secondary);">%</span>
+                    </div>
+                    <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;">
+                        Markup % applied on top of the bank exchange rate when generating USD invoices.
+                        Frozen per invoice at creation. Visible on invoice PDF and customer portal. 0 = no markup.
+                    </p>
+                </div>
+            </div>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save Currency Settings</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
 
 </div><!-- /general tab -->
 
