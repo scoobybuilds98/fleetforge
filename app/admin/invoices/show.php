@@ -220,32 +220,490 @@ foreach ($lineItems as $li) {
     if ($li['item_type'] === 'mileage_charge' || $li['item_type'] === 'mileage_overage') $mileageLineCount++;
 }
 
+/* ─── Company settings for the print letterhead ─────────────────
+ * WHY: The "Print" button calls window.print(); the browser then
+ * re-renders the page through @media print. The on-screen header
+ * contains sidebar / breadcrumb / action buttons (all hidden in
+ * print), so we need a dedicated print-only letterhead block at
+ * the top of the printed document that identifies the supplier
+ * with company name, address, contact info, and the regulatory
+ * tax IDs (GST/PST) that PASS-13:T3/I1 requires on every invoice.
+ */
+$companyName    = (string) settings_get('company.name',        'FleetForge');
+$companyAddress = (string) settings_get('company.address',     '');
+$companyCity    = (string) settings_get('company.city',        '');
+$companyProv    = (string) settings_get('company.province',    '');
+$companyPostal  = (string) settings_get('company.postal_code', '');
+$companyPhone   = (string) settings_get('company.phone',       '');
+$companyEmail   = (string) settings_get('company.email',       '');
+$companyWebsite = (string) settings_get('company.website',     '');
+$companyGst     = (string) settings_get('company.gst_number',  '');
+$companyPst     = (string) settings_get('company.pst_number',  '');
+
+// WHY: Compose the "City, Province Postal" line, skipping empties
+$companyCityLine = trim(
+    $companyCity
+    . ($companyProv   ? ($companyCity ? ', ' : '') . $companyProv : '')
+    . ($companyPostal ? ' ' . $companyPostal : '')
+);
+
+// WHY: Hide the Notes card in print when there's nothing customer-facing
+// to show. Without this the card renders as an ugly empty box with the
+// "No notes or references on this invoice" placeholder text.
+$hasPrintableNotes = !empty($invoice['notes'])
+                  || !empty($invoice['po_number'])
+                  || !empty($invoice['void_reason'])
+                  || !empty($invoice['write_off_reason']);
+
 $pageTitle = 'Invoice ' . $invoice['invoice_number'];
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ================================================================
      PRINT-ONLY STYLES — Scoped to this page
+     WHY: Redesigned from scratch (S043) so the printed PDF is
+     professional letterhead output that fits on 1–2 letter pages.
+     Key decisions:
+       • Hide the sidebar, topbar, breadcrumb, stat-timeline, action
+         buttons, rate-calc breakdown, delivery tracking, payment
+         history, internal notes, and activity log — customers don't
+         need any of that on their printed invoice.
+       • Show a dedicated .ff-print-header letterhead with company
+         name/address/tax IDs and a big "INVOICE" wordmark plus the
+         invoice number and dates (so the print is standalone).
+       • Shrink stat cards into a 4-up summary strip (Date, Due,
+         Total, Balance Due) instead of the chunky on-screen tiles.
+       • Compact typography: 9pt body, 6.5pt stat labels, table
+         rows 5/6px padding. Targets density:compact even if the
+         user is on spacious.
+       • Single bordered card look (no rounded corners/shadows).
      ================================================================ -->
 <style>
-    /* Print-specific overrides for professional invoice output */
-    @media print {
-        .no-print, .page-header-actions, .breadcrumb,
-        .invoice-actions-bar, .activity-log-section,
-        .btn, button { display: none !important; }
-        .invoice-status-timeline { display: none !important; }
-        .stat-grid { break-inside: avoid; }
-        .card { break-inside: avoid; box-shadow: none !important; border: 1px solid #ddd; }
-        .invoice-addresses { break-inside: avoid; }
-        .line-items-card { break-inside: avoid; }
-        .financial-summary-card { break-inside: avoid; }
-        body { font-size: 12px; }
-        .page-content { padding: 0 !important; }
-        /* Show print header */
-        .print-only { display: block !important; }
-    }
+    /* Print-only helper classes — hidden on-screen by default */
     @media screen {
-        .print-only { display: none !important; }
+        .print-only, .ff-print-only { display: none !important; }
+    }
+
+    @media print {
+        /* ───── PAGE SETUP — US Letter with tight margins ─────
+           0.35in top/bottom and 0.4in left/right maximize content
+           area while staying within safe printable margins for
+           most office printers. */
+        @page {
+            size: letter;
+            margin: 0.35in 0.4in;
+        }
+
+        html, body {
+            background: #ffffff !important;
+            color: #111 !important;
+            font-family: 'DM Sans', Arial, sans-serif !important;
+            font-size: 9pt !important;
+            line-height: 1.3 !important;
+        }
+
+        /* Reset the app shell so only invoice content flows */
+        .app-layout, .app-main, .page-content, main#main-content,
+        [x-data="FF_InvoiceShow()"] {
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-height: 0 !important;
+            height: auto !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: #ffffff !important;
+            overflow: visible !important;
+        }
+
+        /* ───── HIDE app chrome + all screen-only sections ───── */
+        .no-print,
+        .breadcrumb,
+        .page-header,
+        .page-header-actions,
+        .invoice-status-timeline,
+        .invoice-actions-bar,
+        .activity-log-section,
+        .btn, button,
+        .toast,
+        .rate-explanation-body,
+        .inline-edit-section,
+        .app-footer,
+        .sidebar, .topbar, #ff-toast-container,
+        .modal-overlay, .chat-widget,
+        .ff-print-hide {
+            display: none !important;
+        }
+
+        /* Show print-only elements */
+        .ff-print-only, .print-only {
+            display: block !important;
+        }
+        .ff-print-header.ff-print-only {
+            display: flex !important;
+        }
+
+        /* ───── LETTERHEAD — company info + INVOICE wordmark ───── */
+        .ff-print-header {
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #111;
+            padding: 0 0 8px 0;
+            margin: 0 0 10px 0;
+            gap: 24px;
+        }
+        .ff-print-header .pc-company { flex: 1 1 60%; max-width: 60%; }
+        .ff-print-header .pc-name {
+            font-size: 14pt;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            color: #111;
+            margin: 0 0 3px 0;
+            line-height: 1.2;
+        }
+        .ff-print-header .pc-addr {
+            font-size: 8.5pt;
+            line-height: 1.45;
+            color: #333;
+        }
+        .ff-print-header .pc-reg {
+            font-size: 7.5pt;
+            color: #555;
+            margin-top: 4px;
+            font-family: 'DM Mono', monospace;
+        }
+        .ff-print-header .pc-title {
+            flex: 0 0 auto;
+            text-align: right;
+            min-width: 200px;
+        }
+        .ff-print-header .pc-title-text {
+            font-size: 22pt;
+            font-weight: 700;
+            letter-spacing: 3px;
+            color: #111;
+            margin: 0;
+            line-height: 1;
+        }
+        .ff-print-header .pc-number {
+            font-size: 10pt;
+            font-family: 'DM Mono', monospace;
+            margin-top: 4px;
+            color: #111;
+            font-weight: 600;
+        }
+        .ff-print-header .pc-meta {
+            font-size: 8pt;
+            color: #333;
+            margin-top: 6px;
+            line-height: 1.55;
+            font-family: 'DM Mono', monospace;
+        }
+        .ff-print-header .pc-status-badge {
+            display: inline-block;
+            border: 1px solid #111;
+            padding: 1px 6px;
+            font-size: 7.5pt;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+        .ff-print-header .pc-status-badge.is-overdue,
+        .ff-print-header .pc-status-badge.is-void,
+        .ff-print-header .pc-status-badge.is-written-off {
+            background: #111;
+            color: #fff;
+        }
+
+        /* ───── STAT SUMMARY STRIP — 5 compact tiles across ─────
+           Five cards (Date, Due, Total, Paid, Balance) so nothing
+           wraps to a second row on letter paper. */
+        .stat-grid {
+            display: grid !important;
+            grid-template-columns: repeat(5, 1fr) !important;
+            gap: 0 !important;
+            margin: 0 0 8px 0 !important;
+            break-inside: avoid;
+        }
+        .stat-card {
+            padding: 6px 8px 6px 10px !important;
+            border: 1px solid #bbb !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            margin: 0 !important;
+            color: #111 !important;
+            min-height: 0 !important;
+            overflow: hidden !important;
+        }
+        .stat-card + .stat-card { border-left: none !important; }
+        /* Kill the orange ::before accent stripe in print — it's a
+           screen-design flourish that clashes with the clean print look */
+        .stat-card::before { display: none !important; content: none !important; }
+        .stat-card .stat-label {
+            font-size: 6.5pt !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            color: #666 !important;
+            margin: 0 0 2px 0 !important;
+        }
+        .stat-card .stat-value {
+            font-size: 11pt !important;
+            font-weight: 700 !important;
+            color: #111 !important;
+            font-family: 'DM Mono', monospace !important;
+            line-height: 1.15 !important;
+        }
+        /* Neutralise on-screen danger/success inline colors in print */
+        .stat-card .stat-value[style*="color"],
+        .stat-card .stat-value * {
+            color: #111 !important;
+        }
+        .stat-card .text-sm,
+        .stat-card .stat-value div {
+            font-size: 6.5pt !important;
+            font-weight: 400 !important;
+            color: #666 !important;
+            margin-top: 1px !important;
+        }
+
+        /* ───── BILL TO / INVOICE DETAILS ───── */
+        .invoice-addresses {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 10px !important;
+            margin: 0 0 8px 0 !important;
+            break-inside: avoid;
+        }
+        .invoice-addresses .card {
+            padding: 10px 12px !important;
+            border: 1px solid #bbb !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            background: #ffffff !important;
+        }
+        .invoice-addresses h3 {
+            font-size: 7.5pt !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            color: #666 !important;
+            margin: 0 0 6px 0 !important;
+        }
+        .invoice-addresses dl {
+            grid-template-columns: 95px 1fr !important;
+            gap: 3px 10px !important;
+            font-size: 8.5pt !important;
+            margin: 0 !important;
+        }
+        .invoice-addresses dd,
+        .invoice-addresses dt {
+            font-size: 8.5pt !important;
+            line-height: 1.4 !important;
+            color: #111 !important;
+        }
+        .invoice-addresses dt { color: #666 !important; }
+        .invoice-addresses .card > div { font-size: 8.5pt !important; line-height: 1.4 !important; }
+        .invoice-addresses .card > div > div[style*="font-weight:600"] {
+            font-size: 9pt !important;
+        }
+
+        /* ───── LINE ITEMS CARD ───── */
+        .line-items-card {
+            border: 1px solid #111 !important;
+            border-radius: 0 !important;
+            margin: 0 0 8px 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            break-inside: auto;
+        }
+        .line-items-card > div:first-child {
+            padding: 6px 10px !important;
+            border-bottom: 1px solid #111 !important;
+            background: #f2f2f2 !important;
+        }
+        .line-items-card h3 {
+            font-size: 9pt !important;
+            margin: 0 !important;
+        }
+        /* Hide only header-bar badges (the "1 item" / "credits" counts),
+           keep the per-row Type badges inside the table body visible. */
+        .line-items-card > div:first-child .badge { display: none !important; }
+        .line-items-card table { font-size: 8pt !important; }
+        .line-items-card th {
+            font-size: 6.5pt !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.4px !important;
+            background: #fafafa !important;
+            color: #444 !important;
+            border-bottom: 1px solid #111 !important;
+            padding: 5px 6px !important;
+            font-weight: 700 !important;
+            vertical-align: middle !important;
+        }
+        .line-items-card td {
+            padding: 5px 6px !important;
+            font-size: 8pt !important;
+            color: #111 !important;
+            border-bottom: 1px solid #e5e5e5 !important;
+            vertical-align: top !important;
+        }
+        .line-items-card .mileage-detail { font-size: 7pt !important; color: #555 !important; }
+        .line-items-card .detail-toggle { display: none !important; }
+        .line-items-card .detail-expansion { display: none !important; }
+        .line-items-card tfoot td {
+            background: #f2f2f2 !important;
+            border-top: 1px solid #111 !important;
+            border-bottom: none !important;
+            font-weight: 700 !important;
+            font-size: 8.5pt !important;
+            padding: 6px 8px !important;
+            color: #111 !important;
+        }
+        /* Column type badges — flatten for print */
+        .line-items-card td .badge {
+            border: 1px solid #777 !important;
+            background: #ffffff !important;
+            color: #333 !important;
+            padding: 0 3px !important;
+            font-size: 6pt !important;
+            border-radius: 2px !important;
+        }
+
+        /* ───── FINANCIAL SUMMARY ───── */
+        .financial-summary-card {
+            border: 1px solid #bbb !important;
+            border-radius: 0 !important;
+            margin: 0 0 8px 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            break-inside: avoid;
+        }
+        .financial-summary-card > div:first-child {
+            padding: 6px 10px !important;
+            border-bottom: 1px solid #bbb !important;
+            background: #f2f2f2 !important;
+        }
+        .financial-summary-card > div:first-child h3 {
+            font-size: 9pt !important;
+            margin: 0 !important;
+        }
+        .financial-summary-card > div:last-child {
+            padding: 10px 12px !important;
+        }
+        .financial-summary-table {
+            max-width: 360px !important;
+            margin-left: auto !important;
+        }
+        .financial-summary-table td {
+            padding: 3px 12px !important;
+            font-size: 8.5pt !important;
+            color: #111 !important;
+        }
+        .financial-summary-table .fs-label { color: #444 !important; }
+        .financial-summary-table .fs-total {
+            font-size: 10pt !important;
+            font-weight: 700 !important;
+        }
+        .financial-summary-table .fs-grand td {
+            border-top: 1.5px solid #111 !important;
+            padding-top: 6px !important;
+            padding-bottom: 6px !important;
+        }
+        .financial-summary-table .fs-divider td {
+            border-top: 1px solid #111 !important;
+            padding-top: 5px !important;
+            padding-bottom: 5px !important;
+        }
+        .financial-summary-table .fs-value[style*="color"],
+        .financial-summary-table td[style*="color"] {
+            color: #111 !important;
+        }
+
+        /* ───── NOTES & REFERENCES ───── */
+        #invoice-edit-section {
+            border: 1px solid #bbb !important;
+            border-radius: 0 !important;
+            margin: 0 0 6px 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            break-inside: avoid;
+        }
+        #invoice-edit-section > div:first-child {
+            padding: 4px 10px !important;
+            border-bottom: 1px solid #bbb !important;
+            background: #f2f2f2 !important;
+        }
+        #invoice-edit-section > div:first-child h3 {
+            font-size: 8.5pt !important;
+            margin: 0 !important;
+        }
+        #invoice-edit-section > div:nth-child(2) {
+            padding: 6px 10px !important;
+            font-size: 8pt !important;
+        }
+        #invoice-edit-section > div:nth-child(2) > div { gap: 6px !important; }
+        #invoice-edit-section .text-secondary { color: #555 !important; }
+        /* Empty notes message is hidden in print */
+        #invoice-edit-section p.text-secondary { display: none !important; }
+
+        /* ───── GENERIC CARD POLISH ───── */
+        .card {
+            border: 1px solid #bbb !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            color: #111 !important;
+            break-inside: avoid;
+        }
+
+        /* ───── BADGES — flat, monochrome ───── */
+        .badge {
+            border: 1px solid #777 !important;
+            background: #ffffff !important;
+            color: #333 !important;
+            padding: 0 4px !important;
+            font-size: 6.5pt !important;
+            border-radius: 2px !important;
+            box-shadow: none !important;
+            letter-spacing: 0.2px !important;
+        }
+
+        /* ───── LINKS — plain ink ───── */
+        a, a:link, a:visited {
+            color: #111 !important;
+            text-decoration: none !important;
+        }
+
+        /* ───── PRINT FOOTER line ─────
+           Use #ff-print-footer ID selector so we beat the inline
+           style's margin-top:40px / padding:24px 0 without fighting
+           attribute selector specificity. */
+        #ff-print-footer {
+            border-top: 1px solid #999 !important;
+            padding: 5px 0 0 0 !important;
+            margin-top: 8px !important;
+            font-size: 7pt !important;
+            color: #666 !important;
+            text-align: center !important;
+        }
+        #ff-print-footer strong {
+            font-family: 'DM Mono', monospace;
+            color: #111 !important;
+        }
+
+        /* ───── PAGE BREAK BEHAVIOUR ───── */
+        h1, h2, h3 { break-after: avoid; }
+        table { break-inside: auto; }
+        thead { display: table-header-group; }
+        tfoot { display: table-footer-group; }
+        tr { break-inside: avoid; }
     }
 
     /* Status timeline styles */
@@ -401,6 +859,60 @@ require_once FF_ROOT . '/includes/header.php';
 </nav>
 
 <div x-data="FF_InvoiceShow()" x-cloak>
+
+<!-- ================================================================
+     PRINT-ONLY LETTERHEAD
+     WHY: When the user clicks Print → Save as PDF, the browser uses
+     @media print which hides the sidebar/topbar/breadcrumb/buttons.
+     Without this block, the printed invoice would have no company
+     branding. This block is hidden on-screen (display:none via the
+     .ff-print-only rule in @media screen) and visible only when
+     printing. It shows the supplier letterhead on the left and the
+     "INVOICE" wordmark + number/dates/status on the right.
+     ================================================================ -->
+<div class="ff-print-header ff-print-only">
+    <div class="pc-company">
+        <div class="pc-name"><?= e($companyName) ?></div>
+        <div class="pc-addr">
+            <?php if ($companyAddress): ?><?= nl2br(e($companyAddress)) ?><br><?php endif; ?>
+            <?php if ($companyCityLine): ?><?= e($companyCityLine) ?><br><?php endif; ?>
+            <?php if ($companyPhone): ?>Tel: <?= e($companyPhone) ?><?php endif; ?>
+            <?php if ($companyPhone && $companyEmail): ?> &middot; <?php endif; ?>
+            <?php if ($companyEmail): ?><?= e($companyEmail) ?><?php endif; ?>
+            <?php if ($companyWebsite): ?><br><?= e($companyWebsite) ?><?php endif; ?>
+        </div>
+        <?php if ($companyGst || $companyPst): ?>
+        <div class="pc-reg">
+            <?php if ($companyGst): ?>GST/HST: <?= e($companyGst) ?><?php endif; ?>
+            <?php if ($companyGst && $companyPst): ?> &middot; <?php endif; ?>
+            <?php if ($companyPst): ?>PST: <?= e($companyPst) ?><?php endif; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+    <div class="pc-title">
+        <div class="pc-title-text">INVOICE</div>
+        <div class="pc-number">#<?= e($invoice['invoice_number']) ?></div>
+        <div class="pc-meta">
+            Date: <?= format_date($invoice['invoice_date']) ?><br>
+            Due:&nbsp; <?= format_date($invoice['due_date']) ?>
+            <?php if ($invoice['po_number']): ?><br>PO:&nbsp;&nbsp; <?= e($invoice['po_number']) ?><?php endif; ?>
+            <?php if ($invoice['currency'] !== 'CAD'): ?><br>Curr: <?= e($invoice['currency']) ?><?php endif; ?>
+        </div>
+        <?php
+        // WHY: Badge class names in print-CSS drive whether the status
+        // box gets a black background (overdue/void/written-off) or stays
+        // an outlined ink box (sent/paid/draft/partially_paid).
+        $printBadgeClass = '';
+        if ($isOverdue)       $printBadgeClass = ' is-overdue';
+        elseif ($isVoid)      $printBadgeClass = ' is-void';
+        elseif ($isWrittenOff)$printBadgeClass = ' is-written-off';
+        ?>
+        <div class="pc-status-badge<?= $printBadgeClass ?>">
+            <?= e($isOverdue ? 'Overdue' : ucfirst(str_replace('_', ' ', $invoice['status']))) ?>
+        </div>
+    </div>
+</div>
+
 <div class="page-header">
     <div>
         <h1 class="page-header-title h4">
@@ -511,7 +1023,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal modal-sm">
                 <div class="modal-header">
                     <h3 class="modal-title">Void Invoice</h3>
-                    <button class="modal-close" @click="showVoidModal = false">&times;</button>
+                    <button class="modal-close-btn" aria-label="Close" @click="showVoidModal = false">&times;</button>
                 </div>
                 <div class="modal-body">
                     <p class="text-sm text-secondary" style="margin-bottom:12px;">
@@ -539,7 +1051,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal modal-sm">
                 <div class="modal-header">
                     <h3 class="modal-title">Delete Invoice</h3>
-                    <button class="modal-close" @click="showDeleteModal = false">&times;</button>
+                    <button class="modal-close-btn" aria-label="Close" @click="showDeleteModal = false">&times;</button>
                 </div>
                 <div class="modal-body">
                     <p>Are you sure you want to delete invoice <strong><?= e($invoice['invoice_number']) ?></strong>
@@ -818,7 +1330,8 @@ if ($hasOdometer):
         [$invoice['lease_id']]
     );
 ?>
-<div class="card" style="padding:20px; margin-bottom:20px;">
+<!-- WHY: Odometer detail is internal telematics context; hidden in print -->
+<div class="card ff-print-hide" style="padding:20px; margin-bottom:20px;">
     <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 12px 0;">
         Odometer &amp; Distance
     </h3>
@@ -887,7 +1400,8 @@ if ($rateExplanation) {
 }
 ?>
 <?php if (!empty($rateLines)): ?>
-<div class="card" style="margin-bottom:24px; padding:16px 20px;">
+<!-- WHY: Rate calc breakdown is an internal audit trail; hidden in print -->
+<div class="card ff-print-hide" style="margin-bottom:24px; padding:16px 20px;">
     <div style="display:flex; align-items:center; gap:8px; cursor:pointer;"
          onclick="this.parentElement.querySelector('.rate-explanation-body').classList.toggle('hidden')">
         <?= heroicon('calculator', 'icon-sm') ?>
@@ -1222,7 +1736,9 @@ $hasWriteOffInfo = $isWrittenOff && $invoice['write_off_reason'];
 
 if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWriteOffInfo):
 ?>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+<!-- WHY: Delivery/late/credit/void tracking is internal context; hidden in print.
+     Customers get the essential info (status badge, notes) via the letterhead. -->
+<div class="ff-print-hide" style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
 
     <!-- Delivery Tracking -->
     <?php if ($hasDeliveryInfo): ?>
@@ -1380,8 +1896,11 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
 
 <!-- ================================================================
      PAYMENT HISTORY — Allocations table with Record Payment button
+     WHY hidden in print: customers get "Amount Paid / Balance Due"
+     in the KPI strip and "Payments Applied" in the financial summary.
+     The full allocation history is internal AR detail.
      ================================================================ -->
-<div class="card" style="margin-bottom:24px;">
+<div class="card ff-print-hide" style="margin-bottom:24px;">
     <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
         <h3 style="font-size:14px; font-weight:600; margin:0;">Payment History</h3>
         <span class="badge badge-no-dot badge-neutral"><?= count($invoicePayments) ?> payment<?= count($invoicePayments) !== 1 ? 's' : '' ?></span>
@@ -1463,8 +1982,11 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
 <!-- ================================================================
      NOTES — Customer-facing, Internal, Void reason
      With inline editing for draft invoices
+     WHY: Whole card is hidden in print when there's nothing
+     customer-facing to show. Internal notes are always hidden in
+     print regardless (they're staff-only).
      ================================================================ -->
-<div class="card" id="invoice-edit-section" style="margin-bottom:24px;">
+<div class="card<?= $hasPrintableNotes ? '' : ' ff-print-hide' ?>" id="invoice-edit-section" style="margin-bottom:24px;">
     <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
         <h3 style="font-size:14px; font-weight:600; margin:0;">Notes & References</h3>
         <?php if ($canEdit): ?>
@@ -1495,7 +2017,8 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
                 <?php endif; ?>
 
                 <?php if ($invoice['internal_notes']): ?>
-                <div>
+                <!-- WHY: Internal notes are staff-only; hidden in print -->
+                <div class="ff-print-hide">
                     <div class="text-secondary text-sm" style="font-weight:600; margin-bottom:4px;">Internal Notes <span class="badge badge-no-dot badge-warning" style="font-size:10px;">Staff Only</span></div>
                     <div style="white-space:pre-wrap;"><?= e($invoice['internal_notes']) ?></div>
                 </div>
@@ -1608,8 +2131,10 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
 
 <!-- ================================================================
      PRINT-ONLY FOOTER — Shows on printed invoice
+     WHY: id="ff-print-footer" lets the print CSS override the inline
+     style's margin-top:40px / padding:24px 0 cleanly with !important.
      ================================================================ -->
-<div class="print-only" style="text-align:center; padding:24px 0; border-top:2px solid #333; margin-top:40px; font-size:12px; color:#666;">
+<div id="ff-print-footer" class="print-only" style="text-align:center; padding:24px 0; border-top:2px solid #333; margin-top:40px; font-size:12px; color:#666;">
     <strong>Invoice <?= e($invoice['invoice_number']) ?></strong> ·
     Generated by FleetForge ·
     <?= date('M j, Y g:i A') ?>

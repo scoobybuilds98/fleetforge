@@ -3407,12 +3407,91 @@ textarea.form-input {
 html.is-mac .mac-only     { display: inline; }
 html.is-mac .non-mac-only { display: none; }
 
-/* Print */
+/* Print
+   PRINT-DARK-FIX: Force light-theme colors during print regardless of the
+   user's `data-theme` preference. Without this override, a dark-theme user
+   prints white text (--text-primary: #ffffff) onto white paper because
+   Chrome's default print setting "Background graphics" is OFF — the dark
+   card backgrounds are dropped but the white text stays white, leaving
+   the page visually empty. We override the CSS variables themselves so
+   every consumer (cards, stats, tables, headers, links) gets readable
+   ink-on-paper colors automatically. */
 @media print {
-    .sidebar, .topbar, #ff-toast-container { display: none !important; }
+    /* Force light-theme palette for both :root and the dark-theme scope */
+    :root,
+    [data-theme="dark"] {
+        --bg-body:            #ffffff !important;
+        --bg-page:            #ffffff !important;
+        --bg-surface:         #ffffff !important;
+        --bg-surface-2:       #ffffff !important;
+        --bg-card:            #ffffff !important;
+        --bg-muted:           #f5f5f5 !important;
+        --bg-secondary:       #ffffff !important;
+        --bg-input:           #ffffff !important;
+        --bg-hover:           #ffffff !important;
+        --bg-selected:        #ffffff !important;
+        --bg-surface-hover:   #ffffff !important;
+
+        --text-primary:       #000000 !important;
+        --text-secondary:     #333333 !important;
+        --text-tertiary:      #555555 !important;
+        --text-muted:         #555555 !important;
+        --text-disabled:      #888888 !important;
+        --text-inverse:       #ffffff !important;
+
+        --border-color:        #cccccc !important;
+        --border-color-strong: #999999 !important;
+        --border-strong:       #999999 !important;
+    }
+
+    /* Force every element to ink-on-paper colors as a defensive backstop
+       for elements that hard-code white text (e.g. inline `style="color:#fff"`)
+       or that override --text-primary. Then individual selectors below
+       restore brand accents that should remain coloured. */
+    html, body { background: #ffffff !important; color: #000000 !important; }
+
+    .sidebar, .topbar, #ff-toast-container, .chat-widget { display: none !important; }
     .app-main { margin-left: 0 !important; }
     .page-content { padding: 0; }
-    .card { border: 1px solid #ccc; box-shadow: none; }
+    .card { border: 1px solid #ccc; box-shadow: none !important; background: #ffffff !important; color: #000000 !important; }
+
+    /* PRINT-TABLE-FIX: Force tables back to proper table layout.
+       WHY: app.js auto-adds .table-stack to every table in the app so that
+       on mobile (max-width:767px) each row renders as a stacked label/value
+       card. But when the browser prints to letter paper, the paper width
+       (~720px after ~0.5in margins) falls BELOW the 767px breakpoint, so
+       every table on every printed page collapses into a vertical stack —
+       an 8-column line-items table becomes 8 block rows per item, blowing
+       a one-page invoice out to four pages of wasted whitespace. Force
+       display:table / table-row / table-cell in print so tables stay
+       horizontal regardless of the mobile query. */
+    .table-stack,
+    .table-stack.table,
+    table.table {
+        display: table !important;
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+    .table-stack thead, table.table thead { display: table-header-group !important; }
+    .table-stack tbody, table.table tbody { display: table-row-group !important; }
+    .table-stack tfoot, table.table tfoot { display: table-footer-group !important; }
+    .table-stack tr, table.table tr {
+        display: table-row !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        background: transparent !important;
+    }
+    .table-stack td, .table-stack th,
+    table.table td, table.table th {
+        display: table-cell !important;
+        vertical-align: top !important;
+    }
+    /* Kill the ::before pseudo-label that table-stack uses on mobile */
+    .table-stack td::before { content: none !important; display: none !important; }
+    /* Undo the mobile min-width that forces horizontal scroll */
+    .table-wrapper, .table-responsive { overflow: visible !important; }
+    table.table, table.data-table { min-width: 0 !important; }
 }
 
 /* ============================================================
@@ -7892,3 +7971,380 @@ body:has(.chat-page-content) #ff-chat-widget {
 @keyframes ff-picker-spin {
     to { transform: rotate(360deg); }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   UI-AUDIT-1 — Missing utility classes
+   ────────────────────────────────────────────────────────────────────
+   Source-scan audit turned up ~50 class names referenced in PHP files
+   that had no CSS rule anywhere (not in app.css, not in inline <style>
+   blocks). Some of them silently did nothing (heading variants, badge
+   color modifiers); others caused visibly unstyled UI (modal close
+   buttons, form-section wrappers, invalid-feedback error text).
+   Rather than churn 100+ template files to rename classes, we define
+   the missing selectors here so the templates start rendering correctly.
+   WHY here and not inline: centralising them keeps the design tokens
+   consistent and prevents per-page drift.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── N1 — Heading utility classes ──────────────────────────────
+   <h1 class="h4"> should render at h4 size, etc. CSS previously
+   only defined the element selectors (h4 {}), so the class was inert. */
+.h1 { font-size: 1.5rem;   line-height: 1.25; font-weight: 700; }
+.h2 { font-size: 1.25rem;  line-height: 1.3;  font-weight: 700; }
+.h3 { font-size: 1.125rem; line-height: 1.35; font-weight: 600; }
+.h4 { font-size: 1rem;     line-height: 1.4;  font-weight: 600; }
+.h5 { font-size: 0.9375rem;line-height: 1.4;  font-weight: 600; }
+.h6 { font-size: 0.875rem; line-height: 1.4;  font-weight: 600; }
+
+/* ── N2 — Form validation feedback ──────────────────────────────
+   Bootstrap-style .invalid-feedback displayed under an invalid input.
+   Used by rates/create.php and any form that wants inline per-field
+   error text. */
+.invalid-feedback {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    font-size: 0.75rem;
+    color: var(--color-danger-text);
+    line-height: 1.4;
+}
+.valid-feedback {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    font-size: 0.75rem;
+    color: var(--color-success-text);
+    line-height: 1.4;
+}
+
+/* ── N3 — Form section wrappers ──────────────────────────────
+   Used by maintenance_work_orders/create.php to group related
+   form fields under a subheading. Matches the existing .card look
+   but without the outer border so it can nest inside a card. */
+.form-section {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+.form-section:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+.form-section-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* ── Form control static (read-only display cell) ──────────────
+   Bootstrap-style "form-control-static" — renders a value where an
+   input would normally live without the input chrome. */
+.form-control-static {
+    display: block;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    background: transparent;
+    border: 0;
+    min-height: 38px;
+    line-height: 1.5;
+}
+
+/* ── N5 — Bare .btn-outline (used only in settings/system.php) ──
+   The main outline variant we use elsewhere is .btn-outline-danger.
+   Plain .btn-outline is a neutral outline button. */
+.btn-outline {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color-strong);
+}
+.btn-outline:hover {
+    background: var(--bg-surface-2);
+    border-color: var(--text-tertiary);
+}
+
+/* ── N7 — Additional badge variants ──────────────────────────────
+   Some pages (accounting/fixed-assets, users/*, profile) use colour
+   names we hadn't defined as badge variants. Add them as aliases of
+   the semantic ones (blue=info, green=success, red=danger). */
+.badge-blue   { background: var(--color-info-light);    color: var(--color-info-text);    }
+.badge-green  { background: var(--color-success-light); color: var(--color-success-text); }
+.badge-red    { background: var(--color-danger-light);  color: var(--color-danger-text);  }
+.badge-yellow { background: var(--color-warning-light); color: var(--color-warning-text); }
+.badge-gray   { background: rgba(148, 163, 184, 0.12);  color: var(--text-secondary);     }
+
+/* Pill-shaped badge (fully rounded) — used on profile/users pages. */
+.badge-pill {
+    border-radius: 999px;
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+/* Smaller badge variant for inline list display. */
+.badge-sm {
+    font-size: 0.6875rem;
+    padding: 1px 6px;
+    line-height: 1.4;
+}
+
+/* ── Missing table utility classes ──────────────────────────────
+   .table-hover — row hover highlight (4 files use this).
+   .table-sm    — compact vertical padding.
+   .table-row-link — make whole <tr> look clickable when used with @click.
+   .table-pagination — style for pagination control row under a table. */
+.table-hover tbody tr:hover {
+    background: var(--bg-surface-hover);
+    transition: background-color var(--transition-fast);
+}
+.table-sm th,
+.table-sm td {
+    padding-top: 6px;
+    padding-bottom: 6px;
+    font-size: 0.8125rem;
+}
+.table-row-link {
+    cursor: pointer;
+}
+.table-row-link:hover {
+    background: var(--bg-surface-hover);
+}
+.table-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+/* ── Breadcrumb ─────────────────────────────────────────────────
+   Generic breadcrumb item — used across several detail pages. */
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    color: var(--text-tertiary);
+    margin-bottom: 12px;
+}
+.breadcrumb-item {
+    color: var(--text-tertiary);
+    text-decoration: none;
+}
+.breadcrumb-item:hover {
+    color: var(--text-secondary);
+}
+.breadcrumb-item + .breadcrumb-item::before {
+    content: '/';
+    margin: 0 6px;
+    color: var(--text-tertiary);
+}
+.breadcrumb-item.is-active {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* ── Toolbar row (generic flex row with left/right groups) ─────
+   Used by filter bars on list pages that didn't adopt the
+   .table-toolbar naming. Alias .toolbar → flexible spacer layout. */
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+/* Filter-bar BEM variants (2 files used these modifier names). */
+.filter-bar__left  { display: flex; align-items: center; gap: 8px; }
+.filter-bar__right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* ── Sort link (clickable table header) ────────────────────────── */
+.sort-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 600;
+    cursor: pointer;
+}
+.sort-link:hover { color: var(--text-primary); }
+.sort-link.is-active { color: var(--text-primary); }
+
+/* ── Tab button (non-FF flavoured tab trigger) ─────────────────
+   Alias for the .tab-btn pattern already used elsewhere so a single
+   legacy template keeps working. */
+.tab-button {
+    background: transparent;
+    border: 0;
+    padding: 8px 14px;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.tab-button:hover { color: var(--text-primary); }
+.tab-button.is-active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    font-weight: 600;
+}
+.tab-count {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 6px;
+    font-size: 0.6875rem;
+    background: var(--bg-surface-2);
+    color: var(--text-tertiary);
+    border-radius: 999px;
+}
+
+/* ── Spinner (text-mode loading indicator) ─────────────────────
+   Used in 11 files. Small inline spinning circle. */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: ff-picker-spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+.spinner-sm { width: 12px; height: 12px; border-width: 2px; }
+.spinner-lg { width: 28px; height: 28px; border-width: 3px; }
+
+/* ── Skeleton loading cell ─────────────────────────────────────
+   For placeholder rows while data is loading. */
+.skeleton-cell {
+    display: inline-block;
+    width: 100%;
+    height: 14px;
+    background: linear-gradient(90deg,
+        var(--bg-surface-2) 0%,
+        var(--bg-surface-hover) 50%,
+        var(--bg-surface-2) 100%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    animation: ff-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes ff-skeleton-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ── Notif list card (inbox-style list row) ─────────────────── */
+.notif-list-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md, 8px);
+    padding: 0;
+}
+
+/* ── Detail grid / field-value pair ────────────────────────────
+   Used in a few show pages that render "Label: Value" rows without
+   going through the <dl> pattern. */
+.detail-grid {
+    display: grid;
+    grid-template-columns: minmax(140px, 220px) 1fr;
+    gap: 8px 16px;
+    font-size: 0.875rem;
+}
+.field-value {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+.spec-label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+.spec-value {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* ── Text helpers that were missing ──────────────────────────── */
+.text-info  { color: var(--color-info-text);  }
+.text-link  { color: var(--color-primary-text); text-decoration: none; }
+.text-link:hover { text-decoration: underline; }
+
+/* Toast error alias (some templates still use .toast-error — the
+   primary variant we ship is .toast-danger). */
+.toast-error { /* alias */ }
+.toast-error .toast-icon { color: var(--color-danger-text); }
+
+/* ── Page title helper ─────────────────────────────────────── */
+.page-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 8px;
+}
+
+/* ── Photo thumbnail square ─────────────────────────────────── */
+.photo-thumb {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: var(--radius-md, 8px);
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface-2);
+}
+
+/* ── Generic stepper step wrapper (non-FF flavour) ─────────── */
+.step {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+/* ── Activity-log section header helper ─────────────────────── */
+.activity-log-section {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* ── Inline role form (settings/users inline role dropdown) ─── */
+.inline-role-form {
+    display: inline-block;
+}
+.inline-role-form select {
+    min-width: 140px;
+}
+
+/* ── Email compose chips / rate explanation card ──────────── */
+.rate-explanation-body {
+    padding: 12px 16px;
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md, 8px);
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+/* ────────── UI-AUDIT-1 END ────────── */

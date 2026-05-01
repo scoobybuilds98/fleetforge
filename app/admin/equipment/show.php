@@ -8,7 +8,7 @@ declare(strict_types=1);
  * number, status badge, and health score. Tab navigation: Overview (specs),
  * Compliance (expiry dates), Lease History (lazy-loaded from API), Status Log.
  * Maintenance tab: lazy-loads work orders from api/v1/maintenance_work_orders (S015).
- * Documents tab: placeholder for future session.
+ * Documents tab: lazy-loads from api/v1/documents via loadDocuments() (fully implemented).
  * Status lock: if unit is on_lease the status dropdown shows a warning.
  *
  * @depends config/app.php, includes/auth.php, includes/header.php,
@@ -1414,84 +1414,102 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     <!-- ── TAB: Documents ────────────────────────────────────── -->
     <div x-show="activeTab === 'documents'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
-        <!-- Loading -->
-        <template x-if="docsLoading">
-            <div style="padding:2rem; text-align:center; color:var(--text-secondary);">Loading documents…</div>
-        </template>
-
-        <template x-if="!docsLoading">
-            <div>
-                <!-- One card per compliance document type -->
-                <?php foreach (['cvi' => 'CVI Certificate', 'registration' => 'Registration Document', 'insurance' => 'Insurance Certificate'] as $docKey => $docLabel): ?>
-                <div class="card" style="margin-bottom:1rem;">
-                    <div class="card-header" style="display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem;">
-                        <h3 style="margin:0; font-size:1rem; font-weight:600;"><?= $docLabel ?></h3>
-                        <?php if (can('equipment', 'edit')): ?>
-                        <button class="btn btn-secondary btn-sm"
-                                @click="openUploadModal('<?= $docKey ?>', '<?= $docLabel ?>')">
-                            <span x-show="!getDoc('<?= $docKey ?>')">Upload</span>
-                            <span x-show="getDoc('<?= $docKey ?>')">Replace</span>
-                        </button>
-                        <?php endif; ?>
-                    </div>
-                    <div class="card-body">
-                        <template x-if="!getDoc('<?= $docKey ?>')">
-                            <p style="color:var(--text-secondary); font-size:0.875rem; margin:0;">
-                                No document uploaded yet.
-                            </p>
-                        </template>
-                        <template x-if="getDoc('<?= $docKey ?>')">
-                            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
-                                <div>
-                                    <div class="font-mono" style="font-size:0.875rem;"
-                                         x-text="getDoc('<?= $docKey ?>').file_name"></div>
-                                    <div style="font-size:0.8rem; color:var(--text-secondary); margin-top:0.2rem;">
-                                        <span x-text="getDoc('<?= $docKey ?>').file_size_kb + ' KB'"></span>
-                                        &nbsp;&middot;&nbsp;Uploaded
-                                        <span x-text="formatDate(getDoc('<?= $docKey ?>').uploaded_at)"></span>
-                                        <template x-if="getDoc('<?= $docKey ?>').uploaded_by_name">
-                                            &nbsp;by
-                                            <span x-text="getDoc('<?= $docKey ?>').uploaded_by_name"></span>
-                                        </template>
-                                        <template x-if="getDoc('<?= $docKey ?>').expiration_date">
-                                            &nbsp;&middot;&nbsp;Expires
-                                            <span x-text="formatDate(getDoc('<?= $docKey ?>').expiration_date)"></span>
-                                        </template>
-                                    </div>
-                                </div>
-                                <div style="display:flex; gap:0.5rem; align-items:center;">
-                                    <a :href="getDoc('<?= $docKey ?>').url"
-                                       target="_blank" rel="noopener"
-                                       class="btn btn-sm btn-secondary">View PDF</a>
-                                    <?php if (can('equipment', 'edit')): ?>
-                                    <button class="btn btn-sm btn-outline-danger"
-                                            @click="confirmDeleteDoc(getDoc('<?= $docKey ?>').id)">
-                                        Remove
-                                    </button>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-                <?php endforeach; ?>
+        <div class="card" style="margin-bottom:1rem;">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <h3 class="card-title">Compliance Documents</h3>
+                <?php if (can('equipment', 'edit')): ?>
+                <button class="btn btn-sm btn-primary" @click="openUploadModal('', '')">+ Upload</button>
+                <?php endif; ?>
             </div>
-        </template>
+
+            <!-- Loading -->
+            <div x-show="docsLoading && documents.length === 0" class="card-body"
+                 style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading documents…</span>
+            </div>
+
+            <!-- Empty -->
+            <div x-show="docsLoaded && !docsLoading && documents.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No documents</p>
+                    <p class="empty-state-text">Upload CVI, registration, insurance, or other compliance files for this unit.</p>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div x-show="documents.length > 0" class="tab-table-container">
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>File</th>
+                                <th>Size</th>
+                                <th>Expires</th>
+                                <th>Uploaded</th>
+                                <th>By</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="doc in documents" :key="doc.id">
+                                <tr>
+                                    <td>
+                                        <span class="badge badge-neutral"
+                                              x-text="doc.document_type.replace(/_/g,' ')"></span>
+                                    </td>
+                                    <td class="font-mono text-sm" x-text="doc.file_name"></td>
+                                    <td class="font-mono text-sm"
+                                        x-text="doc.file_size_kb ? doc.file_size_kb + ' KB' : '—'"></td>
+                                    <td x-text="doc.expiration_date ? formatDate(doc.expiration_date) : '—'"></td>
+                                    <td class="text-sm" x-text="formatDate(doc.uploaded_at)"></td>
+                                    <td class="text-sm text-secondary" x-text="doc.uploaded_by_name || '—'"></td>
+                                    <td style="white-space:nowrap;">
+                                        <a :href="doc.url" target="_blank" rel="noopener"
+                                           class="btn btn-xs btn-ghost">View</a>
+                                        <?php if (can('equipment', 'edit')): ?>
+                                        <button class="btn btn-xs btn-outline-danger"
+                                                @click="confirmDeleteDoc(doc.id)"
+                                                style="margin-left:4px;">Remove</button>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div x-show="documents.length > 0" class="tab-table-footer">
+                <span x-text="documents.length + ' document' + (documents.length !== 1 ? 's' : '')"></span>
+            </div>
+        </div>
 
         <!-- Upload Modal -->
         <template x-if="uploadModal.open">
-            <div class="modal-backdrop" @click.self="uploadModal.open = false">
+            <div class="modal-overlay" @click.self="uploadModal.open = false"
+                 style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);">
                 <div class="modal" style="max-width:480px;">
                     <div class="modal-header">
-                        <h2 class="modal-title"
-                            x-text="(getDoc(uploadModal.docType) ? 'Replace ' : 'Upload ') + uploadModal.docLabel"></h2>
-                        <button class="modal-close" @click="uploadModal.open = false">&times;</button>
+                        <h2 class="modal-title">Upload Document</h2>
+                        <button class="modal-close-btn" aria-label="Close" @click="uploadModal.open = false">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <template x-if="uploadModal.error">
-                            <div class="alert alert-danger" style="margin-bottom:1rem;"
-                                 x-text="uploadModal.error"></div>
-                        </template>
+                        <div x-show="uploadModal.error" class="alert alert-danger" style="margin-bottom:1rem;"
+                             x-text="uploadModal.error"></div>
+                        <div style="margin-bottom:1rem;">
+                            <label class="form-label">
+                                Document Type <span style="color:var(--color-danger);">*</span>
+                            </label>
+                            <select class="form-select" x-model="uploadModal.docType"
+                                    :disabled="uploadModal.uploading">
+                                <option value="">— Select type —</option>
+                                <option value="cvi">CVI Certificate</option>
+                                <option value="registration">Registration Document</option>
+                                <option value="insurance">Insurance Certificate</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
                         <div style="margin-bottom:1rem;">
                             <label class="form-label">
                                 Document File <span style="color:var(--color-danger);">*</span>
@@ -1523,7 +1541,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 :disabled="uploadModal.uploading">Cancel</button>
                         <button class="btn btn-primary"
                                 @click="submitUpload()"
-                                :disabled="uploadModal.uploading || !uploadModal.file">
+                                :disabled="uploadModal.uploading || !uploadModal.file || !uploadModal.docType">
                             <span x-show="!uploadModal.uploading">Upload Document</span>
                             <span x-show="uploadModal.uploading">Uploading…</span>
                         </button>
@@ -2249,6 +2267,10 @@ function FF_UnitDetail() {
 
         async submitUpload() {
             if (!this.uploadModal.file) return;
+            if (!this.uploadModal.docType) {
+                this.uploadModal.error = 'Please select a document type.';
+                return;
+            }
             this.uploadModal.uploading = true;
             this.uploadModal.error = '';
             try {
@@ -2284,12 +2306,12 @@ function FF_UnitDetail() {
         },
 
         async confirmDeleteDoc(id) {
-            if (!confirm('Remove this document? The file will be unlinked from this unit.')) return;
+            if (!(await FF_Confirm.ask('Remove this document? The file will be unlinked from this unit.'))) return;
             const r = await FF_Api.post('<?= base_url('api/v1/documents/delete') ?>', { id });
             if (r.success) {
                 this.documents = this.documents.filter(d => d.id !== id);
             } else {
-                alert(r.message || 'Could not remove document.');
+                FF_Toast.error(r.message || 'Could not remove document.');
             }
         },
 
@@ -2365,7 +2387,7 @@ function FF_UnitDetail() {
 
         // POST /api/v1/samsara/unlink — clear the mapping.
         async unlinkSamsaraVehicle() {
-            if (!confirm('Unlink this unit from Samsara? Live data will stop syncing.')) return;
+            if (!(await FF_Confirm.ask('Unlink this unit from Samsara? Live data will stop syncing.'))) return;
             this.samsaraLinking = true;
             this.samsaraError = '';
             try {
@@ -2637,14 +2659,15 @@ function FF_UnitDetail() {
 }
 
 // FIX #42: delete button handler
-function deleteUnit() {
-    if (!confirm('Delete this unit? This action cannot be undone.')) return;
+// [UI-AUDIT-1:M13] async for FF_Confirm.ask().
+async function deleteUnit() {
+    if (!(await FF_Confirm.ask('Delete this unit? This action cannot be undone.'))) return;
     FF_Api.post('<?= base_url('api/v1/equipment/units/delete') ?>', { id: <?= $unitId ?> })
         .then(r => {
             if (r.success) {
                 window.location.href = '<?= base_url('equipment') ?>';
             } else {
-                alert(r.error?.message || 'Failed to delete unit.');
+                FF_Toast.error(r.error?.message || 'Failed to delete unit.');
             }
         });
 }

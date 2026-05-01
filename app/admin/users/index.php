@@ -86,130 +86,145 @@ require_once FF_ROOT . '/includes/header.php';
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
 <!-- TILES-1: @ff-users-filter.window toggles the status filter and reloads. -->
-<div class="card"
-     x-data="usersList()"
+<div x-data="usersList()"
      x-init="init()"
      @ff-users-filter.window="
         filters.status = (filters.status === $event.detail.status && filters.status !== '') ? '' : $event.detail.status;
         load();
      ">
 
-    <!-- Filter bar -->
-    <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+    <!-- Filter toolbar -->
+    <div class="table-toolbar">
+        <div class="table-toolbar-left">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search name or email…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="goPage(1)"
+                   style="min-width:220px;"
+                   aria-label="Search users">
 
-        <input type="text"
-               class="form-control"
-               style="max-width:220px;height:32px;font-size:0.875rem;"
-               placeholder="Search name or email…"
-               x-model="filters.q"
-               @input.debounce.400ms="goPage(1)">
+            <select class="form-select form-control-sm"
+                    x-model="filters.role_id"
+                    @change="goPage(1)"
+                    aria-label="Filter by role">
+                <option value="">All Roles</option>
+                <?php foreach ($roles as $role): ?>
+                <option value="<?= e($role['id']) ?>"><?= e($role['name']) ?></option>
+                <?php endforeach; ?>
+            </select>
 
-        <select class="form-select form-select-sm"
-                x-model="filters.role_id"
-                @change="goPage(1)">
-            <option value="">All Roles</option>
-            <?php foreach ($roles as $role): ?>
-            <option value="<?= e($role['id']) ?>"><?= e($role['name']) ?></option>
-            <?php endforeach; ?>
-        </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.status"
+                    @change="goPage(1)"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="invited">Invited</option>
+                <option value="inactive">Inactive</option>
+                <option value="suspended">Suspended</option>
+                <option value="locked">Locked</option>
+            </select>
 
-        <select class="form-select form-select-sm"
-                x-model="filters.status"
-                @change="goPage(1)">
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="invited">Invited</option>
-            <option value="inactive">Inactive</option>
-            <option value="suspended">Suspended</option>
-            <option value="locked">Locked</option>
-        </select>
+            <button class="btn btn-secondary btn-sm"
+                    @click="resetFilters()">Reset</button>
+        </div>
 
-        <button class="btn btn-secondary btn-sm"
-                @click="resetFilters()">Reset</button>
-
-        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
-              x-text="total > 0 ? total + ' user' + (total === 1 ? '' : 's') : ''"></span>
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="total > 0 ? total + ' user' + (total === 1 ? '' : 's') : ''"></span>
+        </div>
     </div>
 
-    <!-- Loading -->
-    <div class="card-body" x-show="loading" style="text-align:center;padding:32px;">
-        <span class="text-secondary">Loading…</span>
-    </div>
+    <!-- Table card -->
+    <div class="card">
 
-    <!-- Empty state -->
-    <template x-if="!loading && rows.length === 0">
-        <div class="card-body">
-            <div class="empty-state">
-                <p class="empty-state-title">No users found</p>
-                <p class="empty-state-text">Try adjusting your filters, or invite a new user.</p>
+        <!-- Loading -->
+        <template x-if="loading">
+            <div class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading…</span>
             </div>
-        </div>
-    </template>
+        </template>
 
-    <!-- Table -->
-    <template x-if="!loading && rows.length > 0">
-        <div class="table-wrapper">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th @click="setSort('name')" style="cursor:pointer;">
-                            Name <span x-text="sortIcon('name')"></span>
-                        </th>
-                        <th @click="setSort('email')" style="cursor:pointer;">
-                            Email <span x-text="sortIcon('email')"></span>
-                        </th>
-                        <th>Role</th>
-                        <th @click="setSort('status')" style="cursor:pointer;">
-                            Status <span x-text="sortIcon('status')"></span>
-                        </th>
-                        <th @click="setSort('last_login_at')" style="cursor:pointer;">
-                            Last Login <span x-text="sortIcon('last_login_at')"></span>
-                        </th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <template x-for="row in rows" :key="row.id">
-                        <tr @click="window.location = '<?= base_url('users/show') ?>?id=' + row.id"
-                            style="cursor:pointer;">
-                            <td x-text="row.name"></td>
-                            <td x-text="row.email"></td>
-                            <td>
-                                <span class="badge badge-neutral badge-pill"
-                                      x-text="row.role_name"></span>
-                            </td>
-                            <td>
-                                <span class="badge"
-                                      :class="statusBadge(row.status)"
-                                      x-text="statusLabel(row.status)"></span>
-                            </td>
-                            <td x-text="row.last_login_at ? new Date(row.last_login_at).toLocaleDateString('en-CA') : '—'"></td>
-                            <td @click.stop="">
-                                <a :href="'<?= base_url('users/show') ?>?id=' + row.id"
-                                   class="btn btn-secondary btn-sm">View</a>
-                            </td>
+        <!-- Empty state -->
+        <template x-if="!loading && rows.length === 0">
+            <div class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No users found</p>
+                    <p class="empty-state-text">Try adjusting your filters, or invite a new user.</p>
+                </div>
+            </div>
+        </template>
+
+        <!-- Table -->
+        <template x-if="!loading && rows.length > 0">
+            <div class="table-wrapper">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th @click="setSort('name')" style="cursor:pointer;">
+                                Name <span x-text="sortIcon('name')"></span>
+                            </th>
+                            <th @click="setSort('email')" style="cursor:pointer;">
+                                Email <span x-text="sortIcon('email')"></span>
+                            </th>
+                            <th>Role</th>
+                            <th @click="setSort('status')" style="cursor:pointer;">
+                                Status <span x-text="sortIcon('status')"></span>
+                            </th>
+                            <th @click="setSort('last_login_at')" style="cursor:pointer;">
+                                Last Login <span x-text="sortIcon('last_login_at')"></span>
+                            </th>
+                            <th>Actions</th>
                         </tr>
-                    </template>
-                </tbody>
-            </table>
-        </div>
-    </template>
+                    </thead>
+                    <tbody>
+                        <template x-for="row in rows" :key="row.id">
+                            <tr @click="window.location = '<?= base_url('users/show') ?>?id=' + row.id"
+                                style="cursor:pointer;">
+                                <td x-text="row.name"></td>
+                                <td x-text="row.email"></td>
+                                <td>
+                                    <span class="badge badge-neutral badge-pill"
+                                          x-text="row.role_name"></span>
+                                </td>
+                                <td>
+                                    <span class="badge"
+                                          :class="statusBadge(row.status)"
+                                          x-text="statusLabel(row.status)"></span>
+                                </td>
+                                <td x-text="row.last_login_at ? new Date(row.last_login_at).toLocaleDateString('en-CA') : '—'"></td>
+                                <td @click.stop="">
+                                    <a :href="'<?= base_url('users/show') ?>?id=' + row.id"
+                                       class="btn btn-secondary btn-sm">View</a>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
 
-    <!-- Pagination -->
-    <template x-if="!loading && totalPages > 1">
-        <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
-            <button class="btn btn-secondary btn-sm"
-                    :disabled="page <= 1"
-                    @click="goPage(page - 1)">← Prev</button>
-            <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
-                  x-text="'Page ' + page + ' of ' + totalPages"></span>
-            <button class="btn btn-secondary btn-sm"
-                    :disabled="page >= totalPages"
-                    @click="goPage(page + 1)">Next →</button>
-        </div>
-    </template>
+        <!-- Pagination -->
+        <template x-if="!loading && totalPages > 1">
+            <div class="pagination">
+                <span class="pagination-info"
+                      x-text="'Page ' + page + ' of ' + totalPages"></span>
+                <div class="pagination-controls">
+                    <button class="page-btn"
+                            :disabled="page <= 1"
+                            @click="goPage(page - 1)">← Prev</button>
+                    <button class="page-btn"
+                            :disabled="page >= totalPages"
+                            @click="goPage(page + 1)">Next →</button>
+                </div>
+            </div>
+        </template>
 
-</div><!-- /card -->
+    </div><!-- /card -->
+
+</div><!-- /Alpine -->
 
 <script>
 function usersList() {
