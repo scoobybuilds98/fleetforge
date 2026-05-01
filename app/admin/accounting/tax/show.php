@@ -177,7 +177,8 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
     </template>
     <template x-if="remittances.length > 0">
         <div class="card" style="padding:0;margin-bottom:24px;">
-            <table class="data-table">
+            <div class="table-responsive">
+<table class="data-table">
                 <thead>
                     <tr>
                         <th>Date</th>
@@ -203,6 +204,7 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </template>
 
@@ -218,7 +220,8 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
     </template>
     <template x-if="!loadingDetail && invoices.length > 0">
         <div class="card" style="padding:0;margin-bottom:24px;max-height:480px;overflow-y:auto;">
-            <table class="data-table">
+            <div class="table-responsive">
+<table class="data-table">
                 <thead>
                     <tr>
                         <th>Invoice #</th>
@@ -246,6 +249,7 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </template>
 
@@ -260,7 +264,8 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
             </template>
             <template x-if="bills.length > 0">
                 <div class="card" style="padding:0;max-height:400px;overflow-y:auto;">
-                    <table class="data-table">
+                    <div class="table-responsive">
+<table class="data-table">
                         <thead>
                             <tr>
                                 <th>Bill #</th>
@@ -286,6 +291,7 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
                             </template>
                         </tbody>
                     </table>
+</div>
                 </div>
             </template>
         </div>

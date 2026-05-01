@@ -772,11 +772,11 @@ function FF_AiChat() {
         // WHY: User-initiated chat deletion. Backend (api/v1/ai/chat-session.php DELETE)
         // verifies ownership via user_id filter and FK CASCADE removes ai_chat_messages.
         async deleteSession(id) {
-            if (!confirm('Delete this chat? This cannot be undone.')) return;
+            if (!(await FF_Confirm.ask('Delete this chat? This cannot be undone.'))) return;
             try {
                 const r = await FF_Api.delete('<?= base_url('api/v1/ai/chat-session') ?>?id=' + id);
                 if (r.error) {
-                    alert(r.message || 'Failed to delete chat.');
+                    FF_Toast.error(r.message || 'Failed to delete chat.');
                     return;
                 }
                 // Remove from local list without re-fetching
@@ -789,7 +789,7 @@ function FF_AiChat() {
                 }
             } catch (e) {
                 console.error('Failed to delete session:', e);
-                alert('Network error — please try again.');
+                FF_Toast.error('Network error — please try again.');
             }
         },
 

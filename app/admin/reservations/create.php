@@ -128,17 +128,24 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <!-- LEFT: Customer selector (existing mode) -->
                 <div class="form-group" x-show="mode === 'customer'">
-                    <label class="form-label" for="res-customer">Customer: <span class="text-danger">*</span></label>
-                    <select id="res-customer"
-                            class="form-select"
-                            :class="errors.customer_id ? 'is-invalid' : ''"
-                            x-model="form.customer_id"
-                            @change="onCustomerChange()">
-                        <option value="">— Select customer —</option>
-                        <template x-for="c in customers" :key="c.id">
-                            <option :value="c.id" x-text="c.company_name + (c.contact_name ? ' (' + c.contact_name + ')' : '')"></option>
-                        </template>
-                    </select>
+                    <label class="form-label">Customer: <span class="text-danger">*</span></label>
+                    <?php
+                    // SELECTOR-UNIFY: search-as-you-type customer picker.
+                    // WHY: replaces static <select> of 200-cap customers so the
+                    //      selector scales past the hard-coded per_page limit.
+                    $pickerConfig    = [
+                        'endpoint'    => '/api/v1/customers/index.php',
+                        'searchParam' => 'search',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'extraParams' => 'status=active',
+                        'placeholder' => 'Search customers by name, DOT, MC…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.company_name + (r.contact_name ? ' (' + r.contact_name + ')' : ''), sublabel: [r.city, r.province].filter(Boolean).join(', '), raw: r })",
+                    ];
+                    $pickerOnPicked  = 'form.customer_id = $event.detail.id; onCustomerPickerSelected($event.detail.raw)';
+                    $pickerOnCleared = "form.customer_id = ''; onCustomerChange()";
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                     <p class="form-error" x-show="errors.customer_id" x-text="errors.customer_id"></p>
                 </div>
 
@@ -721,6 +728,22 @@ function FF_ReservationCreate() {
                 this.yards          = data.data?.yards           || [];
             } catch {}
             this.loadingUnits = false;
+        },
+
+        // ── Customer picker selected → autofill + load units ──────
+        // WHY: FF_RecordPicker dispatches a record-picked event carrying the
+        //      full raw customer row. We use it directly to populate company
+        //      + contact fields instead of relying on a pre-loaded lookup array.
+        onCustomerPickerSelected(rawCustomer) {
+            if (rawCustomer) {
+                this.form.company_name = rawCustomer.company_name || '';
+                this.form.contact_name = rawCustomer.contact_name || '';
+                // Seed the pre-loaded cache so onCustomerChange() can find it too
+                if (!this.customers.some(c => c.id === rawCustomer.id)) {
+                    this.customers.push(rawCustomer);
+                }
+            }
+            this.onCustomerChange();
         },
 
         // ── Add unit from dropdown ────────────────────────────────

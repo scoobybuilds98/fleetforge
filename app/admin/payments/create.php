@@ -79,32 +79,42 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header"><h3 class="card-title">Payment Details</h3></div>
             <div class="card-body" style="display:flex; flex-direction:column; gap:20px;">
 
-                <!-- Invoice picker -->
+                <!-- Invoice picker (search-as-you-type) -->
                 <div class="form-group">
-                    <label class="form-label" for="invoice_id">
+                    <label class="form-label">
                         Invoice <span style="color:var(--color-danger);">*</span>
                     </label>
-                    <select id="invoice_id" name="invoice_id" class="form-input" x-model="form.invoice_id"
-                            @change="onInvoiceChange()" required>
-                        <option value="">— Select an invoice —</option>
-                        <?php foreach ($outstandingInvoices as $inv): ?>
-                            <option
-                                value="<?= (int) $inv['id'] ?>"
-                                data-balance="<?= e($inv['balance_due']) ?>"
-                                data-total="<?= e($inv['total_amount']) ?>"
-                                data-currency="<?= e($inv['currency']) ?>"
-                                data-customer="<?= e($inv['company_name_snapshot']) ?>"
-                                data-status="<?= e($inv['status']) ?>"
-                                data-due="<?= e($inv['due_date']) ?>"
-                                <?= $preselectedInvoiceId === (int)$inv['id'] ? 'selected' : '' ?>
-                            >
-                                <?= e($inv['invoice_number']) ?>
-                                — <?= e($inv['company_name_snapshot']) ?>
-                                (<?= e($inv['currency']) ?> <?= format_currency($inv['balance_due']) ?> due)
-                                <?= $inv['status'] === 'overdue' ? '[OVERDUE]' : '' ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <?php
+                    // SELECTOR-UNIFY: search invoices that can still receive a payment.
+                    // The existing API returns the full row incl balance_due, status, due_date,
+                    // which onInvoicePickerSelected() uses to populate selectedInvoice live.
+                    $preselectedInvoice = null;
+                    if ($preselectedInvoiceId) {
+                        foreach ($outstandingInvoices as $inv) {
+                            if ((int) $inv['id'] === $preselectedInvoiceId) {
+                                $preselectedInvoice = $inv;
+                                break;
+                            }
+                        }
+                    }
+                    $pickerConfig    = [
+                        'endpoint'    => '/api/v1/invoices/index.php',
+                        'searchParam' => 'q',
+                        'resultKey'   => 'items',
+                        'perPage'     => 15,
+                        // WHY no status filter: invoices/index.php only accepts
+                        //      a single status value. Client-side filter below.
+                        'placeholder' => 'Search invoices by invoice #…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number + ' — ' + (r.company_name_snapshot || ''), sublabel: [r.currency + ' ' + (r.balance_due || '0.00') + ' due', r.due_date ? ('due ' + r.due_date) : '', r.status].filter(Boolean).join(' · '), raw: r })",
+                    ];
+                    if ($preselectedInvoice) {
+                        $pickerConfig['initialId']    = (int) $preselectedInvoice['id'];
+                        $pickerConfig['initialLabel'] = $preselectedInvoice['invoice_number'] . ' — ' . $preselectedInvoice['company_name_snapshot'];
+                    }
+                    $pickerOnPicked  = 'form.invoice_id = $event.detail.id; onInvoicePickerSelected($event.detail.raw)';
+                    $pickerOnCleared = "form.invoice_id = ''; selectedInvoice = {}";
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                     <p class="form-hint" x-show="selectedInvoice.balance">
                         Balance due:
                         <strong class="font-mono" x-text="selectedInvoice.currency + ' ' + formatCurrency(selectedInvoice.balance)"></strong>
@@ -121,7 +131,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="amount">
                             Amount <span style="color:var(--color-danger);">*</span>
                         </label>
-                        <input type="number" id="amount" name="amount" class="form-input font-mono"
+                        <input type="number" min="0" id="amount" name="amount" class="form-input font-mono"
                                x-model="form.amount"
                                step="0.01"
                                placeholder="0.00"
@@ -364,6 +374,26 @@ function FF_CreatePayment() {
                 this.selectedInvoice  = {};
             }
             // VALID-2: clear any prior invoice error on change
+            const form = document.querySelector('form');
+            if (form) FF_Validate.clear(form);
+        },
+
+        // SELECTOR-UNIFY: called by FF_RecordPicker @record-picked dispatch.
+        // WHY: with the picker, the invoiceMap lookup doesn't apply — we use
+        //      the raw row from the API response directly.
+        onInvoicePickerSelected(rawInv) {
+            if (!rawInv) { this.selectedInvoice = {}; return; }
+            this.selectedInvoice = {
+                id:       rawInv.id,
+                number:   rawInv.invoice_number,
+                customer: rawInv.company_name_snapshot,
+                currency: rawInv.currency,
+                total:    rawInv.total_amount,
+                balance:  rawInv.balance_due,
+                status:   rawInv.status,
+                due:      rawInv.due_date,
+            };
+            this.form.currency = rawInv.currency;  // D18: lock currency to invoice
             const form = document.querySelector('form');
             if (form) FF_Validate.clear(form);
         },

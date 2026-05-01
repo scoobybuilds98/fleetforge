@@ -423,22 +423,22 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
                     <div class="form-group">
                         <label class="form-label" for="edit_estimated_repair_cost">Est. Repair Cost</label>
-                        <input type="number" id="edit_estimated_repair_cost" name="estimated_repair_cost" class="form-control" step="0.01" x-model="editForm.estimated_repair_cost">
+                        <input type="number" min="0" id="edit_estimated_repair_cost" name="estimated_repair_cost" class="form-control" step="0.01" x-model="editForm.estimated_repair_cost">
                         <div class="field-error" data-error-for="estimated_repair_cost"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="edit_actual_repair_cost">Actual Repair Cost</label>
-                        <input type="number" id="edit_actual_repair_cost" name="actual_repair_cost" class="form-control" step="0.01" x-model="editForm.actual_repair_cost">
+                        <input type="number" min="0" id="edit_actual_repair_cost" name="actual_repair_cost" class="form-control" step="0.01" x-model="editForm.actual_repair_cost">
                         <div class="field-error" data-error-for="actual_repair_cost"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="edit_customer_liable_amount">Liable Amount ($)</label>
-                        <input type="number" id="edit_customer_liable_amount" name="customer_liable_amount" class="form-control" step="0.01" x-model="editForm.customer_liable_amount">
+                        <input type="number" min="0" id="edit_customer_liable_amount" name="customer_liable_amount" class="form-control" step="0.01" x-model="editForm.customer_liable_amount">
                         <div class="field-error" data-error-for="customer_liable_amount"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="edit_insurance_claim_amount">Insurance Claim</label>
-                        <input type="number" id="edit_insurance_claim_amount" name="insurance_claim_amount" class="form-control" step="0.01" x-model="editForm.insurance_claim_amount">
+                        <input type="number" min="0" id="edit_insurance_claim_amount" name="insurance_claim_amount" class="form-control" step="0.01" x-model="editForm.insurance_claim_amount">
                         <div class="field-error" data-error-for="insurance_claim_amount"></div>
                     </div>
                 </div>
@@ -791,20 +791,21 @@ function damageClaimShow() {
         },
 
         // ── Delete photo ─────────────────────────────────────────────────
-        deletePhoto(photoId) {
-            if (!confirm('Delete this photo?')) return;
+        // [UI-AUDIT-1:M13] async for FF_Confirm.ask().
+        async deletePhoto(photoId) {
+            if (!(await FF_Confirm.ask('Delete this photo?'))) return;
 
             FF_Api.post('<?= base_url('api/v1/damage_claims/delete_photo.php') ?>', {
                 photo_id: photoId,
                 claim_id: <?= (int)$claim['id'] ?>,
             }).then(d => {
                 if (d && d.error) {
-                    alert(d.message ?? d.data?.message ?? 'Failed to delete photo.');
+                    FF_Toast.error(d.message ?? d.data?.message ?? 'Failed to delete photo.');
                 } else {
                     this.photos = this.photos.filter(p => p.id !== photoId);
                 }
             }).catch(err => {
-                alert(err?.message ?? 'Failed to delete photo.');
+                FF_Toast.error(err?.message ?? 'Failed to delete photo.');
             });
         },
 

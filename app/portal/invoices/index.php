@@ -110,7 +110,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     <p class="portal-empty-text" x-text="tab === 'outstanding' ? 'No outstanding invoices at the moment.' : 'No invoices match this filter.'"></p>
                 </div>
             </template>
-            <table class="portal-table" x-show="!loading && invoices.length > 0">
+            <div class="table-responsive">
+<table class="portal-table" x-show="!loading && invoices.length > 0">
                 <thead>
                     <tr>
                         <th>Invoice #</th>
@@ -136,6 +137,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </div>
 

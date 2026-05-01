@@ -261,7 +261,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:700px;width:95%;max-height:85vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2 class="h5" x-text="detailReq ? detailReq.request_number + ' — ' + detailReq.title : ''"></h2>
-                <button class="modal-close" @click="detailOpen = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="detailOpen = false">×</button>
             </div>
             <div class="modal-body">
                 <template x-if="detailReq">
@@ -327,7 +327,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="createOpen" x-transition @click.self="createOpen = false" style="display:none;">
         <div class="modal" style="max-width:560px;width:95%;max-height:85vh;overflow-y:auto;">
-            <div class="modal-header"><h2 class="h5">New CapEx Request</h2><button class="modal-close" @click="createOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">New CapEx Request</h2><button class="modal-close-btn" aria-label="Close" @click="createOpen = false">×</button></div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="createFormError" x-cloak x-text="createFormError"></div>
                 <div class="form-group"><label>Title *</label>
@@ -381,7 +381,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="capitalizeOpen" x-transition @click.self="capitalizeOpen = false" style="display:none;">
         <div class="modal" style="max-width:680px;width:95%;max-height:85vh;overflow-y:auto;">
-            <div class="modal-header"><h2 class="h5">Capitalize Work Order</h2><button class="modal-close" @click="capitalizeOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">Capitalize Work Order</h2><button class="modal-close-btn" aria-label="Close" @click="capitalizeOpen = false">×</button></div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="capitalizeFormError" x-cloak x-text="capitalizeFormError"></div>
                 <p class="text-secondary text-sm" x-show="capitalizeWO">
@@ -438,19 +438,19 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <h3 class="h6" style="margin-top:14px;">GL Accounts</h3>
                 <div class="form-group"><label>Asset Account ID *</label>
-                    <input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.asset_account_id"
+                    <input type="number" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.asset_account_id"
                            :class="capitalizeErrors.asset_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.asset_account_id = ''"
                            placeholder="e.g. 12 = 1210 Fleet Equipment">
                     <div class="field-error" x-show="capitalizeErrors.asset_account_id" x-cloak x-text="capitalizeErrors.asset_account_id"></div>
                 </div>
                 <div class="form-group"><label>Accumulated Depreciation Account ID *</label>
-                    <input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.accum_depr_account_id"
+                    <input type="number" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.accum_depr_account_id"
                            :class="capitalizeErrors.accum_depr_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.accum_depr_account_id = ''"
                            placeholder="e.g. 13 = 1220">
                     <div class="field-error" x-show="capitalizeErrors.accum_depr_account_id" x-cloak x-text="capitalizeErrors.accum_depr_account_id"></div>
                 </div>
                 <div class="form-group"><label>Depreciation Expense Account ID *</label>
-                    <input type="number" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.depr_expense_account_id"
+                    <input type="number" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.depr_expense_account_id"
                            :class="capitalizeErrors.depr_expense_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.depr_expense_account_id = ''"
                            placeholder="e.g. 50 = 5010">
                     <div class="field-error" x-show="capitalizeErrors.depr_expense_account_id" x-cloak x-text="capitalizeErrors.depr_expense_account_id"></div>
@@ -471,7 +471,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="expenseOpen" x-transition @click.self="expenseOpen = false" style="display:none;">
         <div class="modal" style="max-width:520px;width:95%;">
-            <div class="modal-header"><h2 class="h5">Expense Work Order</h2><button class="modal-close" @click="expenseOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">Expense Work Order</h2><button class="modal-close-btn" aria-label="Close" @click="expenseOpen = false">×</button></div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="expenseFormError" x-cloak x-text="expenseFormError"></div>
                 <p class="text-secondary text-sm" x-show="expenseWO">
@@ -501,7 +501,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="completeOpen" x-transition @click.self="completeOpen = false" style="display:none;">
         <div class="modal" style="max-width:680px;width:95%;max-height:85vh;overflow-y:auto;">
-            <div class="modal-header"><h2 class="h5">Complete CapEx + Create Asset</h2><button class="modal-close" @click="completeOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">Complete CapEx + Create Asset</h2><button class="modal-close-btn" aria-label="Close" @click="completeOpen = false">×</button></div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="completeFormError" x-cloak x-text="completeFormError"></div>
                 <p class="text-secondary text-sm" x-show="detailReq" x-text="'Completing ' + (detailReq?.request_number ?? '') + ' — ' + (detailReq?.title ?? '')"></p>
@@ -563,17 +563,17 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="field-error" x-show="completeErrors.total_expected_units" x-cloak x-text="completeErrors.total_expected_units"></div>
                 </div>
                 <div class="form-group"><label>Asset Account ID *</label>
-                    <input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.asset_account_id"
+                    <input type="number" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.asset_account_id"
                            :class="completeErrors.asset_account_id ? 'is-invalid' : ''" @input="completeErrors.asset_account_id = ''">
                     <div class="field-error" x-show="completeErrors.asset_account_id" x-cloak x-text="completeErrors.asset_account_id"></div>
                 </div>
                 <div class="form-group"><label>Accum Depr Account ID *</label>
-                    <input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.accum_depr_account_id"
+                    <input type="number" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.accum_depr_account_id"
                            :class="completeErrors.accum_depr_account_id ? 'is-invalid' : ''" @input="completeErrors.accum_depr_account_id = ''">
                     <div class="field-error" x-show="completeErrors.accum_depr_account_id" x-cloak x-text="completeErrors.accum_depr_account_id"></div>
                 </div>
                 <div class="form-group"><label>Depreciation Expense Account ID *</label>
-                    <input type="number" class="form-control form-control-sm" x-model="completeForm.asset_data.depr_expense_account_id"
+                    <input type="number" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.depr_expense_account_id"
                            :class="completeErrors.depr_expense_account_id ? 'is-invalid' : ''" @input="completeErrors.depr_expense_account_id = ''">
                     <div class="field-error" x-show="completeErrors.depr_expense_account_id" x-cloak x-text="completeErrors.depr_expense_account_id"></div>
                 </div>
@@ -905,7 +905,7 @@ function FF_Capex() {
         // ── Workflow actions ───────────────────────────────────
         async approveRequest() {
             if (!this.detailReq) return;
-            if (!confirm('Approve CapEx request ' + this.detailReq.request_number + '?')) return;
+            if (!(await FF_Confirm.ask('Approve CapEx request ' + this.detailReq.request_number + '?'))) return;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/capex/approve.php') ?>', { id: this.detailReq.id });
                 if (r.success) {

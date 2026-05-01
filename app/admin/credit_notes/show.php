@@ -368,7 +368,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-md">
             <div class="modal-header">
                 <h3 class="modal-title">Void Credit Note</h3>
-                <button class="modal-close" @click="close()">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="close()">×</button>
             </div>
             <div class="modal-body">
                 <div x-show="error" class="alert alert-danger" x-text="error" style="margin-bottom:1rem;"></div>

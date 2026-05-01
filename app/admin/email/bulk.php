@@ -110,7 +110,8 @@ $provinces = ['BC','AB','SK','MB','ON','QC','NB','NS','PE','NL','YT','NT','NU'];
 
             <!-- Customers list -->
             <div style="max-height:420px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;">
-                <table class="table" style="margin:0;">
+                <div class="table-responsive">
+<table class="table" style="margin:0;">
                     <thead>
                         <tr>
                             <th style="width:40px;"><input type="checkbox" @change="toggleAll($event.target.checked)"></th>
@@ -140,6 +141,7 @@ $provinces = ['BC','AB','SK','MB','ON','QC','NB','NS','PE','NL','YT','NT','NU'];
                         </tr>
                     </tbody>
                 </table>
+</div>
             </div>
 
         </div>
@@ -358,7 +360,7 @@ function FF_BulkEmail() {
 
         async sendBulk() {
             if (this.selected.length === 0) return;
-            if (!confirm('Send this email to ' + this.selected.length + ' customer(s)? This cannot be undone.')) return;
+            if (!(await FF_Confirm.ask('Send this email to ' + this.selected.length + ' customer(s)? This cannot be undone.'))) return;
             this.sending = true;
             this.result = null;
             this.progress = '0/' + this.selected.length;

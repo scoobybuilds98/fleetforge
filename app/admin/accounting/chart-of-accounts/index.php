@@ -340,7 +340,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-md">
             <div class="modal-header">
                 <h3 class="modal-title" x-text="editMode ? 'Edit Account' : 'Create Account'"></h3>
-                <button class="modal-close" @click="showModal = false">&times;</button>
+                <button class="modal-close-btn" aria-label="Close" @click="showModal = false">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="formError" x-cloak

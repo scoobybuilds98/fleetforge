@@ -449,7 +449,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-sm">
             <div class="modal-header">
                 <h3 class="modal-title">Void / Remove Payment?</h3>
-                <button class="modal-close" @click="showDelete = false">&times;</button>
+                <button class="modal-close-btn" aria-label="Close" @click="showDelete = false">&times;</button>
             </div>
             <div class="modal-body">
                 <p style="color:var(--text-secondary); margin-bottom:16px;">

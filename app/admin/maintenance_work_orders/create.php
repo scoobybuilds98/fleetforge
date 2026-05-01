@@ -219,7 +219,7 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <div class="form-group">
                     <label class="form-label" for="mileage_at_service">Odometer (km)</label>
-                    <input type="number"
+                    <input type="number" min="0"
                            id="mileage_at_service"
                            name="mileage_at_service"
                            class="form-control"

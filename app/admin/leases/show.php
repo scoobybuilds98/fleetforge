@@ -6,8 +6,10 @@ declare(strict_types=1);
  *
  * @file        app/admin/leases/show.php
  * @description Lease detail view. Server-side hero render (contract number, status,
- *              customer, unit). Three-tab Alpine.js component: Overview (all fields),
- *              Amendments (placeholder — requires amendments table), Status Log (from lease.status_log).
+ *              customer, unit). Multi-tab Alpine.js component: Overview (all fields),
+ *              Amendments (AMEND-1 — full implementation with record-amendment modal,
+ *              sourced from the lease_amendments table), Status Log (from lease.status_log),
+ *              Invoices, Damage Claims, Documents, Inspections, Mileage Logs.
  *              Activate and Close buttons shown based on current status and permissions.
  *              Alpine component: FF_LeaseDetail().
  *
@@ -116,7 +118,7 @@ require_once FF_ROOT . '/includes/header.php';
         <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary btn-sm">Edit</a>
         <?php endif; ?>
         <?php if (can('leases', 'delete') && $lease['status'] === 'pending'): ?>
-        <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this pending lease? This cannot be undone.')){FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(r=>{if(r.success)window.location.href='<?= base_url('leases') ?>';else alert(r.error?.message||'Failed to delete');})}">Delete</button>
+        <button class="btn btn-danger btn-sm" onclick="if((await FF_Confirm.ask('Delete this pending lease? This cannot be undone.'))){FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(r=>{if(r.success)window.location.href='<?= base_url('leases') ?>';else FF_Toast.error(r.error?.message||'Failed to delete');})}">Delete</button>
         <?php endif; ?>
     </div>
 </div>
@@ -1132,7 +1134,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     <div class="modal" style="max-width:480px;">
                         <div class="modal-header">
                             <h3>Upload Document</h3>
-                            <button class="modal-close" @click="leaseDocUploadModal.open = false">✕</button>
+                            <button class="modal-close-btn" aria-label="Close" @click="leaseDocUploadModal.open = false">✕</button>
                         </div>
                         <div class="modal-body">
                             <template x-if="leaseDocUploadModal.error">
@@ -1538,16 +1540,16 @@ function FF_LeaseDetail() {
         },
 
         async confirmDeleteDoc(id) {
-            if (!confirm('Remove this document? This cannot be undone.')) return;
+            if (!(await FF_Confirm.ask('Remove this document? This cannot be undone.'))) return;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/documents/delete') ?>', { id });
                 if (r.success) {
                     this.documents = this.documents.filter(d => d.id !== id);
                 } else {
-                    alert(r.message || 'Delete failed.');
+                    FF_Toast.error(r.message || 'Delete failed.');
                 }
             } catch(e) {
-                alert('Network error. Please try again.');
+                FF_Toast.error('Network error. Please try again.');
             }
         },
 
@@ -1636,7 +1638,7 @@ function FF_LeaseDetail() {
         },
 
         async activate() {
-            if (!confirm('Activate lease <?= e($lease['contract_number']) ?>? This will mark the unit as On Lease.')) return;
+            if (!(await FF_Confirm.ask('Activate lease <?= e($lease['contract_number']) ?>? This will mark the unit as On Lease.'))) return;
             this.actionInProgress = true;
             this.activating       = true;
             this.actionError      = null;

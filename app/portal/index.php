@@ -176,7 +176,8 @@ require_once __DIR__ . '/includes/header.php';
                     <p class="portal-empty-text">Contact us to set up a new lease.</p>
                 </div>
             <?php else: ?>
-                <table class="portal-table">
+                <div class="table-responsive">
+<table class="portal-table">
                     <thead>
                         <tr>
                             <th>Contract</th>
@@ -200,6 +201,7 @@ require_once __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+</div>
             <?php endif; ?>
         </div>
     </div>
@@ -221,7 +223,8 @@ require_once __DIR__ . '/includes/header.php';
                     <p class="portal-empty-text">No outstanding invoices.</p>
                 </div>
             <?php else: ?>
-                <table class="portal-table">
+                <div class="table-responsive">
+<table class="portal-table">
                     <thead>
                         <tr>
                             <th>Invoice</th>
@@ -260,6 +263,7 @@ require_once __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+</div>
             <?php endif; ?>
         </div>
     </div>

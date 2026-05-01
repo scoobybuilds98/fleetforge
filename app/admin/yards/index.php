@@ -633,7 +633,7 @@ function FF_YardsManager() {
 
         // ── Deactivate yard ───────────────────────────────────────────
         async deactivate(yard) {
-            if (!confirm(`Deactivate yard '${yard.name}'?\n\nIt will be hidden from reservation dropdowns. This cannot be done if the yard has upcoming reservations.`)) return;
+            if (!(await FF_Confirm.ask(`Deactivate yard '${yard.name}'?\n\nIt will be hidden from reservation dropdowns. This cannot be done if the yard has upcoming reservations.`))) return;
             this.actionBusy  = yard.id;
             this.actionError = '';
             try {
@@ -653,7 +653,7 @@ function FF_YardsManager() {
 
         // ── Activate yard (re-enable) ─────────────────────────────────
         async activate(yard) {
-            if (!confirm(`Reactivate yard '${yard.name}'?\n\nIt will appear in reservation dropdowns again.`)) return;
+            if (!(await FF_Confirm.ask(`Reactivate yard '${yard.name}'?\n\nIt will appear in reservation dropdowns again.`))) return;
             this.actionBusy  = yard.id;
             this.actionError = '';
             try {

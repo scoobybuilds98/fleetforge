@@ -753,26 +753,26 @@ function billsPage() {
         },
 
         async approveBill(id) {
-            if (!confirm('Approve this bill? This will post a journal entry.')) return;
+            if (!(await FF_Confirm.ask('Approve this bill? This will post a journal entry.'))) return;
             try {
                 const fd = new FormData(); fd.append('id', id);
                 const r = await fetch(FF_Api.url('/api/v1/accounting/bills/approve.php'), {method: 'POST', body: fd, headers: this._csrfHeaders()});
                 const j = await r.json();
                 if (j.success) this.load();
-                else alert(j.error?.message || 'Approve failed.');
-            } catch (e) { alert(e.message); }
+                else FF_Toast.error(j.error?.message || 'Approve failed.');
+            } catch (e) { FF_Toast.error(e.message); }
         },
 
         async voidBill(id) {
-            const reason = prompt('Void reason:');
+            const reason = (await FF_Confirm.askText('Void reason:'));
             if (!reason) return;
             try {
                 const fd = new FormData(); fd.append('id', id); fd.append('void_reason', reason);
                 const r = await fetch(FF_Api.url('/api/v1/accounting/bills/void.php'), {method: 'POST', body: fd, headers: this._csrfHeaders()});
                 const j = await r.json();
                 if (j.success) this.load();
-                else alert(j.error?.message || 'Void failed.');
-            } catch (e) { alert(e.message); }
+                else FF_Toast.error(j.error?.message || 'Void failed.');
+            } catch (e) { FF_Toast.error(e.message); }
         },
 
         openPay(bill) {

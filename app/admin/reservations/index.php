@@ -1320,7 +1320,7 @@ function FF_Reservations() {
 
         // ── Confirm reservation (pending → confirmed) ─────────────
         async confirmReservation(r) {
-            if (!confirm(`Confirm reservation #${r.id} for ${r.company_name}?`)) return;
+            if (!(await FF_Confirm.ask(`Confirm reservation #${r.id} for ${r.company_name}?`))) return;
             try {
                 const res = await FF_Api.post('<?= base_url('api/v1/reservations/update_status.php') ?>', {
                     id: r.id, status: 'confirmed',
@@ -1329,13 +1329,13 @@ function FF_Reservations() {
                 this.loadAll();
                 this.loadKpis();
             } catch (e) {
-                alert('Error: ' + e.message);
+                FF_Toast.error('Error: ' + e.message);
             }
         },
 
         // ── Mark Out (confirmed → completed) ─────────────────────
         async markOut(r) {
-            if (!confirm(`Mark reservation #${r.id} (${r.company_name}) as Chassis Out?\n\nThis records the unit as physically checked out.`)) return;
+            if (!(await FF_Confirm.ask(`Mark reservation #${r.id} (${r.company_name}) as Chassis Out?\n\nThis records the unit as physically checked out.`))) return;
             try {
                 const res = await FF_Api.post('<?= base_url('api/v1/reservations/mark_out.php') ?>', {
                     id: r.id,
@@ -1344,13 +1344,13 @@ function FF_Reservations() {
                 this.loadAll();
                 this.loadKpis();
             } catch (e) {
-                alert('Error: ' + e.message);
+                FF_Toast.error('Error: ' + e.message);
             }
         },
 
         // ── Reverse mark-out (completed → confirmed) ─────────────
         async reverseMarkOut(r) {
-            if (!confirm(`Reverse mark-out for reservation #${r.id}?\n\nThis will move it back to Chassis In as Confirmed.`)) return;
+            if (!(await FF_Confirm.ask(`Reverse mark-out for reservation #${r.id}?\n\nThis will move it back to Chassis In as Confirmed.`))) return;
             try {
                 const res = await FF_Api.post('<?= base_url('api/v1/reservations/update_status.php') ?>', {
                     id: r.id, status: 'confirmed',
@@ -1359,7 +1359,7 @@ function FF_Reservations() {
                 this.loadAll();
                 this.loadKpis();
             } catch (e) {
-                alert('Error: ' + e.message);
+                FF_Toast.error('Error: ' + e.message);
             }
         },
 
@@ -1394,14 +1394,14 @@ function FF_Reservations() {
 
         // ── Delete reservation ────────────────────────────────────
         async deleteReservation(r) {
-            if (!confirm(`Permanently delete reservation #${r.id} for ${r.company_name}?\n\nThis cannot be undone.`)) return;
+            if (!(await FF_Confirm.ask(`Permanently delete reservation #${r.id} for ${r.company_name}?\n\nThis cannot be undone.`))) return;
             try {
                 const res = await FF_Api.post('<?= base_url('api/v1/reservations/delete.php') ?>', { id: r.id });
                 if (!res.success) throw new Error(res.error?.message || 'Failed to delete');
                 this.loadAll();
                 this.loadKpis();
             } catch (e) {
-                alert('Error: ' + e.message);
+                FF_Toast.error('Error: ' + e.message);
             }
         },
     };

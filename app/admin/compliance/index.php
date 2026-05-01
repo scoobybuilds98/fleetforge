@@ -589,7 +589,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-sm">
             <div class="modal-header">
                 <h3 class="modal-title" x-text="'Update ' + modal.docLabel + ' Dates'"></h3>
-                <button class="modal-close-btn" @click="closeModal()">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="closeModal()">×</button>
             </div>
             <div class="modal-body">
                 <p class="text-secondary" style="font-size:0.875rem;margin-bottom:16px;">

@@ -45,7 +45,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
                 <p class="portal-empty-text">Submit a request for lease extensions, billing inquiries, damage reports, and more.</p>
             </div>
         <?php else: ?>
-            <table class="portal-table">
+            <div class="table-responsive">
+<table class="portal-table">
                 <thead>
                     <tr>
                         <th>#</th>
@@ -83,6 +84,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
+</div>
         <?php endif; ?>
     </div>
 </div>

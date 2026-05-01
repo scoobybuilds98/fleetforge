@@ -49,21 +49,25 @@ require_once FF_ROOT . '/includes/header.php';
 
         <div x-show="error" class="alert alert-danger" x-text="error" style="margin-bottom:1.25rem;"></div>
 
-        <!-- Customer -->
+        <!-- Customer (search-as-you-type picker) -->
         <div class="form-group" style="margin-bottom:1.25rem;">
             <label class="form-label">Customer <span style="color:var(--color-danger);">*</span></label>
-            <select class="form-select" x-model="form.customer_id" :disabled="submitting" @change="onCustomerChange()">
-                <option value="">— Select Customer —</option>
-                <?php
-                $customers = db_select(
-                    "SELECT id, company_name FROM customers WHERE deleted_at IS NULL AND status = 'active' ORDER BY company_name ASC",
-                    []
-                );
-                foreach ($customers as $cust):
-                ?>
-                <option value="<?= (int)$cust['id'] ?>"><?= e($cust['company_name']) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?php
+            // WHY picker: replaces static <select> of all customers with
+            // debounced autocomplete so the list stays usable past ~50 rows.
+            $pickerConfig    = [
+                'endpoint'    => '/api/v1/customers/index.php',
+                'searchParam' => 'search',
+                'resultKey'   => 'items',
+                'perPage'     => 10,
+                'extraParams' => 'status=active',
+                'placeholder' => 'Search customers by name, DOT, MC…',
+                'mapResult'   => "r => ({ id: r.id, label: r.company_name, sublabel: [r.contact_name, r.city, r.province].filter(Boolean).join(' · '), raw: r })",
+            ];
+            $pickerOnPicked  = 'form.customer_id = $event.detail.id; onCustomerChange()';
+            $pickerOnCleared = "form.customer_id = ''; onCustomerChange()";
+            require FF_ROOT . '/includes/partials/record-picker.php';
+            ?>
         </div>
 
         <!-- Source type -->
@@ -126,20 +130,58 @@ require_once FF_ROOT . '/includes/header.php';
 
         <template x-if="showLinks">
             <div style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1.25rem; padding:1rem; background:var(--bg-subtle); border-radius:6px;">
+                <!-- Lease picker (optional) -->
                 <div class="form-group">
-                    <label class="form-label">Lease ID <span style="color:var(--text-tertiary);">(optional)</span></label>
-                    <input class="form-input" type="number" min="1" x-model="form.lease_id"
-                           :disabled="submitting" placeholder="e.g. 12">
+                    <label class="form-label">Lease <span style="color:var(--text-tertiary);">(optional)</span></label>
+                    <?php
+                    $pickerConfig    = [
+                        'endpoint'    => '/api/v1/leases/index.php',
+                        'searchParam' => 'search',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search leases by contract #…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.contract_number, sublabel: [r.company_name_snapshot, r.unit_number_snapshot ? ('Unit ' + r.unit_number_snapshot) : '', r.status].filter(Boolean).join(' · '), raw: r })",
+                    ];
+                    $pickerOnPicked  = 'form.lease_id = $event.detail.id';
+                    $pickerOnCleared = "form.lease_id = ''";
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                 </div>
+
+                <!-- Source invoice picker (optional) -->
                 <div class="form-group">
-                    <label class="form-label">Source Invoice ID <span style="color:var(--text-tertiary);">(optional)</span></label>
-                    <input class="form-input" type="number" min="1" x-model="form.source_invoice_id"
-                           :disabled="submitting" placeholder="e.g. 47">
+                    <label class="form-label">Source Invoice <span style="color:var(--text-tertiary);">(optional)</span></label>
+                    <?php
+                    $pickerConfig    = [
+                        'endpoint'    => '/api/v1/invoices/index.php',
+                        'searchParam' => 'q',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search invoices by invoice #…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number, sublabel: [r.company_name, '\$' + (r.total_amount || '0.00'), r.status].filter(Boolean).join(' · '), raw: r })",
+                    ];
+                    $pickerOnPicked  = 'form.source_invoice_id = $event.detail.id';
+                    $pickerOnCleared = "form.source_invoice_id = ''";
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                 </div>
+
+                <!-- Source payment picker (optional) -->
                 <div class="form-group">
-                    <label class="form-label">Source Payment ID <span style="color:var(--text-tertiary);">(optional)</span></label>
-                    <input class="form-input" type="number" min="1" x-model="form.source_payment_id"
-                           :disabled="submitting" placeholder="e.g. 8">
+                    <label class="form-label">Source Payment <span style="color:var(--text-tertiary);">(optional)</span></label>
+                    <?php
+                    $pickerConfig    = [
+                        'endpoint'    => '/api/v1/payments/index.php',
+                        'searchParam' => 'q',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search payments by payment #…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.payment_number || ('Payment #' + r.id), sublabel: [r.company_name, '\$' + (r.amount || '0.00'), r.status].filter(Boolean).join(' · '), raw: r })",
+                    ];
+                    $pickerOnPicked  = 'form.source_payment_id = $event.detail.id';
+                    $pickerOnCleared = "form.source_payment_id = ''";
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                 </div>
             </div>
         </template>

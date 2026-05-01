@@ -1498,6 +1498,7 @@ CREATE TABLE portal_users (
     password_reset_token  VARCHAR(100) NULL,                  -- [PASS-1:C3] portal password reset flow
     password_reset_expiry DATETIME NULL,                      -- [PASS-1:C3] 2-hour expiry per spec
     is_primary            TINYINT(1) NOT NULL DEFAULT 0,      -- [PASS-4:2.3] first portal user per customer = primary (manages sub-users)
+    notification_preferences JSON NULL DEFAULT NULL,          -- [CVI-EMAIL-1] per-user email opt-outs: {"compliance_expiring": bool}
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_customer (customer_id),
@@ -2383,3 +2384,5 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- [PASS-5:1F]  equipment_status_log: added idx_unit_changed composite index (unit status history)
 -- [PASS-5:1G]  mileage_logs: added idx_unit_date composite index (unit mileage chart)
 -- [PASS-5:1H]  damage_claims: added idx_customer_created composite index (risk score calc)
+-- [CVI-EMAIL-1] portal_users: added notification_preferences JSON column (compliance email opt-out)
+-- ALTER TABLE portal_users ADD COLUMN notification_preferences JSON NULL DEFAULT NULL AFTER is_primary;

@@ -88,7 +88,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="padding:14px 16px;border-bottom:1px solid var(--border-default);">
                     <h3 class="h5" style="margin:0;">Reconciliation History</h3>
                 </div>
-                <table class="table">
+                <div class="table-responsive">
+<table class="table">
                     <thead>
                         <tr>
                             <th>Account</th>
@@ -125,6 +126,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </tbody>
                 </table>
+</div>
             </div>
         </div>
     </template>
@@ -175,7 +177,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-text="reconTransactions.filter(t=>t.is_cleared).length"></span> / <span x-text="reconTransactions.length"></span> cleared
                     </div>
                 </div>
-                <table class="table" style="font-size:0.875rem;">
+                <div class="table-responsive">
+<table class="table" style="font-size:0.875rem;">
                     <thead>
                         <tr>
                             <th style="width:40px;">Clear</th>
@@ -208,6 +211,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </tbody>
                 </table>
+</div>
             </div>
 
             <!-- Outstanding Items Report -->
@@ -383,7 +387,7 @@ function reconPage() {
         },
 
         async completeRecon() {
-            if (!confirm('Complete this reconciliation? Once completed, it cannot be modified.')) return;
+            if (!(await FF_Confirm.ask('Complete this reconciliation? Once completed, it cannot be modified.'))) return;
             this.saving = true;
             const fd = new FormData();
             fd.append('id', this.activeRecon.id);

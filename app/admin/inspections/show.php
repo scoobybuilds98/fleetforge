@@ -557,9 +557,10 @@ function saveTrailer(secId) {
 }
 
 // ── Status transitions ────────────────────────────────────────────────────
-function transitionStatus(newStatus) {
+// [UI-AUDIT-1:M13] async because FF_Confirm.ask() returns a Promise.
+async function transitionStatus(newStatus) {
     const labels = { complete: 'Mark Complete', signed: 'Sign Off', draft: 'Re-open' };
-    if (!confirm('Confirm: ' + (labels[newStatus] ?? newStatus) + '?')) return;
+    if (!(await FF_Confirm.ask('Confirm: ' + (labels[newStatus] ?? newStatus) + '?'))) return;
 
     FF_Api.post('<?= base_url('api/v1/inspections/update_status.php') ?>', {
         id: INSP_ID, status: newStatus
@@ -637,12 +638,13 @@ function uploadPhoto(event, secId) {
 }
 
 // ── Photo delete ─────────────────────────────────────────────────────────
-function deletePhoto(photoId, secId) {
-    if (!confirm('Delete this photo?')) return;
+// [UI-AUDIT-1:M13] async for FF_Confirm.ask().
+async function deletePhoto(photoId, secId) {
+    if (!(await FF_Confirm.ask('Delete this photo?'))) return;
     FF_Api.post('<?= base_url('api/v1/inspections/photos/delete.php') ?>', { photo_id: photoId })
         .then(d => {
             if (d && d.error) {
-                alert(extractError(d, 'Delete failed.'));
+                FF_Toast.error(extractError(d, 'Delete failed.'));
             } else {
                 const el = document.getElementById('photo-' + photoId);
                 if (el) el.remove();
@@ -651,12 +653,13 @@ function deletePhoto(photoId, secId) {
 }
 
 // ── Delete inspection ─────────────────────────────────────────────────────
-function deleteInspection() {
-    if (!confirm('Delete this inspection? This cannot be undone.')) return;
+// [UI-AUDIT-1:M13] async for FF_Confirm.ask().
+async function deleteInspection() {
+    if (!(await FF_Confirm.ask('Delete this inspection? This cannot be undone.'))) return;
     FF_Api.post('<?= base_url('api/v1/inspections/delete.php') ?>', { id: INSP_ID })
         .then(d => {
             if (d && d.error) {
-                alert(extractError(d, 'Delete failed.'));
+                FF_Toast.error(extractError(d, 'Delete failed.'));
             } else {
                 window.location.href = '<?= base_url('inspections') ?>';
             }

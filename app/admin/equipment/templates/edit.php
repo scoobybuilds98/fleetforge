@@ -176,19 +176,19 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-row-3">
                         <div class="form-group">
                             <label class="form-label" for="default_length_ft">Length (ft)</label>
-                            <input type="number" id="default_length_ft" name="default_length_ft" class="form-control font-mono"
+                            <input type="number" min="0" id="default_length_ft" name="default_length_ft" class="form-control font-mono"
                                    x-model="form.default_length_ft" step="0.01">
                             <div class="field-error" data-error-for="default_length_ft"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="default_width_ft">Width (ft)</label>
-                            <input type="number" id="default_width_ft" name="default_width_ft" class="form-control font-mono"
+                            <input type="number" min="0" id="default_width_ft" name="default_width_ft" class="form-control font-mono"
                                    x-model="form.default_width_ft" step="0.01">
                             <div class="field-error" data-error-for="default_width_ft"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="default_height_ft">Height (ft)</label>
-                            <input type="number" id="default_height_ft" name="default_height_ft" class="form-control font-mono"
+                            <input type="number" min="0" id="default_height_ft" name="default_height_ft" class="form-control font-mono"
                                    x-model="form.default_height_ft" step="0.01">
                             <div class="field-error" data-error-for="default_height_ft"></div>
                         </div>
@@ -196,13 +196,13 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-row-3">
                         <div class="form-group">
                             <label class="form-label" for="default_axle_count">Axle Count</label>
-                            <input type="number" id="default_axle_count" name="default_axle_count" class="form-control font-mono"
+                            <input type="number" min="0" id="default_axle_count" name="default_axle_count" class="form-control font-mono"
                                    x-model="form.default_axle_count">
                             <div class="field-error" data-error-for="default_axle_count"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="default_weight_capacity_lbs">Weight Capacity (lbs)</label>
-                            <input type="number" id="default_weight_capacity_lbs" name="default_weight_capacity_lbs" class="form-control font-mono"
+                            <input type="number" min="0" id="default_weight_capacity_lbs" name="default_weight_capacity_lbs" class="form-control font-mono"
                                    x-model="form.default_weight_capacity_lbs">
                             <div class="field-error" data-error-for="default_weight_capacity_lbs"></div>
                         </div>
@@ -249,7 +249,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <label class="form-label" for="default_daily_rate">Daily Rate</label>
                             <div class="input-group">
                                 <span class="input-group-prefix">$</span>
-                                <input type="number" id="default_daily_rate" name="default_daily_rate" class="form-control font-mono"
+                                <input type="number" min="0" id="default_daily_rate" name="default_daily_rate" class="form-control font-mono"
                                        x-model="form.default_daily_rate" step="0.01" placeholder="0.00">
                             </div>
                             <div class="field-error" data-error-for="default_daily_rate"></div>
@@ -258,7 +258,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <label class="form-label" for="default_weekly_rate">Weekly Rate</label>
                             <div class="input-group">
                                 <span class="input-group-prefix">$</span>
-                                <input type="number" id="default_weekly_rate" name="default_weekly_rate" class="form-control font-mono"
+                                <input type="number" min="0" id="default_weekly_rate" name="default_weekly_rate" class="form-control font-mono"
                                        x-model="form.default_weekly_rate" step="0.01" placeholder="0.00">
                             </div>
                             <div class="field-error" data-error-for="default_weekly_rate"></div>
@@ -267,7 +267,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <label class="form-label" for="default_monthly_rate">Monthly Rate</label>
                             <div class="input-group">
                                 <span class="input-group-prefix">$</span>
-                                <input type="number" id="default_monthly_rate" name="default_monthly_rate" class="form-control font-mono"
+                                <input type="number" min="0" id="default_monthly_rate" name="default_monthly_rate" class="form-control font-mono"
                                        x-model="form.default_monthly_rate" step="0.01" placeholder="0.00">
                             </div>
                             <div class="field-error" data-error-for="default_monthly_rate"></div>
@@ -279,7 +279,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <label class="form-label" for="default_mileage_rate">Mileage Rate (per mile/km)</label>
                             <div class="input-group">
                                 <span class="input-group-prefix">$</span>
-                                <input type="number" id="default_mileage_rate" name="default_mileage_rate" class="form-control font-mono"
+                                <input type="number" min="0" id="default_mileage_rate" name="default_mileage_rate" class="form-control font-mono"
                                        x-model="form.default_mileage_rate" step="0.0001" placeholder="0.0000">
                             </div>
                             <div class="form-hint">Set to 0 to disable mileage billing for this template.</div>
@@ -305,13 +305,13 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-row-2">
                         <div class="form-group">
                             <label class="form-label" for="default_cvi_interval_days">CVI Interval (days)</label>
-                            <input type="number" id="default_cvi_interval_days" name="default_cvi_interval_days" class="form-control font-mono"
+                            <input type="number" min="0" id="default_cvi_interval_days" name="default_cvi_interval_days" class="form-control font-mono"
                                    x-model="form.default_cvi_interval_days" placeholder="365">
                             <div class="field-error" data-error-for="default_cvi_interval_days"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="default_mvi_interval_days">MVI Interval (days)</label>
-                            <input type="number" id="default_mvi_interval_days" name="default_mvi_interval_days" class="form-control font-mono"
+                            <input type="number" min="0" id="default_mvi_interval_days" name="default_mvi_interval_days" class="form-control font-mono"
                                    x-model="form.default_mvi_interval_days" placeholder="365">
                             <div class="field-error" data-error-for="default_mvi_interval_days"></div>
                         </div>
@@ -319,13 +319,13 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-row-2">
                         <div class="form-group">
                             <label class="form-label" for="default_registration_interval_days">Registration Interval (days)</label>
-                            <input type="number" id="default_registration_interval_days" name="default_registration_interval_days" class="form-control font-mono"
+                            <input type="number" min="0" id="default_registration_interval_days" name="default_registration_interval_days" class="form-control font-mono"
                                    x-model="form.default_registration_interval_days" placeholder="365">
                             <div class="field-error" data-error-for="default_registration_interval_days"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="default_insurance_interval_days">Insurance Interval (days)</label>
-                            <input type="number" id="default_insurance_interval_days" name="default_insurance_interval_days" class="form-control font-mono"
+                            <input type="number" min="0" id="default_insurance_interval_days" name="default_insurance_interval_days" class="form-control font-mono"
                                    x-model="form.default_insurance_interval_days" placeholder="365">
                             <div class="field-error" data-error-for="default_insurance_interval_days"></div>
                         </div>

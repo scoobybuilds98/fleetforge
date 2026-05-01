@@ -324,7 +324,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="form-row-2" style="margin-bottom:16px;">
                 <div>
                     <label class="form-label">Hourly Rate ($)</label>
-                    <input type="number" id="edit-hourly-rate" class="form-control"
+                    <input type="number" min="0" id="edit-hourly-rate" class="form-control"
                            value="<?= e($vendor['hourly_rate'] ?? '') ?>"
                            min="0" step="0.01">
                 </div>
@@ -447,7 +447,8 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- Table + footer -->
     <div x-show="items.length > 0">
         <div class="tab-table-container">
-            <table class="table">
+            <div class="table-responsive">
+<table class="table">
                 <thead>
                     <tr>
                         <th>Work Order #</th>
@@ -483,6 +484,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
         <div class="tab-table-footer">
             <span x-text="`Showing ${items.length} of ${total}`"></span>
@@ -512,7 +514,8 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php else: ?>
     <div class="tab-table-container">
-        <table class="table">
+        <div class="table-responsive">
+<table class="table">
             <thead>
                 <tr>
                     <th>Unit #</th>
@@ -540,6 +543,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
     <?php endif; ?>
 </div>
@@ -563,7 +567,8 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php else: ?>
     <div class="tab-table-container">
-        <table class="table">
+        <div class="table-responsive">
+<table class="table">
             <thead>
                 <tr>
                     <th>Unit #</th>
@@ -599,6 +604,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
     <?php endif; ?>
 </div>

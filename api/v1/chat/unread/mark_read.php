@@ -2,11 +2,12 @@
 /**
  * api/v1/chat/unread/mark_read.php
  *
- * POST — Marks all messages in a channel as read for the current user.
- * Updates last_read_at and last_read_message_id in chat_channel_members.
+ * POST {channel_id}
+ * Marks all messages in a channel as read for current user.
+ * Updates last_read_at and last_read_message_id.
  *
  * Dependencies: api/bootstrap.php, chat_messages, chat_channel_members
- * Spec: CHAT-1
+ * Spec: CHAT-2
  */
 declare(strict_types=1);
 require_once dirname(__DIR__, 3) . '/bootstrap.php';
@@ -22,9 +23,9 @@ if (!db_exists('chat_channel_members', 'channel_id = ? AND user_id = ?', [$chann
     json_error('FORBIDDEN', 'Not a channel member.', 403);
 }
 
-// Get the latest message ID in this channel
+// Get the latest non-deleted message ID in this channel
 $latest = db_row(
-    "SELECT MAX(id) AS max_id FROM chat_messages WHERE channel_id = ? AND is_archived = 0",
+    "SELECT MAX(id) AS max_id FROM chat_messages WHERE channel_id = ? AND is_deleted = 0",
     [$channelId]
 );
 $maxId = $latest['max_id'] ?? null;

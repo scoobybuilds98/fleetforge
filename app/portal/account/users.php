@@ -224,7 +224,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
             <span style="font-size:0.8125rem;color:var(--text-muted);"><?= e(count($subUsers)) ?> user<?= count($subUsers) !== 1 ? 's' : '' ?></span>
         </div>
         <div class="portal-section-body--flush">
-            <table class="portal-table">
+            <div class="table-responsive">
+<table class="portal-table">
                 <thead>
                     <tr>
                         <th>Name</th>
@@ -291,6 +292,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
+</div>
         </div>
     </div>
 

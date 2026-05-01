@@ -43,6 +43,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user['name'] = $name;
             $success = 'Profile updated successfully.';
         }
+    } elseif ($action === 'update_notifications') {
+        $complianceExpiring = isset($_POST['compliance_expiring']);
+        $prefs = json_decode((string)($user['notification_preferences'] ?? '{}'), true);
+        if (!is_array($prefs)) $prefs = [];
+        $prefs['compliance_expiring'] = $complianceExpiring;
+        db_update('portal_users', [
+            'notification_preferences' => json_encode($prefs),
+        ], 'id = ?', [$puid]);
+        $user['notification_preferences'] = json_encode($prefs);
+        $success = 'Notification preferences updated.';
     } elseif ($action === 'change_password') {
         $currentPw = (string) ($_POST['current_password'] ?? '');
         $newPw     = (string) ($_POST['new_password'] ?? '');
@@ -78,6 +88,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                 Sub-Users
             </button>
         <?php endif; ?>
+        <button class="portal-tab-btn" :class="{ 'is-active': tab === 'notifications' }" @click="tab = 'notifications'">Notifications</button>
         <button class="portal-tab-btn" :class="{ 'is-active': tab === 'payment' }" @click="tab = 'payment'">Payment Details</button>
     </div>
 
@@ -190,7 +201,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
         ?>
         <div class="portal-section">
             <div class="portal-section-body--flush">
-                <table class="portal-table">
+                <div class="table-responsive">
+<table class="portal-table">
                     <thead>
                         <tr>
                             <th>Name</th>
@@ -216,10 +228,49 @@ require_once dirname(__DIR__) . '/includes/header.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+</div>
             </div>
         </div>
     </div>
     <?php endif; ?>
+
+    <!-- Notifications Tab -->
+    <div x-show="tab === 'notifications'" style="max-width:520px;">
+        <div class="portal-section">
+            <div class="portal-section-header">
+                <h2 class="portal-section-title">Notification Preferences</h2>
+            </div>
+            <div class="portal-section-body">
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
+                    <input type="hidden" name="action" value="update_notifications">
+
+                    <?php
+                    $notifPrefs = json_decode((string)($user['notification_preferences'] ?? '{}'), true);
+                    if (!is_array($notifPrefs)) $notifPrefs = [];
+                    $complianceEnabled = $notifPrefs['compliance_expiring'] ?? true;
+                    ?>
+
+                    <div class="portal-form-group" style="display:flex;align-items:flex-start;gap:12px;">
+                        <input type="checkbox" id="compliance_expiring" name="compliance_expiring"
+                               value="1"
+                               <?= $complianceEnabled ? 'checked' : '' ?>
+                               style="margin-top:3px;flex-shrink:0;">
+                        <div>
+                            <label class="portal-form-label" for="compliance_expiring" style="margin-bottom:2px;cursor:pointer;">
+                                Compliance Expiry Reminders
+                            </label>
+                            <p style="font-size:0.75rem;color:var(--text-muted);margin:0;">
+                                Receive email notifications when your leased equipment has expiring compliance documents (CVI, registration, insurance).
+                            </p>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-md" style="margin-top:16px;">Save Preferences</button>
+                </form>
+            </div>
+        </div>
+    </div>
 
     <!-- Payment Details Tab -->
     <div x-show="tab === 'payment'" style="max-width:520px;">

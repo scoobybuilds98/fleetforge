@@ -177,7 +177,7 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- Optional: Lease link -->
             <div class="form-group">
                 <label class="form-label" for="lease_id">Linked Lease ID <span class="form-hint" style="display:inline;font-size:0.8rem;">(optional)</span></label>
-                <input type="number"
+                <input type="number" min="0"
                        id="lease_id"
                        name="lease_id"
                        class="form-control"
@@ -207,7 +207,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="form-row form-row-3">
                 <div class="form-group">
                     <label class="form-label" for="estimated_repair_cost">Est. Repair Cost ($)</label>
-                    <input type="number"
+                    <input type="number" min="0"
                            id="estimated_repair_cost"
                            name="estimated_repair_cost"
                            class="form-control"
@@ -218,7 +218,7 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="customer_liable_amount">Customer Liable ($)</label>
-                    <input type="number"
+                    <input type="number" min="0"
                            id="customer_liable_amount"
                            name="customer_liable_amount"
                            class="form-control"
@@ -229,7 +229,7 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="insurance_claim_amount">Insurance Claim ($)</label>
-                    <input type="number"
+                    <input type="number" min="0"
                            id="insurance_claim_amount"
                            name="insurance_claim_amount"
                            class="form-control"

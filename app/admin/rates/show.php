@@ -143,8 +143,10 @@ require_once FF_ROOT . '/includes/header.php';
                     <label class="form-label">Effective To</label>
                     <div x-show="!editMode" class="form-control-static font-mono"
                          x-text="form.effective_to || 'Open-ended'"></div>
+                    <?php // [UI-AUDIT-1:M18] :min keeps the end date ≥ start date. ?>
                     <input x-show="editMode" type="date" class="form-control"
-                           x-model="form.effective_to">
+                           x-model="form.effective_to"
+                           :min="form.effective_from || ''">
                 </div>
 
                 <!-- Is Default -->
@@ -329,7 +331,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-sm">
             <div class="modal-header">
                 <h3 class="modal-title">Delete Rate Card</h3>
-                <button class="modal-close" @click="deleteModal.open = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="deleteModal.open = false">×</button>
             </div>
             <div class="modal-body">
                 <p>Permanently delete <strong><?= e($card['name']) ?></strong>?</p>

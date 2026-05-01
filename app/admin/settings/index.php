@@ -297,7 +297,7 @@ if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
                 <textarea id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control" rows="3"
                           <?= !$canEdit ? 'readonly' : '' ?>><?= e($val) ?></textarea>
                 <?php elseif (in_array($vtype, ['integer', 'decimal'], true)): ?>
-                <input type="number" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                <input type="number" min="0" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
                        value="<?= e($val) ?>" step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
                        min="0" <?= !$canEdit ? 'readonly' : '' ?>>
                 <?php else: ?>
@@ -394,7 +394,7 @@ if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
                     <label for="<?= e($key) ?>" style="margin-left:6px;font-size:0.875rem;">Enabled</label>
                 </div>
                 <?php elseif (in_array($vtype, ['integer', 'decimal'], true)): ?>
-                <input type="number" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                <input type="number" min="0" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
                        value="<?= e($val) ?>" step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
                        min="0" <?= !$canEdit ? 'readonly' : '' ?>>
                 <?php elseif ($isSecret): ?>

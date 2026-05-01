@@ -16,8 +16,15 @@ declare(strict_types=1);
  * Deduplication: does not create a new notification for a unit+type combination
  * that was already notified within the past 24 hours (checks notification_log).
  *
- * Notifications are written to the `notifications` table (in-app only — email
- * notifications are handled by a future notifications module).
+ * Notifications are written to the `notifications` table (in-app) AND one digest
+ * email is sent per affected customer via Mailer (customer email branch — CVI-EMAIL-1).
+ *
+ * Customer email branch:
+ *   - Joins equipment_units → active leases → customers → primary portal users.
+ *   - Groups all affected units into one digest per customer.
+ *   - Respects portal_users.notification_preferences.compliance_expiring (null = opt-in, EC5).
+ *   - Dedup: notification_type = 'customer_compliance_alert' (separate from staff branch).
+ *   - Requires: ALTER TABLE portal_users ADD COLUMN notification_preferences JSON NULL DEFAULT NULL AFTER is_primary;
  *
  * Crontab (production): 0 6 * * * php /var/www/fleetforge/cron/compliance_alerts.php
  * Local test:           php /Users/avi/Documents/fleetforge/cron/compliance_alerts.php
@@ -25,7 +32,7 @@ declare(strict_types=1);
  * Requires: config/app.php, includes/db.php
  * Decisions: D21 (GET_LOCK advisory lock prevents duplicate runs)
  * Spec ref: §7.9 Compliance & Expiry, §Notifications (nightly compliance alerts)
- * Session: S020
+ * Session: S020, CVI-EMAIL-1
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -209,10 +216,210 @@ try {
         }
     }
 
+    // ===================================================================
+    // [CVI-EMAIL-1] Customer email branch
+    //
+    // One digest email per customer per day grouping all affected units.
+    // notification_type = 'customer_compliance_alert' — independent dedup
+    // from the staff in-app branch above.
+    // ===================================================================
+    require_once FF_ROOT . '/lib/Email/templates/customer_compliance_expiring.php';
+
+    $emailNotified = 0;
+    $emailSkipped  = 0;
+    $emailErrors   = 0;
+
+    // Fetch all affected units that are on an active lease, with customer + primary portal user.
+    $customerRows = db_select(
+        "SELECT
+             eu.id AS unit_id,
+             eu.unit_number,
+             eu.cvi_expiry,
+             eu.registration_expiry,
+             eu.mvi_expiry,
+             eu.insurance_expiry,
+             c.id AS customer_id,
+             COALESCE(c.contact_name, c.company_name) AS customer_name,
+             c.email AS customer_email,
+             pu.id AS portal_user_id,
+             pu.email AS portal_email,
+             pu.name AS portal_name,
+             pu.notification_preferences
+         FROM equipment_units eu
+         JOIN leases l
+              ON l.equipment_unit_id = eu.id
+             AND l.deleted_at IS NULL
+             AND l.status = 'active'
+         JOIN customers c
+              ON c.id = l.customer_id
+             AND c.deleted_at IS NULL
+         LEFT JOIN portal_users pu
+              ON pu.customer_id = c.id
+             AND pu.is_primary = 1
+             AND pu.status = 'active'
+         WHERE eu.deleted_at IS NULL
+           AND eu.status NOT IN ('inactive','decommissioned')
+           AND (
+               (eu.cvi_expiry IS NOT NULL          AND eu.cvi_expiry          <= ?)
+               OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= ?)
+               OR (eu.mvi_expiry IS NOT NULL          AND eu.mvi_expiry          <= ?)
+               OR (eu.insurance_expiry IS NOT NULL    AND eu.insurance_expiry    <= ?)
+           )
+         ORDER BY c.id ASC, eu.unit_number ASC",
+        [$inWarning, $inWarning, $inWarning, $inWarning]
+    );
+
+    // Group rows by customer_id; collect per-unit affected-doc lists
+    $byCustomer = [];
+    foreach ($customerRows as $row) {
+        $cid = (int) $row['customer_id'];
+
+        if (!isset($byCustomer[$cid])) {
+            $byCustomer[$cid] = [
+                'customer_id'              => $cid,
+                'customer_name'            => $row['customer_name'],
+                'customer_email'           => $row['customer_email'],
+                'portal_email'             => $row['portal_email'],
+                'portal_name'              => $row['portal_name'],
+                'notification_preferences' => $row['notification_preferences'],
+                'units'                    => [],
+            ];
+        }
+
+        $docChecks = [
+            'CVI'          => $row['cvi_expiry'],
+            'Registration' => $row['registration_expiry'],
+            'MVI'          => $row['mvi_expiry'],
+            'Insurance'    => $row['insurance_expiry'],
+        ];
+        $unitDocs = [];
+        foreach ($docChecks as $docName => $expiryDate) {
+            if ($expiryDate === null || $expiryDate > $inWarning) continue;
+            $urgency = match(true) {
+                $expiryDate <= $today    => 'expired',
+                $expiryDate <= $inCritical => 'critical',
+                default                  => 'warning',
+            };
+            $unitDocs[] = ['name' => $docName, 'expiry' => $expiryDate, 'urgency' => $urgency];
+        }
+
+        if (!empty($unitDocs)) {
+            $byCustomer[$cid]['units'][] = [
+                'unit_number' => $row['unit_number'],
+                'unit_id'     => (int) $row['unit_id'],
+                'docs'        => $unitDocs,
+            ];
+        }
+    }
+
+    $companyName = (string) settings_get('company.name', 'FleetForge');
+    $appUrl      = rtrim((string) settings_get('app.url', ''), '/');
+
+    foreach ($byCustomer as $custData) {
+        $customerId = $custData['customer_id'];
+
+        // EC2: Skip if no deliverable email address
+        $toEmail = (string) ($custData['portal_email'] ?: $custData['customer_email']);
+        $toName  = (string) ($custData['portal_name']  ?: $custData['customer_name']);
+        if ($toEmail === '') {
+            $emailSkipped++;
+            continue;
+        }
+
+        // EC3: Skip if no actionable units remain after doc filtering
+        if (empty($custData['units'])) {
+            $emailSkipped++;
+            continue;
+        }
+
+        // EC5: null notification_preferences = default opt-in
+        // EC7: explicit compliance_expiring=false → skip
+        if ($custData['notification_preferences'] !== null) {
+            $prefs = json_decode((string) $custData['notification_preferences'], true);
+            if (is_array($prefs) && ($prefs['compliance_expiring'] ?? true) === false) {
+                $emailSkipped++;
+                continue;
+            }
+        }
+
+        // Dedup: skip if we already emailed this customer today
+        $recentEmail = db_row(
+            "SELECT id FROM notification_log
+             WHERE entity_type = 'customer'
+               AND entity_id = ?
+               AND notification_type = 'customer_compliance_alert'
+               AND created_at >= NOW() - INTERVAL 24 HOUR
+             LIMIT 1",
+            [$customerId]
+        );
+        if ($recentEmail) {
+            $emailSkipped++;
+            continue;
+        }
+
+        // Determine urgency label for subject line
+        $hasExpired  = false;
+        $hasCritical = false;
+        foreach ($custData['units'] as $u) {
+            foreach ($u['docs'] as $d) {
+                if ($d['urgency'] === 'expired')  $hasExpired  = true;
+                if ($d['urgency'] === 'critical') $hasCritical = true;
+            }
+        }
+        $urgencyWord = $hasExpired ? 'Expired' : ($hasCritical ? 'Expiring Soon' : 'Upcoming Expiry');
+        $unitCount   = count($custData['units']);
+        $subject     = "[Action Required] Compliance Documents {$urgencyWord}"
+                     . " — {$unitCount} Unit" . ($unitCount > 1 ? 's' : '');
+
+        // Build and wrap email body
+        $bodyHtml    = render_customer_compliance_email([
+            'customer_name' => $toName,
+            'company_name'  => $companyName,
+            'units'         => $custData['units'],
+            'portal_url'    => $appUrl . '/portal/documents',
+        ]);
+        $wrappedHtml = \FleetForge\Email\EmailService::renderEmailHtml($bodyHtml);
+
+        try {
+            $sent = \FleetForge\Notifications\Mailer::send(
+                toEmail:  $toEmail,
+                toName:   $toName,
+                subject:  $subject,
+                htmlBody: $wrappedHtml,
+            );
+
+            // Always write the dedup log entry regardless of send success
+            db_insert('notification_log', [
+                'rule_id'           => null,
+                'channel'           => 'email',
+                'recipient'         => $toEmail,
+                'subject'           => $subject,
+                'body'              => mb_substr(strip_tags($bodyHtml), 0, 2000),
+                'entity_type'       => 'customer',
+                'entity_id'         => $customerId,
+                'notification_type' => 'customer_compliance_alert',
+                'status'            => $sent ? 'sent' : 'failed',
+                'error_message'     => $sent ? null : 'Mailer::send() returned false',
+                'sent_at'           => $sent ? date('Y-m-d H:i:s') : null,
+            ]);
+
+            if ($sent) {
+                $emailNotified++;
+            } else {
+                $emailErrors++;
+                error_log("[CRON compliance_alerts] Customer #{$customerId} email send failed");
+            }
+        } catch (\Throwable $e) {
+            $emailErrors++;
+            error_log("[CRON compliance_alerts] Customer #{$customerId} email exception: " . $e->getMessage());
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Summary audit log entry
     // -----------------------------------------------------------------------
-    $summary = "compliance_alerts completed: {$notified} notified, {$skipped} skipped (dedup), {$errors} errors";
+    $summary = "compliance_alerts completed: {$notified} notified, {$skipped} skipped (dedup), {$errors} errors"
+             . " | customer emails: {$emailNotified} sent, {$emailSkipped} skipped, {$emailErrors} errors";
     error_log("[CRON] {$summary}");
 
     db_insert('audit_log', [

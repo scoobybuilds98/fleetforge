@@ -111,6 +111,42 @@ set_exception_handler(function (Throwable $e): void {
 
 
 // ============================================================
+// JSON body → $_POST auto-merge
+// ============================================================
+// WHY: PHP only populates $_POST for form-encoded or multipart
+// bodies — never for application/json. FF_Api.post() sends JSON,
+// so endpoints that read $_POST directly saw empty values. This
+// merge lets every endpoint keep its $_POST['key'] reads while
+// still accepting JSON bodies from FF_Api.post() callers.
+// Form-encoded bodies already have $_POST populated and are
+// skipped. Only applies to POST/PUT/PATCH/DELETE methods.
+(function (): void {
+    $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+    if (in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
+        return;
+    }
+    // If $_POST is already populated (form-encoded / multipart), skip.
+    if (!empty($_POST)) {
+        return;
+    }
+    $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+    // Only auto-merge if client said Content-Type: application/json
+    if (!str_contains($contentType, 'application/json')) {
+        return;
+    }
+    $raw = file_get_contents('php://input');
+    if (!is_string($raw) || $raw === '') {
+        return;
+    }
+    $decoded = json_decode($raw, true);
+    if (is_array($decoded)) {
+        // Merge decoded body into $_POST so legacy reads still work.
+        $_POST = array_merge($_POST, $decoded);
+    }
+})();
+
+
+// ============================================================
 // API RESPONSE HELPERS
 // ============================================================
 

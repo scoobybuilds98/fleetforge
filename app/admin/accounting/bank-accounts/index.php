@@ -86,7 +86,8 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- Accounts Table -->
     <div class="card" style="overflow:hidden;">
-        <table class="table">
+        <div class="table-responsive">
+<table class="table">
             <thead>
                 <tr>
                     <th>Account</th>
@@ -131,6 +132,7 @@ require_once FF_ROOT . '/includes/header.php';
                 </template>
             </tbody>
         </table>
+</div>
     </div>
 
     <!-- Selected Account Detail: Transactions -->
@@ -152,7 +154,8 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
             <div class="card" style="overflow:hidden;">
-                <table class="table">
+                <div class="table-responsive">
+<table class="table">
                     <thead>
                         <tr>
                             <th>Date</th>
@@ -197,6 +200,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </tbody>
                 </table>
+</div>
             </div>
             <!-- Pagination -->
             <div x-show="txnTotalPages > 1" style="display:flex;justify-content:center;gap:6px;margin-top:12px;">
@@ -355,7 +359,8 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                     </div>
                     <div style="max-height:400px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px;">
-                        <table class="table" style="font-size:0.8125rem;">
+                        <div class="table-responsive">
+<table class="table" style="font-size:0.8125rem;">
                             <thead>
                                 <tr>
                                     <th style="width:30px;"><input type="checkbox" @change="toggleAllImport($event.target.checked)" checked></th>
@@ -395,6 +400,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 </template>
                             </tbody>
                         </table>
+</div>
                     </div>
                     <template x-if="importPreview.errors && importPreview.errors.length > 0">
                         <div style="margin-top:8px;padding:8px 12px;background:var(--badge-warning-bg);color:var(--badge-warning-text);border-radius:6px;font-size:0.8125rem;">
@@ -551,7 +557,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div style="display:grid;gap:12px;">
                 <div>
                     <label class="form-label">Payment ID *</label>
-                    <input type="number" class="form-input" :class="nsfErrors.payment_id ? 'is-invalid' : ''" x-model="nsfForm.payment_id" @input="nsfErrors.payment_id = ''" placeholder="Enter payment ID">
+                    <input type="number" min="0" class="form-input" :class="nsfErrors.payment_id ? 'is-invalid' : ''" x-model="nsfForm.payment_id" @input="nsfErrors.payment_id = ''" placeholder="Enter payment ID">
                     <div class="field-error" x-show="nsfErrors.payment_id" x-cloak x-text="nsfErrors.payment_id"></div>
                 </div>
                 <div>
@@ -1042,7 +1048,7 @@ function bankAccountsPage() {
                 this.nsfFormError = 'Please correct the highlighted fields.';
                 return;
             }
-            if (!confirm('Are you sure you want to process this NSF? This will reverse the payment and reopen associated invoices.')) return;
+            if (!(await FF_Confirm.ask('Are you sure you want to process this NSF? This will reverse the payment and reopen associated invoices.'))) return;
             this.saving = true;
             this.nsfFormError = '';
             const fd = new FormData();

@@ -669,7 +669,7 @@ class EmailService
     // a 600px centered card, brand header, and footer block.
     // Inline styles only — email clients ignore <style> blocks.
     // =========================================================
-    private static function renderEmailHtml(string $body): string
+    public static function renderEmailHtml(string $body): string
     {
         $companyName    = (string) settings_get('company.name', 'FleetForge');
         $companyAddress = (string) settings_get('company.address', '');

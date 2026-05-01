@@ -4,12 +4,35 @@ declare(strict_types=1);
 /**
  * app/admin/settings/portal_users.php
  *
- * Portal user management tab — included by settings/index.php.
+ * Portal user management tab — normally included by settings/index.php.
  * Super_admin can view, manage, reset passwords for ALL customer portal users.
  * Shows portal_users grouped by customer with status, login info, actions.
  *
- * Variables inherited from parent: $canEdit, $isSuperAdmin, $csrfToken
+ * Variables inherited from parent (when included): $canEdit, $isSuperAdmin, $csrfToken
+ *
+ * [C0-FIX] Standalone-safe bootstrap — see settings/users.php for the full
+ * rationale. Without this guard, hitting /settings/portal_users directly
+ * exposes portal user data (emails, customer associations) to ANY visitor,
+ * authenticated or not, because the db_select() runs before the Undefined
+ * variable warning.
  */
+
+// [C0-FIX] Detect standalone execution (see users.php).
+if (!isset($canEdit)) {
+    require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
+    require_once FF_ROOT . '/includes/auth.php';
+
+    require_auth();
+    require_permission('settings', 'view');
+
+    $canEdit      = can('settings', 'edit');
+    $isSuperAdmin = can('settings', 'delete');
+    $csrfToken    = generate_csrf_token();
+
+    $pageTitle = 'Portal Users';
+    require_once FF_ROOT . '/includes/header.php';
+    $_ff_standalone_portal_users = true;
+}
 
 // Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isSuperAdmin) {
@@ -298,7 +321,8 @@ $statusBadge = [
         <a href="<?= e(base_url('customers/show?id=' . $custId)) ?>" class="btn btn-ghost btn-xs">View Customer</a>
     </div>
     <div class="card-body" style="padding:0;">
-        <table class="table" style="margin:0;">
+        <div class="table-responsive">
+<table class="table" style="margin:0;">
             <thead>
                 <tr>
                     <th>Name</th>
@@ -341,7 +365,7 @@ $statusBadge = [
                                 <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
                                 <input type="hidden" name="portal_action" value="reset_portal_password">
                                 <input type="hidden" name="target_pu_id" value="<?= e((string)$pu['id']) ?>">
-                                <button type="submit" class="btn btn-ghost btn-xs" onclick="return confirm('Send password reset link to <?= e($pu['email']) ?>?')">Reset PW</button>
+                                <button type="submit" class="btn btn-ghost btn-xs" onclick="return (await FF_Confirm.ask('Send password reset link to <?= e($pu['email']) ?>?'))">Reset PW</button>
                             </form>
 
                             <!-- Status toggle -->
@@ -352,7 +376,7 @@ $statusBadge = [
                                 <input type="hidden" name="target_pu_id" value="<?= e((string)$pu['id']) ?>">
                                 <input type="hidden" name="new_status" value="inactive">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-warning);"
-                                        onclick="return confirm('Deactivate this portal user?')">Deactivate</button>
+                                        onclick="return (await FF_Confirm.ask('Deactivate this portal user?'))">Deactivate</button>
                             </form>
                             <?php elseif ($pu['status'] === 'inactive'): ?>
                             <form method="POST" style="display:inline;">
@@ -371,7 +395,7 @@ $statusBadge = [
                                 <input type="hidden" name="portal_action" value="delete_portal_user">
                                 <input type="hidden" name="target_pu_id" value="<?= e((string)$pu['id']) ?>">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-danger);"
-                                        onclick="return confirm('Permanently delete this portal user? This cannot be undone.')">Delete</button>
+                                        onclick="return (await FF_Confirm.ask('Permanently delete this portal user? This cannot be undone.'))">Delete</button>
                             </form>
                             <?php endif; ?>
                         </div>
@@ -381,8 +405,16 @@ $statusBadge = [
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
 <?php endforeach; ?>
 
 <?php endif; ?>
+
+<?php
+// [C0-FIX] Standalone footer — only when running as top-level route.
+if (!empty($_ff_standalone_portal_users)) {
+    require FF_ROOT . '/includes/footer.php';
+}
+?>

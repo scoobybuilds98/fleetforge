@@ -7,8 +7,9 @@ declare(strict_types=1);
  * @file        app/admin/leases/edit.php
  * @description Edit lease metadata. Only allows editing fields that don't require
  *              an amendment record (dates, notes, add-ons, po_number, mileage).
- *              Rates are shown read-only — rate changes require a lease_amendment
- *              (not yet built). Status changes excluded — use activate/close endpoints.
+ *              Rates are shown read-only — rate changes go through the
+ *              Amendments tab on leases/show.php (built in S018, AMEND-1).
+ *              Status changes excluded — use activate/close endpoints.
  *              Server pre-populates form via json_encode(). D19 optimistic lock:
  *              passes updated_at from initial load to update API.
  *
@@ -134,15 +135,19 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="end_date">End Date</label>
+                        <?php // [UI-AUDIT-1:M18] :min prevents picking a date before lease start. ?>
                         <input type="date" id="end_date" class="form-control"
                                x-model="form.end_date"
+                               min="<?= e($lease['start_date']) ?>"
                                :class="errors.end_date ? 'is-invalid' : ''">
                         <div class="form-error" x-show="errors.end_date" x-text="errors.end_date"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="minimum_end_date">Minimum End Date</label>
+                        <?php // [UI-AUDIT-1:M18] Same constraint on minimum_end_date. ?>
                         <input type="date" id="minimum_end_date" class="form-control"
-                               x-model="form.minimum_end_date">
+                               x-model="form.minimum_end_date"
+                               min="<?= e($lease['start_date']) ?>">
                     </div>
                 </div>
             </div>
@@ -153,7 +158,11 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header">
                 <div class="card-title">Rental Rates</div>
                 <div style="font-size:0.8125rem;color:var(--text-secondary);">
-                    Rate changes require an amendment record (coming in a future session).
+                    <?php // [M5-FIX] Amendments are implemented in leases/show.php → Amendments tab. ?>
+                    Rate changes require an amendment record — use the
+                    <a href="<?= e(base_url('leases/show?id=' . $leaseId)) ?>#amendments"
+                       class="text-link">Amendments tab</a>
+                    on this lease.
                 </div>
             </div>
             <div class="card-body">

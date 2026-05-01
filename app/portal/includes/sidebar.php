@@ -43,6 +43,18 @@ try {
     // [MSGR-1] Unread admin messages — counts admin sends with no read
     // cursor at all OR a cursor older than the message id, scoped to the
     // threads this portal user is allowed to see (customer-wide OR pinned).
+    // [CHAT-2] Unread staff messages in customer chat conversation channels
+    $_unreadChatBadge = db_count(
+        "SELECT COUNT(*) FROM chat_messages cm
+           JOIN chat_channels cc ON cc.id = cm.channel_id
+                AND cc.type = 'customer' AND cc.customer_id = ? AND cc.is_archived = 0
+           LEFT JOIN chat_channel_members ccm
+                ON ccm.channel_id = cm.channel_id AND ccm.portal_user_id = ?
+          WHERE cm.is_deleted = 0
+            AND cm.portal_user_id IS NULL
+            AND (ccm.last_read_message_id IS NULL OR cm.id > ccm.last_read_message_id)",
+        [$_cid, $_pid]
+    );
     $_unreadMessageBadge = db_count(
         "SELECT COUNT(*) AS cnt
            FROM messenger_messages mm
@@ -66,6 +78,7 @@ $_navItems = [
     ['label' => 'Equipment', 'url' => '/portal/equipment', 'icon' => 'truck',      'badge' => 0],
     ['label' => 'Documents', 'url' => '/portal/documents', 'icon' => 'folder',     'badge' => 0],
     ['label' => 'Messages',  'url' => '/portal/messages',  'icon' => 'envelope',   'badge' => $_unreadMessageBadge],
+    ['label' => 'Chat',      'url' => '/portal/chat',      'icon' => 'chat-bubble','badge' => $_unreadChatBadge],
     ['label' => 'Requests',  'url' => '/portal/requests',  'icon' => 'chat',       'badge' => $_openRequestBadge],
     ['label' => 'Account',   'url' => '/portal/account',   'icon' => 'user',       'badge' => 0],
 ];
@@ -79,6 +92,7 @@ $_icons = [
     'folder' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg>',
     'chat' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155"/></svg>',
     'envelope' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"/></svg>',
+    'chat-bubble' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 0 1 .778-.332 48.294 48.294 0 0 0 5.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg>',
     'user' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>',
 ];
 ?>
@@ -132,5 +146,5 @@ $_icons = [
 <?php
 unset($_portalUser, $_companyName, $_customerName, $_currentPath, $_portalBase,
       $_initials, $_cid, $_pid, $_overdueInvoiceBadge, $_openRequestBadge,
-      $_unreadMessageBadge, $_navItems, $_icons, $_item, $_itemFullUrl, $_isActive);
+      $_unreadMessageBadge, $_unreadChatBadge, $_navItems, $_icons, $_item, $_itemFullUrl, $_isActive);
 ?>

@@ -4,11 +4,33 @@ declare(strict_types=1);
 /**
  * app/admin/settings/system.php
  *
- * System information tab — included by settings/index.php.
+ * System information tab — normally included by settings/index.php.
  * Shows environment info, database stats, table sizes, cron status, and health checks.
  *
- * Variables inherited from parent: $canEdit, $isSuperAdmin, $csrfToken
+ * Variables inherited from parent (when included): $canEdit, $isSuperAdmin, $csrfToken
+ *
+ * [C0-FIX] Standalone-safe bootstrap — this page leaks PHP version, MySQL
+ * version, memory limits, app environment and other fingerprintable server
+ * details to unauthenticated visitors if reached via direct URL. The guard
+ * below enforces auth before any env data is rendered.
  */
+
+// [C0-FIX] Detect standalone execution (see users.php).
+if (!isset($canEdit)) {
+    require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
+    require_once FF_ROOT . '/includes/auth.php';
+
+    require_auth();
+    require_permission('settings', 'view');
+
+    $canEdit      = can('settings', 'edit');
+    $isSuperAdmin = can('settings', 'delete');
+    $csrfToken    = generate_csrf_token();
+
+    $pageTitle = 'System Information';
+    require_once FF_ROOT . '/includes/header.php';
+    $_ff_standalone_system = true;
+}
 
 // ── Environment Info ──────────────────────────────────────────────────────────
 $envInfo = [
@@ -141,7 +163,8 @@ $statusIcon = [
 <div class="card" style="margin-bottom:20px;">
     <div class="card-header" style="font-weight:600;">Health Checks</div>
     <div class="card-body" style="padding:0;">
-        <table class="table" style="margin:0;">
+        <div class="table-responsive">
+<table class="table" style="margin:0;">
             <thead><tr><th></th><th>Component</th><th>Status</th></tr></thead>
             <tbody>
                 <?php foreach ($healthChecks as $name => $check): ?>
@@ -153,6 +176,7 @@ $statusIcon = [
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
 
@@ -162,7 +186,8 @@ $statusIcon = [
 <div class="card">
     <div class="card-header" style="font-weight:600;">Environment</div>
     <div class="card-body" style="padding:0;">
-        <table class="table" style="margin:0;">
+        <div class="table-responsive">
+<table class="table" style="margin:0;">
             <tbody>
                 <?php foreach ($envInfo as $label => $value): ?>
                 <tr>
@@ -172,6 +197,7 @@ $statusIcon = [
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
 
@@ -179,7 +205,8 @@ $statusIcon = [
 <div class="card">
     <div class="card-header" style="font-weight:600;">Database</div>
     <div class="card-body" style="padding:0;">
-        <table class="table" style="margin:0;">
+        <div class="table-responsive">
+<table class="table" style="margin:0;">
             <tbody>
                 <?php foreach ($dbStats as $label => $value): ?>
                 <tr>
@@ -189,6 +216,7 @@ $statusIcon = [
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
 
@@ -206,7 +234,8 @@ $statusIcon = [
         <?php endif; ?>
     </div>
     <div class="card-body" style="padding:0;">
-        <table class="table" style="margin:0;">
+        <div class="table-responsive">
+<table class="table" style="margin:0;">
             <thead>
                 <tr>
                     <th>Task</th>
@@ -249,6 +278,7 @@ $statusIcon = [
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
 
@@ -340,3 +370,10 @@ async function cronRunAll() {
         </div>
     </div>
 </div>
+
+<?php
+// [C0-FIX] Standalone footer — only when running as top-level route.
+if (!empty($_ff_standalone_system)) {
+    require FF_ROOT . '/includes/footer.php';
+}
+?>

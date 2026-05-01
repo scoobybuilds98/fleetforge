@@ -3,13 +3,16 @@
  * api/v1/chat/messages/index.php
  *
  * GET ?channel_id=X&before_id=Y&limit=50
- * Returns messages for a channel in reverse chronological order.
- * Cursor pagination by message ID. Includes: user info, attachments,
- * reactions, reply_to preview. Archived messages shown as "[message deleted]".
+ * Returns messages for a channel in reverse chronological order
+ * (oldest first for display). Cursor pagination by message ID.
+ * Includes sender info, attachments, reactions, reply_to preview.
+ *
+ * WHY: Never return file_path in response — only preview_url.
+ *      Deleted messages return null message text, display "[Message deleted]".
  *
  * Dependencies: api/bootstrap.php, chat_messages, chat_channel_members,
- *               chat_attachments, chat_reactions, users
- * Spec: CHAT-1
+ *               chat_attachments, chat_reactions, users, portal_users
+ * Spec: CHAT-2
  */
 declare(strict_types=1);
 require_once dirname(__DIR__, 3) . '/bootstrap.php';
@@ -23,27 +26,29 @@ $limit     = min(50, max(10, clean_int($_GET['limit'] ?? 50) ?? 50));
 
 if (!$channelId) json_error('MISSING_REQUIRED', 'channel_id is required.', 422);
 
-// Verify membership
-if (!db_exists('chat_channel_members', 'channel_id = ? AND user_id = ?', [$channelId, $userId])) {
+// Verify membership — check both staff and portal membership
+$isMember = db_exists('chat_channel_members', 'channel_id = ? AND user_id = ?', [$channelId, $userId])
+         || db_exists('chat_channel_members', 'channel_id = ? AND portal_user_id = ?', [$channelId, $userId]);
+if (!$isMember) {
     json_error('FORBIDDEN', 'You are not a member of this channel.', 403);
 }
 
-// Build cursor condition
 $cursorSQL = $beforeId ? 'AND cm.id < ?' : '';
 $params    = $beforeId ? [$channelId, $beforeId, $limit] : [$channelId, $limit];
 
 $messages = db_select(
-    "SELECT cm.id, cm.channel_id, cm.user_id, cm.message, cm.type,
-            cm.is_edited, cm.edited_at, cm.is_archived,
+    "SELECT cm.id, cm.channel_id, cm.user_id, cm.portal_user_id,
+            cm.sender_display_name, cm.message, cm.type,
+            cm.is_edited, cm.edited_at, cm.is_deleted,
             cm.reply_to_id, cm.mentions, cm.created_at, cm.updated_at,
-            u.name AS user_name,
+            COALESCE(u.name, cm.sender_display_name, 'Unknown') AS user_name,
             rm.message AS reply_to_message,
-            ru.name AS reply_to_user_name
+            COALESCE(ru.name, rm.sender_display_name, 'Unknown') AS reply_to_user_name
      FROM chat_messages cm
-     JOIN users u ON u.id = cm.user_id
+     LEFT JOIN users u ON u.id = cm.user_id
      LEFT JOIN chat_messages rm ON rm.id = cm.reply_to_id
      LEFT JOIN users ru ON ru.id = rm.user_id
-     WHERE cm.channel_id = ? $cursorSQL
+     WHERE cm.channel_id = ? {$cursorSQL}
      ORDER BY cm.id DESC
      LIMIT ?",
     $params
@@ -56,14 +61,17 @@ if (empty($messages)) {
     json_success(['messages' => [], 'has_more' => false]);
 }
 
-// Batch-load attachments for all messages
-$messageIds = array_column($messages, 'id');
+$messageIds   = array_column($messages, 'id');
 $placeholders = implode(',', array_fill(0, count($messageIds), '?'));
+
+// Batch-load attachments — never return file_path
 $attachments = db_select(
-    "SELECT * FROM chat_attachments WHERE message_id IN ($placeholders)",
+    "SELECT id, message_id, attachment_type, entity_id, file_name, file_size,
+            mime_type, preview_title, preview_subtitle, preview_badge,
+            preview_badge_class, preview_url
+     FROM chat_attachments WHERE message_id IN ({$placeholders})",
     $messageIds
 );
-// Index by message_id
 $attachMap = [];
 foreach ($attachments as $att) {
     $attachMap[$att['message_id']][] = $att;
@@ -73,46 +81,55 @@ foreach ($attachments as $att) {
 $reactions = db_select(
     "SELECT cr.message_id, cr.emoji, cr.user_id, u.name AS user_name
      FROM chat_reactions cr
-     JOIN users u ON u.id = cr.user_id
-     WHERE cr.message_id IN ($placeholders)",
+     LEFT JOIN users u ON u.id = cr.user_id
+     WHERE cr.message_id IN ({$placeholders})",
     $messageIds
 );
-// Group reactions by message_id then emoji → count + my_reaction flag
 $reactionMap = [];
 foreach ($reactions as $r) {
-    $key = $r['message_id'] . '_' . $r['emoji'];
     if (!isset($reactionMap[$r['message_id']][$r['emoji']])) {
-        $reactionMap[$r['message_id']][$r['emoji']] = ['emoji' => $r['emoji'], 'count' => 0, 'mine' => false, 'users' => []];
+        $reactionMap[$r['message_id']][$r['emoji']] = [
+            'emoji' => $r['emoji'],
+            'count' => 0,
+            'mine'  => false,
+            'users' => [],
+        ];
     }
     $reactionMap[$r['message_id']][$r['emoji']]['count']++;
-    $reactionMap[$r['message_id']][$r['emoji']]['users'][] = $r['user_name'];
-    if ($r['user_id'] == $userId) {
+    $reactionMap[$r['message_id']][$r['emoji']]['users'][] = $r['user_name'] ?? '?';
+    if ((int)$r['user_id'] === $userId) {
         $reactionMap[$r['message_id']][$r['emoji']]['mine'] = true;
     }
 }
 
 // Build final response
 foreach ($messages as &$msg) {
-    // Soft-deleted messages shown as placeholder
-    if ($msg['is_archived']) {
-        $msg['message'] = null;
-        $msg['display_text'] = '[message deleted]';
+    if ($msg['is_deleted']) {
+        $msg['message']      = null;
+        $msg['display_text'] = '[Message deleted]';
     } else {
         $msg['display_text'] = $msg['message'];
     }
-    $msg['attachments'] = $attachMap[$msg['id']] ?? [];
-    $reactions_grouped  = [];
-    if (!empty($reactionMap[$msg['id']])) {
-        foreach ($reactionMap[$msg['id']] as $emoji => $data) {
-            $reactions_grouped[] = $data;
-        }
-    }
-    $msg['reactions']  = $reactions_grouped;
+
+    // Build sender initials
+    $parts         = explode(' ', trim($msg['user_name'] ?? '?'));
+    $msg['initials'] = strtoupper(implode('', array_map(fn($p) => $p[0] ?? '', array_slice($parts, 0, 2))));
+
+    // Decode mentions
     $msg['mentions']   = $msg['mentions'] ? json_decode($msg['mentions'], true) : [];
+
+    // Attachments
+    $msg['attachments'] = $attachMap[$msg['id']] ?? [];
+
+    // Reactions grouped
+    $reactions_grouped = [];
+    foreach (($reactionMap[$msg['id']] ?? []) as $data) {
+        $reactions_grouped[] = $data;
+    }
+    $msg['reactions'] = $reactions_grouped;
 }
 unset($msg);
 
-// Has more if we got a full page
 $hasMore = count($messages) >= $limit;
 
 json_success(['messages' => $messages, 'has_more' => $hasMore]);

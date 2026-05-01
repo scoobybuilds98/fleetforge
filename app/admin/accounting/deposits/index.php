@@ -300,7 +300,7 @@ function depositsPage() {
         },
 
         async applyDeposit(dep) {
-            const invoiceId = prompt('Enter Invoice ID to apply deposit ' + dep.deposit_number + ' to:');
+            const invoiceId = (await FF_Confirm.askText('Enter Invoice ID to apply deposit ' + dep.deposit_number + ' to:'));
             if (!invoiceId) return;
             const body = new FormData();
             body.append('deposit_id', dep.id);
@@ -315,7 +315,7 @@ function depositsPage() {
         },
 
         async refundDeposit(id) {
-            if (!confirm('Refund this deposit?')) return;
+            if (!(await FF_Confirm.ask('Refund this deposit?'))) return;
             const body = new FormData();
             body.append('deposit_id', id);
             body.append('csrf_token', document.querySelector('meta[name="csrf-token"]')?.content || '');

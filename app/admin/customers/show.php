@@ -519,7 +519,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <!-- Table + footer -->
             <div x-show="leases.length > 0">
                 <div class="tab-table-container">
-                    <table class="table">
+                    <div class="table-responsive">
+<table class="table">
                         <thead>
                             <tr>
                                 <th>Contract #</th>
@@ -552,6 +553,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             </template>
                         </tbody>
                     </table>
+</div>
                 </div>
                 <div class="tab-table-footer">
                     <span x-text="`Showing ${leases.length} of ${leasesTotal}`"></span>
@@ -617,7 +619,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <!-- Table + footer -->
             <div x-show="invoices.length > 0">
                 <div class="tab-table-container">
-                    <table class="table">
+                    <div class="table-responsive">
+<table class="table">
                         <thead>
                             <tr>
                                 <th>Invoice #</th>
@@ -650,6 +653,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             </template>
                         </tbody>
                     </table>
+</div>
                 </div>
                 <div class="tab-table-footer">
                     <span x-text="`Showing ${invoices.length} of ${invoicesTotal}`"></span>
@@ -723,7 +727,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <!-- Table + footer -->
             <div x-show="damageClaims.length > 0">
                 <div class="tab-table-container">
-                    <table class="table">
+                    <div class="table-responsive">
+<table class="table">
                         <thead>
                             <tr>
                                 <th>Claim #</th>
@@ -759,6 +764,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             </template>
                         </tbody>
                     </table>
+</div>
                 </div>
                 <div class="tab-table-footer">
                     <span x-text="`Showing ${damageClaims.length} of ${damageClaimsTotal}`"></span>
@@ -816,7 +822,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <!-- Table + footer -->
             <div x-show="mileageLogs.length > 0">
                 <div class="tab-table-container">
-                    <table class="table">
+                    <div class="table-responsive">
+<table class="table">
                         <thead>
                             <tr>
                                 <th>Date</th>
@@ -844,6 +851,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             </template>
                         </tbody>
                     </table>
+</div>
                 </div>
                 <div class="tab-table-footer">
                     <span x-text="`Showing ${mileageLogs.length} of ${mileageLogsTotal}`"></span>
@@ -888,7 +896,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <!-- Table -->
             <div x-show="rateOverrides.length > 0">
                 <div class="tab-table-container">
-                    <table class="table">
+                    <div class="table-responsive">
+<table class="table">
                         <thead>
                             <tr>
                                 <th>Equipment Type</th>
@@ -940,6 +949,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             </template>
                         </tbody>
                     </table>
+</div>
                 </div>
                 <div class="tab-table-footer">
                     <span x-text="`${rateOverrides.length} override${rateOverrides.length !== 1 ? 's' : ''}`"></span>
@@ -955,7 +965,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         <div class="modal" style="width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
             <div class="modal-header">
                 <h3 class="modal-title" x-text="rateModal.id ? 'Edit Rate Override' : 'Add Rate Override'"></h3>
-                <button class="modal-close" @click="rateModal.open = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="rateModal.open = false">×</button>
             </div>
             <div class="modal-body">
                 <div x-show="rateModal.error" class="alert alert-danger" x-text="rateModal.error" style="margin-bottom:12px;"></div>
@@ -983,7 +993,9 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label">Effective To</label>
-                        <input type="date" class="form-control" x-model="rateModal.form.effective_to">
+                        <?php // [UI-AUDIT-1:M18] :min constrains the picker so the user can't choose a date before Effective From. ?>
+                        <input type="date" class="form-control" x-model="rateModal.form.effective_to"
+                               :min="rateModal.form.effective_from || ''">
                         <div class="form-hint">Leave blank for open-ended.</div>
                     </div>
 
@@ -1071,7 +1083,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
             <!-- Table -->
             <div x-show="documents.length > 0" class="tab-table-container">
-                <table class="table">
+                <div class="table-responsive">
+<table class="table">
                     <thead>
                         <tr>
                             <th>Type</th>
@@ -1113,6 +1126,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </template>
                     </tbody>
                 </table>
+</div>
             </div>
             <div x-show="documents.length > 0" class="tab-table-footer">
                 <span x-text="documents.length + ' document' + (documents.length !== 1 ? 's' : '')"></span>
@@ -1151,7 +1165,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             </div>
 
             <div x-show="emailsLoaded && emails.length > 0" class="tab-table-container">
-                <table class="table">
+                <div class="table-responsive">
+<table class="table">
                     <thead>
                         <tr>
                             <th>Date</th>
@@ -1188,6 +1203,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </template>
                     </tbody>
                 </table>
+</div>
             </div>
         </div>
 
@@ -1197,7 +1213,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <div class="modal modal-lg" @click.stop style="max-height:calc(100vh - 32px);">
                 <div class="modal-header">
                     <h3 class="modal-title">Email Details</h3>
-                    <button class="modal-close-btn" @click="emailViewModal.open = false">×</button>
+                    <button class="modal-close-btn" aria-label="Close" @click="emailViewModal.open = false">×</button>
                 </div>
                 <div class="modal-body">
                     <div x-show="emailViewModal.loading" class="text-center" style="padding:32px;">Loading…</div>
@@ -1255,7 +1271,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         <div class="modal" style="width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
             <div class="modal-header">
                 <h3 class="modal-title">Upload Document</h3>
-                <button class="modal-close" @click="docUploadModal.open = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="docUploadModal.open = false">×</button>
             </div>
             <div class="modal-body">
                 <div x-show="docUploadModal.error" class="alert alert-danger"
@@ -1523,10 +1539,10 @@ function FF_CustomerProfile() {
                     this.newNotePinned = false;
                     this.notesLoaded   = true;
                 } else {
-                    alert(json.error?.message ?? 'Failed to save note.');
+                    FF_Toast.error(json.error?.message ?? 'Failed to save note.');
                 }
             } catch (e) {
-                alert('Network error. Please try again.');
+                FF_Toast.error('Network error. Please try again.');
             } finally {
                 this.savingNote = false;
             }
@@ -1702,7 +1718,7 @@ function FF_CustomerProfile() {
         },
 
         async deleteRateOverride(rate) {
-            if (!confirm(`Delete rate override for "${rate.equipment_type}"? This cannot be undone.`)) return;
+            if (!(await FF_Confirm.ask(`Delete rate override for "${rate.equipment_type}"? This cannot be undone.`))) return;
             try {
                 const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
                 const res  = await fetch('<?= base_url('api/v1/customer_equipment_rates/delete') ?>', {
@@ -1714,10 +1730,10 @@ function FF_CustomerProfile() {
                 if (res.ok && json.success) {
                     this.rateOverrides = this.rateOverrides.filter(r => r.id !== rate.id);
                 } else {
-                    alert(json.error?.message ?? 'Failed to delete rate override.');
+                    FF_Toast.error(json.error?.message ?? 'Failed to delete rate override.');
                 }
             } catch (e) {
-                alert('Network error. Please try again.');
+                FF_Toast.error('Network error. Please try again.');
             }
         },
 
@@ -1782,7 +1798,7 @@ function FF_CustomerProfile() {
 
         async confirmDeleteDoc(doc) {
             const label = doc.title || doc.file_name;
-            if (!confirm(`Remove "${label}"? This cannot be undone.`)) return;
+            if (!(await FF_Confirm.ask(`Remove "${label}"? This cannot be undone.`))) return;
             try {
                 const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
                 const res  = await fetch('<?= base_url('api/v1/documents/delete') ?>', {
@@ -1796,10 +1812,10 @@ function FF_CustomerProfile() {
                 if (res.ok && json.success) {
                     this.documents = this.documents.filter(d => d.id !== doc.id);
                 } else {
-                    alert(json.error?.message ?? 'Failed to remove document.');
+                    FF_Toast.error(json.error?.message ?? 'Failed to remove document.');
                 }
             } catch (e) {
-                alert('Network error. Please try again.');
+                FF_Toast.error('Network error. Please try again.');
             }
         },
 
@@ -1878,10 +1894,10 @@ async function deleteCustomer(id) {
         if (res.ok && json.success) {
             window.location.href = '<?= base_url('customers') ?>';
         } else {
-            alert(json.error?.message ?? 'Failed to delete customer.');
+            FF_Toast.error(json.error?.message ?? 'Failed to delete customer.');
         }
     } catch (e) {
-        alert('Network error. Please try again.');
+        FF_Toast.error('Network error. Please try again.');
     }
 }
 </script>

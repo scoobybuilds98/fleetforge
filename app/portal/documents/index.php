@@ -132,7 +132,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     <p class="portal-empty-text">Documents uploaded by our team will appear here.</p>
                 </div>
             </template>
-            <table class="portal-table" x-show="!loading && docs.length > 0">
+            <div class="table-responsive">
+<table class="portal-table" x-show="!loading && docs.length > 0">
                 <thead>
                     <tr>
                         <th>Document</th>
@@ -165,6 +166,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </div>
 

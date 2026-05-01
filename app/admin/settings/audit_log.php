@@ -4,12 +4,35 @@ declare(strict_types=1);
 /**
  * app/admin/settings/audit_log.php
  *
- * Audit log viewer tab — included by settings/index.php.
+ * Audit log viewer tab — normally included by settings/index.php.
  * Filterable by module, action, user, and date range.
  * Shows all audit_log entries with pagination.
  *
- * Variables inherited from parent: $canEdit, $isSuperAdmin, $csrfToken
+ * Variables inherited from parent (when included): $canEdit, $isSuperAdmin, $csrfToken
+ *
+ * [C0-FIX] Standalone-safe bootstrap — this page is the most sensitive of
+ * the four: the audit log contains admin emails, login timestamps, IP
+ * addresses, and full actor trail for every write. Without the guard,
+ * hitting /settings/audit_log directly dumped ~52 KB of PII to
+ * unauthenticated visitors.
  */
+
+// [C0-FIX] Detect standalone execution (see users.php).
+if (!isset($canEdit)) {
+    require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
+    require_once FF_ROOT . '/includes/auth.php';
+
+    require_auth();
+    require_permission('settings', 'view');
+
+    $canEdit      = can('settings', 'edit');
+    $isSuperAdmin = can('settings', 'delete');
+    $csrfToken    = generate_csrf_token();
+
+    $pageTitle = 'Audit Log';
+    require_once FF_ROOT . '/includes/header.php';
+    $_ff_standalone_audit_log = true;
+}
 
 $perPage = 50;
 $page    = max(1, clean_int($_GET['audit_page'] ?? 1));
@@ -150,7 +173,8 @@ $filterQS = http_build_query($filterParams);
         <?php if (empty($logs)): ?>
         <div style="text-align:center;padding:40px;color:var(--text-muted);">No audit log entries match your filters.</div>
         <?php else: ?>
-        <table class="table" style="margin:0;">
+        <div class="table-responsive">
+<table class="table" style="margin:0;">
             <thead>
                 <tr>
                     <th>Time</th>
@@ -186,6 +210,7 @@ $filterQS = http_build_query($filterParams);
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
         <?php endif; ?>
     </div>
 
@@ -210,3 +235,10 @@ $filterQS = http_build_query($filterParams);
     </div>
     <?php endif; ?>
 </div>
+
+<?php
+// [C0-FIX] Standalone footer — only when running as top-level route.
+if (!empty($_ff_standalone_audit_log)) {
+    require FF_ROOT . '/includes/footer.php';
+}
+?>

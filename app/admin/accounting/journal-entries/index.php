@@ -321,7 +321,7 @@ require_once FF_ROOT . '/includes/header.php';
                                   style="margin-left:8px;vertical-align:middle;"></span>
                         </template>
                     </h3>
-                    <button class="modal-close" @click="showViewModal = false">&times;</button>
+                    <button class="modal-close-btn" aria-label="Close" @click="showViewModal = false">&times;</button>
                 </div>
                 <div class="modal-body" x-show="viewEntry">
                     <!-- Entry metadata -->
@@ -420,7 +420,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal modal-lg">
                 <div class="modal-header">
                     <h3 class="modal-title">New Journal Entry</h3>
-                    <button class="modal-close" @click="showCreateModal = false">&times;</button>
+                    <button class="modal-close-btn" aria-label="Close" @click="showCreateModal = false">&times;</button>
                 </div>
                 <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
                     <div class="form-error-banner" x-show="createFormError" x-cloak x-text="createFormError" style="margin-bottom:1rem;"></div>
@@ -520,7 +520,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         <td>
                                             <!-- WHY: Auto-clear credit when user types a debit amount
                                                  to enforce single-sided entry per line -->
-                                            <input type="number"
+                                            <input type="number" min="0"
                                                    class="form-control form-control-sm text-right font-mono"
                                                    x-model="line.debit"
                                                    :class="(lineErrors[idx] && lineErrors[idx].debit) ? 'is-invalid' : ''"
@@ -534,7 +534,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         <td>
                                             <!-- WHY: Auto-clear debit when user types a credit amount
                                                  to enforce single-sided entry per line -->
-                                            <input type="number"
+                                            <input type="number" min="0"
                                                    class="form-control form-control-sm text-right font-mono"
                                                    x-model="line.credit"
                                                    :class="(lineErrors[idx] && lineErrors[idx].credit) ? 'is-invalid' : ''"

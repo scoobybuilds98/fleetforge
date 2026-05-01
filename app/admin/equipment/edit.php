@@ -9,8 +9,8 @@ declare(strict_types=1);
  * the D19 optimistic lock (passes updated_at from initial load).
  *
  * NOTE: Status changes are intentionally excluded from this form — they
- * require state machine validation and go through a dedicated endpoint
- * (built in a future session with the lease/maintenance modules).
+ * require state machine validation and go through the dedicated
+ * api/v1/equipment/units/update_status.php endpoint.
  *
  * @depends config/app.php, includes/auth.php, includes/header.php,
  *          includes/footer.php, api/v1/equipment/units/update.php
@@ -162,24 +162,24 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label" for="length_ft">Length (ft)</label>
-                        <input type="number" id="length_ft" name="length_ft" class="form-control font-mono" x-model="form.length_ft" step="0.01">
+                        <input type="number" min="0" id="length_ft" name="length_ft" class="form-control font-mono" x-model="form.length_ft" step="0.01">
                         <div class="field-error" data-error-for="length_ft"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="width_ft">Width (ft)</label>
-                        <input type="number" id="width_ft" name="width_ft" class="form-control font-mono" x-model="form.width_ft" step="0.01">
+                        <input type="number" min="0" id="width_ft" name="width_ft" class="form-control font-mono" x-model="form.width_ft" step="0.01">
                         <div class="field-error" data-error-for="width_ft"></div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="height_ft">Height (ft)</label>
-                        <input type="number" id="height_ft" name="height_ft" class="form-control font-mono" x-model="form.height_ft" step="0.01">
+                        <input type="number" min="0" id="height_ft" name="height_ft" class="form-control font-mono" x-model="form.height_ft" step="0.01">
                         <div class="field-error" data-error-for="height_ft"></div>
                     </div>
                 </div>
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label" for="axle_count">Axle Count</label>
-                        <input type="number" id="axle_count" name="axle_count" class="form-control font-mono" x-model="form.axle_count">
+                        <input type="number" min="0" id="axle_count" name="axle_count" class="form-control font-mono" x-model="form.axle_count">
                         <div class="field-error" data-error-for="axle_count"></div>
                     </div>
                     <div class="form-group">
@@ -188,7 +188,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="weight_capacity_lbs">Weight Capacity (lbs)</label>
-                        <input type="number" id="weight_capacity_lbs" name="weight_capacity_lbs" class="form-control font-mono" x-model="form.weight_capacity_lbs">
+                        <input type="number" min="0" id="weight_capacity_lbs" name="weight_capacity_lbs" class="form-control font-mono" x-model="form.weight_capacity_lbs">
                         <div class="field-error" data-error-for="weight_capacity_lbs"></div>
                     </div>
                 </div>
@@ -205,7 +205,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="mileage">Current Mileage</label>
-                        <input type="number" id="mileage" name="mileage" class="form-control font-mono" x-model="form.mileage">
+                        <input type="number" min="0" id="mileage" name="mileage" class="form-control font-mono" x-model="form.mileage">
                         <div class="field-error" data-error-for="mileage"></div>
                     </div>
                     <div class="form-group">

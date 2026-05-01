@@ -335,7 +335,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-sm">
             <div class="modal-header">
                 <h3 class="modal-title">Delete Rate Card</h3>
-                <button class="modal-close" @click="deleteCardModal.open = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="deleteCardModal.open = false">×</button>
             </div>
             <div class="modal-body">
                 <p>Delete <strong x-text="deleteCardModal.name"></strong>?</p>
@@ -362,7 +362,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-sm">
             <div class="modal-header">
                 <h3 class="modal-title">Delete Rate Override</h3>
-                <button class="modal-close" @click="deleteOvModal.open = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="deleteOvModal.open = false">×</button>
             </div>
             <div class="modal-body">
                 <p>Delete custom rates for <strong x-text="deleteOvModal.label"></strong>?</p>

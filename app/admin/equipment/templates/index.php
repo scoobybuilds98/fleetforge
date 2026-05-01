@@ -252,7 +252,7 @@ function FF_Templates() {
 
         async deleteTemplate(tpl) {
             if (tpl.unit_count > 0) return;
-            if (!confirm('Delete template "' + tpl.name + '"? This cannot be undone.')) return;
+            if (!(await FF_Confirm.ask('Delete template "' + tpl.name + '"? This cannot be undone.'))) return;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/delete') ?>', { id: tpl.id });
                 if (r.success) {

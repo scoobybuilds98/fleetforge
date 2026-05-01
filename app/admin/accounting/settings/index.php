@@ -203,7 +203,8 @@ require_once FF_ROOT . '/includes/header.php';
 
         <template x-if="lineTypes.length > 0">
             <div>
-                <table class="table" aria-label="Revenue mapping">
+                <div class="table-responsive">
+<table class="table" aria-label="Revenue mapping">
                     <thead>
                         <tr>
                             <th scope="col">Invoice Line Type</th>
@@ -230,6 +231,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </tbody>
                 </table>
+</div>
 
                 <div style="margin-top:16px;">
                     <button class="btn btn-primary btn-sm" @click="saveRevenueMapping()" :disabled="saving.revenue_mapping">

@@ -153,7 +153,8 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── Periods table ─────────────────────────────────────── -->
     <template x-if="!loading && periods.length > 0">
         <div class="card" style="padding:0;">
-            <table class="data-table">
+            <div class="table-responsive">
+<table class="data-table">
                 <thead>
                     <tr>
                         <th>Tax Type</th>
@@ -201,6 +202,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </template>
 
@@ -218,7 +220,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:560px;width:95%;">
             <div class="modal-header">
                 <h2 class="h5">New Tax Filing Period</h2>
-                <button class="modal-close" @click="createOpen = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="createOpen = false">×</button>
             </div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="createFormError" x-cloak x-text="createFormError"></div>
@@ -289,7 +291,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:480px;width:95%;">
             <div class="modal-header">
                 <h2 class="h5">Mark Period as Filed</h2>
-                <button class="modal-close" @click="filedOpen = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="filedOpen = false">×</button>
             </div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="filedFormError" x-cloak x-text="filedFormError"></div>
@@ -320,7 +322,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:560px;width:95%;">
             <div class="modal-header">
                 <h2 class="h5">Record Tax Remittance</h2>
-                <button class="modal-close" @click="remitOpen = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="remitOpen = false">×</button>
             </div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="remitFormError" x-cloak x-text="remitFormError"></div>
@@ -608,7 +610,7 @@ function FF_TaxPeriods() {
 
         // ── Calculate ──────────────────────────────────────────
         async calculate(id) {
-            if (!confirm('Recalculate this period from posted GL entries? Filed periods can be recalculated until remitted.')) return;
+            if (!(await FF_Confirm.ask('Recalculate this period from posted GL entries? Filed periods can be recalculated until remitted.'))) return;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/tax/periods/calculate.php') ?>', { id });
                 if (r.success) {

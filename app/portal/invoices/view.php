@@ -120,7 +120,18 @@ require_once dirname(__DIR__) . '/includes/header.php';
             <li><span class="portal-info-label">Invoice #</span><span class="portal-info-value font-mono"><?= e($inv['invoice_number']) ?></span></li>
             <li><span class="portal-info-label">Issue Date</span><span class="portal-info-value font-mono"><?= e(format_date($inv['invoice_date'])) ?></span></li>
             <li><span class="portal-info-label">Due Date</span><span class="portal-info-value font-mono"><?= e(format_date($inv['due_date'])) ?></span></li>
-            <li><span class="portal-info-label">Period</span><span class="portal-info-value font-mono"><?= e(format_date($inv['period_start'])) ?> — <?= e(format_date($inv['period_end'])) ?></span></li>
+            <?php
+            // [C4-FIX] Column names are billing_period_start/billing_period_end on
+            // the invoices table. The old 'period_start'/'period_end' keys were
+            // undefined and emitted Undefined array key warnings on every render.
+            // Hide the Period row entirely when both dates are missing so
+            // non-lease invoices (one-off bills) don't render "— —".
+            $_periodStart = $inv['billing_period_start'] ?? null;
+            $_periodEnd   = $inv['billing_period_end']   ?? null;
+            if ($_periodStart || $_periodEnd):
+            ?>
+            <li><span class="portal-info-label">Period</span><span class="portal-info-value font-mono"><?= e(format_date($_periodStart)) ?> — <?= e(format_date($_periodEnd)) ?></span></li>
+            <?php endif; ?>
             <li><span class="portal-info-label">Currency</span><span class="portal-info-value"><?= e($inv['currency'] ?? 'CAD') ?></span></li>
             <li><span class="portal-info-label">Subtotal</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['subtotal'])) ?></span></li>
             <?php if (bccomp($inv['gst_amount'] ?? '0', '0', 2) > 0): ?>
@@ -171,7 +182,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
         <?php if (empty($lineItems)): ?>
             <div class="portal-empty"><p class="portal-empty-text">No line items.</p></div>
         <?php else: ?>
-            <table class="portal-table">
+            <div class="table-responsive">
+<table class="portal-table">
                 <thead>
                     <tr>
                         <th>Description</th>
@@ -186,11 +198,16 @@ require_once dirname(__DIR__) . '/includes/header.php';
                         <td><?= e($li['description']) ?></td>
                         <td class="text-right font-mono"><?= e(rtrim(rtrim($li['quantity'], '0'), '.')) ?></td>
                         <td class="text-right font-mono"><?= e(format_currency($li['unit_price'])) ?></td>
-                        <td class="text-right font-mono" style="font-weight:600;"><?= e(format_currency($li['line_total'])) ?></td>
+                        <?php
+                        // [C4-FIX] invoice_line_items column is `amount`, not
+                        // `line_total`. Previous code emitted Undefined array key.
+                        ?>
+                        <td class="text-right font-mono" style="font-weight:600;"><?= e(format_currency($li['amount'])) ?></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+</div>
         <?php endif; ?>
     </div>
 </div>
@@ -202,7 +219,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
         <h2 class="portal-section-title">Payment History</h2>
     </div>
     <div class="portal-section-body--flush">
-        <table class="portal-table">
+        <div class="table-responsive">
+<table class="portal-table">
             <thead>
                 <tr>
                     <th>Date</th>
@@ -222,6 +240,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
 <?php endif; ?>

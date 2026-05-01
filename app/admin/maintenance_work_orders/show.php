@@ -408,7 +408,7 @@ function priorityBadgeClass(string $p): string {
                     <div class="form-row-2" style="margin-top:12px;">
                         <div class="form-group">
                             <label class="form-label" for="edit_mileage_at_service">Odometer (km)</label>
-                            <input type="number" id="edit_mileage_at_service" name="mileage_at_service" class="form-control" x-model="editForm.mileage_at_service">
+                            <input type="number" min="0" id="edit_mileage_at_service" name="mileage_at_service" class="form-control" x-model="editForm.mileage_at_service">
                             <div class="field-error" data-error-for="mileage_at_service"></div>
                         </div>
                         <div class="form-group">
@@ -493,12 +493,12 @@ function priorityBadgeClass(string $p): string {
                             <div class="form-row-3" style="margin-top:10px;">
                                 <div class="form-group">
                                     <label class="form-label" for="add_quantity">Quantity <span class="text-danger">*</span></label>
-                                    <input type="number" id="add_quantity" name="quantity" class="form-control" x-model="newItem.quantity" step="0.01">
+                                    <input type="number" min="0" id="add_quantity" name="quantity" class="form-control" x-model="newItem.quantity" step="0.01">
                                     <div class="field-error" data-error-for="quantity"></div>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label" for="add_unit_cost">Unit Cost <span class="text-danger">*</span></label>
-                                    <input type="number" id="add_unit_cost" name="unit_cost" class="form-control" x-model="newItem.unit_cost" step="0.01">
+                                    <input type="number" min="0" id="add_unit_cost" name="unit_cost" class="form-control" x-model="newItem.unit_cost" step="0.01">
                                     <div class="field-error" data-error-for="unit_cost"></div>
                                 </div>
                                 <div class="form-group">
@@ -617,13 +617,13 @@ function confirmDelete() {
     FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/delete.php') ?>', { id: <?= (int)$wo['id'] ?> })
         .then(r => {
             if (!r.success) {
-                alert((r.error && r.error.message) || 'Delete failed.');
+                FF_Toast.error((r.error && r.error.message) || 'Delete failed.');
                 document.getElementById('delete-modal').style.display = 'none';
                 return;
             }
             window.location.href = '<?= base_url('maintenance_work_orders') ?>';
         })
-        .catch(() => { alert('Network error. Please try again.'); });
+        .catch(() => { FF_Toast.error('Network error. Please try again.'); });
 }
 </script>
 <?php endif; ?>
@@ -794,12 +794,12 @@ function woShow() {
             FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/update_status.php') ?>', payload)
                 .then(r => {
                     if (!r.success) {
-                        alert((r.error && r.error.message) || 'Transition failed.');
+                        FF_Toast.error((r.error && r.error.message) || 'Transition failed.');
                         return;
                     }
                     window.location.reload();
                 })
-                .catch(() => { alert('Network error. Please try again.'); })
+                .catch(() => { FF_Toast.error('Network error. Please try again.'); })
                 .finally(() => { this.transitioning = false; });
         },
 
@@ -859,17 +859,18 @@ function woShow() {
                 .finally(() => { this.addingItem = false; });
         },
 
-        deleteItem(lineItemId) {
-            if (!confirm('Delete this line item?')) return;
+        // [UI-AUDIT-1:M13] async for FF_Confirm.ask().
+        async deleteItem(lineItemId) {
+            if (!(await FF_Confirm.ask('Delete this line item?'))) return;
             FF_Api.post('<?= base_url('api/v1/maintenance_work_orders/line_items/delete.php') ?>', { id: lineItemId })
                 .then(r => {
                     if (!r.success) {
-                        alert((r.error && r.error.message) || 'Delete failed.');
+                        FF_Toast.error((r.error && r.error.message) || 'Delete failed.');
                         return;
                     }
                     window.location.reload();
                 })
-                .catch(() => { alert('Network error. Please try again.'); });
+                .catch(() => { FF_Toast.error('Network error. Please try again.'); });
         },
 
         // ── Badge helpers ──────────────────────────────────────────────────

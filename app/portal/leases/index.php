@@ -105,7 +105,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     <p class="portal-empty-text" x-text="tab === 'active' ? 'No active leases at the moment.' : 'No leases match your filters.'"></p>
                 </div>
             </template>
-            <table class="portal-table" x-show="!loading && leases.length > 0">
+            <div class="table-responsive">
+<table class="portal-table" x-show="!loading && leases.length > 0">
                 <thead>
                     <tr>
                         <th>Contract #</th>
@@ -133,6 +134,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </div>
 

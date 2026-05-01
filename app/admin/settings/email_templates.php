@@ -68,7 +68,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <h3 class="card-title" x-text="categoryLabel(category) + ' (' + group.length + ')'"></h3>
             </div>
             <div class="card-body" style="padding:0;">
-                <table class="table" style="margin:0;">
+                <div class="table-responsive">
+<table class="table" style="margin:0;">
                     <thead>
                         <tr>
                             <th>Template Name</th>
@@ -104,6 +105,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </tbody>
                 </table>
+</div>
             </div>
         </div>
     </template>
@@ -114,7 +116,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-full" @click.stop style="max-height: calc(100vh - 32px);">
             <div class="modal-header">
                 <h3 class="modal-title" x-text="editor.id ? 'Edit Template' : 'New Template'"></h3>
-                <button class="modal-close-btn" @click="closeEditor()">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="closeEditor()">×</button>
             </div>
             <div class="modal-body">
                 <div style="display:grid;grid-template-columns: 2fr 1fr;gap:20px;">
@@ -203,7 +205,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal modal-lg" @click.stop>
             <div class="modal-header">
                 <h3 class="modal-title">Preview: <span x-text="preview.name"></span></h3>
-                <button class="modal-close-btn" @click="preview.open = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="preview.open = false">×</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -433,7 +435,7 @@ function FF_EmailTemplates() {
         },
 
         async deleteTemplate(t) {
-            if (!confirm('Delete template "' + t.name + '"? This cannot be undone.')) return;
+            if (!(await FF_Confirm.ask('Delete template "' + t.name + '"? This cannot be undone.'))) return;
             try {
                 const r = await FF_Api.post(FF_Api.url('/api/v1/email/templates/delete.php'), { id: t.id });
                 if (r.success) {

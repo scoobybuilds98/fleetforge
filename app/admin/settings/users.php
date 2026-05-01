@@ -4,12 +4,41 @@ declare(strict_types=1);
 /**
  * app/admin/settings/users.php
  *
- * Admin user management tab — included by settings/index.php.
+ * Admin user management tab — normally included by settings/index.php.
  * Lists all admin users, allows invite, status change, role change.
  * Super_admin only for destructive actions; managers can view.
  *
- * Variables inherited from parent: $canEdit, $isSuperAdmin, $csrfToken
+ * Variables inherited from parent (when included): $canEdit, $isSuperAdmin, $csrfToken
+ *
+ * [C0-FIX] Standalone-safe bootstrap: if the file is reached via a direct
+ * URL hit (top-level route), the parent context is missing and PHP would
+ * emit Undefined variable warnings and a Fatal error on current_user_id().
+ * It would also LEAK user data to unauthenticated visitors because the
+ * db_select() runs before any warning is hit. Guard block below runs the
+ * full auth + permission + CSRF bootstrap if we detect standalone context.
  */
+
+// [C0-FIX] Detect standalone execution. When included from settings/index.php,
+// FF_ROOT is defined AND $canEdit has been set by the parent. When hit directly
+// the constants may be set (config/app.php is loaded by the router) but
+// $canEdit is not. We key on the partial-specific variable to decide.
+if (!isset($canEdit)) {
+    require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
+    require_once FF_ROOT . '/includes/auth.php';
+
+    require_auth();
+    require_permission('settings', 'view');
+
+    $canEdit      = can('settings', 'edit');
+    $isSuperAdmin = can('settings', 'delete'); // WHY: only super_admin has settings.delete
+    $csrfToken    = generate_csrf_token();
+
+    // WHY: when loaded standalone we still want a proper shell around the
+    // partial so the page renders correctly (not as bare HTML fragments).
+    $pageTitle = 'Admin Users';
+    require_once FF_ROOT . '/includes/header.php';
+    $_ff_standalone_users = true;
+}
 
 // Fetch roles for dropdown
 $roles = db_select("SELECT id, name, slug FROM user_roles ORDER BY id ASC");
@@ -234,7 +263,8 @@ $statusBadge = [
         <span style="font-size:0.8125rem;color:var(--text-muted);"><?= e(count($users)) ?> user<?= count($users) !== 1 ? 's' : '' ?></span>
     </div>
     <div class="card-body" style="padding:0;">
-        <table class="table">
+        <div class="table-responsive">
+<table class="table">
             <thead>
                 <tr>
                     <th>Name</th>
@@ -287,7 +317,7 @@ $statusBadge = [
                                 <input type="hidden" name="target_user_id" value="<?= e((string)$u['id']) ?>">
                                 <input type="hidden" name="new_status" value="suspended">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-warning);"
-                                        onclick="return confirm('Suspend this user?')">Suspend</button>
+                                        onclick="return (await FF_Confirm.ask('Suspend this user?'))">Suspend</button>
                             </form>
                             <?php elseif (in_array($u['status'], ['inactive', 'suspended', 'locked'], true)): ?>
                             <form method="POST" style="display:inline;">
@@ -303,7 +333,7 @@ $statusBadge = [
                                 <input type="hidden" name="user_action" value="delete_user">
                                 <input type="hidden" name="target_user_id" value="<?= e((string)$u['id']) ?>">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-danger);"
-                                        onclick="return confirm('Delete this user? This action is reversible (soft delete).')">Delete</button>
+                                        onclick="return (await FF_Confirm.ask('Delete this user? This action is reversible (soft delete).'))">Delete</button>
                             </form>
                         </div>
                         <?php endif; ?>
@@ -313,5 +343,14 @@ $statusBadge = [
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
+
+<?php
+// [C0-FIX] Close the header shell only when running standalone.
+// When included from settings/index.php the parent owns the footer.
+if (!empty($_ff_standalone_users)) {
+    require FF_ROOT . '/includes/footer.php';
+}
+?>

@@ -958,7 +958,7 @@ function FF_ReservationShow(resId) {
 
         // ── Action: Confirm ───────────────────────────────────────
         async confirmReservation() {
-            if (!confirm('Confirm this reservation? System-linked units will be marked as Reserved.')) return;
+            if (!(await FF_Confirm.ask('Confirm this reservation? System-linked units will be marked as Reserved.'))) return;
             this.actionBusy  = true;
             this.actionError = '';
             try {
@@ -978,7 +978,7 @@ function FF_ReservationShow(resId) {
 
         // ── Action: Mark Out ──────────────────────────────────────
         async markOut() {
-            if (!confirm('Mark this reservation as Chassis Out?\n\nThis records the unit as physically leaving the yard.')) return;
+            if (!(await FF_Confirm.ask('Mark this reservation as Chassis Out?\n\nThis records the unit as physically leaving the yard.'))) return;
             this.actionBusy  = true;
             this.actionError = '';
             try {
@@ -996,7 +996,7 @@ function FF_ReservationShow(resId) {
 
         // ── Action: Reverse mark-out ──────────────────────────────
         async reverseMarkOut() {
-            if (!confirm('Reverse the mark-out? This will move the reservation back to Confirmed.')) return;
+            if (!(await FF_Confirm.ask('Reverse the mark-out? This will move the reservation back to Confirmed.'))) return;
             this.actionBusy  = true;
             this.actionError = '';
             try {
@@ -1050,7 +1050,7 @@ function FF_ReservationShow(resId) {
 
         // ── Action: Delete ────────────────────────────────────────
         async deleteReservation() {
-            if (!confirm('Permanently delete this reservation?\n\nThis cannot be undone.')) return;
+            if (!(await FF_Confirm.ask('Permanently delete this reservation?\n\nThis cannot be undone.'))) return;
             this.actionBusy  = true;
             this.actionError = '';
             try {

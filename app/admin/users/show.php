@@ -391,7 +391,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="empty-state-title">No login history recorded yet.</div>
         </div>
         <?php else: ?>
-        <table class="table table-hover">
+        <div class="table-responsive">
+<table class="table table-hover">
             <thead>
                 <tr>
                     <th>Date / Time</th>
@@ -428,6 +429,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
         <?php endif; ?>
     </div>
 </div>

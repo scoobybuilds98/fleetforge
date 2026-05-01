@@ -302,7 +302,8 @@ require_once FF_ROOT . '/includes/header.php';
                                 settings above. Use the topbar quick controls to
                                 make changes from any page.
                             </p>
-                            <table class="table table-sm">
+                            <div class="table-responsive">
+<table class="table table-sm">
                                 <thead>
                                     <tr><th>Item</th><th>Quantity</th><th>Total</th></tr>
                                 </thead>
@@ -311,6 +312,7 @@ require_once FF_ROOT . '/includes/header.php';
                                     <tr><td>Sample row 2</td><td>1</td><td>$45.00</td></tr>
                                 </tbody>
                             </table>
+</div>
                         </div>
                     </div>
                 </div>
@@ -338,7 +340,8 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="empty-state-text">No login attempts have been recorded yet.</div>
                 </div>
                 <?php else: ?>
-                <table class="table table-hover">
+                <div class="table-responsive">
+<table class="table table-hover">
                     <thead>
                         <tr>
                             <th>Date / Time</th>
@@ -371,6 +374,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+</div>
                 <?php endif; ?>
             </div>
         </div>

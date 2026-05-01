@@ -137,7 +137,8 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── Runs table ────────────────────────────────────────── -->
     <template x-if="!loading && runs.length > 0">
         <div class="card" style="padding:0;">
-            <table class="data-table">
+            <div class="table-responsive">
+<table class="data-table">
                 <thead>
                     <tr>
                         <th>Run #</th>
@@ -175,6 +176,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </template>
 
@@ -192,7 +194,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:900px;width:95%;max-height:85vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2 class="h5" x-text="detailRun ? 'Depreciation Run #' + detailRun.id + ' — ' + (detailRun.period_name || '') : ''"></h2>
-                <button class="modal-close" @click="detailOpen = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="detailOpen = false">×</button>
             </div>
             <div class="modal-body">
                 <template x-if="detailLoading">
@@ -220,7 +222,8 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                         <template x-if="detailLines.length > 0">
                             <div style="max-height:340px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px;">
-                                <table class="data-table" style="font-size:0.8125rem;">
+                                <div class="table-responsive">
+<table class="data-table" style="font-size:0.8125rem;">
                                     <thead>
                                         <tr>
                                             <th>Asset #</th>
@@ -244,6 +247,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         </template>
                                     </tbody>
                                 </table>
+</div>
                             </div>
                         </template>
                     </div>
@@ -268,7 +272,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="previewOpen" x-transition @click.self="previewOpen = false" style="display:none;">
         <div class="modal" style="max-width:560px;width:95%;">
-            <div class="modal-header"><h2 class="h5">Generate Depreciation Preview</h2><button class="modal-close" @click="previewOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">Generate Depreciation Preview</h2><button class="modal-close-btn" aria-label="Close" @click="previewOpen = false">×</button></div>
             <div class="modal-body">
                 <div class="form-error-banner" x-show="previewFormError" x-cloak x-text="previewFormError"></div>
                 <p class="text-secondary text-sm">Select an open period. A preview run will be generated showing each active asset's depreciation. You can then review and post it to create the consolidated JE.</p>
@@ -450,7 +454,7 @@ function FF_DepreciationRuns() {
 
         // ── Post to GL ─────────────────────────────────────────
         async postRun(id) {
-            if (!confirm('Post this depreciation run to the general ledger? This creates a JE and updates each asset\'s accumulated depreciation.')) return;
+            if (!(await FF_Confirm.ask('Post this depreciation run to the general ledger? This creates a JE and updates each asset\'s accumulated depreciation.'))) return;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/depreciation/post.php') ?>', { run_id: id });
                 if (r.success) {
@@ -464,7 +468,7 @@ function FF_DepreciationRuns() {
 
         // ── Reverse a posted run ───────────────────────────────
         async reverseRun(id) {
-            if (!confirm('Reverse this depreciation run? This creates a reversal JE (DR/CR swapped), restores asset NBVs, and marks the original run as reversed. This action is logged in the audit trail.')) return;
+            if (!(await FF_Confirm.ask('Reverse this depreciation run? This creates a reversal JE (DR/CR swapped), restores asset NBVs, and marks the original run as reversed. This action is logged in the audit trail.'))) return;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/depreciation/reverse.php') ?>', { run_id: id });
                 if (r.success) {

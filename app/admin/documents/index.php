@@ -93,7 +93,8 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- Data table -->
         <div x-show="items.length > 0" class="tab-table-container">
-            <table class="table">
+            <div class="table-responsive">
+<table class="table">
                 <thead>
                     <tr>
                         <th>
@@ -170,6 +171,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
 
         <!-- Pagination footer -->
@@ -190,7 +192,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
             <div class="modal-header">
                 <h3 class="modal-title">Upload Document</h3>
-                <button class="modal-close" @click="uploadModal.open = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="uploadModal.open = false">×</button>
             </div>
             <div class="modal-body">
                 <div x-show="uploadModal.error" class="alert alert-danger"
@@ -423,7 +425,7 @@ function FF_Documents() {
         // ── Delete ─────────────────────────────────────────────────
         async confirmDelete(doc) {
             const label = doc.title || doc.file_name;
-            if (!confirm(`Remove "${label}"? This cannot be undone.`)) return;
+            if (!(await FF_Confirm.ask(`Remove "${label}"? This cannot be undone.`))) return;
             try {
                 const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
                 const res  = await fetch('<?= base_url('api/v1/documents/delete') ?>', {
@@ -438,10 +440,10 @@ function FF_Documents() {
                     this.items = this.items.filter(d => d.id !== doc.id);
                     this.total = Math.max(0, this.total - 1);
                 } else {
-                    alert(json.error?.message ?? 'Failed to remove document.');
+                    FF_Toast.error(json.error?.message ?? 'Failed to remove document.');
                 }
             } catch (e) {
-                alert('Network error. Please try again.');
+                FF_Toast.error('Network error. Please try again.');
             }
         },
 

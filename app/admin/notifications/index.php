@@ -341,7 +341,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     document.querySelectorAll('.notif-page-delete').forEach(btn => {
         btn.addEventListener('click', async () => {
-            if (!confirm('Delete this notification? This cannot be undone.')) return;
+            if (!(await FF_Confirm.ask('Delete this notification? This cannot be undone.'))) return;
             const id = parseInt(btn.dataset.id, 10);
             try {
                 const res = await FF_Api.post(endpoint('delete.php'), { notification_id: id });
@@ -364,7 +364,7 @@ require_once FF_ROOT . '/includes/header.php';
     });
 
     document.getElementById('notif-clear-read-btn')?.addEventListener('click', async () => {
-        if (!confirm('Delete all read notifications? This cannot be undone.')) return;
+        if (!(await FF_Confirm.ask('Delete all read notifications? This cannot be undone.'))) return;
         try {
             const res = await FF_Api.post(endpoint('delete.php'), { clear_all_read: true });
             if (res?.success) {

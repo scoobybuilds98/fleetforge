@@ -309,7 +309,7 @@ require_once FF_ROOT . '/includes/header.php';
             <h3 class="modal-title">
                 <span x-text="reasonModal.intent === 1 ? 'Grant permission' : 'Revoke permission'"></span>
             </h3>
-            <button type="button" class="modal-close" @click="cancelReason()">×</button>
+            <button type="button" class="modal-close-btn" aria-label="Close" @click="cancelReason()">×</button>
         </div>
         <div class="modal-body">
             <p style="margin:0 0 12px;font-size:0.875rem;color:var(--text-secondary);">
@@ -354,7 +354,7 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="modal" @click.stop>
         <div class="modal-header">
             <h3 class="modal-title">Reset all overrides?</h3>
-            <button type="button" class="modal-close" @click="resetModalOpen = false">×</button>
+            <button type="button" class="modal-close-btn" aria-label="Close" @click="resetModalOpen = false">×</button>
         </div>
         <div class="modal-body">
             <p style="margin:0;font-size:0.875rem;">

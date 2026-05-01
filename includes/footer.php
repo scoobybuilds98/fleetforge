@@ -88,6 +88,8 @@
      CONFIRM MODAL — generic confirmation dialog
      Used for delete/void/cancel actions across all modules.
      Triggered via FF_Confirm.show({ title, message, onConfirm })
+     or via the Promise helpers FF_Confirm.ask() / FF_Confirm.askText().
+     [UI-AUDIT-1:M13] Prompt mode adds a text input for askText().
      ============================================================ -->
 <div id="ff-confirm-modal"
      class="modal-overlay"
@@ -106,6 +108,15 @@
         </div>
         <div class="modal-body">
             <p x-text="message" class="text-secondary"></p>
+            <!-- [M13] Text input — rendered only when FF_Confirm.askText() is used. -->
+            <div x-show="prompt" style="margin-top:12px;">
+                <input type="text"
+                       class="form-control"
+                       data-ff-confirm-input
+                       x-model="promptValue"
+                       :placeholder="placeholder"
+                       @keydown.enter.prevent="confirm()">
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary btn-md" @click="cancel()">Cancel</button>

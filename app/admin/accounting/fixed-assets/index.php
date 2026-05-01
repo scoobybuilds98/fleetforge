@@ -146,7 +146,8 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── Asset table ───────────────────────────────────────── -->
     <template x-if="!loading && assets.length > 0">
         <div class="card" style="padding:0;">
-            <table class="data-table">
+            <div class="table-responsive">
+<table class="data-table">
                 <thead>
                     <tr>
                         <th>Asset #</th>
@@ -182,6 +183,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </template>
                 </tbody>
             </table>
+</div>
         </div>
     </template>
 
@@ -199,7 +201,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:1000px;width:96%;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2 class="h5" x-text="detailAsset ? detailAsset.asset_number + ' — ' + detailAsset.name : ''"></h2>
-                <button class="modal-close" @click="detailOpen = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="detailOpen = false">×</button>
             </div>
 
             <!-- ── PAYOFF-1 tab bar ──────────────────────────────
@@ -241,7 +243,8 @@ require_once FF_ROOT . '/includes/header.php';
                                     <div class="card-title">Classification</div>
                                 </div>
                                 <div class="card-body">
-                                    <table class="spec-table">
+                                    <div class="table-responsive">
+<table class="spec-table">
                                         <tr>
                                             <td class="spec-label">Class</td>
                                             <td class="spec-value" x-text="formatClass(detailAsset.asset_class)"></td>
@@ -279,6 +282,7 @@ require_once FF_ROOT . '/includes/header.php';
                                             </tr>
                                         </template>
                                     </table>
+</div>
                                 </div>
                             </div>
 
@@ -288,7 +292,8 @@ require_once FF_ROOT . '/includes/header.php';
                                     <div class="card-title">Valuation</div>
                                 </div>
                                 <div class="card-body">
-                                    <table class="spec-table">
+                                    <div class="table-responsive">
+<table class="spec-table">
                                         <tr>
                                             <td class="spec-label">Cost</td>
                                             <td class="spec-value font-mono text-right" x-text="formatMoney(detailAsset.acquisition_cost)"></td>
@@ -310,6 +315,7 @@ require_once FF_ROOT . '/includes/header.php';
                                             <td class="spec-value font-mono text-right" x-text="formatMoney(detailAsset.net_book_value)"></td>
                                         </tr>
                                     </table>
+</div>
                                 </div>
                             </div>
 
@@ -320,7 +326,8 @@ require_once FF_ROOT . '/includes/header.php';
                                         <div class="card-title">Identification</div>
                                     </div>
                                     <div class="card-body">
-                                        <table class="spec-table">
+                                        <div class="table-responsive">
+<table class="spec-table">
                                             <template x-if="detailAsset.serial_number">
                                                 <tr>
                                                     <td class="spec-label">Serial Number</td>
@@ -342,6 +349,7 @@ require_once FF_ROOT . '/includes/header.php';
                                                 </tr>
                                             </template>
                                         </table>
+</div>
                                     </div>
                                 </div>
                             </template>
@@ -393,7 +401,8 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                         <template x-if="detailSchedule.length > 0">
                             <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px;">
-                                <table class="data-table" style="font-size:0.8125rem;">
+                                <div class="table-responsive">
+<table class="data-table" style="font-size:0.8125rem;">
                                     <thead>
                                         <tr>
                                             <th>Period</th>
@@ -413,6 +422,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         </template>
                                     </tbody>
                                 </table>
+</div>
                                 <template x-if="detailSchedule.length > 60">
                                     <p class="text-secondary text-xs" style="padding:8px;text-align:center;">Showing first 60 of <span x-text="detailSchedule.length"></span> periods</p>
                                 </template>
@@ -653,7 +663,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="disposeOpen" x-transition @click.self="disposeOpen = false" style="display:none;">
         <div class="modal" style="max-width:520px;width:95%;">
-            <div class="modal-header"><h2 class="h5">Dispose Asset</h2><button class="modal-close" @click="disposeOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">Dispose Asset</h2><button class="modal-close-btn" aria-label="Close" @click="disposeOpen = false">×</button></div>
             <div class="modal-body">
                 <p class="text-secondary text-sm" x-show="detailAsset" x-text="'Disposing ' + (detailAsset?.asset_number ?? '') + ' — ' + (detailAsset?.name ?? '')"></p>
 
@@ -703,7 +713,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="impairOpen" x-transition @click.self="impairOpen = false" style="display:none;">
         <div class="modal" style="max-width:520px;width:95%;">
-            <div class="modal-header"><h2 class="h5">Impair Asset</h2><button class="modal-close" @click="impairOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">Impair Asset</h2><button class="modal-close-btn" aria-label="Close" @click="impairOpen = false">×</button></div>
             <div class="modal-body">
                 <p class="text-secondary text-sm" x-show="detailAsset" x-text="'Impairing ' + (detailAsset?.asset_number ?? '') + ' — ' + (detailAsset?.name ?? '')"></p>
 
@@ -748,7 +758,7 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div class="modal-backdrop" x-show="createOpen" x-transition @click.self="createOpen = false" style="display:none;">
         <div class="modal" style="max-width:760px;width:96%;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header"><h2 class="h5">New Fixed Asset</h2><button class="modal-close" @click="createOpen = false">×</button></div>
+            <div class="modal-header"><h2 class="h5">New Fixed Asset</h2><button class="modal-close-btn" aria-label="Close" @click="createOpen = false">×</button></div>
             <div class="modal-body">
 
                 <!-- ── VALID-2: form-level error banner ── -->
@@ -848,21 +858,21 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px;">
                     <div class="form-group">
                         <label>Asset Acct *</label>
-                        <input type="number" class="form-control form-control-sm"
+                        <input type="number" min="0" class="form-control form-control-sm"
                                :class="createErrors.asset_account_id ? 'is-invalid' : ''"
                                x-model="createForm.asset_account_id" placeholder="e.g. 1210">
                         <div class="field-error" x-show="createErrors.asset_account_id" x-text="createErrors.asset_account_id" x-cloak></div>
                     </div>
                     <div class="form-group">
                         <label>Accum Depr Acct *</label>
-                        <input type="number" class="form-control form-control-sm"
+                        <input type="number" min="0" class="form-control form-control-sm"
                                :class="createErrors.accum_depr_account_id ? 'is-invalid' : ''"
                                x-model="createForm.accum_depr_account_id" placeholder="e.g. 1220">
                         <div class="field-error" x-show="createErrors.accum_depr_account_id" x-text="createErrors.accum_depr_account_id" x-cloak></div>
                     </div>
                     <div class="form-group">
                         <label>Depr Expense Acct *</label>
-                        <input type="number" class="form-control form-control-sm"
+                        <input type="number" min="0" class="form-control form-control-sm"
                                :class="createErrors.depr_expense_account_id ? 'is-invalid' : ''"
                                x-model="createForm.depr_expense_account_id" placeholder="e.g. 5010">
                         <div class="field-error" x-show="createErrors.depr_expense_account_id" x-text="createErrors.depr_expense_account_id" x-cloak></div>
@@ -874,7 +884,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <h3 class="section-title">Identification</h3>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
-                    <div class="form-group"><label>Equipment Unit ID</label><input type="number" class="form-control form-control-sm" x-model="createForm.equipment_unit_id" placeholder="Enables Payoff Analysis"></div>
+                    <div class="form-group"><label>Equipment Unit ID</label><input type="number" min="0" class="form-control form-control-sm" x-model="createForm.equipment_unit_id" placeholder="Enables Payoff Analysis"></div>
                     <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="createForm.serial_number"></div>
                     <div class="form-group" style="grid-column:1/-1;"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="createForm.location"></div>
                 </div>
@@ -939,7 +949,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="modal" style="max-width:760px;width:96%;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2 class="h5">Edit Fixed Asset</h2>
-                <button class="modal-close" @click="editOpen = false">×</button>
+                <button class="modal-close-btn" aria-label="Close" @click="editOpen = false">×</button>
             </div>
             <div class="modal-body">
 
@@ -984,7 +994,7 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
                     <div class="form-group"><label>Equipment Unit ID</label>
-                        <input type="number" class="form-control form-control-sm" x-model="editForm.equipment_unit_id"
+                        <input type="number" min="0" class="form-control form-control-sm" x-model="editForm.equipment_unit_id"
                                placeholder="Numeric ID of the equipment_units row">
                     </div>
                     <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="editForm.serial_number"></div>

@@ -550,9 +550,236 @@ const FF_Confirm = {
     show(options = {}) {
         window.dispatchEvent(new CustomEvent('ff-confirm', { detail: options }));
     },
+
+    /**
+     * Promise-based replacement for native confirm().
+     * Returns true if the user clicks the confirm button, false otherwise.
+     *
+     * WHY: [UI-AUDIT-1:M13] the codebase had 40+ `if (!confirm(...)) return;`
+     * call sites. Rather than restructure every function to put its body
+     * inside an onConfirm callback, this lets us migrate with a minimal
+     * diff:
+     *
+     *   Before:  if (!confirm('Delete?')) return;
+     *   After:   if (!(await FF_Confirm.ask('Delete?'))) return;
+     *
+     * @param {string|object} messageOrOptions - Plain message string or
+     *        full options object ({ title, message, confirmLabel, dangerMode }).
+     * @returns {Promise<boolean>}
+     */
+    ask(messageOrOptions) {
+        return new Promise(function (resolve) {
+            const opts = typeof messageOrOptions === 'string'
+                ? { message: messageOrOptions }
+                : (messageOrOptions || {});
+
+            window.dispatchEvent(new CustomEvent('ff-confirm', {
+                detail: Object.assign({
+                    title: 'Confirm',
+                    dangerMode: true,
+                    confirmLabel: 'Confirm',
+                }, opts, {
+                    onConfirm: function () { resolve(true); },
+                    onCancel:  function () { resolve(false); },
+                }),
+            }));
+        });
+    },
+
+    /**
+     * Promise-based replacement for native prompt().
+     * Returns the entered string if the user clicks Confirm, null on Cancel.
+     *
+     *   Before:  const x = prompt('Reason:'); if (!x) return;
+     *   After:   const x = await FF_Confirm.askText('Reason:'); if (!x) return;
+     */
+    askText(messageOrOptions) {
+        return new Promise(function (resolve) {
+            const opts = typeof messageOrOptions === 'string'
+                ? { message: messageOrOptions }
+                : (messageOrOptions || {});
+
+            window.dispatchEvent(new CustomEvent('ff-confirm', {
+                detail: Object.assign({
+                    title: 'Input required',
+                    confirmLabel: 'OK',
+                    prompt: true,
+                    placeholder: '',
+                }, opts, {
+                    onConfirm: function (value) { resolve(value || ''); },
+                    onCancel:  function () { resolve(null); },
+                }),
+            }));
+        });
+    },
 };
 
 window.FF_Confirm = FF_Confirm;
+
+
+// ============================================================
+// 05b. Auto data-label for responsive tables (UI-AUDIT-1:M1)
+// ============================================================
+// WHY: app.css ships a .table-stack mobile pattern that renders
+// each <td> as a label/value row on narrow screens using
+// `content: attr(data-label)`. But NONE of the 147 tables in
+// the app populate data-label manually, so the stacking pattern
+// was useless. Auto-labelling from the <th> text lets every
+// admin/portal table gracefully degrade on mobile without any
+// template edits.
+//
+// Behaviour:
+//   • Runs once on DOMContentLoaded and once more after Alpine
+//     init so dynamically rendered tables also get the labels.
+//   • Re-runs whenever a new <table> is added to the DOM
+//     (tabs lazy-load tables into existing panels).
+//   • Skips tables already marked with [data-no-auto-label].
+//   • Skips <td>s that already have data-label so legacy
+//     manual labels keep working.
+//   • Ignores tables without a <thead><tr><th> structure
+//     (bills-of-material tables, etc.).
+// ============================================================
+
+(function () {
+    function labelCellsIn(table) {
+        if (table.hasAttribute('data-no-auto-label')) return;
+        if (table.dataset.labelled === '1') return;
+        const ths = table.querySelectorAll(':scope > thead > tr > th');
+        if (ths.length === 0) return;
+        const labels = Array.from(ths).map(function (th) {
+            // Strip HTML, collapse whitespace, trim.
+            return (th.textContent || '').replace(/\s+/g, ' ').trim();
+        });
+        const rows = table.querySelectorAll(':scope > tbody > tr');
+        rows.forEach(function (row) {
+            const tds = row.querySelectorAll(':scope > td');
+            tds.forEach(function (td, idx) {
+                if (td.hasAttribute('data-label')) return;
+                const lbl = labels[idx];
+                if (lbl) td.setAttribute('data-label', lbl);
+            });
+        });
+        // Also add the .table-stack class so the mobile CSS kicks in.
+        if (!table.classList.contains('table-stack')) {
+            table.classList.add('table-stack');
+        }
+        table.dataset.labelled = '1';
+    }
+
+    function labelAllTables() {
+        document.querySelectorAll('table').forEach(labelCellsIn);
+    }
+
+    // Initial pass.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', labelAllTables);
+    } else {
+        labelAllTables();
+    }
+
+    // Re-run after Alpine has initialised (Alpine renders x-for late).
+    document.addEventListener('alpine:initialized', labelAllTables);
+
+    // Observe future DOM additions for dynamically inserted tables.
+    const observer = new MutationObserver(function (mutations) {
+        for (const m of mutations) {
+            for (const node of m.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                if (node.tagName === 'TABLE') {
+                    labelCellsIn(node);
+                } else if (node.querySelectorAll) {
+                    node.querySelectorAll('table').forEach(labelCellsIn);
+                }
+            }
+        }
+    });
+    if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+    } else {
+        document.addEventListener('DOMContentLoaded', function () {
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+    }
+})();
+
+
+// ============================================================
+// 06a. Global modal keyboard & backdrop handlers (UI-AUDIT-1)
+// ============================================================
+// WHY: the audit found that only 6 of 23 modal-hosting files wired
+// up Escape-to-close, and only 10 supported backdrop click-to-close.
+// Rather than edit 17+ files to add @keydown.escape / @click.self
+// individually (and risk breaking scoped Alpine state), we install
+// two document-level listeners that:
+//
+//   • On Escape:  locate the topmost visible close button inside a
+//     .modal-overlay or .modal-backdrop and simulate a click.
+//   • On mousedown inside .modal-overlay (but NOT on the .modal
+//     card itself): simulate clicking the nearest close button.
+//
+// This is intentionally DOM-driven so every modal that follows the
+// standard structure (.modal-overlay > .modal > header > .modal-close-btn)
+// gets Escape + backdrop-close behaviour without any template edits.
+//
+// Modals that already wire @keydown.escape or @click.self keep working
+// — the listener finds the button and calls .click(), which triggers
+// whatever Alpine handler the close button is already bound to.
+// ============================================================
+
+(function () {
+    /**
+     * Find the topmost visible close button in the DOM.
+     * We look for elements inside a .modal-overlay that are currently
+     * rendered (display !== 'none'), and return the close button of
+     * the LAST one (which is visually the top-most overlapping modal).
+     */
+    function topmostVisibleCloseButton() {
+        const overlays = Array.from(document.querySelectorAll(
+            '.modal-overlay, .modal-backdrop'
+        )).filter(function (el) {
+            if (el.offsetParent === null) return false;
+            const cs = window.getComputedStyle(el);
+            return cs.display !== 'none' && cs.visibility !== 'hidden';
+        });
+        if (overlays.length === 0) return null;
+        const top = overlays[overlays.length - 1];
+        return top.querySelector('.modal-close-btn, .modal-close, [data-modal-close]');
+    }
+
+    // Escape key → click topmost close button.
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' && e.keyCode !== 27) return;
+        const btn = topmostVisibleCloseButton();
+        if (btn) {
+            e.preventDefault();
+            e.stopPropagation();
+            btn.click();
+        }
+    });
+
+    // Backdrop click → click close button of that specific overlay.
+    // We use mousedown+mouseup on the same target to avoid closing
+    // when the user starts a drag INSIDE the modal and releases it
+    // outside (which would fire click on the overlay).
+    let mousedownTarget = null;
+    document.addEventListener('mousedown', function (e) {
+        mousedownTarget = e.target;
+    }, true);
+
+    document.addEventListener('click', function (e) {
+        // Only act if the same element received both mousedown and click.
+        if (e.target !== mousedownTarget) return;
+        const overlay = e.target.closest('.modal-overlay, .modal-backdrop');
+        if (!overlay) return;
+        // If the click happened inside a .modal card, ignore it.
+        if (e.target.closest('.modal, .modal-dialog, .modal-box')) return;
+        const btn = overlay.querySelector('.modal-close-btn, .modal-close, [data-modal-close]');
+        if (btn) {
+            e.preventDefault();
+            btn.click();
+        }
+    });
+})();
 
 
 // ============================================================
@@ -997,7 +1224,7 @@ window.FF_PortalNotifications = FF_PortalNotifications;
 // ============================================================
 // 07c. FF_ChatBadge — topbar chat icon unread counter
 // ============================================================
-// Polls /api/v1/chat/unread/index.php every 5 seconds.
+// Polls /api/v1/chat/unread/count.php every 5 seconds.
 // Used by includes/topbar.php chat icon.
 
 function FF_ChatBadge() {
@@ -1016,7 +1243,7 @@ function FF_ChatBadge() {
 
         async fetchUnread() {
             try {
-                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php'));
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/count.php'));
                 const newCount = data.data?.total_unread || 0;
                 // MEDIA-1: only ding when unread INCREASES, after first
                 // load, and when the user isn't already viewing the chat
@@ -1039,73 +1266,140 @@ window.FF_ChatBadge = FF_ChatBadge;
 
 // ============================================================
 // 07d. FF_Chat — full-page chat component (app/admin/chat/index.php)
+// CHAT-2 REBUILD — complete rewrite with all spec features
 // ============================================================
 
 function FF_Chat() {
     return {
-        // ── State ────────────────────────────────────────────────────────
-        channels:          [],
-        directMessages:    [],
-        activeChannel:     null,
-        messages:          [],
-        channelMembers:    [],
-        composing:         '',
-        attachments:       [],       // pending attachments to send
-        replyingTo:        null,     // message object being replied to
-        editingMessage:    null,     // message being edited
-        lastMessageId:     0,
-        hasMore:           false,
-        loadingMessages:   false,
-        loadingMore:       false,
-        sending:           false,
-        showInfo:          false,
-        showSearch:        false,
-        showCreateChannel: false,
-        showBrowse:        false,
-        showNewDM:         false,
-        searchQuery:       '',
-        searchResults:     [],
-        browseQuery:       '',
-        browseChannels:    [],
-        dmUserQuery:       '',
-        dmUserResults:     [],
-        newChannel:        { name: '', description: '', is_private: false },
-        // Mention / record picker state
-        showMentions:      false,
-        mentionResults:    [],
-        mentionQuery:      '',
-        showRecordPicker:  false,
-        recordPickerType:  null,
-        recordSearchQuery: '',
-        recordSearchResults: [],
-        // Emoji picker
-        emojiPickerMessageId: null,
-        commonEmojis: ['👍','❤️','😂','🎉','🔥','👏','✅','🚀','😮','🙏','💯','👀'],
-        // Polling
-        _pollTimer: null,
+        // ── Sidebar state ─────────────────────────────────────────────────
+        channels:               [],
+        directMessages:         [],
+        customerConversations:  [],
+        sidebarSearch:          '',
+        // ── Active channel state ──────────────────────────────────────────
+        activeChannel:          null,
+        messages:               [],
+        channelMembers:         [],
+        hasMore:                false,
+        loadingMessages:        false,
+        loadingMore:            false,
+        lastMessageId:          0,
+        highlightedMsgId:       null,
+        // ── Compose state ─────────────────────────────────────────────────
+        composing:              '',
+        pendingAttachments:     [],
+        replyingTo:             null,
+        editingMessage:         null,
+        sending:                false,
+        // ── Pickers ───────────────────────────────────────────────────────
+        showMentions:           false,
+        mentionResults:         [],
+        mentionQuery:           '',
+        mentionIndex:           0,
+        showRecordPicker:       false,
+        recordPickerType:       null,
+        recordQuery:            '',
+        recordResults:          [],
+        recordLoading:          false,
+        recordIndex:            0,
+        emojiPickerForMsg:      null,
+        commonEmojis:           ['👍','❤️','😂','🎉','🔥','👏','✅','🚀','😮','🙏','💯','👀'],
+        // ── Search ────────────────────────────────────────────────────────
+        showSearch:             false,
+        messageSearch:          '',
+        searchResults:          [],
+        // ── New messages banner ───────────────────────────────────────────
+        showNewMsgsBanner:      false,
+        // ── Right panel ───────────────────────────────────────────────────
+        showRightPanel:         false,
+        editChannelName:        '',
+        editChannelDesc:        '',
+        // ── Modals ────────────────────────────────────────────────────────
+        showCreateChannel:      false,
+        newChannel:             { name: '', description: '', is_private: false, members: [] },
+        newChannelMemberSearch: '',
+        newChannelMemberResults:[],
+        showNewDM:              false,
+        dmSearch:               '',
+        dmResults:              [],
+        showCustomerConvo:      false,
+        customerSearch:         '',
+        customerResults:        [],
+        selectedCustomer:       null,
+        customerConvoSubject:   '',
+        customerConvoMessage:   '',
+        showAddMembers:         false,
+        addMemberSearch:        '',
+        addMemberResults:       [],
+        addMemberSelected:      [],
+        showBrowse:             false,
+        browseQuery:            '',
+        browseChannels:         [],
+        // ── Polling ───────────────────────────────────────────────────────
+        _pollTimer:             null,
+        _unreadTimer:           null,
 
-        // ── Lifecycle ────────────────────────────────────────────────────
+        // ── COMPUTED ──────────────────────────────────────────────────────
+
+        get filteredChannels() {
+            const q = this.sidebarSearch.toLowerCase();
+            return q ? this.channels.filter(c => c.name.toLowerCase().includes(q)) : this.channels;
+        },
+        get filteredDMs() {
+            const q = this.sidebarSearch.toLowerCase();
+            if (!q) return this.directMessages;
+            return this.directMessages.filter(d =>
+                (d.other_user?.name || d.name || '').toLowerCase().includes(q)
+            );
+        },
+        get filteredCustomerConvos() {
+            const q = this.sidebarSearch.toLowerCase();
+            if (!q) return this.customerConversations;
+            return this.customerConversations.filter(c =>
+                (c.customer_company_name || c.name || '').toLowerCase().includes(q)
+            );
+        },
+        get filteredBrowseChannels() {
+            const q = this.browseQuery.toLowerCase();
+            return q ? this.browseChannels.filter(c => c.name.toLowerCase().includes(q)) : this.browseChannels;
+        },
+        get isChannelAdminOrOwner() {
+            if (!this.activeChannel) return false;
+            const me = this.channelMembers.find(m => m.user_id == this.currentUserId);
+            return me && ['owner','admin'].includes(me.role);
+        },
+        get currentUserId() {
+            return parseInt(document.querySelector('[data-current-user-id]')?.dataset.currentUserId || '0');
+        },
+        // Messages interleaved with date separator objects
+        get messagesWithSeparators() {
+            const items = [];
+            let lastDate = null;
+            for (const msg of this.messages) {
+                const d   = new Date(msg.created_at);
+                const key = d.toDateString();
+                if (key !== lastDate) {
+                    lastDate = key;
+                    items.push({ type: 'separator', key: 'sep_' + msg.id, label: this.formatDateLabel(d) });
+                }
+                items.push({ type: 'message', key: 'msg_' + msg.id, msg });
+            }
+            return items;
+        },
+
+        // ── INIT ─────────────────────────────────────────────────────────
 
         async init(channelIdParam = 0, messageIdParam = 0) {
             await this.loadChannels();
-            // If URL has ?channel= param, open that channel
+
+            // Open channel from URL param or default to first channel
+            const all = [...this.channels, ...this.directMessages, ...this.customerConversations];
             if (channelIdParam) {
-                const target = [...this.channels, ...this.directMessages]
-                    .find(c => c.id == channelIdParam);
+                const target = all.find(c => c.id == channelIdParam);
                 if (target) {
                     await this.selectChannel(target);
-                    // BUGFIX-1: scroll to and highlight the specific message if provided.
-                    // $nextTick queued here runs after selectChannel's scrollToBottom,
-                    // so our scroll wins and the user lands on the notified message.
                     if (messageIdParam) {
-                        this.$nextTick(() => {
-                            const el = document.querySelector('[data-message-id="' + messageIdParam + '"]');
-                            if (el) {
-                                el.scrollIntoView({ block: 'center' });
-                                el.classList.add('chat-message--highlight');
-                                setTimeout(() => el.classList.remove('chat-message--highlight'), 3000);
-                            }
-                        });
+                        this.$nextTick(() => this.highlightMessage(messageIdParam));
                     }
                 } else if (this.channels.length > 0) {
                     await this.selectChannel(this.channels[0]);
@@ -1113,48 +1407,78 @@ function FF_Chat() {
             } else if (this.channels.length > 0) {
                 await this.selectChannel(this.channels[0]);
             }
-            // Start polling for new messages
-            this._pollTimer = setInterval(() => this.poll(), 5000);
+
+            // Polling — pause when tab hidden
+            this._pollTimer = setInterval(() => {
+                if (!document.hidden) this.poll();
+            }, 5000);
+            // Unread sidebar refresh (separate cadence)
+            this._unreadTimer = setInterval(() => this.refreshUnreadCounts(), 10000);
         },
 
-        // ── Channel loading ───────────────────────────────────────────────
+        // ── CHANNEL LOADING ───────────────────────────────────────────────
 
         async loadChannels() {
             try {
                 const data = await FF_Api.get(FF_Api.url('/api/v1/chat/channels/index.php'));
-                this.channels       = data.data?.channels       || [];
-                this.directMessages = data.data?.direct_messages || [];
+                this.channels              = data.data?.channels               || [];
+                this.directMessages        = data.data?.direct_messages        || [];
+                this.customerConversations = data.data?.customer_conversations  || [];
             } catch (e) {
                 FF_Toast.error('Failed to load channels.');
             }
         },
 
         async selectChannel(ch) {
-            this.activeChannel  = ch;
-            this.messages       = [];
-            this.lastMessageId  = 0;
-            this.hasMore        = false;
-            this.replyingTo     = null;
-            this.editingMessage = null;
-            this.composing      = '';
-            this.attachments    = [];
-            this.showInfo       = false;
+            this.activeChannel      = ch;
+            this.messages           = [];
+            this.lastMessageId      = 0;
+            this.hasMore            = false;
+            this.replyingTo         = null;
+            this.editingMessage     = null;
+            this.composing          = '';
+            this.pendingAttachments = [];
+            this.showRightPanel     = false;
+            this.showSearch         = false;
+            this.searchResults      = [];
+            this.showNewMsgsBanner  = false;
+            this.emojiPickerForMsg  = null;
+            this.editChannelName    = ch.name || '';
+            this.editChannelDesc    = ch.description || '';
+
             await this.loadMessages(ch.id);
             await this.markRead(ch.id);
             await this.loadMembers(ch.id);
-            this.$nextTick(() => this.scrollToBottom());
+
+            this.$nextTick(() => {
+                this.scrollToBottom(true);
+                this.$refs.composeInput?.focus();
+            });
+
+            // Update URL
+            const url = new URL(window.location);
+            url.searchParams.set('channel', ch.id);
+            window.history.pushState({}, '', url);
         },
 
         async selectChannelById(id) {
-            const ch = [...this.channels, ...this.directMessages].find(c => c.id == id);
+            const all = [...this.channels, ...this.directMessages, ...this.customerConversations];
+            const ch  = all.find(c => c.id == id);
             if (ch) await this.selectChannel(ch);
         },
 
-        isChannelMember(id) {
-            return [...this.channels, ...this.directMessages].some(c => c.id == id);
+        isMyChannel(id) {
+            const all = [...this.channels, ...this.directMessages, ...this.customerConversations];
+            return all.some(c => c.id == id);
         },
 
-        // ── Message loading ───────────────────────────────────────────────
+        isOnline(userId) {
+            // WHY: No real online tracking — return false for now.
+            // Future: WebSocket presence or session-update-time check.
+            return false;
+        },
+
+        // ── MESSAGE LOADING ───────────────────────────────────────────────
 
         async loadMessages(channelId) {
             this.loadingMessages = true;
@@ -1162,11 +1486,10 @@ function FF_Chat() {
                 const data = await FF_Api.get(
                     FF_Api.url('/api/v1/chat/messages/index.php') + '?channel_id=' + channelId + '&limit=50'
                 );
-                this.messages      = data.data?.messages  || [];
-                this.hasMore       = data.data?.has_more   || false;
+                this.messages      = data.data?.messages || [];
+                this.hasMore       = data.data?.has_more  || false;
                 this.lastMessageId = this.messages.length > 0
-                    ? Math.max(...this.messages.map(m => m.id))
-                    : 0;
+                    ? Math.max(...this.messages.map(m => m.id)) : 0;
             } catch (e) {
                 FF_Toast.error('Failed to load messages.');
             } finally {
@@ -1175,18 +1498,28 @@ function FF_Chat() {
         },
 
         async loadMore() {
-            if (!this.activeChannel || this.loadingMore) return;
+            if (!this.activeChannel || this.loadingMore || !this.hasMore) return;
             const firstId = this.messages[0]?.id;
             if (!firstId) return;
+
+            // Save scroll position before prepending
+            const area   = document.getElementById('chat-messages-scroll');
+            const prevH  = area ? area.scrollHeight : 0;
+
             this.loadingMore = true;
             try {
                 const data = await FF_Api.get(
-                    FF_Api.url('/api/v1/chat/messages/index.php') + '?channel_id=' + this.activeChannel.id +
-                    '&before_id=' + firstId + '&limit=50'
+                    FF_Api.url('/api/v1/chat/messages/index.php') +
+                    '?channel_id=' + this.activeChannel.id + '&before_id=' + firstId + '&limit=50'
                 );
-                const older = data.data?.messages || [];
-                this.messages  = [...older, ...this.messages];
-                this.hasMore   = data.data?.has_more || false;
+                const older  = data.data?.messages || [];
+                this.messages = [...older, ...this.messages];
+                this.hasMore  = data.data?.has_more || false;
+
+                // Maintain scroll position — don't jump to top or bottom
+                this.$nextTick(() => {
+                    if (area) area.scrollTop = area.scrollHeight - prevH;
+                });
             } catch (e) {
                 FF_Toast.error('Failed to load older messages.');
             } finally {
@@ -1196,127 +1529,136 @@ function FF_Chat() {
 
         async loadMembers(channelId) {
             try {
-                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/channels/members.php') + '?channel_id=' + channelId);
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/channels/members/index.php') + '?channel_id=' + channelId
+                );
                 this.channelMembers = data.data || [];
             } catch (e) {
                 this.channelMembers = [];
             }
         },
 
-        // ── Polling ───────────────────────────────────────────────────────
+        // ── POLLING ───────────────────────────────────────────────────────
 
         async poll() {
             if (!this.activeChannel) return;
             try {
                 const data = await FF_Api.get(
-                    FF_Api.url('/api/v1/chat/messages/poll.php') + '?channel_id=' + this.activeChannel.id +
-                    '&after_id=' + this.lastMessageId
+                    FF_Api.url('/api/v1/chat/messages/poll.php') +
+                    '?channel_id=' + this.activeChannel.id + '&after_id=' + this.lastMessageId
                 );
                 const newMsgs = data.data?.messages || [];
                 if (newMsgs.length > 0) {
-                    this.messages = [...this.messages, ...newMsgs];
-                    this.lastMessageId = Math.max(...this.messages.map(m => m.id));
-                    this.$nextTick(() => this.scrollToBottom());
-                    // Update channel unread in sidebar (reset since we're viewing)
-                    await this.markRead(this.activeChannel.id);
+                    // Filter out messages sent by current user (already appended optimistically)
+                    const truly_new = newMsgs.filter(m => m.user_id != this.currentUserId);
+                    if (truly_new.length > 0) {
+                        this.messages = [...this.messages, ...truly_new];
+                        this.lastMessageId = Math.max(...this.messages.map(m => m.id));
+
+                        if (this.isNearBottom()) {
+                            this.$nextTick(() => this.scrollToBottom(true));
+                            await this.markRead(this.activeChannel.id);
+                        } else {
+                            this.showNewMsgsBanner = true;
+                        }
+
+                        // Play notification sound
+                        try { FF_Sound.play('notification'); } catch(e) {}
+                    }
                 }
-                // Refresh unread counts in sidebar
-                await this.refreshUnreadCounts();
-            } catch (e) {
-                // Silent — poll failures are expected on network issues
-            }
+            } catch (e) { /* Silent — network issues expected */ }
         },
 
         async refreshUnreadCounts() {
             try {
-                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php'));
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/count.php'));
                 const map  = {};
                 (data.data?.channels || []).forEach(c => { map[c.id] = c.unread; });
-                this.channels.forEach(ch => {
-                    ch.unread_count = map[ch.id] || 0;
-                });
-                this.directMessages.forEach(dm => {
-                    dm.unread_count = map[dm.id] || 0;
-                });
+                const allLists = [this.channels, this.directMessages, this.customerConversations];
+                allLists.forEach(list => list.forEach(ch => {
+                    ch.unread_count = map[ch.id] ?? ch.unread_count;
+                }));
+                // Update topbar badge via FF_ChatBadge if it exists
+                if (window._FF_ChatHubBadge) window._FF_ChatHubBadge.refresh?.();
             } catch (e) {}
         },
 
-        // ── Send message ─────────────────────────────────────────────────
+        // ── SEND MESSAGE ──────────────────────────────────────────────────
 
         async send() {
             if (!this.activeChannel || this.sending) return;
-            if (this.editingMessage) {
-                await this.submitEdit();
-                return;
-            }
+            if (this.editingMessage) { await this.saveEdit(); return; }
+
             const text = this.composing.trim();
-            if (!text && this.attachments.length === 0) return;
+            if (!text && this.pendingAttachments.length === 0) return;
 
             this.sending = true;
-            const fd = new FormData();
+            const fd    = new FormData();
             fd.append('channel_id', this.activeChannel.id);
             if (text) fd.append('message', text);
             if (this.replyingTo) fd.append('reply_to_id', this.replyingTo.id);
 
-            // Extract mentions from text
-            const mentioned = this.channelMembers
-                .filter(m => text.includes('@' + m.name))
-                .map(m => m.id);
-            mentioned.forEach(id => fd.append('mentions[]', id));
+            // Extract @mentions from text
+            const mentionedUsers = this.channelMembers
+                .filter(m => m.user_id && text.includes('@' + m.name))
+                .map(m => m.user_id);
+            mentionedUsers.forEach(id => fd.append('mentions[]', id));
 
-            // Attachments
-            this.attachments.forEach((att, i) => {
-                fd.append('attachments[' + i + '][type]',      att.type);
-                fd.append('attachments[' + i + '][entity_id]', att.entity_id || '');
-                fd.append('attachments[' + i + '][preview_data][title]',    (att.preview_data || {}).title    || att.type);
-                fd.append('attachments[' + i + '][preview_data][subtitle]', (att.preview_data || {}).subtitle || '');
-                fd.append('attachments[' + i + '][preview_data][badge]',    (att.preview_data || {}).badge    || '');
+            // Pending record attachments
+            this.pendingAttachments.forEach((att, i) => {
+                const prefix = 'attachments[' + i + ']';
+                fd.append(prefix + '[type]',              att.attachment_type || att.type || 'file');
+                fd.append(prefix + '[entity_id]',         att.entity_id || '');
+                fd.append(prefix + '[preview_title]',     att.preview_title || att.file_name || '');
+                fd.append(prefix + '[preview_subtitle]',  att.preview_subtitle || '');
+                fd.append(prefix + '[preview_badge]',     att.preview_badge || '');
+                fd.append(prefix + '[preview_badge_class]',att.preview_badge_class || '');
+                fd.append(prefix + '[preview_url]',       att.preview_url || '');
+                if (att.file_name)  fd.append(prefix + '[file_name]', att.file_name);
+                if (att.file_size)  fd.append(prefix + '[file_size]', att.file_size);
+                if (att.mime_type)  fd.append(prefix + '[mime_type]', att.mime_type);
             });
 
             try {
-                // WHY: use fetch directly with FormData to avoid JSON serialisation
-                //      of the nested attachments array
-                const token  = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                const base   = (window.FF_BASE_URL || '/fleetforge') + '/api/';
-                const resp   = await fetch(base + 'v1/chat/messages/create.php', {
-                    method: 'POST',
-                    headers: { 'X-CSRF-Token': token },
-                    body: fd,
-                });
-                const data = await resp.json();
-                if (!data.success) throw new Error(data.message || 'Send failed');
+                const token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                const resp  = await fetch(
+                    (window.FF_BASE_URL || '/fleetforge') + '/api/v1/chat/messages/create.php',
+                    { method: 'POST', headers: { 'X-CSRF-Token': token }, body: fd }
+                );
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.message || 'Send failed');
 
-                this.messages.push(data.data);
-                this.lastMessageId = data.data.id;
+                // Optimistic append
+                this.messages.push(json.data);
+                this.lastMessageId = json.data.id;
                 this.composing     = '';
-                this.attachments   = [];
+                this.pendingAttachments = [];
                 this.replyingTo    = null;
 
-                // Reset compose textarea height
                 this.$nextTick(() => {
                     if (this.$refs.composeInput) {
                         this.$refs.composeInput.style.height = 'auto';
                     }
-                    this.scrollToBottom();
+                    this.scrollToBottom(true);
                 });
 
-                // Update channel preview in sidebar
-                const ch = this.channels.find(c => c.id === this.activeChannel.id)
-                        || this.directMessages.find(c => c.id === this.activeChannel.id);
+                // Update sidebar preview
+                const all = [...this.channels, ...this.directMessages, ...this.customerConversations];
+                const ch  = all.find(c => c.id == this.activeChannel.id);
                 if (ch) {
                     ch.last_message_at      = new Date().toISOString();
                     ch.last_message_preview = text || '[attachment]';
                 }
             } catch (e) {
-                FF_Toast.error('Failed to send message.');
+                FF_Toast.error('Failed to send message. Please try again.');
             } finally {
                 this.sending = false;
             }
         },
 
-        // ── Edit message ─────────────────────────────────────────────────
+        // ── EDIT / DELETE ─────────────────────────────────────────────────
 
-        editMessage(msg) {
+        editMsg(msg) {
             this.editingMessage = msg;
             this.composing      = msg.message || '';
             this.$nextTick(() => this.$refs.composeInput?.focus());
@@ -1327,17 +1669,17 @@ function FF_Chat() {
             this.composing      = '';
         },
 
-        async submitEdit() {
+        async saveEdit() {
             if (!this.editingMessage) return;
+            const text = this.composing.trim();
+            if (!text) return;
             try {
                 const data = await FF_Api.post(FF_Api.url('/api/v1/chat/messages/update.php'), {
                     message_id: this.editingMessage.id,
-                    message:    this.composing.trim(),
+                    message:    text,
                 });
                 const idx = this.messages.findIndex(m => m.id === this.editingMessage.id);
-                if (idx !== -1) {
-                    this.messages[idx] = { ...this.messages[idx], ...data };
-                }
+                if (idx !== -1) Object.assign(this.messages[idx], data.data);
                 this.editingMessage = null;
                 this.composing      = '';
             } catch (e) {
@@ -1347,242 +1689,346 @@ function FF_Chat() {
             }
         },
 
-        // ── Delete message ────────────────────────────────────────────────
-
-        async deleteMessage(id) {
+        async deleteMsg(id) {
             if (!confirm('Delete this message?')) return;
             try {
                 await FF_Api.post(FF_Api.url('/api/v1/chat/messages/delete.php'), { message_id: id });
                 const idx = this.messages.findIndex(m => m.id === id);
                 if (idx !== -1) {
-                    this.messages[idx] = { ...this.messages[idx], is_archived: 1 };
+                    this.messages[idx].is_deleted = 1;
+                    this.messages[idx].message    = null;
                 }
             } catch (e) {
                 FF_Toast.error('Failed to delete message.');
             }
         },
 
-        // ── Reactions ────────────────────────────────────────────────────
+        // ── REACTIONS ─────────────────────────────────────────────────────
 
-        async addReaction(messageId, emoji) {
+        async toggleReaction(messageId, emoji) {
             try {
                 const data = await FF_Api.post(FF_Api.url('/api/v1/chat/reactions/toggle.php'), {
                     message_id: messageId,
-                    emoji:      emoji,
+                    emoji,
                 });
-                // Update reactions in the message
                 const idx = this.messages.findIndex(m => m.id === messageId);
-                if (idx !== -1) {
-                    this.messages[idx].reactions = data.reactions || [];
-                }
+                if (idx !== -1) this.messages[idx].reactions = data.data?.reactions || [];
             } catch (e) {
-                FF_Toast.error('Failed to add reaction.');
+                FF_Toast.error('Failed to update reaction.');
             }
         },
 
-        showEmojiPicker(messageId) {
-            this.emojiPickerMessageId = this.emojiPickerMessageId === messageId ? null : messageId;
+        showEmojiFor(messageId) {
+            this.emojiPickerForMsg = this.emojiPickerForMsg === messageId ? null : messageId;
         },
 
-        // ── Reply ────────────────────────────────────────────────────────
+        // ── REPLY ─────────────────────────────────────────────────────────
 
         setReply(msg) {
             this.replyingTo = msg;
             this.$nextTick(() => this.$refs.composeInput?.focus());
         },
 
-        // ── Mark read ────────────────────────────────────────────────────
+        // ── MARK READ ─────────────────────────────────────────────────────
 
         async markRead(channelId) {
             try {
                 await FF_Api.post(FF_Api.url('/api/v1/chat/unread/mark_read.php'), { channel_id: channelId });
-                const ch = [...this.channels, ...this.directMessages].find(c => c.id == channelId);
+                const all = [...this.channels, ...this.directMessages, ...this.customerConversations];
+                const ch  = all.find(c => c.id == channelId);
                 if (ch) ch.unread_count = 0;
+                this.showNewMsgsBanner = false;
             } catch (e) {}
         },
 
-        // ── Compose input handlers ────────────────────────────────────────
+        // ── COMPOSE HANDLERS ──────────────────────────────────────────────
 
         handleComposeKeydown(e) {
+            // Mention picker navigation
+            if (this.showMentions) {
+                if (e.key === 'ArrowUp')   { e.preventDefault(); this.mentionIndex = Math.max(0, this.mentionIndex - 1); return; }
+                if (e.key === 'ArrowDown') { e.preventDefault(); this.mentionIndex = Math.min(this.mentionResults.length - 1, this.mentionIndex + 1); return; }
+                if (e.key === 'Enter')     { e.preventDefault(); if (this.mentionResults[this.mentionIndex]) this.insertMention(this.mentionResults[this.mentionIndex]); return; }
+                if (e.key === 'Escape')    { this.showMentions = false; return; }
+            }
+            // Record picker navigation
+            if (this.showRecordPicker) {
+                if (e.key === 'Escape') { this.showRecordPicker = false; return; }
+            }
+            // Send on Enter (not Shift+Enter)
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.send();
                 return;
             }
+            // Escape — cancel reply or edit
             if (e.key === 'Escape') {
-                if (this.replyingTo)     this.replyingTo     = null;
-                if (this.editingMessage) this.cancelEdit();
-                if (this.showMentions)   this.showMentions   = false;
-                if (this.showRecordPicker) this.showRecordPicker = false;
+                if (this.replyingTo)     { this.replyingTo = null; return; }
+                if (this.editingMessage) { this.cancelEdit(); return; }
                 return;
             }
+            // ↑ Arrow on empty input — edit last own message
             if (e.key === 'ArrowUp' && !this.composing.trim()) {
-                // Edit last own message
-                const myId = parseInt(document.body.dataset.userId || '0');
-                const last = [...this.messages].reverse().find(m => m.user_id == myId && !m.is_archived);
-                if (last) this.editMessage(last);
+                const last = [...this.messages].reverse().find(m => m.user_id == this.currentUserId && !m.is_deleted);
+                if (last) { e.preventDefault(); this.editMsg(last); }
                 return;
             }
         },
 
         handleComposeInput() {
-            const val = this.composing;
-            const pos = this.$refs.composeInput?.selectionStart || val.length;
+            const val    = this.composing;
+            const pos    = this.$refs.composeInput?.selectionStart ?? val.length;
             const before = val.substring(0, pos);
 
-            // Detect @ mention trigger
+            // @ mention trigger
             const mentionMatch = before.match(/@(\w*)$/);
             if (mentionMatch) {
-                this.mentionQuery   = mentionMatch[1];
-                this.showMentions   = true;
+                this.mentionQuery    = mentionMatch[1];
+                this.mentionIndex    = 0;
+                this.showMentions    = true;
                 this.showRecordPicker = false;
                 this.searchMentions(mentionMatch[1]);
                 return;
             }
-            // Detect / record attachment trigger at start of empty line
+
+            // / record picker trigger (at start of word)
             const slashMatch = before.match(/(?:^|\n)\/([\w]*)$/);
-            if (slashMatch && !this.composing.trim().replace('/' + slashMatch[1], '').trim()) {
+            if (slashMatch && !val.replace('/' + slashMatch[1], '').trim()) {
                 this.showRecordPicker = true;
                 this.showMentions     = false;
                 if (slashMatch[1]) {
-                    const known = ['invoice','lease','customer','equipment','work_order','damage_claim','reservation'];
-                    const match = known.find(t => t.startsWith(slashMatch[1].toLowerCase()));
+                    const types = ['invoice','lease','customer','payment','equipment','work_order','damage_claim','reservation'];
+                    const match = types.find(t => t.startsWith(slashMatch[1].toLowerCase()));
                     if (match) {
-                        this.recordPickerType  = match;
-                        this.recordSearchQuery = '';
+                        this.recordPickerType = match;
+                        this.recordQuery      = '';
+                        this.recordResults    = [];
                         this.$nextTick(() => this.$refs.recordSearchInput?.focus());
                     }
                 }
                 return;
             }
+
             this.showMentions     = false;
             this.showRecordPicker = false;
         },
 
-        async searchMentions(query) {
-            // Filter from loaded members
+        autoResizeTextarea(e) {
+            e.target.style.height = 'auto';
+            e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
+        },
+
+        // ── MENTION PICKER ────────────────────────────────────────────────
+
+        searchMentions(query) {
             const q = query.toLowerCase();
             this.mentionResults = this.channelMembers
-                .filter(m => m.name.toLowerCase().includes(q))
+                .filter(m => m.name && m.name.toLowerCase().includes(q))
                 .slice(0, 8);
         },
 
         insertMention(user) {
-            const val = this.composing;
-            const pos = this.$refs.composeInput?.selectionStart || val.length;
+            const val    = this.composing;
+            const pos    = this.$refs.composeInput?.selectionStart ?? val.length;
             const before = val.substring(0, pos).replace(/@\w*$/, '@' + user.name + ' ');
             const after  = val.substring(pos);
             this.composing    = before + after;
             this.showMentions = false;
+            this.mentionIndex = 0;
             this.$nextTick(() => this.$refs.composeInput?.focus());
         },
 
+        // ── RECORD PICKER ─────────────────────────────────────────────────
+
         setRecordType(type) {
-            this.recordPickerType    = type;
-            this.recordSearchQuery   = '';
-            this.recordSearchResults = [];
+            this.recordPickerType = type;
+            this.recordQuery      = '';
+            this.recordResults    = [];
+            this.recordIndex      = 0;
             this.$nextTick(() => this.$refs.recordSearchInput?.focus());
         },
 
         async searchRecords() {
-            if (!this.recordPickerType) return;
+            if (!this.recordPickerType || this.recordQuery.length < 1) {
+                this.recordResults = [];
+                return;
+            }
+            this.recordLoading = true;
             try {
                 const data = await FF_Api.get(
-                    FF_Api.url('/api/v1/chat/attachments/available.php') + '?type=' + this.recordPickerType +
-                    '&query=' + encodeURIComponent(this.recordSearchQuery)
+                    FF_Api.url('/api/v1/chat/search/records.php') +
+                    '?type=' + this.recordPickerType +
+                    '&q=' + encodeURIComponent(this.recordQuery) + '&limit=10'
                 );
-                this.recordSearchResults = data.data?.results || [];
+                this.recordResults = data.data?.results || [];
+                this.recordIndex   = 0;
             } catch (e) {
-                this.recordSearchResults = [];
+                this.recordResults = [];
+            } finally {
+                this.recordLoading = false;
             }
         },
 
         attachRecord(record) {
-            const type = this.recordPickerType;
-            this.attachments.push({
-                type:       type,
-                entity_id:  record.id,
-                preview_data: {
-                    title:    record.title,
-                    subtitle: record.subtitle || '',
-                    badge:    record.badge    || '',
-                },
+            this.pendingAttachments.push({
+                attachment_type:    record.type,
+                entity_id:          record.id,
+                preview_title:      record.title,
+                preview_subtitle:   record.subtitle || '',
+                preview_badge:      record.badge    || '',
+                preview_badge_class:record.badge_class || 'badge-neutral',
+                preview_url:        record.url || '',
             });
-            // Remove the /command from composing
-            this.composing = this.composing.replace(/(?:^|\n)\/([\w]*)$/, '');
-            this.showRecordPicker  = false;
-            this.recordPickerType  = null;
-            this.recordSearchQuery = '';
-            this.recordSearchResults = [];
+            // Clear /command from composing
+            this.composing        = this.composing.replace(/(?:^|\n)\/([\w]*)$/, '').trim();
+            this.showRecordPicker = false;
+            this.recordPickerType = null;
+            this.recordQuery      = '';
+            this.recordResults    = [];
             this.$nextTick(() => this.$refs.composeInput?.focus());
         },
 
-        removeAttachment(i) {
-            this.attachments.splice(i, 1);
+        removePendingAttachment(i) {
+            this.pendingAttachments.splice(i, 1);
         },
 
-        // ── File upload ───────────────────────────────────────────────────
+        // ── FILE UPLOAD ───────────────────────────────────────────────────
 
         async handleFileUpload(event) {
             const file = event.target.files?.[0];
             if (!file) return;
-            const maxSize = 10 * 1024 * 1024; // 10MB
+            event.target.value = '';
+
+            const maxSize = 10 * 1024 * 1024;
             if (file.size > maxSize) {
                 FF_Toast.error('File must be under 10MB.');
                 return;
             }
-            const allowed = ['application/pdf','image/jpeg','image/png','image/gif',
-                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                             'application/vnd.ms-excel',
-                             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                             'application/msword'];
-            // Note: MIME is checked server-side too; this is UX feedback only
-            this.attachments.push({
-                type:      'file',
-                entity_id: null,
-                preview_data: { title: file.name, subtitle: this.formatFileSize(file.size), badge: 'file' },
-                _file: file,
-            });
-            event.target.value = '';
+
+            // Upload to server first
+            const fd    = new FormData();
+            fd.append('file', file);
+            try {
+                const token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                const resp  = await fetch(
+                    (window.FF_BASE_URL || '/fleetforge') + '/api/v1/chat/upload.php',
+                    { method: 'POST', headers: { 'X-CSRF-Token': token }, body: fd }
+                );
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.message || 'Upload failed');
+                this.pendingAttachments.push({ ...json.data });
+                FF_Toast.success('File attached.');
+            } catch (e) {
+                FF_Toast.error('File upload failed: ' + (e.message || 'Unknown error'));
+            }
         },
 
-        // ── Channel management ────────────────────────────────────────────
+        // ── CHANNEL MANAGEMENT ────────────────────────────────────────────
+
+        openCreateChannel() {
+            this.newChannel = { name: '', description: '', is_private: false, members: [] };
+            this.newChannelMemberSearch  = '';
+            this.newChannelMemberResults = [];
+            this.showCreateChannel = true;
+        },
+
+        async searchNewChannelMembers() {
+            if (!this.newChannelMemberSearch) { this.newChannelMemberResults = []; return; }
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/users/index.php') + '?q=' + encodeURIComponent(this.newChannelMemberSearch) + '&per_page=10'
+                );
+                this.newChannelMemberResults = (data.data || []).filter(u =>
+                    !this.newChannel.members.find(m => m.id === u.id)
+                );
+            } catch (e) { this.newChannelMemberResults = []; }
+        },
+
+        addNewChannelMember(u) {
+            if (!this.newChannel.members.find(m => m.id === u.id)) {
+                this.newChannel.members.push(u);
+            }
+            this.newChannelMemberSearch  = '';
+            this.newChannelMemberResults = [];
+        },
+
+        removeNewChannelMember(id) {
+            this.newChannel.members = this.newChannel.members.filter(m => m.id !== id);
+        },
 
         async createChannel() {
             if (!this.newChannel.name.trim()) return;
             try {
-                const data = await FF_Api.post(FF_Api.url('/api/v1/chat/channels/create.php'), {
-                    name:        this.newChannel.name.trim(),
-                    description: this.newChannel.description.trim(),
-                    is_private:  this.newChannel.is_private ? 1 : 0,
-                });
-                this.channels.push({ ...data, unread_count: 0 });
+                const fd = new FormData();
+                fd.append('name',        this.newChannel.name.trim());
+                fd.append('description', this.newChannel.description.trim());
+                fd.append('is_private',  this.newChannel.is_private ? '1' : '0');
+                this.newChannel.members.forEach(m => fd.append('member_ids[]', m.id));
+
+                const token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                const resp  = await fetch(
+                    (window.FF_BASE_URL || '/fleetforge') + '/api/v1/chat/channels/create.php',
+                    { method: 'POST', headers: { 'X-CSRF-Token': token }, body: fd }
+                );
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.message || 'Failed to create channel');
+
+                this.channels.push({ ...json.data, unread_count: 0 });
                 this.showCreateChannel = false;
-                this.newChannel = { name: '', description: '', is_private: false };
-                await this.selectChannel(data);
-                FF_Toast.success('Channel created!');
+                await this.selectChannel(json.data);
+                FF_Toast.success('Channel #' + this.newChannel.name + ' created!');
             } catch (e) {
                 FF_Toast.error('Failed to create channel.');
             }
         },
 
-        openCreateChannel() {
-            this.newChannel = { name: '', description: '', is_private: false };
-            this.showCreateChannel = true;
+        async saveChannelSettings() {
+            if (!this.activeChannel) return;
+            try {
+                await FF_Api.post(FF_Api.url('/api/v1/chat/channels/update.php'), {
+                    channel_id:  this.activeChannel.id,
+                    name:        this.editChannelName,
+                    description: this.editChannelDesc,
+                });
+                this.activeChannel.name        = this.editChannelName;
+                this.activeChannel.description = this.editChannelDesc;
+                const ch = this.channels.find(c => c.id === this.activeChannel.id);
+                if (ch) { ch.name = this.editChannelName; ch.description = this.editChannelDesc; }
+                FF_Toast.success('Channel updated.');
+            } catch (e) {
+                FF_Toast.error('Failed to update channel.');
+            }
         },
 
-        async loadBrowseChannels() {
+        async archiveChannel() {
+            if (!confirm('Archive this channel? Members will lose access.')) return;
             try {
-                const all  = await FF_Api.get(FF_Api.url('/api/v1/chat/channels/index.php'));
-                const mine = new Set([...this.channels, ...this.directMessages].map(c => c.id));
-                // For browse, we'd need a separate "all channels" endpoint;
-                // for now reuse existing channels + show join option for non-members
-                // This is a simplified browse — shows channels from the current list
-                this.browseChannels = this.channels.filter(c =>
-                    !this.browseQuery || c.name.toLowerCase().includes(this.browseQuery.toLowerCase())
-                );
+                await FF_Api.post(FF_Api.url('/api/v1/chat/channels/archive.php'), {
+                    channel_id: this.activeChannel.id,
+                });
+                this.channels = this.channels.filter(c => c.id !== this.activeChannel.id);
+                this.activeChannel = null;
+                this.showRightPanel = false;
+                FF_Toast.success('Channel archived.');
             } catch (e) {
-                this.browseChannels = this.channels;
+                FF_Toast.error('Failed to archive channel.');
+            }
+        },
+
+        async leaveChannel() {
+            if (!this.activeChannel || this.activeChannel.type !== 'channel') return;
+            if (!confirm('Leave this channel?')) return;
+            try {
+                await FF_Api.post(FF_Api.url('/api/v1/chat/channels/members/remove.php'), {
+                    channel_id: this.activeChannel.id,
+                    user_id:    this.currentUserId,
+                });
+                this.channels = this.channels.filter(c => c.id !== this.activeChannel.id);
+                this.activeChannel = this.channels[0] || null;
+                if (this.activeChannel) await this.loadMessages(this.activeChannel.id);
+                FF_Toast.success('Left channel.');
+            } catch (e) {
+                FF_Toast.error('Failed to leave channel.');
             }
         },
 
@@ -1592,73 +2038,182 @@ function FF_Chat() {
             this.showBrowse     = true;
         },
 
-        async joinChannel(ch) {
+        // ── MEMBER MANAGEMENT ─────────────────────────────────────────────
+
+        openAddMembers() {
+            this.addMemberSearch   = '';
+            this.addMemberResults  = [];
+            this.addMemberSelected = [];
+            this.showAddMembers    = true;
+        },
+
+        async searchAddMembers() {
+            if (!this.addMemberSearch) { this.addMemberResults = []; return; }
             try {
-                await FF_Api.post(FF_Api.url('/api/v1/chat/channels/join.php'), { channel_id: ch.id });
-                await this.loadChannels();
-                this.showBrowse = false;
-                await this.selectChannelById(ch.id);
-                FF_Toast.success('Joined #' + ch.name);
+                // WHY: users API returns paginated envelope — unwrap .items.
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/users/index.php') + '?q=' + encodeURIComponent(this.addMemberSearch) + '&per_page=10'
+                );
+                this.addMemberResults = data.data?.items || [];
+            } catch (e) { this.addMemberResults = []; }
+        },
+
+        isExistingMember(userId) {
+            return this.channelMembers.some(m => m.user_id == userId);
+        },
+
+        toggleAddMember(u) {
+            if (this.isExistingMember(u.id)) return;
+            const idx = this.addMemberSelected.findIndex(m => m.id === u.id);
+            if (idx >= 0) this.addMemberSelected.splice(idx, 1);
+            else          this.addMemberSelected.push(u);
+        },
+
+        async confirmAddMembers() {
+            if (!this.addMemberSelected.length) return;
+            try {
+                const fd = new FormData();
+                fd.append('channel_id', this.activeChannel.id);
+                this.addMemberSelected.forEach(u => fd.append('user_ids[]', u.id));
+                const token = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                const resp  = await fetch(
+                    (window.FF_BASE_URL || '/fleetforge') + '/api/v1/chat/channels/members/add.php',
+                    { method: 'POST', headers: { 'X-CSRF-Token': token }, body: fd }
+                );
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.message || 'Failed');
+                this.showAddMembers = false;
+                await this.loadMembers(this.activeChannel.id);
+                FF_Toast.success(json.data?.message || 'Members added.');
             } catch (e) {
-                FF_Toast.error('Failed to join channel.');
+                FF_Toast.error('Failed to add members.');
             }
         },
 
-        // ── Direct messages ───────────────────────────────────────────────
+        // ── DIRECT MESSAGES ───────────────────────────────────────────────
 
         openNewDM() {
-            this.dmUserQuery   = '';
-            this.dmUserResults = [];
-            this.showNewDM     = true;
+            this.dmSearch  = '';
+            this.dmResults = [];
+            this.showNewDM = true;
+            this.$nextTick(() => this.$refs.dmSearchInput?.focus());
         },
 
         async searchDMUsers() {
-            if (!this.dmUserQuery) { this.dmUserResults = []; return; }
+            if (!this.dmSearch) { this.dmResults = []; return; }
             try {
+                // WHY: users API returns paginated envelope — unwrap .items.
                 const data = await FF_Api.get(
-                    'v1/users/index.php?q=' + encodeURIComponent(this.dmUserQuery) + '&per_page=10'
+                    FF_Api.url('/api/v1/users/index.php') + '?q=' + encodeURIComponent(this.dmSearch) + '&per_page=10'
                 );
-                this.dmUserResults = (data.data || []).slice(0, 10);
-            } catch (e) {
-                this.dmUserResults = [];
-            }
+                this.dmResults = (data.data?.items || []).slice(0, 10);
+            } catch (e) { this.dmResults = []; }
         },
 
         async startDM(userId) {
             try {
                 const data = await FF_Api.post(FF_Api.url('/api/v1/chat/dm/create.php'), { user_id: userId });
                 this.showNewDM = false;
-                // Add to DMs if not already there
-                if (!this.directMessages.find(d => d.id === data.id)) {
-                    this.directMessages.push({ ...data, unread_count: 0 });
+                if (!this.directMessages.find(d => d.id === data.data?.id)) {
+                    this.directMessages.push({ ...data.data, unread_count: 0 });
                 }
-                await this.selectChannel(data);
+                await this.selectChannel(data.data);
             } catch (e) {
                 FF_Toast.error('Failed to open direct message.');
             }
         },
 
-        // ── Search ────────────────────────────────────────────────────────
+        // ── CUSTOMER CONVERSATIONS ────────────────────────────────────────
+
+        openCustomerConvo() {
+            this.customerSearch        = '';
+            this.customerResults       = [];
+            this.selectedCustomer      = null;
+            this.customerConvoSubject  = '';
+            this.customerConvoMessage  = '';
+            this.showCustomerConvo     = true;
+        },
+
+        async searchCustomers() {
+            if (!this.customerSearch) { this.customerResults = []; return; }
+            try {
+                // WHY: customers API uses `search` (not `q`) and returns paginated
+                //      envelope `{data: {items, pagination}}` — must unwrap .items.
+                const data = await FF_Api.get(
+                    FF_Api.url('/api/v1/customers/index.php') + '?search=' + encodeURIComponent(this.customerSearch) + '&per_page=10'
+                );
+                this.customerResults = data.data?.items || [];
+            } catch (e) { this.customerResults = []; }
+        },
+
+        selectCustomer(c) {
+            this.selectedCustomer  = c;
+            this.customerResults   = [];
+            this.customerSearch    = c.company_name;
+        },
+
+        async startCustomerConvo() {
+            if (!this.selectedCustomer || !this.customerConvoSubject.trim()) return;
+            try {
+                const data = await FF_Api.post(FF_Api.url('/api/v1/chat/customer/create.php'), {
+                    customer_id: this.selectedCustomer.id,
+                    subject:     this.customerConvoSubject.trim(),
+                    message:     this.customerConvoMessage.trim(),
+                });
+                this.showCustomerConvo = false;
+                this.customerConversations.push({ ...data.data, unread_count: 0 });
+                await this.selectChannel(data.data);
+                FF_Toast.success('Conversation started.');
+            } catch (e) {
+                FF_Toast.error('Failed to start conversation.');
+            }
+        },
+
+        // ── SEARCH ────────────────────────────────────────────────────────
 
         toggleSearch() {
-            this.showSearch   = !this.showSearch;
-            this.searchQuery  = '';
+            this.showSearch    = !this.showSearch;
+            this.messageSearch = '';
             this.searchResults = [];
             if (this.showSearch) {
-                this.$nextTick(() => this.$el.querySelector('.chat-search-input')?.focus());
+                this.$nextTick(() => this.$refs.searchInput?.focus());
             }
         },
 
         async searchMessages() {
-            if (this.searchQuery.length < 2) { this.searchResults = []; return; }
+            if (this.messageSearch.length < 2) { this.searchResults = []; return; }
             try {
                 const chParam = this.activeChannel ? '&channel_id=' + this.activeChannel.id : '';
-                const data = await FF_Api.get(
-                    FF_Api.url('/api/v1/chat/search.php') + '?q=' + encodeURIComponent(this.searchQuery) + chParam
+                const data    = await FF_Api.get(
+                    FF_Api.url('/api/v1/chat/search/messages.php') +
+                    '?q=' + encodeURIComponent(this.messageSearch) + chParam
                 );
                 this.searchResults = data.data?.results || [];
-            } catch (e) {
-                this.searchResults = [];
+            } catch (e) { this.searchResults = []; }
+        },
+
+        // ── SCROLL ────────────────────────────────────────────────────────
+
+        scrollToBottom(force = false) {
+            const el = document.getElementById('chat-messages-scroll');
+            if (el && (force || this.isNearBottom())) {
+                el.scrollTop = el.scrollHeight;
+                this.showNewMsgsBanner = false;
+            }
+        },
+
+        isNearBottom() {
+            const el = document.getElementById('chat-messages-scroll');
+            if (!el) return true;
+            return el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+        },
+
+        handleScroll(e) {
+            if (e.target.scrollTop < 80 && this.hasMore && !this.loadingMore) {
+                this.loadMore();
+            }
+            if (this.isNearBottom()) {
+                this.showNewMsgsBanner = false;
             }
         },
 
@@ -1666,55 +2221,68 @@ function FF_Chat() {
             const el = document.querySelector('[data-message-id="' + id + '"]');
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.classList.add('chat-message--highlight');
-                setTimeout(() => el.classList.remove('chat-message--highlight'), 2000);
+                this.highlightedMsgId = id;
+                setTimeout(() => { this.highlightedMsgId = null; }, 2500);
             }
         },
 
-        // ── Scroll ────────────────────────────────────────────────────────
-
-        scrollToBottom() {
-            const el = document.getElementById('chat-messages-scroll');
-            if (el) el.scrollTop = el.scrollHeight;
-        },
-
-        handleScroll(e) {
-            // Load more when scrolled near top
-            if (e.target.scrollTop < 80 && this.hasMore && !this.loadingMore) {
-                this.loadMore();
+        highlightMessage(id) {
+            const el = document.querySelector('[data-message-id="' + id + '"]');
+            if (el) {
+                el.scrollIntoView({ block: 'center' });
+                this.highlightedMsgId = id;
+                setTimeout(() => { this.highlightedMsgId = null; }, 3000);
             }
         },
+
+        // ── GLOBAL KEYDOWN ────────────────────────────────────────────────
 
         handleKeydown(e) {
-            // Global Escape closes dropdowns
             if (e.key === 'Escape') {
                 this.showCreateChannel = false;
                 this.showBrowse        = false;
                 this.showNewDM         = false;
-                this.emojiPickerMessageId = null;
+                this.showCustomerConvo = false;
+                this.showAddMembers    = false;
+                this.emojiPickerForMsg = null;
+                this.showRecordPicker  = false;
+                this.showMentions      = false;
             }
         },
 
-        // ── Formatting helpers ─────────────────────────────────────────────
+        // ── FORMATTING HELPERS ────────────────────────────────────────────
 
         initials(name) {
             if (!name) return '?';
-            return name.split(' ').map(p => p[0]).join('').substring(0, 2).toUpperCase();
+            return name.trim().split(/\s+/).map(p => p[0] || '').join('').substring(0, 2).toUpperCase();
         },
 
         formatTime(ts) {
             if (!ts) return '';
-            const d = new Date(ts);
-            const now = new Date();
+            const d      = new Date(ts);
+            const now    = new Date();
             const diffMs = now - d;
-            const diffMins = Math.floor(diffMs / 60000);
-            if (diffMins < 1)  return 'just now';
-            if (diffMins < 60) return diffMins + 'm ago';
-            const diffHrs = Math.floor(diffMins / 60);
-            if (diffHrs < 24)  return diffHrs + 'h ago';
-            // Older — show date + time
-            return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) +
-                   ' ' + d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+            const diffMin= Math.floor(diffMs / 60000);
+            if (diffMin < 1)  return 'just now';
+            if (diffMin < 60) return diffMin + 'm ago';
+            const isSameDay = d.toDateString() === now.toDateString();
+            const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+            const timeStr   = d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+            if (isSameDay)                         return timeStr;
+            if (d.toDateString() === yesterday.toDateString()) return 'Yesterday ' + timeStr;
+            if (d.getFullYear() === now.getFullYear())
+                return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) + ' at ' + timeStr;
+            return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' });
+        },
+
+        formatDateLabel(d) {
+            const now       = new Date();
+            const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+            if (d.toDateString() === now.toDateString())       return 'Today';
+            if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+            if (d.getFullYear() === now.getFullYear())
+                return d.toLocaleDateString('en-CA', { month: 'long', day: 'numeric' });
+            return d.toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' });
         },
 
         truncate(text, max) {
@@ -1723,82 +2291,51 @@ function FF_Chat() {
         },
 
         formatFileSize(bytes) {
-            if (bytes < 1024)       return bytes + ' B';
-            if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
+            if (!bytes || bytes < 1024) return (bytes || 0) + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / 1048576).toFixed(1) + ' MB';
         },
 
         formatMessageHtml(text) {
             if (!text) return '';
-            // Escape HTML first
             let html = text
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
-            // Bold @mentions
-            html = html.replace(/@(\w+(?:\s+\w+)?)/g,
-                '<span class="chat-mention">@$1</span>');
-            // URLs
-            html = html.replace(/(https?:\/\/[^\s]+)/g,
+            // @mentions → highlighted span
+            html = html.replace(/@(\w+(?:\s+\w+)?)/g, '<span class="chat-mention">@$1</span>');
+            // URLs → links
+            html = html.replace(/(https?:\/\/[^\s<]+)/g,
                 '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1</a>');
-            // Newlines
+            // Newlines → <br>
             html = html.replace(/\n/g, '<br>');
             return html;
         },
 
-        // ── Attachment helpers ────────────────────────────────────────────
+        // ── ATTACHMENT HELPERS ────────────────────────────────────────────
 
         attachmentIcon(type) {
-            const icons = {
-                invoice:      '📄',
-                lease:        '📋',
-                customer:     '👤',
-                equipment:    '🚛',
-                work_order:   '🔧',
-                damage_claim: '⚠️',
-                reservation:  '📅',
-                payment:      '💰',
-                document:     '📁',
-                file:         '📎',
-            };
-            return icons[type] || '📎';
-        },
-
-        attachmentTitle(att) {
-            if (att.preview_data) {
-                try {
-                    const d = typeof att.preview_data === 'string'
-                        ? JSON.parse(att.preview_data) : att.preview_data;
-                    return d.title || att.type;
-                } catch (e) {}
-            }
-            return att.file_name || att.type;
-        },
-
-        attachmentSubtitle(att) {
-            if (att.preview_data) {
-                try {
-                    const d = typeof att.preview_data === 'string'
-                        ? JSON.parse(att.preview_data) : att.preview_data;
-                    return d.subtitle || '';
-                } catch (e) {}
-            }
-            return att.file_size ? this.formatFileSize(att.file_size) : '';
+            return {
+                invoice: '📄', lease: '📋', customer: '👤', equipment: '🚛',
+                work_order: '🔧', damage_claim: '⚠️', reservation: '📅',
+                payment: '💰', document: '📁', file: '📎', image: '🖼️',
+            }[type] || '📎';
         },
 
         attachmentUrl(att) {
+            if (att.preview_url) return att.preview_url;
             if (!att.entity_id) return '#';
             const routes = {
-                invoice:      '/fleetforge/invoices/show?id=',
-                lease:        '/fleetforge/leases/show?id=',
-                customer:     '/fleetforge/customers/show?id=',
-                equipment:    '/fleetforge/equipment/show?id=',
-                work_order:   '/fleetforge/maintenance/show?id=',
+                invoice: '/fleetforge/invoices/show?id=',
+                lease: '/fleetforge/leases/show?id=',
+                customer: '/fleetforge/customers/show?id=',
+                equipment: '/fleetforge/equipment/show?id=',
+                work_order: '/fleetforge/maintenance/show?id=',
                 damage_claim: '/fleetforge/damage-claims/show?id=',
-                reservation:  '/fleetforge/reservations/show?id=',
-                payment:      '/fleetforge/payments/show?id=',
+                reservation: '/fleetforge/reservations/show?id=',
+                payment: '/fleetforge/payments/show?id=',
             };
-            return (routes[att.type] || '#') + att.entity_id;
+            return (routes[att.attachment_type || att.type] || '#') + att.entity_id;
         },
     };
 }
@@ -1848,7 +2385,7 @@ function FF_ChatWidget() {
 
         async pollUnread() {
             try {
-                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php'));
+                const data = await FF_Api.get(FF_Api.url('/api/v1/chat/unread/count.php'));
                 this.totalUnread = data.data?.total_unread || 0;
                 const map = {};
                 (data.data?.channels || []).forEach(c => { map[c.id] = c.unread; });
@@ -2019,7 +2556,7 @@ function FF_ChatHubBadge() {
             // want the other half of the badge to keep working.
             try {
                 const [chatData, msgrData] = await Promise.all([
-                    FF_Api.get(FF_Api.url('/api/v1/chat/unread/index.php')).catch(() => null),
+                    FF_Api.get(FF_Api.url('/api/v1/chat/unread/count.php')).catch(() => null),
                     FF_Api.get(FF_Api.url('/api/v1/messenger/unread.php')).catch(() => null),
                 ]);
                 const chatUnread = (chatData && chatData.data && chatData.data.total_unread) || 0;
@@ -2046,7 +2583,377 @@ window.FF_ChatHubBadge = FF_ChatHubBadge;
 
 
 // ============================================================
-// 07g. FF_Messenger — admin customer messenger page (app/admin/messenger/index.php)
+// 07g. FF_PortalChat — portal-side customer chat component
+// CHAT-2 — single-thread iMessage-style conversation view.
+// Used by app/portal/chat/index.php.
+// ============================================================
+
+function FF_PortalChat() {
+    return {
+        channel:         null,   // chat_channels row for this customer
+        messages:        [],
+        loading:         true,
+        loadingMessages: false,
+        loadingMore:     false,
+        sending:         false,
+        composing:       '',
+        lastId:          0,
+        hasMore:         false,
+        _pollTimer:      null,
+
+        async init() {
+            await this.loadChannel();
+            if (this.channel) {
+                this.loadingMessages = true;
+                await this.loadMessages();
+                this.loadingMessages = false;
+            }
+            // WHY: 10s poll (portal gets slower cadence than staff — they're external)
+            this._pollTimer = setInterval(() => {
+                if (!document.hidden && this.channel) this.poll();
+            }, 10000);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && this.channel) this.poll();
+            });
+        },
+
+        async loadChannel() {
+            try {
+                const data = await FF_Api.get(FF_Api.url('/portal/api/chat/channel.php'));
+                this.channel = data.data?.channel || null;
+            } catch (e) {
+                // Keep channel null — show empty state
+            }
+            this.loading = false;
+        },
+
+        async loadMessages(prepend = false) {
+            if (!this.channel) return;
+            const params = new URLSearchParams({ channel_id: this.channel.id, limit: 30 });
+            if (prepend && this.messages.length > 0) {
+                params.set('before_id', this.messages[0].id);
+            }
+            try {
+                const data = await FF_Api.get(
+                    FF_Api.url('/portal/api/chat/messages.php') + '?' + params
+                );
+                const msgs    = data.data?.messages || [];
+                this.hasMore  = data.data?.has_more || false;
+                if (prepend) {
+                    const area  = this.$refs.msgArea;
+                    const prevH = area ? area.scrollHeight : 0;
+                    this.messages = [...msgs, ...this.messages];
+                    this.$nextTick(() => { if (area) area.scrollTop = area.scrollHeight - prevH; });
+                } else {
+                    this.messages = msgs;
+                    if (msgs.length > 0) this.lastId = msgs[msgs.length - 1].id;
+                    this.$nextTick(() => this.scrollToBottom());
+                }
+            } catch (e) {
+                // Silent
+            }
+        },
+
+        async loadMore() {
+            if (this.loadingMore) return;
+            this.loadingMore = true;
+            await this.loadMessages(true);
+            this.loadingMore = false;
+        },
+
+        async poll() {
+            if (!this.channel) return;
+            const params = new URLSearchParams({
+                channel_id: this.channel.id,
+                after_id:   this.lastId,
+            });
+            try {
+                const data    = await FF_Api.get(
+                    FF_Api.url('/portal/api/chat/poll.php') + '?' + params
+                );
+                const newMsgs = data.data?.messages || [];
+                if (newMsgs.length > 0) {
+                    const area         = this.$refs.msgArea;
+                    const wasNearBottom = !area ||
+                        (area.scrollHeight - area.scrollTop - area.clientHeight) < 200;
+                    this.messages = [...this.messages, ...newMsgs];
+                    this.lastId   = newMsgs[newMsgs.length - 1].id;
+                    if (wasNearBottom) {
+                        this.$nextTick(() => this.scrollToBottom());
+                    }
+                    // WHY: play notification sound only for staff messages (portal user
+                    //      already sees their own messages instantly after send).
+                    const hasStaffMsg = newMsgs.some(m => m.user_id !== null);
+                    if (hasStaffMsg && window.FF_Sound) {
+                        try { FF_Sound.play('notification'); } catch (e) {}
+                    }
+                }
+            } catch (e) {
+                // Silent
+            }
+        },
+
+        async send() {
+            const msg = this.composing.trim();
+            if (!msg || this.sending || !this.channel) return;
+            this.sending = true;
+            try {
+                await FF_Api.post(FF_Api.url('/portal/api/chat/send.php'), {
+                    channel_id: this.channel.id,
+                    message:    msg,
+                });
+                this.composing = '';
+                // Reset textarea height
+                this.$nextTick(() => {
+                    const ta = this.$refs.composeInput;
+                    if (ta) { ta.style.height = 'auto'; }
+                });
+                await this.poll();
+            } catch (e) {
+                alert('Failed to send message. Please try again.');
+            }
+            this.sending = false;
+        },
+
+        handleKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.send();
+            }
+        },
+
+        scrollToBottom() {
+            const area = this.$refs.msgArea;
+            if (area) area.scrollTop = area.scrollHeight;
+        },
+
+        isPortalMessage(msg) {
+            // WHY: portal_user_id being set means this was sent by the customer;
+            //      user_id set means it was sent by a staff member.
+            return msg.portal_user_id !== null && msg.portal_user_id !== undefined;
+        },
+
+        staffInitials(msg) {
+            const name = msg.author_name || msg.sender_display_name || '?';
+            return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        },
+
+        attachmentIcon(type) {
+            const icons = {
+                invoice: '🧾', lease: '📋', customer: '🏢', payment: '💳',
+                work_order: '🔧', damage_claim: '🛡', reservation: '📅',
+                equipment: '🚛', file: '📎', image: '🖼', document: '📄',
+            };
+            return icons[type] || '📎';
+        },
+
+        attachmentHref(att) {
+            if (att.preview_url) return att.preview_url;
+            return '#';
+        },
+
+        // ── messagesWithSeparators — computed (Alpine magic property) ──
+        get messagesWithSeparators() {
+            const out  = [];
+            let lastDay = null;
+            for (const msg of this.messages) {
+                const raw = msg.created_at || '';
+                const d   = raw ? new Date(raw.replace(' ', 'T') + (raw.includes('T') ? '' : 'Z')) : null;
+                const day = d ? d.toDateString() : null;
+                if (day && day !== lastDay) {
+                    out.push({ type: 'separator', key: 'sep-' + day, label: this.formatDateLabel(d) });
+                    lastDay = day;
+                }
+                out.push({ type: 'message', key: 'msg-' + msg.id, msg });
+            }
+            return out;
+        },
+
+        formatTime(ts) {
+            if (!ts) return '';
+            const d = new Date(ts.replace(' ', 'T') + (ts.includes('T') ? '' : 'Z'));
+            const now = new Date();
+            const isToday = d.toDateString() === now.toDateString();
+            if (isToday) {
+                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+            return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+                   d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        },
+
+        formatDateLabel(d) {
+            if (!d) return '';
+            const now = new Date();
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            if (d.toDateString() === now.toDateString())        return 'Today';
+            if (d.toDateString() === yesterday.toDateString())  return 'Yesterday';
+            return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+        },
+    };
+}
+
+window.FF_PortalChat = FF_PortalChat;
+
+
+// ============================================================
+// 07g. FF_RecordPicker — universal search-as-you-type record selector
+// ============================================================
+// WHY: replaces brittle static <select> dropdowns (which become unusable
+//      once a customer/lease/equipment list grows past ~50 rows) with a
+//      reusable Alpine factory. Any form that needs to pick a customer,
+//      lease, equipment unit, vendor, or invoice can drop in a
+//      FF_RecordPicker() component instance with a few config options
+//      and get a debounced, keyboard-navigable, pagination-aware picker.
+//
+// Usage (inside a parent Alpine component):
+//   <div x-data="FF_RecordPicker({
+//          endpoint:  '/api/v1/customers/index.php',
+//          searchParam: 'search',            // or 'q' — varies per API
+//          resultKey: 'items',               // default; 'results' for some
+//          mapResult: r => ({
+//              id:       r.id,
+//              label:    r.company_name,
+//              sublabel: r.city + ', ' + r.province,
+//              raw:      r,
+//          }),
+//          placeholder: 'Search customers…',
+//        })"
+//        @record-picked="form.customer_id = $event.detail.id"
+//        @record-cleared="form.customer_id = ''">
+//     <!-- picker UI renders itself via x-template -->
+//     <div x-html="renderPicker()"></div>
+//   </div>
+//
+// Or use the template-less drop-in pattern: include the markup inline
+// in the parent page and reference the picker factory's state directly.
+
+function FF_RecordPicker(config) {
+    return {
+        // ── Configuration (merged from caller) ─────────────────────────
+        _cfg: Object.assign({
+            endpoint:    '',
+            searchParam: 'search',
+            resultKey:   'items',        // where in data.data the array lives
+            perPage:     10,
+            extraParams: '',             // additional query string fragment
+            minChars:    1,
+            placeholder: 'Search…',
+            mapResult:   (r) => ({ id: r.id, label: r.name || r.title || ('#' + r.id), sublabel: '', raw: r }),
+            initialId:   null,           // for edit forms — pre-select by ID
+            initialLabel: '',            // display text if initialId is given
+            loadInitial: true,           // fetch initial results on focus
+        }, config || {}),
+
+        // ── State ──────────────────────────────────────────────────────
+        query:        '',
+        results:      [],
+        selected:     null,
+        loading:      false,
+        showDropdown: false,
+        highlightIdx: 0,
+        _searchTimer: null,
+
+        init() {
+            // Pre-fill if editing an existing record
+            if (this._cfg.initialId && this._cfg.initialLabel) {
+                this.selected = { id: this._cfg.initialId, label: this._cfg.initialLabel };
+                this.query    = this._cfg.initialLabel;
+            }
+        },
+
+        async search() {
+            const q = (this.query || '').trim();
+            if (q.length < this._cfg.minChars) {
+                this.results = [];
+                this.showDropdown = false;
+                return;
+            }
+            this.loading = true;
+            this.showDropdown = true;
+            try {
+                let url = FF_Api.url(this._cfg.endpoint) +
+                          '?' + this._cfg.searchParam + '=' + encodeURIComponent(q) +
+                          '&per_page=' + this._cfg.perPage;
+                if (this._cfg.extraParams) url += '&' + this._cfg.extraParams;
+
+                const data  = await FF_Api.get(url);
+                const items = data.data?.[this._cfg.resultKey] || data.data || [];
+                this.results = Array.isArray(items)
+                    ? items.map(r => this._cfg.mapResult(r))
+                    : [];
+                this.highlightIdx = 0;
+            } catch (e) {
+                this.results = [];
+            }
+            this.loading = false;
+        },
+
+        onInput() {
+            // Debounce search by 200ms
+            clearTimeout(this._searchTimer);
+            this._searchTimer = setTimeout(() => this.search(), 200);
+            // If user clears the text, also clear the selection
+            if ((this.query || '').trim() === '' && this.selected) {
+                this.clear();
+            }
+        },
+
+        onFocus() {
+            if (this.results.length > 0) this.showDropdown = true;
+            else if (this.query.trim() !== '') this.search();
+        },
+
+        onBlur() {
+            // Delay so clicks on results register before dropdown hides
+            setTimeout(() => { this.showDropdown = false; }, 180);
+        },
+
+        handleKey(e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.highlightIdx = Math.min(this.highlightIdx + 1, this.results.length - 1);
+                this.showDropdown = true;
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.highlightIdx = Math.max(this.highlightIdx - 1, 0);
+            } else if (e.key === 'Enter') {
+                if (this.showDropdown && this.results[this.highlightIdx]) {
+                    e.preventDefault();
+                    this.pick(this.results[this.highlightIdx]);
+                }
+            } else if (e.key === 'Escape') {
+                this.showDropdown = false;
+            }
+        },
+
+        pick(r) {
+            this.selected = r;
+            this.query    = r.label;
+            this.results  = [];
+            this.showDropdown = false;
+            // Emit a DOM event so the parent Alpine component can react.
+            // WHY $dispatch: Alpine's built-in event bus bubbles the event
+            //      up through the scope chain so @record-picked on the
+            //      parent <div> receives it cleanly — no global state.
+            if (this.$dispatch) this.$dispatch('record-picked', r);
+        },
+
+        clear() {
+            this.selected = null;
+            this.query    = '';
+            this.results  = [];
+            this.showDropdown = false;
+            if (this.$dispatch) this.$dispatch('record-cleared');
+        },
+    };
+}
+
+window.FF_RecordPicker = FF_RecordPicker;
+
+
+// ============================================================
+// 07i. FF_Messenger — admin customer messenger page (app/admin/messenger/index.php)
 // ============================================================
 // Facebook-Messenger-style inbox for admin↔customer conversations.
 // Completely separate from FF_Chat (team chat) — different endpoints,
@@ -2872,31 +3779,69 @@ window.FF_ConfirmModal = function () {
         message:      '',
         confirmLabel: 'Confirm',
         dangerMode:   false,
-        _callback:    null,     // onConfirm function — stored but not reactive
+        prompt:       false,        // [M13] when true, show a text input field
+        promptValue:  '',           // [M13] text input value
+        placeholder:  '',           // [M13] placeholder for the prompt input
+        _callback:    null,         // onConfirm function — stored but not reactive
+        _cancelCb:    null,         // [M13] onCancel function — for FF_Confirm.ask()
 
         show(detail) {
             this.title        = detail.title        ?? 'Confirm';
             this.message      = detail.message      ?? '';
             this.confirmLabel = detail.confirmLabel ?? 'Confirm';
             this.dangerMode   = detail.dangerMode   ?? false;
+            this.prompt       = detail.prompt       ?? false;
+            this.promptValue  = detail.defaultValue ?? '';
+            this.placeholder  = detail.placeholder  ?? '';
             this._callback    = typeof detail.onConfirm === 'function'
                                     ? detail.onConfirm
                                     : null;
+            this._cancelCb    = typeof detail.onCancel === 'function'
+                                    ? detail.onCancel
+                                    : null;
             this.open = true;
+
+            // Focus the input field after the modal has rendered.
+            if (this.prompt) {
+                this.$nextTick(() => {
+                    const input = this.$el.querySelector('[data-ff-confirm-input]');
+                    if (input) input.focus();
+                });
+            }
         },
 
         confirm() {
             if (this._callback) {
                 try {
-                    this._callback();
+                    // [M13] Pass the prompt value if this is a prompt dialog,
+                    // otherwise call the callback with no arguments (preserving
+                    // the old FF_Confirm.show() contract).
+                    if (this.prompt) {
+                        this._callback(this.promptValue);
+                    } else {
+                        this._callback();
+                    }
                 } catch (err) {
                     console.error('[FF_ConfirmModal] onConfirm threw:', err);
                 }
             }
+            this._callback = null;
+            this._cancelCb = null;
             this.open = false;
         },
 
         cancel() {
+            // [M13] Invoke the cancel callback if FF_Confirm.ask() is waiting
+            // for a Promise resolution. Wrapped in try/catch like confirm().
+            if (this._cancelCb) {
+                try {
+                    this._cancelCb();
+                } catch (err) {
+                    console.error('[FF_ConfirmModal] onCancel threw:', err);
+                }
+            }
+            this._callback = null;
+            this._cancelCb = null;
             this.open = false;
         },
     };

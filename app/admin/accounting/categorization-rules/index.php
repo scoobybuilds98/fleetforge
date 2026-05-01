@@ -362,14 +362,14 @@ function rulesPage() {
         },
 
         async deleteRule(id) {
-            if (!confirm('Delete this rule?')) return;
+            if (!(await FF_Confirm.ask('Delete this rule?'))) return;
             try {
                 const fd = new FormData(); fd.append('id', id);
                 const r = await fetch(FF_Api.url('/api/v1/accounting/categorization-rules/delete.php'), { method: 'POST', body: fd, headers: this._csrfHeaders() });
                 const j = await r.json();
                 if (j.success) this.load();
-                else alert(j.error?.message || 'Delete failed.');
-            } catch (e) { alert(e.message); }
+                else FF_Toast.error(j.error?.message || 'Delete failed.');
+            } catch (e) { FF_Toast.error(e.message); }
         },
     };
 }

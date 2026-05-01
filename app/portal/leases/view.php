@@ -216,7 +216,8 @@ $statusBadge = match($lease['status']) {
                 <p class="portal-empty-text">Invoices will appear here once generated.</p>
             </div>
         <?php else: ?>
-            <table class="portal-table">
+            <div class="table-responsive">
+<table class="portal-table">
                 <thead>
                     <tr>
                         <th>Invoice #</th>
@@ -250,6 +251,7 @@ $statusBadge = match($lease['status']) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+</div>
         <?php endif; ?>
     </div>
 </div>
@@ -264,7 +266,8 @@ $statusBadge = match($lease['status']) {
         </h2>
     </div>
     <div class="portal-section-body--flush">
-        <table class="portal-table">
+        <div class="table-responsive">
+<table class="portal-table">
             <thead>
                 <tr>
                     <th>Document</th>
@@ -288,6 +291,7 @@ $statusBadge = match($lease['status']) {
                 <?php endforeach; ?>
             </tbody>
         </table>
+</div>
     </div>
 </div>
 <?php endif; ?>

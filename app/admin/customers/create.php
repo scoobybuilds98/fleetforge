@@ -354,7 +354,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="credit_limit">Credit Limit</label>
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
-                            <input type="number" id="credit_limit" name="credit_limit" class="form-control"
+                            <input type="number" min="0" id="credit_limit" name="credit_limit" class="form-control"
                                    x-model="form.credit_limit"
                                    step="0.01" placeholder="0.00">
                         </div>
@@ -381,7 +381,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <template x-if="form.discount_type !== 'none'">
                         <div class="form-group">
                             <label class="form-label" for="discount_value">Discount Value</label>
-                            <input type="number" id="discount_value" name="discount_value" class="form-control"
+                            <input type="number" min="0" id="discount_value" name="discount_value" class="form-control"
                                    x-model="form.discount_value"
                                    step="0.0001">
                             <div class="field-error" data-error-for="discount_value"></div>
