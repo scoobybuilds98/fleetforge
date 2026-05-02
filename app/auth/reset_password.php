@@ -199,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     This password reset link has expired or already been used.
                     Reset links are valid for <strong>1 hour</strong>.
                 </p>
-                <a href="<?= e(base_url('auth/forgot-password')) ?>"
+                <a href="<?= e(base_url('auth/forgot_password')) ?>"
                    class="btn btn-primary btn-md"
                    style="margin-top:20px;display:inline-flex;">
                     Request a new link
@@ -227,7 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
 
             <form method="post"
-                  action="<?= e(base_url('auth/reset-password')) ?>?token=<?= urlencode($plainToken) ?>"
+                  action="<?= e(base_url('auth/reset_password')) ?>?token=<?= urlencode($plainToken) ?>"
                   novalidate
                   id="reset-form">
 

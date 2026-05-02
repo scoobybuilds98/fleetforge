@@ -514,7 +514,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="form-group">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                     <label class="form-label" for="password" style="margin-bottom:0">Password</label>
-                    <a href="<?= e(base_url('auth/forgot-password')) ?>"
+                    <a href="<?= e(base_url('auth/forgot_password')) ?>"
                        class="btn-link btn-sm"
                        tabindex="-1">
                         Forgot password?

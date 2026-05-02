@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         [$user['id'], $tokenHash, $expiresAt]
                     );
 
-                    $resetLink = base_url('auth/reset-password') . '?token=' . urlencode($plainToken);
+                    $resetLink = base_url('auth/reset_password') . '?token=' . urlencode($plainToken);
                     $appName   = settings_get('company.name', 'FleetForge');
 
                     $htmlBody =
@@ -192,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </p>
                 <p style="font-size:0.8125rem;color:var(--text-tertiary);margin-top:12px;">
                     Didn't receive it? Check your spam folder, or
-                    <a href="<?= e(base_url('auth/forgot-password')) ?>">try again</a>.
+                    <a href="<?= e(base_url('auth/forgot_password')) ?>">try again</a>.
                 </p>
             </div>
 
@@ -213,7 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             <?php endif; ?>
 
-            <form method="post" action="<?= e(base_url('auth/forgot-password')) ?>" novalidate>
+            <form method="post" action="<?= e(base_url('auth/forgot_password')) ?>" novalidate>
                 <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
 
                 <div class="form-group">
