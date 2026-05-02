@@ -239,8 +239,9 @@ try {
              eu.mvi_expiry,
              eu.insurance_expiry,
              c.id AS customer_id,
-             COALESCE(c.contact_name, c.company_name) AS customer_name,
+             c.company_name,
              c.email AS customer_email,
+             l.contract_number,
              pu.id AS portal_user_id,
              pu.email AS portal_email,
              pu.name AS portal_name,
@@ -269,7 +270,10 @@ try {
         [$inWarning, $inWarning, $inWarning, $inWarning]
     );
 
-    // Group rows by customer_id; collect per-unit affected-doc lists
+    // Group rows by customer_id; collect per-unit affected-doc lists.
+    // _unitKeys tracks unit_id → index in 'units' to dedup units that
+    // appear on multiple active leases (edge case) and merge their
+    // contract numbers rather than emitting a duplicate unit block.
     $byCustomer = [];
     foreach ($customerRows as $row) {
         $cid = (int) $row['customer_id'];
@@ -277,12 +281,13 @@ try {
         if (!isset($byCustomer[$cid])) {
             $byCustomer[$cid] = [
                 'customer_id'              => $cid,
-                'customer_name'            => $row['customer_name'],
+                'company_name'             => (string) $row['company_name'],
                 'customer_email'           => $row['customer_email'],
                 'portal_email'             => $row['portal_email'],
                 'portal_name'              => $row['portal_name'],
                 'notification_preferences' => $row['notification_preferences'],
                 'units'                    => [],
+                '_unitKeys'                => [],  // unit_id => index in 'units'
             ];
         }
 
@@ -295,21 +300,35 @@ try {
         $unitDocs = [];
         foreach ($docChecks as $docName => $expiryDate) {
             if ($expiryDate === null || $expiryDate > $inWarning) continue;
-            $urgency = match(true) {
-                $expiryDate <= $today    => 'expired',
-                $expiryDate <= $inCritical => 'critical',
-                default                  => 'warning',
-            };
-            $unitDocs[] = ['name' => $docName, 'expiry' => $expiryDate, 'urgency' => $urgency];
+            $unitDocs[] = ['name' => $docName, 'expiry' => $expiryDate];
         }
 
         if (!empty($unitDocs)) {
-            $byCustomer[$cid]['units'][] = [
-                'unit_number' => $row['unit_number'],
-                'unit_id'     => (int) $row['unit_id'],
-                'docs'        => $unitDocs,
-            ];
+            $unitId = (int) $row['unit_id'];
+            if (!isset($byCustomer[$cid]['_unitKeys'][$unitId])) {
+                $byCustomer[$cid]['_unitKeys'][$unitId] = count($byCustomer[$cid]['units']);
+                $byCustomer[$cid]['units'][] = [
+                    'unit_number'      => $row['unit_number'],
+                    'unit_id'          => $unitId,
+                    'contract_numbers' => [],
+                    'docs'             => $unitDocs,
+                ];
+            }
+            $idx = $byCustomer[$cid]['_unitKeys'][$unitId];
+            $cn  = (string) ($row['contract_number'] ?? '');
+            if ($cn !== '' && !in_array($cn, $byCustomer[$cid]['units'][$idx]['contract_numbers'], true)) {
+                $byCustomer[$cid]['units'][$idx]['contract_numbers'][] = $cn;
+            }
         }
+    }
+
+    // Flatten contract_numbers array → contract_number string, drop internal key
+    foreach ($byCustomer as $cid => $cdata) {
+        foreach ($byCustomer[$cid]['units'] as $i => $unit) {
+            $byCustomer[$cid]['units'][$i]['contract_number'] = implode(', ', $unit['contract_numbers']);
+            unset($byCustomer[$cid]['units'][$i]['contract_numbers']);
+        }
+        unset($byCustomer[$cid]['_unitKeys']);
     }
 
     $companyName = (string) settings_get('company.name', 'FleetForge');
@@ -319,8 +338,8 @@ try {
         $customerId = $custData['customer_id'];
 
         // EC2: Skip if no deliverable email address
-        $toEmail = (string) ($custData['portal_email'] ?: $custData['customer_email']);
-        $toName  = (string) ($custData['portal_name']  ?: $custData['customer_name']);
+        $toEmail   = (string) ($custData['portal_email']  ?: $custData['customer_email']);
+        $toName    = (string) ($custData['portal_name']   ?: $custData['company_name']);
         if ($toEmail === '') {
             $emailSkipped++;
             continue;
@@ -357,13 +376,14 @@ try {
             continue;
         }
 
-        // Determine urgency label for subject line
+        // Determine urgency label for subject line by re-deriving from expiry dates
         $hasExpired  = false;
         $hasCritical = false;
         foreach ($custData['units'] as $u) {
             foreach ($u['docs'] as $d) {
-                if ($d['urgency'] === 'expired')  $hasExpired  = true;
-                if ($d['urgency'] === 'critical') $hasCritical = true;
+                $expiryDate = (string) ($d['expiry'] ?? '');
+                if ($expiryDate <= $today)      $hasExpired  = true;
+                elseif ($expiryDate <= $inCritical) $hasCritical = true;
             }
         }
         $urgencyWord = $hasExpired ? 'Expired' : ($hasCritical ? 'Expiring Soon' : 'Upcoming Expiry');
@@ -371,9 +391,9 @@ try {
         $subject     = "[Action Required] Compliance Documents {$urgencyWord}"
                      . " — {$unitCount} Unit" . ($unitCount > 1 ? 's' : '');
 
-        // Build and wrap email body
+        // Build and wrap email body; customer_name = company_name for formal greeting
         $bodyHtml    = render_customer_compliance_email([
-            'customer_name' => $toName,
+            'customer_name' => $custData['company_name'],
             'company_name'  => $companyName,
             'units'         => $custData['units'],
             'portal_url'    => $appUrl . '/portal/documents',

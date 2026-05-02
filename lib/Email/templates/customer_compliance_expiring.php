@@ -11,7 +11,7 @@ declare(strict_types=1);
  * @param array{
  *   customer_name: string,
  *   company_name:  string,
- *   units:         list<array{unit_number:string, unit_id:int, docs:list<array{name:string, expiry:string, urgency:string}>}>,
+ *   units:         list<array{unit_number:string, unit_id:int, contract_number:string, docs:list<array{name:string, expiry:string}>}>,
  *   portal_url:    string,
  * } $data
  * @return string  Inner HTML body (inline-style only, no wrapper tags)
@@ -24,26 +24,51 @@ function render_customer_compliance_email(array $data): string
     $portalUrl    = htmlspecialchars((string)($data['portal_url']    ?? ''), ENT_QUOTES, 'UTF-8');
     $units        = is_array($data['units'] ?? null) ? $data['units'] : [];
 
+    $todayDt = new \DateTime('today');
+
     $unitRowsHtml = '';
     foreach ($units as $unit) {
-        $unitNumber = htmlspecialchars((string)($unit['unit_number'] ?? ''), ENT_QUOTES, 'UTF-8');
-        $docsHtml   = '';
+        $unitNumber      = htmlspecialchars((string)($unit['unit_number']      ?? ''), ENT_QUOTES, 'UTF-8');
+        $contractNumber  = (string)($unit['contract_number'] ?? '');
+        $unitHeading     = 'Unit ' . $unitNumber;
+        if ($contractNumber !== '') {
+            $unitHeading .= ' &mdash; Contract ' . htmlspecialchars($contractNumber, ENT_QUOTES, 'UTF-8');
+        }
+        $docsHtml = '';
 
         foreach ((array)($unit['docs'] ?? []) as $doc) {
             $docName = htmlspecialchars((string)($doc['name']   ?? ''), ENT_QUOTES, 'UTF-8');
-            $expiry  = htmlspecialchars((string)($doc['expiry'] ?? ''), ENT_QUOTES, 'UTF-8');
-            $urgency = (string)($doc['urgency'] ?? 'warning');
+            $expiry  = (string)($doc['expiry'] ?? '');
+            $expiryDisplay = htmlspecialchars($expiry, ENT_QUOTES, 'UTF-8');
 
-            [$bgColor, $label] = match ($urgency) {
-                'expired'  => ['#dc2626', 'EXPIRED'],
-                'critical' => ['#d97706', 'EXPIRES SOON'],
-                default    => ['#2563eb', 'UPCOMING'],
-            };
+            // Compute day delta so the badge shows concrete day counts
+            // instead of just a 3-state urgency label.
+            try {
+                $expiryDt = new \DateTime($expiry);
+                $diffDays = (int) $todayDt->diff($expiryDt)->format('%r%a');
+            } catch (\Throwable $e) {
+                $diffDays = 0;
+            }
+
+            if ($diffDays < 0) {
+                $n       = abs($diffDays);
+                $bgColor = '#dc2626';
+                $label   = 'EXPIRED ' . $n . ' ' . ($n === 1 ? 'day' : 'days') . ' ago';
+            } elseif ($diffDays === 0) {
+                $bgColor = '#dc2626';
+                $label   = 'EXPIRES TODAY';
+            } elseif ($diffDays <= 7) {
+                $bgColor = '#dc2626';
+                $label   = $diffDays . ' ' . ($diffDays === 1 ? 'day' : 'days') . ' remaining';
+            } else {
+                $bgColor = '#d97706';
+                $label   = $diffDays . ' days remaining';
+            }
 
             $docsHtml .=
                 '<tr>'
                 . '<td style="padding:4px 8px 4px 0;font-size:13px;color:#374151;">' . $docName . '</td>'
-                . '<td style="padding:4px 8px;font-size:13px;font-family:monospace;color:#374151;">' . $expiry . '</td>'
+                . '<td style="padding:4px 8px;font-size:13px;font-family:monospace;color:#374151;">' . $expiryDisplay . '</td>'
                 . '<td style="padding:4px 0 4px 8px;">'
                     . '<span style="display:inline-block;padding:2px 8px;border-radius:4px;'
                     . 'font-size:11px;font-weight:700;background:' . $bgColor . ';color:#fff;">' . $label . '</span>'
@@ -53,7 +78,7 @@ function render_customer_compliance_email(array $data): string
 
         $unitRowsHtml .=
             '<div style="margin-bottom:16px;padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">'
-            . '<div style="font-size:14px;font-weight:600;color:#1c1c1a;margin-bottom:8px;">Unit ' . $unitNumber . '</div>'
+            . '<div style="font-size:14px;font-weight:600;color:#1c1c1a;margin-bottom:8px;">' . $unitHeading . '</div>'
             . '<table cellpadding="0" cellspacing="0" border="0" style="width:100%;">'
             . '<thead><tr>'
             . '<th style="text-align:left;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;padding-bottom:6px;">Document</th>'
@@ -69,7 +94,7 @@ function render_customer_compliance_email(array $data): string
     $unitWord  = $unitCount === 1 ? 'unit' : 'units';
 
     return
-        '<p style="margin:0 0 16px;">Dear ' . $customerName . ',</p>'
+        '<p style="margin:0 0 16px;">Hi ' . $customerName . ',</p>'
         . '<p style="margin:0 0 16px;">This is an automated compliance notice from <strong>' . $companyName . '</strong>.</p>'
         . '<p style="margin:0 0 16px;">The following ' . $unitWord . ' in your fleet '
         . 'have compliance documents that require attention:</p>'

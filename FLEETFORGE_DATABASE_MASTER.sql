@@ -2387,8 +2387,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- [PASS-5:1F]  equipment_status_log: added idx_unit_changed composite index (unit status history)
 -- [PASS-5:1G]  mileage_logs: added idx_unit_date composite index (unit mileage chart)
 -- [PASS-5:1H]  damage_claims: added idx_customer_created composite index (risk score calc)
--- [CVI-EMAIL-1] portal_users: added notification_preferences JSON column (compliance email opt-out)
--- ALTER TABLE portal_users ADD COLUMN notification_preferences JSON NULL DEFAULT NULL AFTER is_primary;
+-- [CVI-EMAIL-1] portal_users: notification_preferences JSON column already in CREATE TABLE portal_users:1504
 -- [CURRENCY-MARKUP-1] invoices: added currency_markup_pct DECIMAL(6,4) DEFAULT 0.0000 AFTER exchange_rate_to_cad
 -- [CURRENCY-MARKUP-1] payments: added currency_markup_pct DECIMAL(6,4) DEFAULT 0.0000 AFTER exchange_rate_to_cad
 -- [CURRENCY-MARKUP-1] settings: added currency.usd_cad_markup_pct seed row (group=currency)
