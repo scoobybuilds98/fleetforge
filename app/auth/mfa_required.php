@@ -78,7 +78,8 @@ if (empty($_SESSION['ff_mfa_must_setup'])) {
             Authy, or 1Password all work. The setup takes about two minutes.
         </p>
 
-        <a href="<?= e(base_url('account/mfa-setup')) ?>" class="btn btn-primary w-full btn-lg">
+        <!-- S-PROD-1A-FIX: underscore matches actual filename mfa_setup.php -->
+        <a href="<?= e(base_url('account/mfa_setup')) ?>" class="btn btn-primary w-full btn-lg">
             Set up two-factor authentication
         </a>
 

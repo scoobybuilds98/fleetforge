@@ -22,9 +22,17 @@ require_once FF_ROOT . '/includes/auth.php';
 
 define('FF_API_CONTEXT', true);
 require_method('POST');
-require_auth_api();
 
+// S-PROD-1A-FIX T6: accept fully authenticated (ff_user) or forced-setup
+// (ff_mfa_must_setup) sessions. See setup_init.php for security rationale.
 $userId = current_user_id();
+if (!$userId) {
+    $forcedId = (int) ($_SESSION['ff_mfa_must_setup'] ?? 0);
+    if (!$forcedId) {
+        json_error('UNAUTHORIZED', 'Authentication required.', 401);
+    }
+    $userId = $forcedId;
+}
 
 use FleetForge\Auth\MfaService;
 

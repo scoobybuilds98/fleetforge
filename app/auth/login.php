@@ -170,14 +170,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'started_at' => time(),
                             'remember'   => $remember,
                         ];
-                        header('Location: ' . base_url('auth/mfa-challenge'));
+                        // S-PROD-1A-FIX: underscore matches actual filename mfa_challenge.php
+                        header('Location: ' . base_url('auth/mfa_challenge'));
                         exit;
                     }
 
                     if ((int) ($user['mfa_required'] ?? 0) === 1) {
                         // Role requires MFA but user hasn't set it up
                         $_SESSION['ff_mfa_must_setup'] = $user['id'];
-                        header('Location: ' . base_url('auth/mfa-required'));
+                        // S-PROD-1A-FIX: underscore matches actual filename mfa_required.php
+                        header('Location: ' . base_url('auth/mfa_required'));
                         exit;
                     }
 

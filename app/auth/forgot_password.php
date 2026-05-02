@@ -69,10 +69,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // Look up the user — but never reveal whether it exists
             try {
+                // S-PROD-1A-FIX T18: was is_active=1 (column not found); schema uses status enum
                 $user = db_row(
                     "SELECT id, name, email
                      FROM users
-                     WHERE email = ? AND is_active = 1 AND deleted_at IS NULL",
+                     WHERE email = ? AND status = 'active' AND deleted_at IS NULL",
                     [$email]
                 );
 

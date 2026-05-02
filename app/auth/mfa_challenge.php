@@ -254,7 +254,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <h1 class="auth-heading">Two-factor authentication</h1>
         <p class="auth-subheading">Enter the 6-digit code from your authenticator app.</p>
 
-        <form method="post" action="<?= e(base_url('auth/mfa-challenge')) ?>">
+        <form method="post" action="<?= e(base_url('auth/mfa_challenge')) ?>">
             <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
             <div class="form-group">
                 <label class="form-label" for="code">Authenticator code</label>
@@ -267,7 +267,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <button type="submit" class="btn btn-primary w-full btn-lg">Verify</button>
         </form>
-        <a href="<?= e(base_url('auth/mfa-challenge')) ?>?backup=1" class="switch-link">
+        <a href="<?= e(base_url('auth/mfa_challenge')) ?>?backup=1" class="switch-link">
             Use a backup code instead
         </a>
 
@@ -276,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <h1 class="auth-heading">Use a backup code</h1>
         <p class="auth-subheading">Enter one of the 8-character backup codes you saved when setting up MFA.</p>
 
-        <form method="post" action="<?= e(base_url('auth/mfa-challenge')) ?>">
+        <form method="post" action="<?= e(base_url('auth/mfa_challenge')) ?>">
             <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
             <input type="hidden" name="use_backup" value="1">
             <div class="form-group">
@@ -290,7 +290,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <button type="submit" class="btn btn-primary w-full btn-lg">Verify backup code</button>
         </form>
-        <a href="<?= e(base_url('auth/mfa-challenge')) ?>" class="switch-link">
+        <a href="<?= e(base_url('auth/mfa_challenge')) ?>" class="switch-link">
             Use authenticator app instead
         </a>
 
