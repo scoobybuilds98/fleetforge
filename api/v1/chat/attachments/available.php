@@ -81,14 +81,17 @@ $results = match($type) {
          ORDER BY dc.created_at DESC LIMIT ?",
         [$like, $like, $limit]
     ),
+    // WHY: reservations has no number column or start_date — match by id/name, pickup_date for subtitle
     'reservation' => db_select(
-        "SELECT r.id, r.reservation_number AS title, r.status AS badge,
-                CONCAT(c.company_name, ' · ', r.start_date) AS subtitle
+        "SELECT r.id,
+                CONCAT('#', r.id, IF(COALESCE(r.contact_name,'') != '', CONCAT(' — ', r.contact_name), '')) AS title,
+                r.status AS badge,
+                CONCAT(c.company_name, ' · ', r.pickup_date) AS subtitle
          FROM reservations r JOIN customers c ON c.id = r.customer_id
          WHERE r.deleted_at IS NULL AND c.deleted_at IS NULL
-           AND (r.reservation_number LIKE ? OR c.company_name LIKE ?)
+           AND (CAST(r.id AS CHAR) LIKE ? OR c.company_name LIKE ? OR r.contact_name LIKE ?)
          ORDER BY r.created_at DESC LIMIT ?",
-        [$like, $like, $limit]
+        [$like, $like, $like, $limit]
     ),
     'equipment' => db_select(
         "SELECT eu.id, eu.unit_number AS title, eu.status AS badge,

@@ -29,20 +29,30 @@ class TaxCalculator
      * PST exemption suppresses PST only.
      * Both flags are independent — a customer can be GST-exempt but PST-liable.
      *
-     * @param string $subtotal   Pre-tax amount after discounts, as bcmath string
-     * @param string $province   Two-letter province code (e.g. 'BC', 'ON', 'AB')
-     * @param bool   $gstExempt  If true, GST and HST are zero
-     * @param bool   $pstExempt  If true, PST is zero
+     * @param string   $subtotal      Pre-tax amount after discounts, as bcmath string
+     * @param string   $province      Two-letter province code (e.g. 'BC', 'ON', 'AB')
+     * @param bool     $gstExempt     If true, GST and HST are zero
+     * @param bool     $pstExempt     If true, PST is zero
+     * @param string   $country       ISO country code for logging context (default 'CA')
+     * @param int|null $customerId    Customer ID for logging context (optional)
+     * @param string   $customerName  Customer name for logging context (optional)
      * @return array{
      *   gst_rate: string, pst_rate: string, hst_rate: string,
      *   gst: string, pst: string, hst: string, total: string,
      *   gst_exempt: bool, pst_exempt: bool
      * }
      */
-    public function calculate(string $subtotal, string $province, bool $gstExempt, bool $pstExempt): array
-    {
+    public function calculate(
+        string $subtotal,
+        string $province,
+        bool $gstExempt,
+        bool $pstExempt,
+        string $country = 'CA',
+        ?int $customerId = null,
+        string $customerName = ''
+    ): array {
         // Look up current active tax rate for province (D11: at invoice time)
-        $rates = $this->lookupRates($province);
+        $rates = $this->lookupRates($province, $country, $customerId, $customerName);
 
         $gstRate = $rates['gst_rate'] ?? '0.0000';
         $pstRate = $rates['pst_rate'] ?? '0.0000';
@@ -88,13 +98,21 @@ class TaxCalculator
      * Look up active tax rates for a province from the database.
      *
      * Returns the most recently effective rate that is active.
-     * Falls back to zero rates if no rate found.
+     * Falls back to zero rates if no rate found, and logs a warning so
+     * operators can catch missing provinces before they become CRA exposures.
      *
-     * @param string $province Two-letter province code
+     * @param string   $province     Two-letter province code
+     * @param string   $country      ISO country code for log context
+     * @param int|null $customerId   Customer ID for log context
+     * @param string   $customerName Customer name for log context
      * @return array{gst_rate: string, pst_rate: string, hst_rate: string}
      */
-    private function lookupRates(string $province): array
-    {
+    private function lookupRates(
+        string $province,
+        string $country = 'CA',
+        ?int $customerId = null,
+        string $customerName = ''
+    ): array {
         $row = db_row(
             "SELECT gst_rate, pst_rate, hst_rate
              FROM tax_rates
@@ -105,11 +123,18 @@ class TaxCalculator
         );
 
         if (!$row) {
-            // No rate found — return zeros (e.g., US customers)
+            error_log(sprintf(
+                'TAX_RATE_MISSING: province=%s country=%s customer_id=%s customer_name=%s'
+                . ' — billed at $0 tax. This may be a CRA exposure.',
+                $province,
+                $country,
+                $customerId !== null ? $customerId : 'unknown',
+                $customerName !== '' ? $customerName : 'unknown'
+            ));
             return [
-                'gst_rate' => '0.0000',
-                'pst_rate' => '0.0000',
-                'hst_rate' => '0.0000',
+                'gst_rate' => '0.000000',
+                'pst_rate' => '0.000000',
+                'hst_rate' => '0.000000',
             ];
         }
 

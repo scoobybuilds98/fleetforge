@@ -218,19 +218,20 @@ switch ($type) {
 
     case 'reservation':
         $rows = db_select(
-            "SELECT r.id, r.reservation_number, r.status, c.company_name
+            // WHY: reservations has no number column — match by id cast + name, per api/v1/search.php
+            "SELECT r.id, r.contact_name, r.pickup_date, r.status, c.company_name
              FROM reservations r
              JOIN customers c ON c.id = r.customer_id AND c.deleted_at IS NULL
              WHERE r.deleted_at IS NULL
-               AND (r.reservation_number LIKE ? OR c.company_name LIKE ?)
+               AND (CAST(r.id AS CHAR) LIKE ? OR c.company_name LIKE ? OR r.contact_name LIKE ?)
              ORDER BY r.id DESC LIMIT {$limit}",
-            [$sq, $sq]
+            [$sq, $sq, $sq]
         );
         foreach ($rows as $r) {
             $results[] = [
                 'id'          => (int)$r['id'],
                 'type'        => 'reservation',
-                'title'       => $r['reservation_number'],
+                'title'       => '#' . (int)$r['id'] . ($r['contact_name'] ? ' — ' . $r['contact_name'] : ''),
                 'subtitle'    => $r['company_name'] ?? '',
                 'badge'       => $r['status'],
                 'badge_class' => match($r['status']) {
