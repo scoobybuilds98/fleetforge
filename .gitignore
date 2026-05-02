@@ -7,8 +7,9 @@
 *.pem
 *.key
 
-# --- Composer ---
+# --- Composer / npm ---
 vendor/
+node_modules/
 # Front-end vendor (self-hosted JS/CSS libraries) is committed — do not ignore
 !public/assets/vendor/
 
