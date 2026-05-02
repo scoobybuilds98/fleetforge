@@ -73,6 +73,28 @@ if ($invoice['updated_at'] !== $submittedUpdatedAt) {
 // ADV-BILL-1 D-C: advance invoices are restricted to po_number / notes / internal_notes
 // even on draft — period/billing/financial fields are immutable from the moment the batch
 // is created so the prepaid CRA snapshot stays intact.
+//
+// S-FIX-2 Phase 0.5 Bug C (defensive): financial fields are NOT editable here for any
+// invoice. If a future caller posts total_amount / subtotal / tax / line_items, reject
+// with 422. The Path B canonical truth table requires that any draft total_amount edit
+// emit a corresponding leases.total_invoiced delta — which this endpoint does not do.
+// Lock the door now so no caller silently drifts the counter.
+$financialFields = [
+    'total_amount', 'subtotal', 'subtotal_after_discount',
+    'tax_total', 'tax_gst_amount', 'tax_pst_amount', 'tax_hst_amount',
+    'discount_amount', 'discount_value',
+    'line_items', 'amount', 'balance_due', 'amount_paid', 'credits_applied',
+];
+$forbiddenSent = array_intersect($financialFields, array_keys($body));
+if (!empty($forbiddenSent)) {
+    json_error(
+        'IMMUTABLE_RECORD',
+        'Financial fields cannot be edited via update.php. Void and recreate the invoice.',
+        422,
+        ['fields' => array_fill_keys($forbiddenSent, 'Field is locked. Void and recreate.')]
+    );
+}
+
 $updateData = [];
 $updatable = [
     'po_number'      => clean_string($body['po_number'] ?? null),

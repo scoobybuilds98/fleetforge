@@ -20,6 +20,37 @@ declare(strict_types=1);
  *            D15 (sequential invoice numbers), D16 (bcmath), D20 (FOR UPDATE),
  *            D22 (granular tax exemptions)
  * Spec ref: §9 Invoice Generation Flow, §9 Invoice Calculation Order, §9 Late Fees
+ *
+ * ==========================================================================
+ * PATH B — CANONICAL COUNTER TRUTH TABLE (S-FIX-2, 2026-05-02)
+ * ==========================================================================
+ * customers.outstanding_balance reflects SENT invoices only
+ *   (sent / partially_paid / overdue). Drafts and voids do NOT count.
+ * leases.total_invoiced continues to include drafts (lease-internal total,
+ *   not a customer-facing AR figure).
+ *
+ *   Event                                 | OB delta             | total_invoiced
+ *   --------------------------------------|----------------------|---------------
+ *   Invoice created as draft              | unchanged            | += total_amount
+ *   Draft -> sent (send.php)              | += balance_due       | unchanged
+ *   Sent -> void                          | -= balance_due       | -= total_amount
+ *   Sent -> paid (full payment)           | -= balance_due       | unchanged
+ *   Sent -> partially_paid (partial pmt)  | -= allocated_amount  | unchanged
+ *   Draft -> void                         | unchanged            | -= total_amount
+ *   Sent -> deleted (super_admin)         | -= balance_due       | -= total_amount
+ *   Draft -> deleted                      | unchanged            | -= total_amount
+ *   Draft total_amount edited (update)    | unchanged            | += (new - old)
+ *   Sent -> written_off                   | -= balance_due       | unchanged
+ *   Payment del/reversed (sent invoice)   | += allocated_amount  | unchanged
+ *   Payment del/reversed (now-void inv)   | unchanged (status grd)| unchanged
+ *   NSF / bounced (sent invoice)          | += allocated_amount  | unchanged
+ *   NSF / bounced (now-void invoice)      | unchanged (status grd)| unchanged
+ *   Credit note applied                   | -= applied_amount    | unchanged
+ *   AR deposit applied                    | -= applied_amount    | unchanged
+ *   Late-fee invoice created (draft)      | unchanged            | += total_amount
+ *
+ * Every counter mutation site MUST match the row above for its event.
+ * ==========================================================================
  */
 
 namespace FleetForge\Billing;
@@ -75,9 +106,17 @@ class InvoiceGenerator
         // Wraps everything in a single transaction (Trap 6: denormalized counters)
         return db_transaction(function () use ($leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $params) {
 
-            // Load lease with all rate/tax/customer data
+            // Load lease with all rate/tax/customer data.
+            // S-FIX-2 Bug #5: also pull customer exemption expiry dates so we can
+            // re-evaluate exemption status at invoice creation time. The lease
+            // record is NOT modified; only the invoice snapshots are demoted.
             $lease = db_row(
-                "SELECT l.*, c.province, c.billing_address, c.email AS customer_email
+                "SELECT l.*, c.province, c.billing_address, c.email AS customer_email,
+                        c.gst_exempt_expiry  AS customer_gst_exempt_expiry,
+                        c.pst_exempt_expiry  AS customer_pst_exempt_expiry,
+                        c.tax_exempt_expiry  AS customer_tax_exempt_expiry,
+                        c.id                  AS customer_row_id,
+                        c.company_name        AS customer_company_name
                  FROM leases l
                  LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
                  WHERE l.id = ? AND l.deleted_at IS NULL",
@@ -202,6 +241,70 @@ class InvoiceGenerator
                 }
             }
 
+            // --- S-FIX-2 Bug #3: mileage_credit overflow cap ---
+            // If the credit lines drive subtotal below $0, cap the first
+            // mileage_credit line so subtotal floors at $0 and route the
+            // remainder to a credit_notes row (source='mileage_overpayment').
+            // The credit_note is created AFTER the invoice INSERT below; we
+            // capture the overflow here so the invoice rows reflect the cap.
+            $mileageOverflow = '0.00';
+            if (bccomp($subtotal, '0', 2) < 0) {
+                $mileageOverflow = bcmul($subtotal, '-1', 2); // abs($subtotal)
+
+                $capApplied = false;
+                foreach ($lineItems as &$capItem) {
+                    if (($capItem['item_type'] ?? '') === 'mileage_credit'
+                        && !empty($capItem['is_credit'])) {
+                        $originalCredit = (string) $capItem['amount'];
+                        $newCredit      = bcsub($originalCredit, $mileageOverflow, 2);
+                        if (bccomp($newCredit, '0', 2) < 0) {
+                            // The overflow exceeds this single line — not expected,
+                            // but defensively cap to 0 and surface the residual.
+                            $newCredit = '0.00';
+                        }
+                        $capItem['amount'] = $newCredit;
+
+                        $detail = isset($capItem['detail_lines'])
+                            ? json_decode((string) $capItem['detail_lines'], true)
+                            : [];
+                        if (!is_array($detail)) {
+                            $detail = ['note' => (string) ($capItem['detail_lines'] ?? '')];
+                        }
+                        $detail['cap_applied']                    = true;
+                        $detail['original_credit_amount']         = $originalCredit;
+                        $detail['capped_to']                      = $newCredit;
+                        $detail['overflow_routed_to_credit_note'] = $mileageOverflow;
+                        $capItem['detail_lines'] = json_encode($detail);
+
+                        $capApplied = true;
+                        break;
+                    }
+                }
+                unset($capItem);
+
+                if (!$capApplied) {
+                    // No mileage_credit line is present, yet the subtotal went
+                    // negative. That means a different is_credit line (manual,
+                    // goodwill, etc.) caused it — refuse rather than silently
+                    // rewriting a deliberate adjustment. Caller should split.
+                    json_error(
+                        'VALIDATION_ERROR',
+                        'Invoice subtotal is negative but no mileage_credit line is present to cap. Reduce other credit line items or split into a separate credit_note.',
+                        422
+                    );
+                }
+
+                // Recompute subtotal after the cap (should be exactly 0.00).
+                $subtotal = '0.00';
+                foreach ($lineItems as $item) {
+                    if ($item['is_credit']) {
+                        $subtotal = bcsub($subtotal, $item['amount'], 2);
+                    } else {
+                        $subtotal = bcadd($subtotal, $item['amount'], 2);
+                    }
+                }
+            }
+
             // --- Step 6: Apply discount ---
             $discountType = $lease['discount_type'] ?? 'none';
             $discountValue = (string)($lease['discount_value'] ?? '0.0000');
@@ -225,6 +328,32 @@ class InvoiceGenerator
             if ($lease['tax_exempt']) {
                 $gstExempt = true;
                 $pstExempt = true;
+            }
+
+            // S-FIX-2 Bug #5: re-evaluate exemption status against expiry dates.
+            // If the customer's exemption certificate has expired by invoice_date,
+            // demote the exemption on THIS invoice only — the lease record stays
+            // unchanged, so historical invoices keep their original tax treatment.
+            // Audit log the demotion so accountants can see why a previously
+            // exempt customer started getting taxed.
+            $expiryCheckDate = $invoiceDate ?? date('Y-m-d');
+            $expiryAuditEntries = [];
+
+            if ($gstExempt && !empty($lease['customer_gst_exempt_expiry'])
+                && (string) $lease['customer_gst_exempt_expiry'] < $expiryCheckDate) {
+                $expiryAuditEntries[] = [
+                    'tax'    => 'GST',
+                    'expiry' => (string) $lease['customer_gst_exempt_expiry'],
+                ];
+                $gstExempt = false;
+            }
+            if ($pstExempt && !empty($lease['customer_pst_exempt_expiry'])
+                && (string) $lease['customer_pst_exempt_expiry'] < $expiryCheckDate) {
+                $expiryAuditEntries[] = [
+                    'tax'    => 'PST',
+                    'expiry' => (string) $lease['customer_pst_exempt_expiry'],
+                ];
+                $pstExempt = false;
             }
 
             // Only tax the taxable portion of the subtotal after discount
@@ -366,6 +495,33 @@ class InvoiceGenerator
                 'updated_by'                => $params['created_by'] ?? null,  // FIX #43
             ]);
 
+            // S-FIX-2 Bug #5: write audit_log entries for any exemption
+            // demotions detected above. entity is the customer (the certificate
+            // expired on the customer record, not the lease) so accountants
+            // searching by customer see why their tax treatment changed.
+            foreach ($expiryAuditEntries as $entry) {
+                db_insert('audit_log', [
+                    'user_id'      => $params['created_by'] ?? null,
+                    'user_name'    => (function_exists('current_user') && current_user())
+                                        ? (current_user()['name'] ?? 'system') : 'system',
+                    'action'       => 'update',
+                    'module'       => 'billing',
+                    'entity_type'  => 'customer',
+                    'entity_id'    => (int) ($lease['customer_row_id'] ?? $lease['customer_id']),
+                    'entity_label' => $lease['customer_company_name'] ?? '',
+                    'notes'        => "{$entry['tax']} exempt expired {$entry['expiry']} — invoice {$invoiceNumber} billed at full rate (S-FIX-2 Bug #5).",
+                    'old_values'   => json_encode([
+                        $entry['tax'] === 'GST' ? 'gst_exempt_snapshot' : 'pst_exempt_snapshot' => 1,
+                    ]),
+                    'new_values'   => json_encode([
+                        $entry['tax'] === 'GST' ? 'gst_exempt_snapshot' : 'pst_exempt_snapshot' => 0,
+                        'expiry_on_certificate' => $entry['expiry'],
+                        'invoice_id' => $invoiceId,
+                    ]),
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+            }
+
             // --- Insert line items ---
             foreach ($lineItems as $item) {
                 // Calculate per-line tax for line items that are taxable
@@ -419,24 +575,79 @@ class InvoiceGenerator
             ]);
 
             // --- Update denormalized lease totals in same transaction (Trap 6) ---
+            // S-FIX-2 Path B: total_invoiced INCLUDES drafts (lease-internal total).
+            // outstanding_balance on the lease is being kept in sync with the customer
+            // counter for now — both increment only at draft -> sent transition (send.php).
             db_execute(
-                "UPDATE leases SET total_invoiced = total_invoiced + ?, outstanding_balance = outstanding_balance + ?, last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
-                [$totalAmount, $balanceDue, $invoiceDate, $invoiceId, $leaseId]
+                "UPDATE leases SET total_invoiced = total_invoiced + ?, last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
+                [$totalAmount, $invoiceDate, $invoiceId, $leaseId]
             );
 
-            // --- Update customer outstanding_balance (Trap 6) ---
-            if ($lease['customer_id']) {
-                db_execute(
-                    "UPDATE customers SET outstanding_balance = outstanding_balance + ?, updated_at = NOW() WHERE id = ?",
-                    [$balanceDue, $lease['customer_id']]
-                );
+            // S-FIX-2 Path B: drafts do NOT touch outstanding_balance.
+            // The increment fires in api/v1/invoices/send.php on draft -> sent.
+            // (Historical comment "Trap 6 customer outstanding_balance" removed —
+            //  the customer counter now follows Path B canonical truth.)
+
+            // S-FIX-2 Bug #3: route the mileage credit overflow (if any) to a
+            // credit_notes row with source='mileage_overpayment'. Created after
+            // the invoice INSERT so source_invoice_id can reference the new
+            // invoice. Same db_transaction → JE rolls back if either fails.
+            // No tax: a customer credit liability is not a billable line.
+            if (bccomp($mileageOverflow ?? '0', '0', 2) > 0) {
+                $cnYear   = date('Y');
+                $cnKey    = "credit_note.next_number.{$cnYear}";
+                $cnRow    = db_row("SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE", [$cnKey]);
+                $cnNext   = $cnRow ? (int) $cnRow['value'] : 1;
+                $cnPrefix = settings_get('credit_note.prefix', 'CN-CR');
+                $cnNumber = sprintf('%s-%s-%05d', $cnPrefix, $cnYear, $cnNext);
+                if ($cnRow) {
+                    db_execute("UPDATE settings SET `value` = ? WHERE `key` = ?", [$cnNext + 1, $cnKey]);
+                } else {
+                    db_execute(
+                        "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
+                        [$cnKey, $cnNext + 1]
+                    );
+                }
+
+                $cnId = db_insert('credit_notes', [
+                    'credit_note_number' => $cnNumber,
+                    'customer_id'        => $lease['customer_id'],
+                    'lease_id'           => $leaseId,
+                    'source'             => 'mileage_overpayment',
+                    'source_invoice_id'  => $invoiceId,
+                    'amount'             => $mileageOverflow,
+                    'currency'           => $lease['currency'],
+                    'amount_remaining'   => $mileageOverflow,
+                    'status'             => 'active',
+                    'reason'             => "Mileage credit exceeded final invoice subtotal — overflow routed to account credit (S-FIX-2 Bug #3, invoice {$invoiceNumber}).",
+                    'created_by'         => $params['created_by'] ?? null,
+                ]);
+
+                db_insert('audit_log', [
+                    'user_id'      => $params['created_by'] ?? null,
+                    'user_name'    => (function_exists('current_user') && current_user())
+                                        ? (current_user()['name'] ?? 'system') : 'system',
+                    'action'       => 'create',
+                    'module'       => 'invoices',
+                    'entity_type'  => 'credit_note',
+                    'entity_id'    => $cnId,
+                    'entity_label' => $cnNumber,
+                    'notes'        => "Auto-created from mileage credit overflow (S-FIX-2 Bug #3) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$mileageOverflow}.",
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+
+                // Auto-JE for the credit_note creation: DR Revenue / CR 2060
+                // Customer Credits Liability. AR is unchanged (the invoice is
+                // already $0 — no AR was raised).
+                \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued($cnId, $params['created_by'] ?? null);
             }
 
             return [
-                'invoice_id'     => $invoiceId,
-                'invoice_number' => $invoiceNumber,
-                'total_amount'   => $totalAmount,
-                'balance_due'    => $balanceDue,
+                'invoice_id'        => $invoiceId,
+                'invoice_number'    => $invoiceNumber,
+                'total_amount'      => $totalAmount,
+                'balance_due'       => $balanceDue,
+                'mileage_overflow'  => $mileageOverflow ?? '0.00',
             ];
         });
     }
@@ -800,27 +1011,23 @@ class InvoiceGenerator
             );
 
             // Update denormalized counters on the lease (Trap 6: same transaction)
+            // S-FIX-2 Path B: late-fee invoices are created as 'draft' (status above
+            // is 'draft' on line ~752). total_invoiced gets the increment (it includes
+            // drafts), but outstanding_balance does NOT — that fires when staff sends
+            // the late-fee draft via send.php.
             if ($orig['lease_id']) {
                 db_execute(
                     "UPDATE leases
-                     SET total_invoiced       = total_invoiced + ?,
-                         outstanding_balance  = outstanding_balance + ?,
-                         updated_at           = NOW()
+                     SET total_invoiced = total_invoiced + ?,
+                         updated_at     = NOW()
                      WHERE id = ?",
-                    [$totalAmount, $totalAmount, $orig['lease_id']]
+                    [$totalAmount, $orig['lease_id']]
                 );
             }
 
-            // Update denormalized counter on the customer (Trap 6: same transaction)
-            if ($orig['customer_id']) {
-                db_execute(
-                    "UPDATE customers
-                     SET outstanding_balance = outstanding_balance + ?,
-                         updated_at          = NOW()
-                     WHERE id = ?",
-                    [$totalAmount, $orig['customer_id']]
-                );
-            }
+            // S-FIX-2 Path B: customer.outstanding_balance NOT touched at late-fee
+            // creation — this counter only moves on draft -> sent (send.php) and on
+            // payment/credit/void/etc. against a sent invoice.
 
             return [
                 'invoice_id'     => $newInvoiceId,

@@ -48,17 +48,52 @@ db_transaction(function () use ($id, $invoice) {
     // Soft-delete the invoice
     db_update('invoices', ['deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
 
-    // Reverse denormalized counters (Trap 6)
+    // S-FIX-2 Path B: status-aware counter logic.
+    //   draft         -> deleted: total_invoiced -= total_amount; OB unchanged
+    //   sent/partial/overdue -> deleted (super_admin):
+    //                          total_invoiced -= total_amount; OB -= balance_due
+    //   paid          -> deleted (super_admin): total_invoiced -= total_amount; OB unchanged
+    //                          (OB was already decremented when paid)
+    //   void          -> deleted (super_admin): total_invoiced unchanged; OB unchanged
+    //                          (void already reversed both counters)
+    //   written_off   -> deleted (super_admin): total_invoiced unchanged; OB unchanged
+    //                          (writeoff already cleared OB; total_invoiced should
+    //                           stay because the invoice was real revenue)
+    //
+    // Backwards-compat (Phase 0.5 Bug B): void invoices may have stale balance_due
+    // if voided BEFORE the S-FIX-2 void.php update. Treat OB delta as 0 whenever
+    // status='void' regardless of the balance_due value on the row — this protects
+    // pre-fix void rows from a second DEC at delete time.
+    $totalAmount = (string) $invoice['total_amount'];
+    $balanceDue  = (string) $invoice['balance_due'];
+    $status      = $invoice['status'];
+
+    $decTotalInvoiced = $totalAmount;
+    $decOb            = $balanceDue;
+
+    if ($status === 'draft') {
+        $decOb = '0.00';
+    } elseif ($status === 'paid') {
+        $decOb = '0.00';
+    } elseif ($status === 'void') {
+        $decTotalInvoiced = '0.00';
+        $decOb            = '0.00';
+    } elseif ($status === 'written_off') {
+        $decTotalInvoiced = '0.00';
+        $decOb            = '0.00';
+    }
+    // Otherwise sent / partially_paid / overdue → both decrements stand.
+
     if ($invoice['lease_id']) {
         db_execute(
             "UPDATE leases SET total_invoiced = total_invoiced - ?, outstanding_balance = outstanding_balance - ?, updated_at = NOW() WHERE id = ?",
-            [$invoice['total_amount'], $invoice['balance_due'], $invoice['lease_id']]
+            [$decTotalInvoiced, $decOb, $invoice['lease_id']]
         );
     }
     if ($invoice['customer_id']) {
         db_execute(
             "UPDATE customers SET outstanding_balance = outstanding_balance - ?, updated_at = NOW() WHERE id = ?",
-            [$invoice['balance_due'], $invoice['customer_id']]
+            [$decOb, $invoice['customer_id']]
         );
     }
 
@@ -70,7 +105,9 @@ db_transaction(function () use ($id, $invoice) {
         'entity_type'  => 'invoice',
         'entity_id'    => $id,
         'entity_label' => $invoice['invoice_number'],
-        'notes'        => "Invoice {$invoice['invoice_number']} soft-deleted (was {$invoice['status']})",
+        'notes'        => "Invoice {$invoice['invoice_number']} soft-deleted (was {$status}). Counter delta: total_invoiced -= {$decTotalInvoiced}, outstanding_balance -= {$decOb} (Path B).",
+        'old_values'   => json_encode(['status' => $status, 'balance_due' => $balanceDue]),
+        'new_values'   => json_encode(['deleted_at' => date('Y-m-d H:i:s')]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 });

@@ -126,11 +126,20 @@ function adv_void_or_credit_full(array $inv, array $lease, string $reason): arra
  * Mirrors api/v1/invoices/void.php so the Trap-6 counter reversal and the
  * accounting JE reversal both happen (otherwise lease.total_invoiced stays
  * inflated and accounting drifts from the invoice ledger).
+ *
+ * S-FIX-2 Path B: status-aware OB decrement. Drafts: OB unchanged. Sent/etc:
+ *   OB -= balance_due. Plus Phase 0.5 Bug B fix: zero balance_due on the void row.
  */
 function adv_void_invoice(array $inv, array $lease, string $reason): void
 {
+    $preVoidStatus = $inv['status'];
+    $totalAmount   = (string) $inv['total_amount'];
+    $balanceDue    = (string) $inv['balance_due'];
+    $decOb         = ($preVoidStatus === 'draft') ? '0.00' : $balanceDue;
+
     db_update('invoices', [
         'status'      => 'void',
+        'balance_due' => '0.00',
         'voided_date' => date('Y-m-d'),
         'void_reason' => $reason,
         'voided_by'   => current_user_id(),
@@ -144,7 +153,7 @@ function adv_void_invoice(array $inv, array $lease, string $reason): void
                 outstanding_balance = outstanding_balance - ?,
                 updated_at = NOW()
           WHERE id = ?",
-        [(string) $inv['total_amount'], (string) $inv['balance_due'], (int) $lease['id']]
+        [$totalAmount, $decOb, (int) $lease['id']]
     );
     if (!empty($lease['customer_id'])) {
         db_execute(
@@ -152,7 +161,7 @@ function adv_void_invoice(array $inv, array $lease, string $reason): void
                 SET outstanding_balance = outstanding_balance - ?,
                     updated_at = NOW()
               WHERE id = ?",
-            [(string) $inv['balance_due'], (int) $lease['customer_id']]
+            [$decOb, (int) $lease['customer_id']]
         );
     }
 
@@ -164,7 +173,9 @@ function adv_void_invoice(array $inv, array $lease, string $reason): void
         'entity_type'  => 'invoice',
         'entity_id'    => $inv['id'],
         'entity_label' => $inv['invoice_number'],
-        'notes'        => "Advance invoice {$inv['invoice_number']} voided on lease close: {$reason}",
+        'notes'        => "Advance invoice {$inv['invoice_number']} voided on lease close (was {$preVoidStatus}): {$reason}. Counter delta: total_invoiced -= {$totalAmount}, outstanding_balance -= {$decOb} (Path B).",
+        'old_values'   => json_encode(['status' => $preVoidStatus, 'balance_due' => $balanceDue]),
+        'new_values'   => json_encode(['status' => 'void', 'balance_due' => '0.00']),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
@@ -324,6 +335,248 @@ function adv_create_credit_note(array $inv, array $lease, string $amount, string
     ];
 }
 
+/**
+ * S-FIX-2 Bug 1 helper: locate any cron-generated full_month draft for the
+ * closing month and (a) void it on a mid-month close, or (b) append mileage
+ * reconciliation to it on a last-day-of-month close.
+ *
+ * Returns a descriptor of what was done (or null if no matching draft existed).
+ *
+ * Concurrency: the SELECT is FOR UPDATE so a concurrent monthly cron run cannot
+ * insert a duplicate full_month invoice between our check and our action. The
+ * outer close transaction already holds the equipment_unit lock so the cron
+ * cannot mid-process the same lease.
+ */
+function legacy_handle_existing_full_month_draft(
+    int $leaseId,
+    string $returnDate,
+    array $lease,
+    array $extraLines,
+    ?string $odoPeriodStart,
+    ?string $odoAtClose,
+    ?string $odoSource,
+    ?string $odoFetchedAt
+): ?array {
+    // Find ANY existing full_month invoice for the closing month (any status)
+    // so we can surface non-draft conflicts before silently double-billing.
+    $existing = db_row(
+        "SELECT id, invoice_number, status, billing_period_start, billing_period_end,
+                subtotal, discount_amount, subtotal_after_discount, total_amount,
+                balance_due, currency, customer_id, lease_id,
+                gst_exempt_snapshot, pst_exempt_snapshot, tax_exempt_snapshot,
+                odometer_at_period_start_km, odometer_at_period_end_km,
+                odometer_source, odometer_fetched_at
+         FROM invoices
+         WHERE lease_id      = ?
+           AND billing_type  = 'full_month'
+           AND deleted_at    IS NULL
+           AND YEAR(billing_period_start)  = YEAR(?)
+           AND MONTH(billing_period_start) = MONTH(?)
+         ORDER BY id DESC
+         LIMIT 1
+         FOR UPDATE",
+        [$leaseId, $returnDate, $returnDate]
+    );
+    if (!$existing) {
+        return null;
+    }
+
+    // Spec hard rule: only drafts may be auto-voided / auto-modified. Sent /
+    // paid / partially_paid / overdue / void / written_off invoices are
+    // CRA-immutable — refuse to proceed and surface the conflict.
+    if ($existing['status'] !== 'draft') {
+        json_error(
+            'INVOICE_CONFLICT',
+            "Cannot close lease: an existing full_month invoice {$existing['invoice_number']} (status '{$existing['status']}', total {$existing['currency']} {$existing['total_amount']}) covers the closing month. Resolve this invoice manually before closing the lease.",
+            409,
+            ['existing_invoice' => [
+                'id'             => (int) $existing['id'],
+                'invoice_number' => $existing['invoice_number'],
+                'status'         => $existing['status'],
+                'total_amount'   => (string) $existing['total_amount'],
+                'period_start'   => $existing['billing_period_start'],
+                'period_end'     => $existing['billing_period_end'],
+            ]]
+        );
+    }
+
+    $isLastDayOfMonth = ($returnDate === date('Y-m-t', strtotime($returnDate)));
+
+    if ($isLastDayOfMonth) {
+        return legacy_append_mileage_to_full_month_draft(
+            $existing, $lease, $extraLines,
+            $odoPeriodStart, $odoAtClose, $odoSource, $odoFetchedAt
+        );
+    }
+
+    // Mid-month close → void the draft. Path B canonical truth for draft → void:
+    //   total_invoiced -= total_amount; OB unchanged.
+    // adv_void_invoice() already implements this status-aware logic.
+    adv_void_invoice($existing, $lease,
+        'Lease closed mid-month — replaced by final invoice (S-FIX-2 Bug #1).');
+
+    return [
+        'invoice_id'     => (int) $existing['id'],
+        'invoice_number' => $existing['invoice_number'],
+        'action'         => 'voided_for_replacement',
+        'old_total'      => (string) $existing['total_amount'],
+    ];
+}
+
+/**
+ * S-FIX-2 Bug 1 helper (last-day branch): append mileage reconciliation lines
+ * to an existing full_month draft, recompute totals, and emit the Path-B
+ * lease.total_invoiced delta. The draft keeps its original invoice number so
+ * the cron's gap-free numbering is preserved.
+ *
+ * Tax recomputation uses the invoice's exemption snapshots (CRA-correct — the
+ * exemption that was in force at draft creation continues to apply).
+ */
+function legacy_append_mileage_to_full_month_draft(
+    array $invoice,
+    array $lease,
+    array $extraLines,
+    ?string $odoPeriodStart,
+    ?string $odoAtClose,
+    ?string $odoSource,
+    ?string $odoFetchedAt
+): array {
+    if (empty($extraLines)) {
+        // Last-day close with no mileage overage — nothing to append.
+        return [
+            'invoice_id'     => (int) $invoice['id'],
+            'invoice_number' => $invoice['invoice_number'],
+            'action'         => 'no_mileage_to_append',
+            'old_total'      => (string) $invoice['total_amount'],
+            'new_total'      => (string) $invoice['total_amount'],
+        ];
+    }
+
+    $taxCalc   = new \FleetForge\Billing\TaxCalculator();
+    $province  = $lease['province'] ?? 'BC';
+    $gstExempt = (bool) $invoice['gst_exempt_snapshot'];
+    $pstExempt = (bool) $invoice['pst_exempt_snapshot'];
+    if ($invoice['tax_exempt_snapshot']) {
+        $gstExempt = true;
+        $pstExempt = true;
+    }
+
+    $oldTotal = (string) $invoice['total_amount'];
+
+    // Find the highest sort_order so appended lines come after the existing rental.
+    $maxSortRow = db_row(
+        "SELECT COALESCE(MAX(sort_order), -1) AS max_sort FROM invoice_line_items WHERE invoice_id = ?",
+        [$invoice['id']]
+    );
+    $sortOrder = (int) ($maxSortRow['max_sort'] ?? -1) + 1;
+
+    // Insert each appended line item AND accumulate the subtotal delta.
+    $addToSubtotal = '0.00';
+    foreach ($extraLines as $line) {
+        $signedAmount = (string) ($line['amount'] ?? '0.00');
+        if (!empty($line['is_credit'])) {
+            $signedAmount = bcmul($signedAmount, '-1', 2);
+        }
+        $addToSubtotal = bcadd($addToSubtotal, $signedAmount, 2);
+
+        $lineTax = ['gst' => '0.00', 'pst' => '0.00', 'hst' => '0.00'];
+        if (!empty($line['taxable'])) {
+            $lineTax = $taxCalc->calculate(
+                $line['is_credit'] ? bcsub('0', (string) $line['amount'], 2) : (string) $line['amount'],
+                $province, $gstExempt, $pstExempt
+            );
+        }
+
+        db_insert('invoice_line_items', [
+            'invoice_id'     => $invoice['id'],
+            'sort_order'     => $sortOrder++,
+            'item_type'      => $line['item_type']   ?? 'mileage',
+            'description'    => $line['description'] ?? 'Mileage adjustment',
+            'quantity'       => $line['quantity']    ?? '1.0000',
+            'unit'           => $line['unit']        ?? null,
+            'unit_price'     => $line['unit_price']  ?? '0.00',
+            'amount'         => $line['amount']      ?? '0.00',
+            'is_credit'      => (int) ($line['is_credit'] ?? 0),
+            'taxable'        => (int) ($line['taxable']   ?? 1),
+            'tax_gst_amount' => $lineTax['gst'],
+            'tax_pst_amount' => $lineTax['pst'],
+            'tax_hst_amount' => $lineTax['hst'],
+        ]);
+    }
+
+    // Recompute totals using the current discount on the lease (snapshotted into
+    // the original draft as discount_amount; we re-run the formula on the new
+    // subtotal so the discount stays proportional for percentage discounts).
+    $newSubtotal   = bcadd((string) $invoice['subtotal'], $addToSubtotal, 2);
+    $discountType  = $lease['discount_type']  ?? 'none';
+    $discountValue = (string) ($lease['discount_value'] ?? '0.0000');
+    $discountAmt   = '0.00';
+    if ($discountType === 'percentage' && bccomp($discountValue, '0', 4) > 0) {
+        $discountAmt = bcround(bcmul($newSubtotal, bcdiv($discountValue, '100', 6), 6), 2);
+    } elseif ($discountType === 'flat' && bccomp($discountValue, '0', 4) > 0) {
+        $discountAmt = bcround($discountValue, 2);
+    }
+    $newSubtotalAfterDiscount = bcsub($newSubtotal, $discountAmt, 2);
+    $newTax     = $taxCalc->calculate($newSubtotalAfterDiscount, $province, $gstExempt, $pstExempt);
+    $newTotal   = bcadd($newSubtotalAfterDiscount, $newTax['total'], 2);
+    $newBalance = $newTotal; // draft → no payments / credits applied yet
+
+    // Update odometer columns when supplied — last-day close brings closing odo.
+    $invoiceUpdate = [
+        'subtotal'                => $newSubtotal,
+        'discount_amount'         => $discountAmt,
+        'subtotal_after_discount' => $newSubtotalAfterDiscount,
+        'tax_gst_rate'            => $newTax['gst_rate'],
+        'tax_pst_rate'            => $newTax['pst_rate'],
+        'tax_hst_rate'            => $newTax['hst_rate'],
+        'tax_gst_amount'          => $newTax['gst'],
+        'tax_pst_amount'          => $newTax['pst'],
+        'tax_hst_amount'          => $newTax['hst'],
+        'tax_total'               => $newTax['total'],
+        'total_amount'            => $newTotal,
+        'balance_due'             => $newBalance,
+        'updated_by'              => current_user_id(),
+    ];
+    if ($odoPeriodStart !== null) $invoiceUpdate['odometer_at_period_start_km'] = $odoPeriodStart;
+    if ($odoAtClose     !== null) $invoiceUpdate['odometer_at_period_end_km']   = $odoAtClose;
+    if ($odoSource      !== null) $invoiceUpdate['odometer_source']             = $odoSource;
+    if ($odoFetchedAt   !== null) $invoiceUpdate['odometer_fetched_at']         = $odoFetchedAt;
+
+    db_update('invoices', $invoiceUpdate, 'id = ?', [$invoice['id']]);
+
+    // Path B: lease.total_invoiced gets the delta. customer.outstanding_balance
+    // unchanged (this is a draft edit; the OB increment fires only on send).
+    $delta = bcsub($newTotal, $oldTotal, 2);
+    if (bccomp($delta, '0', 2) !== 0 && !empty($invoice['lease_id'])) {
+        db_execute(
+            "UPDATE leases SET total_invoiced = total_invoiced + ?, updated_at = NOW() WHERE id = ?",
+            [$delta, (int) $invoice['lease_id']]
+        );
+    }
+
+    db_insert('audit_log', [
+        'user_id'      => current_user_id(),
+        'user_name'    => current_user()['name'] ?? 'system',
+        'action'       => 'update',
+        'module'       => 'invoices',
+        'entity_type'  => 'invoice',
+        'entity_id'    => (int) $invoice['id'],
+        'entity_label' => $invoice['invoice_number'],
+        'notes'        => "S-FIX-2 Bug #1 last-day close: appended mileage reconciliation to full_month draft {$invoice['invoice_number']}. Counter delta: total_invoiced += {$delta} (Path B; draft, OB unchanged).",
+        'old_values'   => json_encode(['total_amount' => $oldTotal]),
+        'new_values'   => json_encode(['total_amount' => $newTotal]),
+        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+    ]);
+
+    return [
+        'invoice_id'     => (int) $invoice['id'],
+        'invoice_number' => $invoice['invoice_number'],
+        'action'         => 'appended_mileage',
+        'old_total'      => $oldTotal,
+        'new_total'      => $newTotal,
+    ];
+}
+
 $result = null;
 
 db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $reconMode, &$result) {
@@ -331,13 +584,20 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
     // SAMSARA-3: include odometer_start_km so we can derive the period
     // start odometer for the final invoice when the user supplies a
     // closing odometer without an explicit start value.
+    // S-FIX-2 Bug #1: include discount_* and JOIN customer.province so the
+    // legacy_append_mileage_to_full_month_draft helper can recompute totals
+    // with the right discount + tax rules on a last-day-of-month close.
     $lease = db_row(
-        "SELECT id, status, contract_number, company_name_snapshot, customer_id,
-                equipment_unit_id, unit_number_snapshot, mileage_at_start,
-                mileage_rate, mileage_unit, estimated_mileage, mileage_precharge_amount,
-                start_date, last_billed_date, odometer_start_km,
-                advance_billing_periods, currency
-         FROM leases WHERE id = ? AND deleted_at IS NULL",
+        "SELECT l.id, l.status, l.contract_number, l.company_name_snapshot, l.customer_id,
+                l.equipment_unit_id, l.unit_number_snapshot, l.mileage_at_start,
+                l.mileage_rate, l.mileage_unit, l.estimated_mileage, l.mileage_precharge_amount,
+                l.start_date, l.last_billed_date, l.odometer_start_km,
+                l.advance_billing_periods, l.currency,
+                l.discount_type, l.discount_value,
+                c.province AS province
+         FROM leases l
+         LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
+         WHERE l.id = ? AND l.deleted_at IS NULL",
         [$id]
     );
 
@@ -566,29 +826,80 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         }
     } else {
         // ── Legacy path: single final invoice ──────────────────
-        // Per spec §12 [PASS-3:2C]: final period = day after last_billed_date (or
-        // start_date if never billed) through actual_return_date. Pro-rated.
-        $periodStart = $lease['last_billed_date']
-            ? date('Y-m-d', strtotime($lease['last_billed_date'] . ' +1 day'))
-            : $lease['start_date'];
+        // S-FIX-2 Bug #1 (audit #1): if the monthly cron already generated a
+        // full_month draft for the closing month, do NOT generate a second
+        // partial_end on top of it (would double-bill). Two branches:
+        //   - Last-day close: append mileage reconciliation to the existing
+        //     draft and use it as the final invoice (skip partial_end).
+        //   - Mid-month close: void the draft, then fall through to partial_end.
+        // Concurrency: helper uses FOR UPDATE on the draft row; outer txn already
+        // holds the equipment_unit lock so the cron cannot insert mid-flight.
+        $draftAction = legacy_handle_existing_full_month_draft(
+            $id, $actualReturnDate, $lease, $extraLines,
+            $odoPeriodStart, $odoAtClose, $odoSource, $odoFetchedAt
+        );
 
-        $invoiceResult = $generator->createFromLease([
-            'lease_id'          => $id,
-            'period_start'      => $periodStart,
-            'period_end'        => $actualReturnDate,
-            'billing_type'      => 'partial_end',
-            'invoice_type'      => 'final',
-            'notes'             => $closeNotes,
-            'created_by'        => current_user_id(),
-            'auto_generated'    => 1,
-            'generation_source' => 'lease_close',
-            'extra_lines'       => $extraLines,
-            'odometer_at_period_start_km' => $odoPeriodStart,
-            'odometer_at_period_end_km'   => $odoAtClose,
-            'odometer_source'             => $odoSource,
-            'odometer_fetched_at'         => $odoFetchedAt,
-        ]);
-        $finalInvoiceId = $invoiceResult['invoice_id'];
+        $skipPartialEnd = false;
+        if ($draftAction !== null) {
+            // Surface the action in the response alongside any advance actions.
+            $advanceActions[] = $draftAction;
+            // Only the append branch produces the final invoice; the void branch
+            // falls through to partial_end generation below.
+            if ($draftAction['action'] === 'appended_mileage'
+                || $draftAction['action'] === 'no_mileage_to_append') {
+                $finalInvoiceId = $draftAction['invoice_id'];
+                $skipPartialEnd = true;
+            }
+        }
+
+        if (!$skipPartialEnd) {
+            // Per spec §12 [PASS-3:2C]: final period = day after last_billed_date (or
+            // start_date if never billed) through actual_return_date. Pro-rated.
+            $periodStart = $lease['last_billed_date']
+                ? date('Y-m-d', strtotime($lease['last_billed_date'] . ' +1 day'))
+                : $lease['start_date'];
+
+            // S-FIX-2 Bug #6: guard against date inversion. If last_billed_date is
+            // greater than or equal to actual_return_date, the previous invoice
+            // already covered (or extended past) the close date and there is no
+            // new period to bill. Skip partial_end generation rather than emit
+            // an invoice with period_end < period_start.
+            if ($periodStart > $actualReturnDate) {
+                db_insert('audit_log', [
+                    'user_id'      => current_user_id(),
+                    'user_name'    => current_user()['name'] ?? 'system',
+                    'action'       => 'lease_closed',
+                    'module'       => 'leases',
+                    'entity_type'  => 'lease',
+                    'entity_id'    => $id,
+                    'entity_label' => $lease['contract_number'],
+                    'notes'        => "S-FIX-2 Bug #6: lease closed within an already-billed period (last_billed_date {$lease['last_billed_date']} >= actual_return_date {$actualReturnDate}). No partial_end invoice generated.",
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+                $advanceActions[] = [
+                    'action' => 'partial_end_skipped',
+                    'reason' => "last_billed_date ({$lease['last_billed_date']}) >= actual_return_date ({$actualReturnDate}); previous invoice already covers the closing date.",
+                ];
+            } else {
+                $invoiceResult = $generator->createFromLease([
+                    'lease_id'          => $id,
+                    'period_start'      => $periodStart,
+                    'period_end'        => $actualReturnDate,
+                    'billing_type'      => 'partial_end',
+                    'invoice_type'      => 'final',
+                    'notes'             => $closeNotes,
+                    'created_by'        => current_user_id(),
+                    'auto_generated'    => 1,
+                    'generation_source' => 'lease_close',
+                    'extra_lines'       => $extraLines,
+                    'odometer_at_period_start_km' => $odoPeriodStart,
+                    'odometer_at_period_end_km'   => $odoAtClose,
+                    'odometer_source'             => $odoSource,
+                    'odometer_fetched_at'         => $odoFetchedAt,
+                ]);
+                $finalInvoiceId = $invoiceResult['invoice_id'];
+            }
+        }
     }
 
     $result = [

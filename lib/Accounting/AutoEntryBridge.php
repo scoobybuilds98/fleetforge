@@ -289,6 +289,108 @@ class AutoEntryBridge
     }
 
     // ============================================================
+    // OVERPAYMENT RECEIVED — DR 1010 Cash full / CR 1030 AR allocated /
+    //                       CR 2060 Customer Credits Liability overpayment
+    // Spec ref: §16, S-FIX-2 audit #2
+    //
+    // WHY a dedicated method: the standard onPaymentReceived posts DR Cash /
+    // CR AR for the allocated amount only. For an overpayment we receive cash
+    // for the FULL amount but only the allocated portion reduces AR — the
+    // remainder becomes a customer credit liability and is recorded on a
+    // separate credit_notes row with source='overpayment'. Posting the two
+    // events as a single 3-line JE keeps the cash side balanced and ensures
+    // the credit_note creation does NOT call onCreditNoteIssued (which would
+    // double-count the liability).
+    // ============================================================
+
+    /**
+     * Post JE when a payment is recorded with an overpayment portion.
+     *
+     * @param int      $paymentId          The payment row ID
+     * @param int      $invoiceId          The invoice the allocated portion reduced
+     * @param string   $allocatedAmount    Amount applied to the invoice (bcmath)
+     * @param string   $overpaymentAmount  Amount routed to credit liability (bcmath, > 0)
+     * @param int|null $userId
+     * @return array|null
+     */
+    public static function onOverpaymentReceived(
+        int $paymentId,
+        int $invoiceId,
+        string $allocatedAmount,
+        string $overpaymentAmount,
+        ?int $userId = null
+    ): ?array {
+        if (!self::isEnabled()) return null;
+
+        if (bccomp($overpaymentAmount, '0', 2) <= 0) {
+            // No overpayment — caller should have used onPaymentReceived instead.
+            return null;
+        }
+
+        $payment = \db_row(
+            "SELECT * FROM payments WHERE id = ? AND deleted_at IS NULL",
+            [$paymentId]
+        );
+        if (!$payment) return null;
+
+        $invoice = \db_row(
+            "SELECT invoice_number, customer_id, company_name_snapshot
+             FROM invoices WHERE id = ? AND deleted_at IS NULL",
+            [$invoiceId]
+        );
+        if (!$invoice) return null;
+
+        $cashAccountId        = self::requireAccountId('accounting.default_cash_account_id', 'Cash');
+        $arAccountId          = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+        $creditsLiabilityId   = self::requireAccountId(
+            'accounting.customer_credits_account_id',
+            'Customer Credits Liability (2060)'
+        );
+
+        $totalCash = bcadd($allocatedAmount, $overpaymentAmount, 2);
+
+        $jeLines = [
+            [
+                'account_id'  => $cashAccountId,
+                'debit'       => $totalCash,
+                'credit'      => '0.00',
+                'description' => "Cash received — {$payment['payment_number']} (incl. overpayment)",
+                'customer_id' => $invoice['customer_id'],
+            ],
+        ];
+
+        if (bccomp($allocatedAmount, '0', 2) > 0) {
+            $jeLines[] = [
+                'account_id'  => $arAccountId,
+                'debit'       => '0.00',
+                'credit'      => $allocatedAmount,
+                'description' => "AR reduced — {$payment['payment_number']} → {$invoice['invoice_number']}",
+                'customer_id' => $invoice['customer_id'],
+            ];
+        }
+
+        $jeLines[] = [
+            'account_id'  => $creditsLiabilityId,
+            'debit'       => '0.00',
+            'credit'      => $overpaymentAmount,
+            'description' => "Customer credit — overpayment from {$payment['payment_number']}",
+            'customer_id' => $invoice['customer_id'],
+        ];
+
+        $periodInfo = self::resolvePeriod($payment['payment_date']);
+
+        return JournalEntryService::create([
+            'entry_date'       => $periodInfo['entry_date'],
+            'description'      => "Payment {$payment['payment_number']} received with overpayment — {$invoice['company_name_snapshot']}",
+            'entry_type'       => 'system',
+            'reference'        => $payment['payment_number'],
+            'source_type'      => 'payment',
+            'source_id'        => $paymentId,
+            'post_immediately' => true,
+        ], $jeLines, $userId);
+    }
+
+    // ============================================================
     // CREDIT NOTE ISSUED — DR 4xxx Revenue / CR 2060 Customer Credits Liability
     // Spec ref: §16 PASS-6:G2 — posts to liability, NOT directly to AR
     // ============================================================

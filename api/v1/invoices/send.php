@@ -33,7 +33,8 @@ if (!$id) {
 
 $invoice = db_row(
     "SELECT id, status, invoice_number, customer_email_snapshot,
-            customer_id, company_name_snapshot, total_amount, due_date
+            customer_id, company_name_snapshot, total_amount, balance_due,
+            lease_id, due_date
      FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -62,6 +63,23 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
         'updated_by'      => current_user_id(),
     ], 'id = ?', [$id]);
 
+    // S-FIX-2 Path B: outstanding_balance increments on draft -> sent.
+    // Drafts do not contribute to OB; only sent/partially_paid/overdue do.
+    // Both the lease counter and the customer counter advance together.
+    $balanceDue = (string) $invoice['balance_due'];
+    if ($invoice['lease_id']) {
+        db_execute(
+            "UPDATE leases SET outstanding_balance = outstanding_balance + ?, updated_at = NOW() WHERE id = ?",
+            [$balanceDue, $invoice['lease_id']]
+        );
+    }
+    if ($invoice['customer_id']) {
+        db_execute(
+            "UPDATE customers SET outstanding_balance = outstanding_balance + ?, updated_at = NOW() WHERE id = ?",
+            [$balanceDue, $invoice['customer_id']]
+        );
+    }
+
     db_insert('audit_log', [
         'user_id'      => current_user_id(),
         'user_name'    => current_user()['name'] ?? 'System',
@@ -70,7 +88,9 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
         'entity_type'  => 'invoice',
         'entity_id'    => $id,
         'entity_label' => $invoice['invoice_number'],
-        'notes'        => "Invoice {$invoice['invoice_number']} sent (draft → sent)",
+        'notes'        => "Invoice {$invoice['invoice_number']} sent (draft → sent). Counter delta: outstanding_balance += {$balanceDue} (Path B).",
+        'old_values'   => json_encode(['status' => 'draft']),
+        'new_values'   => json_encode(['status' => 'sent', 'outstanding_balance_delta' => $balanceDue]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 

@@ -51,11 +51,15 @@ if (!$payment) {
     json_error('NOT_FOUND', 'Payment not found.', 404);
 }
 
-// Load all allocations for this payment (to know which invoices/leases to reverse)
+// Load all allocations for this payment (to know which invoices/leases to reverse).
+// S-FIX-2 Path B / D-E: also pull invoice.deleted_at so we can skip OB re-INC and
+// invoice updates for invoices that were voided / written-off / deleted after the
+// payment was made (those events already accounted for the counter movement).
 $allocations = db_select(
     "SELECT pa.id, pa.invoice_id, pa.amount,
             i.lease_id, i.invoice_number, i.total_amount, i.credits_applied,
-            i.amount_paid, i.balance_due, i.status AS invoice_status, i.customer_id
+            i.amount_paid, i.balance_due, i.status AS invoice_status,
+            i.customer_id, i.deleted_at AS invoice_deleted_at
      FROM payment_allocations pa
      JOIN invoices i ON i.id = pa.invoice_id
      WHERE pa.payment_id = ?",
@@ -80,6 +84,32 @@ db_transaction(function () use ($id, $payment, $allocations, $reason, &$reverted
         $credits      = (string) $alloc['credits_applied'];
         $total        = (string) $alloc['total_amount'];
 
+        // S-FIX-2 D-E: status guard. If the invoice is currently void / written_off /
+        // soft-deleted, the void/writeoff/delete path already reversed the counters.
+        // Skip the OB re-INC and the invoice balance/amount_paid update entirely —
+        // touching them now would create a phantom balance.
+        $invoiceTerminal = in_array($alloc['invoice_status'], ['void', 'written_off'], true)
+                        || $alloc['invoice_deleted_at'] !== null;
+
+        if ($invoiceTerminal) {
+            $revertedStatuses[] = [
+                'invoice_id'     => $alloc['invoice_id'],
+                'invoice_number' => $alloc['invoice_number'],
+                'old_status'     => $alloc['invoice_status'],
+                'new_status'     => $alloc['invoice_status'],
+                'note'           => 'skipped — invoice is void/written_off/deleted (Path B status guard)',
+            ];
+            // Still reverse leases.total_paid — that counter tracks payments, not OB,
+            // and the payment really is being reversed.
+            if ($alloc['lease_id']) {
+                db_execute(
+                    "UPDATE leases SET total_paid = GREATEST(0, total_paid - ?), updated_at = NOW() WHERE id = ?",
+                    [$allocated, $alloc['lease_id']]
+                );
+            }
+            continue;
+        }
+
         $newAmountPaid = bcround(bcsub($amountPaid, $allocated, 6), 2);
         if (bccomp($newAmountPaid, '0', 2) < 0) {
             $newAmountPaid = '0.00';
@@ -96,7 +126,7 @@ db_transaction(function () use ($id, $payment, $allocations, $reason, &$reverted
         //   - If balance_due = 0: stays 'paid' (other payments cover it)
         //   - If 0 < balance_due < total: partially_paid
         //   - If balance_due = total (nothing paid): sent
-        //   - Do NOT revert void or written_off invoices
+        //   - Do NOT revert void or written_off invoices (handled above)
         // ------------------------------------------------------------------
         $revertedStatus = $alloc['invoice_status']; // default: no change
 
@@ -145,7 +175,11 @@ db_transaction(function () use ($id, $payment, $allocations, $reason, &$reverted
 
         // ------------------------------------------------------------------
         // Step 4: Reverse customers.outstanding_balance (Trap 6)
-        //         Balance goes back UP when we remove the payment
+        //         Balance goes back UP when we remove the payment.
+        //         Path B: only re-INC on non-terminal invoice statuses (handled above).
+        //         leases.outstanding_balance is intentionally NOT touched here — it
+        //         has a pre-existing asymmetry (payments do not DEC it) and the brief
+        //         restricts Path B to the customer counter at payment-level moves.
         // ------------------------------------------------------------------
         if ($alloc['customer_id']) {
             db_execute(

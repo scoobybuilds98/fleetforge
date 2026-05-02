@@ -95,10 +95,13 @@ foreach ($statuses as $s) {
     );
 }
 
-// Refresh customer outstanding_balance counters
+// Refresh customer outstanding_balance counters.
+// S-FIX-2 Path B: filter by status (sent/partially_paid/overdue), not
+// `balance_due > 0`. The legacy filter inflated OB with draft invoices;
+// Path B excludes drafts and voids from the customer-facing AR figure.
 db_execute(
     "UPDATE customers c SET
-        outstanding_balance = COALESCE((SELECT SUM(balance_due) FROM invoices WHERE customer_id = c.id AND deleted_at IS NULL AND balance_due > 0), 0)
+        outstanding_balance = COALESCE((SELECT SUM(balance_due) FROM invoices WHERE customer_id = c.id AND deleted_at IS NULL AND status IN ('sent','partially_paid','overdue')), 0)
       WHERE deleted_at IS NULL",
     []
 );

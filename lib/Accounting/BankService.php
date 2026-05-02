@@ -745,13 +745,31 @@ class BankService
                 'status' => 'failed',
             ], 'id = ?', [$paymentId]);
 
-            // Reverse payment allocations — reopen invoices
+            // Reverse payment allocations — reopen invoices.
+            // S-FIX-2 D-E: status guard. If an allocated invoice is now void / written_off
+            // / soft-deleted, those events already reversed the counters; do NOT re-INC
+            // OB on this NSF reversal. Otherwise we get a phantom positive balance.
             $allocations = \db_select(
-                "SELECT * FROM payment_allocations WHERE payment_id = ?",
+                "SELECT pa.*, i.status AS invoice_status, i.deleted_at AS invoice_deleted_at
+                 FROM payment_allocations pa
+                 JOIN invoices i ON i.id = pa.invoice_id
+                 WHERE pa.payment_id = ?",
                 [$paymentId]
             );
 
+            $obReinflateAmount = '0.00';
+
             foreach ($allocations as $alloc) {
+                $invoiceTerminal = in_array($alloc['invoice_status'], ['void', 'written_off'], true)
+                                || $alloc['invoice_deleted_at'] !== null;
+
+                if ($invoiceTerminal) {
+                    // Invoice is in a terminal state — counters already reversed by the
+                    // void/writeoff/delete event. Skip both the invoice update and the
+                    // OB re-INC for this allocation.
+                    continue;
+                }
+
                 // Restore balance_due on invoice
                 \db_execute(
                     "UPDATE invoices SET
@@ -769,13 +787,18 @@ class BankService
                         $alloc['invoice_id'],
                     ]
                 );
+
+                $obReinflateAmount = bcadd($obReinflateAmount, (string) $alloc['amount'], 2);
             }
 
-            // Update customer outstanding balance
-            if ($payment['customer_id']) {
+            // Update customer outstanding balance.
+            // Path B: only re-INC by the sum of allocations whose invoice is still in a
+            // payable state. Allocations against void/written_off/deleted invoices are
+            // skipped above and excluded from $obReinflateAmount.
+            if ($payment['customer_id'] && bccomp($obReinflateAmount, '0', 2) > 0) {
                 \db_execute(
                     "UPDATE customers SET outstanding_balance = outstanding_balance + ? WHERE id = ? AND deleted_at IS NULL",
-                    [$paymentAmount, $payment['customer_id']]
+                    [$obReinflateAmount, $payment['customer_id']]
                 );
             }
 

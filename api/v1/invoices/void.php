@@ -54,8 +54,24 @@ if (!in_array($invoice['status'], $voidable)) {
 db_transaction(function () use ($id, $invoice, $voidReason) {
     $now = date('Y-m-d H:i:s');
 
+    // S-FIX-2 Path B: status-aware counter logic + Phase 0.5 Bug B fix.
+    // Snapshot the pre-void status so the audit log shows what we decremented.
+    $preVoidStatus      = $invoice['status'];
+    $totalAmount        = (string) $invoice['total_amount'];
+    $balanceDue         = (string) $invoice['balance_due'];
+
+    // Path B canonical truth:
+    //   draft  -> void: total_invoiced -= total_amount; OB unchanged
+    //   sent   -> void: total_invoiced -= total_amount; OB -= balance_due
+    //   (paid/partially_paid/overdue cannot reach this code — voidable list above
+    //    is ['draft','sent']. Kept the dec_ob_amount switch for symmetry only.)
+    $decOb = ($preVoidStatus === 'draft') ? '0.00' : $balanceDue;
+
+    // S-FIX-2 Phase 0.5 Bug B: zero balance_due on the void row to prevent a
+    // subsequent super_admin delete from double-decrementing the counter.
     db_update('invoices', [
         'status'      => 'void',
+        'balance_due' => '0.00',
         'voided_date' => date('Y-m-d'),
         'void_reason' => $voidReason,
         'voided_by'   => current_user_id(),
@@ -66,13 +82,13 @@ db_transaction(function () use ($id, $invoice, $voidReason) {
     if ($invoice['lease_id']) {
         db_execute(
             "UPDATE leases SET total_invoiced = total_invoiced - ?, outstanding_balance = outstanding_balance - ?, updated_at = NOW() WHERE id = ?",
-            [$invoice['total_amount'], $invoice['balance_due'], $invoice['lease_id']]
+            [$totalAmount, $decOb, $invoice['lease_id']]
         );
     }
     if ($invoice['customer_id']) {
         db_execute(
             "UPDATE customers SET outstanding_balance = outstanding_balance - ?, updated_at = NOW() WHERE id = ?",
-            [$invoice['balance_due'], $invoice['customer_id']]
+            [$decOb, $invoice['customer_id']]
         );
     }
 
@@ -84,7 +100,9 @@ db_transaction(function () use ($id, $invoice, $voidReason) {
         'entity_type'  => 'invoice',
         'entity_id'    => $id,
         'entity_label' => $invoice['invoice_number'],
-        'notes'        => "Invoice {$invoice['invoice_number']} voided: {$voidReason}",
+        'notes'        => "Invoice {$invoice['invoice_number']} voided (was {$preVoidStatus}): {$voidReason}. Counter delta: total_invoiced -= {$totalAmount}, outstanding_balance -= {$decOb} (Path B).",
+        'old_values'   => json_encode(['status' => $preVoidStatus, 'balance_due' => $balanceDue]),
+        'new_values'   => json_encode(['status' => 'void', 'balance_due' => '0.00']),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 

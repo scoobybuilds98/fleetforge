@@ -126,16 +126,11 @@ if ($invoiceCheck['status'] === 'paid') {
     $crossFieldErrors['invoice_id'] = 'This invoice is already fully paid.';
 }
 
-// VALID-2: Amount must not exceed balance due (overpayment is explicitly rejected).
-// The exact balance is echoed so staff know what to enter.
-if (empty($crossFieldErrors['currency'])
-    && empty($crossFieldErrors['invoice_id'])
-    && bccomp($amountRaw, (string) $invoiceCheck['balance_due'], 6) > 0) {
-    $balanceFormatted = '$' . number_format((float) $invoiceCheck['balance_due'], 2);
-    $crossFieldErrors['amount'] =
-        "Payment amount exceeds invoice balance of {$balanceFormatted}.";
-}
-
+// S-FIX-2 Bug #2: overpayments are NO LONGER rejected. When amount > balance_due
+// AND currency matches, the excess is auto-routed to a credit_notes row with
+// source='overpayment' (see transaction body below). Currency mismatch + overage
+// still produces 422 CURRENCY_MISMATCH because mixed-currency overpayment has no
+// clean rounding pattern (and the FX gain/loss should be the user's call, not ours).
 if ($crossFieldErrors) {
     json_validation_error($crossFieldErrors);
 }
@@ -200,17 +195,17 @@ db_transaction(function () use (
 
     $balanceDue = (string) $invoice['balance_due'];  // bcmath string
 
-    // VALID-2: D20 — strict rejection of over-allocation (defense in depth;
-    // pre-flight already caught this, but the FOR-UPDATE refetch may show a
-    // balance that changed under us). Exact balance is echoed in the error.
+    // S-FIX-2 Bug #2: split-allocation. If amount <= balance_due, allocate the
+    // full payment and overpayment is zero. If amount > balance_due, allocate
+    // exactly balance_due to the invoice and route the remainder to a
+    // credit_notes row with source='overpayment' (created later in this txn).
     if (bccomp($amountRaw, $balanceDue, 6) > 0) {
-        $balanceFormatted = '$' . number_format((float) $balanceDue, 2);
-        json_error('ALLOCATION_EXCEEDS_BALANCE',
-            "Payment amount exceeds invoice balance of {$balanceFormatted}.", 422,
-            ['fields' => ['amount' => "Payment amount exceeds invoice balance of {$balanceFormatted}."]]);
+        $allocatedAmount   = bcround($balanceDue, 2);
+        $overpaymentAmount = bcround(bcsub($amountRaw, $balanceDue, 6), 2);
+    } else {
+        $allocatedAmount   = bcround($amountRaw, 2);
+        $overpaymentAmount = '0.00';
     }
-    $allocatedAmount   = bcround($amountRaw, 2);
-    $overpaymentAmount = '0.00';
 
     // ------------------------------------------------------------------
     // 3b. Generate gap-free payment number via FOR UPDATE on settings row
@@ -349,6 +344,10 @@ db_transaction(function () use (
     // ------------------------------------------------------------------
     // 3i. Audit log — inside same transaction (FIX #19 pattern)
     // ------------------------------------------------------------------
+    $auditNote = "Payment {$paymentNumber} ({$currency} {$allocatedAmount}) applied to invoice {$invoice['invoice_number']}. Invoice status: {$newInvoiceStatus}.";
+    if (bccomp($overpaymentAmount, '0', 2) > 0) {
+        $auditNote .= " Overpayment {$currency} {$overpaymentAmount} routed to customer credit (S-FIX-2 Bug #2).";
+    }
     db_insert('audit_log', [
         'user_id'      => current_user_id(),
         'user_name'    => current_user()['name'] ?? 'System',
@@ -357,18 +356,97 @@ db_transaction(function () use (
         'entity_type'  => 'payment',
         'entity_id'    => $paymentId,
         'entity_label' => $paymentNumber,
-        'notes'        => "Payment {$paymentNumber} ({$currency} {$allocatedAmount}) applied to invoice {$invoice['invoice_number']}. Invoice status: {$newInvoiceStatus}.",
+        'notes'        => $auditNote,
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
-    // Auto-JE: DR 1010 Cash / CR 1030 AR for the allocated amount
-    // WHY: Inside same transaction — JE failure rolls back the payment (A8, §16)
-    \FleetForge\Accounting\AutoEntryBridge::onPaymentReceived(
-        $paymentId,
-        $invoiceId,
-        $allocatedAmount,
-        current_user_id()
-    );
+    // S-FIX-2 Bug #2: if there is an overpayment, create the credit_notes row
+    // (source='overpayment') and refresh the payment row's overpayment fields.
+    // Then post the 3-line JE via onOverpaymentReceived() instead of the regular
+    // 2-line onPaymentReceived(). Both events stay inside this transaction —
+    // any failure rolls back the entire payment.
+    $creditNoteOut = null;
+    if (bccomp($overpaymentAmount, '0', 2) > 0) {
+        // The INSERT above already wrote overpayment_amount + overpayment_action;
+        // mark resolved=1 because we are auto-routing the overpayment to a
+        // credit_notes row in this same transaction (no staff follow-up needed).
+        db_update('payments', [
+            'overpayment_resolved' => 1,
+        ], 'id = ?', [$paymentId]);
+
+        // Generate gap-free credit_note number — same FOR UPDATE pattern as
+        // api/v1/credit_notes/create.php (D15).
+        $cnYear   = date('Y');
+        $cnKey    = "credit_note.next_number.{$cnYear}";
+        $cnRow    = db_row("SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE", [$cnKey]);
+        $cnNext   = $cnRow ? (int) $cnRow['value'] : 1;
+        $cnPrefix = settings_get('credit_note.prefix', 'CN-CR');
+        $cnNumber = sprintf('%s-%s-%05d', $cnPrefix, $cnYear, $cnNext);
+        if ($cnRow) {
+            db_execute("UPDATE settings SET `value` = ? WHERE `key` = ?", [$cnNext + 1, $cnKey]);
+        } else {
+            db_execute(
+                "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
+                [$cnKey, $cnNext + 1]
+            );
+        }
+
+        $cnId = db_insert('credit_notes', [
+            'credit_note_number' => $cnNumber,
+            'customer_id'        => $invoice['customer_id'],
+            'lease_id'           => $invoice['lease_id'],
+            'source'             => 'overpayment',
+            'source_invoice_id'  => $invoiceId,
+            'source_payment_id'  => $paymentId,
+            'amount'             => $overpaymentAmount,
+            'currency'           => $currency,
+            'amount_remaining'   => $overpaymentAmount,
+            'status'             => 'active',
+            'reason'             => "Overpayment from payment {$paymentNumber} (received {$currency} {$amountRaw}, invoice balance was {$currency} {$balanceDue})",
+            'created_by'         => current_user_id(),
+        ]);
+
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => current_user()['name'] ?? 'System',
+            'action'       => 'create',
+            'module'       => 'invoices',
+            'entity_type'  => 'credit_note',
+            'entity_id'    => $cnId,
+            'entity_label' => $cnNumber,
+            'notes'        => "Auto-created from overpayment on payment {$paymentNumber} (S-FIX-2 Bug #2). Source: overpayment, amount: {$currency} {$overpaymentAmount}.",
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+
+        $creditNoteOut = [
+            'id'                 => $cnId,
+            'credit_note_number' => $cnNumber,
+            'amount'             => $overpaymentAmount,
+            'currency'           => $currency,
+            'status'             => 'active',
+            'source'             => 'overpayment',
+        ];
+
+        // 3-line JE: DR Cash full / CR AR allocated / CR 2060 Liability overpayment.
+        // We DO NOT call onCreditNoteIssued() here — its DR Revenue / CR 2060
+        // pattern would double-count the liability we already credited.
+        \FleetForge\Accounting\AutoEntryBridge::onOverpaymentReceived(
+            $paymentId,
+            $invoiceId,
+            $allocatedAmount,
+            $overpaymentAmount,
+            current_user_id()
+        );
+    } else {
+        // Standard payment, no overpayment — 2-line JE: DR Cash / CR AR.
+        // WHY: Inside same transaction — JE failure rolls back the payment (A8, §16)
+        \FleetForge\Accounting\AutoEntryBridge::onPaymentReceived(
+            $paymentId,
+            $invoiceId,
+            $allocatedAmount,
+            current_user_id()
+        );
+    }
 
     // Return values to outer scope
     $result = [
@@ -377,6 +455,7 @@ db_transaction(function () use (
         'amount'           => $amountRaw,
         'allocated_amount' => $allocatedAmount,
         'overpayment'      => $overpaymentAmount,
+        'credit_note'      => $creditNoteOut,
         'invoice_id'       => $invoiceId,
         'invoice_number'   => $invoice['invoice_number'],
         'invoice_status'   => $newInvoiceStatus,

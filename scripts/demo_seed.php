@@ -903,13 +903,18 @@ db_execute(
     [date('Y-m-d')]
 );
 
-// Update customer counters
+// Update customer counters.
+// S-FIX-2 Path B: outstanding_balance = SUM(balance_due) of invoices in
+// status IN ('sent','partially_paid','overdue'). Drafts and voids do NOT
+// contribute. Filtering on `balance_due > 0` was the legacy heuristic and
+// included drafts; switch to status filter so seed data matches the canonical
+// truth used by api/v1/invoices/send.php (where the OB increment now lives).
 db_execute(
     "UPDATE customers c SET
         lease_count = (SELECT COUNT(*) FROM leases WHERE customer_id = c.id AND deleted_at IS NULL),
         active_lease_count = (SELECT COUNT(*) FROM leases WHERE customer_id = c.id AND status = 'active' AND deleted_at IS NULL),
         total_revenue = COALESCE((SELECT SUM(amount_paid) FROM invoices WHERE customer_id = c.id AND deleted_at IS NULL), 0),
-        outstanding_balance = COALESCE((SELECT SUM(balance_due) FROM invoices WHERE customer_id = c.id AND deleted_at IS NULL AND balance_due > 0), 0)
+        outstanding_balance = COALESCE((SELECT SUM(balance_due) FROM invoices WHERE customer_id = c.id AND deleted_at IS NULL AND status IN ('sent','partially_paid','overdue')), 0)
       WHERE deleted_at IS NULL",
     []
 );
