@@ -61,7 +61,7 @@ if (!$existing) {
 }
 
 // ── D19: Optimistic lock ───────────────────────────────────────
-if ($existing['updated_at'] !== $updatedAt) {
+if (!optimistic_lock_matches($updatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA',
         'This unit was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This unit was modified by another user. Refresh and try again.']]);

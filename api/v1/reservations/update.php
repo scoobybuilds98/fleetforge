@@ -71,7 +71,7 @@ if (in_array($existing['status'], ['completed', 'cancelled'])) {
 }
 
 // ── Optimistic lock (D19) ──────────────────────────────────────
-if ($existing['updated_at'] !== $submittedAt) {
+if (!optimistic_lock_matches($submittedAt, $existing['updated_at'])) {
     json_error('STALE_DATA',
         'This reservation was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This reservation was modified by another user. Refresh and try again.']]);

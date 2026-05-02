@@ -235,7 +235,7 @@ class FixedAssetService
             if (!$row) {
                 throw new \RuntimeException('Asset not found.');
             }
-            if ($row['updated_at'] !== $data['updated_at']) {
+            if (!optimistic_lock_matches($data['updated_at'], $row['updated_at'])) {
                 throw new \RuntimeException('STALE_DATA: this asset was modified by another user.');
             }
             if ($row['status'] === 'disposed') {

@@ -108,7 +108,7 @@ if ($id) {
 
     // D19 optimistic lock
     $submittedUpdatedAt = clean_string($input['updated_at'] ?? null);
-    if ($submittedUpdatedAt && $existing['updated_at'] !== $submittedUpdatedAt) {
+    if ($submittedUpdatedAt && !optimistic_lock_matches($submittedUpdatedAt, $existing['updated_at'])) {
         json_error('STALE_DATA', 'This rule was modified by another user. Please refresh and try again.', 409, [
             'fields' => ['updated_at' => 'This rule was modified by another user. Please refresh and try again.'],
         ]);

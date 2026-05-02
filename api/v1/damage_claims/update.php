@@ -73,7 +73,7 @@ if (!$claim) {
 }
 
 // D19: optimistic lock
-if ($claim['updated_at'] !== $submittedUpdatedAt) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $claim['updated_at'])) {
     json_error('STALE_DATA',
         'This damage claim was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This damage claim was modified by another user. Refresh and try again.']]);

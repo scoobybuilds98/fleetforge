@@ -88,7 +88,7 @@ $submittedUpdatedAt = clean_string($body['updated_at'] ?? null);
 if (!$submittedUpdatedAt) {
     json_error('VALIDATION_ERROR', 'updated_at is required for optimistic locking.', 422);
 }
-if ($unit['updated_at'] !== $submittedUpdatedAt) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $unit['updated_at'])) {
     json_error('STALE_DATA', 'This unit was modified by another user. Refresh the grid and try again.', 409);
 }
 

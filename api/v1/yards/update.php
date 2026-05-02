@@ -40,7 +40,7 @@ $existing = db_row("SELECT id, name, updated_at FROM yards WHERE id = ?", [$id])
 if (!$existing) json_error('NOT_FOUND', 'Yard not found.', 404);
 
 // ── D19 optimistic lock ───────────────────────────────────────────
-if ($existing['updated_at'] !== $submittedAt) {
+if (!optimistic_lock_matches($submittedAt, $existing['updated_at'])) {
     json_error('STALE_DATA', 'Yard was modified by another user. Refresh and try again.', 409);
 }
 

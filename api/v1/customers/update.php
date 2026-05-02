@@ -65,7 +65,7 @@ if (!$existing) {
 // ── D19 Optimistic lock check ──────────────────────────────────
 // Compare submitted updated_at against DB — reject if stale.
 // WHY: prevents overwriting changes made by another user since the form was loaded.
-if ($submittedUpdatedAt !== $existing['updated_at']) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA',
         'This customer was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This customer was modified by another user. Refresh and try again.']]);

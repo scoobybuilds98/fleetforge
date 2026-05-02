@@ -85,8 +85,11 @@ $tokenHash  = hash('sha256', $plainToken);      // SHA-256 hash stored in DB
 // -----------------------------------------------------------------------
 // 7. Insert user inside transaction + audit log
 // -----------------------------------------------------------------------
+// S-PROD-1B #67: set mfa_required based on the assigned role at invite time
+$mfaRequired = \FleetForge\Auth\MfaService::userRoleRequiresMfa($roleId) ? 1 : 0;
+
 $newId = db_transaction(function () use (
-    $name, $email, $roleId, $phone, $timezone, $tokenHash
+    $name, $email, $roleId, $phone, $timezone, $tokenHash, $mfaRequired
 ) {
     $id = db_insert('users', [
         'name'                 => $name,
@@ -95,6 +98,7 @@ $newId = db_transaction(function () use (
         'phone'                => $phone,
         'timezone'             => $timezone,
         'status'               => 'invited',
+        'mfa_required'         => $mfaRequired,
         'invite_token'         => $tokenHash,
         'invite_token_expiry'  => date('Y-m-d H:i:s', strtotime('+7 days')),
         'invite_sent_at'       => date('Y-m-d H:i:s'),
@@ -110,7 +114,7 @@ $newId = db_transaction(function () use (
         'entity_type'  => 'user',
         'entity_id'    => $id,
         'entity_label' => $email,
-        'new_values'   => json_encode(['name' => $name, 'email' => $email, 'status' => 'invited']),
+        'new_values'   => json_encode(['name' => $name, 'email' => $email, 'status' => 'invited', 'mfa_required' => $mfaRequired]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
         'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
     ]);

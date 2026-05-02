@@ -47,7 +47,7 @@ $rows = db_select(
             l.contract_number AS lease_number,
             inv.invoice_number AS applied_to_invoice_number
      FROM acc_customer_deposits d
-     LEFT JOIN customers c ON c.id = d.customer_id
+     LEFT JOIN customers c ON c.id = d.customer_id AND c.deleted_at IS NULL
      LEFT JOIN leases l ON l.id = d.lease_id
      LEFT JOIN invoices inv ON inv.id = d.applied_to_invoice_id
      WHERE {$whereSQL}

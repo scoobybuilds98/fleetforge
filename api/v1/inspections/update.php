@@ -50,7 +50,7 @@ $existing = db_row("SELECT * FROM inspections WHERE id = ?", [$id]);
 if (!$existing) json_error('NOT_FOUND', 'Inspection not found.', 404);
 
 // D19 optimistic lock — reject if another user modified the record since the client loaded it
-if ($existing['updated_at'] !== $updatedAt) {
+if (!optimistic_lock_matches($updatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA',
         'This inspection was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This inspection was modified by another user. Refresh and try again.']]);

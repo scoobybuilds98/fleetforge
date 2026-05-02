@@ -38,6 +38,31 @@ class MfaService
     }
 
     // ────────────────────────────────────────────────────────────
+    // Role-driven MFA policy (S-PROD-1B #67)
+    // ────────────────────────────────────────────────────────────
+
+    /**
+     * Returns true if the given role requires MFA, per the
+     * security.mfa.required_roles setting (default: super_admin, manager).
+     * Returns false for unknown role IDs or misconfigured settings.
+     */
+    public static function userRoleRequiresMfa(int $roleId): bool
+    {
+        $role = db_row("SELECT slug FROM user_roles WHERE id = ?", [$roleId]);
+        if (!$role) {
+            return false;
+        }
+        $required = json_decode(
+            settings_get('security.mfa.required_roles', '["super_admin","manager"]'),
+            true
+        );
+        if (!is_array($required)) {
+            return false;
+        }
+        return in_array($role['slug'], $required, true);
+    }
+
+    // ────────────────────────────────────────────────────────────
     // TOTP
     // ────────────────────────────────────────────────────────────
 

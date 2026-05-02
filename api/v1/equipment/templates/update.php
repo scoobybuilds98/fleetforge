@@ -59,7 +59,7 @@ if (!$existing) {
 
 // ── D19: Optimistic lock check ─────────────────────────────────
 // WHY: prevents last-write-wins race when two users edit simultaneously
-if ($existing['updated_at'] !== $updatedAt) {
+if (!optimistic_lock_matches($updatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA',
         'This template was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This template was modified by another user. Refresh and try again.']]);

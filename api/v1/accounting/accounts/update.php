@@ -64,7 +64,7 @@ if (!$account) {
 }
 
 // Optimistic lock check
-if ($account['updated_at'] !== $submittedUpdatedAt) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $account['updated_at'])) {
     json_error(
         'STALE_DATA',
         'This account was modified by another user. Please refresh and try again.',

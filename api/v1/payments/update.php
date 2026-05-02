@@ -54,7 +54,7 @@ if (!$payment) {
 }
 
 // D19: Optimistic lock — reject if record was modified since the form loaded
-if ($payment['updated_at'] !== $submittedUpdatedAt) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $payment['updated_at'])) {
     json_error('STALE_DATA',
         'This payment was modified by another user. Please refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This payment was modified by another user. Please refresh and try again.']]);

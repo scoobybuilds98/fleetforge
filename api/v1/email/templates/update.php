@@ -40,7 +40,7 @@ if (!$existing) {
 }
 
 // D19 optimistic lock — refuse if record changed
-if ($submittedUpdatedAt && $existing['updated_at'] !== $submittedUpdatedAt) {
+if ($submittedUpdatedAt && !optimistic_lock_matches($submittedUpdatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA', 'Template was modified by another user. Refresh and try again.', 409);
 }
 

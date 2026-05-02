@@ -82,7 +82,7 @@ if (!$current) {
         'fields' => ['filing_period_id' => 'Tax filing period not found.'],
     ]);
 }
-if ((string) $current['updated_at'] !== $updatedAt) {
+if (!optimistic_lock_matches($updatedAt, $current['updated_at'])) {
     json_error(
         'STALE_DATA',
         'This tax period was modified by another user. Please refresh and try again.',

@@ -63,7 +63,7 @@ if (!$existing) {
 // -----------------------------------------------------------------------
 // 2. D19 optimistic lock
 // -----------------------------------------------------------------------
-if ($existing['updated_at'] !== $submittedUpdatedAt) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA',
         'This work order was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This work order was modified by another user. Refresh and try again.']]);

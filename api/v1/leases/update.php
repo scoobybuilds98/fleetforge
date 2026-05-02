@@ -64,7 +64,7 @@ if (in_array($existing['status'], ['completed', 'cancelled'])) {
 }
 
 // ── D19 Optimistic lock check ──────────────────────────────────
-if ($existing['updated_at'] !== $updatedAt) {
+if (!optimistic_lock_matches($updatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA',
         'This lease was modified by another user. Reload the page to get the latest version.', 409);
 }

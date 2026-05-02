@@ -85,7 +85,7 @@ if ($isUpdate) {
     if (!$submittedUpdatedAt) {
         json_validation_error(['updated_at' => 'Optimistic lock token is required.']);
     }
-    if ($existing['updated_at'] !== $submittedUpdatedAt) {
+    if (!optimistic_lock_matches($submittedUpdatedAt, $existing['updated_at'])) {
         json_error('STALE_DATA',
             'This rate was modified by another user. Refresh and try again.', 409,
             ['fields' => ['updated_at' => 'This rate was modified by another user. Refresh and try again.']]);

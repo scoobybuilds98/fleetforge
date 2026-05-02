@@ -54,7 +54,7 @@ if ($bill['status'] !== 'draft') {
 }
 
 // D19 optimistic lock
-if ($bill['updated_at'] !== $submittedUpdatedAt) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $bill['updated_at'])) {
     json_error('STALE_DATA',
         'This bill was modified by another user. Refresh and try again.', 409,
         ['fields' => ['updated_at' => 'This bill was modified by another user. Refresh and try again.']]);

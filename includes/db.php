@@ -236,3 +236,29 @@ function db_sanitize_column(string $col): string
     // Backtick-quote every column name so reserved words (e.g. `condition`) are safe.
     return "`{$col}`";
 }
+
+// ============================================================
+// optimistic_lock_matches() — D19 optimistic locking (S-PROD-1B #36)
+//
+// Normalizes both timestamps to Unix seconds before comparing.
+// Comparison normalized to Unix timestamp / second precision.
+// Subsecond drift discarded — concurrent same-second edits are
+// extremely rare; the SELECT-then-UPDATE pattern guards against
+// actual lost-update scenarios.
+//
+// Guards against: DST transitions, microsecond precision differences
+// (DATETIME(6) vs DATETIME), and timezone-format variations that
+// would cause a raw string comparison to incorrectly fire the lock.
+// Fails closed (returns false) on malformed input so a garbled
+// token never silently passes the lock.
+// ============================================================
+function optimistic_lock_matches(string $client, string $db): bool
+{
+    try {
+        $clientTs = (new DateTimeImmutable($client))->getTimestamp();
+        $dbTs     = (new DateTimeImmutable($db))->getTimestamp();
+        return $clientTs === $dbTs;
+    } catch (\Exception $e) {
+        return false; // Malformed input fails closed
+    }
+}

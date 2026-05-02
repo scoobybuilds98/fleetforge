@@ -57,7 +57,7 @@ if ($cn['status'] === 'void') {
 }
 
 // D19: Compare updated_at — reject if record was modified since caller loaded it
-if ($cn['updated_at'] !== $submittedUpdatedAt) {
+if (!optimistic_lock_matches($submittedUpdatedAt, $cn['updated_at'])) {
     json_error('STALE_DATA', 'This credit note was modified by another user. Please refresh and try again.', 409);
 }
 
