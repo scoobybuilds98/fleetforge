@@ -66,6 +66,9 @@ if (!$forcedSetup) {
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap">
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>" defer></script>
+    <!-- S-PROD-1A-FIX-4 T7: forced-setup head does not include footer.php (which loads Alpine).
+         Must load Alpine here; Bundle 2 (S-PROD-1A-FIX-5) will replace with local vendor file. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>try{var t=localStorage.getItem('ff-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}
     window.FF_BASE_PATH = <?= json_encode(FF_BASE_PATH) ?>;
     </script>
@@ -85,7 +88,7 @@ if (!$forcedSetup) {
         </div>
 <?php endif; ?>
 
-        <div x-data="mfaSetup()" x-init="init()">
+        <div x-data="mfaSetup()" x-init="init()" x-cloak><!-- S-PROD-1A-FIX-4 T28: x-cloak prevents flash of all steps before Alpine binds -->
 
             <!-- ── Step indicator ──────────────────────────────────────────── -->
             <div style="display:flex;gap:8px;margin-bottom:28px;" x-show="step < 4">

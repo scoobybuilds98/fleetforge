@@ -78,6 +78,11 @@ if (!$result['success']) {
 
 // ── Clean up session ──────────────────────────────────────────────────────────
 unset($_SESSION['ff_mfa_setup']);
+// S-PROD-1A-FIX-4 T17: clear forced-setup flag so user cannot re-enter setup
+// wizard (and rotate their TOTP secret) before their next full login.
+// Failure paths above do NOT clear this — a user who fails verification
+// while still in forced-setup must remain gated until they succeed.
+unset($_SESSION['ff_mfa_must_setup']);
 
 db_insert('audit_log', [
     'user_id'      => $userId,

@@ -164,6 +164,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     // ── MFA intercept (step 4.5) ─────────────────────
                     if ((int) ($user['mfa_enabled'] ?? 0) === 1) {
+                        // S-PROD-1A-FIX-4 T14: regenerate before writing ff_mfa_pending to
+                        // close session-fixation window (attacker knows pw but not TOTP).
+                        // A second regeneration fires in auth_login() after TOTP succeeds.
+                        session_regenerate_id(true);
                         // User has MFA — gate login behind challenge
                         $_SESSION['ff_mfa_pending'] = [
                             'user_id'    => $user['id'],
@@ -176,6 +180,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     if ((int) ($user['mfa_required'] ?? 0) === 1) {
+                        // S-PROD-1A-FIX-4 T14: regenerate before writing ff_mfa_must_setup
+                        // for same session-fixation defense as the ff_mfa_pending branch.
+                        session_regenerate_id(true);
                         // Role requires MFA but user hasn't set it up
                         $_SESSION['ff_mfa_must_setup'] = $user['id'];
                         // S-PROD-1A-FIX: underscore matches actual filename mfa_required.php

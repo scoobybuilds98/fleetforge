@@ -123,11 +123,14 @@ class MfaService
         foreach ($rows as $row) {
             if (password_verify($code, $row['code_hash'])) {
                 $ip = \FleetForge\Security\RateLimiter::getClientIp();
-                db_execute(
-                    "UPDATE user_mfa_backup_codes SET used_at = NOW(), used_ip = ? WHERE id = ?",
+                // S-PROD-1A-FIX-4 T16: AND used_at IS NULL guards against two concurrent
+                // requests both passing password_verify and double-consuming the same code.
+                // db_execute returns rowCount(); 0 means another worker won the race.
+                $affected = db_execute(
+                    "UPDATE user_mfa_backup_codes SET used_at = NOW(), used_ip = ? WHERE id = ? AND used_at IS NULL",
                     [$ip, $row['id']]
                 );
-                return true;
+                return $affected === 1;
             }
         }
 

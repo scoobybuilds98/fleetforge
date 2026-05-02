@@ -57,7 +57,7 @@ function find_valid_reset_token(string $plainToken): ?array
              JOIN users u ON u.id = prt.user_id
              WHERE prt.token_hash = ?
                AND prt.expires_at > NOW()
-               AND u.is_active = 1
+               AND u.status = 'active'         -- S-PROD-1A-FIX-4 T34: users has no is_active column
                AND u.deleted_at IS NULL",
             [$tokenHash]
         );
