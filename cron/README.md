@@ -50,6 +50,19 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 # ── AI / Analytics ────────────────────────────────────────────────────────────
 # AI anomaly scan — daily at 04:00 UTC
 0 4 * * *     /usr/bin/php /var/www/fleetforge/cron/ai_anomaly_scan.php >> /var/www/fleetforge/logs/cron.log 2>&1
+
+# ── Integrity & Cleanup (S-CRON-2) ────────────────────────────────────────────
+# Counter drift detection — nightly at 02:00 UTC (after monthly invoice cron at 01:00)
+0 2 * * *     /usr/bin/php /var/www/fleetforge/cron/reconcile_counters.php >> /var/www/fleetforge/logs/cron.log 2>&1
+
+# Stale reservation cleanup — daily at 04:30 UTC
+30 4 * * *    /usr/bin/php /var/www/fleetforge/cron/stale_reservations.php >> /var/www/fleetforge/logs/cron.log 2>&1
+
+# Monthly data archive — 1st of month at 04:00 UTC
+0 4 1 * *     /usr/bin/php /var/www/fleetforge/cron/archive_old_data.php >> /var/www/fleetforge/logs/cron.log 2>&1
+
+# Cache expiry sweep — every hour
+0 * * * *     /usr/bin/php /var/www/fleetforge/cron/cache_cleanup.php >> /var/www/fleetforge/logs/cron.log 2>&1
 ```
 
 ---
@@ -69,6 +82,23 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 | `gps_mileage_sync.php` | Daily 02:00 | `ff_cron_gps_mileage` | Mileage reconciliation |
 | `compliance_alerts.php` | Daily 06:30 | `ff_cron_compliance` | Compliance deadline alerts |
 | `ai_anomaly_scan.php` | Daily 04:00 | `ff_cron_ai_anomaly` | AI-driven anomaly detection |
+| `reconcile_counters.php` | Daily 02:00 | `ff_cron_reconcile_counters` | Counter drift detection — read-only |
+| `stale_reservations.php` | Daily 04:30 | `ff_cron_stale_reservations` | Auto-cancel pending reservations past threshold |
+| `archive_old_data.php` | 1st of month 04:00 | `ff_cron_archive_old_data` | Archive audit_log + notification_log |
+| `cache_cleanup.php` | Hourly | `ff_cron_cache_cleanup` | Delete expired report_cache + ai_summaries |
+
+---
+
+## Integrity & cleanup settings (S-CRON-2)
+
+| Setting key | Default | Description |
+|---|---|---|
+| `reservations.stale_after_days` | `14` | Days a pending reservation can sit before auto-cancel |
+| `archive.audit_log_retention_days` | `365` | Days before audit_log rows are archived (raise to 2190 for 6-year CRA retention) |
+| `archive.notification_log_retention_days` | `90` | Days before notification_log rows are archived |
+
+Reconciliation log files: `logs/reconciliation/{YYYY-MM-DD}.log`
+State file (spike detection): `logs/reconciliation/last_run.json`
 
 ---
 
