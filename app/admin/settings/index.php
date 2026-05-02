@@ -47,17 +47,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             // CURRENCY-MARKUP-1: step=0.0001 precision, range 0–20, old/new audit log
             $oldMarkup = (string) (settings_get('currency.usd_cad_markup_pct', '0.0000') ?? '0.0000');
             $rawMarkup = $_POST['currency_usd_cad_markup_pct'] ?? null;
-            $newMarkup = $rawMarkup !== null
-                ? (string) preg_replace('/[^0-9.]/', '', (string) $rawMarkup)
-                : '0.0000';
-            if (!is_numeric($newMarkup) || $newMarkup === '') {
-                $newMarkup = '0.0000';
-            }
-            $newMarkup = number_format((float) $newMarkup, 4, '.', '');
-
-            if (bccomp($newMarkup, '0', 4) < 0 || bccomp($newMarkup, '20', 4) > 0) {
+            // Reject before stripping: a leading '-' would be silently dropped by
+            // the sanitizer, turning -1.0 into 1.0 and bypassing the range check.
+            if ($rawMarkup !== null && ltrim((string) $rawMarkup)[0] === '-') {
                 $saveError = 'USD → CAD markup must be between 0% and 20%.';
-            } else {
+            }
+            if (empty($saveError)) {
+                $newMarkup = $rawMarkup !== null
+                    ? (string) preg_replace('/[^0-9.]/', '', (string) $rawMarkup)
+                    : '0.0000';
+                if (!is_numeric($newMarkup) || $newMarkup === '') {
+                    $newMarkup = '0.0000';
+                }
+                $newMarkup = number_format((float) $newMarkup, 4, '.', '');
+            }
+
+            if (empty($saveError) && (bccomp($newMarkup, '0', 4) < 0 || bccomp($newMarkup, '20', 4) > 0)) {
+                $saveError = 'USD → CAD markup must be between 0% and 20%.';
+            }
+            if (empty($saveError)) {
                 db_execute(
                     "UPDATE settings SET `value` = ?, updated_by = ?, updated_at = NOW() WHERE `key` = 'currency.usd_cad_markup_pct'",
                     [$newMarkup, current_user_id()]
