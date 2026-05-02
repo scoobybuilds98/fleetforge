@@ -9,6 +9,8 @@
 
 # --- Composer ---
 vendor/
+# Front-end vendor (self-hosted JS/CSS libraries) is committed — do not ignore
+!public/assets/vendor/
 
 # --- Storage — user uploads and generated files (go to S3 in prod) ---
 storage/uploads/

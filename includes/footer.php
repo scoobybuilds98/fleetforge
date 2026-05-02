@@ -165,8 +165,8 @@
 <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
 <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
 
-<!-- Alpine.js v3 — loaded last, defer ensures it initialises after DOM is ready -->
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<!-- Alpine.js v3.15.12 — self-hosted (S-PROD-1A-FIX-5); defer ensures it initialises after DOM is ready -->
+<script defer src="<?= asset_url('assets/vendor/alpinejs/cdn.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
 
 <!-- ============================================================
      SVG Icon Sprite — shared stat-card & UI icons (Heroicons outline 24)

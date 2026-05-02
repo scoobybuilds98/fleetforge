@@ -67,8 +67,8 @@ if (!$forcedSetup) {
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>" defer></script>
     <!-- S-PROD-1A-FIX-4 T7: forced-setup head does not include footer.php (which loads Alpine).
-         Must load Alpine here; Bundle 2 (S-PROD-1A-FIX-5) will replace with local vendor file. -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+         S-PROD-1A-FIX-5: self-hosted at vendor path, no CDN dependency. -->
+    <script defer src="<?= asset_url('assets/vendor/alpinejs/cdn.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
     <script>try{var t=localStorage.getItem('ff-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}
     window.FF_BASE_PATH = <?= json_encode(FF_BASE_PATH) ?>;
     </script>

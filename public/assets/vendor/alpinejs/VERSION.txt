@@ -1,0 +1,10 @@
+Alpine.js v3.15.12
+Downloaded from https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js
+Date: 2026-05-02
+SHA-384 (SRI): sha384-pb6hrQvo4s23cEUFtj0CZkzGE3jyK3pj26RIupXXxhSrrcUA/Cn0lZgcCrGH0t6L
+
+To upgrade:
+  1. Replace cdn.min.js with new version from cdn.jsdelivr.net/npm/alpinejs@<new_version>/dist/cdn.min.js
+  2. Update version and SHA-384 in this file
+  3. Bump FF_ASSET_VERSION in .env and .env.example
+  4. Re-run S-PROD-1A-FIX-5 regression sweep (SC8)
