@@ -71,3 +71,5 @@ samsara_api*
 
 # --- Claude Code working dirs ---
 .claude/worktrees/
+logs/
+.claude/
