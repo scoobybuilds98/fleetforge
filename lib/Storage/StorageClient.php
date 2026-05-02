@@ -97,6 +97,51 @@ class StorageClient
     }
 
     // ============================================================
+    // exists() — check whether a stored file exists
+    //
+    // Returns false if the file does not exist (does not throw).
+    // ============================================================
+    public static function exists(string $key): bool
+    {
+        self::validateStoragePath($key);
+        return self::driver() === 's3'
+            ? self::existsS3($key)
+            : self::existsLocal($key);
+    }
+
+    // ============================================================
+    // fileSize() — return the byte size of a stored file.
+    //
+    // Returns 0 if the file does not exist.
+    // ============================================================
+    public static function fileSize(string $key): int
+    {
+        self::validateStoragePath($key);
+        return self::driver() === 's3'
+            ? self::fileSizeS3($key)
+            : self::fileSizeLocal($key);
+    }
+
+    // ============================================================
+    // listByPrefix() — list all stored files under a path prefix.
+    //
+    // Returns array of:
+    //   ['key' => string, 'size' => int, 'last_modified' => string]
+    // 'last_modified' is a UTC datetime string (Y-m-d H:i:s).
+    // An empty prefix lists everything under the storage root.
+    // ============================================================
+    public static function listByPrefix(string $prefix): array
+    {
+        $checkPath = rtrim($prefix, '/');
+        if ($checkPath !== '') {
+            self::validateStoragePath($checkPath);
+        }
+        return self::driver() === 's3'
+            ? self::listByPrefixS3($prefix)
+            : self::listByPrefixLocal($prefix);
+    }
+
+    // ============================================================
     // driver() — resolve the active storage driver
     //
     // INT-1: settings table FIRST, .env SECOND. Returns 'local'
@@ -213,6 +258,50 @@ class StorageClient
         return true;
     }
 
+    private static function existsLocal(string $key): bool
+    {
+        return file_exists(FF_ROOT . '/storage/' . $key);
+    }
+
+    private static function fileSizeLocal(string $key): int
+    {
+        $path = FF_ROOT . '/storage/' . $key;
+        if (!file_exists($path)) return 0;
+        $size = filesize($path);
+        return $size === false ? 0 : (int) $size;
+    }
+
+    private static function listByPrefixLocal(string $prefix): array
+    {
+        $baseDir = FF_ROOT . '/storage/' . $prefix;
+        $results = [];
+
+        if (!is_dir($baseDir)) {
+            return $results;
+        }
+
+        $storageBase    = FF_ROOT . '/storage/';
+        $storageBaseLen = strlen($storageBase);
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($baseDir, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::LEAVES_ONLY
+        );
+
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) continue;
+            $realPath = $file->getRealPath();
+            if (!str_starts_with($realPath, $storageBase)) continue;
+            $results[] = [
+                'key'           => str_replace('\\', '/', substr($realPath, $storageBaseLen)),
+                'size'          => (int) $file->getSize(),
+                'last_modified' => gmdate('Y-m-d H:i:s', $file->getMTime()),
+            ];
+        }
+
+        return $results;
+    }
+
     // ----------------------------------------------------------
     // S3 DRIVER — private implementation
     // ----------------------------------------------------------
@@ -311,6 +400,61 @@ class StorageClient
                 "StorageClient S3 delete failed: " . $e->getMessage()
             );
         }
+    }
+
+    private static function existsS3(string $key): bool
+    {
+        try {
+            self::s3()->headObject([
+                'Bucket' => self::bucket(),
+                'Key'    => $key,
+            ]);
+            return true;
+        } catch (S3Exception $e) {
+            if ($e->getStatusCode() === 404) return false;
+            throw new RuntimeException("StorageClient S3 head failed: " . $e->getMessage());
+        }
+    }
+
+    private static function fileSizeS3(string $key): int
+    {
+        try {
+            $result = self::s3()->headObject([
+                'Bucket' => self::bucket(),
+                'Key'    => $key,
+            ]);
+            return (int) ($result['ContentLength'] ?? 0);
+        } catch (S3Exception $e) {
+            if ($e->getStatusCode() === 404) return 0;
+            throw new RuntimeException("StorageClient S3 head failed: " . $e->getMessage());
+        }
+    }
+
+    private static function listByPrefixS3(string $prefix): array
+    {
+        $results = [];
+        try {
+            $paginator = self::s3()->getPaginator('ListObjectsV2', [
+                'Bucket' => self::bucket(),
+                'Prefix' => $prefix,
+            ]);
+            foreach ($paginator as $page) {
+                foreach ($page['Contents'] ?? [] as $obj) {
+                    $lastMod = $obj['LastModified'];
+                    $modStr  = $lastMod instanceof \DateTimeInterface
+                        ? $lastMod->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s')
+                        : (string) $lastMod;
+                    $results[] = [
+                        'key'           => (string) $obj['Key'],
+                        'size'          => (int)    $obj['Size'],
+                        'last_modified' => $modStr,
+                    ];
+                }
+            }
+        } catch (S3Exception $e) {
+            throw new RuntimeException("StorageClient S3 list failed: " . $e->getMessage());
+        }
+        return $results;
     }
 
     // ----------------------------------------------------------
