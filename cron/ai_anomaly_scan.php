@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 // WHY: Cron scripts must bootstrap the app themselves
 require_once __DIR__ . '/../config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 $startTime = microtime(true);
 $logPrefix = '[' . date('Y-m-d H:i:s') . '] [AI_ANOMALY_SCAN]';
@@ -52,6 +53,7 @@ try {
     }
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     echo "{$logPrefix} FATAL: {$e->getMessage()}\n";
     exit(1);
 }

@@ -12,7 +12,8 @@
         "aws/aws-sdk-php": "^3.300",
         "bacon/bacon-qr-code": "^3.1",
         "mpdf/mpdf": "^8.2",
-        "pragmarx/google2fa": "^9.0"
+        "pragmarx/google2fa": "^9.0",
+        "sentry/sentry": "^4.25"
     },
     "autoload": {
         "psr-4": {

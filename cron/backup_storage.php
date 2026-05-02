@@ -21,6 +21,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 use FleetForge\Storage\StorageClient;
 
@@ -166,6 +167,7 @@ try {
     ff_backup_storage_retention();
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     if ($tmpFile !== '' && file_exists($tmpFile)) {
         @unlink($tmpFile);
     }

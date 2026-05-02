@@ -22,11 +22,16 @@ declare(strict_types=1);
 // 1. Global exception handler — must be set before any output
 //    [PASS-8:2] All unhandled exceptions → branded 500 page
 // ============================================================
+// Init Sentry before the exception handler so crashes are captured (S-PROD-2 / #19).
+\FleetForge\Observability\Sentry::init();
+
 set_exception_handler(function (Throwable $e): void {
     error_log(
         '[FF Page Exception] ' . $e->getMessage() .
         ' in ' . $e->getFile() . ':' . $e->getLine()
     );
+
+    \FleetForge\Observability\Sentry::captureException($e);
 
     // Discard any partial output already buffered
     if (ob_get_level() > 0) ob_end_clean();

@@ -20,15 +20,12 @@ declare(strict_types=1);
  * @session S027
  */
 
-require_once __DIR__ . '/../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 2) . '/bootstrap.php';
 
 require_auth_api();
 
 if (!can('ai', 'view')) {
-    http_response_code(403);
-    echo json_encode(['error' => true, 'message' => 'Forbidden']);
-    exit;
+    json_error('FORBIDDEN', 'Forbidden', 403);
 }
 
 // ── User-level rate limit (S-PROD-1A) ────────────────────────────────────────
@@ -38,9 +35,7 @@ $_rlCheck = \FleetForge\Security\RateLimiter::check(
     (int) settings_get('security.rate_limit.ai_user_window_minutes', 60)
 );
 if (!$_rlCheck['allowed']) {
-    http_response_code(429);
-    echo json_encode(['error' => true, 'message' => 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 'code' => 'RATE_LIMITED']);
-    exit;
+    json_error('RATE_LIMITED', 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 429);
 }
 unset($_rlCheck);
 
@@ -56,9 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = $_GET;
     $forceRefresh = false;
 } else {
-    http_response_code(405);
-    echo json_encode(['error' => true, 'message' => 'Method not allowed']);
-    exit;
+    json_error('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
 }
 
 $entityType  = trim($body['entity_type'] ?? '');
@@ -68,33 +61,25 @@ $summaryType = trim($body['summary_type'] ?? '');
 // Validate entity_type
 $validEntityTypes = ['customer', 'lease', 'equipment_unit', 'fleet'];
 if (!in_array($entityType, $validEntityTypes, true)) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'Invalid entity_type. Must be one of: ' . implode(', ', $validEntityTypes)]);
-    exit;
+    json_error('VALIDATION_ERROR', 'Invalid entity_type. Must be one of: ' . implode(', ', $validEntityTypes), 400);
 }
 
 // Validate summary_type
 $validSummaryTypes = ['customer_insights', 'lease_summary', 'unit_analysis', 'fleet_health', 'payment_risk', 'forecast', 'anomaly', 'accounting_overview'];
 if (!in_array($summaryType, $validSummaryTypes, true)) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'Invalid summary_type. Must be one of: ' . implode(', ', $validSummaryTypes)]);
-    exit;
+    json_error('VALIDATION_ERROR', 'Invalid summary_type. Must be one of: ' . implode(', ', $validSummaryTypes), 400);
 }
 
 // fleet-level summaries (fleet_health, accounting_overview) don't need an entity_id
 $fleetLevelTypes = ['fleet_health', 'accounting_overview'];
 if (!in_array($summaryType, $fleetLevelTypes, true) && $entityType !== 'fleet' && $entityId <= 0) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'entity_id is required']);
-    exit;
+    json_error('VALIDATION_ERROR', 'entity_id is required', 400);
 }
 
 // ── Check AI is enabled ────────────────────────────────────
 $ai = new \FleetForge\AI\ClaudeClient();
 if (!$ai->isEnabled()) {
-    http_response_code(503);
-    echo json_encode(['error' => true, 'message' => 'AI features are not enabled.']);
-    exit;
+    json_error('AI_DISABLED', 'AI features are not enabled.', 503);
 }
 
 // ── Generate or retrieve summary ───────────────────────────
@@ -107,9 +92,7 @@ $result = \FleetForge\AI\SummaryEngine::generate(
 );
 
 if ($result === null) {
-    http_response_code(500);
-    echo json_encode(['error' => true, 'message' => 'Failed to generate summary. Please try again.']);
-    exit;
+    json_error('AI_ERROR', 'Failed to generate summary. Please try again.', 500);
 }
 
 echo json_encode($result, JSON_UNESCAPED_UNICODE);

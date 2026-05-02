@@ -116,6 +116,22 @@ require_once FF_ROOT . '/includes/header.php';
                                x-model="form.email"
                                maxlength="255">
                         <div class="field-error" data-error-for="email"></div>
+                        <?php if (!empty($customerRow['email_disabled'])): ?>
+                        <div class="alert alert-warning mt-2" style="font-size:0.875rem;">
+                            <strong>Email disabled</strong> — <?= e($customerRow['email_disabled_reason'] ?? 'SES bounce or complaint') ?>
+                            <?php if ($customerRow['email_disabled_at']): ?>
+                                on <?= e(date('Y-m-d', strtotime($customerRow['email_disabled_at']))) ?>
+                            <?php endif; ?>
+                            <?php if (current_user_can('customers', 'edit') && (is_manager() || is_super_admin())): ?>
+                            <button type="button" class="btn btn-sm btn-warning ms-2"
+                                    @click="reenableEmail()"
+                                    x-bind:disabled="reenabling">
+                                <span x-show="!reenabling">Re-enable email</span>
+                                <span x-show="reenabling">Re-enabling…</span>
+                            </button>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="form-group">
@@ -495,6 +511,7 @@ function FF_CustomerEditForm() {
 
     return {
         submitting:  false,
+        reenabling:  false,
         form:        prefill,
         allTags: [
             'vip','preferred','owner-operator','fleet','net-30','net-45','net-60',
@@ -594,6 +611,23 @@ function FF_CustomerEditForm() {
                 FF_Validate.banner(form, 'Network error. Please try again.');
             } finally {
                 this.submitting = false;
+            }
+        },
+
+        async reenableEmail() {
+            if (this.reenabling) return;
+            this.reenabling = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/customers/reenable_email') ?>', { id: this.form.id });
+                if (r.success) {
+                    window.location.reload();
+                } else {
+                    alert(r.error?.message || 'Could not re-enable email. Please try again.');
+                }
+            } catch (e) {
+                alert('Network error. Please try again.');
+            } finally {
+                this.reenabling = false;
             }
         },
     };

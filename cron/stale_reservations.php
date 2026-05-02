@@ -38,6 +38,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 use FleetForge\Notifications\NotificationService;
 
@@ -238,6 +239,7 @@ try {
     error_log("[CRON stale_reservations] {$notes}");
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     $msg = $e->getMessage();
     error_log("[CRON stale_reservations] FAILED: {$msg}");
 

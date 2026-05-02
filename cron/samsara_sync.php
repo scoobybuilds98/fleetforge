@@ -41,6 +41,7 @@ declare(strict_types=1);
 // ============================================================
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 use FleetForge\GPS\SamsaraClient;
 
@@ -296,6 +297,7 @@ try {
     echo "[SAMSARA_SYNC] $summary\n";
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     $msg = $e->getMessage();
     ff_samsara_log('CRON_FATAL', $msg);
     error_log("[SAMSARA_SYNC] Fatal error: $msg");

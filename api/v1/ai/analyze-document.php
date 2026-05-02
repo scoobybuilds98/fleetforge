@@ -27,15 +27,12 @@ declare(strict_types=1);
  * @session S027
  */
 
-require_once __DIR__ . '/../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 2) . '/bootstrap.php';
 
 require_auth_api();
 
 if (!can('ai', 'create')) {
-    http_response_code(403);
-    echo json_encode(['error' => true, 'message' => 'Forbidden']);
-    exit;
+    json_error('FORBIDDEN', 'Forbidden', 403);
 }
 
 // ── User-level rate limit (S-PROD-1A) ────────────────────────────────────────
@@ -45,16 +42,12 @@ $_rlCheck = \FleetForge\Security\RateLimiter::check(
     (int) settings_get('security.rate_limit.ai_user_window_minutes', 60)
 );
 if (!$_rlCheck['allowed']) {
-    http_response_code(429);
-    echo json_encode(['error' => true, 'message' => 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 'code' => 'RATE_LIMITED']);
-    exit;
+    json_error('RATE_LIMITED', 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 429);
 }
 unset($_rlCheck);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error' => true, 'message' => 'Method not allowed']);
-    exit;
+    json_error('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
 }
 
 header('Content-Type: application/json');
@@ -63,9 +56,7 @@ $userId = (int) ($_SESSION['ff_user']['id'] ?? 0);
 
 // ── Validate file upload ───────────────────────────────────
 if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'File upload is required']);
-    exit;
+    json_error('VALIDATION_ERROR', 'File upload is required', 400);
 }
 
 $file     = $_FILES['file'];
@@ -73,9 +64,7 @@ $maxSize  = 10 * 1024 * 1024; // 10MB
 $prompt   = trim($_POST['prompt'] ?? '');
 
 if ($file['size'] > $maxSize) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'File too large. Maximum size is 10MB.']);
-    exit;
+    json_error('FILE_TOO_LARGE', 'File too large. Maximum size is 10MB.', 400);
 }
 
 // WHY: Only allow image types that Anthropic Vision API supports, plus PDF
@@ -89,9 +78,7 @@ $allowedTypes = [
 ];
 
 if (!isset($allowedTypes[$mimeType])) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'Unsupported file type. Allowed: PDF, PNG, JPG, GIF, WEBP.']);
-    exit;
+    json_error('UNSUPPORTED_FILE_TYPE', 'Unsupported file type. Allowed: PDF, PNG, JPG, GIF, WEBP.', 400);
 }
 
 // ── Initialize AI ──────────────────────────────────────────
@@ -103,21 +90,13 @@ if (!$ai->isEnabled()) {
 }
 
 if (!\FleetForge\AI\TokenTracker::canSpend($userId)) {
-    http_response_code(429);
-    echo json_encode([
-        'error'   => true,
-        'message' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
-        'code'    => 'TOKEN_LIMIT',
-    ]);
-    exit;
+    json_error('TOKEN_LIMIT', 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.', 429);
 }
 
 // ── Build message with document ────────────────────────────
 $fileData = file_get_contents($file['tmp_name']);
 if ($fileData === false) {
-    http_response_code(500);
-    echo json_encode(['error' => true, 'message' => 'Failed to read uploaded file.']);
-    exit;
+    json_error('INTERNAL_ERROR', 'Failed to read uploaded file.', 500);
 }
 
 $base64 = base64_encode($fileData);

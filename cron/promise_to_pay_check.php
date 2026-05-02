@@ -42,6 +42,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 // Advisory lock prevents overlapping runs
 $lock = db_row("SELECT GET_LOCK('ff_cron_promise_check', 0) AS ok", []);
@@ -252,6 +253,7 @@ try {
     ]);
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     error_log("[CRON promise_to_pay_check] Fatal: " . $e->getMessage());
 
     db_insert('audit_log', [

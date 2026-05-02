@@ -26,15 +26,12 @@ declare(strict_types=1);
  * @session S027
  */
 
-require_once __DIR__ . '/../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 2) . '/bootstrap.php';
 
 require_auth_api();
 
 if (!can('ai', 'view')) {
-    http_response_code(403);
-    echo json_encode(['error' => true, 'message' => 'Forbidden']);
-    exit;
+    json_error('FORBIDDEN', 'Forbidden', 403);
 }
 
 // ── User-level rate limit (S-PROD-1A) ────────────────────────────────────────
@@ -44,24 +41,18 @@ $_rlCheck = \FleetForge\Security\RateLimiter::check(
     (int) settings_get('security.rate_limit.ai_user_window_minutes', 60)
 );
 if (!$_rlCheck['allowed']) {
-    http_response_code(429);
-    echo json_encode(['error' => true, 'message' => 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 'code' => 'RATE_LIMITED']);
-    exit;
+    json_error('RATE_LIMITED', 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 429);
 }
 unset($_rlCheck);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error' => true, 'message' => 'Method not allowed']);
-    exit;
+    json_error('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
 }
 
 // ── Parse input ────────────────────────────────────────────
 $body = json_decode(file_get_contents('php://input'), true);
 if (!is_array($body)) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'Invalid JSON body']);
-    exit;
+    json_error('INVALID_JSON', 'Invalid JSON body', 400);
 }
 
 $messageText = trim($body['message'] ?? '');
@@ -70,9 +61,7 @@ $contextType = trim($body['context_type'] ?? '');
 $contextId   = (int) ($body['context_id'] ?? 0);
 
 if ($messageText === '') {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'Message is required']);
-    exit;
+    json_error('VALIDATION_ERROR', 'Message is required', 400);
 }
 
 $userId   = (int) ($_SESSION['ff_user']['id'] ?? 0);
@@ -92,13 +81,7 @@ if (!$ai->isEnabled()) {
 }
 
 if (!\FleetForge\AI\TokenTracker::canSpend($userId)) {
-    http_response_code(429);
-    echo json_encode([
-        'error'   => true,
-        'message' => 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.',
-        'code'    => 'TOKEN_LIMIT',
-    ]);
-    exit;
+    json_error('TOKEN_LIMIT', 'Daily AI token limit reached. Try again tomorrow or raise the limit in settings.', 429);
 }
 
 // ── Create or resume session (same as chat.php) ───────────
@@ -116,9 +99,7 @@ if ($sessionId <= 0) {
         [$sessionId, $userId]
     );
     if (!$session) {
-        http_response_code(404);
-        echo json_encode(['error' => true, 'message' => 'Session not found']);
-        exit;
+        json_error('NOT_FOUND', 'Session not found', 404);
     }
 }
 

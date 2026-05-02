@@ -19,15 +19,12 @@ declare(strict_types=1);
  * @session S027
  */
 
-require_once __DIR__ . '/../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 2) . '/bootstrap.php';
 
 require_auth_api();
 
 if (!can('ai', 'view')) {
-    http_response_code(403);
-    echo json_encode(['error' => true, 'message' => 'Forbidden']);
-    exit;
+    json_error('FORBIDDEN', 'Forbidden', 403);
 }
 
 header('Content-Type: application/json');
@@ -36,9 +33,7 @@ $userId    = (int) ($_SESSION['ff_user']['id'] ?? 0);
 $sessionId = (int) ($_GET['id'] ?? 0);
 
 if ($sessionId <= 0) {
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'Session ID is required']);
-    exit;
+    json_error('VALIDATION_ERROR', 'Session ID is required', 400);
 }
 
 // WHY: Verify session belongs to the requesting user
@@ -50,9 +45,7 @@ $session = db_row(
 );
 
 if (!$session) {
-    http_response_code(404);
-    echo json_encode(['error' => true, 'message' => 'Chat session not found']);
-    exit;
+    json_error('NOT_FOUND', 'Chat session not found', 404);
 }
 
 // ────────────────────────────────────────────────────────────
@@ -79,9 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 // ────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
     if (!can('ai', 'edit')) {
-        http_response_code(403);
-        echo json_encode(['error' => true, 'message' => 'Forbidden']);
-        exit;
+        json_error('FORBIDDEN', 'Forbidden', 403);
     }
 
     // WHY: Messages have FK CASCADE on session_id, so deleting session removes messages
@@ -91,5 +82,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
     exit;
 }
 
-http_response_code(405);
-echo json_encode(['error' => true, 'message' => 'Method not allowed']);
+json_error('METHOD_NOT_ALLOWED', 'Method not allowed', 405);

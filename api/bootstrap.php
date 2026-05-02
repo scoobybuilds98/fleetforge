@@ -31,6 +31,11 @@ declare(strict_types=1);
 require_once realpath(dirname(__DIR__) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
 
+// ── Sentry error monitoring (S-PROD-2 / #19) ────────────────
+// Init before session so any early crash is captured.
+// No-op when SENTRY_DSN is blank (dev mode).
+\FleetForge\Observability\Sentry::init();
+
 // ── Session ─────────────────────────────────────────────────
 // Must start before any output and before CSRF is checked.
 _ff_session_start();
@@ -56,6 +61,8 @@ set_exception_handler(function (Throwable $e): void {
         '[FF API] Unhandled exception: ' . $e->getMessage() .
         ' in ' . $e->getFile() . ':' . $e->getLine()
     );
+
+    \FleetForge\Observability\Sentry::captureException($e);
 
     // Never expose internal details in production
     $message = (defined('FF_DEBUG') && FF_DEBUG)

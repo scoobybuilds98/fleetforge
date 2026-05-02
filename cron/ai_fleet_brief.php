@@ -30,6 +30,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 // D21: Advisory lock prevents overlapping runs.
 $lock = db_row("SELECT GET_LOCK('ff_cron_ai_fleet_brief', 0) AS ok", []);
@@ -186,6 +187,7 @@ try {
     ));
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     error_log('[CRON ai_fleet_brief] Fatal: ' . $e->getMessage());
     log_brief_audit('ai_fleet_brief fatal error: ' . $e->getMessage(), isError: true);
     exit(1);

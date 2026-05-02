@@ -21,6 +21,7 @@ declare(strict_types=1);
 // ============================================================
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 use FleetForge\GPS\SamsaraClient;
 
@@ -145,6 +146,7 @@ try {
     echo "[GPS_SYNC] Done. Processed: $processed, Skipped: $skipped, Failed: $failed\n";
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     $msg = $e->getMessage();
     error_log("[GPS_SYNC] Fatal error: $msg");
 

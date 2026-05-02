@@ -18,6 +18,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 // D21: Advisory lock prevents overlapping runs from marking the same invoices twice
 $lock = db_row("SELECT GET_LOCK('ff_cron_invoice_overdue', 0) AS ok", []);
@@ -140,6 +141,7 @@ try {
     ]);
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     error_log("[CRON invoice_overdue] Fatal: " . $e->getMessage());
 
     db_insert('audit_log', [

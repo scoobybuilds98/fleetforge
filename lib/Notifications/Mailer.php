@@ -67,6 +67,14 @@ class Mailer
             return false;
         }
 
+        // D-C: check email_disabled before every send (S-PROD-2 / #21).
+        // Permanent SES bounces and complaints auto-disable the address.
+        // A disabled address must be re-enabled by a manager before email resumes.
+        if (self::isEmailDisabled($toEmail)) {
+            error_log("[Mailer] Send blocked — email_disabled=1 for '{$toEmail}'");
+            return false;
+        }
+
         // Auto-generate plain-text body if not provided
         if ($textBody === '') {
             $textBody = strip_tags($htmlBody);
@@ -259,6 +267,42 @@ class Mailer
         ]);
 
         return self::$sesInstance;
+    }
+
+    // ============================================================
+    // isEmailDisabled() — returns true if the recipient's address has
+    // been auto-disabled by a hard SES bounce or complaint (D-C).
+    //
+    // Checks both customers and portal_users. If the address appears
+    // in neither, or the column doesn't exist yet, returns false
+    // (fail-open — never silently block mail for unknown addresses).
+    // ============================================================
+    private static function isEmailDisabled(string $toEmail): bool
+    {
+        try {
+            $email = strtolower(trim($toEmail));
+
+            $customer = db_row(
+                "SELECT email_disabled FROM customers WHERE LOWER(email) = ? AND deleted_at IS NULL LIMIT 1",
+                [$email]
+            );
+            if ($customer && (int) $customer['email_disabled'] === 1) {
+                return true;
+            }
+
+            $portal = db_row(
+                "SELECT email_disabled FROM portal_users WHERE LOWER(email) = ? LIMIT 1",
+                [$email]
+            );
+            if ($portal && (int) $portal['email_disabled'] === 1) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // Column not yet present (pre-migration): fail-open so mail still works.
+            error_log('[Mailer] isEmailDisabled check failed: ' . $e->getMessage());
+        }
+
+        return false;
     }
 
     // ============================================================

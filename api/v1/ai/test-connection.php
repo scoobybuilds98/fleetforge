@@ -16,22 +16,17 @@ declare(strict_types=1);
  * @session S027
  */
 
-require_once __DIR__ . '/../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 2) . '/bootstrap.php';
 
 require_auth_api();
 
 // WHY: Only super_admin should test API connections (settings:edit permission)
 if (!can('settings', 'edit')) {
-    http_response_code(403);
-    echo json_encode(['error' => true, 'message' => 'Forbidden']);
-    exit;
+    json_error('FORBIDDEN', 'Forbidden', 403);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error' => true, 'message' => 'Method not allowed']);
-    exit;
+    json_error('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
 }
 
 header('Content-Type: application/json');

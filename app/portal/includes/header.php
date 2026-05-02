@@ -12,9 +12,13 @@ declare(strict_types=1);
  *   require_once dirname(__DIR__) . '/includes/header.php';
  */
 
+// Init Sentry before exception handler so portal crashes are captured (S-PROD-2 / #19).
+\FleetForge\Observability\Sentry::init();
+
 // Global exception handler for portal pages
 set_exception_handler(function (Throwable $e): void {
     error_log('[FF Portal Exception] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    \FleetForge\Observability\Sentry::captureException($e);
     if (ob_get_level() > 0) ob_end_clean();
     http_response_code(500);
     if (FF_DEBUG) {

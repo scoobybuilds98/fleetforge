@@ -38,6 +38,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 // Advisory lock prevents overlapping runs
 $lock = db_row("SELECT GET_LOCK('ff_cron_collections_escalate', 0) AS ok", []);
@@ -234,6 +235,7 @@ try {
     ]);
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     error_log("[CRON collections_auto_escalate] Fatal: " . $e->getMessage());
 
     db_insert('audit_log', [

@@ -34,6 +34,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();
 
 const ARCHIVE_CHUNK_SIZE = 500;
 
@@ -192,6 +193,7 @@ try {
     error_log("[CRON archive_old_data] {$notes}");
 
 } catch (\Throwable $e) {
+    \FleetForge\Observability\Sentry::captureException($e);
     $msg = $e->getMessage();
     error_log("[CRON archive_old_data] FAILED: {$msg}");
 

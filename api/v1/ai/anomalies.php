@@ -23,15 +23,12 @@ declare(strict_types=1);
  * @session S027
  */
 
-require_once __DIR__ . '/../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 2) . '/bootstrap.php';
 
 require_auth_api();
 
 if (!can('ai', 'view')) {
-    http_response_code(403);
-    echo json_encode(['error' => true, 'message' => 'Forbidden']);
-    exit;
+    json_error('FORBIDDEN', 'Forbidden', 403);
 }
 
 // ── User-level rate limit (S-PROD-1A) ────────────────────────────────────────
@@ -41,9 +38,7 @@ $_rlCheck = \FleetForge\Security\RateLimiter::check(
     (int) settings_get('security.rate_limit.ai_user_window_minutes', 60)
 );
 if (!$_rlCheck['allowed']) {
-    http_response_code(429);
-    echo json_encode(['error' => true, 'message' => 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 'code' => 'RATE_LIMITED']);
-    exit;
+    json_error('RATE_LIMITED', 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 429);
 }
 unset($_rlCheck);
 
@@ -74,16 +69,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Acknowledge an alert
     if ($action === 'acknowledge' || isset($body['alert_id'])) {
         if (!can('ai', 'edit')) {
-            http_response_code(403);
-            echo json_encode(['error' => true, 'message' => 'Forbidden']);
-            exit;
+            json_error('FORBIDDEN', 'Forbidden', 403);
         }
 
         $alertId = (int) ($body['alert_id'] ?? 0);
         if ($alertId <= 0) {
-            http_response_code(400);
-            echo json_encode(['error' => true, 'message' => 'alert_id is required']);
-            exit;
+            json_error('VALIDATION_ERROR', 'alert_id is required', 400);
         }
 
         \FleetForge\AI\AnomalyDetector::acknowledgeAlert($alertId, $userId);
@@ -94,9 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Trigger a manual scan (super_admin only)
     if ($action === 'scan') {
         if (!can('settings', 'edit')) {
-            http_response_code(403);
-            echo json_encode(['error' => true, 'message' => 'Only administrators can trigger manual scans']);
-            exit;
+            json_error('FORBIDDEN', 'Only administrators can trigger manual scans', 403);
         }
 
         $count = \FleetForge\AI\AnomalyDetector::runAll($userId);
@@ -104,10 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    http_response_code(400);
-    echo json_encode(['error' => true, 'message' => 'Invalid action. Use "acknowledge" or "scan".']);
-    exit;
+    json_error('VALIDATION_ERROR', 'Invalid action. Use "acknowledge" or "scan".', 400);
 }
 
-http_response_code(405);
-echo json_encode(['error' => true, 'message' => 'Method not allowed']);
+json_error('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
