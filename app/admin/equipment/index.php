@@ -465,12 +465,14 @@ function FF_Equipment() {
             return map[status] || 'badge-neutral';
         },
 
-        // Health score badge — spec §12
+        // Health score badge — spec §12 four bands (S-CRON-3 canonical mapping)
+        // Mirrors PHP equipment_health_color() in includes/functions.php.
         healthBadgeClass(score) {
-            if (score >= 80) return 'badge-success';
-            if (score >= 50) return 'badge-warning';
-            if (score >= 20) return 'badge-danger';
-            return 'badge-danger';
+            if (score === null || score === undefined) return 'badge-neutral';
+            if (score >= 80) return 'badge-success';   // green
+            if (score >= 50) return 'badge-warning';   // yellow
+            if (score >= 20) return 'badge-warning';   // orange (no separate badge)
+            return 'badge-danger';                     // red
         },
 
         // Compliance: flag if any expiry date is within 30 days or in the past

@@ -636,3 +636,30 @@ function format_mileage(mixed $distance, string $unit = 'km'): string
     return $formatted . ' ' . $label;
 }
 }
+
+// ============================================================
+// EQUIPMENT HEALTH SCORE HELPERS — S-CRON-3
+// ============================================================
+
+// equipment_health_color() — derive color band from numeric health score
+//
+// WHY: Spec §12 locks the score→color mapping. Pure function, recompute on
+// every read (no health_color column on equipment_units — D-NEW S-CRON-3).
+// Cron writes health_score only; render sites call this helper.
+//
+// Mapping (locked):
+//   80-100 → 'green'
+//   50-79  → 'yellow'
+//   20-49  → 'orange'
+//   0-19   → 'red'
+//   null   → 'unknown' (unit never scored)
+if (!function_exists('equipment_health_color')) {
+function equipment_health_color(?int $score): string
+{
+    if ($score === null) return 'unknown';
+    if ($score >= 80) return 'green';
+    if ($score >= 50) return 'yellow';
+    if ($score >= 20) return 'orange';
+    return 'red';
+}
+}

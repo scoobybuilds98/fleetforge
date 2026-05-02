@@ -156,6 +156,9 @@ json_success([
     'internal_notes'         => $row['internal_notes'],
     'tags'                   => $row['tags'] ? json_decode($row['tags'], true) : [],
     'health_score'           => $row['health_score'] !== null ? (int) $row['health_score'] : null,
+    // health_color: derived band per S-CRON-3 (no separate column;
+    // recomputed on every read from the canonical helper).
+    'health_color'           => equipment_health_color($row['health_score'] !== null ? (int) $row['health_score'] : null),
     'health_score_updated_at'=> $row['health_score_updated_at'],
     'lease_count'            => (int) $row['lease_count'],
     'total_revenue'          => $row['total_revenue'],

@@ -152,6 +152,9 @@ foreach ($rows as $row) {
         'mvi_expiry'          => $row['mvi_expiry'],
         'insurance_expiry'    => $row['insurance_expiry'],
         'health_score'        => $row['health_score'] !== null ? (int) $row['health_score'] : null,
+        // health_color: derived band per S-CRON-3 (no separate column;
+        // recomputed on every read from the canonical helper).
+        'health_color'        => equipment_health_color($row['health_score'] !== null ? (int) $row['health_score'] : null),
         'lease_count'         => (int) $row['lease_count'],
         'total_revenue'       => $row['total_revenue'],
         'acquired_date'       => $row['acquired_date'],

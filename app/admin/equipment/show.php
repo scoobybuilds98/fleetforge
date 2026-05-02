@@ -97,11 +97,17 @@ function statusBadgeClass(string $status): string {
     };
 }
 
+// healthBadgeClass — map the canonical 4-band health color (S-CRON-3) to
+// our shared badge palette. equipment_health_color() lives in
+// includes/functions.php and is the single source of truth for the bands.
 function healthBadgeClass(?int $score): string {
-    if ($score === null) return 'badge-neutral';
-    if ($score >= 80) return 'badge-success';
-    if ($score >= 50) return 'badge-warning';
-    return 'badge-danger';
+    return match (equipment_health_color($score)) {
+        'green'   => 'badge-success',
+        'yellow'  => 'badge-warning',
+        'orange'  => 'badge-warning',
+        'red'     => 'badge-danger',
+        default   => 'badge-neutral',
+    };
 }
 
 // Compliance days-remaining helper
