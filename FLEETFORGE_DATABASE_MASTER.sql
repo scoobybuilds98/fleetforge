@@ -36,6 +36,10 @@ CREATE TABLE users (
     name                    VARCHAR(255) NOT NULL,
     email                   VARCHAR(255) NOT NULL UNIQUE,
     password_hash           VARCHAR(255) NULL,
+    mfa_enabled             TINYINT(1) NOT NULL DEFAULT 0,                -- [S-PROD-1A] TOTP enrolled and active
+    mfa_secret              VARCHAR(500) NULL,                             -- [S-PROD-1A] AES-256-CBC encrypted TOTP secret (ENC:base64)
+    mfa_enabled_at          DATETIME NULL,                                 -- [S-PROD-1A] when MFA was enrolled
+    mfa_required            TINYINT(1) NOT NULL DEFAULT 0,                -- [S-PROD-1A] role-policy driven (super_admin/manager)
     auth0_sub               VARCHAR(255) NULL UNIQUE, -- kept nullable for possible future SSO integration (Decision D1)
     role_id                 INT UNSIGNED NOT NULL,
     status                  ENUM('active','inactive','invited','suspended','locked') NOT NULL DEFAULT 'active',
@@ -62,6 +66,18 @@ CREATE TABLE users (
     INDEX idx_deleted (deleted_at),
     FOREIGN KEY (role_id) REFERENCES user_roles(id) ON DELETE RESTRICT,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- user_mfa_backup_codes — [S-PROD-1A] bcrypt-hashed TOTP backup codes (one-time use)
+CREATE TABLE user_mfa_backup_codes (
+    id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id    INT UNSIGNED NOT NULL,
+    code_hash  VARCHAR(255) NOT NULL,
+    used_at    DATETIME NULL,
+    used_ip    VARCHAR(45) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_used (user_id, used_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 003_user_permissions.sql
@@ -2339,6 +2355,18 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- rate_limit_attempts — [S-PROD-1A] fixed-window rate limiting for login/forgot-password/AI/MFA
+CREATE TABLE rate_limit_attempts (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    bucket_key    VARCHAR(255) NOT NULL,
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 1,
+    window_start  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_attempt  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    blocked_until DATETIME NULL,
+    INDEX idx_bucket_key (bucket_key),
+    INDEX idx_blocked (blocked_until)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================================
@@ -2395,3 +2423,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- [ADV-BILL-1] leases: added advance_billing_periods TINYINT UNSIGNED DEFAULT 0 AFTER billing_cycle
 -- [ADV-BILL-1] invoices: extended generation_source ENUM with 'advance' value (lease activation prepayment batch)
 -- [ADV-BILL-1] settings: added billing.max_advance_periods seed row (default 24, group=invoices)
+-- [S-PROD-1A] users: added mfa_enabled, mfa_secret, mfa_enabled_at, mfa_required columns (D62–D64)
+-- [S-PROD-1A] NEW TABLE user_mfa_backup_codes: bcrypt-hashed one-time TOTP backup codes
+-- [S-PROD-1A] NEW TABLE rate_limit_attempts: fixed-window rate limiting buckets (D65–D67)
+-- [S-PROD-1A] settings: 16 security.rate_limit.* and security.mfa.* seed rows added

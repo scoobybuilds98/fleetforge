@@ -5,12 +5,14 @@
     "license": "proprietary",
     "require": {
         "php": ">=8.2",
-        "mpdf/mpdf": "^8.2",
-        "aws/aws-sdk-php": "^3.300",
         "ext-bcmath": "*",
+        "ext-gd": "*",
         "ext-mbstring": "*",
         "ext-pdo": "*",
-        "ext-gd": "*"
+        "aws/aws-sdk-php": "^3.300",
+        "bacon/bacon-qr-code": "^3.1",
+        "mpdf/mpdf": "^8.2",
+        "pragmarx/google2fa": "^9.0"
     },
     "autoload": {
         "psr-4": {

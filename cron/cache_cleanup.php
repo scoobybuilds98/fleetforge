@@ -49,10 +49,17 @@ try {
         []
     );
 
-    $duration = time() - $start;
-    $total    = $reportDeleted + $aiDeleted;
+    // ── Clean rate_limit_attempts (S-PROD-1A) ─────────────────────────────────
+    // Rows older than 7 days are stale — any active block has long expired.
+    $rateLimitDeleted = db_execute(
+        "DELETE FROM rate_limit_attempts WHERE window_start < DATE_SUB(NOW(), INTERVAL 7 DAY)",
+        []
+    );
 
-    $notes = "Cache cleanup: report_cache={$reportDeleted}, ai_summaries={$aiDeleted} expired rows deleted ({$duration}s)";
+    $duration = time() - $start;
+    $total    = $reportDeleted + $aiDeleted + $rateLimitDeleted;
+
+    $notes = "Cache cleanup: report_cache={$reportDeleted}, ai_summaries={$aiDeleted}, rate_limit_attempts={$rateLimitDeleted} expired rows deleted ({$duration}s)";
 
     db_insert('audit_log', [
         'user_id'      => null,

@@ -22,6 +22,7 @@ require_once realpath(dirname(__DIR__, 2) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
 
 use FleetForge\Notifications\Mailer;
+use FleetForge\Security\RateLimiter;
 
 _ff_session_start();
 
@@ -47,6 +48,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!hash_equals($_SESSION['csrf_token'] ?? '', $submittedToken)) {
         $error = 'Invalid request token. Please refresh the page and try again.';
+
+    } elseif (!($fpIpCheck = RateLimiter::check(
+        'forgot_password:ip:' . RateLimiter::getClientIp(),
+        (int) settings_get('security.rate_limit.forgot_password_ip_threshold', 5),
+        (int) settings_get('security.rate_limit.forgot_password_ip_window_minutes', 60),
+        (int) settings_get('security.rate_limit.forgot_password_ip_block_minutes', 60)
+    ))['allowed']) {
+        http_response_code(429);
+        header('Retry-After: ' . $fpIpCheck['retry_after_seconds']);
+        $error = 'Too many requests. Please try again later.';
 
     } else {
         $email = trim((string) ($_POST['email'] ?? ''));

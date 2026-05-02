@@ -39,6 +39,7 @@ $user = db_row(
          u.id, u.name, u.email, u.status, u.phone, u.timezone,
          u.theme_preference, u.last_login_at, u.last_login_ip,
          u.invite_sent_at, u.created_at, u.updated_at,
+         u.mfa_enabled, u.mfa_required, u.mfa_enabled_at,
          ur.id AS role_id, ur.name AS role_name, ur.slug AS role_slug
      FROM users u
      JOIN user_roles ur ON ur.id = u.role_id
@@ -352,6 +353,58 @@ require_once FF_ROOT . '/includes/header.php';
                     :disabled="saving">
                 <span x-show="!saving">Set Password</span>
                 <span x-show="saving">Saving…</span>
+            </button>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- ── Two-Factor Authentication (super_admin, non-self) ─────── -->
+    <?php if (is_super_admin() && !$isSelf && (int)($user['mfa_enabled'] ?? 0)): ?>
+    <div class="card"
+         x-data="{ disabling: false, mfaMsg: '', mfaOk: true }">
+        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Two-Factor Authentication</div>
+        <div class="card-body" style="padding:16px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="var(--color-success,#10b981)" style="width:16px;height:16px;flex-shrink:0;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/>
+                </svg>
+                <span style="font-size:0.8125rem;color:var(--color-success,#10b981);font-weight:600;">MFA Enabled</span>
+            </div>
+            <?php if ($user['mfa_enabled_at']): ?>
+            <div style="font-size:0.75rem;color:var(--text-tertiary);margin-bottom:10px;">
+                Since <?= e(format_datetime($user['mfa_enabled_at'])) ?>
+            </div>
+            <?php endif; ?>
+            <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 10px;">
+                Emergency recovery only — use this if the user has lost access to both their
+                authenticator app and backup codes. They will be required to set up MFA again
+                on their next login if their role requires it.
+            </p>
+            <div x-show="mfaMsg" x-text="mfaMsg"
+                 :style="mfaOk ? 'color:var(--color-success)' : 'color:var(--color-danger)'"
+                 style="font-size:0.8125rem;margin-bottom:8px;display:none;"></div>
+            <button class="btn btn-danger w-full"
+                    :disabled="disabling"
+                    @click="async function() {
+                        if (!confirm('Disable MFA for this user? They will need to re-enroll if their role requires it.')) return;
+                        this.disabling = true;
+                        this.mfaMsg   = '';
+                        const r = await fetch(window.FF_BASE_PATH + '/api/v1/users/disable_mfa.php', {
+                            method:  'POST',
+                            headers: {
+                                'Content-Type':     'application/json',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content ?? '',
+                            },
+                            body: JSON.stringify({ user_id: <?= $userId ?> }),
+                        });
+                        const d = await r.json();
+                        this.disabling = false;
+                        if (d.success) { this.mfaOk = true; this.mfaMsg = 'MFA disabled. Page will refresh…'; setTimeout(() => location.reload(), 1500); }
+                        else { this.mfaOk = false; this.mfaMsg = d.error?.message ?? 'Failed to disable MFA.'; }
+                    }.call($data)">
+                <span x-show="!disabling">Disable MFA for this User</span>
+                <span x-show="disabling">Disabling…</span>
             </button>
         </div>
     </div>

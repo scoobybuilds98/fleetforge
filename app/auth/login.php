@@ -18,6 +18,8 @@ declare(strict_types=1);
 require_once realpath(dirname(__DIR__, 2) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
 
+use FleetForge\Security\RateLimiter;
+
 _ff_session_start();
 
 // Already logged in → bounce to dashboard
@@ -46,6 +48,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         http_response_code(403);
         $error = 'Invalid request token. Please refresh the page and try again.';
 
+    } elseif (!($ipCheck = RateLimiter::check(
+        'login:ip:' . RateLimiter::getClientIp(),
+        (int) settings_get('security.rate_limit.login_ip_threshold', 20),
+        (int) settings_get('security.rate_limit.login_ip_window_minutes', 15),
+        (int) settings_get('security.rate_limit.login_ip_block_minutes', 60)
+    ))['allowed']) {
+        // IP-level rate limit hit
+        db_insert('audit_log', [
+            'user_id'      => null,
+            'user_name'    => 'unknown',
+            'action'       => 'login',
+            'module'       => 'auth',
+            'entity_type'  => 'user',
+            'entity_id'    => null,
+            'notes'        => 'Login IP rate limit hit',
+            'ip_address'   => RateLimiter::getClientIp(),
+            'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+        ]);
+        http_response_code(429);
+        header('Retry-After: ' . $ipCheck['retry_after_seconds']);
+        $error = 'Too many sign-in attempts from your network. Please try again later.';
+
     } else {
         $email    = trim((string) ($_POST['email']    ?? ''));
         $password =       (string) ($_POST['password'] ?? '');
@@ -63,7 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         u.role_id, r.slug AS role_slug,
                         u.theme_preference, u.status,
                         u.login_attempts, u.locked_until,
-                        u.display_font_size, u.display_density
+                        u.display_font_size, u.display_density,
+                        u.mfa_enabled, u.mfa_required
                  FROM users u
                  JOIN user_roles r ON r.id = u.role_id
                  WHERE u.email = ? AND u.deleted_at IS NULL",
@@ -134,13 +159,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                 } else {
-                    // ── Successful login ────────────────────────────
+                    // ── Password verified — IP forgiven ─────────────
+                    RateLimiter::reset('login:ip:' . RateLimiter::getClientIp());
+
+                    // ── MFA intercept (step 4.5) ─────────────────────
+                    if ((int) ($user['mfa_enabled'] ?? 0) === 1) {
+                        // User has MFA — gate login behind challenge
+                        $_SESSION['ff_mfa_pending'] = [
+                            'user_id'    => $user['id'],
+                            'started_at' => time(),
+                            'remember'   => $remember,
+                        ];
+                        header('Location: ' . base_url('auth/mfa-challenge'));
+                        exit;
+                    }
+
+                    if ((int) ($user['mfa_required'] ?? 0) === 1) {
+                        // Role requires MFA but user hasn't set it up
+                        $_SESSION['ff_mfa_must_setup'] = $user['id'];
+                        header('Location: ' . base_url('auth/mfa-required'));
+                        exit;
+                    }
+
+                    // ── Normal login (MFA not required/enabled) ──────
                     db_execute(
                         "UPDATE users
                          SET login_attempts = 0, locked_until = NULL,
                              last_login_at = NOW(), last_login_ip = ?
                          WHERE id = ?",
-                        [$_SERVER['REMOTE_ADDR'] ?? '127.0.0.1', $user['id']]
+                        [RateLimiter::getClientIp(), $user['id']]
                     );
 
                     db_insert('audit_log', [
@@ -151,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'entity_type'  => 'user',
                         'entity_id'    => $user['id'],
                         'entity_label' => $user['email'],
-                        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                        'ip_address'   => RateLimiter::getClientIp(),
                         'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
                     ]);
 

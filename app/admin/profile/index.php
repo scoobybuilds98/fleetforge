@@ -40,6 +40,7 @@ $me = db_row(
     "SELECT u.id, u.name, u.email, u.status, u.phone, u.timezone,
             u.theme_preference, u.last_login_at, u.last_login_ip,
             u.display_font_size, u.display_density,
+            u.mfa_enabled, u.mfa_required, u.mfa_enabled_at,
             u.created_at, u.updated_at,
             ur.id AS role_id, ur.name AS role_name, ur.slug AS role_slug
      FROM users u
@@ -63,6 +64,12 @@ $loginHistory = db_select(
      LIMIT 20",
     [current_user_id()]
 );
+
+// ── MFA status ────────────────────────────────────────────────────────────────
+use FleetForge\Auth\MfaService;
+$mfaEnabled       = (bool) ($me['mfa_enabled'] ?? false);
+$mfaRequired      = (bool) ($me['mfa_required'] ?? false);
+$unusedBackupCount = $mfaEnabled ? MfaService::countUnusedBackupCodes(current_user_id()) : 0;
 
 // ── Status badge helper ───────────────────────────────────────────────────────
 $statusBadgeClass = match($me['status']) {
@@ -440,6 +447,88 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ── Card: Two-Factor Authentication (MFA) ───────────────────── -->
+    <div class="card" x-data="mfaCard()" x-init="init()">
+        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Two-Factor Authentication</div>
+        <div class="card-body" style="padding:16px;">
+
+            <?php if ($mfaEnabled): ?>
+            <!-- MFA is ON -->
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="var(--color-success,#10b981)" style="width:18px;height:18px;flex-shrink:0;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/>
+                </svg>
+                <span style="font-size:0.8125rem;color:var(--color-success,#10b981);font-weight:600;">Enabled</span>
+            </div>
+            <div style="font-size:0.75rem;color:var(--text-tertiary);margin-bottom:12px;">
+                <?php if ($me['mfa_enabled_at']): ?>
+                Enabled <?= e(format_datetime($me['mfa_enabled_at'])) ?>.<br>
+                <?php endif; ?>
+                Backup codes remaining: <strong><?= $unusedBackupCount ?></strong> of <?= (int) settings_get('security.mfa.backup_code_count', 10) ?>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <button class="btn btn-secondary btn-sm w-full"
+                        @click="regenerateCodes()"
+                        :disabled="loading">
+                    <span x-show="!loading">Regenerate Backup Codes</span>
+                    <span x-show="loading">Loading…</span>
+                </button>
+                <?php if (!$mfaRequired): ?>
+                <button class="btn btn-danger btn-sm w-full"
+                        @click="disableMfa()"
+                        :disabled="loading">
+                    Disable MFA
+                </button>
+                <?php else: ?>
+                <button class="btn btn-secondary btn-sm w-full" disabled
+                        title="Your role requires MFA — contact a super_admin to disable it">
+                    Disable MFA (role requires)
+                </button>
+                <?php endif; ?>
+            </div>
+
+            <!-- Backup codes display (after regeneration) -->
+            <div x-show="backupCodes.length > 0" style="margin-top:16px;padding:12px;background:var(--bg-surface-2);border:1px solid var(--border-color);border-radius:var(--radius-md);">
+                <div style="font-size:0.75rem;font-weight:600;color:var(--color-warning,#f59e0b);margin-bottom:8px;">Save these codes — shown once only</div>
+                <template x-for="(code, i) in backupCodes" :key="i">
+                    <div style="font-family:monospace;font-size:0.875rem;padding:2px 0;" x-text="(i+1) + '. ' + code"></div>
+                </template>
+                <button class="btn btn-secondary btn-sm" style="margin-top:8px;"
+                        @click="copyCodes()">
+                    <span x-show="!copied">Copy all</span>
+                    <span x-show="copied">Copied!</span>
+                </button>
+            </div>
+
+            <?php else: ?>
+            <!-- MFA is OFF -->
+            <?php if ($mfaRequired): ?>
+            <div class="toast toast-warning" style="position:relative;animation:none;margin-bottom:12px;">
+                <div class="toast-body">
+                    <div class="toast-message" style="font-size:0.8125rem;">
+                        <strong>Your role requires MFA.</strong> Set it up to ensure continued access.
+                    </div>
+                </div>
+            </div>
+            <?php else: ?>
+            <p style="font-size:0.8125rem;color:var(--text-secondary);margin-bottom:12px;">
+                Not enabled. Adding a second factor significantly protects your account.
+            </p>
+            <?php endif; ?>
+            <a href="<?= e(base_url('account/mfa-setup')) ?>" class="btn btn-primary btn-sm w-full">
+                Set Up Two-Factor Authentication
+            </a>
+            <?php endif; ?>
+
+            <!-- Error/success feedback -->
+            <div x-show="feedbackMsg" x-text="feedbackMsg"
+                 :class="feedbackOk ? 'toast toast-success' : 'toast toast-danger'"
+                 style="position:relative;animation:none;margin-top:10px;"></div>
+
+        </div>
+    </div>
+
     <!-- ── Card 2: Account Info (read-only) ─────────────────────── -->
     <div class="card">
         <div class="card-header" style="font-weight:600;font-size:0.875rem;">Account Info</div>
@@ -517,6 +606,87 @@ require_once FF_ROOT . '/includes/header.php';
 </style>
 
 <script>
+// ── mfaCard Alpine component (S-PROD-1A) ──────────────────────────────────────
+function mfaCard() {
+    return {
+        loading:     false,
+        backupCodes: [],
+        copied:      false,
+        feedbackMsg: '',
+        feedbackOk:  true,
+
+        init() {},
+
+        async regenerateCodes() {
+            if (!confirm('This will invalidate your current backup codes. Continue?')) return;
+            this.loading     = true;
+            this.backupCodes = [];
+            this.feedbackMsg = '';
+            try {
+                const r = await fetch(window.FF_BASE_PATH + '/api/v1/account/mfa/regenerate_codes.php', {
+                    method:  'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                    },
+                });
+                const d = await r.json();
+                if (d.success && d.data?.backup_codes) {
+                    this.backupCodes = d.data.backup_codes;
+                    this.feedbackOk  = true;
+                    this.feedbackMsg = 'New backup codes generated. Save them now.';
+                } else {
+                    this.feedbackOk  = false;
+                    this.feedbackMsg = d.error?.message ?? 'Failed to regenerate codes.';
+                }
+            } catch (e) {
+                this.feedbackOk  = false;
+                this.feedbackMsg = 'Network error. Please try again.';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async disableMfa() {
+            if (!confirm('Disable two-factor authentication? Your account will be less secure.')) return;
+            this.loading     = true;
+            this.feedbackMsg = '';
+            try {
+                const r = await fetch(window.FF_BASE_PATH + '/api/v1/account/mfa/disable.php', {
+                    method:  'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                    },
+                });
+                const d = await r.json();
+                if (d.success) {
+                    window.location.reload();
+                } else {
+                    this.feedbackOk  = false;
+                    this.feedbackMsg = d.error?.message ?? 'Failed to disable MFA.';
+                }
+            } catch (e) {
+                this.feedbackOk  = false;
+                this.feedbackMsg = 'Network error. Please try again.';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async copyCodes() {
+            const text = this.backupCodes.map((c, i) => (i+1) + '. ' + c).join('\n');
+            try {
+                await navigator.clipboard.writeText(text);
+                this.copied = true;
+                setTimeout(() => this.copied = false, 3000);
+            } catch (e) {
+                alert('Copy failed — please select and copy the codes manually.');
+            }
+        },
+    };
+}
+
 // ── profilePage Alpine component ──────────────────────────────────────────────
 function profilePage() {
     return {

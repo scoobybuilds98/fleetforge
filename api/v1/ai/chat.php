@@ -37,6 +37,19 @@ if (!can('ai', 'view')) {
     exit;
 }
 
+// ── User-level rate limit (S-PROD-1A) ────────────────────────────────────────
+$_rlCheck = \FleetForge\Security\RateLimiter::check(
+    'ai:user:' . (int) ($_SESSION['ff_user']['id'] ?? 0),
+    (int) settings_get('security.rate_limit.ai_user_threshold', 60),
+    (int) settings_get('security.rate_limit.ai_user_window_minutes', 60)
+);
+if (!$_rlCheck['allowed']) {
+    http_response_code(429);
+    echo json_encode(['error' => true, 'message' => 'Too many AI requests. Try again in ' . $_rlCheck['retry_after_seconds'] . ' seconds.', 'code' => 'RATE_LIMITED']);
+    exit;
+}
+unset($_rlCheck);
+
 header('Content-Type: application/json');
 
 $userId   = (int) ($_SESSION['ff_user']['id'] ?? 0);
