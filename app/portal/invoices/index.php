@@ -33,7 +33,8 @@ if (!empty($_GET['ajax'])) {
 
     $rows = db_select(
         "SELECT i.id, i.invoice_number, i.invoice_date, i.due_date,
-                i.total_amount, i.balance_due, i.status,
+                i.billing_period_start, i.billing_period_end,
+                i.generation_source, i.total_amount, i.balance_due, i.status,
                 (i.total_amount - i.balance_due) AS paid_amount
          FROM invoices i
          WHERE {$whereSQL}
@@ -43,8 +44,10 @@ if (!empty($_GET['ajax'])) {
     );
 
     foreach ($rows as &$r) {
-        $r['invoice_date_fmt'] = format_date($r['invoice_date']);
-        $r['due_date_fmt']     = format_date($r['due_date']);
+        $r['invoice_date_fmt']       = format_date($r['invoice_date']);
+        $r['due_date_fmt']           = format_date($r['due_date']);
+        $r['billing_period_fmt']     = format_date($r['billing_period_start'])
+                                     . ' – ' . format_date($r['billing_period_end']);
         $r['total_amount_fmt'] = format_currency($r['total_amount']);
         $r['balance_due_fmt']  = format_currency($r['balance_due']);
         $r['paid_fmt']         = format_currency($r['paid_amount']);
@@ -53,7 +56,8 @@ if (!empty($_GET['ajax'])) {
     $counts = [
         'outstanding' => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND status IN ('sent','partially_paid','overdue') AND deleted_at IS NULL", [$cid]),
         'paid'        => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND status = 'paid' AND deleted_at IS NULL", [$cid]),
-        'all'         => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL AND status != 'draft'", [$cid]),
+        // advance drafts are visible in the All tab so include them in the count
+        'all'         => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL AND (status != 'draft' OR generation_source = 'advance')", [$cid]),
     ];
 
     echo json_encode(['success' => true, 'data' => ['invoices' => $rows, 'counts' => $counts]]);
@@ -115,6 +119,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                 <thead>
                     <tr>
                         <th>Invoice #</th>
+                        <th>Billing Period</th>
                         <th>Date</th>
                         <th>Due Date</th>
                         <th class="text-right">Amount</th>
@@ -127,6 +132,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
                     <template x-for="inv in invoices" :key="inv.id">
                         <tr>
                             <td><a :href="viewUrl(inv.id)" class="portal-table-link" x-text="inv.invoice_number"></a></td>
+                            <td class="font-mono" style="font-size:0.8125rem;" x-text="inv.billing_period_fmt"></td>
                             <td class="font-mono" x-text="inv.invoice_date_fmt"></td>
                             <td class="font-mono" :style="inv.status === 'overdue' ? 'color:var(--color-danger);font-weight:600' : ''" x-text="inv.due_date_fmt"></td>
                             <td class="text-right font-mono" x-text="inv.total_amount_fmt"></td>

@@ -239,16 +239,45 @@ require_once FF_ROOT . '/includes/header.php';
                                class="form-control"
                                x-model.number="form.advance_billing_periods"
                                @input="clampAdvancePeriods()" />
-                        <div class="form-help" x-show="form.advance_billing_periods > 0" x-cloak>
-                            Activation will generate
-                            <strong x-text="(form.advance_billing_periods + 1)"></strong>
-                            invoices in one batch
-                            (Invoice 1 + <span x-text="form.advance_billing_periods"></span>
-                            future-period prepayments).
-                        </div>
                         <div class="form-help" style="color:var(--color-text-muted,#6b7280);">
                             Cap: <span x-text="advanceBillingCap"></span>.
                             Leave at 0 for normal monthly billing.
+                        </div>
+                        <!-- ADV-BILL-1: period preview — shows when advance > 0 and start_date set -->
+                        <div x-show="form.advance_billing_periods > 0 && form.start_date" x-cloak
+                             style="margin-top:12px;border:1px solid var(--color-border,#e5e7eb);border-radius:6px;overflow:hidden;">
+                            <div style="padding:8px 12px;background:var(--color-surface-alt,#f9fafb);border-bottom:1px solid var(--color-border,#e5e7eb);font-size:0.8125rem;font-weight:600;color:var(--color-text-secondary,#374151);">
+                                Invoices to be generated at activation
+                            </div>
+                            <table style="width:100%;border-collapse:collapse;">
+                                <thead>
+                                    <tr style="background:var(--color-surface-alt,#f9fafb);">
+                                        <th style="padding:6px 12px;text-align:left;font-size:0.75rem;font-weight:600;color:var(--color-text-muted,#6b7280);text-transform:uppercase;letter-spacing:.04em;">#</th>
+                                        <th style="padding:6px 12px;text-align:left;font-size:0.75rem;font-weight:600;color:var(--color-text-muted,#6b7280);text-transform:uppercase;letter-spacing:.04em;">Period</th>
+                                        <th style="padding:6px 12px;text-align:right;font-size:0.75rem;font-weight:600;color:var(--color-text-muted,#6b7280);text-transform:uppercase;letter-spacing:.04em;">Days</th>
+                                        <th style="padding:6px 12px;text-align:right;font-size:0.75rem;font-weight:600;color:var(--color-text-muted,#6b7280);text-transform:uppercase;letter-spacing:.04em;">Est. Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="(p, idx) in advancePreviewPeriods()" :key="idx">
+                                        <tr style="border-top:1px solid var(--color-border,#e5e7eb);">
+                                            <td style="padding:7px 12px;font-size:0.8125rem;color:var(--color-text-muted,#6b7280);" x-text="idx + 1"></td>
+                                            <td style="padding:7px 12px;font-size:0.8125rem;font-family:var(--font-mono,'DM Mono',monospace);" x-text="p.label"></td>
+                                            <td style="padding:7px 12px;font-size:0.8125rem;text-align:right;color:var(--color-text-muted,#6b7280);" x-text="p.days"></td>
+                                            <td style="padding:7px 12px;font-size:0.8125rem;text-align:right;font-family:var(--font-mono,'DM Mono',monospace);font-weight:600;" x-text="p.amountFmt"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                                <tfoot>
+                                    <tr style="border-top:2px solid var(--color-border,#e5e7eb);background:var(--color-surface-alt,#f9fafb);">
+                                        <td colspan="3" style="padding:8px 12px;font-size:0.8125rem;font-weight:600;color:var(--color-text-primary,#1c1c1a);">Total to be invoiced at activation</td>
+                                        <td style="padding:8px 12px;font-size:0.875rem;text-align:right;font-family:var(--font-mono,'DM Mono',monospace);font-weight:700;" x-text="advancePreviewTotal()"></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                            <div style="padding:6px 12px;font-size:0.75rem;color:var(--color-text-muted,#6b7280);background:var(--color-surface-alt,#f9fafb);border-top:1px solid var(--color-border,#e5e7eb);">
+                                Estimated pre-tax · add-ons and exact tax calculated at activation
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -667,6 +696,72 @@ function FF_CreateLease() {
             if (isNaN(n) || n < 0) n = 0;
             if (n > this.advanceBillingCap) n = this.advanceBillingCap;
             this.form.advance_billing_periods = n;
+        },
+
+        // ADV-BILL-1: client-side period preview — mirrors generateAdvanceBatch() period math.
+        // Uses monthly_rate for full months; prorates by day for partial first period.
+        // Returns array of { label, days, amount, amountFmt } — one entry per invoice.
+        advancePreviewPeriods() {
+            const n = parseInt(this.form.advance_billing_periods, 10);
+            if (!n || n < 1 || !this.form.start_date) return [];
+
+            const monthly  = parseFloat(this.form.monthly_rate) || 0;
+            const daily    = parseFloat(this.form.daily_rate)   || 0;
+            const currency = this.form.currency || 'CAD';
+            const locale   = 'en-CA';
+            const fmtOpts  = { style: 'currency', currency, minimumFractionDigits: 2 };
+            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+            const periods = [];
+            // Parse start date without timezone shift
+            const [sy, sm, sd] = this.form.start_date.split('-').map(Number);
+            let pYear = sy, pMonth = sm - 1, pDay = sd; // pMonth is 0-indexed
+
+            for (let i = 0; i <= n; i++) {
+                const daysInMonth = new Date(pYear, pMonth + 1, 0).getDate();
+                const endDay      = daysInMonth;
+                const days        = endDay - pDay + 1;
+                const isFullMonth = (pDay === 1);
+
+                // Estimate pre-tax base amount
+                let amount;
+                if (isFullMonth && monthly > 0) {
+                    amount = monthly;
+                } else if (monthly > 0) {
+                    amount = (monthly / daysInMonth) * days;
+                } else {
+                    amount = daily * days;
+                }
+
+                const startLabel = pDay + ' ' + monthNames[pMonth] + ' ' + pYear;
+                const endLabel   = endDay + ' ' + monthNames[pMonth] + ' ' + pYear;
+                const label      = (pDay === 1 && endDay === daysInMonth)
+                    ? (monthNames[pMonth] + ' ' + pYear)
+                    : (startLabel + ' – ' + endLabel);
+
+                periods.push({
+                    label,
+                    days,
+                    amount,
+                    amountFmt: amount > 0
+                        ? amount.toLocaleString(locale, fmtOpts)
+                        : '—',
+                });
+
+                // Advance to first day of next month
+                pMonth++;
+                if (pMonth > 11) { pMonth = 0; pYear++; }
+                pDay = 1;
+            }
+            return periods;
+        },
+
+        advancePreviewTotal() {
+            const periods  = this.advancePreviewPeriods();
+            if (!periods.length) return '—';
+            const total    = periods.reduce((s, p) => s + p.amount, 0);
+            const currency = this.form.currency || 'CAD';
+            return total.toLocaleString('en-CA', { style: 'currency', currency, minimumFractionDigits: 2 });
         },
 
         onCustomerChange() {
