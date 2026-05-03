@@ -325,6 +325,8 @@ Use these consistently. Never invent new ones without checking here first.
 | `HAS_ACTIVE_UNITS` | 422 | Cannot delete template with active units |
 | `INVOICE_VOID` | 422 | Cannot allocate payment to void invoice |
 | `MILEAGE_DATA_ERROR` | 422 | End mileage < start mileage |
+| `MILEAGE_REVIEW_REQUIRED` | 422 | Invoice has `mileage_review_status='pending'` — manager must approve / override / reject before send (S-LEASE-MILEAGE / D84). HARD gate, no role exemption. |
+| `EMAIL_DISABLED` | 422 | Recipient's `customers.email_disabled=1` (hard-bounce or complaint flag from S-PROD-2 SES handler). Manager re-enable required via `api/v1/customers/reenable_email.php`. |
 
 ### System
 | Code | HTTP | When |
@@ -389,17 +391,25 @@ WHERE l.deleted_at IS NULL AND c.deleted_at IS NULL;
 
 ```php
 db_insert('audit_log', [
-    'user_id'     => current_user_id(),   // null for cron/system
-    'action'      => 'created',           // created|updated|deleted|status_changed|voided|...
-    'module'      => 'leases',            // matches permission module name
-    'entity_type' => 'lease',             // singular
-    'entity_id'   => $leaseId,
-    'description' => 'Lease CN-A3F9K2-2025 created for ABC Trucking',
-    'old_values'  => json_encode($oldData),  // null for creates
-    'new_values'  => json_encode($newData),  // null for deletes
-    'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+    'user_id'      => current_user_id(),   // null for cron/system
+    'user_name'    => current_user_name() ?? 'system',
+    'action'       => 'create',            // see enum below — NOT freeform
+    'module'       => 'leases',            // matches permission module name
+    'entity_type'  => 'lease',             // singular
+    'entity_id'    => $leaseId,
+    'entity_label' => 'CN-A3F9K2-2025',    // human-readable identifier
+    'old_values'   => json_encode($oldData),   // null for creates
+    'new_values'   => json_encode($newData),   // null for deletes
+    'notes'        => 'Lease CN-A3F9K2-2025 created for ABC Trucking',
+    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
 ]);
 ```
+
+`audit_log.action` is an **ENUM** (not free-text). Valid values:
+
+`create | update | delete | restore | login | logout | export | status_change | view | bulk_action | payment_recorded | invoice_sent | invoice_voided | lease_closed | cron`
+
+If you need a new action verb, ALTER the enum first (separate migration); never invent freeform values — the INSERT will throw "Data truncated for column 'action'". CLI runners (cron, migration runner) use `action='cron'` with the specific intent in `module` and `notes`.
 
 ---
 
@@ -443,10 +453,14 @@ db_transaction(function() use ($id) {
 ### Optimistic lock — required for all user-editable update endpoints:
 ```php
 $existing = db_row("SELECT updated_at FROM customers WHERE id = ?", [$id]);
-if ($existing['updated_at'] !== $submittedUpdatedAt) {
+// Use the helper — raw string equality is fragile across DST shifts
+// and PDO drivers that return trailing .000000 microseconds (S-PROD-1B / D73).
+if (!optimistic_lock_matches($submittedUpdatedAt, $existing['updated_at'])) {
     json_error('STALE_DATA', 'Record modified by another user. Refresh and try again.', 409);
 }
 ```
+
+Helper signature: `optimistic_lock_matches(string $client, string $db): bool` (in `includes/db.php`). Normalizes both sides to `DateTimeImmutable::getTimestamp()` and compares Unix integers. Used at all 24 optimistic-lock callsites in `api/v1/` and `lib/Accounting/FixedAssetService.php`.
 
 ### Cron advisory lock — required for all write-heavy crons:
 ```php
@@ -601,6 +615,32 @@ db_transaction(function() use (&$invoiceNumber) {
     db_insert('invoices', ['invoice_number' => $invoiceNumber, /* ... */]);
 });
 ```
+
+### Trap 10: audit_log.action is an ENUM — invented values silently truncate
+The `audit_log.action` column is an ENUM, not free text. Inserting an undefined value (e.g. `'login_db_error'`, `'migration_applied'`) throws "Data truncated for column 'action'" under MySQL strict mode, OR silently stores `''` in older configs. Pick from the existing enum (see §7) and put the specific intent in `module` + `notes`. If a new verb is genuinely needed, ALTER the enum first as a separate migration.
+
+### Trap 11: every entry-point must call Sentry::init()
+Every PHP entry-point that runs in production — pages, API endpoints, cron, CLI runners — MUST call `\FleetForge\Observability\Sentry::init()` before any business logic. Established S-PROD-2.
+
+```php
+require_once dirname(__DIR__) . '/config/app.php';
+\FleetForge\Observability\Sentry::init();   // no-op when SENTRY_DSN is blank
+```
+
+`Sentry::init()` is idempotent (guarded by `private static bool $initialized`) so multiple calls in one request are fine. `before_send` strips bcrypt hashes, `ENC:` AES ciphertext, and 12 sensitive key names per D-B from S-PROD-2. In every catch block, call `Sentry::captureException($e)` before deciding the user-facing response.
+
+### Trap 12: json_error() envelope shape is canonical
+S-PROD-2 (audit #18) standardized 54 non-canonical error responses across `api/v1/ai/`. Every API error MUST go through `json_error()` so the response shape is `{ success: false, error: { code, message, fields? } }`. Frontend code (Alpine + Axios interceptors) reads `error.code` for branching — non-canonical shapes (`{error: true, message: …}`) silently break that contract.
+
+```php
+// CORRECT
+json_error('STALE_DATA', 'Record modified by another user.', 409);
+
+// WRONG — Alpine sees an unknown shape, falls back to generic error
+echo json_encode(['error' => true, 'message' => 'Record modified.']);
+```
+
+`json_error()` lives in `api/bootstrap.php`; pages-side equivalent is the page-level exception handler installed by `_ff_session_start()`.
 
 ---
 

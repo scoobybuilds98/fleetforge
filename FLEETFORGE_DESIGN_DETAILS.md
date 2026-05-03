@@ -138,6 +138,123 @@ Form inputs render as borderless tinted-gray pills with a 2px brand-orange focus
 
 ---
 
+## 1.6 SEGMENTED CONTROL — APPLE iOS PILL TOGGLE (S-LEASE-UNITS / S-LEASE-UNITS-FORM, 2026-05-03)
+
+A two-option toggle that slides a grayscale "active pill" between options. Used in lease forms for the km/miles primary-unit picker (D-D from S-LEASE-UNITS: no brand orange — the active pill is a neutral elevated surface). Component CSS lives at `public/assets/css/app.css` lines 8402-8484, plus the responsive override at line 8564.
+
+```css
+/* DARK MODE (default at :root) — mid-gray pill on translucent track */
+:root {
+  --segment-track-bg:     rgba(118, 118, 128, 0.24);
+  --segment-active-bg:    #636366;
+  --segment-active-shadow:
+      0 3px 8px rgba(0, 0, 0, 0.32),
+      0 1px 2px rgba(0, 0, 0, 0.18);
+  --segment-active-text:  rgba(255, 255, 255, 1);
+  --segment-inactive-text: rgba(235, 235, 245, 0.6);
+}
+
+/* LIGHT MODE — white pill on lighter translucent track (Apple iOS spec) */
+[data-theme="light"] {
+  --segment-track-bg:     rgba(118, 118, 128, 0.12);
+  --segment-active-bg:    #FFFFFF;
+  --segment-active-shadow:
+      0 3px 8px rgba(0, 0, 0, 0.12),
+      0 1px 2px rgba(0, 0, 0, 0.04);
+  --segment-active-text:  rgba(0, 0, 0, 1);
+  --segment-inactive-text: rgba(60, 60, 67, 0.6);
+}
+```
+
+**Component anatomy** (3 elements per control):
+
+| Element | Class | Role |
+|---------|-------|------|
+| Outer | `.ff-segment-control` | 320px × 44px track, `inline-flex`, 9px radius, `padding: 2px`, `user-select: none` |
+| Pill | `.ff-segment-control__pill` | Absolute-positioned active surface, `width: calc(50% - 2px)`, `border-radius: 7px`, slides via `transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)`. Modifier `--right` translates by 100% |
+| Option | `.ff-segment-control__option` | Click target, flex 1, `font-size: 14px; font-weight: 500; letter-spacing: -0.01em`. Modifier `--active` applies the active text color. `:focus-visible` gets a 2px brand-primary ring |
+
+**Responsive** (≤540px): control width drops from fixed `320px` to `width: 100%; max-width: 320px;` so it fills the column on phones (line 8564).
+
+### Variant A — Interactive (Alpine + ARIA tablist)
+
+Used at [app/admin/leases/create.php:410-433](app/admin/leases/create.php:410). User clicks an option to commit it.
+
+```html
+<div class="ff-segment-control"
+     role="tablist"
+     aria-label="Mileage unit">
+  <div class="ff-segment-control__pill"
+       :class="{ 'ff-segment-control__pill--right': form.mileage_unit === 'miles' }"></div>
+  <div class="ff-segment-control__option"
+       :class="{ 'ff-segment-control__option--active': form.mileage_unit === 'km' }"
+       @click="!ratesLocked && togglePrimaryUnit('km')"
+       role="tab"
+       :aria-selected="form.mileage_unit === 'km'"
+       :aria-disabled="ratesLocked"
+       tabindex="0">
+    Kilometers
+  </div>
+  <div class="ff-segment-control__option"
+       :class="{ 'ff-segment-control__option--active': form.mileage_unit === 'miles' }"
+       @click="!ratesLocked && togglePrimaryUnit('miles')"
+       role="tab"
+       :aria-selected="form.mileage_unit === 'miles'"
+       :aria-disabled="ratesLocked"
+       tabindex="0">
+    Miles
+  </div>
+</div>
+```
+
+**Required bindings:**
+- `:class` on the pill — `__pill--right` when state matches the second option (else default position).
+- `:class` on each option — `__option--active` when state matches that option's value.
+- `@click` on each option — guarded by any disabled flag (e.g. `!ratesLocked`).
+- `tabindex="0"` so each option is keyboard-focusable.
+- `role="tablist"` on the wrapper, `role="tab"` + `:aria-selected` on each option.
+
+### Variant B — Read-only (no Alpine click handlers)
+
+Used at [app/admin/leases/edit.php:215-233](app/admin/leases/edit.php:215). Visible state but the user must use a separate amendment flow to change it.
+
+```html
+<div class="ff-segment-control"
+     role="group"
+     aria-label="Mileage unit (read-only — change via amendment)"
+     style="opacity:0.92;">
+  <div class="ff-segment-control__pill"
+       :class="{ 'ff-segment-control__pill--right': _mileageUnit === 'miles' }"></div>
+  <div class="ff-segment-control__option"
+       :class="{ 'ff-segment-control__option--active': _mileageUnit === 'km' }"
+       aria-disabled="true"
+       style="cursor:not-allowed;">
+    Kilometers
+  </div>
+  <div class="ff-segment-control__option"
+       :class="{ 'ff-segment-control__option--active': _mileageUnit === 'miles' }"
+       aria-disabled="true"
+       style="cursor:not-allowed;">
+    Miles
+  </div>
+</div>
+```
+
+**Read-only differences:**
+- `role="group"` instead of `tablist` (no tab navigation semantics).
+- `aria-disabled="true"` on each option, no `tabindex`.
+- No `@click` handler.
+- Outer `style="opacity:0.92;"` and `cursor:not-allowed` on each option to communicate the disabled state visually.
+- ARIA label spells out the reason ("change via amendment").
+
+**Decisions:**
+- Active pill is grayscale, not brand orange (D-D from S-LEASE-UNITS) — matches Apple's iOS segmented-control spec where the active pill is just an elevated surface, never a tinted hue. Brand orange is reserved for primary actions.
+- Pill slides via CSS `transform` not by re-rendering — single transition, no Alpine `x-transition` needed.
+- Two-option only. A 3+ option control would need recalculating `width: calc(33.33% - …)` and a new `--right2` modifier; not implemented because no current product surface needs it.
+- Mobile uses `width: 100%` rather than scaling down — the 14px font and 44px height stay constant for tap-target accessibility.
+
+---
+
 ## 2. BUTTON VARIANTS — The 8 × 5 matrix
 
 ### 8 variants:
