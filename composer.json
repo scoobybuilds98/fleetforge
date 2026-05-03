@@ -20,6 +20,9 @@
             "FleetForge\\": "lib/"
         }
     },
+    "bin": [
+        "bin/migrate.php"
+    ],
     "config": {
         "optimize-autoloader": true,
         "sort-packages": true

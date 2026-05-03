@@ -2770,7 +2770,10 @@ CREATE TABLE `schema_migrations` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `version` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `filename` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `checksum` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `applied_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `applied_by` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'cli',
+  `execution_ms` int unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `version` (`version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

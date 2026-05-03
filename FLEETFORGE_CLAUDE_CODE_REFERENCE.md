@@ -648,6 +648,84 @@ audit            VCEDS        V        —           V           V
 
 ---
 
+## 13.5 MIGRATIONS — `bin/migrate.php` is the only sanctioned runner
+
+(Established **S-MIGRATIONS-RUNNER**, 2026-05-04. Resolves S-COMPLETENESS-CHECK Finding B.)
+
+### Filename convention
+
+| Style | When | Example |
+|-------|------|---------|
+| `<SESSION-ID>_<desc>.sql` | The 5 historical files only — DO NOT create new files in this style | `S-PROD-2_ses_bounce_handler.sql` |
+| `YYYYMMDDHHMM_<SESSION-ID>_<desc>.sql` | Every new migration. UTC timestamp. Sorts chronologically. | `202605041430_S-FIX-INVOICELINES_typo.sql` |
+
+Filenames must match `^[A-Za-z0-9_\-]+\.sql$`. Anything with spaces, quotes, or shell metacharacters is rejected at scan time.
+
+### CLI usage
+
+```sh
+php bin/migrate.php             # dry-run (default — mutates nothing)
+php bin/migrate.php --apply     # apply pending migrations
+php bin/migrate.php --verify    # recompute every stored checksum
+php bin/migrate.php --status    # terse counts; always exit 0
+php bin/migrate.php --backfill  # one-time bootstrap; refuses if non-empty
+```
+
+Exit codes: 0 ok / 1 error / 2 bad args / 3 lock contention / 4 checksum drift.
+
+### What the runner does
+
+1. Acquires `GET_LOCK('ff_migrations', 0)` (timeout 0 — fail fast, like our `ff_cron_*` pattern per D21).
+2. Scans `db_migrations/` for `*.sql` files matching the safe regex.
+3. SHA-256s each file; diffs against `schema_migrations` rows.
+4. Reports drift on already-applied files whose current SHA-256 differs from stored. Refuses `--apply` until drift is resolved.
+5. Applies pending files in filename-asc order by **shelling out to the `mysql` binary** via `proc_open` (NOT PDO multiquery — `S-LEASE-MILEAGE_schema.sql` uses `DELIMITER //` for stored procedures, which PDO does not understand).
+6. Records each successful apply in `schema_migrations` (checksum + applied_by + execution_ms) and writes an `audit_log` row (`action='cron'`, `module='migrations'`).
+
+### Drift policy (D92)
+
+If a migration file is edited after being applied, SHA-256 will mismatch and the runner will refuse `--apply` with exit 4.
+
+**Two recovery paths:**
+
+- **Edit was a typo / accidental:** revert so SHA-256 matches stored.
+- **Edit was intentional and the DB already reflects it:** manually `UPDATE schema_migrations SET checksum = '<new sha256>' WHERE filename = '<file>'`.
+
+**Going forward, prefer creating a NEW migration over editing an applied one.**
+
+### Failure handling (D93)
+
+MySQL DDL auto-commits — partial failures cannot be rolled back inside a transaction.
+
+- Runner stops at the failed file, prints `ERROR <code>` from stderr, does NOT record in `schema_migrations`, exits 1.
+- Operator decides: roll-forward (fix the file, write idempotent guards, re-run) OR restore from `cron/backup_db.php` artifact.
+- Migration files SHOULD be idempotent (`IF NOT EXISTS`, `INFORMATION_SCHEMA` guards) so re-running after a partial failure is safe.
+
+### Backfill (one-time only — D97)
+
+`--backfill` records the 5 named historical files (`Runner::HISTORICAL_FILES`) as already-applied with `applied_at = filemtime()` and `applied_by = 'backfill:<whoami>'`. Refuses to run if `schema_migrations` has any row. The 5 files are NOT re-executed — backfill is a record-only operation.
+
+After this session, do not run `--backfill` again. If you ever need to re-bootstrap (lost dev DB), the safer path is to restore from a backup or run `--apply` against an empty DB and let the runner apply every file fresh.
+
+### `schema_migrations` columns
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `version` | `VARCHAR(100) UNIQUE` | filename without `.sql` |
+| `filename` | `VARCHAR(255)` | full filename |
+| `checksum` | `CHAR(64) NULL` | SHA-256 hex |
+| `applied_at` | `DATETIME` | `NOW()` for `--apply`; file mtime for `--backfill` |
+| `applied_by` | `VARCHAR(100)` | `<whoami>` for `--apply`; `backfill:<whoami>` for `--backfill` |
+| `execution_ms` | `INT UNSIGNED NULL` | wall-clock ms; 0 for `--backfill` |
+
+### See also
+
+- `db_migrations/README.md` — full runbook (filename rules, runner usage, failure handling)
+- `lib/Migrations/Runner.php` — implementation
+- D88-D97 in `FLEETFORGE_PROGRESS.md` — locked decisions
+
+---
+
 ## 14. SESSION CHECKLIST — Do this at the END of every session
 
 1. Mark touched items ✅ or 🔄 in FLEETFORGE_PROGRESS.md
