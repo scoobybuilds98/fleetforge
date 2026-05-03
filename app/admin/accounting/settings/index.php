@@ -50,11 +50,13 @@ $glAccounts = db_select(
 );
 
 // ── Load invoice line types for revenue mapping ────────────────
-// WHY: Pull distinct item_type from invoice_lines if they exist
+// WHY: Pull distinct item_type from invoice_line_items so the
+// Revenue Mapping dropdown lists every category the billing engine
+// actually emits (base_rental, mileage_*, late_fee, damage, …).
 $lineTypes = [];
 try {
     $lineTypes = db_select(
-        "SELECT DISTINCT item_type AS line_type FROM invoice_lines WHERE item_type IS NOT NULL ORDER BY item_type",
+        "SELECT DISTINCT item_type AS line_type FROM invoice_line_items WHERE item_type IS NOT NULL ORDER BY item_type",
         []
     );
 } catch (\Throwable $e) {
