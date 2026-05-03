@@ -34,7 +34,7 @@ if (!$id) {
 $invoice = db_row(
     "SELECT id, status, invoice_number, customer_email_snapshot,
             customer_id, company_name_snapshot, total_amount, balance_due,
-            lease_id, due_date
+            lease_id, due_date, mileage_review_status
      FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -45,6 +45,21 @@ if (!$invoice) {
 // State machine: only draft → sent is valid
 if ($invoice['status'] !== 'draft') {
     json_error('INVALID_TRANSITION', "Cannot send invoice with status '{$invoice['status']}'. Only draft invoices can be sent.", 409);
+}
+
+// ── S-LEASE-MILEAGE: HARD mileage review gate ──────────────
+// When excess mileage was detected, mileage_review_status is 'pending'
+// until a manager explicitly approves or overrides it via the review UI.
+// No role exempts this gate — super_admin and finance roles fall through
+// the same check. Pattern matches S-PROD-1B invoice-immutability uniformity.
+// CRA defensibility: an excess mileage charge cannot reach the customer
+// without a documented manager review-and-approve trail.
+if ($invoice['mileage_review_status'] === 'pending') {
+    json_error(
+        'MILEAGE_REVIEW_REQUIRED',
+        'This invoice has excess mileage that requires manager review before it can be sent. Open the invoice and complete the mileage review first.',
+        422
+    );
 }
 
 $sentToEmail = clean_email($body['sent_to_email'] ?? null) ?? $invoice['customer_email_snapshot'];

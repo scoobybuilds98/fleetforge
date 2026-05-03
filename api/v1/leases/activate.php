@@ -95,6 +95,26 @@ db_transaction(function () use ($id, &$result) {
             "Cannot activate: unit {$unit['unit_number']} is not in reserved status (status: {$unit['status']}).", 409);
     }
 
+    // ── S-LEASE-MILEAGE: capture starting odometer ─────────────
+    // Path B: read-only Samsara fetch — never call any write endpoint.
+    // Capture is non-blocking — if Samsara is unreachable / unit is not
+    // linked / reading is implausible, we activate anyway with starting
+    // odometer NULL and the lease detail page surfaces a manual-entry
+    // banner. Stale (>24h) GPS readings still get persisted but flag a
+    // manager warning via audit_log so the bookkeeper can recapture
+    // before the first invoice generates.
+    $odoCapture = (new \FleetForge\GPS\OdometerService())
+        ->captureCurrentReading((int) $lease['equipment_unit_id']);
+
+    $startKm        = null;
+    $startSource    = null;
+    $startFetchedAt = null;
+    if ($odoCapture['success']) {
+        $startKm        = $odoCapture['odometer_km'];
+        $startSource    = 'gps';
+        $startFetchedAt = $odoCapture['fetched_at'];
+    }
+
     // ── Update lease status → active ───────────────────────────
     // next_billing_date: first day of next month after start_date
     // Only set for monthly billing cycle — on_close_only has no auto-billing schedule
@@ -108,9 +128,22 @@ db_transaction(function () use ($id, &$result) {
         $nextBillingDate = date('Y-m-01', strtotime('+1 month', $startTs));
     }
 
+    // Update lease — set odometer fields when capture succeeded; leave
+    // them NULL when it didn't, so the manual-entry banner triggers on
+    // the lease detail page. Existing odometer_start_km values (e.g. set
+    // pre-activation via update_odometer.php) are preserved on capture
+    // failure: COALESCE keeps the prior value rather than overwriting
+    // with NULL.
     db_execute(
-        "UPDATE leases SET status = 'active', next_billing_date = ?, updated_by = ? WHERE id = ?",
-        [$nextBillingDate, current_user_id(), $id]
+        "UPDATE leases
+            SET status = 'active',
+                next_billing_date = ?,
+                odometer_start_km         = COALESCE(?, odometer_start_km),
+                odometer_start_source     = COALESCE(?, odometer_start_source),
+                odometer_start_fetched_at = COALESCE(?, odometer_start_fetched_at),
+                updated_by = ?
+          WHERE id = ?",
+        [$nextBillingDate, $startKm, $startSource, $startFetchedAt, current_user_id(), $id]
     );
 
     // ── Update equipment_unit status → on_lease ────────────────
@@ -143,6 +176,20 @@ db_transaction(function () use ($id, &$result) {
     ]);
 
     // ── audit_log ──────────────────────────────────────────────
+    // Annotate the activation entry with odometer-capture outcome so
+    // managers can see at a glance whether a GPS fetch landed cleanly,
+    // came in stale (>24h), or fell back to manual.
+    $odoNote = '';
+    if ($odoCapture['success']) {
+        $odoNote = $odoCapture['is_stale']
+            ? sprintf(' — odometer captured %.2f km (GPS, STALE: %d hours old, manager review recommended)',
+                $odoCapture['odometer_km'],
+                (int) round(($odoCapture['reading_age_seconds'] ?? 0) / 3600))
+            : sprintf(' — odometer captured %.2f km (GPS)', $odoCapture['odometer_km']);
+    } else {
+        $odoNote = ' — odometer NOT captured (' . ($odoCapture['error'] ?? 'unknown') . '); manual entry required';
+    }
+
     db_insert('audit_log', [
         'user_id'      => current_user_id(),
         'user_name'    => $changedBy,
@@ -151,9 +198,14 @@ db_transaction(function () use ($id, &$result) {
         'entity_type'  => 'lease',
         'entity_id'    => $id,
         'entity_label' => $lease['contract_number'],
-        'notes'        => "Lease {$lease['contract_number']} activated — unit {$unit['unit_number']} → on_lease",
+        'notes'        => "Lease {$lease['contract_number']} activated — unit {$unit['unit_number']} → on_lease" . $odoNote,
         'old_values'   => json_encode(['status' => 'pending']),
-        'new_values'   => json_encode(['status' => 'active']),
+        'new_values'   => json_encode([
+            'status'                => 'active',
+            'odometer_start_km'     => $startKm,
+            'odometer_start_source' => $startSource,
+            'odometer_start_is_stale' => $odoCapture['is_stale'],
+        ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
@@ -168,6 +220,17 @@ db_transaction(function () use ($id, &$result) {
     // too, but the nesting guard in db.php means it runs in this outer transaction.
     $generator = new \FleetForge\Billing\InvoiceGenerator();
 
+    // S-LEASE-MILEAGE: surface odometer-capture outcome on the response
+    // so the UI can react (toast for stale GPS, banner for unavailable).
+    $odoBlock = [
+        'captured'           => $odoCapture['success'],
+        'odometer_km'        => $odoCapture['odometer_km'],
+        'source'             => $odoCapture['source'],
+        'is_stale'           => $odoCapture['is_stale'],
+        'reading_age_seconds'=> $odoCapture['reading_age_seconds'],
+        'error'              => $odoCapture['error'],
+    ];
+
     if ($isAdvancePath) {
         // ADV-BILL-1: N+1 invoice batch. All share invoice_date / tax / FX / markup.
         $batch = $generator->generateAdvanceBatch($id, current_user_id());
@@ -175,6 +238,7 @@ db_transaction(function () use ($id, &$result) {
             'id'           => $id,
             'status'       => 'active',
             'invoice_ids'  => array_column($batch['invoices'], 'invoice_id'),
+            'odometer'     => $odoBlock,
             'advance'      => [
                 'total_count'        => $batch['total_count'],
                 'first_period_start' => $batch['first_period_start'],
@@ -201,9 +265,23 @@ db_transaction(function () use ($id, &$result) {
             'created_by'        => current_user_id(),
             'auto_generated'    => 1,
             'generation_source' => 'manual',  // ENUM: cron|manual|lease_close|late_fee_cron|advance
+            // S-LEASE-MILEAGE: anchor Invoice 1 to the just-captured starting
+            // odometer so the period_start column on the first invoice matches
+            // lease.odometer_start_km. period_end is unknown at activation —
+            // the next month's cron run computes period_distance for the next
+            // invoice using either prev.odometer_at_period_end_km or this
+            // lease.odometer_start_km as the anchor.
+            'odometer_at_period_start_km' => $startKm,
+            'odometer_source'             => $startSource,
+            'odometer_fetched_at'         => $startFetchedAt,
         ]);
 
-        $result = ['id' => $id, 'status' => 'active', 'invoice_id' => $invoiceResult['invoice_id']];
+        $result = [
+            'id'         => $id,
+            'status'     => 'active',
+            'invoice_id' => $invoiceResult['invoice_id'],
+            'odometer'   => $odoBlock,
+        ];
     }
 
     // ── In-app notifications (NOTIF-1 + ADV-BILL-1 D-D) ────────

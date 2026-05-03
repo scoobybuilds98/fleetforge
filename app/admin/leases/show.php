@@ -177,6 +177,30 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
      ============================================================ -->
 <div x-data="FF_LeaseDetail()" x-init="init()">
 
+    <!-- ── S-LEASE-MILEAGE: starting-odometer banner ──────────────
+         High-visibility prompt shown at the top of every active lease
+         where the starting odometer is null. The retroactive capture
+         widget lives inside the Mileage Tracking card lower down — this
+         banner ensures the manager sees the missing value immediately
+         on page load. Hidden once odometer_start_km is set OR when the
+         lease is closed (cannot capture retroactively per D12).
+         ──────────────────────────────────────────────────────────── -->
+    <template x-if="lease && lease.status === 'active'
+                    && (lease.odometer_start_km === null || lease.odometer_start_km === undefined)">
+        <div class="alert alert-warning" style="margin-bottom:1rem;display:flex;align-items:center;gap:12px;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:20px;height:20px;flex-shrink:0;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>
+            </svg>
+            <div style="flex:1;">
+                <strong>Starting odometer not captured.</strong>
+                Mileage tracking and per-period excess calculations will not run until a starting reading is recorded.
+                Scroll to the <a href="#" @click.prevent="tab='overview';
+                    document.getElementById('mileage-tracking-card')?.scrollIntoView({behavior:'smooth', block:'start'})"
+                   style="text-decoration:underline;">Mileage Tracking card</a> on this page to enter it.
+            </div>
+        </div>
+    </template>
+
     <!-- ── Action buttons (status-driven) ─────────────────────── -->
     <?php if (can('leases', 'edit')): ?>
     <div class="d-flex gap-2" style="margin-bottom:1.5rem;">
@@ -393,7 +417,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                              odometer captured, exposes a retroactive
                              capture flow (Fetch from Samsara or manual
                              entry) against /api/v1/leases/update_odometer. -->
-                        <div class="card" style="grid-column: span 2;">
+                        <div class="card" id="mileage-tracking-card" style="grid-column: span 2;">
                             <div class="card-header"><div class="card-title">Odometer &amp; Distance</div></div>
                             <div class="card-body">
                                 <!-- Has starting odometer → full summary -->
@@ -1044,6 +1068,106 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </div>
                     </div>
 
+                    <!-- ── S-LEASE-MILEAGE: Manager Reconciliation Review ──
+                         Visible whenever closing odometer + starting odometer
+                         are both known and the lease has a positive allowance
+                         and rate. Manager picks credit_note (default for
+                         underage), final_invoice_adjustment, waived, or
+                         no_adjustment. Refunds-to-payment-method deferred per
+                         D-H — credit notes are the standard path.
+                         ─────────────────────────────────────────────────── -->
+                    <template x-if="closeReconciliation && closeReconciliation.kind !== 'no_billing'">
+                        <div style="border:2px solid var(--border-color);border-radius:8px;padding:14px 16px;background:var(--bg-surface-2);margin-bottom:12px;">
+                            <div style="font-weight:600;margin-bottom:0.5rem;font-size:0.9rem;display:flex;align-items:center;justify-content:space-between;">
+                                Mileage Reconciliation
+                                <span class="badge"
+                                      :class="closeReconciliation.kind === 'excess' ? 'badge-warning'
+                                              : closeReconciliation.kind === 'underage' ? 'badge-info'
+                                              : 'badge-success'"
+                                      x-text="closeReconciliation.kind === 'excess' ? 'Excess'
+                                              : closeReconciliation.kind === 'underage' ? 'Underage'
+                                              : 'Exact match'"></span>
+                            </div>
+
+                            <dl style="display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:0.8125rem;margin:0 0 8px 0;">
+                                <dt class="text-secondary">Total driven</dt>
+                                <dd class="font-mono"
+                                    x-text="Number(closeReconciliation.total).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></dd>
+                                <dt class="text-secondary">Allowance</dt>
+                                <dd class="font-mono"
+                                    x-text="Number(closeReconciliation.allowance).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'"></dd>
+                                <dt class="text-secondary"
+                                    x-text="closeReconciliation.kind === 'excess' ? 'Excess' : 'Underage'"></dt>
+                                <dd class="font-mono" style="font-weight:600;"
+                                    x-text="Number(closeReconciliation.diffKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km @ $' + Number(closeReconciliation.rate).toFixed(4) + '/km'"></dd>
+                                <dt class="text-secondary"
+                                    x-text="closeReconciliation.kind === 'excess' ? 'Charge' : 'Credit value'"></dt>
+                                <dd class="font-mono" style="font-weight:700;"
+                                    x-text="'$' + Number(closeReconciliation.amount).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2})"></dd>
+                            </dl>
+
+                            <template x-if="closeReconciliation.kind !== 'exact'">
+                                <div>
+                                    <div style="font-size:0.8125rem;font-weight:600;margin:8px 0 4px;">
+                                        Manager decision (required)
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:4px;">
+                                        <template x-if="closeReconciliation.kind === 'underage'">
+                                            <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:0.8125rem;">
+                                                <input type="radio" value="credit_note"
+                                                       x-model="closeForm.adjustment_decision" style="margin-top:3px;">
+                                                <span><strong>Issue credit note</strong>
+                                                    <span class="text-secondary text-xs" style="display:block;">Customer receives an account credit for the underage value (default).</span>
+                                                </span>
+                                            </label>
+                                        </template>
+                                        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:0.8125rem;">
+                                            <input type="radio" value="final_invoice_adjustment"
+                                                   x-model="closeForm.adjustment_decision" style="margin-top:3px;">
+                                            <span><strong x-text="closeReconciliation.kind === 'excess' ? 'Add charge to final invoice' : 'Reduce final invoice'"></strong>
+                                                <span class="text-secondary text-xs" style="display:block;"
+                                                      x-text="closeReconciliation.kind === 'excess'
+                                                              ? 'Excess mileage line item added to the final invoice.'
+                                                              : 'Final invoice total reduced by the underage value.'"></span>
+                                            </span>
+                                        </label>
+                                        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:0.8125rem;">
+                                            <input type="radio" value="waived"
+                                                   x-model="closeForm.adjustment_decision" style="margin-top:3px;">
+                                            <span><strong>Waive</strong>
+                                                <span class="text-secondary text-xs" style="display:block;">No charge, no credit. Documented in audit log.</span>
+                                            </span>
+                                        </label>
+                                        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:0.8125rem;">
+                                            <input type="radio" value="no_adjustment"
+                                                   x-model="closeForm.adjustment_decision" style="margin-top:3px;">
+                                            <span><strong>No adjustment</strong>
+                                                <span class="text-secondary text-xs" style="display:block;">Do not record a close adjustment row.</span>
+                                            </span>
+                                        </label>
+                                    </div>
+
+                                    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                                        <div class="form-group" style="flex:1 1 140px;margin:0;"
+                                             x-show="closeForm.adjustment_decision === 'credit_note' || closeForm.adjustment_decision === 'final_invoice_adjustment'">
+                                            <label class="form-label" style="font-size:0.75rem;">Override amount ($)</label>
+                                            <input type="number" step="0.01" min="0"
+                                                   class="form-control font-mono"
+                                                   x-model="closeForm.adjustment_override"
+                                                   :placeholder="Number(closeReconciliation.amount).toFixed(2)">
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin:8px 0 0;"
+                                         x-show="closeForm.adjustment_decision && closeForm.adjustment_decision !== 'no_adjustment'">
+                                        <label class="form-label" style="font-size:0.75rem;">Manager notes (required)</label>
+                                        <textarea x-model="closeForm.adjustment_notes" rows="2" class="form-control"
+                                                  placeholder="e.g. Customer goodwill — long-term renewal."></textarea>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
                     <div class="form-group">
                         <label class="form-label" for="close_notes">Close Notes</label>
                         <textarea id="close_notes" class="form-control"
@@ -1368,6 +1492,10 @@ function FF_LeaseDetail() {
             odometer_fetched_at:   null,   // ISO datetime if GPS
             // ADV-BILL-1 D-H: only sent for advance leases; ignored otherwise.
             reconciliation_mode:   'refund_unused',
+            // S-LEASE-MILEAGE: manager close-adjustment decision
+            adjustment_decision:   '',     // '' | 'credit_note' | 'final_invoice_adjustment' | 'waived' | 'no_adjustment'
+            adjustment_override:   '',     // optional manager override of calculated amount
+            adjustment_notes:      '',
         },
         // SAMSARA-1: hint shown beneath End Mileage explaining where the
         // value came from (e.g. "Pulled from Samsara: 184,233 km").
@@ -1923,6 +2051,45 @@ function FF_LeaseDetail() {
             return Number(total).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' km';
         },
 
+        // ── S-LEASE-MILEAGE: live mileage reconciliation getters ─
+        // Drive the close-modal review section. Returns null when we can't
+        // compute reconciliation (e.g. start odometer not captured yet).
+        get closeReconciliation() {
+            if (!this.lease) return null;
+            const closeKm = parseFloat(this.closeForm.odometer_at_close_km);
+            const startKm = parseFloat(this.lease.odometer_start_km);
+            if (isNaN(closeKm) || isNaN(startKm)) return null;
+
+            const total = Math.max(0, closeKm - startKm);
+            const allowance = parseFloat(this.lease.estimated_mileage_km
+                                         || this.lease.estimated_mileage || 0);
+            const rate      = parseFloat(this.lease.mileage_rate_km
+                                         || this.lease.mileage_rate || 0);
+            if (allowance <= 0 || rate <= 0) {
+                return { total, allowance, rate, kind: 'no_billing', amount: 0, diffKm: 0 };
+            }
+
+            if (total > allowance) {
+                const excess = total - allowance;
+                return {
+                    total, allowance, rate,
+                    kind: 'excess',
+                    diffKm: excess,
+                    amount: Math.round(excess * rate * 100) / 100,
+                };
+            }
+            if (total < allowance) {
+                const under = allowance - total;
+                return {
+                    total, allowance, rate,
+                    kind: 'underage',
+                    diffKm: under,
+                    amount: Math.round(under * rate * 100) / 100,
+                };
+            }
+            return { total, allowance, rate, kind: 'exact', diffKm: 0, amount: 0 };
+        },
+
         // ── SAMSARA-1: Live GPS card helpers ─────────────────────
         // "Online" means we have a recent connection (<8h) — same rule the
         // Fleet Tracking dashboard uses, kept consistent on purpose.
@@ -1973,6 +2140,29 @@ function FF_LeaseDetail() {
             // ADV-BILL-1 D-H: only meaningful when this lease has prepaid advance periods.
             if ((this.lease?.advance_billing_periods || 0) > 0) {
                 payload.reconciliation_mode = this.closeForm.reconciliation_mode || 'refund_unused';
+            }
+            // ── S-LEASE-MILEAGE: include close_adjustment when manager
+            // has reviewed the reconciliation panel. Only attached when a
+            // decision was selected — leases without billable mileage skip
+            // it entirely and the legacy partial-month overage logic on the
+            // server takes over for backwards compatibility.
+            const recon = this.closeReconciliation;
+            if (recon && recon.kind !== 'no_billing' && recon.kind !== 'exact'
+                && this.closeForm.adjustment_decision) {
+                if (this.closeForm.adjustment_decision !== 'no_adjustment'
+                    && !this.closeForm.adjustment_notes.trim()) {
+                    this.actionError = 'Manager notes are required for the chosen adjustment decision.';
+                    this.actionInProgress = false;
+                    this.closing = false;
+                    return;
+                }
+                payload.close_adjustment = {
+                    decision: this.closeForm.adjustment_decision,
+                    notes:    this.closeForm.adjustment_notes,
+                };
+                if (this.closeForm.adjustment_override !== '' && this.closeForm.adjustment_override !== null) {
+                    payload.close_adjustment.final_amount = parseFloat(this.closeForm.adjustment_override);
+                }
             }
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/close') ?>', payload);

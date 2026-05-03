@@ -70,6 +70,10 @@ $lease = db_row(
         l.odometer_start_km,
         l.odometer_start_source,
         l.odometer_start_fetched_at,
+        l.odometer_end_km,
+        l.odometer_end_source,
+        l.odometer_end_fetched_at,
+        l.total_distance_km,
         l.tax_exempt,
         l.gst_exempt,
         l.pst_exempt,
@@ -143,8 +147,15 @@ $lease['samsara_battery_charging']    = $lease['samsara_battery_charging']    !=
 $lease['samsara_last_location_lat']   = $lease['samsara_last_location_lat']   !== null ? (float) $lease['samsara_last_location_lat']   : null;
 $lease['samsara_last_location_lng']   = $lease['samsara_last_location_lng']   !== null ? (float) $lease['samsara_last_location_lng']   : null;
 $lease['samsara_last_speed_kph']      = $lease['samsara_last_speed_kph']      !== null ? (float) $lease['samsara_last_speed_kph']      : null;
-// SAMSARA-3: odometer_start_km is DECIMAL — cast so JS gets a typed number
+// SAMSARA-3 / S-LEASE-MILEAGE: cast DECIMAL columns so JS gets typed numbers.
 $lease['odometer_start_km']           = $lease['odometer_start_km']           !== null ? (float) $lease['odometer_start_km']           : null;
+$lease['odometer_end_km']             = $lease['odometer_end_km']             !== null ? (float) $lease['odometer_end_km']             : null;
+$lease['total_distance_km']           = $lease['total_distance_km']           !== null ? (float) $lease['total_distance_km']           : null;
+$lease['estimated_mileage_km']        = $lease['estimated_mileage_km']        !== null ? (float) $lease['estimated_mileage_km']        : null;
+$lease['estimated_mileage_miles']     = $lease['estimated_mileage_miles']     !== null ? (float) $lease['estimated_mileage_miles']     : null;
+$lease['mileage_rate_km']             = $lease['mileage_rate_km']             !== null ? (float) $lease['mileage_rate_km']             : null;
+$lease['mileage_rate_miles']          = $lease['mileage_rate_miles']          !== null ? (float) $lease['mileage_rate_miles']          : null;
+$lease['km_to_miles_conversion']      = $lease['km_to_miles_conversion']      !== null ? (float) $lease['km_to_miles_conversion']      : null;
 
 // SAMSARA-3: pull the latest invoice's period-end odometer and invoice number
 // so the Overview tab can show "Latest recorded: 2,456.78 km (from INV-...)"

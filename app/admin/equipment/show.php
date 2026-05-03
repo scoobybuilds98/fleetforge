@@ -928,6 +928,9 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 <th>Start</th>
                                 <th>End</th>
                                 <th class="text-right">Monthly Rate</th>
+                                <!-- S-LEASE-MILEAGE: total km + allowance per lease -->
+                                <th class="text-right" title="Total km driven over this lease">Total km</th>
+                                <th class="text-right" title="Total mileage allowance for this lease">Allowance</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -944,6 +947,14 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                     <td x-text="formatDate(ls.start_date)"></td>
                                     <td x-text="ls.end_date ? formatDate(ls.end_date) : 'Open'"></td>
                                     <td class="text-right font-mono" x-text="'$' + parseFloat(ls.monthly_rate).toFixed(2)"></td>
+                                    <td class="text-right font-mono"
+                                        x-text="ls.total_distance_km !== null && ls.total_distance_km !== undefined
+                                                ? Number(ls.total_distance_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'
+                                                : '—'"></td>
+                                    <td class="text-right font-mono"
+                                        x-text="ls.estimated_mileage_km && parseFloat(ls.estimated_mileage_km) > 0
+                                                ? Number(ls.estimated_mileage_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'
+                                                : '—'"></td>
                                     <td>
                                         <a :href="'<?= base_url('leases/show') ?>?id=' + ls.id"
                                            class="btn btn-sm btn-secondary">View</a>
@@ -951,6 +962,14 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 </tr>
                             </template>
                         </tbody>
+                        <tfoot x-show="leaseHistory.length > 0">
+                            <tr style="font-weight:600; background:var(--bg-surface-2);">
+                                <td colspan="6" class="text-right">Total km across all leases:</td>
+                                <td class="text-right font-mono"
+                                    x-text="Number(leaseHistory.reduce((s,l) => s + (parseFloat(l.total_distance_km) || 0), 0)).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'"></td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
                 <div class="tab-table-footer">

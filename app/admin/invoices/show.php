@@ -151,6 +151,35 @@ if (!empty($userIds)) {
     }
 }
 
+/* ─── S-LEASE-MILEAGE: load lease for mileage-review breakdown ──── */
+// WHY: When mileage_review_status is pending/approved/overridden, the
+// review card needs the lease's allowance + rate to show the manager
+// the same numbers the system used to compute the excess. Load only
+// when there's actually a review to render — avoids extra queries on
+// invoices that have no excess.
+$mileageReviewLease = null;
+$mileageReviewedByName = null;
+if (!empty($invoice['mileage_review_status'])
+    && $invoice['mileage_review_status'] !== 'not_required'
+    && !empty($invoice['lease_id'])
+) {
+    $mileageReviewLease = db_row(
+        "SELECT id, contract_number, start_date, end_date,
+                estimated_mileage_km, mileage_rate_km, mileage_unit,
+                km_to_miles_conversion
+           FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$invoice['lease_id']]
+    );
+
+    if (!empty($invoice['mileage_reviewed_by_user_id'])) {
+        $rev = db_row(
+            "SELECT name FROM users WHERE id = ?",
+            [(int) $invoice['mileage_reviewed_by_user_id']]
+        );
+        $mileageReviewedByName = $rev['name'] ?? null;
+    }
+}
+
 /* ─── Load activity log (most recent 50 entries) ────────────────── */
 $activityLog = db_select(
     "SELECT action, user_name, notes, old_values, new_values, ip_address, created_at
@@ -983,9 +1012,13 @@ require_once FF_ROOT . '/includes/header.php';
                 <?= heroicon('pencil-square', 'icon-sm') ?>
                 Edit
             </button>
-            <!-- Send -->
-            <button class="btn btn-primary btn-sm" @click="sendInvoice()" :disabled="sending">
-                <span x-show="!sending">Send Invoice</span>
+            <!-- Send — disabled when mileage review is pending (HARD gate) -->
+            <?php $reviewPending = ($invoice['mileage_review_status'] ?? 'not_required') === 'pending'; ?>
+            <button class="btn btn-primary btn-sm"
+                    @click="sendInvoice()"
+                    :disabled="sending || <?= $reviewPending ? 'true' : 'false' ?>"
+                    <?= $reviewPending ? 'title="Mileage review must be approved before this invoice can be sent."' : '' ?>>
+                <span x-show="!sending">Send Invoice<?= $reviewPending ? ' (Review Required)' : '' ?></span>
                 <span x-show="sending">Sending…</span>
             </button>
         <?php endif; ?>
@@ -1388,6 +1421,165 @@ if ($hasOdometer):
             <?php endif; ?>
         </dd>
     </dl>
+</div>
+<?php endif; ?>
+
+
+<!-- ================================================================
+     S-LEASE-MILEAGE: MANAGER REVIEW CARD
+     Visible whenever mileage_review_status != 'not_required'.
+     • pending     → action buttons (approve / override / reject)
+     • approved    → confirmation banner with reviewer + when
+     • overridden  → confirmation banner showing override delta
+     ================================================================ -->
+<?php
+$mrs = $invoice['mileage_review_status'] ?? 'not_required';
+if ($mrs !== 'not_required' && $mileageReviewLease):
+    $allowanceMeta = \FleetForge\Billing\Mileage::monthlyAllowance($mileageReviewLease);
+    $periodDist    = (float) ($invoice['period_distance_km'] ?? 0);
+    $allowanceKm   = $allowanceMeta['allowance_km'];
+    $excessKm      = (float) ($invoice['excess_distance_km'] ?? 0);
+    $excessCharge  = (string) ($invoice['excess_charge_amount'] ?? '0');
+    $overrideAmt   = $invoice['mileage_override_amount'] ?? null;
+    $rateKm        = (string) ($mileageReviewLease['mileage_rate_km'] ?? '0');
+
+    $statusClass = match($mrs) {
+        'pending'    => 'badge-warning',
+        'approved'   => 'badge-success',
+        'overridden' => 'badge-info',
+        default      => 'badge-neutral',
+    };
+    $statusLabel = match($mrs) {
+        'pending'    => 'Review Required',
+        'approved'   => 'Approved',
+        'overridden' => 'Approved — Manager Override',
+        default      => ucfirst($mrs),
+    };
+?>
+<div class="card ff-print-hide" id="mileage-review-card"
+     style="padding:20px; margin-bottom:20px; border:2px solid <?= $mrs === 'pending' ? '#f59e0b' : '#e5e7eb' ?>;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0;">
+            Mileage Review
+        </h3>
+        <span class="badge <?= $statusClass ?>" style="font-size:11px;"><?= e($statusLabel) ?></span>
+    </div>
+
+    <?php if ($mrs === 'pending'): ?>
+        <p style="font-size:13px; color:var(--text-primary); margin:0 0 12px 0;">
+            This invoice has excess mileage and cannot be sent until a manager approves the charge.
+        </p>
+    <?php elseif ($mrs === 'approved'): ?>
+        <p style="font-size:13px; color:var(--text-primary); margin:0 0 12px 0;">
+            Approved as calculated by
+            <strong><?= e($mileageReviewedByName ?? 'manager') ?></strong>
+            on <?= format_datetime($invoice['mileage_reviewed_at']) ?>.
+        </p>
+    <?php elseif ($mrs === 'overridden'): ?>
+        <p style="font-size:13px; color:var(--text-primary); margin:0 0 12px 0;">
+            Approved with override by
+            <strong><?= e($mileageReviewedByName ?? 'manager') ?></strong>
+            on <?= format_datetime($invoice['mileage_reviewed_at']) ?> — applied
+            $<?= e(number_format((float) ($overrideAmt ?? 0), 2)) ?>
+            instead of calculated $<?= e(number_format((float) $excessCharge, 2)) ?>.
+        </p>
+    <?php endif; ?>
+
+    <dl style="display:grid; grid-template-columns:200px 1fr; gap:6px 16px; font-size:13px; margin:0 0 12px 0;">
+        <dt class="text-secondary">Period Distance</dt>
+        <dd class="font-mono"><?= number_format($periodDist, 2) ?> km</dd>
+
+        <dt class="text-secondary">Monthly Allowance</dt>
+        <dd class="font-mono">
+            <?= number_format($allowanceKm, 2) ?> km
+            <span class="text-secondary text-sm">
+              (<?= number_format((float) ($mileageReviewLease['estimated_mileage_km'] ?? 0), 0) ?> km
+              ÷ <?= number_format($allowanceMeta['lease_months'], 2) ?> months)
+              <?php if ($allowanceMeta['was_open_ended']): ?>
+                <span class="badge badge-warning" style="font-size:10px; margin-left:4px;">12-mo default</span>
+              <?php endif; ?>
+            </span>
+        </dd>
+
+        <dt class="text-secondary">Excess Distance</dt>
+        <dd class="font-mono" style="font-weight:600;"><?= number_format($excessKm, 2) ?> km</dd>
+
+        <dt class="text-secondary">Mileage Rate</dt>
+        <dd class="font-mono">$<?= e($rateKm) ?> / km</dd>
+
+        <dt class="text-secondary">Calculated Charge</dt>
+        <dd class="font-mono" style="font-weight:700;">$<?= number_format((float) $excessCharge, 2) ?></dd>
+
+        <?php if ($mrs === 'overridden' && $overrideAmt !== null): ?>
+        <dt class="text-secondary">Override Applied</dt>
+        <dd class="font-mono" style="font-weight:700; color:#0369a1;">$<?= number_format((float) $overrideAmt, 2) ?></dd>
+        <?php endif; ?>
+
+        <?php if (!empty($invoice['mileage_review_notes'])): ?>
+        <dt class="text-secondary" style="vertical-align:top;">Notes</dt>
+        <dd style="white-space:pre-wrap;"><?= e($invoice['mileage_review_notes']) ?></dd>
+        <?php endif; ?>
+    </dl>
+
+    <?php if ($mrs === 'pending' && $isDraft && can('invoices', 'edit')): ?>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+        <button type="button" class="btn btn-primary btn-sm" @click="openMileageReview('approve')">
+            Approve as Calculated — $<?= number_format((float) $excessCharge, 2) ?>
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" @click="openMileageReview('override')">
+            Override Amount
+        </button>
+        <button type="button" class="btn btn-warning btn-sm" @click="openMileageReview('reject')">
+            Reject &amp; Recapture
+        </button>
+    </div>
+
+    <!-- Inline review modal — Alpine-backed, lives within FF_InvoiceShow() -->
+    <div x-show="mileageReview.open" x-cloak x-transition.opacity
+         class="modal-backdrop"
+         style="position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:9999; display:flex; align-items:center; justify-content:center; padding:24px;">
+        <div class="card" style="max-width:520px; width:100%; padding:24px; background:#fff;">
+            <h4 style="margin:0 0 12px 0; font-size:16px; font-weight:600;"
+                x-text="mileageReview.action === 'approve' ? 'Approve Mileage Charge' :
+                        mileageReview.action === 'override' ? 'Override Mileage Charge' :
+                        'Reject Mileage Review'"></h4>
+
+            <div x-show="mileageReview.action === 'override'" style="margin-bottom:14px;">
+                <label style="display:block; font-size:12px; font-weight:500; color:var(--text-secondary); margin-bottom:4px;">
+                    Override Amount ($)
+                </label>
+                <input type="number" step="0.01" min="0" x-model="mileageReview.overrideAmount"
+                       class="form-control" style="font-family:monospace;"
+                       placeholder="<?= number_format((float) $excessCharge, 2) ?>">
+                <p style="font-size:11px; color:var(--text-secondary); margin:4px 0 0;">
+                    Calculated: $<?= number_format((float) $excessCharge, 2) ?>.
+                    Set to <code>0</code> to waive entirely.
+                </p>
+            </div>
+
+            <div style="margin-bottom:14px;">
+                <label style="display:block; font-size:12px; font-weight:500; color:var(--text-secondary); margin-bottom:4px;">
+                    Notes <span x-show="mileageReview.action !== 'approve'" style="color:#dc2626;">(required)</span>
+                </label>
+                <textarea x-model="mileageReview.notes" rows="3" class="form-control"
+                          placeholder="e.g. Customer goodwill — long-term renewal."></textarea>
+            </div>
+
+            <div x-show="mileageReview.error" x-text="mileageReview.error"
+                 style="font-size:12px; color:#dc2626; margin-bottom:10px;"></div>
+
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button type="button" class="btn btn-secondary btn-sm"
+                        @click="mileageReview.open=false">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm"
+                        @click="submitMileageReview()" :disabled="mileageReview.submitting">
+                    <span x-show="!mileageReview.submitting">Confirm</span>
+                    <span x-show="mileageReview.submitting">Submitting…</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 </div>
 <?php endif; ?>
 
@@ -2230,6 +2422,69 @@ function FF_InvoiceShow() {
         /* ── Toast ──────────────────────────────────────────── */
         toast:     '',
         toastType: 'success',
+
+        /* ── S-LEASE-MILEAGE: Manager review modal state ────── */
+        mileageReview: {
+            open:           false,
+            action:         '',     // 'approve' | 'override' | 'reject'
+            overrideAmount: '',
+            notes:          '',
+            submitting:     false,
+            error:          '',
+        },
+
+        openMileageReview(action) {
+            this.mileageReview.action         = action;
+            this.mileageReview.overrideAmount = '';
+            this.mileageReview.notes          = '';
+            this.mileageReview.submitting     = false;
+            this.mileageReview.error          = '';
+            this.mileageReview.open           = true;
+        },
+
+        async submitMileageReview() {
+            // Client-side validation matches server requirements so the
+            // manager doesn't need a round-trip to discover missing notes.
+            const action = this.mileageReview.action;
+            if ((action === 'override' || action === 'reject')
+                && !this.mileageReview.notes.trim()) {
+                this.mileageReview.error = 'Notes are required for override or reject.';
+                return;
+            }
+            if (action === 'override') {
+                const amt = parseFloat(this.mileageReview.overrideAmount);
+                if (isNaN(amt) || amt < 0) {
+                    this.mileageReview.error = 'Override amount must be a non-negative number.';
+                    return;
+                }
+            }
+            this.mileageReview.error      = '';
+            this.mileageReview.submitting = true;
+
+            try {
+                const payload = {
+                    id:     <?= (int)$invoiceId ?>,
+                    action: action,
+                    notes:  this.mileageReview.notes,
+                };
+                if (action === 'override') {
+                    payload.override_amount = this.mileageReview.overrideAmount;
+                }
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/review_mileage') ?>', payload);
+                if (r.success) {
+                    const verb = action === 'reject' ? 'rejected' :
+                                 action === 'override' ? 'overridden' : 'approved';
+                    this.showToast('Mileage review ' + verb, 'success');
+                    this.mileageReview.open = false;
+                    setTimeout(() => location.reload(), 900);
+                } else {
+                    this.mileageReview.error = r.error?.message || 'Review failed';
+                }
+            } catch (e) {
+                this.mileageReview.error = 'Network error';
+            }
+            this.mileageReview.submitting = false;
+        },
 
         /* ── Send Invoice ───────────────────────────────────── */
         async sendInvoice() {

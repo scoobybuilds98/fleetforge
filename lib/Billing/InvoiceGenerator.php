@@ -435,6 +435,56 @@ class InvoiceGenerator
                 }
             }
 
+            // ── S-LEASE-MILEAGE: per-period excess + manager review gate ───
+            // Excess only applies when:
+            //   • We have a valid period_distance_km (both odometer endpoints)
+            //   • The billing_type is NOT 'mileage_only' (those ARE the excess line)
+            //   • Lease has a positive estimated_mileage_km (otherwise unlimited)
+            //   • Lease has a positive mileage_rate_km (otherwise excess is free)
+            //
+            // When excess > 0, mileage_review_status='pending' triggers the
+            // HARD send guard in api/v1/invoices/send.php — the invoice cannot
+            // be sent until a manager reviews and approves. No role bypass.
+            //
+            // Open-ended leases (no end_date) fall back to a 12-month assumption
+            // for monthly_allowance derivation; the audit_log entry below flags
+            // this so managers know to scrutinize the calculation (D-F).
+            $excessDistanceKm   = '0.00';
+            $excessChargeAmount = '0.00';
+            $mileageReviewStatus = 'not_required';
+            $mileageReviewMeta   = null;
+
+            if ($periodDistanceKm !== null
+                && $billingType !== 'mileage_only'
+                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) > 0
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
+            ) {
+                $allowance = \FleetForge\Billing\Mileage::monthlyAllowance($lease);
+                $excess    = \FleetForge\Billing\Mileage::periodExcess(
+                    (float) $periodDistanceKm,
+                    (float) $allowance['allowance_km'],
+                    (string) $lease['mileage_rate_km']
+                );
+                $excessDistanceKm   = (string) $excess['excess_km'];
+                $excessChargeAmount = $excess['excess_charge'];
+
+                if ($excess['review_required']) {
+                    $mileageReviewStatus = 'pending';
+                }
+
+                // Stash for the post-insert audit_log entry — we don't have
+                // the invoice id yet at this point in the function.
+                $mileageReviewMeta = [
+                    'period_distance_km'  => (float) $periodDistanceKm,
+                    'monthly_allowance_km'=> $allowance['allowance_km'],
+                    'lease_months'        => $allowance['lease_months'],
+                    'was_open_ended'      => $allowance['was_open_ended'],
+                    'mileage_rate_km'     => (string) $lease['mileage_rate_km'],
+                    'excess_km'           => $excess['excess_km'],
+                    'excess_charge'       => $excess['excess_charge'],
+                ];
+            }
+
             // --- Insert invoice ---
             $invoiceId = db_insert('invoices', [
                 'invoice_number'            => $invoiceNumber,
@@ -489,6 +539,10 @@ class InvoiceGenerator
                 'cumulative_distance_km'      => $cumulativeDistanceKm,
                 'odometer_source'             => $odometerSource,
                 'odometer_fetched_at'         => $odometerFetchedAt,
+                // S-LEASE-MILEAGE: excess + manager review gate
+                'excess_distance_km'          => $excessDistanceKm,
+                'excess_charge_amount'        => $excessChargeAmount,
+                'mileage_review_status'       => $mileageReviewStatus,
                 'auto_generated'            => (int)($params['auto_generated'] ?? 0),
                 'generation_source'         => $params['generation_source'] ?? 'manual',
                 'created_by'                => $params['created_by'] ?? null,
@@ -517,6 +571,51 @@ class InvoiceGenerator
                         $entry['tax'] === 'GST' ? 'gst_exempt_snapshot' : 'pst_exempt_snapshot' => 0,
                         'expiry_on_certificate' => $entry['expiry'],
                         'invoice_id' => $invoiceId,
+                    ]),
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+            }
+
+            // ── S-LEASE-MILEAGE: audit excess calculation ──────────────
+            // Only write when we actually calculated excess (mileageReviewMeta
+            // is set). Captures the assumption flag for open-ended leases per
+            // D-F so reviewing managers know to verify the 12-month default
+            // matches their expectation.
+            if ($mileageReviewMeta !== null) {
+                $assumptionFlag = $mileageReviewMeta['was_open_ended']
+                    ? ' [ASSUMPTION: lease has no end_date — applied 12-month default; manager should verify allowance]'
+                    : '';
+
+                db_insert('audit_log', [
+                    'user_id'      => $params['created_by'] ?? null,
+                    'user_name'    => (function_exists('current_user') && current_user())
+                                        ? (current_user()['name'] ?? 'system') : 'system',
+                    'action'       => 'create',
+                    'module'       => 'billing',
+                    'entity_type'  => 'invoice',
+                    'entity_id'    => $invoiceId,
+                    'entity_label' => $invoiceNumber,
+                    'notes'        => sprintf(
+                        'Mileage excess calc: period=%.2fkm, allowance=%.2fkm/mo (lease=%.2fmo), excess=%.2fkm × $%s/km = $%s, review=%s%s',
+                        $mileageReviewMeta['period_distance_km'],
+                        $mileageReviewMeta['monthly_allowance_km'],
+                        $mileageReviewMeta['lease_months'],
+                        $mileageReviewMeta['excess_km'],
+                        $mileageReviewMeta['mileage_rate_km'],
+                        $mileageReviewMeta['excess_charge'],
+                        $mileageReviewStatus,
+                        $assumptionFlag
+                    ),
+                    'old_values'   => null,
+                    'new_values'   => json_encode([
+                        'period_distance_km'    => $mileageReviewMeta['period_distance_km'],
+                        'monthly_allowance_km'  => $mileageReviewMeta['monthly_allowance_km'],
+                        'lease_months'          => $mileageReviewMeta['lease_months'],
+                        'was_open_ended'        => $mileageReviewMeta['was_open_ended'],
+                        'mileage_rate_km'       => $mileageReviewMeta['mileage_rate_km'],
+                        'excess_km'             => $mileageReviewMeta['excess_km'],
+                        'excess_charge'         => $mileageReviewMeta['excess_charge'],
+                        'mileage_review_status' => $mileageReviewStatus,
                     ]),
                     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
                 ]);

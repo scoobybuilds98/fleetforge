@@ -101,6 +101,14 @@ $rows = db_select(
         l.total_invoiced,
         l.next_billing_date,
         l.po_number,
+        -- S-LEASE-MILEAGE: surface mileage totals on the lease list so the
+        -- equipment-unit Lease History tab can show total km without an
+        -- extra round-trip per row.
+        l.estimated_mileage_km,
+        l.mileage_unit,
+        l.odometer_start_km,
+        l.odometer_end_km,
+        l.total_distance_km,
         l.created_at,
         l.updated_at,
         COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,

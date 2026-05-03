@@ -69,6 +69,70 @@ $startTs = strtotime($lease['start_date']);
 $endTs   = $lease['end_date'] ? strtotime($lease['end_date']) : time();
 $daysActive = max(1, (int) ceil(($endTs - $startTs) / 86400) + 1);
 
+// ── S-LEASE-MILEAGE: customer-facing mileage usage ─────────
+// Customer never sees manager-internal fields (review status, override
+// notes, audit log). Show running totals and a per-month progress card
+// for active leases; final summary for closed leases.
+$mileageCard = null;
+$totalAllowanceKm = (float) ($lease['estimated_mileage_km']
+                              ?? $lease['estimated_mileage'] ?? 0);
+if ($totalAllowanceKm > 0) {
+    $allowanceMeta = \FleetForge\Billing\Mileage::monthlyAllowance($lease);
+
+    // Cumulative usage for an active lease comes from the latest invoice's
+    // cumulative_distance_km column; for a closed lease it's the canonical
+    // lease.total_distance_km.
+    $cumulativeKm = null;
+    $latestInvoiceNumber = null;
+    $latestInvoiceDate   = null;
+
+    if ($lease['status'] === 'completed' && !empty($lease['total_distance_km'])) {
+        $cumulativeKm = (float) $lease['total_distance_km'];
+    } else {
+        $latestInv = db_row(
+            "SELECT cumulative_distance_km, invoice_number, invoice_date
+               FROM invoices
+              WHERE lease_id = ? AND deleted_at IS NULL
+                AND cumulative_distance_km IS NOT NULL
+              ORDER BY billing_period_end DESC, id DESC LIMIT 1",
+            [$leaseId]
+        );
+        if ($latestInv) {
+            $cumulativeKm = (float) $latestInv['cumulative_distance_km'];
+            $latestInvoiceNumber = $latestInv['invoice_number'];
+            $latestInvoiceDate   = $latestInv['invoice_date'];
+        }
+    }
+
+    // Display unit conversion. Internal storage stays km — customer sees
+    // miles on miles-leases via lease.km_to_miles_conversion (D-E).
+    $displayUnit = (string) ($lease['mileage_unit'] ?? 'km');
+    $kmToMiles   = (float) ($lease['km_to_miles_conversion'] ?? 0.621371);
+    if ($kmToMiles <= 0) $kmToMiles = 0.621371;
+
+    $convert = function (float $km) use ($displayUnit, $kmToMiles): float {
+        return $displayUnit === 'miles' ? $km * $kmToMiles : $km;
+    };
+
+    $remainingKm = max(0.0, $totalAllowanceKm - (float) ($cumulativeKm ?? 0));
+    $usagePct    = $totalAllowanceKm > 0
+        ? min(100, max(0, ((float) ($cumulativeKm ?? 0) / $totalAllowanceKm) * 100))
+        : 0;
+
+    $mileageCard = [
+        'total_allowance' => $convert($totalAllowanceKm),
+        'used'            => $convert((float) ($cumulativeKm ?? 0)),
+        'remaining'       => $convert($remainingKm),
+        'monthly_allowance' => $convert((float) $allowanceMeta['allowance_km']),
+        'usage_pct'       => round($usagePct, 1),
+        'unit'            => $displayUnit,
+        'latest_invoice'  => $latestInvoiceNumber,
+        'latest_invoice_date' => $latestInvoiceDate,
+        'is_closed'       => ($lease['status'] === 'completed'),
+        'lease_months'    => $allowanceMeta['lease_months'],
+    ];
+}
+
 $pageTitle = 'Lease ' . $lease['contract_number'];
 require_once dirname(__DIR__) . '/includes/header.php';
 
@@ -200,6 +264,96 @@ $statusBadge = match($lease['status']) {
     </div>
 
 </div>
+
+<!-- ── S-LEASE-MILEAGE: customer-facing mileage usage card ──── -->
+<?php if ($mileageCard): ?>
+<div class="portal-section">
+    <div class="portal-section-header">
+        <h2 class="portal-section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 1.5v-1.5m0 0c0-.621.504-1.125 1.125-1.125m0 0h7.5"/>
+            </svg>
+            Mileage Usage
+        </h2>
+    </div>
+    <div class="portal-section-body">
+        <?php if ($mileageCard['is_closed']): ?>
+            <!-- ─── Closed lease: final summary ─── -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px;">
+                <div>
+                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Total driven</div>
+                    <div class="font-mono" style="font-size:1.25rem; font-weight:700;">
+                        <?= e(number_format($mileageCard['used'], 0)) ?> <?= e($mileageCard['unit']) ?>
+                    </div>
+                </div>
+                <div>
+                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Total allowance</div>
+                    <div class="font-mono" style="font-size:1.25rem;">
+                        <?= e(number_format($mileageCard['total_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?>
+                    </div>
+                </div>
+                <div>
+                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Final status</div>
+                    <div style="font-size:0.875rem; font-weight:600;">
+                        <?php if ($mileageCard['used'] > $mileageCard['total_allowance']): ?>
+                            <span style="color:#b45309;">Over by <?= e(number_format($mileageCard['used'] - $mileageCard['total_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?></span>
+                        <?php elseif ($mileageCard['used'] < $mileageCard['total_allowance']): ?>
+                            <span style="color:#0369a1;">Under by <?= e(number_format($mileageCard['total_allowance'] - $mileageCard['used'], 0)) ?> <?= e($mileageCard['unit']) ?></span>
+                        <?php else: ?>
+                            <span style="color:#15803d;">Exact</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        <?php else: ?>
+            <!-- ─── Active lease: progress bars + monthly snapshot ─── -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:14px;">
+                <div>
+                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Total allowance</div>
+                    <div class="font-mono" style="font-size:1.125rem;">
+                        <?= e(number_format($mileageCard['total_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?>
+                    </div>
+                </div>
+                <div>
+                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Used to date</div>
+                    <div class="font-mono" style="font-size:1.125rem; font-weight:700;">
+                        <?= e(number_format($mileageCard['used'], 0)) ?> <?= e($mileageCard['unit']) ?>
+                    </div>
+                </div>
+                <div>
+                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Remaining</div>
+                    <div class="font-mono" style="font-size:1.125rem;">
+                        <?= e(number_format($mileageCard['remaining'], 0)) ?> <?= e($mileageCard['unit']) ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Total-usage progress bar -->
+            <div style="margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:baseline; font-size:0.8125rem; margin-bottom:4px;">
+                    <span style="color:var(--text-secondary);">Total usage</span>
+                    <span class="font-mono" style="font-weight:600;"><?= e($mileageCard['usage_pct']) ?>%</span>
+                </div>
+                <div style="background:#f1f5f9; height:8px; border-radius:4px; overflow:hidden;">
+                    <div style="height:100%; background:<?= $mileageCard['usage_pct'] >= 100 ? '#dc2626' : ($mileageCard['usage_pct'] >= 80 ? '#f59e0b' : '#0ea5e9') ?>; width:<?= e($mileageCard['usage_pct']) ?>%;"></div>
+                </div>
+            </div>
+
+            <!-- Monthly allowance reference -->
+            <div style="font-size:0.8125rem; color:var(--text-secondary); margin-top:12px;">
+                Monthly allowance:
+                <span class="font-mono" style="font-weight:600; color:var(--text-primary);">
+                    <?= e(number_format($mileageCard['monthly_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?>
+                </span>
+                <?php if ($mileageCard['latest_invoice_date']): ?>
+                · Last reading from invoice <?= e($mileageCard['latest_invoice']) ?> on <?= e(format_date($mileageCard['latest_invoice_date'])) ?>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 
 <!-- Invoices for this lease -->
 <div class="portal-section">
