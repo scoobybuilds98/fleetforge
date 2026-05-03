@@ -95,6 +95,49 @@ The spec names the variables but never provides the hex values. These are the de
 
 ---
 
+## 1.5 INPUTS & LABELS — APPLE MACOS AESTHETIC (S-DESIGN-INPUTS, 2026-05-03)
+
+Form inputs render as borderless tinted-gray pills with a 2px brand-orange focus ring. Labels render in muted alpha. Token-level — every `.form-control`, `.form-input`, `.form-select`, `.portal-form-input` cascades from the variables below.
+
+```css
+/* DARK MODE (warm-tinted alphas — palette-matched to FleetForge dark theme) */
+:root,                          /* default theme = dark */
+[data-theme="dark"] {           /* explicit dark refresh */
+  --input-bg:          rgba(140, 130, 115, 0.18);
+  --input-bg-focus:    rgba(140, 130, 115, 0.32);
+  --input-text:        rgba(255, 255, 255, 0.96);
+  --input-placeholder: rgba(235, 230, 220, 0.40);
+  --label-text:        rgba(235, 230, 220, 0.60);
+  --label-text-strong: rgba(255, 255, 255, 0.85);
+}
+
+/* LIGHT MODE (Apple cool gray rgba 118,118,128 verbatim) */
+[data-theme="light"] {
+  --input-bg:          rgba(118, 118, 128, 0.12);
+  --input-bg-focus:    rgba(118, 118, 128, 0.22);
+  --input-text:        rgba(0, 0, 0, 0.92);
+  --input-placeholder: rgba(60, 60, 67, 0.40);
+  --label-text:        rgba(60, 60, 67, 0.72);  /* bumped from Apple 0.60 for WCAG AA */
+  --label-text-strong: rgba(0, 0, 0, 0.85);
+}
+```
+
+**Component rules** (see `public/assets/css/app.css` lines ~2167-2240):
+- `.form-control / .form-input / .form-select` — `border:none; border-radius:8px; height:40px; background:var(--input-bg)`
+- Focus — `background:var(--input-bg-focus); box-shadow:0 0 0 2px var(--color-primary)` (no border so no layout shift)
+- Disabled — `opacity:0.5; cursor:not-allowed`
+- Invalid (`.is-invalid` / `.ff-invalid`) — `box-shadow:0 0 0 2px var(--color-danger)`
+- `.form-label` — `color:var(--label-text); font-size:0.8125rem; font-weight:500; letter-spacing:0.01em`
+
+**Decisions:**
+- Warm dark-mode tints (140,130,115) chosen over Apple's cool (118,118,128) for palette coherence with the brownish-black FleetForge dark theme (`#262624` page / `#141413` cards).
+- Light-mode label alpha bumped 0.60 → 0.72 to pass WCAG AA contrast (4.5:1) for 13px labels over white.
+- `--input-border` retained — `.form-check-input` (checkboxes) intentionally keep their bordered look.
+- All `input[type=*]` types (text/email/number/password/search/tel/url/date/datetime-local/time/select/textarea) cascade through the `.form-control/.form-input/.form-select` selector set. No per-type rules needed.
+- Specialized inputs retain custom treatments: `.search-input` (cmd-K palette), `.search-wrapper .search-input` (topbar pill), `.chat-search-input`, `.portal-search-input`.
+
+---
+
 ## 2. BUTTON VARIANTS — The 8 × 5 matrix
 
 ### 8 variants:

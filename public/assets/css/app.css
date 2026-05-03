@@ -175,13 +175,24 @@ hr {
     --z-toast:     70;
 
     /* ── Form ────────────────────────────────────── */
+    /* S-DESIGN-INPUTS (2026-05-03): Apple-aesthetic input tokens.
+       Inputs render as borderless tinted-gray pills; on focus the
+       background brightens and a 2px brand-orange ring appears.
+       Dark mode uses warm-tinted alphas to match the brownish-black
+       palette (rgba 140,130,115); light mode uses Apple's cool gray
+       (rgba 118,118,128) verbatim. Labels use --label-text muted alpha.
+       --input-border is retained for .form-check (checkbox borders)
+       which intentionally keep the bordered look. */
     --input-height:      40px;
     --input-height-sm:   32px;
     --input-height-lg:   48px;
-    --input-bg:          #111318;
+    --input-bg:          rgba(140, 130, 115, 0.18);
+    --input-bg-focus:    rgba(140, 130, 115, 0.32);
     --input-border:      #2a3347;
-    --input-text:        #f1f5f9;
-    --input-placeholder: #4b5563;
+    --input-text:        rgba(255, 255, 255, 0.96);
+    --input-placeholder: rgba(235, 230, 220, 0.40);
+    --label-text:        rgba(235, 230, 220, 0.60);
+    --label-text-strong: rgba(255, 255, 255, 0.85);
 
     /* ── FIX #28: Spec-name aliases (both conventions work) ─── */
     /* Design spec uses different names than what was implemented */
@@ -241,10 +252,16 @@ hr {
     --shadow-lg:  0 10px 15px -3px rgba(0, 0, 0, 0.10), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     --shadow-xl:  0 20px 25px -5px rgba(0, 0, 0, 0.10), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 
-    --input-bg:          #ffffff;
+    /* S-DESIGN-INPUTS: light-mode Apple input tokens (cool gray tints).
+       --label-text bumped from Apple's 0.60 to 0.72 to pass WCAG AA
+       contrast (4.5:1) for 13px label text on white. */
+    --input-bg:          rgba(118, 118, 128, 0.12);
+    --input-bg-focus:    rgba(118, 118, 128, 0.22);
     --input-border:      #cbd5e1;
-    --input-text:        #0f172a;
-    --input-placeholder: #94a3b8;
+    --input-text:        rgba(0, 0, 0, 0.92);
+    --input-placeholder: rgba(60, 60, 67, 0.40);
+    --label-text:        rgba(60, 60, 67, 0.72);
+    --label-text-strong: rgba(0, 0, 0, 0.85);
 }
 
 /* Dark mode — deeper blacks for explicit dark-mode toggle */
@@ -318,11 +335,16 @@ hr {
     --topbar-text:           #c2c0b6;
 
     /* ── Input fields ────────────────────────────── */
-    --input-bg:              #1f1e1d;
+    /* S-DESIGN-INPUTS: warm-tinted Apple-style alphas, palette-matched
+       to the brownish-black dark theme (#262624/#141413). */
+    --input-bg:              rgba(140, 130, 115, 0.18);
+    --input-bg-focus:        rgba(140, 130, 115, 0.32);
     --input-border:          #333330;
-    --input-text:            #ffffff;
-    --input-placeholder:     #5a5855;
-    --input-focus-bg:        #262624;
+    --input-text:            rgba(255, 255, 255, 0.96);
+    --input-placeholder:     rgba(235, 230, 220, 0.40);
+    --input-focus-bg:        rgba(140, 130, 115, 0.32);
+    --label-text:            rgba(235, 230, 220, 0.60);
+    --label-text-strong:     rgba(255, 255, 255, 0.85);
 
     /* ── Shadows — warmer tones ──────────────────── */
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
@@ -2164,12 +2186,17 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     margin-bottom: 0;
 }
 
+/* S-DESIGN-INPUTS (2026-05-03): Apple macOS aesthetic.
+   Labels render in muted alpha (--label-text). Inputs are borderless
+   tinted-gray pills. Focus brightens the bg and adds a 2px brand-orange
+   ring via box-shadow (no border, so no layout shift on focus). */
 .form-label {
     display: block;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     font-weight: 500;
-    color: var(--text-primary);
+    color: var(--label-text);
     margin-bottom: 6px;
+    letter-spacing: 0.01em;
 }
 
 .form-label .required {
@@ -2187,34 +2214,48 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     height: var(--input-height);
     padding: 0 12px;
     background: var(--input-bg);
-    border: 1px solid var(--input-border);
-    border-radius: var(--radius-md);
+    border: none;
+    border-radius: 8px;
     color: var(--input-text);
     font-size: 0.9rem;
     font-family: inherit;
     line-height: 1;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
     appearance: none;
     -webkit-appearance: none;
+    outline: none;
 }
 
-.form-control::placeholder { color: var(--input-placeholder); }
+.form-control::placeholder,
+.form-input::placeholder,
+.form-select::placeholder { color: var(--input-placeholder); }
 
 .form-control:focus,
+.form-input:focus,
 .form-select:focus {
     outline: none;
-    border-color: var(--border-focus);
-    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+    background: var(--input-bg-focus);
+    box-shadow: 0 0 0 2px var(--color-primary);
 }
 
+.form-control:disabled,
+.form-input:disabled,
+.form-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Invalid state — danger ring via box-shadow (no border to color). */
 .form-control.is-invalid,
+.form-input.is-invalid,
 .form-select.is-invalid {
-    border-color: var(--color-danger);
+    box-shadow: 0 0 0 2px var(--color-danger);
 }
 
 .form-control.is-invalid:focus,
+.form-input.is-invalid:focus,
 .form-select.is-invalid:focus {
-    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+    box-shadow: 0 0 0 2px var(--color-danger);
 }
 
 .form-control-sm,
@@ -2304,8 +2345,7 @@ textarea.form-input {
 .form-control.ff-invalid,
 .form-input.ff-invalid,
 .form-select.ff-invalid {
-    border-color: var(--color-danger);
-    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.08);
+    box-shadow: 0 0 0 2px var(--color-danger);
 }
 
 /* Inline alert banners — used in forms and modals */
@@ -2370,13 +2410,15 @@ textarea.form-input {
     align-items: stretch;
 }
 
+/* S-DESIGN-INPUTS: prefix/suffix render as part of one continuous Apple
+   pill with the input — same bg, no border, joined radii. */
 .input-group-prefix,
 .input-group-suffix {
     display: flex;
     align-items: center;
     padding: 0 12px;
-    background: var(--bg-surface-2);
-    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    border: none;
     color: var(--text-secondary);
     font-size: 0.875rem;
     white-space: nowrap;
@@ -2384,13 +2426,11 @@ textarea.form-input {
 }
 
 .input-group-prefix {
-    border-right: none;
-    border-radius: var(--radius-md) 0 0 var(--radius-md);
+    border-radius: 8px 0 0 8px;
 }
 
 .input-group-suffix {
-    border-left: none;
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    border-radius: 0 8px 8px 0;
 }
 
 .input-group .form-control {
@@ -2398,8 +2438,8 @@ textarea.form-input {
     border-radius: 0;
 }
 
-.input-group:has(.input-group-prefix) .form-control { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
-.input-group:has(.input-group-suffix) .form-control { border-radius: var(--radius-md) 0 0 var(--radius-md); }
+.input-group:has(.input-group-prefix) .form-control { border-radius: 0 8px 8px 0; }
+.input-group:has(.input-group-suffix) .form-control { border-radius: 8px 0 0 8px; }
 .input-group:has(.input-group-prefix):has(.input-group-suffix) .form-control { border-radius: 0; }
 
 
@@ -4715,32 +4755,34 @@ dl.detail-grid dd {
 .portal-form-group {
     margin-bottom: 16px;
 }
+/* S-DESIGN-INPUTS: portal mirrors admin Apple aesthetic. */
 .portal-form-label {
     display: block;
     font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-weight: 500;
+    color: var(--label-text);
     margin-bottom: 6px;
+    letter-spacing: 0.01em;
 }
 .portal-form-input {
     width: 100%;
     padding: 10px 14px;
-    border: 1px solid var(--border-color);
+    border: none;
     border-radius: 8px;
     font-size: 0.875rem;
-    color: var(--text-primary);
-    background: var(--bg-input);
-    transition: all 0.15s ease;
+    color: var(--input-text);
+    background: var(--input-bg);
+    transition: background 0.15s ease, box-shadow 0.15s ease;
     outline: none;
     font-family: inherit;
     box-sizing: border-box;
 }
 .portal-form-input:focus {
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    background: var(--input-bg-focus);
+    box-shadow: 0 0 0 2px var(--color-primary);
 }
 .portal-form-input::placeholder {
-    color: var(--text-muted);
+    color: var(--input-placeholder);
 }
 .portal-form-textarea {
     resize: vertical;
@@ -4836,30 +4878,32 @@ dl.detail-grid dd {
     flex-wrap: wrap;
     margin-bottom: 16px;
 }
+/* S-DESIGN-INPUTS: portal search/filter use Apple pill aesthetic. */
 .portal-search-input {
     flex: 1;
     min-width: 200px;
     max-width: 320px;
     padding: 8px 12px 8px 34px;
-    border: 1px solid var(--border-color);
+    border: none;
     border-radius: 8px;
     font-size: 0.8125rem;
-    color: var(--text-primary);
-    background: var(--bg-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%239c9c96'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z'/%3E%3C/svg%3E") no-repeat 10px center / 16px;
+    color: var(--input-text);
+    background: var(--input-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%239c9c96'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z'/%3E%3C/svg%3E") no-repeat 10px center / 16px;
     outline: none;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
 }
+.portal-search-input::placeholder { color: var(--input-placeholder); }
 .portal-search-input:focus {
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    background-color: var(--input-bg-focus);
+    box-shadow: 0 0 0 2px var(--color-primary);
 }
 .portal-filter-select {
     padding: 8px 32px 8px 12px;
-    border: 1px solid var(--border-color);
+    border: none;
     border-radius: 8px;
     font-size: 0.8125rem;
-    color: var(--text-primary);
-    background: var(--bg-input);
+    color: var(--input-text);
+    background: var(--input-bg);
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b6b66' d='M3 4.5L6 8l3-3.5'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
@@ -4867,6 +4911,11 @@ dl.detail-grid dd {
     background-size: 12px;
     outline: none;
     cursor: pointer;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.portal-filter-select:focus {
+    background-color: var(--input-bg-focus);
+    box-shadow: 0 0 0 2px var(--color-primary);
 }
 
 /* ── Portal Pagination ──────────────────────────────────────── */
