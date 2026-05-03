@@ -89,6 +89,22 @@ $weeklyRate  = ($weeklyRateIn  !== null && bccomp($weeklyRateIn,  '0', 4) >= 0) 
 $monthlyRate = ($monthlyRateIn !== null && bccomp($monthlyRateIn, '0', 4) >= 0) ? $monthlyRateIn : '0.00';
 $mileageRate = ($mileageRateIn !== null && bccomp($mileageRateIn, '0', 4) >= 0) ? $mileageRateIn : '0.0000';
 
+// Dual-unit rate fields — hoisted above the $anyMileageRate guard so the
+// guard can read them without triggering "Undefined variable" warnings.
+// Allowance and conversion-factor extraction stay at their original spots
+// further down — only the rate fields are referenced by the guard.
+$rateKmRaw    = isset($body['mileage_rate_km'])    ? clean_decimal($body['mileage_rate_km'])    : null;
+$rateMilesRaw = isset($body['mileage_rate_miles'])  ? clean_decimal($body['mileage_rate_miles']) : null;
+
+if ($rateKmRaw !== null && bccomp($rateKmRaw, '0', 4) < 0) {
+    $fields['mileage_rate_km'] = 'KM mileage rate cannot be negative.';
+    $rateKmRaw = null;
+}
+if ($rateMilesRaw !== null && bccomp($rateMilesRaw, '0', 4) < 0) {
+    $fields['mileage_rate_miles'] = 'Mile mileage rate cannot be negative.';
+    $rateMilesRaw = null;
+}
+
 // Enforce: at least one rate must be positive (spec §7.5 docblock)
 // Check both legacy mileage_rate and new dual-unit fields
 $anyMileageRate = bccomp($mileageRate, '0', 4) > 0
@@ -142,18 +158,8 @@ $nonStandardConversion = (
     bccomp($milesToKmFinal, '1.5', 6) < 0 || bccomp($milesToKmFinal, '1.7', 6) > 0
 );
 
-// Dual-unit rate fields
-$rateKmRaw    = isset($body['mileage_rate_km'])    ? clean_decimal($body['mileage_rate_km'])    : null;
-$rateMilesRaw = isset($body['mileage_rate_miles'])  ? clean_decimal($body['mileage_rate_miles']) : null;
-
-if ($rateKmRaw !== null && bccomp($rateKmRaw, '0', 4) < 0) {
-    $fields['mileage_rate_km'] = 'KM mileage rate cannot be negative.';
-    $rateKmRaw = null;
-}
-if ($rateMilesRaw !== null && bccomp($rateMilesRaw, '0', 4) < 0) {
-    $fields['mileage_rate_miles'] = 'Mile mileage rate cannot be negative.';
-    $rateMilesRaw = null;
-}
+// Dual-unit rate fields ($rateKmRaw, $rateMilesRaw) are extracted above
+// the $anyMileageRate guard. Allowance fields are local to this section.
 
 // Dual-unit allowance fields
 $allowKmRaw    = isset($body['estimated_mileage_km'])    ? clean_decimal($body['estimated_mileage_km'])    : null;
