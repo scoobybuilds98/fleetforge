@@ -282,22 +282,61 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                         <tr><td class="text-secondary">Daily Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.daily_rate).toFixed(2)"></td></tr>
                                         <tr><td class="text-secondary">Weekly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.weekly_rate).toFixed(2)"></td></tr>
                                         <tr><td class="text-secondary">Monthly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.monthly_rate).toFixed(2)"></td></tr>
-                                        <!-- S-LEASE-UNITS: dual-unit mileage rate — primary emphasized, secondary muted -->
-                                        <tr x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0">
-                                            <td class="text-secondary" style="vertical-align:top;padding-top:9px;">Mileage Rate</td>
+                                        <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance — primary prominent,
+                                             secondary muted with ≈ prefix, custom-conversion badge when factors
+                                             differ from international standard. -->
+                                        <tr x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0 || parseFloat(lease.estimated_mileage_km || lease.estimated_mileage) > 0 || parseFloat(lease.estimated_mileage_miles) > 0">
+                                            <td class="text-secondary" style="vertical-align:top;padding-top:9px;">Mileage &amp; allowance</td>
                                             <td>
-                                                <div style="display:flex;align-items:baseline;gap:5px;flex-wrap:wrap;">
-                                                    <span class="font-mono" style="font-weight:600;"
-                                                          x-text="'$' + parseFloat(lease.mileage_unit === 'miles' ? (lease.mileage_rate_miles || lease.mileage_rate || 0) : (lease.mileage_rate_km || lease.mileage_rate || 0)).toFixed(4) + ' / ' + (lease.mileage_unit || 'km')"></span>
-                                                    <span style="font-size:0.6875rem;font-weight:700;color:var(--color-primary);letter-spacing:0.04em;">PRIMARY</span>
+                                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                                                    <!-- Per-unit rate -->
+                                                    <div>
+                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Per-unit rate</div>
+                                                        <template x-if="lease.mileage_unit === 'km'">
+                                                            <div>
+                                                                <div class="ff-show-primary"
+                                                                     x-text="'$' + parseFloat(lease.mileage_rate_km || lease.mileage_rate || 0).toFixed(4) + ' / km'"></div>
+                                                                <div class="ff-show-secondary"
+                                                                     x-text="'≈ $' + parseFloat(lease.mileage_rate_miles || 0).toFixed(4) + ' / mile'"></div>
+                                                            </div>
+                                                        </template>
+                                                        <template x-if="lease.mileage_unit !== 'km'">
+                                                            <div>
+                                                                <div class="ff-show-primary"
+                                                                     x-text="'$' + parseFloat(lease.mileage_rate_miles || lease.mileage_rate || 0).toFixed(4) + ' / mile'"></div>
+                                                                <div class="ff-show-secondary"
+                                                                     x-text="'≈ $' + parseFloat(lease.mileage_rate_km || 0).toFixed(4) + ' / km'"></div>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                    <!-- Allowance -->
+                                                    <div>
+                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Allowance</div>
+                                                        <template x-if="lease.mileage_unit === 'km'">
+                                                            <div>
+                                                                <div class="ff-show-primary"
+                                                                     x-text="parseFloat(lease.estimated_mileage_km || lease.estimated_mileage || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
+                                                                <div class="ff-show-secondary"
+                                                                     x-text="'≈ ' + parseFloat(lease.estimated_mileage_miles || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
+                                                            </div>
+                                                        </template>
+                                                        <template x-if="lease.mileage_unit !== 'km'">
+                                                            <div>
+                                                                <div class="ff-show-primary"
+                                                                     x-text="parseFloat(lease.estimated_mileage_miles || lease.estimated_mileage || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
+                                                                <div class="ff-show-secondary"
+                                                                     x-text="'≈ ' + parseFloat(lease.estimated_mileage_km || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
+                                                            </div>
+                                                        </template>
+                                                    </div>
                                                 </div>
-                                                <div style="font-size:0.8125rem;color:var(--text-muted);font-family:var(--font-mono,'DM Mono',monospace);margin-top:2px;"
-                                                     x-text="'≈ $' + parseFloat(lease.mileage_unit === 'miles' ? (lease.mileage_rate_km || 0) : (lease.mileage_rate_miles || 0)).toFixed(4) + ' / ' + (lease.mileage_unit === 'miles' ? 'km' : 'mi')"></div>
-                                                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px;display:flex;align-items:center;gap:5px;">
-                                                    <span style="font-family:var(--font-mono,'DM Mono',monospace);"
-                                                          x-text="'1 km = ' + Number(lease.km_to_miles_conversion || 0.621371).toFixed(6) + ' mi'"></span>
-                                                    <span x-show="Math.abs(Number(lease.km_to_miles_conversion || 0.621371) - 0.621371) > 0.0001"
-                                                          style="font-size:0.6875rem;color:var(--color-warning-text,#b45309);background:var(--color-warning-light,#fef3c7);padding:1px 5px;border-radius:3px;">custom</span>
+                                                <div class="ff-show-caption">
+                                                    <span x-text="'1 km = ' + Number(lease.km_to_miles_conversion || 0.621371).toFixed(6) + ' mi · 1 mile = ' + Number(lease.miles_to_km_conversion || 1.609344).toFixed(6) + ' km'"></span>
+                                                    <span class="ff-badge-custom"
+                                                          x-show="Math.abs(Number(lease.km_to_miles_conversion || 0.621371) - 0.621371) > 0.0001
+                                                               || Math.abs(Number(lease.miles_to_km_conversion || 1.609344) - 1.609344) > 0.0001">
+                                                        Custom conversion
+                                                    </span>
                                                 </div>
                                             </td>
                                         </tr>

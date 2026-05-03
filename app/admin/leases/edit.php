@@ -196,131 +196,161 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
-        <!-- ── Section 4: Mileage (S-LEASE-UNITS) ─────────────── -->
+        <!-- ══════════════════════════════════════════════════════════
+             Section 4: Mileage & allowance (S-LEASE-UNITS)
+             ──────────────────────────────────────────────────────────
+             Primary unit is fixed at creation — flipping it requires an
+             amendment, so the segmented control is rendered read-only-
+             style (visible state, disabled interaction). Rate fields are
+             also read-only (amendment workflow). Allowance + conversion
+             factors stay editable with Pattern A bidirectional behavior
+             matching create.php.
+             ══════════════════════════════════════════════════════════ -->
         <div class="card" style="margin-bottom:1.5rem;">
-            <div class="card-header"><div class="card-title">Mileage</div></div>
+            <div class="card-header"><div class="card-title">Mileage &amp; allowance</div></div>
             <div class="card-body">
 
-                <!-- Primary unit badge (static — set at creation) -->
-                <div style="margin-bottom:1.25rem;display:flex;align-items:center;gap:0.75rem;font-size:0.875rem;">
-                    <span style="color:var(--text-secondary);">Primary unit:</span>
-                    <span style="font-family:var(--font-mono,'DM Mono',monospace);font-weight:700;color:var(--color-primary);letter-spacing:0.05em;">
-                        <?= strtoupper(e($lease['mileage_unit'] ?? 'km')) ?>
-                    </span>
-                    <span style="color:var(--text-muted);font-size:0.8125rem;">(to change, create an amendment)</span>
+                <!-- ── Primary unit indicator (read-only on edit) ── -->
+                <div style="display:flex;justify-content:center;margin-bottom:24px;">
+                    <div class="ff-segment-control"
+                         role="group"
+                         aria-label="Mileage unit (read-only — change via amendment)"
+                         style="opacity:0.92;">
+                        <div class="ff-segment-control__pill"
+                             :class="{ 'ff-segment-control__pill--right': _mileageUnit === 'miles' }"></div>
+                        <div class="ff-segment-control__option"
+                             :class="{ 'ff-segment-control__option--active': _mileageUnit === 'km' }"
+                             aria-disabled="true"
+                             style="cursor:not-allowed;">
+                            Kilometers
+                        </div>
+                        <div class="ff-segment-control__option"
+                             :class="{ 'ff-segment-control__option--active': _mileageUnit === 'miles' }"
+                             aria-disabled="true"
+                             style="cursor:not-allowed;">
+                            Miles
+                        </div>
+                    </div>
+                </div>
+                <div class="form-hint" style="text-align:center;margin-bottom:24px;">
+                    Primary unit is fixed at creation — change via the
+                    <a href="<?= e(base_url('leases/show?id=' . $leaseId)) ?>#amendments" class="text-link">Amendments tab</a>.
                 </div>
 
-                <!-- Mileage Rates: read-only -->
-                <div style="margin-bottom:1.25rem;">
-                    <div style="font-size:0.8125rem;font-weight:600;color:var(--text-primary);margin-bottom:0.625rem;">Mileage Rates <span style="font-weight:400;color:var(--text-muted);">— read-only</span></div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label class="form-label" style="font-size:0.8125rem;display:flex;align-items:center;gap:5px;margin-bottom:4px;">
-                                <span style="font-family:var(--font-mono,'DM Mono',monospace);font-weight:700;<?= ($lease['mileage_unit'] ?? 'km') === 'km' ? 'color:var(--color-primary);' : '' ?>">Per KM</span>
-                                <?php if (($lease['mileage_unit'] ?? 'km') === 'km'): ?>
-                                <span style="font-size:0.6875rem;font-weight:700;color:var(--color-primary);">PRIMARY</span>
-                                <?php endif; ?>
-                            </label>
-                            <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;">
-                                $<?= e(number_format((float)($lease['mileage_rate_km'] ?? $lease['mileage_rate'] ?? 0), 4)) ?>
+                <!-- ── Per-unit rate (read-only) ── -->
+                <div class="ff-dual-label">Per-unit rate <span style="font-weight:400;color:var(--text-muted);">— read-only</span></div>
+                <div class="ff-dual-grid">
+                    <div<?= ($lease['mileage_unit'] ?? 'km') !== 'km' ? ' class="ff-field-secondary"' : '' ?>>
+                        <div class="input-group">
+                            <span class="input-group-prefix">$</span>
+                            <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;border-radius:0;">
+                                <?= e(number_format((float)($lease['mileage_rate_km'] ?? $lease['mileage_rate'] ?? 0), 4)) ?>
                             </div>
+                            <span class="input-group-suffix">/ km</span>
                         </div>
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label class="form-label" style="font-size:0.8125rem;display:flex;align-items:center;gap:5px;margin-bottom:4px;">
-                                <span style="font-family:var(--font-mono,'DM Mono',monospace);font-weight:700;<?= ($lease['mileage_unit'] ?? 'km') === 'miles' ? 'color:var(--color-primary);' : '' ?>">Per Mile</span>
-                                <?php if (($lease['mileage_unit'] ?? 'km') === 'miles'): ?>
-                                <span style="font-size:0.6875rem;font-weight:700;color:var(--color-primary);">PRIMARY</span>
-                                <?php endif; ?>
-                            </label>
-                            <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;">
-                                $<?= e(number_format((float)($lease['mileage_rate_miles'] ?? 0), 4)) ?>
+                    </div>
+                    <div<?= ($lease['mileage_unit'] ?? 'km') !== 'miles' ? ' class="ff-field-secondary"' : '' ?>>
+                        <div class="input-group">
+                            <span class="input-group-prefix">$</span>
+                            <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;border-radius:0;">
+                                <?= e(number_format((float)($lease['mileage_rate_miles'] ?? 0), 4)) ?>
                             </div>
+                            <span class="input-group-suffix">/ mile</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Conversion factor caption + editable panel -->
-                <div style="margin-bottom:1.25rem;">
-                    <div style="font-family:var(--font-mono,'DM Mono',monospace);font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">
-                        <span x-text="'1 km = ' + Number(form.km_to_miles_conversion || 0.621371).toFixed(6) + ' mi  ·  1 mi = ' + Number(form.miles_to_km_conversion || 1.609344).toFixed(6) + ' km'"></span>
-                        &nbsp;
+                <!-- ── Allowance (editable) ── -->
+                <div class="ff-dual-label">Allowance per lease</div>
+                <div class="ff-dual-grid">
+                    <div :class="{ 'ff-field-secondary': _mileageUnit !== 'km' }">
+                        <div class="input-group">
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.001"
+                                   min="0"
+                                   name="estimated_mileage_km"
+                                   x-model="form.estimated_mileage_km"
+                                   @input.debounce.150ms="onAllowanceKmInput($event.target.value)"
+                                   aria-label="Allowance in kilometers"
+                                   placeholder="0">
+                            <span class="input-group-suffix">km</span>
+                        </div>
+                        <div class="form-error" x-show="errors.estimated_mileage_km" x-text="errors.estimated_mileage_km"></div>
+                    </div>
+                    <div :class="{ 'ff-field-secondary': _mileageUnit !== 'miles' }">
+                        <div class="input-group">
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.001"
+                                   min="0"
+                                   name="estimated_mileage_miles"
+                                   x-model="form.estimated_mileage_miles"
+                                   @input.debounce.150ms="onAllowanceMilesInput($event.target.value)"
+                                   aria-label="Allowance in miles"
+                                   placeholder="0">
+                            <span class="input-group-suffix">miles</span>
+                        </div>
+                        <div class="form-error" x-show="errors.estimated_mileage_miles" x-text="errors.estimated_mileage_miles"></div>
+                    </div>
+                </div>
+                <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Used for pre-charge calculation. Set both to 0 to disable.</div>
+
+                <!-- ── Collapsible conversion factor section ── -->
+                <div style="margin-bottom:24px;">
+                    <button type="button"
+                            class="ff-collapsible-toggle"
+                            @click="factor_section_open = !factor_section_open"
+                            :aria-expanded="factor_section_open">
+                        <span class="ff-collapsible-chevron"
+                              :class="{ 'ff-collapsible-chevron--open': factor_section_open }">▶</span>
+                        Conversion factor
+                    </button>
+
+                    <div class="ff-collapsible-content"
+                         x-show="factor_section_open"
+                         x-cloak>
+                        <p class="form-hint" style="margin:0 0 12px 0;">
+                            Conversion factors are independently editable. Default:
+                            1&nbsp;km&nbsp;=&nbsp;0.621371&nbsp;mi, 1&nbsp;mile&nbsp;=&nbsp;1.609344&nbsp;km.
+                        </p>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                            <div>
+                                <label class="form-label" style="font-size:0.8125rem;">1 km =</label>
+                                <div class="input-group">
+                                    <input type="number"
+                                           class="form-control font-mono"
+                                           step="0.000001"
+                                           min="0.000001"
+                                           name="km_to_miles_conversion"
+                                           x-model="form.km_to_miles_conversion"
+                                           @input.debounce.150ms="onKmToMilesFactorInput($event.target.value)"
+                                           placeholder="0.621371">
+                                    <span class="input-group-suffix">miles</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="form-label" style="font-size:0.8125rem;">1 mile =</label>
+                                <div class="input-group">
+                                    <input type="number"
+                                           class="form-control font-mono"
+                                           step="0.000001"
+                                           min="0.000001"
+                                           name="miles_to_km_conversion"
+                                           x-model="form.miles_to_km_conversion"
+                                           @input.debounce.150ms="onMilesToKmFactorInput($event.target.value)"
+                                           placeholder="1.609344">
+                                    <span class="input-group-suffix">km</span>
+                                </div>
+                            </div>
+                        </div>
                         <button type="button"
-                                @click="showConversionEditor = !showConversionEditor"
-                                style="color:var(--color-primary);background:none;border:none;cursor:pointer;font-size:0.75rem;text-decoration:underline;padding:0;font-family:inherit;">
-                            <span x-text="showConversionEditor ? 'hide' : 'edit conversion'"></span>
+                                class="ff-link-button"
+                                @click="resetFactorsToDefaults()"
+                                style="margin-top:12px;">
+                            Reset to defaults
                         </button>
                     </div>
-                    <div x-show="showConversionEditor" x-cloak
-                         style="padding:0.875rem;background:var(--bg-muted);border-radius:6px;border:1px solid var(--border-color);max-width:440px;">
-                        <div style="font-size:0.8125rem;font-weight:600;color:var(--text-primary);margin-bottom:0.625rem;">Edit Conversion Factors</div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.625rem;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label" style="font-size:0.75rem;">1 km =</label>
-                                <div style="display:flex;align-items:center;gap:6px;">
-                                    <input type="number" class="form-control font-mono"
-                                           x-model.number="form.km_to_miles_conversion"
-                                           @input.debounce.150ms="onKmToMilesInput()"
-                                           step="0.000001" min="0.000001" placeholder="0.621371">
-                                    <span style="font-size:0.8125rem;color:var(--text-secondary);white-space:nowrap;">mi</span>
-                                </div>
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label" style="font-size:0.75rem;">1 mile =</label>
-                                <div style="display:flex;align-items:center;gap:6px;">
-                                    <input type="number" class="form-control font-mono"
-                                           x-model.number="form.miles_to_km_conversion"
-                                           @input.debounce.150ms="onMilesToKmInput()"
-                                           step="0.000001" min="0.000001" placeholder="1.609344"
-                                           :readonly="!factorsUnlinked">
-                                    <span style="font-size:0.8125rem;color:var(--text-secondary);white-space:nowrap;">km</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                            <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;color:var(--text-secondary);cursor:pointer;user-select:none;">
-                                <input type="checkbox" class="form-check-input" x-model="factorsUnlinked">
-                                Advanced: unlink factors
-                            </label>
-                            <span x-show="factorsUnlinked && Math.abs((1 / (form.km_to_miles_conversion || 0.621371)) - (form.miles_to_km_conversion || 1.609344)) > 0.001"
-                                  style="font-size:0.75rem;color:var(--color-warning-text,#b45309);background:var(--color-warning-light,#fef3c7);padding:2px 8px;border-radius:4px;">
-                                Non-reciprocal — double-check before saving
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Included Mileage Allowance: editable km + miles -->
-                <div style="margin-bottom:1.25rem;">
-                    <div style="font-size:0.8125rem;font-weight:600;color:var(--text-primary);margin-bottom:0.625rem;">Included Mileage Allowance</div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                        <div class="form-group" style="margin-bottom:0;<?= ($lease['mileage_unit'] ?? 'km') !== 'km' ? 'opacity:0.8;' : '' ?>">
-                            <label class="form-label" style="font-size:0.8125rem;display:flex;align-items:center;gap:5px;margin-bottom:4px;">
-                                <span style="font-family:var(--font-mono,'DM Mono',monospace);font-weight:700;<?= ($lease['mileage_unit'] ?? 'km') === 'km' ? 'color:var(--color-primary);' : '' ?>">KM</span>
-                                <?php if (($lease['mileage_unit'] ?? 'km') === 'km'): ?>
-                                <span style="font-size:0.6875rem;font-weight:700;color:var(--color-primary);">PRIMARY</span>
-                                <?php endif; ?>
-                            </label>
-                            <input type="number" class="form-control font-mono"
-                                   x-model="form.estimated_mileage_km"
-                                   @input.debounce.150ms="onAllowanceKmInput()"
-                                   min="0" step="0.001" placeholder="0">
-                            <div class="form-error" x-show="errors.estimated_mileage_km" x-text="errors.estimated_mileage_km"></div>
-                        </div>
-                        <div class="form-group" style="margin-bottom:0;<?= ($lease['mileage_unit'] ?? 'km') !== 'miles' ? 'opacity:0.8;' : '' ?>">
-                            <label class="form-label" style="font-size:0.8125rem;display:flex;align-items:center;gap:5px;margin-bottom:4px;">
-                                <span style="font-family:var(--font-mono,'DM Mono',monospace);font-weight:700;<?= ($lease['mileage_unit'] ?? 'km') === 'miles' ? 'color:var(--color-primary);' : '' ?>">Miles</span>
-                                <?php if (($lease['mileage_unit'] ?? 'km') === 'miles'): ?>
-                                <span style="font-size:0.6875rem;font-weight:700;color:var(--color-primary);">PRIMARY</span>
-                                <?php endif; ?>
-                            </label>
-                            <input type="number" class="form-control font-mono"
-                                   x-model="form.estimated_mileage_miles"
-                                   @input.debounce.150ms="onAllowanceMilesInput()"
-                                   min="0" step="0.001" placeholder="0">
-                            <div class="form-error" x-show="errors.estimated_mileage_miles" x-text="errors.estimated_mileage_miles"></div>
-                        </div>
-                    </div>
-                    <div class="form-hint" style="margin-top:4px;">Used for pre-charge calculation. Set both to 0 to disable.</div>
                 </div>
 
                 <!-- Odometer readings -->
@@ -430,61 +460,41 @@ function FF_EditLease() {
         errors:      {},
         submitting:  false,
 
-        // S-LEASE-UNITS: mileage_unit is fixed at creation — embed for JS logic
-        _mileageUnit: <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
-        allowanceKmOverridden:    false,
-        allowanceMilesOverridden: false,
-        factorsUnlinked:          false,
-        showConversionEditor:     false,
+        // S-LEASE-UNITS: primary unit is fixed at creation — read-only here.
+        // Pattern A bidirectional behavior matches create.php; no override
+        // flags, no auto-reciprocation between factors.
+        _mileageUnit:        <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
+        factor_section_open: false,
 
         init() {},
 
-        // S-LEASE-UNITS: allowance input handlers (mileage_unit is fixed server-side)
-        onAllowanceKmInput() {
-            if (this._mileageUnit === 'km') {
-                this._recomputeFromKm();
-            } else {
-                this.allowanceKmOverridden = true;
-            }
-        },
-        onAllowanceMilesInput() {
-            if (this._mileageUnit === 'miles') {
-                this._recomputeFromMiles();
-            } else {
-                this.allowanceMilesOverridden = true;
-            }
-        },
-
-        // S-LEASE-UNITS: D-B auto-reciprocate conversion factors
-        onKmToMilesInput() {
-            const v = parseFloat(this.form.km_to_miles_conversion);
-            if (!this.factorsUnlinked && v > 0) {
-                this.form.miles_to_km_conversion = parseFloat((1 / v).toFixed(6));
-            }
-            if (this._mileageUnit === 'km') this._recomputeFromKm();
-            else this._recomputeFromMiles();
-        },
-        onMilesToKmInput() {
-            // Only active when factorsUnlinked=true
-            if (this._mileageUnit === 'miles') this._recomputeFromMiles();
-            else this._recomputeFromKm();
-        },
-
-        _recomputeFromKm() {
-            if (this.allowanceMilesOverridden) return;
+        // Allowance handlers (3-decimal precision, DECIMAL(12,3)).
+        onAllowanceKmInput(value) {
+            const km = parseFloat(value);
+            if (isNaN(km) || km < 0) { this.form.estimated_mileage_miles = ''; return; }
             const factor = parseFloat(this.form.km_to_miles_conversion) || 0.621371;
-            const raw = this.form.estimated_mileage_km;
-            if (raw === '' || raw === null) { this.form.estimated_mileage_miles = ''; return; }
-            const km = parseFloat(raw);
-            if (!isNaN(km) && km >= 0) this.form.estimated_mileage_miles = (km * factor).toFixed(3);
+            this.form.estimated_mileage_miles = (Math.round(km * factor * 1000) / 1000).toFixed(3);
         },
-        _recomputeFromMiles() {
-            if (this.allowanceKmOverridden) return;
+        onAllowanceMilesInput(value) {
+            const miles = parseFloat(value);
+            if (isNaN(miles) || miles < 0) { this.form.estimated_mileage_km = ''; return; }
             const factor = parseFloat(this.form.miles_to_km_conversion) || 1.609344;
-            const raw = this.form.estimated_mileage_miles;
-            if (raw === '' || raw === null) { this.form.estimated_mileage_km = ''; return; }
-            const miles = parseFloat(raw);
-            if (!isNaN(miles) && miles >= 0) this.form.estimated_mileage_km = (miles * factor).toFixed(3);
+            this.form.estimated_mileage_km = (Math.round(miles * factor * 1000) / 1000).toFixed(3);
+        },
+
+        // Factors are independently editable — D-B.
+        onKmToMilesFactorInput(value) {
+            const v = parseFloat(value);
+            this.form.km_to_miles_conversion = (isNaN(v) || v <= 0) ? 0.621371 : v;
+        },
+        onMilesToKmFactorInput(value) {
+            const v = parseFloat(value);
+            this.form.miles_to_km_conversion = (isNaN(v) || v <= 0) ? 1.609344 : v;
+        },
+
+        resetFactorsToDefaults() {
+            this.form.km_to_miles_conversion = 0.621371;
+            this.form.miles_to_km_conversion = 1.609344;
         },
 
         validate() {

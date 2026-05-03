@@ -8397,3 +8397,209 @@ body:has(.chat-page-content) #ff-chat-widget {
 }
 
 /* ────────── UI-AUDIT-1 END ────────── */
+
+
+/* ============================================================
+   S-LEASE-UNITS — Apple-style segmented control tokens
+   ────────────────────────────────────────────────────────────
+   Convention: FleetForge defaults to dark mode at :root, with
+   [data-theme="light"] overriding for light mode (opposite of
+   the Apple spec literal text, but matches FleetForge's existing
+   token system). Active pill is a grayscale "elevated" surface
+   (white pill on light track / mid-gray pill on dark track) —
+   no brand orange (D-D).
+   ============================================================ */
+
+:root {
+    --segment-track-bg:        rgba(118, 118, 128, 0.24);
+    --segment-active-bg:        #636366;
+    --segment-active-shadow:    0 3px 8px rgba(0, 0, 0, 0.32),
+                                0 1px 2px rgba(0, 0, 0, 0.18);
+    --segment-active-text:      rgba(255, 255, 255, 1);
+    --segment-inactive-text:    rgba(235, 235, 245, 0.6);
+}
+
+[data-theme="light"] {
+    --segment-track-bg:        rgba(118, 118, 128, 0.12);
+    --segment-active-bg:        #FFFFFF;
+    --segment-active-shadow:    0 3px 8px rgba(0, 0, 0, 0.12),
+                                0 1px 2px rgba(0, 0, 0, 0.04);
+    --segment-active-text:      rgba(0, 0, 0, 1);
+    --segment-inactive-text:    rgba(60, 60, 67, 0.6);
+}
+
+/* The control itself */
+.ff-segment-control {
+    position: relative;
+    display: inline-flex;
+    width: 320px;
+    height: 44px;
+    background: var(--segment-track-bg);
+    border-radius: 9px;
+    padding: 2px;
+    user-select: none;
+}
+
+.ff-segment-control__pill {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: calc(50% - 2px);
+    height: calc(100% - 4px);
+    background: var(--segment-active-bg);
+    border-radius: 7px;
+    box-shadow: var(--segment-active-shadow);
+    transition: transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1);
+    z-index: 0;
+    pointer-events: none;
+}
+
+.ff-segment-control__pill--right {
+    transform: translateX(100%);
+}
+
+.ff-segment-control__option {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    color: var(--segment-inactive-text);
+    border-radius: 7px;
+    outline: none;
+}
+
+.ff-segment-control__option--active {
+    color: var(--segment-active-text);
+}
+
+.ff-segment-control__option:focus-visible {
+    box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+/* Secondary unit fields render slightly muted; full opacity on hover/focus */
+.ff-field-secondary {
+    opacity: 0.85;
+    transition: opacity 0.15s ease;
+}
+
+.ff-field-secondary:hover,
+.ff-field-secondary:focus-within {
+    opacity: 1;
+}
+
+/* Lightweight collapsible (used for "Conversion factor" panel).
+   x-show toggles display; we avoid the @alpinejs/collapse plugin. */
+.ff-collapsible-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 0;
+}
+
+.ff-collapsible-toggle:hover {
+    color: var(--text-primary);
+}
+
+.ff-collapsible-chevron {
+    display: inline-block;
+    font-size: 0.75rem;
+    transition: transform 0.15s ease;
+}
+
+.ff-collapsible-chevron--open {
+    transform: rotate(90deg);
+}
+
+.ff-collapsible-content {
+    margin-top: 12px;
+    padding: 16px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md, 8px);
+}
+
+.ff-link-button {
+    background: none;
+    border: none;
+    color: var(--color-primary-text);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    padding: 0;
+}
+
+.ff-link-button:hover {
+    text-decoration: underline;
+}
+
+/* Dual-unit "Per-unit rate" / "Allowance" wrapper labels */
+.ff-dual-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    letter-spacing: -0.005em;
+}
+
+.ff-dual-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+@media (max-width: 540px) {
+    .ff-segment-control { width: 100%; max-width: 320px; }
+    .ff-dual-grid { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* show.php read-only variant — primary prominent, secondary muted */
+.ff-show-primary {
+    font-family: var(--font-mono, 'DM Mono', monospace);
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.ff-show-secondary {
+    font-family: var(--font-mono, 'DM Mono', monospace);
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.ff-show-caption {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono, 'DM Mono', monospace);
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ff-badge-custom {
+    display: inline-block;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--color-warning-text, #b45309);
+    background: var(--color-warning-light, #fef3c7);
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+}
+/* ────────── S-LEASE-UNITS END ────────── */
