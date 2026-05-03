@@ -175,6 +175,18 @@ $lease['latest_invoice_number_for_odo']  = $latestOdoInv['invoice_number'] ?? nu
 $lease['latest_invoice_id_for_odo']      = $latestOdoInv && $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
 $lease['samsara_odometer_km']         = $lease['samsara_odometer_km']         !== null ? (float) $lease['samsara_odometer_km']         : null;
 
+// S-MILEAGE-FIX-0 (Q9): expose total prior monthly excess (km canonical)
+// so the close-modal UI can detect the inverse case (priorOverbillKm > 0)
+// and render a warning banner BEFORE the manager picks a decision.
+// Voided invoices excluded — their excess never reached customer AR.
+$priorExcessRow = db_row(
+    "SELECT COALESCE(SUM(excess_distance_km), 0) AS prior_excess
+       FROM invoices
+      WHERE lease_id = ? AND deleted_at IS NULL AND status != 'void'",
+    [$id]
+);
+$lease['prior_excess_km'] = (float) ($priorExcessRow['prior_excess'] ?? 0);
+
 // Fetch status log for this lease
 $statusLog = db_select(
     "SELECT id, old_status, new_status, notes, changed_by, user_id, changed_at

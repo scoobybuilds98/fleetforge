@@ -784,6 +784,31 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
 
     $isAdvanceClose = !empty($advanceInvoices);
 
+    // ── S-MILEAGE-FIX-0 (Q9): prior monthly excess sum ──────────
+    // Per-period excess billed via S-LEASE-MILEAGE on prior monthly
+    // invoices already charged the customer for excess kilometres.
+    // Both the legacy overage block (below) and the S-LEASE-MILEAGE
+    // close-adjustment block (further down) must subtract this value
+    // to avoid double-billing the same kilometres at close. Voided
+    // invoices excluded — their excess never reached customer AR.
+    // The cron-generated full_month draft for the closing month is
+    // included here automatically (it's a non-void invoice on the
+    // lease), which also handles the D-D
+    // legacy_append_mileage_to_full_month_draft path.
+    //
+    // This is a transitional safeguard. The Model-B refactor in
+    // S-MILEAGE-1+ replaces the per-period excess gate with a
+    // drawdown balance and removes the seam entirely.
+    $priorExcessRow = db_row(
+        "SELECT COALESCE(SUM(excess_distance_km), 0) AS prior_excess
+           FROM invoices
+          WHERE lease_id = ?
+            AND deleted_at IS NULL
+            AND status != 'void'",
+        [$id]
+    );
+    $priorExcessKm = (float) ($priorExcessRow['prior_excess'] ?? 0);
+
     // Mileage overage shared between branches (computed once)
     // S-LEASE-MILEAGE: when a `close_adjustment` block is supplied the
     // manager has already reviewed totals against the full-lease allowance,
@@ -800,6 +825,27 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         $actualMileage    = (string)($mileageAtEnd - (int)$lease['mileage_at_start']);
         $includedMileage  = (string)($lease['estimated_mileage'] ?? '0');
         $overageMileage   = bcsub($actualMileage, $includedMileage, 4);
+
+        // S-MILEAGE-FIX-0 (Q9 path 2): subtract prior excess. The new
+        // excess_distance_km column is canonically km (D-E from
+        // S-LEASE-MILEAGE); convert to the lease's primary mileage unit
+        // before subtracting from the legacy integer-mileage overage.
+        // In practice leases hitting this block predate odometer tracking
+        // and have priorExcessKm = 0 by structure, but the conversion is
+        // defence-in-depth for hybrid leases that have both legacy and
+        // new tracking populated.
+        if ($priorExcessKm > 0) {
+            $mileageUnit = $lease['mileage_unit'] ?? 'km';
+            $priorExcessInLeaseUnit = $priorExcessKm;
+            if ($mileageUnit === 'miles') {
+                $factor = (float) ($lease['km_to_miles_conversion'] ?? 0.621371);
+                if ($factor > 0) {
+                    $priorExcessInLeaseUnit = $priorExcessKm * $factor;
+                }
+            }
+            $overageMileage = bcsub($overageMileage, (string) $priorExcessInLeaseUnit, 4);
+        }
+
         if (bccomp($overageMileage, '0', 4) > 0) {
             $mileageCharge = bcround(bcmul($overageMileage, (string)$lease['mileage_rate'], 6), 2);
             if (bccomp($mileageCharge, '0', 2) > 0) {
@@ -1001,8 +1047,27 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         }
         if ($totalDistanceKm < 0) $totalDistanceKm = 0.0;
 
-        $excessKm   = max(0.0, $totalDistanceKm - $totalAllowanceKm);
-        $underageKm = max(0.0, $totalAllowanceKm - $totalDistanceKm);
+        // ── S-MILEAGE-FIX-0 (Q9): subtract prior monthly excess ────
+        // priorExcessKm was computed earlier in this transaction
+        // (above line ~795) as SUM(excess_distance_km) over non-void
+        // invoices for this lease. Subtracting it here prevents
+        // double-billing the same excess kilometres at close.
+        //
+        // Inverse case (D-B): if priorExcessKm exceeds the raw overage
+        // (i.e. prior monthly excess billed MORE kilometres than the
+        // lease was actually over allowance), the customer was
+        // already over-billed. We do NOT auto-correct — adjustedExcess
+        // is clamped to 0 so no further charge fires, and the close
+        // UI surfaces a banner via api/v1/leases/show.php's
+        // prior_excess_km field. Manager handles via manual credit_note
+        // if business policy requires it. The audit_log row below also
+        // captures the inverse case for ops visibility.
+        $rawOverageKm  = $totalDistanceKm - $totalAllowanceKm;
+        $excessKm      = max(0.0, $rawOverageKm - $priorExcessKm);
+        $underageKm    = max(0.0, $totalAllowanceKm - $totalDistanceKm);
+        $priorOverbillKm = ($rawOverageKm > 0 && $priorExcessKm > $rawOverageKm)
+            ? ($priorExcessKm - $rawOverageKm)
+            : 0.0;
 
         $adjType = $excessKm > 0 ? 'excess_charge'
                  : ($underageKm > 0 ? 'underage_credit' : 'no_adjustment');
@@ -1150,9 +1215,82 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
                 'final_amount'              => $finalAmount,
                 'related_invoice_id'        => $relatedInvoiceId,
                 'related_credit_note_id'    => $relatedCreditNoteId,
+                'prior_excess_km'           => $priorExcessKm,
+                'raw_overage_km'            => $rawOverageKm,
+                'adjusted_excess_km'        => $excessKm,
+                'prior_overbill_km'         => $priorOverbillKm,
             ]),
             'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
         ]);
+
+        // ── S-MILEAGE-FIX-0 (D-E): transitional regression safeguard ─
+        // Surface to ops + audit_log every close that touches a lease
+        // with prior monthly excess. INFO when the math reconciles
+        // cleanly; WARNING (Sentry) when the inverse case fires (prior
+        // monthly excess billed MORE kilometres than the lease was over
+        // allowance, meaning the customer was over-billed and the close
+        // calc has clamped excess to 0). Manager handles via manual
+        // credit_note if business policy requires correction.
+        //
+        // audit_log.action is an ENUM that doesn't include
+        // close_adjustment_with_prior_excess as a value. We use 'update'
+        // (existing enum value) and put the descriptive label in
+        // entity_type so log searches still find these rows.
+        if ($priorExcessKm > 0 && $closeAdjustment['decision'] !== 'waived') {
+            $isInverseCase = $priorOverbillKm > 0;
+            $severity      = $isInverseCase ? 'WARNING' : 'INFO';
+            $safeguardMsg  = sprintf(
+                'S-MILEAGE-FIX-0 [%s]: close adjustment with prior monthly excess. lease=%s, prior_excess=%.2fkm, total_distance=%.2fkm, allowance=%.2fkm, raw_overage=%.2fkm, adjusted_excess=%.2fkm, prior_overbill=%.2fkm, decision=%s.%s',
+                $severity,
+                $lease['contract_number'],
+                $priorExcessKm, $totalDistanceKm, $totalAllowanceKm,
+                $rawOverageKm, $excessKm, $priorOverbillKm,
+                $closeAdjustment['decision'],
+                $isInverseCase
+                    ? ' INVERSE CASE: customer was over-billed in monthly excess; close_adjustment fired with auto-clamped 0 excess. Manager review required for credit_note issuance per business policy.'
+                    : ''
+            );
+
+            db_insert('audit_log', [
+                'user_id'      => current_user_id(),
+                'user_name'    => $changedBy,
+                'action'       => 'update',
+                'module'       => 'leases',
+                'entity_type'  => 'lease_close_with_prior_excess',
+                'entity_id'    => $id,
+                'entity_label' => $lease['contract_number'],
+                'notes'        => $safeguardMsg,
+                'old_values'   => null,
+                'new_values'   => json_encode([
+                    'severity'              => $severity,
+                    'is_inverse_case'       => $isInverseCase,
+                    'prior_excess_km'       => $priorExcessKm,
+                    'total_distance_km'     => $totalDistanceKm,
+                    'total_allowance_km'    => $totalAllowanceKm,
+                    'raw_overage_km'        => $rawOverageKm,
+                    'adjusted_excess_km'    => $excessKm,
+                    'prior_overbill_km'     => $priorOverbillKm,
+                    'decision'              => $closeAdjustment['decision'],
+                    'final_amount'          => $finalAmount,
+                ]),
+                'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+
+            // Sentry warning only for the inverse case — that's the
+            // actionable one. INFO-level audit_log is enough for the
+            // routine prior-excess case.
+            if ($isInverseCase) {
+                try {
+                    \FleetForge\Observability\Sentry::captureMessage(
+                        $safeguardMsg,
+                        'warning'
+                    );
+                } catch (\Throwable $e) {
+                    // Never let observability break the close transaction.
+                    error_log('[S-MILEAGE-FIX-0 Sentry] ' . $e->getMessage());
+                }
+            }
+        }
 
         $closeAdjustmentResult = [
             'id'                     => (int) $closeAdjustmentRowId,
@@ -1164,7 +1302,46 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
             'final_amount'           => $finalAmount,
             'related_invoice_id'     => $relatedInvoiceId,
             'related_credit_note_id' => $relatedCreditNoteId,
+            // S-MILEAGE-FIX-0 (Q9): exposed for response transparency.
+            'prior_excess_km'        => $priorExcessKm,
+            'raw_overage_km'         => $rawOverageKm,
+            'adjusted_excess_km'     => $excessKm,
+            'prior_overbill_km'      => $priorOverbillKm,
         ];
+    }
+
+    // ── S-MILEAGE-FIX-0 (D-E): legacy-path safeguard ──────────────
+    // Fire the prior-excess safeguard when the legacy path closed the
+    // lease without a close_adjustment block. The S-LEASE-MILEAGE block
+    // above already wrote a safeguard row when closeAdjustment fired;
+    // this branch covers the case where the manager dismissed the close
+    // modal without picking a decision (e.g. inverse case where the UI
+    // returned kind='exact' and hid the radios). Audit_log only — no
+    // Sentry, since the manager intentionally chose not to record a
+    // close_adjustment row.
+    if ($closeAdjustment === null && $priorExcessKm > 0) {
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => $changedBy,
+            'action'       => 'update',
+            'module'       => 'leases',
+            'entity_type'  => 'lease_close_with_prior_excess',
+            'entity_id'    => $id,
+            'entity_label' => $lease['contract_number'],
+            'notes'        => sprintf(
+                'S-MILEAGE-FIX-0 [INFO]: legacy-path close on lease %s with prior monthly excess. prior_excess=%.2fkm, decision=NONE (legacy partial_end path).',
+                $lease['contract_number'], $priorExcessKm
+            ),
+            'old_values'   => null,
+            'new_values'   => json_encode([
+                'severity'        => 'INFO',
+                'is_inverse_case' => false,  // legacy path doesn't compute the inverse case explicitly
+                'prior_excess_km' => $priorExcessKm,
+                'decision'        => null,
+                'path'            => 'legacy',
+            ]),
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
     }
 
     $result = [
@@ -1175,6 +1352,10 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         'reconciliation'    => $isAdvanceClose ? $reconMode : null,
         'advance_actions'   => $advanceActions,
         'close_adjustment'  => $closeAdjustmentResult,
+        // S-MILEAGE-FIX-0 (Q9): always returned, even when no
+        // close_adjustment was supplied, so callers and ops dashboards
+        // can detect prior-excess interactions on the lease.
+        'prior_excess_km'   => $priorExcessKm,
     ];
 
     // ── In-app notifications (NOTIF-1) ─────────────────────────

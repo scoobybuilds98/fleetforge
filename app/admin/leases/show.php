@@ -1089,6 +1089,50 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                               : 'Exact match'"></span>
                             </div>
 
+                            <!-- ── S-MILEAGE-FIX-0 (Q9 D-B): prior monthly excess banner ──
+                                 Surface when prior_excess_km > 0 (some kilometres were
+                                 already billed via per-period excess on prior monthly
+                                 invoices). Two flavours:
+                                   • INFO: prior excess covers part/all of the lease
+                                     overage cleanly. Customer is being correctly billed
+                                     without double-charge.
+                                   • WARNING: prior excess EXCEEDED actual lease overage
+                                     (the inverse case). Customer was over-billed
+                                     during the lease; manager should consider issuing
+                                     a manual credit_note before closing.
+                                 ─────────────────────────────────────────────────── -->
+                            <template x-if="closeReconciliation.priorExcessKm > 0">
+                                <div style="border-radius:6px;padding:10px 12px;margin-bottom:10px;"
+                                     :style="closeReconciliation.priorOverbillKm > 0
+                                             ? 'background:var(--bg-warning-subtle, #fff7e6);border:1px solid var(--color-warning, #d97706);color:var(--text-warning, #92400e);'
+                                             : 'background:var(--bg-info-subtle, #eff6ff);border:1px solid var(--color-info, #2563eb);color:var(--text-info, #1e40af);'">
+                                    <div style="font-size:0.8125rem;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px;">
+                                        <span x-show="closeReconciliation.priorOverbillKm > 0">⚠ Prior monthly excess exceeds lease overage</span>
+                                        <span x-show="closeReconciliation.priorOverbillKm === 0">Prior monthly excess already billed</span>
+                                    </div>
+                                    <div style="font-size:0.75rem;line-height:1.45;">
+                                        <span x-show="closeReconciliation.priorOverbillKm === 0">
+                                            <span x-text="Number(closeReconciliation.priorExcessKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></span>
+                                            of excess kilometres have already been billed on prior monthly invoices.
+                                            Close-time charge is computed on the remaining
+                                            <span x-text="Number(closeReconciliation.diffKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></span>
+                                            so the customer is not charged twice for the same kilometres.
+                                        </span>
+                                        <span x-show="closeReconciliation.priorOverbillKm > 0">
+                                            Prior monthly excess billed
+                                            <strong x-text="Number(closeReconciliation.priorExcessKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></strong>
+                                            but the lease was only
+                                            <strong x-text="Number(closeReconciliation.rawOverageKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></strong>
+                                            over allowance. Customer was over-billed by
+                                            <strong x-text="Number(closeReconciliation.priorOverbillKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></strong>
+                                            (≈ $<span x-text="(closeReconciliation.priorOverbillKm * closeReconciliation.rate).toFixed(2)"></span>).
+                                            Close-time charge has been auto-clamped to $0 to prevent further over-billing;
+                                            consider issuing a manual credit_note before closing if business policy requires correction.
+                                        </span>
+                                    </div>
+                                </div>
+                            </template>
+
                             <dl style="display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:0.8125rem;margin:0 0 8px 0;">
                                 <dt class="text-secondary">Total driven</dt>
                                 <dd class="font-mono"
@@ -1096,12 +1140,25 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 <dt class="text-secondary">Allowance</dt>
                                 <dd class="font-mono"
                                     x-text="Number(closeReconciliation.allowance).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'"></dd>
+                                <template x-if="closeReconciliation.priorExcessKm > 0">
+                                    <template x-if="true">
+                                        <div style="display:contents;">
+                                            <dt class="text-secondary">Prior monthly excess</dt>
+                                            <dd class="font-mono"
+                                                x-text="Number(closeReconciliation.priorExcessKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></dd>
+                                        </div>
+                                    </template>
+                                </template>
                                 <dt class="text-secondary"
-                                    x-text="closeReconciliation.kind === 'excess' ? 'Excess' : 'Underage'"></dt>
+                                    x-text="closeReconciliation.kind === 'excess' ? 'Excess'
+                                            : closeReconciliation.kind === 'underage' ? 'Underage'
+                                            : 'Net adjustment'"></dt>
                                 <dd class="font-mono" style="font-weight:600;"
                                     x-text="Number(closeReconciliation.diffKm).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' km @ $' + Number(closeReconciliation.rate).toFixed(4) + '/km'"></dd>
                                 <dt class="text-secondary"
-                                    x-text="closeReconciliation.kind === 'excess' ? 'Charge' : 'Credit value'"></dt>
+                                    x-text="closeReconciliation.kind === 'excess' ? 'Charge'
+                                            : closeReconciliation.kind === 'underage' ? 'Credit value'
+                                            : 'Charge'"></dt>
                                 <dd class="font-mono" style="font-weight:700;"
                                     x-text="'$' + Number(closeReconciliation.amount).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2})"></dd>
                             </dl>
@@ -2054,6 +2111,15 @@ function FF_LeaseDetail() {
         // ── S-LEASE-MILEAGE: live mileage reconciliation getters ─
         // Drive the close-modal review section. Returns null when we can't
         // compute reconciliation (e.g. start odometer not captured yet).
+        //
+        // S-MILEAGE-FIX-0 (Q9 D-B): also returns prior_excess_km (sum of
+        // per-period excess on prior monthly invoices, supplied by the
+        // lease show API) and prior_overbill_km (positive when prior
+        // monthly excess billed MORE kilometres than the lease was over
+        // allowance — the inverse case). Excess kind is computed against
+        // the adjusted overage (raw - prior) so the manager sees the
+        // delta that should still be charged at close, not the full raw
+        // overage that would double-bill.
         get closeReconciliation() {
             if (!this.lease) return null;
             const closeKm = parseFloat(this.closeForm.odometer_at_close_km);
@@ -2065,29 +2131,73 @@ function FF_LeaseDetail() {
                                          || this.lease.estimated_mileage || 0);
             const rate      = parseFloat(this.lease.mileage_rate_km
                                          || this.lease.mileage_rate || 0);
-            if (allowance <= 0 || rate <= 0) {
-                return { total, allowance, rate, kind: 'no_billing', amount: 0, diffKm: 0 };
-            }
+            const priorExcessKm = parseFloat(this.lease.prior_excess_km || 0) || 0;
 
-            if (total > allowance) {
-                const excess = total - allowance;
+            if (allowance <= 0 || rate <= 0) {
                 return {
                     total, allowance, rate,
-                    kind: 'excess',
-                    diffKm: excess,
-                    amount: Math.round(excess * rate * 100) / 100,
+                    kind: 'no_billing', amount: 0, diffKm: 0,
+                    priorExcessKm: priorExcessKm,
+                    rawOverageKm: 0,
+                    priorOverbillKm: 0,
                 };
             }
-            if (total < allowance) {
-                const under = allowance - total;
+
+            const rawOverageKm = total - allowance;
+            // priorOverbillKm > 0 means monthly excess already billed
+            // MORE kilometres than the lease was actually over allowance.
+            // The customer was over-billed; close-time adjusted excess
+            // is clamped to 0 and the manager sees a warning banner.
+            const priorOverbillKm = (rawOverageKm > 0 && priorExcessKm > rawOverageKm)
+                ? (priorExcessKm - rawOverageKm)
+                : 0;
+
+            if (rawOverageKm > 0) {
+                const adjustedExcess = Math.max(0, rawOverageKm - priorExcessKm);
+                if (adjustedExcess > 0) {
+                    return {
+                        total, allowance, rate,
+                        kind: 'excess',
+                        diffKm: adjustedExcess,
+                        amount: Math.round(adjustedExcess * rate * 100) / 100,
+                        priorExcessKm,
+                        rawOverageKm,
+                        priorOverbillKm,
+                    };
+                }
+                // Adjusted excess = 0 (and rawOverageKm > 0): prior monthly
+                // excess fully covered the lease overage. No close-time
+                // charge; surface as 'exact' but with priorOverbill flag
+                // when over-billed.
+                return {
+                    total, allowance, rate,
+                    kind: 'exact',
+                    diffKm: 0,
+                    amount: 0,
+                    priorExcessKm,
+                    rawOverageKm,
+                    priorOverbillKm,
+                };
+            }
+            if (rawOverageKm < 0) {
+                const under = -rawOverageKm;
                 return {
                     total, allowance, rate,
                     kind: 'underage',
                     diffKm: under,
                     amount: Math.round(under * rate * 100) / 100,
+                    priorExcessKm,
+                    rawOverageKm,
+                    priorOverbillKm,
                 };
             }
-            return { total, allowance, rate, kind: 'exact', diffKm: 0, amount: 0 };
+            return {
+                total, allowance, rate,
+                kind: 'exact', diffKm: 0, amount: 0,
+                priorExcessKm,
+                rawOverageKm,
+                priorOverbillKm,
+            };
         },
 
         // ── SAMSARA-1: Live GPS card helpers ─────────────────────
