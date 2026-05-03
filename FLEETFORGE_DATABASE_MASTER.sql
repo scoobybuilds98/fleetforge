@@ -517,6 +517,11 @@ CREATE TABLE leases (
     mileage_at_end              INT UNSIGNED NULL,
     gps_mileage_at_start        INT UNSIGNED NULL,
     gps_mileage_at_end          INT UNSIGNED NULL,
+    -- [S-LEASE-MILEAGE] closing odometer + total distance (km canonical, D-A: align (10,2))
+    odometer_end_km             DECIMAL(10,2) NULL,                    -- final odometer at lease close
+    odometer_end_source         ENUM('gps','manual') NULL,             -- how the closing reading was captured
+    odometer_end_fetched_at     DATETIME NULL,                         -- when the closing reading was captured / Samsara timestamp
+    total_distance_km           DECIMAL(10,2) NULL,                    -- end - start, computed at close
     mileage_precharge_amount    DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     mileage_precharge_invoiced  TINYINT(1) NOT NULL DEFAULT 0,
     tax_exempt                  TINYINT(1) NOT NULL DEFAULT 0,
@@ -585,6 +590,35 @@ CREATE TABLE lease_status_log (
     FOREIGN KEY (lease_id) REFERENCES leases(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- [S-LEASE-MILEAGE] lease_close_adjustments — per-lease-close manager review
+-- of excess/underage mileage. Written by api/v1/leases/close.php when the
+-- close request includes a close_adjustment block. Decision values:
+--   credit_note              → default for underage, creates a credit_notes row
+--                              (source='mileage_overpayment')
+--   final_invoice_adjustment → adds line item to close invoice
+--   waived / no_adjustment   → decision recorded with no monetary effect
+-- Definition copied verbatim from db_migrations/S-LEASE-MILEAGE_schema.sql —
+-- intentionally no FK constraints (matches what's actually in production DB).
+CREATE TABLE lease_close_adjustments (
+    id                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    lease_id                 INT UNSIGNED NOT NULL,
+    adjustment_type          ENUM('excess_charge','underage_credit','no_adjustment') NOT NULL,        -- direction relative to allowance
+    calculated_distance_km   DECIMAL(10,2) NOT NULL,                                                  -- absolute km over/under allowance at close (always positive)
+    calculated_amount        DECIMAL(12,2) NOT NULL,                                                  -- system-calculated charge or credit before override
+    final_amount             DECIMAL(12,2) NOT NULL,                                                  -- amount actually applied after any manager override
+    decision                 ENUM('credit_note','final_invoice_adjustment','waived','no_adjustment') NOT NULL,
+    related_invoice_id       INT UNSIGNED NULL,                                                       -- invoice that received the adjustment (final_invoice_adjustment)
+    related_credit_note_id   INT UNSIGNED NULL,                                                       -- credit note created (credit_note decision)
+    approved_by_user_id      INT UNSIGNED NOT NULL,                                                   -- user who approved this close adjustment
+    approved_at              DATETIME NOT NULL,
+    notes                    TEXT NULL,
+    created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_lease (lease_id),
+    KEY idx_invoice (related_invoice_id),
+    KEY idx_credit_note (related_credit_note_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT 'S-LEASE-MILEAGE: per-lease-close manager review of excess/underage';
 
 CREATE TABLE lease_amendments (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -965,6 +999,14 @@ CREATE TABLE invoices (
     auto_generated              TINYINT(1) NOT NULL DEFAULT 0,
     auto_generated_at           DATETIME NULL,
     generation_source           ENUM('cron','manual','lease_close','late_fee_cron','advance') NULL,  -- ADV-BILL-1: 'advance' = pre-paid future-period invoice from lease activation batch
+    -- [S-LEASE-MILEAGE] excess mileage + manager review gate (HARD send guard via mileage_review_status)
+    excess_distance_km          DECIMAL(10,2) NULL DEFAULT 0,                                                            -- distance over monthly allowance for this period (km)
+    excess_charge_amount        DECIMAL(12,2) NULL DEFAULT 0,                                                            -- calculated excess charge before manager override
+    mileage_review_status       ENUM('not_required','pending','approved','overridden') NOT NULL DEFAULT 'not_required',  -- HARD send gate: 'pending' blocks api/v1/invoices/send.php with 422 MILEAGE_REVIEW_REQUIRED, no role exempt
+    mileage_reviewed_by_user_id INT UNSIGNED NULL,                                                                       -- user who approved/overrode
+    mileage_reviewed_at         DATETIME NULL,
+    mileage_review_notes        TEXT NULL,                                                                               -- required for override or reject actions
+    mileage_override_amount     DECIMAL(12,2) NULL,                                                                      -- if manager overrode the calculated excess, the actual amount applied
     created_by                  INT UNSIGNED NULL,
     updated_by                  INT UNSIGNED NULL,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -979,6 +1021,7 @@ CREATE TABLE invoices (
     INDEX idx_customer_status_deleted (customer_id, status, deleted_at), -- [PASS-10:D4] customer balance recalc
     INDEX idx_deleted (deleted_at),
     INDEX idx_status_due_deleted (status, due_date, deleted_at), -- [PASS-10:D1] overdue cron + AR aging
+    INDEX idx_mileage_review (mileage_review_status, lease_id), -- [S-LEASE-MILEAGE] manager review queue + per-lease scoping
     FULLTEXT idx_ft_invoices (invoice_number, company_name_snapshot),
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
     FOREIGN KEY (lease_id) REFERENCES leases(id) ON DELETE SET NULL,
@@ -1131,7 +1174,7 @@ CREATE TABLE credit_notes (
     credit_note_number  VARCHAR(100) NOT NULL UNIQUE,
     customer_id         INT UNSIGNED NOT NULL,
     lease_id            INT UNSIGNED NULL,
-    source              ENUM('mileage_overpayment','invoice_adjustment',
+    source              ENUM('mileage_overpayment','invoice_adjustment',         -- 'mileage_overpayment' is also raised by S-LEASE-MILEAGE: lease_close_adjustments.decision='credit_note' for underage closes
                              'damage_resolution','goodwill','payment_returned',
                              'overpayment','other') NOT NULL,
     source_invoice_id   INT UNSIGNED NULL,
