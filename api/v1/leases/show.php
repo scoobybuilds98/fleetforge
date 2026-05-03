@@ -161,7 +161,7 @@ $lease['latest_invoice_odometer_km']     = $latestOdoInv && $latestOdoInv['odome
 $lease['latest_invoice_cumulative_km']   = $latestOdoInv && $latestOdoInv['cumulative_distance_km'] !== null
     ? (float) $latestOdoInv['cumulative_distance_km'] : null;
 $lease['latest_invoice_number_for_odo']  = $latestOdoInv['invoice_number'] ?? null;
-$lease['latest_invoice_id_for_odo']      = $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
+$lease['latest_invoice_id_for_odo']      = $latestOdoInv && $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
 $lease['samsara_odometer_km']         = $lease['samsara_odometer_km']         !== null ? (float) $lease['samsara_odometer_km']         : null;
 
 // Fetch status log for this lease
