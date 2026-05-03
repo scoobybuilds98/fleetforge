@@ -18,6 +18,33 @@ declare(strict_types=1);
 require_once realpath(dirname(__DIR__, 2) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
 
+\FleetForge\Observability\Sentry::init();
+
+// Top-level exception handler — login.php is a standalone page that
+// does NOT include header.php, so the global handler installed by
+// _ff_session_start() does not run on uncaught throws. Without this,
+// a MySQL outage during ANY db call in this file (RateLimiter,
+// audit_log inserts, lockout updates, the user lookup) would render
+// a blank page (APP_DEBUG=false) or a full stack trace (APP_DEBUG=true).
+// Capture to Sentry and serve a plain 503 page instead. (Resolves #82.)
+set_exception_handler(static function (\Throwable $e): void {
+    \FleetForge\Observability\Sentry::captureException($e);
+    if (!headers_sent()) {
+        http_response_code(503);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+    }
+    echo '<!doctype html><html lang="en"><head>'
+       . '<meta charset="utf-8">'
+       . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+       . '<title>Sign-in unavailable — FleetForge</title>'
+       . '<style>body{font-family:system-ui,-apple-system,sans-serif;background:#262624;color:#fff;margin:0;padding:24px;display:flex;min-height:100vh;align-items:center;justify-content:center}main{max-width:420px;text-align:center}h1{font-size:1.25rem;margin:0 0 8px;font-weight:600}p{color:rgba(235,230,220,.7);font-size:.9375rem;line-height:1.5;margin:0}</style>'
+       . '</head><body><main>'
+       . '<h1>Sign-in is temporarily unavailable</h1>'
+       . '<p>Please try again in a moment. If the problem persists, contact your administrator.</p>'
+       . '</main></body></html>';
+});
+
 use FleetForge\Security\RateLimiter;
 
 _ff_session_start();
@@ -82,18 +109,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($password === '') {
             $error = 'Password is required.';
         } else {
-            $user = db_row(
-                "SELECT u.id, u.name, u.email, u.password_hash,
-                        u.role_id, r.slug AS role_slug,
-                        u.theme_preference, u.status,
-                        u.login_attempts, u.locked_until,
-                        u.display_font_size, u.display_density,
-                        u.mfa_enabled, u.mfa_required
-                 FROM users u
-                 JOIN user_roles r ON r.id = u.role_id
-                 WHERE u.email = ? AND u.deleted_at IS NULL",
-                [$email]
-            );
+            // Wrap user lookup in try/catch — login.php is standalone (no
+            // bootstrap.php / header.php), so a MySQL outage here would
+            // otherwise produce a blank page (APP_DEBUG=false) or a stack
+            // trace (APP_DEBUG=true) without any audit trail. The catch
+            // path forwards the real exception to Sentry, records the
+            // event in audit_log, and surfaces a generic message that
+            // does NOT reveal whether the email exists or leak any SQL
+            // state. $dbLookupOk gates the password-verify block below
+            // so the 503 message isn't overwritten by the credential
+            // message. (Resolves issue #82.)
+            $user        = null;
+            $dbLookupOk  = false;
+            try {
+                $user = db_row(
+                    "SELECT u.id, u.name, u.email, u.password_hash,
+                            u.role_id, r.slug AS role_slug,
+                            u.theme_preference, u.status,
+                            u.login_attempts, u.locked_until,
+                            u.display_font_size, u.display_density,
+                            u.mfa_enabled, u.mfa_required
+                     FROM users u
+                     JOIN user_roles r ON r.id = u.role_id
+                     WHERE u.email = ? AND u.deleted_at IS NULL",
+                    [$email]
+                );
+                $dbLookupOk = true;
+            } catch (\Throwable $dbErr) {
+                \FleetForge\Observability\Sentry::captureException($dbErr);
+                try {
+                    db_insert('audit_log', [
+                        'user_id'      => null,
+                        'user_name'    => 'unknown',
+                        'action'       => 'login',
+                        'module'       => 'auth',
+                        'entity_type'  => 'user',
+                        'entity_id'    => null,
+                        'notes'        => 'DB exception during login lookup: '
+                                        . substr($dbErr->getMessage(), 0, 480),
+                        'ip_address'   => RateLimiter::getClientIp(),
+                        'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                    ]);
+                } catch (\Throwable $logErr) {
+                    // If audit_log itself is unreachable (same outage),
+                    // the Sentry capture above is the only signal — that
+                    // is intentional, do not let logging failures mask
+                    // the original exception by re-throwing.
+                    error_log('[login] audit_log insert failed in DB-error path: ' . $logErr->getMessage());
+                }
+                http_response_code(503);
+                $error = 'Authentication is temporarily unavailable. Please try again in a moment.';
+            }
 
             // Determine lockout state before checking password
             $isLocked = false;
@@ -110,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            if (!$isLocked) {
+            if (!$isLocked && $dbLookupOk) {
                 // Use constant-time comparison regardless of user existence
                 $passwordHash = $user['password_hash'] ?? '$2y$12$invalid.hash.placeholder.00000000000000000000000000000000';
                 $passwordOk   = password_verify($password, $passwordHash);
