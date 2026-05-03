@@ -15,12 +15,20 @@ declare(strict_types=1);
  *              Partial-update pattern: only fields present in the request body are
  *              updated. Fields not sent retain their current DB values.
  *
+ *              Dual-unit mileage (S-LEASE-UNITS): new editable fields
+ *              estimated_mileage_km, estimated_mileage_miles, km_to_miles_conversion,
+ *              miles_to_km_conversion. When updated, legacy estimated_mileage is
+ *              re-synced to primary-unit value for backward compat. Rate fields
+ *              (mileage_rate_km/miles) are not editable here — they require amendment.
+ *
  * @method      POST
  * @body        JSON — id, updated_at (required for optimistic lock)
  *              Optional metadata: end_date, minimum_end_date, rate_notes, po_number,
  *              notes, internal_notes, mileage_at_start, mileage_at_end,
- *              estimated_mileage, insurance_opt_in, insurance_cost,
- *              warranty_opt_in, warranty_cost, gst_exempt, pst_exempt
+ *              estimated_mileage, estimated_mileage_km, estimated_mileage_miles,
+ *              km_to_miles_conversion, miles_to_km_conversion,
+ *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
+ *              gst_exempt, pst_exempt
  *              NOTE: status, daily_rate, weekly_rate, monthly_rate are immutable
  *              after creation (require amendment record — not implemented here)
  * @auth        Session required; require_permission('leases','edit')
@@ -29,7 +37,7 @@ declare(strict_types=1);
  * @depends     api/bootstrap.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases
  * @decisions   D19 (optimistic lock)
- * @session     S007
+ * @session     S007, S-LEASE-UNITS
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -159,6 +167,55 @@ if (array_key_exists('pst_exempt', $body)) {
     $data['pst_exempt'] = (bool) $body['pst_exempt'] ? 1 : 0;
 }
 
+// ── S-LEASE-UNITS: dual-unit allowance + conversion fields ─────
+// Rate fields (mileage_rate_km/miles) are not editable here (require amendment).
+// Allowance and conversion factor are updatable.
+
+if (array_key_exists('estimated_mileage_km', $body)) {
+    $d = clean_decimal($body['estimated_mileage_km']);
+    if ($d !== null && bccomp($d, '0', 3) < 0) {
+        $fields['estimated_mileage_km'] = 'KM allowance cannot be negative.';
+    }
+    $data['estimated_mileage_km'] = ($d !== null && bccomp($d, '0', 3) >= 0) ? bcround($d, 3) : '0.000';
+}
+
+if (array_key_exists('estimated_mileage_miles', $body)) {
+    $d = clean_decimal($body['estimated_mileage_miles']);
+    if ($d !== null && bccomp($d, '0', 3) < 0) {
+        $fields['estimated_mileage_miles'] = 'Mile allowance cannot be negative.';
+    }
+    $data['estimated_mileage_miles'] = ($d !== null && bccomp($d, '0', 3) >= 0) ? bcround($d, 3) : '0.000';
+}
+
+if (array_key_exists('km_to_miles_conversion', $body)) {
+    $d = clean_decimal($body['km_to_miles_conversion']);
+    if ($d === null || bccomp($d, '0', 6) <= 0) {
+        $fields['km_to_miles_conversion'] = 'KM to miles conversion factor must be greater than zero.';
+    } else {
+        $data['km_to_miles_conversion'] = bcround($d, 6);
+    }
+}
+
+if (array_key_exists('miles_to_km_conversion', $body)) {
+    $d = clean_decimal($body['miles_to_km_conversion']);
+    if ($d === null || bccomp($d, '0', 6) <= 0) {
+        $fields['miles_to_km_conversion'] = 'Miles to KM conversion factor must be greater than zero.';
+    } else {
+        $data['miles_to_km_conversion'] = bcround($d, 6);
+    }
+}
+
+// Non-standard conversion warning — audit only, no rejection
+$nonStdConv = false;
+if (isset($data['km_to_miles_conversion'])) {
+    $v = $data['km_to_miles_conversion'];
+    if (bccomp($v, '0.5', 6) < 0 || bccomp($v, '0.7', 6) > 0) $nonStdConv = true;
+}
+if (isset($data['miles_to_km_conversion'])) {
+    $v = $data['miles_to_km_conversion'];
+    if (bccomp($v, '1.5', 6) < 0 || bccomp($v, '1.7', 6) > 0) $nonStdConv = true;
+}
+
 // ADV-BILL-1: advance_billing_periods is editable ONLY while the lease is pending.
 // Once activated, the prepaid invoice batch is locked in and changing the count
 // would break invoice numbering / next_billing_date / customer notifications.
@@ -221,10 +278,21 @@ if (empty($data)) {
 
 $data['updated_by'] = current_user_id();
 
+// ── S-LEASE-UNITS: re-sync legacy estimated_mileage to primary unit value ──
+// If any dual-unit allowance field was updated, keep legacy field in sync
+// so close.php billing math (which reads estimated_mileage) stays correct.
+if (isset($data['estimated_mileage_km']) || isset($data['estimated_mileage_miles'])) {
+    $leaseRow = db_row("SELECT mileage_unit, estimated_mileage_km, estimated_mileage_miles FROM leases WHERE id = ?", [$id]);
+    $primaryUnit = $leaseRow['mileage_unit'] ?? 'km';
+    $resolvedKm    = $data['estimated_mileage_km']    ?? $leaseRow['estimated_mileage_km']    ?? '0.000';
+    $resolvedMiles = $data['estimated_mileage_miles'] ?? $leaseRow['estimated_mileage_miles'] ?? '0.000';
+    $data['estimated_mileage'] = ($primaryUnit === 'miles') ? $resolvedMiles : $resolvedKm;
+}
+
 // FIX #20: wrap db_update + audit_log in transaction so both commit or rollback together
 $newUpdatedAt = null;
 
-db_transaction(function () use ($id, $data, $existing, &$newUpdatedAt) {
+db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdatedAt) {
     db_update('leases', $data, 'id = ?', [$id]);
 
     $newRow = db_row("SELECT updated_at FROM leases WHERE id = ?", [$id]);
@@ -243,6 +311,20 @@ db_transaction(function () use ($id, $data, $existing, &$newUpdatedAt) {
         'new_values'   => json_encode($data),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    if ($nonStdConv) {
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => current_user()['name'] ?? 'system',
+            'action'       => 'update',
+            'module'       => 'leases',
+            'entity_type'  => 'lease',
+            'entity_id'    => $id,
+            'entity_label' => $existing['contract_number'],
+            'notes'        => "Non-standard conversion factors updated on {$existing['contract_number']} (S-LEASE-UNITS warning)",
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+    }
 });
 
 json_success(['updated_at' => $newUpdatedAt]);

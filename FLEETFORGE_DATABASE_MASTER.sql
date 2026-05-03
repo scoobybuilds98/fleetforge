@@ -504,8 +504,14 @@ CREATE TABLE leases (
     currency                    ENUM('CAD','USD') NOT NULL DEFAULT 'CAD',
     exchange_rate_to_cad        DECIMAL(10,6) NULL,
     mileage_unit                ENUM('km','miles') NOT NULL DEFAULT 'km',
-    mileage_rate                DECIMAL(8,4) NOT NULL DEFAULT 0.0000,
-    estimated_mileage           DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    mileage_rate                DECIMAL(8,4) NOT NULL DEFAULT 0.0000,  -- legacy: kept = primary-unit value for backward compat (close.php, billing)
+    mileage_rate_km             DECIMAL(10,4) NULL,                    -- [S-LEASE-UNITS] rate per km
+    mileage_rate_miles          DECIMAL(10,4) NULL,                    -- [S-LEASE-UNITS] rate per mile
+    estimated_mileage           DECIMAL(10,2) NOT NULL DEFAULT 0.00,   -- legacy: kept = primary-unit value for backward compat
+    estimated_mileage_km        DECIMAL(12,3) NULL,                    -- [S-LEASE-UNITS] allowance in km
+    estimated_mileage_miles     DECIMAL(12,3) NULL,                    -- [S-LEASE-UNITS] allowance in miles
+    km_to_miles_conversion      DECIMAL(8,6)  NOT NULL DEFAULT 0.621371, -- [S-LEASE-UNITS] per-lease conversion factor (manager-editable)
+    miles_to_km_conversion      DECIMAL(8,6)  NOT NULL DEFAULT 1.609344, -- [S-LEASE-UNITS] auto-reciprocated inverse
     actual_mileage              DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     mileage_at_start            INT UNSIGNED NULL,
     mileage_at_end              INT UNSIGNED NULL,
@@ -2423,6 +2429,8 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- [ADV-BILL-1] leases: added advance_billing_periods TINYINT UNSIGNED DEFAULT 0 AFTER billing_cycle
 -- [ADV-BILL-1] invoices: extended generation_source ENUM with 'advance' value (lease activation prepayment batch)
 -- [ADV-BILL-1] settings: added billing.max_advance_periods seed row (default 24, group=invoices)
+-- [S-LEASE-UNITS] leases: added mileage_rate_km, mileage_rate_miles DECIMAL(10,4), estimated_mileage_km, estimated_mileage_miles DECIMAL(12,3), km_to_miles_conversion DECIMAL(8,6) DEFAULT 0.621371, miles_to_km_conversion DECIMAL(8,6) DEFAULT 1.609344
+-- [S-LEASE-UNITS] settings: added lease.km_to_miles_default and lease.miles_to_km_default seed rows (group=leases)
 -- [S-PROD-1A] users: added mfa_enabled, mfa_secret, mfa_enabled_at, mfa_required columns (D62–D64)
 -- [S-PROD-1A] NEW TABLE user_mfa_backup_codes: bcrypt-hashed one-time TOTP backup codes
 -- [S-PROD-1A] NEW TABLE rate_limit_attempts: fixed-window rate limiting buckets (D65–D67)
