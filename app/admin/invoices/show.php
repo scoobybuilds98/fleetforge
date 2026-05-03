@@ -242,11 +242,17 @@ $canEdit   = ($isDraft || $isSuperAdmin) && can('invoices', 'edit');
 $canDelete = ($isDraft || $isSuperAdmin) && can('invoices', 'delete');
 
 // WHY: Count line items by category for summary badges
+// S-MILEAGE-FIX-0 (D-G): use the actual schema enum values for mileage
+// line items. Pre-fix referenced 'mileage_charge' / 'mileage_overage'
+// which are NOT in invoice_line_items.item_type — the count silently
+// returned 0 even when real mileage_adjustment / mileage_credit /
+// mileage_precharge lines existed.
 $creditLineCount = 0;
 $mileageLineCount = 0;
+$mileageItemTypes = ['mileage_precharge', 'mileage_adjustment', 'mileage_credit'];
 foreach ($lineItems as $li) {
     if ($li['is_credit']) $creditLineCount++;
-    if ($li['item_type'] === 'mileage_charge' || $li['item_type'] === 'mileage_overage') $mileageLineCount++;
+    if (in_array($li['item_type'], $mileageItemTypes, true)) $mileageLineCount++;
 }
 
 /* ─── Company settings for the print letterhead ─────────────────
@@ -1664,7 +1670,11 @@ if ($rateExplanation) {
                         $isCreditLine = (bool)$item['is_credit'];
                         $rowStyle = $isCreditLine ? 'color:var(--color-success);' : '';
                         $hasDetail = !empty($item['_detail']);
-                        $isMileage = in_array($item['item_type'], ['mileage_charge', 'mileage_overage']);
+                        // S-MILEAGE-FIX-0 (D-G): match the schema enum values
+                        // (mileage_precharge / mileage_adjustment / mileage_credit)
+                        // rather than the stale mileage_charge / mileage_overage
+                        // which are not in invoice_line_items.item_type.
+                        $isMileage = in_array($item['item_type'], ['mileage_precharge', 'mileage_adjustment', 'mileage_credit'], true);
 
                         // WHY: Calculate per-line tax total for display
                         $lineTaxTotal = bcadd(
@@ -1674,20 +1684,23 @@ if ($rateExplanation) {
                         );
 
                         // WHY: Item type badge color mapping
+                        // S-MILEAGE-FIX-0 (D-G): replaced stale mileage_charge /
+                        // mileage_overage badges with the actual enum values.
                         $itemTypeBadge = match($item['item_type']) {
-                            'base_rental'       => 'badge-info',
-                            'mileage_charge'    => 'badge-neutral',
-                            'mileage_overage'   => 'badge-warning',
-                            'late_fee'          => 'badge-danger',
-                            'damage_charge'     => 'badge-danger',
-                            'credit'            => 'badge-success',
-                            'adjustment'        => 'badge-warning',
-                            'discount'          => 'badge-success',
-                            'tax_adjustment'    => 'badge-neutral',
-                            'fuel_surcharge'    => 'badge-neutral',
-                            'insurance'         => 'badge-neutral',
-                            'admin_fee'         => 'badge-neutral',
-                            default             => 'badge-neutral',
+                            'base_rental'        => 'badge-info',
+                            'mileage_precharge'  => 'badge-info',
+                            'mileage_adjustment' => 'badge-warning',
+                            'mileage_credit'     => 'badge-success',
+                            'late_fee'           => 'badge-danger',
+                            'damage_charge'      => 'badge-danger',
+                            'credit'             => 'badge-success',
+                            'adjustment'         => 'badge-warning',
+                            'discount'           => 'badge-success',
+                            'tax_adjustment'     => 'badge-neutral',
+                            'fuel_surcharge'     => 'badge-neutral',
+                            'insurance'          => 'badge-neutral',
+                            'admin_fee'          => 'badge-neutral',
+                            default              => 'badge-neutral',
                         };
                     ?>
                     <tr style="<?= $rowStyle ?>">
