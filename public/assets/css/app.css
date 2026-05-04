@@ -2099,9 +2099,19 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .btn-link.btn-sm { font-size: 0.8125rem; }
 .btn-link.btn-xs { font-size: 0.75rem; }
 
-/* Button with icon */
+/* Button with icon
+   WHY: previously used `:first-child:not(:only-child)` to skip icon-only
+   buttons. That selector incorrectly treated text-node-sibling SVGs as
+   :only-child (CSS :only-child ignores text nodes), so buttons emitted
+   as `<button> <svg> Label </button>` escaped the 16×16 sizing and
+   ballooned to full button width once RESPONSIVE-1 made `.btn { width:
+   100% }` on mobile. Switched to `.btn > svg` which sizes any direct
+   SVG child; icon-only buttons should use the dedicated `.btn-icon`
+   class which doesn't match `.btn > svg` here. The chat widget send
+   button has inline `style="width:14px;height:14px"` so its inline
+   styles still win. */
 .btn .btn-icon-left,
-.btn svg:first-child:not(:only-child) {
+.btn > svg {
     width: 16px;
     height: 16px;
 }

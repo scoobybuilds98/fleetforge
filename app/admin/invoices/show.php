@@ -880,6 +880,88 @@ require_once FF_ROOT . '/includes/header.php';
         padding: 20px;
         border-radius: 0 0 var(--radius) var(--radius);
     }
+
+    /* ───────────────────────────────────────────────────────────────
+       S-INVOICE-SHOW-RESPONSIVE — page-scoped responsive layer
+       Sits ON TOP of RESPONSIVE-1 (app.css). Targets only patterns
+       unique to this page: hardcoded inline grid widths in <dl>
+       blocks, the status timeline, the section grid wrapper, and
+       the FX breakdown table. RESPONSIVE-1 already handles
+       .invoice-addresses single-column collapse and
+       .page-header-actions wrap, so we don't repeat those.
+       ─────────────────────────────────────────────────────────────── */
+
+    /* Tablet (≤768px) — shrink dl label columns, collapse section grid */
+    @media (max-width: 768px) {
+        /* WHY: !important needed because the matching grid-template-columns
+           is on an inline style attribute (specificity 1,0,0,0). */
+        .invoice-meta-dl {
+            grid-template-columns: 110px 1fr !important;
+        }
+        .invoice-section-grid {
+            grid-template-columns: 1fr !important;
+        }
+    }
+
+    /* Mobile (≤540px) — stack dt above dd, vertical timeline, FX tighten */
+    @media (max-width: 540px) {
+        /* dt/dd stack: full-width rows, dt becomes a small uppercase label */
+        .invoice-meta-dl {
+            grid-template-columns: 1fr !important;
+            gap: 2px 0 !important;
+        }
+        .invoice-meta-dl dt {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+        .invoice-meta-dl dt:first-child {
+            margin-top: 0;
+        }
+        .invoice-meta-dl dd {
+            margin: 0;
+            padding-bottom: 4px;
+            border-bottom: 1px dashed var(--border-color);
+        }
+        .invoice-meta-dl dd:last-of-type {
+            border-bottom: none;
+        }
+
+        /* Status timeline: horizontal flex → vertical column.
+           Connectors become 2px×16px vertical lines between dots. */
+        .invoice-status-timeline {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+            padding: 14px 16px;
+        }
+        .invoice-status-timeline .timeline-step {
+            white-space: normal;
+            width: 100%;
+        }
+        .invoice-status-timeline .timeline-connector {
+            width: 2px;
+            height: 16px;
+            min-width: 0;
+            min-height: 16px;
+            margin: 0 0 0 4px;
+            flex: 0 0 auto;
+        }
+
+        /* FX breakdown table: tighten so it doesn't overflow the card */
+        .invoice-fx-block {
+            max-width: 100% !important;
+        }
+        .invoice-fx-block table {
+            font-size: 0.75rem !important;
+        }
+        .invoice-fx-block td {
+            padding: 2px 6px 2px 0 !important;
+            white-space: normal !important;
+        }
+    }
 </style>
 
 <!-- ================================================================
@@ -1310,7 +1392,7 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
     <!-- Right: Invoice Metadata -->
     <div class="card" style="padding:20px;">
         <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 12px 0;">Invoice Details</h3>
-        <dl style="display:grid; grid-template-columns:140px 1fr; gap:6px 16px; font-size:13px; margin:0;">
+        <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:140px 1fr; gap:6px 16px; font-size:13px; margin:0;">
             <dt class="text-secondary">Billing Period</dt>
             <dd class="font-mono"><?= format_date($invoice['billing_period_start']) ?> → <?= format_date($invoice['billing_period_end']) ?></dd>
 
@@ -1491,7 +1573,7 @@ if ($mrs !== 'not_required' && $mileageReviewLease):
         </p>
     <?php endif; ?>
 
-    <dl style="display:grid; grid-template-columns:200px 1fr; gap:6px 16px; font-size:13px; margin:0 0 12px 0;">
+    <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:200px 1fr; gap:6px 16px; font-size:13px; margin:0 0 12px 0;">
         <dt class="text-secondary">Period Distance</dt>
         <dd class="font-mono"><?= number_format($periodDist, 2) ?> km</dd>
 
@@ -1933,7 +2015,7 @@ if ($rateExplanation) {
             }
             $fxFmtRate = static fn(string $r): string => rtrim(rtrim(number_format((float)$r, 6), '0'), '.');
         ?>
-        <div style="text-align:right; margin-top:12px; max-width:480px; margin-left:auto;">
+        <div class="invoice-fx-block" style="text-align:right; margin-top:12px; max-width:480px; margin-left:auto;">
         <?php if ($fxHasMarkup): ?>
             <!-- Full breakdown: bank rate + markup + effective rate + CAD equivalent -->
             <table style="margin-left:auto; border-collapse:collapse; font-size:0.8125rem; width:100%;">
@@ -1999,7 +2081,7 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
 ?>
 <!-- WHY: Delivery/late/credit/void tracking is internal context; hidden in print.
      Customers get the essential info (status badge, notes) via the letterhead. -->
-<div class="ff-print-hide" style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+<div class="ff-print-hide invoice-section-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
 
     <!-- Delivery Tracking -->
     <?php if ($hasDeliveryInfo): ?>
@@ -2007,7 +2089,7 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
         <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 12px 0;">
             Delivery Tracking
         </h3>
-        <dl style="display:grid; grid-template-columns:120px 1fr; gap:6px 16px; font-size:13px; margin:0;">
+        <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:120px 1fr; gap:6px 16px; font-size:13px; margin:0;">
             <?php if ($invoice['sent_date']): ?>
             <dt class="text-secondary">Sent Date</dt>
             <dd class="font-mono"><?= format_date($invoice['sent_date']) ?></dd>
