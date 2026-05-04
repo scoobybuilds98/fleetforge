@@ -727,7 +727,9 @@ The cron-generated full_month draft for the closing month is in the sum automati
 
 ### What replaces this in S-MILEAGE-1+
 
-**Model B (drawdown balance):** Invoice 1 carries a `mileage_precharge` line for `estimated_mileage_km × rate`. `leases.mileage_precharge_amount` becomes a running balance, decremented per period. Once balance hits zero, monthly invoices bill mileage straight at per-km rate. At close, balance > 0 → refund residue.
+**Model B (drawdown balance):** Invoice 1 carries a `mileage_precharge` line for the **user-set** `leases.precharge_amount` (NOT derived from `estimated_mileage_km × rate` — Avi's intent is that the customer picks the upfront commitment, not the system). `leases.precharge_balance` is the running drawdown — initialized = `precharge_amount` at activation, decremented per invoice. Once balance hits zero, monthly invoices bill mileage straight at per-km rate. At close, balance > 0 → refund residue (cash or credit, manager's pick at close per `precharge_refund_method`).
+
+S-MILEAGE-1 (2026-05-04, this session) landed Phase 1 — the schema columns + lease-form precharge toggle/amount + show-page display. The dead Model A columns `mileage_precharge_amount` / `mileage_precharge_invoiced` were dropped (snapshotted in `leases_precharge_backup_S_MILEAGE_1`). See §13.4.1 below.
 
 When that lands, retire:
 - The `excess_distance_km` / `excess_charge_amount` / `mileage_review_status` columns on invoices
@@ -752,7 +754,118 @@ Anything else (`mileage_charge`, `mileage_overage`, etc.) is NOT in `invoice_lin
 - `/tmp/fleetforge_mileage_model_audit.md` — full audit (Q1–Q10 with file:line evidence)
 - D81–D86 (S-LEASE-MILEAGE Model C lock-in)
 - D98–D105 (S-MILEAGE-FIX-0 transitional safeguards)
+- D106–D115 (S-MILEAGE-1 Model B precharge schema lock-in — see §13.4.1)
 - KNOWN ISSUE #99 — Q9 fixed status
+- KNOWN ISSUE #100 — `lease_billing_periods` precharge column cleanup (deferred)
+
+---
+
+## 13.4.1 MODEL B PRECHARGE — Lease-Level Schema (S-MILEAGE-1)
+
+(Established **S-MILEAGE-1**, 2026-05-04. Phase 1 of three. Activation logic is **S-MILEAGE-2**, close/refund is **S-MILEAGE-3**.)
+
+This section documents the schema landed by S-MILEAGE-1 and the lifecycle ownership of each new column. **No invoice-generation, monthly-cron, or close logic touches these columns yet** — all writers/readers in this session are at lease create/edit/show only.
+
+### The 6 new columns on `leases` (D106 / D-A)
+
+| Column | Type | Lifecycle owner | Notes |
+|--------|------|-----------------|-------|
+| `precharge_enabled` | `TINYINT(1) NOT NULL DEFAULT 0` | User (lease create/edit) | Off by default. Existing leases stay opted out — no backfill. |
+| `precharge_amount` | `DECIMAL(12,2) NULL` | User (lease create/edit) | Required (>0) when enabled. NULL when disabled. **User-set, not derived.** |
+| `precharge_balance` | `DECIMAL(12,2) NULL` | S-MILEAGE-2 (activation) | Initialized = `precharge_amount` on lease activation. Decremented per invoice. NULL until activation. |
+| `precharge_invoiced_at` | `DATETIME NULL` | S-MILEAGE-2 (Invoice 1 send) | Stamps when the precharge line was billed on Invoice 1. **Lock signal:** non-NULL freezes `precharge_enabled` + `precharge_amount`. |
+| `precharge_refund_method` | `ENUM('cash','credit') NULL` | S-MILEAGE-3 (lease close) | Manager picks at close when `precharge_balance > 0`. |
+| `precharge_refund_settled_at` | `DATETIME NULL` | S-MILEAGE-3 (refund posted) | Audit trail — when the cash/credit refund actually moved. |
+
+### CHECK constraint (D109 / D-D)
+
+```sql
+CONSTRAINT chk_leases_precharge_amount CHECK (
+    (precharge_enabled = 0)
+    OR
+    (precharge_amount IS NOT NULL AND precharge_amount > 0)
+)
+```
+
+Enforced at the DB layer (MySQL 8.0). App-level validation in `api/v1/leases/create.php` + `update.php` mirrors the rule with the user-friendly message *"Precharge amount is required when precharge is enabled."* Belt-and-suspenders: CHECK protects against direct-SQL writes; app validation provides the form-error UX.
+
+### Immutability after billing (D113 / D-H)
+
+Once `precharge_invoiced_at IS NOT NULL`, neither `precharge_enabled` nor `precharge_amount` may change. `api/v1/leases/update.php` returns `409 PRECHARGE_LOCKED` with explicit guidance:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PRECHARGE_LOCKED",
+    "message": "Cannot change precharge settings after Invoice 1 has billed the precharge. Void/recreate the lease to restructure."
+  }
+}
+```
+
+The PRECHARGE_LOCKED 409 is a SEPARATE gate from the optimistic-lock STALE_DATA 409 (D19) — distinct error codes for client differentiation. STALE_DATA → "reload and re-edit"; PRECHARGE_LOCKED → "void/recreate to restructure". Both can fire on the same request.
+
+### API field whitelist
+
+`api/v1/leases/create.php` + `update.php` accept ONLY `precharge_enabled` (0/1) and `precharge_amount` (decimal > 0) from clients. The other 4 columns are lifecycle-managed server-side:
+
+- `precharge_balance` → set by S-MILEAGE-2 activation, mutated by S-MILEAGE-2 invoice generation
+- `precharge_invoiced_at` → set by S-MILEAGE-2 when Invoice 1 sends
+- `precharge_refund_method`, `precharge_refund_settled_at` → set by S-MILEAGE-3 close/refund
+
+A client that PATCHes one of the lifecycle columns gets a silent ignore (the field isn't in `$allowedFields`).
+
+### Backup of dropped Model A columns (D107 / D-B)
+
+Migration `db_migrations/202605040316_S-MILEAGE-1_precharge_schema.sql` dropped `leases.mileage_precharge_amount` + `leases.mileage_precharge_invoiced` after snapshotting all 34 rows into:
+
+```sql
+CREATE TABLE leases_precharge_backup_S_MILEAGE_1 (
+    id                          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    lease_id                    INT UNSIGNED NOT NULL,
+    mileage_precharge_amount    DECIMAL(12,2) NULL,
+    mileage_precharge_invoiced  TINYINT(1) NULL,
+    snapshot_taken_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_lease (lease_id)
+);
+```
+
+Forensic-only — only consulted if it turns out an unreviewed seed/fixture writer populated these rows in production. The audit said no such writer exists; backup is cheap insurance.
+
+### What S-MILEAGE-2 must do
+
+1. **Activation** (`api/v1/leases/activate.php`): when `precharge_enabled=1`, set `precharge_balance = precharge_amount` inside the activation transaction.
+2. **Invoice 1 generation** (`InvoiceGenerator::createFromLease`): when `precharge_enabled=1` AND this is the activation invoice (no prior invoices for the lease), add a `mileage_precharge` line item for the full `precharge_amount`. Reuse the dormant `'mileage_precharge'` value from `invoice_line_items.item_type` enum.
+3. **Invoice 1 send** (`api/v1/invoices/send.php`): stamp `precharge_invoiced_at = NOW()` on the lease when sending Invoice 1.
+4. **Subsequent invoice generation** (`InvoiceGenerator::createFromLease`): replace the S-LEASE-MILEAGE per-period excess block (lines 438-486) with a balance-drawdown block. Each invoice computes `period_charge = period_distance × mileage_rate`. If `precharge_balance > 0`: emit two visible lines (usage at per-km rate + precharge credit drawing it down); decrement `precharge_balance` by `min(period_charge, precharge_balance)`. If `precharge_balance == 0`: emit just the per-km usage line.
+5. **Retire Model C plumbing**: remove `excess_distance_km`/`excess_charge_amount`/`mileage_review_status` columns from invoices, retire `Mileage::monthlyAllowance` / `periodExcess`, retire the HARD send gate, retire the priorExcessKm transitional safeguard from S-MILEAGE-FIX-0.
+
+### What S-MILEAGE-3 must do
+
+1. **Close path** (`api/v1/leases/close.php`): when `precharge_enabled=1` AND `precharge_balance > 0`, surface a refund-method picker (cash | credit) in the close UI. Write `precharge_refund_method` based on the manager's choice.
+2. **Refund execution**: based on `precharge_refund_method`, either issue a `credit_notes` row (existing pattern, `source='precharge_refund'` — may need a new enum value) or trigger the cash-refund flow (new — Avi's first cash-refund feature; needs accounting-spec alignment).
+3. **Settle stamp**: write `precharge_refund_settled_at = NOW()` once the refund actually posts.
+4. **Retire `lease_close_adjustments`** table — Model B has no close-time excess concept.
+
+### Form UX (S-MILEAGE-1)
+
+Toggle widget: native `<input type="checkbox" role="switch">` (NOT `ff-segment-control` — that's the binary unit picker pattern; a feature flag is semantically a switch). Located inside the existing "Mileage & allowance" card on both `app/admin/leases/create.php` and `edit.php`, after the conversion-factor collapsible and before the closing card div (D111 / D-F).
+
+The conditional currency input is revealed via Alpine `x-show` (NOT `x-if`) so the bound value persists across toggle off→on within the same session. The amount field carries the `$` prefix using the existing `input-group-prefix` pattern.
+
+On the edit form, the Alpine state has a `prechargeFrozen` flag set from the server-rendered `precharge_invoiced_at IS NOT NULL` check — when true, the toggle becomes `:disabled`, the amount becomes `:readonly`, and a "Locked — Invoice 1 has already billed this precharge" hint appears. This UX-only freeze mirrors the server-side 409 PRECHARGE_LOCKED guard.
+
+### `estimated_mileage` in Model B
+
+Per D110 / D-E: `leases.estimated_mileage` is **informational-only** under Model B (forecasting, customer reference). It does NOT drive billing math. Helper text on both lease forms reads: *"Estimated total mileage for the lease (informational; billing is per-km on actual usage)."* The DB column stays (rename = downstream churn for no benefit).
+
+### See also
+
+- `/tmp/fleetforge_mileage_model_audit.md` — full audit (Q1–Q10) — Avi's Model B intent is documented in §3 invoice-by-invoice trace
+- §13.4 above — Model C transitional state (still load-bearing until S-MILEAGE-2/3 retire it)
+- D106–D115 — full lock-in for S-MILEAGE-1 decisions
+- KNOWN ISSUE #99 — Q9 priorExcessKm safeguard (delete when Model C retired)
+- KNOWN ISSUE #100 — `lease_billing_periods` precharge cleanup (deferred to S-MILEAGE-1B)
 
 ---
 
