@@ -364,6 +364,47 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                                 </div>
                                             </td>
                                         </tr>
+                                        <!-- S-MILEAGE-1 Model B: precharge row.
+                                             Hidden unless precharge_enabled = 1.
+                                             Shows: original amount, current balance,
+                                             billed status, and refund settlement
+                                             (after lease close in S-MILEAGE-3). -->
+                                        <tr x-show="Number(lease.precharge_enabled) === 1">
+                                            <td class="text-secondary" style="vertical-align:top;padding-top:9px;">Mileage precharge</td>
+                                            <td>
+                                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                                                    <div>
+                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Amount</div>
+                                                        <div class="ff-show-primary"
+                                                             x-text="'$' + parseFloat(lease.precharge_amount || 0).toFixed(2)"></div>
+                                                    </div>
+                                                    <div>
+                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Balance</div>
+                                                        <template x-if="lease.precharge_balance !== null && lease.precharge_balance !== undefined">
+                                                            <div class="ff-show-primary"
+                                                                 x-text="'$' + parseFloat(lease.precharge_balance).toFixed(2)"></div>
+                                                        </template>
+                                                        <template x-if="lease.precharge_balance === null || lease.precharge_balance === undefined">
+                                                            <div class="ff-show-secondary">Not yet activated</div>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                                <div class="ff-show-caption">
+                                                    <template x-if="lease.precharge_invoiced_at">
+                                                        <span x-text="'Billed on ' + new Date(lease.precharge_invoiced_at).toLocaleDateString('en-CA')"></span>
+                                                    </template>
+                                                    <template x-if="!lease.precharge_invoiced_at">
+                                                        <span>Not yet billed</span>
+                                                    </template>
+                                                    <template x-if="lease.precharge_refund_method">
+                                                        <span x-text="' · Refund method: ' + lease.precharge_refund_method"></span>
+                                                    </template>
+                                                    <template x-if="lease.precharge_refund_settled_at">
+                                                        <span x-text="' · Settled ' + new Date(lease.precharge_refund_settled_at).toLocaleDateString('en-CA')"></span>
+                                                    </template>
+                                                </div>
+                                            </td>
+                                        </tr>
                                         <tr x-show="lease.discount_type !== 'none'">
                                             <td class="text-secondary">Discount</td>
                                             <td x-text="lease.discount_type === 'percentage'

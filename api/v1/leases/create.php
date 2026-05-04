@@ -308,6 +308,43 @@ if ($odoStartRaw !== null && $odoStartRaw !== '') {
     }
 }
 
+// ── S-MILEAGE-1 Model B: precharge fields ──────────────────────
+// precharge_enabled: 0/1 toggle, defaults off when not supplied.
+// precharge_amount: required (>0) when enabled, NULL when disabled.
+// CHECK constraint enforces this at the DB layer; here we provide
+// the user-facing error message and reject early.
+$prechargeEnabled = 0;
+if (array_key_exists('precharge_enabled', $body)) {
+    $rawEnabled = $body['precharge_enabled'];
+    if ($rawEnabled === 0 || $rawEnabled === '0' || $rawEnabled === false) {
+        $prechargeEnabled = 0;
+    } elseif ($rawEnabled === 1 || $rawEnabled === '1' || $rawEnabled === true) {
+        $prechargeEnabled = 1;
+    } else {
+        $fields['precharge_enabled'] = 'Precharge toggle must be 0 or 1.';
+    }
+}
+
+$prechargeAmount = null;
+if (array_key_exists('precharge_amount', $body) && $body['precharge_amount'] !== null && $body['precharge_amount'] !== '') {
+    $amt = clean_decimal($body['precharge_amount']);
+    if ($amt === null) {
+        $fields['precharge_amount'] = 'Precharge amount must be a valid number.';
+    } elseif (bccomp($amt, '0', 2) <= 0) {
+        $fields['precharge_amount'] = 'Precharge amount must be greater than zero.';
+    } else {
+        $prechargeAmount = bcround($amt, 2);
+    }
+}
+
+if ($prechargeEnabled === 1 && $prechargeAmount === null && !isset($fields['precharge_amount'])) {
+    $fields['precharge_amount'] = 'Precharge amount is required when precharge is enabled.';
+}
+if ($prechargeEnabled === 0 && $prechargeAmount !== null) {
+    // Don't fight the user — if they sent an amount but disabled, just clear it.
+    $prechargeAmount = null;
+}
+
 // ── Date validation ─────────────────────────────────────────────
 if ($startDate && $endDate && $endDate < $startDate) {
     $fields['end_date'] = 'End date must be after start date.';
@@ -436,6 +473,7 @@ db_transaction(function () use (
     $rateKmFinal, $rateMilesFinal, $allowKmFinal, $allowMilesFinal,
     $kmToMilesFinal, $milesToKmFinal,
     $nonStandardConversion,
+    $prechargeEnabled, $prechargeAmount,
     &$leaseId
 ) {
     // D20: FOR UPDATE — lock the unit row before status check
@@ -545,6 +583,12 @@ db_transaction(function () use (
         'odometer_start_km'        => $odometerStartKm,
         'odometer_start_source'    => $odometerStartSource,
         'odometer_start_fetched_at'=> $odometerStartFetchedAt,
+        // S-MILEAGE-1 Model B: precharge toggle + amount captured at create.
+        // precharge_balance defaults to NULL here; activation in S-MILEAGE-2
+        // will initialize it = precharge_amount when the lease activates.
+        // (Per D-A: balance is not user-editable via API, set internally.)
+        'precharge_enabled'        => $prechargeEnabled,
+        'precharge_amount'         => $prechargeAmount,
         'created_by'               => current_user_id(),
         'updated_by'               => current_user_id(),
     ]);
@@ -597,6 +641,8 @@ db_transaction(function () use (
             'estimated_mileage_miles' => $allowMilesFinal,
             'km_to_miles_conversion'  => $kmToMilesFinal,
             'miles_to_km_conversion'  => $milesToKmFinal,
+            'precharge_enabled'     => $prechargeEnabled,
+            'precharge_amount'      => $prechargeAmount,
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);

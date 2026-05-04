@@ -632,7 +632,7 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
     $lease = db_row(
         "SELECT l.id, l.status, l.contract_number, l.company_name_snapshot, l.customer_id,
                 l.equipment_unit_id, l.unit_number_snapshot, l.mileage_at_start,
-                l.mileage_rate, l.mileage_unit, l.estimated_mileage, l.mileage_precharge_amount,
+                l.mileage_rate, l.mileage_unit, l.estimated_mileage,
                 l.start_date, l.end_date, l.last_billed_date, l.odometer_start_km,
                 l.estimated_mileage_km, l.estimated_mileage_miles,
                 l.mileage_rate_km, l.mileage_rate_miles, l.km_to_miles_conversion,

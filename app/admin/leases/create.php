@@ -513,7 +513,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <div class="form-error" x-show="errors.estimated_mileage_miles" x-text="errors.estimated_mileage_miles"></div>
                         </div>
                     </div>
-                    <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Used for pre-charge calculation. Set 0 to disable pre-charge.</div>
+                    <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Estimated total mileage for the lease (informational; billing is per-km on actual usage).</div>
 
                     <!-- ── Collapsible conversion factor section ── -->
                     <div>
@@ -569,6 +569,47 @@ require_once FF_ROOT . '/includes/header.php';
                                     style="margin-top:12px;">
                                 Reset to defaults
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- ══════════════════════════════════════════════════════════
+                         S-MILEAGE-1 Model B — Mileage precharge subsection
+                         ──────────────────────────────────────────────────────────
+                         Optional per-lease precharge: customer pays an upfront
+                         amount on Invoice 1 and that amount is drawn down
+                         against per-km usage on subsequent invoices. When the
+                         balance hits zero, future invoices bill straight per-km.
+                         At lease close, any positive remaining balance is
+                         refunded (cash or account credit, picked at close).
+                         Default: off — existing leases unaffected.
+                         ══════════════════════════════════════════════════════════ -->
+                    <div style="border-top:1px solid var(--border-color);margin-top:24px;padding-top:24px;">
+                        <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                            <input type="checkbox"
+                                   role="switch"
+                                   class="form-check-input"
+                                   x-model="form.precharge_enabled">
+                            <span>
+                                <span style="font-size:0.9375rem;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em;">Apply mileage precharge</span>
+                                <div class="form-hint" style="margin-top:2px;">Customer pays this amount upfront on Invoice 1 and draws down against monthly mileage charges. Refunded at lease close if unused.</div>
+                            </span>
+                        </label>
+
+                        <div x-show="form.precharge_enabled" x-cloak style="margin-top:16px;max-width:320px;">
+                            <label class="form-label" for="precharge_amount">Precharge amount</label>
+                            <div class="input-group">
+                                <span class="input-group-prefix">$</span>
+                                <input type="number"
+                                       id="precharge_amount"
+                                       class="form-control font-mono"
+                                       step="0.01"
+                                       min="0.01"
+                                       name="precharge_amount"
+                                       x-model="form.precharge_amount"
+                                       :class="errors.precharge_amount ? 'is-invalid' : ''"
+                                       placeholder="0.00">
+                            </div>
+                            <div class="form-error" x-show="errors.precharge_amount" x-text="errors.precharge_amount"></div>
                         </div>
                     </div>
 
@@ -826,6 +867,12 @@ function FF_CreateLease() {
             odometer_start_fetched_at: null,  // ISO datetime when GPS fetched
             // ADV-BILL-1: prepay future periods at activation (monthly cycle only)
             advance_billing_periods:   0,
+            // S-MILEAGE-1 Model B: optional precharge toggle + amount.
+            // When enabled, customer pays precharge_amount upfront on Invoice 1
+            // and that balance draws down against per-km usage on subsequent
+            // invoices. Off by default — existing leases unaffected.
+            precharge_enabled:         false,
+            precharge_amount:          '',
         },
         // ADV-BILL-1: cap from billing.max_advance_periods setting (server-side
         // re-validates regardless). 24 mirrors the seed default.

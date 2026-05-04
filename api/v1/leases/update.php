@@ -55,8 +55,13 @@ if (!$id)        json_error('MISSING_REQUIRED', 'id is required.', 422);
 if (!$updatedAt) json_error('MISSING_REQUIRED', 'updated_at is required for optimistic lock.', 422);
 
 // ── Fetch existing lease ───────────────────────────────────────
+// S-MILEAGE-1: include precharge_invoiced_at so we can reject any
+// attempt to change precharge_enabled / precharge_amount after the
+// precharge line has been billed on Invoice 1 (immutability rule —
+// CRA D14 spirit: dollars billed are frozen).
 $existing = db_row(
-    "SELECT id, status, contract_number, company_name_snapshot, updated_at
+    "SELECT id, status, contract_number, company_name_snapshot, updated_at,
+            precharge_invoiced_at
      FROM leases WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -214,6 +219,89 @@ if (isset($data['km_to_miles_conversion'])) {
 if (isset($data['miles_to_km_conversion'])) {
     $v = $data['miles_to_km_conversion'];
     if (bccomp($v, '1.5', 6) < 0 || bccomp($v, '1.7', 6) > 0) $nonStdConv = true;
+}
+
+// ── S-MILEAGE-1 Model B: precharge fields ──────────────────────
+// Immutability: once precharge_invoiced_at IS NOT NULL (Invoice 1
+// has billed the precharge), neither precharge_enabled nor
+// precharge_amount may change. Per D-H: spirit of CRA D14 — dollars
+// billed are frozen; downstream lease must be voided/recreated to
+// restructure the deal.
+$prechargeFrozen = !empty($existing['precharge_invoiced_at']);
+
+$prechargeEnabledIn = null;
+$prechargeAmountIn  = null;
+$prechargeAmountSupplied = false;
+$prechargeEnabledSupplied = false;
+
+if (array_key_exists('precharge_enabled', $body)) {
+    $prechargeEnabledSupplied = true;
+    $rawEnabled = $body['precharge_enabled'];
+    if ($rawEnabled === 0 || $rawEnabled === '0' || $rawEnabled === false) {
+        $prechargeEnabledIn = 0;
+    } elseif ($rawEnabled === 1 || $rawEnabled === '1' || $rawEnabled === true) {
+        $prechargeEnabledIn = 1;
+    } else {
+        $fields['precharge_enabled'] = 'Precharge toggle must be 0 or 1.';
+    }
+}
+
+if (array_key_exists('precharge_amount', $body)) {
+    $prechargeAmountSupplied = true;
+    $rawAmt = $body['precharge_amount'];
+    if ($rawAmt === null || $rawAmt === '') {
+        $prechargeAmountIn = null;
+    } else {
+        $amt = clean_decimal($rawAmt);
+        if ($amt === null) {
+            $fields['precharge_amount'] = 'Precharge amount must be a valid number.';
+        } elseif (bccomp($amt, '0', 2) <= 0) {
+            $fields['precharge_amount'] = 'Precharge amount must be greater than zero.';
+        } else {
+            $prechargeAmountIn = bcround($amt, 2);
+        }
+    }
+}
+
+if ($prechargeEnabledSupplied || $prechargeAmountSupplied) {
+    // Compare against current DB row to detect actual change vs no-op echo.
+    $current = db_row(
+        "SELECT precharge_enabled, precharge_amount FROM leases WHERE id = ?",
+        [$id]
+    );
+    $curEnabled = (int) ($current['precharge_enabled'] ?? 0);
+    $curAmount  = $current['precharge_amount'] ?? null;
+
+    $newEnabled = $prechargeEnabledSupplied ? $prechargeEnabledIn : $curEnabled;
+    $newAmount  = $prechargeAmountSupplied  ? $prechargeAmountIn  : $curAmount;
+
+    $enabledChanged = ($newEnabled !== $curEnabled);
+    $amountChanged  = (
+        ($newAmount === null) !== ($curAmount === null)
+        || ($newAmount !== null && $curAmount !== null && bccomp((string)$newAmount, (string)$curAmount, 2) !== 0)
+    );
+
+    if ($prechargeFrozen && ($enabledChanged || $amountChanged)) {
+        // Hard reject — return 409 with explicit guidance.
+        json_error('PRECHARGE_LOCKED',
+            'Cannot change precharge settings after Invoice 1 has billed the precharge. Void/recreate the lease to restructure.',
+            409
+        );
+    }
+
+    // App-level mirror of CHECK chk_leases_precharge_amount.
+    if ($newEnabled === 1 && $newAmount === null && !isset($fields['precharge_amount'])) {
+        $fields['precharge_amount'] = 'Precharge amount is required when precharge is enabled.';
+    }
+
+    if ($enabledChanged || $prechargeEnabledSupplied) {
+        $data['precharge_enabled'] = $newEnabled;
+    }
+    if ($amountChanged || $prechargeAmountSupplied) {
+        // Disabling clears the amount; enabling sets it (validation above
+        // ensures amount is present + > 0 when enabled).
+        $data['precharge_amount'] = ($newEnabled === 1) ? $newAmount : null;
+    }
 }
 
 // ADV-BILL-1: advance_billing_periods is editable ONLY while the lease is pending.

@@ -294,7 +294,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-error" x-show="errors.estimated_mileage_miles" x-text="errors.estimated_mileage_miles"></div>
                     </div>
                 </div>
-                <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Used for pre-charge calculation. Set both to 0 to disable.</div>
+                <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Estimated total mileage for the lease (informational; billing is per-km on actual usage).</div>
 
                 <!-- ── Collapsible conversion factor section ── -->
                 <div style="margin-bottom:24px;">
@@ -364,6 +364,51 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="mileage_at_end">Ending Mileage</label>
                         <input type="number" id="mileage_at_end" class="form-control font-mono"
                                x-model="form.mileage_at_end" min="0">
+                    </div>
+                </div>
+
+                <!-- ══════════════════════════════════════════════════════════
+                     S-MILEAGE-1 Model B — Mileage precharge subsection
+                     ──────────────────────────────────────────────────────────
+                     Same controls as create.php. Becomes read-only once
+                     the precharge has been billed on Invoice 1
+                     (precharge_invoiced_at IS NOT NULL) — server returns
+                     409 PRECHARGE_LOCKED and surfaces the error in the
+                     form-error banner.
+                     ══════════════════════════════════════════════════════════ -->
+                <div style="border-top:1px solid var(--border-color);margin-top:24px;padding-top:24px;">
+                    <label style="display:flex;align-items:center;gap:12px;cursor:pointer;"
+                           :style="prechargeFrozen ? 'cursor:not-allowed;opacity:0.65;' : ''">
+                        <input type="checkbox"
+                               role="switch"
+                               class="form-check-input"
+                               x-model="form.precharge_enabled"
+                               :disabled="prechargeFrozen">
+                        <span>
+                            <span style="font-size:0.9375rem;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em;">Apply mileage precharge</span>
+                            <div class="form-hint" style="margin-top:2px;">Customer pays this amount upfront on Invoice 1 and draws down against monthly mileage charges. Refunded at lease close if unused.</div>
+                            <div x-show="prechargeFrozen" class="form-hint" style="margin-top:4px;color:var(--color-warning-text);">
+                                Locked — Invoice 1 has already billed this precharge.
+                            </div>
+                        </span>
+                    </label>
+
+                    <div x-show="form.precharge_enabled" x-cloak style="margin-top:16px;max-width:320px;">
+                        <label class="form-label" for="precharge_amount">Precharge amount</label>
+                        <div class="input-group">
+                            <span class="input-group-prefix">$</span>
+                            <input type="number"
+                                   id="precharge_amount"
+                                   class="form-control font-mono"
+                                   step="0.01"
+                                   min="0.01"
+                                   name="precharge_amount"
+                                   x-model="form.precharge_amount"
+                                   :readonly="prechargeFrozen"
+                                   :class="errors.precharge_amount ? 'is-invalid' : ''"
+                                   placeholder="0.00">
+                        </div>
+                        <div class="form-error" x-show="errors.precharge_amount" x-text="errors.precharge_amount"></div>
                     </div>
                 </div>
 
@@ -456,9 +501,16 @@ function FF_EditLease() {
             warranty_cost:      <?= json_encode($lease['warranty_cost'] ?? '0.00') ?>,
             notes:              <?= json_encode($lease['notes'] ?? '') ?>,
             internal_notes:     <?= json_encode($lease['internal_notes'] ?? '') ?>,
+            // S-MILEAGE-1 Model B: precharge toggle + amount (editable until
+            // Invoice 1 bills the precharge — see prechargeFrozen below).
+            precharge_enabled:  <?= !empty($lease['precharge_enabled']) ? 'true' : 'false' ?>,
+            precharge_amount:   <?= json_encode($lease['precharge_amount'] ?? '') ?>,
         },
         errors:      {},
         submitting:  false,
+        // S-MILEAGE-1: read-only flag mirrors update.php's PRECHARGE_LOCKED
+        // server check. Set from precharge_invoiced_at — non-null = billed = frozen.
+        prechargeFrozen: <?= !empty($lease['precharge_invoiced_at']) ? 'true' : 'false' ?>,
 
         // S-LEASE-UNITS: primary unit is fixed at creation — read-only here.
         // Pattern A bidirectional behavior matches create.php; no override
