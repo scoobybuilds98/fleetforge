@@ -688,6 +688,74 @@ audit            VCEDS        V        —           V           V
 
 ---
 
+## 13.4 MILEAGE BILLING — Model C is current-and-transitional
+
+(Established **S-MILEAGE-MODEL-AUDIT** + **S-MILEAGE-FIX-0**, 2026-05-04. Replaced wholesale by **S-MILEAGE-1+** Model B refactor.)
+
+**The shipped pipeline implements Model C** (S-LEASE-MILEAGE per-period excess + manager review gate + `lease_close_adjustments` close-time settle), NOT Model A (spec-literal precharge + final reconciliation) and NOT Avi's Model B intent (precharge as drawdown balance).
+
+### What runs today
+
+| Stage | Code path | What it does |
+|-------|-----------|--------------|
+| Lease activation | [api/v1/leases/activate.php](api/v1/leases/activate.php) | Captures `odometer_start_km` via Samsara Path B. **No `mileage_precharge` line is added to Invoice 1.** |
+| Monthly invoice | [cron/invoice_generate_monthly.php](cron/invoice_generate_monthly.php) → [InvoiceGenerator::createFromLease](lib/Billing/InvoiceGenerator.php:98) lines 438-486 | Computes `excess_distance_km` per period vs `monthly_allowance_km = estimated_mileage_km / lease_months`. Sets `mileage_review_status='pending'` when excess > 0. **No line item added at this stage.** |
+| Manager review | [api/v1/invoices/review_mileage.php](api/v1/invoices/review_mileage.php) | Manager approves/overrides/rejects. Approve adds `mileage_adjustment` line item. **HARD send gate** in [send.php:57-63](api/v1/invoices/send.php:57) — no role bypass. |
+| Lease close | [api/v1/leases/close.php](api/v1/leases/close.php) | Optional `close_adjustment` block writes `lease_close_adjustments` row + creates credit_note OR amends final invoice. |
+
+### Q9 transitional safeguard (S-MILEAGE-FIX-0, 2026-05-04)
+
+**Pre-fix bug:** close-time excess calc did NOT subtract kilometres already billed via per-period excess. Canonical 3mo / 3000km / 1100-900-1300 example double-billed $150 of the M3 overage.
+
+**Fix:** at the top of the close transaction in [api/v1/leases/close.php](api/v1/leases/close.php), compute
+
+```sql
+SELECT COALESCE(SUM(excess_distance_km), 0) AS prior_excess
+FROM invoices
+WHERE lease_id = ? AND deleted_at IS NULL AND status != 'void'
+```
+
+and subtract from rawOverageKm in BOTH:
+- the legacy partial-end overage block at lines 794-819 (with km→lease-unit conversion via `km_to_miles_conversion` for miles leases per D100)
+- the S-LEASE-MILEAGE close_adjustment block at lines 976+ (per D98)
+
+The cron-generated full_month draft for the closing month is in the sum automatically since it's a non-void invoice on the lease — D101 subsumed.
+
+**Inverse case (D99):** when prior monthly excess > raw lease overage, customer was over-billed during the lease. Close-time charge auto-clamps to 0; UI renders a yellow warning banner via the `closeReconciliation` Alpine getter in [app/admin/leases/show.php](app/admin/leases/show.php). Manager handles via manual credit_note — NO auto-correction.
+
+**D-E regression safeguard:** every close with `priorExcessKm > 0 AND decision != 'waived'` writes an `audit_log` row (`entity_type='lease_close_with_prior_excess'`, action='update'); WARNING-level Sentry for inverse case. Operators have a paper trail of every close that touched the seam.
+
+### What replaces this in S-MILEAGE-1+
+
+**Model B (drawdown balance):** Invoice 1 carries a `mileage_precharge` line for `estimated_mileage_km × rate`. `leases.mileage_precharge_amount` becomes a running balance, decremented per period. Once balance hits zero, monthly invoices bill mileage straight at per-km rate. At close, balance > 0 → refund residue.
+
+When that lands, retire:
+- The `excess_distance_km` / `excess_charge_amount` / `mileage_review_status` columns on invoices
+- The `lease_close_adjustments` table
+- `Mileage::monthlyAllowance` and `periodExcess` helpers
+- The `priorExcessKm` subtraction in close.php (this transitional safeguard)
+- The HARD send gate in send.php
+- The Mileage Reconciliation panel in [app/admin/leases/show.php](app/admin/leases/show.php) close modal
+
+### Mileage line-item types — schema enum is the source of truth
+
+```
+'mileage_precharge'  → upfront precharge (Model A vestige; reserved for Model B reactivation)
+'mileage_adjustment' → customer owes more (close excess OR per-period review approval)
+'mileage_credit'     → customer credit (close underage when decision='final_invoice_adjustment')
+```
+
+Anything else (`mileage_charge`, `mileage_overage`, etc.) is NOT in `invoice_line_items.item_type` and will silently fall through to `default => 'badge-neutral'` in match arms. See D104. When adding a new mileage line-item type, update the schema enum AND the badge match in `app/admin/invoices/show.php` AND any `$mileageItemTypes` lookups.
+
+### See also
+
+- `/tmp/fleetforge_mileage_model_audit.md` — full audit (Q1–Q10 with file:line evidence)
+- D81–D86 (S-LEASE-MILEAGE Model C lock-in)
+- D98–D105 (S-MILEAGE-FIX-0 transitional safeguards)
+- KNOWN ISSUE #99 — Q9 fixed status
+
+---
+
 ## 13.5 MIGRATIONS — `bin/migrate.php` is the only sanctioned runner
 
 (Established **S-MIGRATIONS-RUNNER**, 2026-05-04. Resolves S-COMPLETENESS-CHECK Finding B.)
