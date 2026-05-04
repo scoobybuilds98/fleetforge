@@ -49,12 +49,24 @@ class SamsaraClient
         // settings_get() returns null when the row exists with an empty
         // value OR when the row is missing — both cases must fall back,
         // so use the ?: operator (truthy check) rather than ??.
+        //
+        // S-MILEAGE-1B (D-I): prefer the new `samsara.*` prefix going
+        // forward; fall back to the legacy `gps.samsara_*` keys so
+        // existing production deployments keep working without manual
+        // migration. Order: new settings → legacy settings → new env →
+        // legacy env. Operators can flip to the new prefix at their
+        // own pace by inserting `samsara.api_token` / `samsara.org_id`
+        // into settings and clearing the legacy rows.
         $this->apiKey = (string) (
-            settings_get('gps.samsara_api_key')
+            settings_get('samsara.api_token')
+            ?: settings_get('gps.samsara_api_key')
+            ?: env('SAMSARA_API_TOKEN', '')
             ?: env('GPS_SAMSARA_API_KEY', '')
         );
         $this->orgId = (string) (
-            settings_get('gps.samsara_org_id')
+            settings_get('samsara.org_id')
+            ?: settings_get('gps.samsara_org_id')
+            ?: env('SAMSARA_ORG_ID', '')
             ?: env('GPS_SAMSARA_ORG_ID', '')
         );
         $this->projectRoot = dirname(__DIR__, 2); // lib/GPS/ → project root
@@ -1186,6 +1198,527 @@ class SamsaraClient
             return false;
         }
         return true;
+    }
+
+    // ============================================================
+    // S-MILEAGE-1B — HISTORICAL DISTANCE FOR BILLING
+    //
+    // getDistanceForPeriod() is a billing-grade replacement for the
+    // legacy snapshot-delta approach. Queries Samsara's
+    // /fleet/vehicles/stats/history endpoint with a wider window
+    // (period ±24h per D-A) so parked-but-monitored units still get
+    // a real bookend pair instead of falling through to "no readings".
+    //
+    // Distance type preference order (D-B):
+    //   1. obdOdometerMeters  → trucks with ECU            (source='obd')
+    //   2. gpsDistanceMeters  → trailers (cumulative GPS)  (source='gps')
+    // gpsOdometerMeters is intentionally NOT requested per Avi's brief.
+    //
+    // Return shape (D-D) is always an associative array with a
+    // distinct success vs failure shape — callers MUST switch on
+    // 'distance' === null to detect failure rather than catching
+    // exceptions. This deviates from the older return-null methods
+    // in this file but gives billing callers the metadata they need
+    // (source, bookend timestamps, warnings) to honor the project
+    // memory rule that every Samsara-fetched distance must remain
+    // user-editable.
+    //
+    // Failures log to logs/gps.log AND Sentry (warning, except
+    // 'unit_not_in_samsara' which is info — see D-J). Successes
+    // log to logs/gps.log only (Sentry-quiet) and write an
+    // audit_log row using action='cron' since the action ENUM
+    // doesn't include 'samsara_history_query' (carry-forward of
+    // the D102 workaround pattern).
+    // ============================================================
+
+    /**
+     * Get GPS-based distance traveled by a vehicle/trailer between
+     * two UTC instants. Uses the wider-window bookend strategy
+     * documented in S-MILEAGE-1B / D-A.
+     *
+     * @param  string             $samsaraVehicleId  Samsara vehicle/trailer ID
+     * @param  \DateTimeImmutable $startUtc          Period start (any TZ; normalized to UTC)
+     * @param  \DateTimeImmutable $endUtc            Period end   (any TZ; normalized to UTC)
+     * @param  string             $unit              'km' (default) or 'miles'
+     * @return array              Success or failure shape per D-D.
+     */
+    public function getDistanceForPeriod(
+        string $samsaraVehicleId,
+        \DateTimeImmutable $startUtc,
+        \DateTimeImmutable $endUtc,
+        string $unit = 'km'
+    ): array {
+        // Normalize unit and time
+        if ($unit !== 'km' && $unit !== 'miles') {
+            $unit = 'km';
+        }
+        $utcZone   = new \DateTimeZone('UTC');
+        $startUtc  = $startUtc->setTimezone($utcZone);
+        $endUtc    = $endUtc->setTimezone($utcZone);
+        $queriedAt = (new \DateTimeImmutable('now', $utcZone))->format('Y-m-d\TH:i:s\Z');
+
+        // Validate range cap (D-A: 90 days max)
+        $rangeSeconds = $endUtc->getTimestamp() - $startUtc->getTimestamp();
+        if ($rangeSeconds <= 0) {
+            return $this->distanceFailure(
+                $samsaraVehicleId, $unit, 'api_error',
+                'endTime must be strictly after startTime.', $queriedAt
+            );
+        }
+        if ($rangeSeconds > 90 * 86400) {
+            $days = (int) ceil($rangeSeconds / 86400);
+            return $this->distanceFailure(
+                $samsaraVehicleId, $unit, 'period_too_long',
+                "Period exceeds 90-day cap (got {$days} days).", $queriedAt
+            );
+        }
+
+        // Validate vehicleId
+        if ($samsaraVehicleId === '') {
+            return $this->distanceFailure(
+                $samsaraVehicleId, $unit, 'unit_not_in_samsara',
+                'Empty samsaraVehicleId — caller must supply a Samsara vehicle/trailer ID.', $queriedAt
+            );
+        }
+
+        // API key check
+        if ($this->apiKey === '') {
+            return $this->distanceFailure(
+                $samsaraVehicleId, $unit, 'api_error',
+                'Samsara API token not configured (settings.samsara.api_token / SAMSARA_API_TOKEN).', $queriedAt
+            );
+        }
+
+        // Wider-window bounds (D-A: 24h either side)
+        $widerStart    = $startUtc->modify('-24 hours');
+        $widerEnd      = $endUtc->modify('+24 hours');
+        $widerStartIso = $widerStart->format('Y-m-d\TH:i:s.000\Z');
+        $widerEndIso   = $widerEnd->format('Y-m-d\TH:i:s.000\Z');
+
+        // Pagination loop (D-E: hard cap at 50 iterations)
+        // Map: time-string => [type => meters_int]
+        $allReadings = [];
+        $cursor      = null;
+        $maxPages    = 50;
+        $vehicleSeen = false;
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $url = self::API_BASE . '/fleet/vehicles/stats/history'
+                 . '?types=' . urlencode('obdOdometerMeters,gpsDistanceMeters')
+                 . '&startTime=' . urlencode($widerStartIso)
+                 . '&endTime=' . urlencode($widerEndIso)
+                 . '&vehicleIds=' . urlencode($samsaraVehicleId);
+            if ($cursor !== null) {
+                $url .= '&after=' . urlencode($cursor);
+            }
+
+            $http = $this->httpRequestWithRetry('GET', $url);
+            if ($http['code'] !== 200) {
+                // 404 from Samsara on a vehicleIds= filter is rare; the
+                // endpoint normally returns an empty data[] array even
+                // for unknown IDs. But if we get a hard 4xx/5xx after
+                // the retry, surface it as api_error.
+                return $this->distanceFailure(
+                    $samsaraVehicleId, $unit,
+                    ($http['code'] === 0 ? 'gateway_offline' : 'api_error'),
+                    'Samsara HTTP ' . $http['code'] . ' after retry. ' . substr((string)$http['body'], 0, 200),
+                    $queriedAt
+                );
+            }
+
+            $response = json_decode((string) $http['body'], true);
+            if (!is_array($response)) {
+                return $this->distanceFailure(
+                    $samsaraVehicleId, $unit, 'api_error',
+                    'Samsara returned non-JSON body: ' . substr((string)$http['body'], 0, 200),
+                    $queriedAt
+                );
+            }
+
+            // Single-vehicle filter — find our vehicle in the data array
+            foreach ($response['data'] ?? [] as $v) {
+                if ((string)($v['id'] ?? '') !== $samsaraVehicleId) {
+                    continue;
+                }
+                $vehicleSeen = true;
+                foreach (['obdOdometerMeters', 'gpsDistanceMeters'] as $type) {
+                    $entries = $v[$type] ?? [];
+                    if (!is_array($entries)) continue;
+                    foreach ($entries as $entry) {
+                        $time  = $entry['time']  ?? null;
+                        $value = $entry['value'] ?? null;
+                        if ($time === null || $value === null) continue;
+                        if (!isset($allReadings[$time])) {
+                            $allReadings[$time] = [];
+                        }
+                        // Cast to int — Samsara meters are whole numbers
+                        $allReadings[$time][$type] = (int) $value;
+                    }
+                }
+            }
+
+            $hasMore = $response['pagination']['hasNextPage'] ?? false;
+            if (!$hasMore) break;
+            $cursor = $response['pagination']['endCursor'] ?? null;
+            if ($cursor === null) break;
+
+            if ($page === $maxPages - 1) {
+                return $this->distanceFailure(
+                    $samsaraVehicleId, $unit, 'api_error',
+                    'Pagination cap of ' . $maxPages . ' exceeded — period may be too long or Samsara returning unexpectedly high reading volume.',
+                    $queriedAt
+                );
+            }
+        }
+
+        // Vehicle not present in any page → unknown to Samsara
+        if (!$vehicleSeen) {
+            return $this->distanceFailure(
+                $samsaraVehicleId, $unit, 'unit_not_in_samsara',
+                'Vehicle/trailer ID not found in Samsara stats response.', $queriedAt
+            );
+        }
+
+        // Determine type preference: OBD if any present, else gpsDistance (D-B)
+        $obdReadings = [];
+        $gpsReadings = [];
+        foreach ($allReadings as $time => $byType) {
+            if (isset($byType['obdOdometerMeters'])) {
+                $obdReadings[$time] = $byType['obdOdometerMeters'];
+            }
+            if (isset($byType['gpsDistanceMeters'])) {
+                $gpsReadings[$time] = $byType['gpsDistanceMeters'];
+            }
+        }
+
+        $usedReadings = [];
+        $source       = 'unavailable';
+        if (!empty($obdReadings)) {
+            $usedReadings = $obdReadings;
+            $source       = 'obd';
+        } elseif (!empty($gpsReadings)) {
+            $usedReadings = $gpsReadings;
+            $source       = 'gps';
+        }
+
+        if (empty($usedReadings)) {
+            return $this->distanceFailure(
+                $samsaraVehicleId, $unit, 'no_readings_in_period',
+                'No obdOdometerMeters or gpsDistanceMeters readings found in period (incl. ±24h wider window).',
+                $queriedAt
+            );
+        }
+
+        // Sort readings chronologically
+        ksort($usedReadings);
+        $allTimes = array_keys($usedReadings);
+
+        // Bookend selection (D-A):
+        //   bookendLow  = last reading at or before startUtc
+        //   bookendHigh = first reading at or after endUtc
+        // If no reading exists on a side, fall back to earliest/latest in
+        // the wider window so we never silently miss a parked-unit period.
+        $startTs = $startUtc->getTimestamp();
+        $endTs   = $endUtc->getTimestamp();
+
+        $bookendLow      = null;
+        $bookendLowTime  = null;
+        $bookendHigh     = null;
+        $bookendHighTime = null;
+
+        foreach ($usedReadings as $time => $meters) {
+            $t = strtotime($time);
+            if ($t <= $startTs) {
+                if ($bookendLowTime === null || $t > strtotime($bookendLowTime)) {
+                    $bookendLow     = $meters;
+                    $bookendLowTime = $time;
+                }
+            }
+            if ($t >= $endTs) {
+                if ($bookendHighTime === null || $t < strtotime($bookendHighTime)) {
+                    $bookendHigh     = $meters;
+                    $bookendHighTime = $time;
+                }
+            }
+        }
+
+        // Wider-window fallback for either side that has no bracketing reading
+        if ($bookendLow === null) {
+            $bookendLowTime = $allTimes[0];
+            $bookendLow     = $usedReadings[$bookendLowTime];
+        }
+        if ($bookendHigh === null) {
+            $bookendHighTime = end($allTimes);
+            $bookendHigh     = $usedReadings[$bookendHighTime];
+        }
+
+        // Distance in meters with safety clamp + gateway-reset detection
+        $distanceMeters = $bookendHigh - $bookendLow;
+        $warnings       = [];
+
+        if ($distanceMeters < 0) {
+            // Gateway swap mid-period or Samsara data corruption — clamp to 0.
+            $warnings[]     = 'gateway_reset_detected';
+            $distanceMeters = 0;
+        }
+
+        // Warning: bookend(s) sourced from outside [startUtc, endUtc]
+        $bookendLowT  = strtotime($bookendLowTime);
+        $bookendHighT = strtotime($bookendHighTime);
+        if ($bookendLowT < $startTs || $bookendHighT > $endTs) {
+            $warnings[] = 'reading_outside_period';
+        }
+
+        // Warning: <2 readings strictly inside the period
+        $insideTimes = [];
+        foreach ($allTimes as $time) {
+            $t = strtotime($time);
+            if ($t >= $startTs && $t <= $endTs) {
+                $insideTimes[] = $time;
+            }
+        }
+        if (count($insideTimes) < 2) {
+            $warnings[] = 'sparse_readings';
+        }
+
+        // Warning: any consecutive in-period gap > 6h
+        sort($insideTimes);
+        $largeGap = false;
+        for ($i = 1, $n = count($insideTimes); $i < $n; $i++) {
+            $gap = strtotime($insideTimes[$i]) - strtotime($insideTimes[$i - 1]);
+            if ($gap > 6 * 3600) {
+                $largeGap = true;
+                break;
+            }
+        }
+        if ($largeGap) {
+            $warnings[] = 'large_gap_detected';
+        }
+
+        // Convert to requested unit via bcmath (D-C — no floats)
+        $distanceMetersStr = (string) $distanceMeters;
+        $distance = ($unit === 'km')
+            ? bcdiv($distanceMetersStr, '1000',     2)
+            : bcdiv($distanceMetersStr, '1609.344', 2);
+
+        // Success path: log to gps.log + audit_log (no Sentry per D-J)
+        $this->log('SAMSARA_HISTORY_SUCCESS', sprintf(
+            'vehicleId=%s period=[%s..%s] distance=%s %s source=%s readings=%d warnings=[%s]',
+            $samsaraVehicleId,
+            $startUtc->format(DATE_ATOM),
+            $endUtc->format(DATE_ATOM),
+            $distance, $unit, $source, count($usedReadings),
+            implode(',', $warnings)
+        ));
+        $this->writeDistanceAudit($samsaraVehicleId, $startUtc, $endUtc, [
+            'outcome'       => 'success',
+            'distance'      => $distance,
+            'unit'          => $unit,
+            'source'        => $source,
+            'reading_count' => count($usedReadings),
+            'warnings'      => $warnings,
+        ]);
+
+        return [
+            'distance'         => $distance,
+            'unit'             => $unit,
+            'source'           => $source,
+            'first_reading_at' => $bookendLowTime,
+            'last_reading_at'  => $bookendHighTime,
+            'reading_count'    => count($usedReadings),
+            'warnings'         => $warnings,
+            'queried_at'       => $queriedAt,
+        ];
+    }
+
+    /**
+     * Build the failure return shape per D-D, log the failure to
+     * gps.log + audit_log, and emit a Sentry warning (info for the
+     * 'unit_not_in_samsara' case per D-J).
+     */
+    private function distanceFailure(
+        string $samsaraVehicleId,
+        string $unit,
+        string $reason,
+        string $detail,
+        string $queriedAt
+    ): array {
+        // gps.log line is always written
+        $this->log('SAMSARA_HISTORY_FAILURE', sprintf(
+            'vehicleId=%s reason=%s detail=%s',
+            $samsaraVehicleId, $reason, $detail
+        ));
+
+        // audit_log row uses action='cron' because the ENUM doesn't
+        // include 'samsara_history_query' (D102 workaround pattern).
+        $this->writeDistanceAudit(
+            $samsaraVehicleId,
+            null,
+            null,
+            [
+                'outcome' => 'failure',
+                'reason'  => $reason,
+                'detail'  => $detail,
+                'unit'    => $unit,
+            ]
+        );
+
+        // Sentry: WARNING by default; INFO for the 'unit_not_in_samsara'
+        // case which is operationally normal (non-tracked equipment).
+        try {
+            $level = ($reason === 'unit_not_in_samsara') ? 'info' : 'warning';
+            \FleetForge\Observability\Sentry::captureMessage(
+                "Samsara getDistanceForPeriod {$reason}: {$detail} (vehicleId={$samsaraVehicleId})",
+                $level
+            );
+        } catch (\Throwable) {
+            // Observability MUST NOT block the billing path
+        }
+
+        return [
+            'distance'   => null,
+            'unit'       => $unit,
+            'source'     => 'unavailable',
+            'reason'     => $reason,
+            'detail'     => $detail,
+            'queried_at' => $queriedAt,
+        ];
+    }
+
+    /**
+     * Write an audit_log row for a getDistanceForPeriod call. Uses
+     * action='cron' (per D102 ENUM workaround) with descriptive
+     * entity_type='samsara_history_query' so log searches still find
+     * these rows. Failures of audit_log itself are swallowed — never
+     * block the billing call.
+     */
+    private function writeDistanceAudit(
+        string $samsaraVehicleId,
+        ?\DateTimeImmutable $startUtc,
+        ?\DateTimeImmutable $endUtc,
+        array $payload
+    ): void {
+        try {
+            if (!function_exists('db_insert')) {
+                return; // standalone script context — skip silently
+            }
+            $newValues = $payload;
+            if ($startUtc) $newValues['period_start'] = $startUtc->format(DATE_ATOM);
+            if ($endUtc)   $newValues['period_end']   = $endUtc->format(DATE_ATOM);
+
+            db_insert('audit_log', [
+                'user_id'      => function_exists('current_user_id') ? current_user_id() : null,
+                'user_name'    => 'samsara_client',
+                'action'       => 'cron',
+                'module'       => 'samsara',
+                'entity_type'  => 'samsara_history_query',
+                'entity_id'    => null,
+                'entity_label' => $samsaraVehicleId,
+                'notes'        => sprintf(
+                    'getDistanceForPeriod %s: %s',
+                    $payload['outcome'] ?? 'unknown',
+                    $payload['outcome'] === 'success'
+                        ? sprintf('distance=%s %s source=%s readings=%d',
+                            $payload['distance'] ?? '?',
+                            $payload['unit']     ?? '?',
+                            $payload['source']   ?? '?',
+                            $payload['reading_count'] ?? 0)
+                        : sprintf('reason=%s', $payload['reason'] ?? '?')
+                ),
+                'old_values'   => null,
+                'new_values'   => json_encode($newValues),
+                'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+        } catch (\Throwable) {
+            // Audit failure must never crash the billing path
+        }
+    }
+
+    /**
+     * HTTP request helper with single-retry on transient errors (D-H).
+     * Returns ['code' => int, 'body' => string|null, 'error' => string,
+     * 'retry_after' => int|null]. code=0 means cURL-level failure.
+     *
+     * Retry once on:
+     *   • cURL error (timeout, connection reset, etc.)
+     *   • HTTP 429 — honors Retry-After header capped at 30s, falls
+     *     back to 2-second backoff if header absent
+     *   • HTTP 5xx
+     * Never retries 4xx (other than 429) — those indicate a client
+     * error that won't be fixed by waiting.
+     */
+    private function httpRequestWithRetry(string $method, string $url): array
+    {
+        $first = $this->httpRequest($method, $url);
+
+        // No retry on success or definitive client error
+        if ($first['code'] === 200) {
+            return $first;
+        }
+        $retryable = ($first['code'] === 0)        // cURL-level error
+                  || ($first['code'] === 429)
+                  || ($first['code'] >= 500 && $first['code'] <= 599);
+        if (!$retryable) {
+            return $first;
+        }
+
+        // Backoff: respect Retry-After on 429 (cap 30s); else 2s
+        $sleepSec = 2;
+        if ($first['code'] === 429 && $first['retry_after'] !== null) {
+            $sleepSec = min(30, max(1, (int) $first['retry_after']));
+        }
+        $this->log('SAMSARA_HISTORY_RETRY', sprintf(
+            'HTTP=%d sleep=%ds url=%s', $first['code'], $sleepSec, $url
+        ));
+        sleep($sleepSec);
+
+        return $this->httpRequest($method, $url);
+    }
+
+    /**
+     * One-shot HTTP request returning code + body + error + parsed
+     * Retry-After. Centralizes cURL setup so retry path doesn't
+     * duplicate options.
+     */
+    private function httpRequest(string $method, string $url): array
+    {
+        $headerAccumulator = [];
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST  => $method,
+            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
+            CURLOPT_HTTPHEADER     => $this->buildHeaders(),
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_HEADERFUNCTION => function ($_ch, $line) use (&$headerAccumulator) {
+                $headerAccumulator[] = $line;
+                return strlen($line);
+            },
+        ]);
+
+        $body = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err  = curl_error($ch);
+        curl_close($ch);
+
+        // Parse Retry-After header if present (seconds form)
+        $retryAfter = null;
+        foreach ($headerAccumulator as $h) {
+            if (stripos($h, 'Retry-After:') === 0) {
+                $val = trim(substr($h, strlen('Retry-After:')));
+                if (ctype_digit($val)) {
+                    $retryAfter = (int) $val;
+                }
+                break;
+            }
+        }
+
+        return [
+            'code'        => (int) $code,
+            'body'        => $body === false ? null : (string) $body,
+            'error'       => $err,
+            'retry_after' => $retryAfter,
+        ];
     }
 
     // --------------------------------------------------------
