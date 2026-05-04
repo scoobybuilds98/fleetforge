@@ -737,6 +737,15 @@ S-PROD-2 KEY LEARNINGS (apply forward):
   • json_error() is a never-returning function — it calls exit() internally. Never add
     an explicit exit after it; doing so is dead code and misleads readers about control flow.
 
+S-MILEAGE-1 KEY LEARNINGS (apply forward):
+  • Backup table leases_precharge_backup_S_MILEAGE_1 captured 34 rows from the dropped
+    Model A columns. All rows had mileage_precharge_amount=0.00 and
+    mileage_precharge_invoiced=0. No real precharge data existed under Model A
+    scaffolding — the audit's "zero writers" finding was substantively correct, but a
+    default-value INSERT path was writing zeros on lease creation. Confirmed safe to
+    proceed with Model B refactor. Backup table retained as audit trail; cleanup
+    target post-S-MILEAGE-4.
+
 S035 KEY LEARNINGS (apply in S036):
   • dirname(__DIR__, N) — count slashes carefully when nesting API endpoints.
     /api/v1/accounting/X/index.php uses dirname(__DIR__, 4),
