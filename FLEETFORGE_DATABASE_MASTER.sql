@@ -2094,8 +2094,6 @@ CREATE TABLE `lease_billing_periods` (
   `monthly_rate_used` decimal(10,2) NOT NULL,
   `currency` enum('CAD','USD') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'CAD',
   `status` enum('pending','invoiced','paid','void') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
-  `has_mileage_reconciliation` tinyint(1) NOT NULL DEFAULT '0',
-  `mileage_reconciliation_amount` decimal(12,2) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
