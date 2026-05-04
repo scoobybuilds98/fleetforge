@@ -727,8 +727,6 @@ foreach ($leaseStatuses as [$lstatus, $qty]) {
             'mileage_rate' => $mileage,
             'estimated_mileage' => $estMileage,
             'actual_mileage'   => $actMileage,
-            'mileage_precharge_amount' => '0.00',
-            'mileage_precharge_invoiced' => 0,
             'tax_exempt' => $cust['taxEx'] ? 1 : 0,
             'gst_exempt' => $cust['gstEx'] ? 1 : 0,
             'pst_exempt' => $cust['pstEx'] ? 1 : 0,

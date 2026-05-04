@@ -2179,8 +2179,12 @@ CREATE TABLE `leases` (
   `mileage_at_end` int unsigned DEFAULT NULL,
   `gps_mileage_at_start` int unsigned DEFAULT NULL,
   `gps_mileage_at_end` int unsigned DEFAULT NULL,
-  `mileage_precharge_amount` decimal(12,2) NOT NULL DEFAULT '0.00',
-  `mileage_precharge_invoiced` tinyint(1) NOT NULL DEFAULT '0',
+  `precharge_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'S-MILEAGE-1 Model B: per-lease precharge toggle. 0 = straight per-km billing every invoice. 1 = upfront precharge on Invoice 1 + drawdown on subsequent invoices.',
+  `precharge_amount` decimal(12,2) DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: original precharge amount in dollars. NOT NULL when precharge_enabled=1 (enforced by chk_leases_precharge_amount). User-set; not derived from estimated_mileage.',
+  `precharge_balance` decimal(12,2) DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: running drawdown balance. Initialized = precharge_amount on lease activation (S-MILEAGE-2). Decremented per invoice. NULL when precharge_enabled=0.',
+  `precharge_invoiced_at` datetime DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: when the precharge line was billed on Invoice 1. NULL until billed (S-MILEAGE-2 sets). Lock signal: amount/enabled become immutable once non-NULL.',
+  `precharge_refund_method` enum('cash','credit') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: refund mechanism picked at lease close when precharge_balance > 0. NULL until close (S-MILEAGE-3 sets).',
+  `precharge_refund_settled_at` datetime DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: when the refund (cash or credit) actually posted. Audit trail for S-MILEAGE-3.',
   `tax_exempt` tinyint(1) NOT NULL DEFAULT '0',
   `gst_exempt` tinyint(1) NOT NULL DEFAULT '0',
   `pst_exempt` tinyint(1) NOT NULL DEFAULT '0',
@@ -2242,8 +2246,18 @@ CREATE TABLE `leases` (
   CONSTRAINT `leases_ibfk_2` FOREIGN KEY (`equipment_unit_id`) REFERENCES `equipment_units` (`id`) ON DELETE SET NULL,
   CONSTRAINT `leases_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `leases_ibfk_4` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `leases_ibfk_5` FOREIGN KEY (`closed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `leases_ibfk_5` FOREIGN KEY (`closed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `chk_leases_precharge_amount` CHECK (((`precharge_enabled` = 0) or ((`precharge_amount` is not null) and (`precharge_amount` > 0))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `leases_precharge_backup_S_MILEAGE_1` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `lease_id` int unsigned NOT NULL,
+  `mileage_precharge_amount` decimal(12,2) DEFAULT NULL COMMENT 'Pre-S-MILEAGE-1 value of leases.mileage_precharge_amount',
+  `mileage_precharge_invoiced` tinyint(1) DEFAULT NULL COMMENT 'Pre-S-MILEAGE-1 value of leases.mileage_precharge_invoiced',
+  `snapshot_taken_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_lease` (`lease_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-MILEAGE-1 (D-B): pre-drop snapshot of dead Model A columns on leases';
 CREATE TABLE `maintenance_line_items` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `work_order_id` int unsigned NOT NULL,
