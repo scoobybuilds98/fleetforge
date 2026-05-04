@@ -1248,6 +1248,22 @@ class SamsaraClient
         \DateTimeImmutable $endUtc,
         string $unit = 'km'
     ): array {
+        // S-MILEAGE-1B / D-G — fixture-mode dispatch.
+        // When settings.samsara.fixture_mode === '1', skip the real
+        // HTTP path entirely and dispatch to the hermetic fixture
+        // provider. Production must NEVER silently run in fixture
+        // mode — the row defaults to '0' and is visible in the
+        // Settings UI. Matched as STRING '1' since settings_get()
+        // returns the raw stored value regardless of value_type.
+        if (function_exists('settings_get')
+            && (string) settings_get('samsara.fixture_mode') === '1') {
+            $this->log('SAMSARA_HISTORY_FIXTURE',
+                "fixture-mode dispatch for vehicleId={$samsaraVehicleId}");
+            return \FleetForge\Samsara\FixtureProvider::getDistanceForPeriod(
+                $samsaraVehicleId, $startUtc, $endUtc, $unit
+            );
+        }
+
         // Normalize unit and time
         if ($unit !== 'km' && $unit !== 'miles') {
             $unit = 'km';
