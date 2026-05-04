@@ -1099,6 +1099,90 @@ T8 (pagination cap) and T10 (malformed response) are documented as source-code-i
 
 ---
 
+## 13.7 SCHEMA DOCUMENTATION DISCIPLINE — `FLEETFORGE_DATABASE_MASTER.sql` parity
+
+(Established **S-DATABASE-MASTER-RECONCILE** 2026-05-03 / D87. Hardened **S-DATABASE-MASTER-RECONCILE-2** 2026-05-04 after the S-MILEAGE-1 in-place-Edit drift.)
+
+### The rule
+
+Every Claude Code session that mutates the schema (CREATE/ALTER/DROP TABLE, ADD/DROP COLUMN, ADD/DROP CONSTRAINT, INDEX changes, etc.) MUST update `FLEETFORGE_DATABASE_MASTER.sql` in the same session. The master file is the canonical artifact loaded at AWS production cutover — drift between master and live = broken cutover.
+
+### Post-session verification (UPDATED — grep alone is insufficient)
+
+The original D87 rule said: post-session, run `grep -c <new_column_or_table_name> FLEETFORGE_DATABASE_MASTER.sql` and confirm ≥1 hit. **This is no longer sufficient on its own** — see "the in-place-Edit gotcha" below for why.
+
+**New rule** (S-DATABASE-MASTER-RECONCILE-2):
+
+```sh
+php tests/_smoke_master_schema_parity.php
+# → "PARITY OK — master matches live DB (0 lines of cosmetic noise filtered) in 4.3s"
+# (or "PARITY FAIL — N substantive drift lines (see /tmp/...)")
+```
+
+Exit 0 = master matches live. Exit 1 = drift detected, smoke test prints the substantive diff lines and the path to the full diff file. Run this at the end of every schema-touching session AND at the start of any session that's about to touch the schema (catch-up before adding new drift).
+
+The smoke test is hermetic vs the dev DB only (no live Samsara, no S3, no external services). It does:
+1. `mysqldump` live DB schema (no data) with the agreed flags.
+2. Drop+create scratch DB `fleetforge_master_validate_2`, load the master, dump it the same way.
+3. Normalize away cosmetic noise (`AUTO_INCREMENT` counters, redundant `CHARACTER SET utf8mb4` re-emission, dump headers).
+4. Diff. Substantive lines (non-noise +/- lines) → drift detected.
+
+Runs in ~5 seconds. Use `--print-full-diff` to see the entire normalized diff (not just substantive lines). Use `--keep-scratch-db` to inspect `fleetforge_master_validate_2` after the test.
+
+### The in-place-Edit gotcha (S-MILEAGE-1 drift root cause)
+
+When ADDING new columns to a table via `Edit` on `FLEETFORGE_DATABASE_MASTER.sql`, **append the new columns at the end of the column list** (just before the `PRIMARY KEY` / index/constraint declarations). Do NOT slot them into the position of a dropped column you're replacing — that's where the in-place str_replace pattern naturally lands you, but it doesn't match what `ALTER TABLE … ADD COLUMN` does in the live DB.
+
+**Example of the wrong pattern (S-MILEAGE-1 Commit 1)**:
+
+```php
+// Edit replaced the dropped Model A columns with the new precharge columns
+// at the SAME position (lines 2182-2187). But ALTER TABLE ADD COLUMN
+// (without BEFORE/AFTER) appends to the end → live DB had them at
+// positions 78-83, master had them at 38-43. The grep verification
+// passed (columns existed), but ordinal positions diverged.
+Edit(
+    old: "  `mileage_precharge_amount` decimal...,\n  `mileage_precharge_invoiced` tinyint...,",
+    new: "  `precharge_enabled` ...,\n  `precharge_amount` ...,\n  ... 4 more"
+);
+```
+
+**Correct pattern**: two separate edits — one to remove the dropped columns at their original position, a second to append the new columns at the end of the column list (just before `PRIMARY KEY`):
+
+```php
+// Edit 1 — remove dropped columns
+Edit(
+    old: "  `mileage_precharge_amount` decimal...,\n  `mileage_precharge_invoiced` tinyint...,\n  `tax_exempt` ...",
+    new: "  `tax_exempt` ..."
+);
+
+// Edit 2 — append new columns at end of column list
+Edit(
+    old: "  `total_distance_km` decimal(10,2) DEFAULT NULL ...,\n  PRIMARY KEY (`id`),",
+    new: "  `total_distance_km` decimal(10,2) DEFAULT NULL ...,\n  `precharge_enabled` ...,\n  ... 5 more,\n  PRIMARY KEY (`id`),"
+);
+```
+
+This matches the ordinal positions that `ALTER TABLE ADD COLUMN` produces in the live DB. The parity smoke test catches the wrong pattern; the grep doesn't.
+
+### Escalation procedure
+
+Drift detected by the smoke test:
+
+- **Single-table column-position drift** (e.g. one session's columns slotted in the wrong position) — fix with two surgical Edits as in the example above. Do NOT regenerate the entire master file. Re-run the smoke test to confirm exit 0. Single commit, ship.
+- **Multiple-table drift OR missing columns / constraints** — likely a session shipped without updating the master at all. Run a full regen (`S-DATABASE-MASTER-RECONCILE-N` pattern from the original 2026-05-03 reconcile commit `a54ad7f`). Backup the old master to `.bak` first.
+- **Mojibake in COMMENT clauses after a re-dump** — load command needs `--default-character-set=utf8mb4`. The smoke test uses this flag automatically; ad-hoc loads should match.
+
+### See also
+
+- `tests/_smoke_master_schema_parity.php` — the parity check
+- D87 in `FLEETFORGE_PROGRESS.md` — original same-session-update rule
+- D126–D127 in `FLEETFORGE_PROGRESS.md` — locked discipline updates (S-DATABASE-MASTER-RECONCILE-2)
+- KNOWN ISSUE #100 — `lease_billing_periods` precharge cleanup (still open; next discipline target)
+- Original Phase 2 reconcile: commit `a54ad7f` for the full-regen procedure
+
+---
+
 ## 14. SESSION CHECKLIST — Do this at the END of every session
 
 1. Mark touched items ✅ or 🔄 in FLEETFORGE_PROGRESS.md
