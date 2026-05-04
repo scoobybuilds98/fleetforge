@@ -947,6 +947,158 @@ After this session, do not run `--backfill` again. If you ever need to re-bootst
 
 ---
 
+## 13.6 SAMSARA — Historical Distance Queries (S-MILEAGE-1B)
+
+(Established **S-MILEAGE-1B**, 2026-05-04. Phase 1 of the Samsara
+billing-grade integration. S-MILEAGE-2 wires this method into
+`InvoiceGenerator::createFromLease`.)
+
+### When to use which method
+
+| Need | Method | Reason |
+|------|--------|--------|
+| Distance traveled by unit X between date A and date B (billing) | `SamsaraClient::getDistanceForPeriod` (NEW) | Wider-window bookend strategy avoids "no readings" failures from off-by-an-hour cron timing; structured failure shape with reason codes; bcmath precision; warning conditions surface "successful-but-suspect" data to the user. |
+| Latest odometer reading right now (lease close auto-populate) | `SamsaraClient::getOdometerReading`, `getVehicleOdometer` | Single-shot live snapshot. Returns `int` (km) or `0.0` on failure. |
+| Live GPS location for the tracking map | `SamsaraClient::getVehicleStats`, `getTrailerStats`, `getEntityStats` | Returns full normalized stats object with GPS + odometer + battery. |
+| Bulk fleet snapshot for the 5-min sync cron | `SamsaraClient::getVehicleLocations`, `getAllTrailerStats` | Paginated bulk endpoints. |
+| Manual lease-close mileage estimate (legacy, predates S-MILEAGE-1B) | `SamsaraClient::getMileageForLease` | Snapshot-delta approach with no wider-window fallback; drifts on cron timing. **Use `getDistanceForPeriod` instead going forward.** |
+
+### Method signature
+
+```php
+public function getDistanceForPeriod(
+    string             $samsaraVehicleId,
+    \DateTimeImmutable $startUtc,    // any TZ; normalized to UTC internally
+    \DateTimeImmutable $endUtc,      // any TZ; normalized to UTC internally
+    string             $unit = 'km'  // 'km' or 'miles'
+): array
+```
+
+### Success return shape
+
+```php
+[
+    'distance'         => '1234.56',                    // bcmath string, never float
+    'unit'             => 'km',                          // echo of input
+    'source'           => 'obd' | 'gps',                 // type used (D117)
+    'first_reading_at' => '2026-04-01T07:00:00.000Z',    // ISO 8601 UTC, bookendLow
+    'last_reading_at'  => '2026-04-30T18:42:00.000Z',    // ISO 8601 UTC, bookendHigh
+    'reading_count'    => 47,                            // total in-window samples
+    'warnings'         => [],                            // see below
+    'queried_at'       => '2026-05-01T12:00:00Z',        // when the call was made
+]
+```
+
+### Failure return shape
+
+```php
+[
+    'distance'   => null,
+    'unit'       => 'km',
+    'source'     => 'unavailable',
+    'reason'     => 'no_readings_in_period' | 'unit_not_in_samsara' | 'api_error' | 'gateway_offline' | 'period_too_long',
+    'detail'     => 'human-readable explanation, includes period if relevant',
+    'queried_at' => '2026-05-01T12:00:00Z',
+]
+```
+
+**Callers MUST switch on `$result['distance'] === null` to detect failure** — the method never throws for an operational failure.
+
+### Wider-window bookend strategy (D-A)
+
+Queries Samsara over `[startUtc - 24h, endUtc + 24h]`. From the resulting reading set:
+- `bookendLow` = the LAST reading at or before `startUtc`
+- `bookendHigh` = the FIRST reading at or after `endUtc`
+- If no bracketing reading exists for a side, falls back to the EARLIEST or LATEST reading inside the wider window.
+- `distance = bookendHigh - bookendLow` (clamped to 0 with `gateway_reset_detected` warning if negative).
+
+Only fails with `reason='no_readings_in_period'` when the entire wider window has zero readings of the preferred type.
+
+### Distance type preference (D-B)
+
+Requests `obdOdometerMeters,gpsDistanceMeters` in one `types=` call. **`gpsOdometerMeters` is intentionally NOT requested** per the locked S-MILEAGE-1B decision. Preference order:
+
+1. `obdOdometerMeters` present → use it (truck case, `source='obd'`)
+2. else `gpsDistanceMeters` present → use it (trailer case, `source='gps'`)
+3. else fail with `no_readings_in_period`
+
+### Advisory warnings (D-F)
+
+Populated in `warnings[]` alongside a successful distance — the method does NOT fail on these. Caller decides whether to surface to the user (S-MILEAGE-2 invoice form will show them as a yellow info banner; S-MILEAGE-3 close UI will require manager confirmation when any are present).
+
+| Warning | Trigger | Distance behavior |
+|---------|---------|-------------------|
+| `gateway_reset_detected` | last < first reading | clamped to 0 |
+| `reading_outside_period` | bookend(s) pulled from the ±24h fallback window | unchanged |
+| `sparse_readings` | <2 readings strictly inside `[startUtc, endUtc]` | unchanged |
+| `large_gap_detected` | any consecutive in-period gap > 6 hours | unchanged |
+
+### bcmath precision (D-C)
+
+```php
+// km:    meters / 1000
+$distance = bcdiv($meters, '1000', 2);
+
+// miles: meters / 1609.344
+$distance = bcdiv($meters, '1609.344', 2);
+```
+
+The `distance` field is ALWAYS a string. Never `(float)$result['distance']` — pass it straight into `bcmul($distance, $rate, …)` for billing math. Float-leak artifacts (`1234.5600000000001`) surface in invoice subtotals as 1¢ reconciliation drift.
+
+### Pagination + retry (D-E, D-H, D-I)
+
+- Pagination: cursor-based (`pagination.endCursor`), hard cap at 50 iterations, `reason='api_error'` on cap exceeded.
+- Retry: single retry on cURL error / HTTP 429 / 5xx with 2-second backoff. 429 honors `Retry-After` header capped at 30s. No retry on 4xx.
+- Auth: constructor reads `samsara.api_token` (settings) → `gps.samsara_api_key` (legacy settings) → `SAMSARA_API_TOKEN` (env) → `GPS_SAMSARA_API_KEY` (legacy env). Operators can migrate to the new prefix at their own pace.
+
+### Hermetic fixture mode (D-G)
+
+For tests that must NOT hit live Samsara, flip the settings flag:
+
+```sql
+UPDATE settings SET value = '1' WHERE `key` = 'samsara.fixture_mode';
+```
+
+When set to `'1'`, `getDistanceForPeriod` dispatches to `\FleetForge\Samsara\FixtureProvider::getDistanceForPeriod()` instead of hitting Samsara. The fixture provider returns the EXACT same shape as production (including bcmath conversion path) — callers cannot tell the difference.
+
+Production must NEVER silently run in fixture mode. The row defaults to `'0'`, is visible in the Settings UI, and the dispatch is gated on a strict string comparison. Smoke tests snapshot+restore the value automatically.
+
+**6 canned scenarios** keyed by `samsaraVehicleId`:
+
+| Vehicle ID  | Scenario | Distance | Source | Warnings |
+|-------------|----------|----------|--------|----------|
+| `FIX_STD`   | Standard 30-day, daily readings | 1234.56 km | gps | none |
+| `FIX_PARKED`| Parked unit, same first/last reading | 0.00 km | gps | none |
+| `FIX_NONE`  | No readings even in wider window | failure | unavailable | reason=no_readings_in_period |
+| `FIX_RESET` | Gateway reset (last < first) | 0.00 km (clamped) | gps | gateway_reset_detected |
+| `FIX_SPARSE`| 1 in-period reading; bookends from wider window | 500.00 km | gps | reading_outside_period, sparse_readings |
+| `FIX_GAP`   | 7-day gap mid-period | 2300.00 km | gps | large_gap_detected |
+
+Plus an implicit 7th case: any unknown vehicleId falls through to `reason='unit_not_in_samsara'` so adversarial / typo'd inputs degrade safely (a misspelled fixture name will fail loudly, not silently match the wrong scenario).
+
+### Smoke test
+
+```sh
+php tests/_smoke_samsara_distance.php
+# → 12/12 passed in 0.0s
+# (or "10/12 passed (FAILED: T# name, ...) in X.Ys" — grep-able for CI)
+```
+
+12 stress tests; each PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern.
+
+T8 (pagination cap) and T10 (malformed response) are documented as source-code-inspection tests because the production HTTP loop / parser are intentionally bypassed in fixture mode. Real coverage of those paths lands when S-MILEAGE-2 integrates the method into `InvoiceGenerator::createFromLease`.
+
+### See also
+
+- `lib/GPS/SamsaraClient.php::getDistanceForPeriod` — implementation
+- `lib/Samsara/FixtureProvider.php` — hermetic test data
+- `tests/_smoke_samsara_distance.php` — 12 stress tests
+- `db_migrations/202605040430_S-MILEAGE-1B_samsara_fixture_setting.sql` — settings row
+- D116–D125 in `FLEETFORGE_PROGRESS.md` — locked decisions
+- S-MILEAGE-1B KEY LEARNINGS — fixture-mode design notes + caveats
+
+---
+
 ## 14. SESSION CHECKLIST — Do this at the END of every session
 
 1. Mark touched items ✅ or 🔄 in FLEETFORGE_PROGRESS.md
