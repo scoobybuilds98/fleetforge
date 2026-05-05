@@ -122,6 +122,50 @@ if (
     $fields['daily_rate'] = 'At least one rate (daily, weekly, monthly, or mileage) must be greater than zero.';
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// S-BILLING-RATE-FIX D-D / D132 — rate-tier completeness invariant
+//
+// When billing_cycle='monthly', all three rate tiers (daily/weekly/monthly)
+// must be present in the request body AND form a complete set: if any one
+// is > 0, all must be > 0. Closes the upstream hole that allowed leases to
+// be created with weekly_rate=0 while other tiers were populated, which
+// silently produced $0 base_rental for 8-29 day periods (the weekly-math
+// branch of ProRateCalculator computed full_weeks*0 + remainder*0/7 = 0
+// without triggering the "exceeds monthly" cap).
+//
+// Origin: 2026-05-06 audit of INV-2026-00086, locked as D132.
+// ════════════════════════════════════════════════════════════════════════
+$billingCycleRaw = (string)($body['billing_cycle'] ?? 'monthly');
+if ($billingCycleRaw === 'monthly') {
+    // Required-key check — relies on the form sending '0' for blank rate
+    // inputs (Layer 1). A missing key would have been silently coerced to
+    // '0.00' by the legacy clean_decimal path, hiding the defect.
+    foreach (['daily_rate', 'weekly_rate', 'monthly_rate'] as $rateKey) {
+        if (!array_key_exists($rateKey, $body) && !isset($fields[$rateKey])) {
+            $fields[$rateKey] = "{$rateKey} is required when billing cycle is monthly.";
+        }
+    }
+
+    // Zero-with-siblings rule. Skip if a per-field error already exists so
+    // the user sees the most specific message (e.g. "cannot be negative").
+    $rateValuesByField = [
+        'daily_rate'   => $dailyRate,
+        'weekly_rate'  => $weeklyRate,
+        'monthly_rate' => $monthlyRate,
+    ];
+    $anyTierPositive = false;
+    foreach ($rateValuesByField as $v) {
+        if (bccomp((string)$v, '0', 4) > 0) { $anyTierPositive = true; break; }
+    }
+    if ($anyTierPositive) {
+        foreach ($rateValuesByField as $rateKey => $v) {
+            if (!isset($fields[$rateKey]) && bccomp((string)$v, '0', 4) <= 0) {
+                $fields[$rateKey] = "Rate tier {$rateKey} must be > 0 when other rate tiers are populated. Use 0 explicitly only if this rate tier is intentionally not offered for this lease.";
+            }
+        }
+    }
+}
+
 // ── Dual-unit mileage fields (S-LEASE-UNITS) ───────────────────
 // Accept new dual-unit fields. If only legacy mileage_rate is provided,
 // derive dual-unit values from it using conversion factors.

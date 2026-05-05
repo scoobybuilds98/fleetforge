@@ -1196,6 +1196,17 @@ function FF_CreateLease() {
                 this.form.weekly_rate  = d.weekly_rate  ?? '';
                 this.form.monthly_rate = d.monthly_rate ?? '';
 
+                // S-BILLING-RATE-FIX D-D: when the rate source supplied a
+                // monthly rate but no weekly, pre-fill weekly from
+                // monthly/4.33 (calendar-accurate: 52 weeks / 12 months).
+                // The user can override before save. Closes the upstream
+                // hole that produced INV-2026-00086 zero-base-rental
+                // (template id=1 had default_weekly_rate=NULL).
+                if ((this.form.weekly_rate === '' || this.form.weekly_rate == null)
+                    && parseFloat(this.form.monthly_rate) > 0) {
+                    this.form.weekly_rate = (parseFloat(this.form.monthly_rate) / 4.33).toFixed(2);
+                }
+
                 // Apply currency/unit from rate source if not already set by customer
                 if (d.currency)     this.form.currency     = d.currency;
                 if (d.mileage_unit) this.form.mileage_unit = d.mileage_unit;
@@ -1307,9 +1318,18 @@ function FF_CreateLease() {
             const form = document.querySelector('form');
 
             // Build payload — omit empty strings
+            // S-BILLING-RATE-FIX D-D: rate-tier fields are always sent. An
+            // empty input becomes '0' so the API can apply the rate-tier
+            // completeness invariant (D132) instead of seeing a missing key
+            // that the legacy null-coalesce path silently turned into 0.00.
+            const rateFields = ['daily_rate', 'weekly_rate', 'monthly_rate'];
             const payload = {};
             Object.entries(this.form).forEach(([k, v]) => {
-                if (v !== '' && v !== null && v !== undefined) payload[k] = v;
+                if (rateFields.includes(k)) {
+                    payload[k] = (v === '' || v === null || v === undefined) ? '0' : v;
+                } else if (v !== '' && v !== null && v !== undefined) {
+                    payload[k] = v;
+                }
             });
 
             // Coerce numeric integers
