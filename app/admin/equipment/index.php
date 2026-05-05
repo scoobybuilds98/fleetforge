@@ -235,10 +235,14 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
-        <!-- Data table -->
+        <!-- ── Desktop table (hidden on mobile) ───────────────────── -->
+        <!-- WHY data-no-auto-label: the auto-stack JS (app.js labelCellsIn)
+             has a race with Alpine x-for — it can run before rows are in the
+             DOM, leaving td cells without data-label, so values never show.
+             Mobile view is handled by the explicit card template below. -->
         <template x-if="!loading && !loadError && units.length > 0">
-            <div class="table-wrapper">
-                <table class="table" aria-label="Equipment units">
+            <div class="table-wrapper eq-table-desktop">
+                <table class="table" aria-label="Equipment units" data-no-auto-label>
                     <thead>
                         <tr>
                             <th class="th-sortable" @click="setSort('unit_number')" style="cursor:pointer;">
@@ -292,7 +296,6 @@ require_once FF_ROOT . '/includes/header.php';
                                     </template>
                                 </td>
                                 <td>
-                                    <!-- Compliance: show warning if any expiry within 30 days or expired -->
                                     <template x-if="hasComplianceIssue(unit)">
                                         <span class="badge badge-warning badge-no-dot">Expiring</span>
                                     </template>
@@ -312,6 +315,84 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </tbody>
                 </table>
+            </div>
+        </template>
+
+        <!-- ── Mobile cards (≤767px, hidden on desktop) ─────────── -->
+        <!-- WHY explicit template: avoid the auto-stack JS race; each
+             field is a plain x-text binding — no data-label magic needed. -->
+        <template x-if="!loading && !loadError && units.length > 0">
+            <div class="eq-cards-mobile">
+                <template x-for="unit in units" :key="'m' + unit.id">
+                    <a :href="'<?= base_url('equipment/show') ?>?id=' + unit.id"
+                       class="eq-mobile-card">
+
+                        <!-- Header row: unit # + status badge -->
+                        <div class="eq-mc-header">
+                            <span class="eq-mc-unit font-mono" x-text="unit.unit_number"></span>
+                            <span class="badge"
+                                  :class="statusBadgeClass(unit.status)"
+                                  x-text="unit.status.replace('_',' ')">
+                            </span>
+                        </div>
+
+                        <!-- Template + category -->
+                        <div class="eq-mc-row">
+                            <span class="eq-mc-label">Template</span>
+                            <span class="eq-mc-value">
+                                <span x-text="unit.template_name" class="font-medium"></span>
+                                <template x-if="unit.template_category">
+                                    <span class="text-secondary"
+                                          x-text="' · ' + unit.template_category.replace('_',' ')"
+                                          style="text-transform:capitalize;"></span>
+                                </template>
+                            </span>
+                        </div>
+
+                        <!-- Year + Yard on same row -->
+                        <div class="eq-mc-row">
+                            <span class="eq-mc-label">Year</span>
+                            <span class="eq-mc-value font-mono" x-text="unit.year || '—'"></span>
+                        </div>
+                        <div class="eq-mc-row">
+                            <span class="eq-mc-label">Yard</span>
+                            <span class="eq-mc-value text-secondary" x-text="unit.yard_location || '—'"></span>
+                        </div>
+
+                        <!-- Mileage + Health -->
+                        <div class="eq-mc-row">
+                            <span class="eq-mc-label">Mileage</span>
+                            <span class="eq-mc-value font-mono"
+                                  x-text="unit.mileage ? unit.mileage.toLocaleString() + ' mi' : '0 mi'">
+                            </span>
+                        </div>
+                        <div class="eq-mc-row">
+                            <span class="eq-mc-label">Health</span>
+                            <span class="eq-mc-value">
+                                <template x-if="unit.health_score !== null">
+                                    <span class="badge badge-no-dot"
+                                          :class="healthBadgeClass(unit.health_score)"
+                                          x-text="unit.health_score + '/100'">
+                                    </span>
+                                </template>
+                                <template x-if="unit.health_score === null">
+                                    <span class="text-secondary">—</span>
+                                </template>
+                            </span>
+                        </div>
+
+                        <!-- Compliance -->
+                        <template x-if="hasComplianceIssue(unit)">
+                            <div class="eq-mc-row">
+                                <span class="eq-mc-label">Compliance</span>
+                                <span class="eq-mc-value">
+                                    <span class="badge badge-warning badge-no-dot">Expiring</span>
+                                </span>
+                            </div>
+                        </template>
+
+                    </a>
+                </template>
             </div>
         </template>
 

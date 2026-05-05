@@ -5443,6 +5443,83 @@ dl.detail-grid dd {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   EQUIPMENT LIST — explicit mobile card view
+   WHY: the auto-stack CSS transform (table → stacked cards) has a
+   timing race with Alpine x-for. Instead, the equipment index uses
+   two separate templates: .eq-table-desktop (hidden ≤767px) and
+   .eq-cards-mobile (hidden ≥768px). Values are plain x-text bindings
+   so there is no dependency on data-label injection timing.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Desktop table: hidden on mobile */
+.eq-table-desktop { display: block; }
+
+/* Mobile card list: hidden on desktop */
+.eq-cards-mobile  { display: none; }
+
+@media (max-width: 767px) {
+    .eq-table-desktop { display: none !important; }
+    .eq-cards-mobile  { display: block; padding: 12px; }
+}
+
+/* Individual unit card */
+.eq-mobile-card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.eq-mobile-card:hover,
+.eq-mobile-card:active {
+    background: var(--bg-surface-hover);
+    box-shadow: var(--shadow-sm);
+    text-decoration: none;
+    color: inherit;
+}
+
+/* Header row: unit number (left) + status badge (right) */
+.eq-mc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+.eq-mc-unit {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* Key / value rows */
+.eq-mc-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.8125rem;
+}
+.eq-mc-label {
+    color: var(--text-tertiary);
+    font-weight: 600;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.eq-mc-value {
+    color: var(--text-primary);
+    text-align: right;
+    min-width: 0;
+    word-break: break-word;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    TABLET — kpi + stat grids for tablet
    ═══════════════════════════════════════════════════════════════ */
 @media (min-width: 768px) and (max-width: 1023px) {
