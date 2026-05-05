@@ -5398,7 +5398,16 @@ dl.detail-grid dd {
    and data-label attributes on <td>.
    ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
-    .table-stack thead { display: none; }
+    /* WHY display:block on table + tbody: without it the browser keeps the
+       table-layout formatting context active. That context overrides
+       display:flex on <td> in WebKit/Safari (iOS), leaving the cells
+       rendered as table-cell regardless of the rule — so the flex
+       label/value layout never applies and the value content is invisible.
+       Setting display:block on every ancestor breaks the table context
+       completely so display:flex on td is honoured. */
+    .table-stack         { display: block; width: 100%; }
+    .table-stack tbody   { display: block; }
+    .table-stack thead   { display: none;  }
     .table-stack tr {
         display: block;
         margin-bottom: 12px;
@@ -5407,12 +5416,16 @@ dl.detail-grid dd {
         padding: 12px;
         background: var(--bg-surface);
     }
+    /* WHY !important on display/padding/border: .table tbody td has
+       specificity 0,1,2 which beats .table-stack td (0,1,1). Without
+       !important the horizontal padding stays 13px 16px (desktop value)
+       and display:flex may lose to the table-layout override above. */
     .table-stack td {
-        display: flex;
+        display: flex !important;
         justify-content: space-between;
         align-items: center;
-        padding: 6px 0;
-        border: none;
+        padding: 6px 0 !important;
+        border: none !important;
         font-size: 0.8125rem;
     }
     .table-stack td::before {
@@ -5420,6 +5433,12 @@ dl.detail-grid dd {
         font-weight: 600;
         color: var(--text-secondary);
         margin-right: 8px;
+        flex-shrink: 0; /* keep label width stable; don't compress into value */
+    }
+    /* Value content — right-aligned, shrinks to fit without squashing label */
+    .table-stack td > * {
+        min-width: 0;
+        text-align: right;
     }
 }
 
