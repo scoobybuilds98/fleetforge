@@ -315,7 +315,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             </div></div>
         </template>
         <template x-if="!loading && unit">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="equip-section-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 
                 <!-- ── Identity & Classification ── -->
                 <div class="card spec-card" style="margin-bottom:0;">
@@ -403,7 +403,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             <button @click="activeTab = 'tracking'" class="btn btn-ghost btn-xs" style="color:#fff;opacity:0.85;">Open Mapping →</button>
                         </div>
                         <div class="card-body" style="padding:0;">
-                            <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0;">
+                            <div class="equip-samsara-live-grid" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:0;">
                                 <!-- Last location -->
                                 <div style="padding:14px 16px;border-right:1px solid var(--border-color);">
                                     <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Location</div>
@@ -576,7 +576,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <div>
 
                 <!-- KPI stat cards -->
-                <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+                <div class="stat-grid stat-grid--4" style="gap:12px;margin-bottom:20px;">
                     <div class="stat-card">
                         <div class="stat-label">Total Invested</div>
                         <div class="stat-value font-mono" style="font-size:1.125rem;" x-text="formatMoney(payoff.acquisition.total)"></div>
@@ -629,7 +629,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
                 <!-- Projection scenarios (click to re-project) -->
                 <h3 class="h6" style="margin:0 0 10px 0;">Projection Scenarios</h3>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+                <div class="stat-grid stat-grid--3" style="gap:12px;margin-bottom:20px;">
                     <div class="card"
                          @click="payoffPeriod = 12; reloadPayoff()"
                          :style="(payoffPeriod === 12 ? 'border:2px solid var(--color-primary);' : 'border:1px solid var(--border-default);') + 'cursor:pointer;padding:14px;'">
@@ -694,7 +694,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 </div>
 
                 <!-- Two-column split: Acquisition breakdown + Earnings breakdown -->
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                <div class="equip-section-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
 
                     <!-- Acquisition detail -->
                     <div class="card spec-card" style="margin-bottom:0;">
@@ -793,7 +793,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     <p class="text-secondary text-xs" style="margin:0 0 10px 0;">
                         Try your own projected monthly net revenue and any one-time upcoming costs (tires, compliance, major repair) to see a custom payoff date.
                     </p>
-                    <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;">
+                    <div class="equip-override-row" style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;">
                         <div>
                             <label class="text-xs text-secondary">Custom Monthly Net ($)</label>
                             <input type="number" step="0.01" min="0" class="form-control form-control-sm"
@@ -1731,7 +1731,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 </template>
 
                 <!-- Live data: map + telemetry side-by-side -->
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="equip-tracking-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                     <!-- Mini Map -->
                     <div class="card spec-card" style="margin-bottom:0;">
                         <div class="card-header" style="padding:12px 16px;">
@@ -1937,6 +1937,58 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     0%   { box-shadow: 0 0 0 0 rgba(34,197,94,0.7); }
     70%  { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
     100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+}
+
+/* ───────────────────────────────────────────────────────────────
+   S-EQUIPMENT-SHOW-RESPONSIVE — page-scoped responsive layer
+   Sits ON TOP of RESPONSIVE-1 (app.css). Targets only patterns
+   unique to this page: hardcoded inline grid widths in section
+   wrappers, the Samsara live-tracking 4-col block, the manual-
+   override row, the tracking-tab map+telemetry split, and the
+   .tab-table-container horizontal-scroll fallback. The KPI
+   stat-grids (Payoff Analysis 4-col, Projection Scenarios 3-col)
+   use RESPONSIVE-1's .stat-grid--4 / .stat-grid--3 classes via
+   the markup edit, so they're handled globally — no rule needed
+   here for those.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Tablet (≤768px) — collapse Tracking-tab map+telemetry split */
+@media (max-width: 768px) {
+    /* WHY: !important needed because the matching grid-template-columns
+       is on an inline style attribute (specificity 1,0,0,0). */
+    .equip-tracking-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+/* Mobile (≤540px) — collapse all section grids + Samsara 4-col +
+   override row + tab-table horizontal-scroll fallback. */
+@media (max-width: 540px) {
+    .equip-section-grid,
+    .equip-samsara-live-grid,
+    .equip-override-row {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Samsara live-tracking cells use right borders to separate columns
+       horizontally; once stacked vertically those borders look broken.
+       Swap to bottom borders, drop on the last cell. */
+    .equip-samsara-live-grid > div {
+        border-right: none !important;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .equip-samsara-live-grid > div:last-child {
+        border-bottom: none;
+    }
+
+    /* .tab-table-container ships in app.css with overflow-y:auto only;
+       on narrow viewports the inner <table class="table"> overflows
+       horizontally with no scroll. Add overflow-x as a page-scoped
+       fallback. (Same pattern likely needed on customers/show +
+       vendors/show — flag for follow-up if those sessions happen.) */
+    .tab-table-container {
+        overflow-x: auto;
+    }
 }
 </style>
 
