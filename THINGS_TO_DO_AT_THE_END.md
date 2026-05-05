@@ -19,6 +19,17 @@ pages, but every page still needs a manual pass for:
   collide. Should reflow to vertical stack ≤767px.
 - **Show/detail pages**: the 2/3 + 1/3 grid layout should already collapse to
   1-column at ≤1023px (`.grid-2-1` rule), but verify on every show page.
+  - ✅ Spec tables (key/value, no `<thead>`) inside `.card` now stack
+    label-above-value on mobile — was previously overflowing 640px and
+    being clipped (commit 3a6799a, 2026-05-05).
+  - ✅ `.grid-2 > *` now resets `grid-column: auto` on mobile so inline
+    `style="grid-column: span 2"` (used on Odometer / GPS cards in
+    leases-show) doesn't break the single-column stack (commit 3a6799a).
+  - Verified clean: leases/show, customers/show, equipment/show.
+  - Still to verify: invoices/show, payments/show, vendors/show,
+    reservations/show, maintenance_work_orders/show, damage_claims/show,
+    mileage_logs/show, inspections/show, credit_notes/show, rates/show,
+    users/show, accounting/tax/show.
 - **Sub-tables inside tabs**: leases/show, customers/show, equipment/show all
   have nested tables in tabs that need their own auto-stack pass.
 - **Modals**: most are fixed-width and overflow on narrow viewports. Needs
