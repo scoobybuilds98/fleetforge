@@ -7,14 +7,14 @@ declare(strict_types=1);
  * S-MILEAGE-1B smoke test for SamsaraClient::getDistanceForPeriod
  * and the FixtureProvider hermetic mode.
  *
- * Runs 12 stress tests covering the success + failure contracts
+ * Runs 13 stress tests covering the success + failure contracts
  * documented in the S-MILEAGE-1B brief. Every test runs through
  * the fixture provider — NO live Samsara calls.
  *
  * Each test prints a PASS/FAIL line carrying the actual `distance`
  * string so a reader can scan for float-leak artifacts (Avi's Q4
- * addition). Final summary line is grep-able: "N/12 passed in Xs"
- * or "M/12 passed (FAILED: T4 ..., T8 ...)".
+ * addition). Final summary line is grep-able: "N/13 passed in Xs"
+ * or "M/13 passed (FAILED: T4 ..., T8 ...)".
  *
  * Exit code: 0 on all-pass, 1 on any-fail.
  *
@@ -75,7 +75,7 @@ function record(array &$results, string $id, string $name, bool $passed, string 
 // =====================================================================
 // T1 — Standard 30-day period: returns expected distance, no warnings
 // =====================================================================
-echo "\n[Running 12 stress tests against FixtureProvider…]\n\n";
+echo "\n[Running 13 stress tests against FixtureProvider…]\n\n";
 
 $start = new DateTimeImmutable('2026-04-01T00:00:00Z');
 $end   = new DateTimeImmutable('2026-04-30T23:59:59Z');
@@ -240,6 +240,18 @@ record($results, 'T12', 'fixture_flag_dispatch',
     $ok, $ok ? 'fixture-mode dispatch wrote SAMSARA_HISTORY_FIXTURE log line'
              : 'expected SAMSARA_HISTORY_FIXTURE in gps.log tail; got ' . substr($tail, 0, 200),
     '');
+
+// =====================================================================
+// T13 — FIX_GAP: 7-day mid-period gap → distance + large_gap_detected
+// =====================================================================
+$r = $client->getDistanceForPeriod('FIX_GAP', $start, $end, 'km');
+$ok = ($r['distance'] === '2300.00')
+    && ($r['source'] === 'gps')
+    && in_array('large_gap_detected', $r['warnings'] ?? [], true);
+record($results, 'T13', 'large_gap_detected',
+    $ok, $ok ? 'distance=2300 source=gps warnings includes large_gap_detected'
+             : 'expected distance=2300.00 + large_gap_detected warning; got ' . json_encode($r),
+    $r['distance']);
 
 // =====================================================================
 // CLEANUP & SUMMARY

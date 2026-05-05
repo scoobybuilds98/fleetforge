@@ -1080,11 +1080,11 @@ Plus an implicit 7th case: any unknown vehicleId falls through to `reason='unit_
 
 ```sh
 php tests/_smoke_samsara_distance.php
-# → 12/12 passed in 0.0s
-# (or "10/12 passed (FAILED: T# name, ...) in X.Ys" — grep-able for CI)
+# → 13/13 passed in 0.0s
+# (or "11/13 passed (FAILED: T# name, ...) in X.Ys" — grep-able for CI)
 ```
 
-12 stress tests; each PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern.
+13 stress tests; each PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern.
 
 T8 (pagination cap) and T10 (malformed response) are documented as source-code-inspection tests because the production HTTP loop / parser are intentionally bypassed in fixture mode. Real coverage of those paths lands when S-MILEAGE-2 integrates the method into `InvoiceGenerator::createFromLease`.
 
@@ -1092,7 +1092,7 @@ T8 (pagination cap) and T10 (malformed response) are documented as source-code-i
 
 - `lib/GPS/SamsaraClient.php::getDistanceForPeriod` — implementation
 - `lib/Samsara/FixtureProvider.php` — hermetic test data
-- `tests/_smoke_samsara_distance.php` — 12 stress tests
+- `tests/_smoke_samsara_distance.php` — 13 stress tests
 - `db_migrations/202605040430_S-MILEAGE-1B_samsara_fixture_setting.sql` — settings row
 - D116–D125 in `FLEETFORGE_PROGRESS.md` — locked decisions
 - S-MILEAGE-1B KEY LEARNINGS — fixture-mode design notes + caveats
