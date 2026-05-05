@@ -99,7 +99,7 @@ define('APP_TIMEZONE',     (string) env('APP_TIMEZONE',     'America/Vancouver')
 define('APP_SECRET',       (string) env('APP_SECRET',       ''));
 
 define('FF_VERSION',       (string) env('FF_VERSION',       '1.0.0'));
-define('FF_ASSET_VERSION', (string) env('FF_ASSET_VERSION', '1.0.0'));
+define('FF_ASSET_VERSION', (string) env('FF_ASSET_VERSION', '1.0.1'));
 define('FF_DEBUG',         (bool)   env('APP_DEBUG',        false));
 
 // ============================================================

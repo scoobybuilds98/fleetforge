@@ -5393,53 +5393,76 @@ dl.detail-grid dd {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TABLE-STACK — opt-in responsive stacked table view for simple
-   lists (notes, activity, timelines). Use .table-stack on <table>
-   and data-label attributes on <td>.
+   TABLE-STACK — responsive stacked table view, label-above-value.
+   app.js auto-applies .table-stack + reads data-label from <th>.
+
+   WHY block layout (label above value) instead of flex (label left,
+   value right): the flex approach broke for any <td> with multiple
+   children — anchors with secondary <div>s, badges wrapped in
+   <template x-if>, <span>s with conditional x-text. WebKit/Safari
+   also keeps the table-cell formatting context active and silently
+   ignores display:flex unless every ancestor (table, tbody, tr) is
+   explicitly forced to display:block. The stacked label/value layout
+   sidesteps both problems — it works regardless of cell structure
+   and never relies on display:flex.
    ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
-    /* WHY display:block on table + tbody: without it the browser keeps the
-       table-layout formatting context active. That context overrides
-       display:flex on <td> in WebKit/Safari (iOS), leaving the cells
-       rendered as table-cell regardless of the rule — so the flex
-       label/value layout never applies and the value content is invisible.
-       Setting display:block on every ancestor breaks the table context
-       completely so display:flex on td is honoured. */
-    .table-stack         { display: block; width: 100%; }
-    .table-stack tbody   { display: block; }
-    .table-stack thead   { display: none;  }
+    /* Break the table-layout formatting context completely so subsequent
+       block/inline rules on tr/td actually take effect (Safari / iOS). */
+    .table-stack         { display: block !important; width: 100%; }
+    .table-stack tbody   { display: block !important; }
+    .table-stack thead   { display: none  !important; }
+
     .table-stack tr {
-        display: block;
-        margin-bottom: 12px;
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-md);
-        padding: 12px;
-        background: var(--bg-surface);
+        display: block !important;
+        margin: 0 0 12px 0 !important;
+        padding: 14px 16px !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-md) !important;
+        background: var(--bg-surface) !important;
     }
-    /* WHY !important on display/padding/border: .table tbody td has
-       specificity 0,1,2 which beats .table-stack td (0,1,1). Without
-       !important the horizontal padding stays 13px 16px (desktop value)
-       and display:flex may lose to the table-layout override above. */
+    .table-stack tr:last-child { margin-bottom: 0 !important; }
+
+    /* Each cell becomes a stacked label-above-value row.
+       !important is required because .table tbody td (specificity
+       0,1,2) beats .table-stack td (0,1,1) and would otherwise hold
+       the desktop padding + table-cell display. */
     .table-stack td {
-        display: flex !important;
-        justify-content: space-between;
-        align-items: center;
+        display: block !important;
         padding: 6px 0 !important;
         border: none !important;
-        font-size: 0.8125rem;
+        text-align: left !important;
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
-    .table-stack td::before {
+    .table-stack td:first-child { padding-top: 0 !important; }
+    .table-stack td:last-child  { padding-bottom: 0 !important; }
+
+    /* Skip cells that have no label — typically the trailing actions <td>
+       which has an empty <th>. Prevents an empty bullet line above the
+       View/Edit buttons. */
+    .table-stack td:not([data-label]),
+    .table-stack td[data-label=""] { padding-top: 8px !important; }
+
+    /* The label sits above the value as a small uppercase eyebrow. */
+    .table-stack td[data-label]:not([data-label=""])::before {
         content: attr(data-label);
+        display: block;
+        margin-bottom: 2px;
+        font-size: 0.6875rem;
         font-weight: 600;
-        color: var(--text-secondary);
-        margin-right: 8px;
-        flex-shrink: 0; /* keep label width stable; don't compress into value */
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-tertiary);
     }
-    /* Value content — right-aligned, shrinks to fit without squashing label */
-    .table-stack td > * {
-        min-width: 0;
-        text-align: right;
-    }
+
+    /* Reset any text-right/text-center alignment that desktop tables use —
+       on mobile every cell reads top-down, left-aligned. */
+    .table-stack td.text-right,
+    .table-stack td.text-center { text-align: left !important; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
