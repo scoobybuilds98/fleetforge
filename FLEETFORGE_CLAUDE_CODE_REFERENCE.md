@@ -1178,8 +1178,97 @@ Drift detected by the smoke test:
 - `tests/_smoke_master_schema_parity.php` — the parity check
 - D87 in `FLEETFORGE_PROGRESS.md` — original same-session-update rule
 - D126–D127 in `FLEETFORGE_PROGRESS.md` — locked discipline updates (S-DATABASE-MASTER-RECONCILE-2)
+- D131 — extension: parity + invariants smokes both run pre-commit (S-BILLING-RATE-FIX)
 - KNOWN ISSUE #100 — `lease_billing_periods` precharge cleanup (still open; next discipline target)
 - Original Phase 2 reconcile: commit `a54ad7f` for the full-regen procedure
+
+---
+
+## 13.8 BILLING RATE-TIER COMPLETENESS — D132 invariant
+
+Origin: 2026-05-06 audit of INV-2026-00086 traced a $0 `base_rental` line on a 27-day partial period to a 4-step chain — `equipment_templates.default_weekly_rate=NULL` → JS form `?? ''` collapse → submit handler omits empty strings → API `clean_decimal(null)` ternary coerces to `'0.00'`. ProRateCalculator's 8–29 day weekly path then computed `(full_weeks × 0) + (remaining × 0/7) = 0` and the "exceeds monthly?" cap evaluated `0 > monthly` as false (since monthly > 0), returning $0 with method='weekly'. Five draft invoices were affected; none had been sent.
+
+### The invariant (D132)
+
+When `billing_cycle='monthly'` and any one of (`daily_rate`, `weekly_rate`, `monthly_rate`) is `> 0`, **all three** must be `> 0`. The form, the API, and the billing engine all enforce this; the smoke test catches latent violations.
+
+### Three-layer defence
+
+```
+        ┌────────────────────────┐
+        │  app/admin/leases/     │  Layer 1 (form)
+        │  create.php            │  - Derive weekly = monthly/4.33 when null pre-fill
+        │                        │  - Submit always sends daily/weekly/monthly ('0' for blank)
+        └───────────┬────────────┘
+                    │ POST
+        ┌───────────▼────────────┐
+        │  api/v1/leases/        │  Layer 2 (API — primary defence)
+        │  create.php            │  - require array_key_exists for the 3 keys
+        │                        │  - zero-with-siblings → 422 with field-level error
+        └───────────┬────────────┘
+                    │ db_insert
+        ┌───────────▼────────────┐
+        │  leases table          │
+        └───────────┬────────────┘
+                    │ generate invoice (cron, manual)
+        ┌───────────▼────────────────────────────────────┐
+        │  lib/Billing/InvoiceGenerator::generate()       │  Layer 3a (engine seatbelt)
+        │   ├─► full_month shortcut (line ~148)          │   Throws BillingRateException
+        │   │     direct monthly_rate; defensive check   │   if rentalAmount <= 0 unless
+        │   │     before line item insert                │   billing_type in
+        │   │                                            │   {mileage_only, adjustment,
+        │   └─► ProRateCalculator::calculate()           │    credit_note}
+        │         assertNonZero() at every branch:        │
+        │         - daily   (1-5 days)                    │
+        │         - weekly  (6-7 days)                    │
+        │         - weekly  (8-29 days)                   │
+        │         - weekly_capped (8-29 days, math>monthly)│
+        │         - monthly (30+ days)                    │
+        │         the only legitimate $0 is method='none' │
+        │         when days <= 0                          │
+        └───────────┬────────────────────────────────────┘
+                    │ runs on every D131 gate
+        ┌───────────▼────────────┐
+        │  tests/_smoke_         │  Layer 4 (post-hoc invariant)
+        │  billing_invariants.php│  - I1: no unjustified zero-base draft
+        │  (D131 gate)           │  - I2: no lease rate-tier hole
+        │                        │  - I3: no template rate-tier hole
+        └────────────────────────┘
+```
+
+Each layer covers what the others miss. The 2026-05-06 audit found the bug specifically because all four were absent — a fix at any one layer would have prevented it.
+
+### Code anchors
+
+- **Form derivation:** [app/admin/leases/create.php](app/admin/leases/create.php) inside `_lookupRates()` — the `parseFloat(monthly_rate)/4.33` pre-fill.
+- **Form submit coercion:** same file, the rate-fields `'0'` send-instead-of-omit block in `submit()`.
+- **API validation:** [api/v1/leases/create.php](api/v1/leases/create.php) — the rate-tier-completeness block right after the existing "at least one rate must be positive" check.
+- **Engine throw — full_month bypass:** [lib/Billing/InvoiceGenerator.php](lib/Billing/InvoiceGenerator.php) — the `$zeroAllowed` exemption + throw, just before the `base_rental` line item insert.
+- **Engine throw — ProRate paths:** [lib/Billing/ProRateCalculator.php](lib/Billing/ProRateCalculator.php) `assertNonZero()` private method called from every non-trivial `return` site.
+- **Exception class:** [lib/Billing/BillingRateException.php](lib/Billing/BillingRateException.php) — `FleetForge\Billing\BillingRateException` extends `\RuntimeException`.
+- **Smoke invariants:** [tests/_smoke_billing_invariants.php](tests/_smoke_billing_invariants.php).
+- **Stress coverage:** [tests/_stress_billing_rate_exception.php](tests/_stress_billing_rate_exception.php) — 11/11 cases (5 throw, 5 success, 1 legit zero).
+- **Backfill / void script:** [scripts/billing_rate_fix_2026_05_06.php](scripts/billing_rate_fix_2026_05_06.php) — one-shot remediation with --dry-run/--execute, idempotent.
+
+### Adding a new caller that writes lease rates
+
+If a future session adds an endpoint or cron that writes `daily_rate` / `weekly_rate` / `monthly_rate` to the `leases` table:
+
+1. **Use `api/v1/leases/create.php` if at all possible** — its validation already enforces D132 and audit_log captures the write.
+2. **If a new write site is unavoidable**, mirror the rate-tier-completeness check before the INSERT/UPDATE. Layer 3 (the engine throws) is a backstop, not a substitute — bad data sitting in the table indefinitely defeats the purpose.
+3. **Run `tests/_smoke_billing_invariants.php` after the change** — exit 0 confirms no new latent violation slipped through.
+4. **Cancel/soft-delete any test artifacts** with a structured `cancel_reason` / `void_reason` that names the session, so a future audit can distinguish test pollution from real data.
+
+### Adding a new billing path that calls ProRateCalculator
+
+Default behaviour: any `days > 0` call that would produce $0 throws `BillingRateException`. Catch it explicitly in your caller, log to error log + Sentry as ERROR with lease + period context, and refuse to write the invoice. Do NOT silently fall back to a different rate tier — that would mask the upstream defect. The current callers (`InvoiceGenerator::generate()`, cron paths) treat the exception as a hard fail; new callers must do the same.
+
+### See also
+
+- D131 in `FLEETFORGE_PROGRESS.md` — smoke-gate-with-invariants discipline
+- D132 in `FLEETFORGE_PROGRESS.md` — rate-tier validation discipline
+- S-BILLING-RATE-FIX session entry in `FLEETFORGE_PROGRESS.md` — full trace of the 2026-05-06 audit + the four-layer fix
+- `THE LAW` in §13 above — the day-count branches the engine is now defending
 
 ---
 
