@@ -161,6 +161,38 @@ class InvoiceGenerator
                 $explanation = $result['explanation'];
             }
 
+            // ════════════════════════════════════════════════════════════════
+            // S-BILLING-RATE-FIX D-E (D132 backstop) — refuse $0 base_rental
+            //
+            // ProRateCalculator now throws on its own zero-compute paths, but
+            // the full_month shortcut above bypasses ProRateCalculator and uses
+            // monthly_rate directly. If a lease ever sneaks past D132 with
+            // monthly_rate=0 (cron, fixtures, direct SQL), the full_month path
+            // would silently ship a $0 base_rental. Mirror the calculator's
+            // fail-loud behaviour here. mileage_only / adjustment / credit_note
+            // legitimately carry $0 base_rental and are exempt.
+            // ════════════════════════════════════════════════════════════════
+            $zeroAllowed = ['mileage_only', 'adjustment', 'credit_note'];
+            if (!in_array($billingType, $zeroAllowed, true)
+                && bccomp($rentalAmount, '0', 2) <= 0) {
+                throw new BillingRateException(
+                    sprintf(
+                        'InvoiceGenerator refused to write $0 base_rental: lease_id=%d, period=%s..%s (%d days), billing_type=%s, rate_method=%s, daily=%s, weekly=%s, monthly=%s. '
+                        . 'Upstream rate-tier-completeness invariant (D132) must be enforced at lease create — see api/v1/leases/create.php.',
+                        (int)$lease['id'], $periodStart, $periodEnd, $days, $billingType, $rateMethod,
+                        (string)$lease['daily_rate'], (string)$lease['weekly_rate'], (string)$lease['monthly_rate']
+                    ),
+                    $rateMethod, $days,
+                    (string)$lease['daily_rate'], (string)$lease['weekly_rate'], (string)$lease['monthly_rate'],
+                    [
+                        'lease_id'     => (int)$lease['id'],
+                        'period_start' => $periodStart,
+                        'period_end'   => $periodEnd,
+                        'billing_type' => $billingType,
+                    ]
+                );
+            }
+
             // ADV-BILL-1: skip the base_rental and insurance/warranty lines on
             // mileage_only adjustment invoices — they only carry mileage extra_lines.
             if ($billingType !== 'mileage_only') {
