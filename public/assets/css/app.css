@@ -3420,8 +3420,16 @@ textarea.form-input {
     .form-row-3,
     .form-row-4 { grid-template-columns: 1fr; }
 
-    /* Grid stacks */
+    /* Grid stacks. The `> *` reset is required because some pages set
+       `style="grid-column: span 2"` inline on cards that should stretch
+       across both desktop columns. With grid-template-columns:1fr that
+       inline span forces the browser to auto-create a second implicit
+       column, breaking the stack — items end up at 50px / 253px instead
+       of 100% width. Forcing every child back to grid-column:auto keeps
+       the single-column stack intact. */
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .grid-2 > *,
+    .grid-3 > * { grid-column: auto !important; }
 
     /* Notification dropdown full width */
     .notification-dropdown {
@@ -5362,9 +5370,20 @@ dl.detail-grid dd {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }
+    /* 640px min-width is the desktop safety floor that lets a table
+       horizontally scroll inside a narrow wrapper. Excluded: tables that
+       have been transformed into mobile cards (.table-stack) or spec
+       key/value tables (no <thead>) — those flow to viewport width and
+       would only get clipped at 640px since the parent .card has
+       overflow:hidden. Override to min-width:0 for them. */
     table.table,
     table.data-table {
         min-width: 640px;
+    }
+    table.table.table-stack,
+    .card .table:not(.table-stack):not([data-labelled]) {
+        min-width: 0 !important;
+        width: 100% !important;
     }
 
     /* Larger tap targets on mobile */
@@ -5463,6 +5482,51 @@ dl.detail-grid dd {
        on mobile every cell reads top-down, left-aligned. */
     .table-stack td.text-right,
     .table-stack td.text-center { text-align: left !important; }
+
+    /* ── SPEC TABLES (key/value, no <thead>) ─────────────────────────
+       Show pages render two-column key/value layouts as `<table class="table">`
+       with no <thead> — the first <td> is the label, second is the value.
+       The auto-labeller skips these (it requires <thead><th>), so on mobile
+       the table keeps its desktop width (~640px) and gets clipped by the
+       parent card's overflow, leaving only the left column visible.
+
+       Detect them via :not([data-labelled]) + :not(.table-stack) and stack
+       each row's two cells the same way as auto-stack tables. */
+    .card .table:not(.table-stack):not([data-labelled]),
+    .card .table:not(.table-stack):not([data-labelled]) tbody {
+        display: block !important;
+        width: 100% !important;
+    }
+    .card .table:not(.table-stack):not([data-labelled]) tr {
+        display: block !important;
+        padding: 8px 0 !important;
+        border: none !important;
+        border-bottom: 1px solid var(--border-color) !important;
+    }
+    .card .table:not(.table-stack):not([data-labelled]) tr:last-child {
+        border-bottom: none !important;
+    }
+    .card .table:not(.table-stack):not([data-labelled]) td {
+        display: block !important;
+        padding: 2px 0 !important;
+        border: none !important;
+        text-align: left !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    /* First cell = label (small uppercase eyebrow). Detect via the
+       .text-secondary class that every spec-table uses for the label
+       column, and fall back to :first-child for tables that don't. */
+    .card .table:not(.table-stack):not([data-labelled]) td:first-child,
+    .card .table:not(.table-stack):not([data-labelled]) td.text-secondary {
+        font-size: 0.6875rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-tertiary) !important;
+        margin-bottom: 2px;
+    }
 }
 
 /* ═══════════════════════════════════════════════════════════════
