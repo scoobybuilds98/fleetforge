@@ -28,6 +28,7 @@ declare(strict_types=1);
  *              estimated_mileage, estimated_mileage_km, estimated_mileage_miles,
  *              km_to_miles_conversion, miles_to_km_conversion,
  *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
+ *              gps_opt_in, gps_cost (S-LEASE-GPS-COST: per-day rate, mutable),
  *              gst_exempt, pst_exempt
  *              NOTE: status, daily_rate, weekly_rate, monthly_rate are immutable
  *              after creation (require amendment record — not implemented here)
@@ -162,6 +163,20 @@ if (array_key_exists('warranty_cost', $body)) {
         $fields['warranty_cost'] = 'Warranty cost cannot be negative.';
     }
     $data['warranty_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
+}
+
+// S-LEASE-GPS-COST: GPS toggle + per-day cost are mutable (parallel to
+// insurance/warranty — not rate-immutable per D14). Negative cost rejected;
+// invalid/null falls back to '1.00' to match schema default.
+if (array_key_exists('gps_opt_in', $body))
+    $data['gps_opt_in'] = (bool) $body['gps_opt_in'] ? 1 : 0;
+
+if (array_key_exists('gps_cost', $body)) {
+    $d = clean_decimal($body['gps_cost']);
+    if ($d !== null && bccomp($d, '0', 4) < 0) {
+        $fields['gps_cost'] = 'GPS cost cannot be negative.';
+    }
+    $data['gps_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '1.00';
 }
 
 // D22: gst_exempt and pst_exempt can be changed via amendment (allow here for now)

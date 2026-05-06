@@ -443,6 +443,22 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                     </div>
                 </div>
+
+                <!-- S-LEASE-GPS-COST: GPS tracking add-on (per-day rate) -->
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;">
+                            <input type="checkbox" class="form-check-input" x-model="form.gps_opt_in">
+                            GPS Tracking ($/day)
+                        </label>
+                        <div class="input-group" x-show="form.gps_opt_in">
+                            <span class="input-group-prefix">$</span>
+                            <input type="number" class="form-control font-mono"
+                                   x-model="form.gps_cost" step="0.01" min="0" placeholder="1.00">
+                        </div>
+                    </div>
+                    <div class="form-group"></div>
+                </div>
             </div>
         </div>
 
@@ -499,6 +515,9 @@ function FF_EditLease() {
             insurance_cost:     <?= json_encode($lease['insurance_cost'] ?? '0.00') ?>,
             warranty_opt_in:    <?= $lease['warranty_opt_in'] ? 'true' : 'false' ?>,
             warranty_cost:      <?= json_encode($lease['warranty_cost'] ?? '0.00') ?>,
+            // S-LEASE-GPS-COST: per-day GPS rate; reads existing values
+            gps_opt_in:         <?= $lease['gps_opt_in'] ? 'true' : 'false' ?>,
+            gps_cost:           <?= json_encode($lease['gps_cost'] ?? '1.00') ?>,
             notes:              <?= json_encode($lease['notes'] ?? '') ?>,
             internal_notes:     <?= json_encode($lease['internal_notes'] ?? '') ?>,
             // S-MILEAGE-1 Model B: precharge toggle + amount (editable until
@@ -570,6 +589,7 @@ function FF_EditLease() {
                 ['estimated_mileage_miles', 'Mile allowance cannot be negative.'],
                 ['insurance_cost',          'Insurance cost cannot be negative.'],
                 ['warranty_cost',           'Warranty cost cannot be negative.'],
+                ['gps_cost',                'GPS cost cannot be negative.'],
             ];
             numChecks.forEach(([k, msg]) => {
                 const v = this.form[k];

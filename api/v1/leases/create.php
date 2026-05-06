@@ -34,6 +34,8 @@ declare(strict_types=1);
  *              Optional: end_date, currency, mileage_unit, billing_cycle,
  *              gst_exempt, pst_exempt, discount_type, discount_value,
  *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
+ *              gps_opt_in, gps_cost (S-LEASE-GPS-COST: per-day rate, defaults
+ *              opt_in=true / cost=$1.00 if absent),
  *              po_number, notes, internal_notes, rate_notes, minimum_end_date,
  *              mileage_rate_km, mileage_rate_miles, estimated_mileage_km,
  *              estimated_mileage_miles, km_to_miles_conversion, miles_to_km_conversion
@@ -249,6 +251,16 @@ if ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) < 0) {
     $fields['warranty_cost'] = 'Warranty cost cannot be negative.';
 }
 $warrantyCost = ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) >= 0) ? $warrantyCostIn : '0.00';
+
+// S-LEASE-GPS-COST: per-day GPS rate. Defaults differ from insurance/warranty —
+// opt_in defaults to true (matches schema DEFAULT 1) and cost defaults to '1.00'
+// (matches schema DEFAULT 1.00) when the field is absent from the payload.
+$gpsOptIn  = isset($body['gps_opt_in']) ? (bool) $body['gps_opt_in'] : true;
+$gpsCostIn = clean_decimal($body['gps_cost'] ?? null);
+if ($gpsCostIn !== null && bccomp($gpsCostIn, '0', 4) < 0) {
+    $fields['gps_cost'] = 'GPS cost cannot be negative.';
+}
+$gpsCost = ($gpsCostIn !== null && bccomp($gpsCostIn, '0', 4) >= 0) ? $gpsCostIn : '1.00';
 
 $poNumber       = clean_string($body['po_number'] ?? null, 100);
 $notes          = clean_string($body['notes'] ?? null, 5000);
@@ -546,6 +558,7 @@ db_transaction(function () use (
     $taxRateGst, $taxRatePst, $taxRateHst,
     $discountType, $discountValue,
     $insuranceOptIn, $insuranceCost, $warrantyOptIn, $warrantyCost,
+    $gpsOptIn, $gpsCost,
     $poNumber, $notes, $internalNotes,
     $estimatedMileage, $mileageAtStart,
     $odometerStartKm, $odometerStartSource, $odometerStartFetchedAt,
@@ -649,6 +662,8 @@ db_transaction(function () use (
         'insurance_cost'           => $insuranceCost,
         'warranty_opt_in'          => $warrantyOptIn ? 1 : 0,
         'warranty_cost'            => $warrantyCost,
+        'gps_opt_in'               => $gpsOptIn ? 1 : 0,
+        'gps_cost'                 => $gpsCost,
         'po_number'                => $poNumber,
         'notes'                    => $notes,
         'internal_notes'           => $internalNotes,
