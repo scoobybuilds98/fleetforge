@@ -490,23 +490,37 @@ class InvoiceGenerator
             // S-MILEAGE-RATE-VALIDATION D-B / D133 — defensive throw on the
             // mileage excess block when allowance is configured but rate is 0.
             // Mirrors the full_month base_rental throw (line ~178) — same
-            // exception class, same fail-loud philosophy. Stage-split the
-            // existing 4-condition AND gate so the throw can attach.
+            // exception class, same fail-loud philosophy.
             //
             // S-MILEAGE-RATE-VALIDATION D-C / D133 — soft WARNING when
             // distance flowed through but no rate tier configured at all
             // (allowance and rate both 0). Uses Sentry::captureMessage at
             // 'warning' level + audit_log row. Sentry call wrapped in
             // try/catch — observability MUST NOT block billing.
+            //
+            // S-MILEAGE-ALLOWANCE-ZERO-FIX D-A — `$mileageBillingExpected`
+            // now keys on rate>0 (operator's intent signal) rather than
+            // allowance>0. This admits Model B Lite (rate>0 + allowance=0
+            // → bill every km from km 0) which the old gate silently
+            // skipped. The D-B HARD throw was previously gated by the
+            // allowance-keyed expected flag; promoted to a standalone
+            // guard so it still fires for the (allowance>0 + rate=0)
+            // data-hole case, unchanged semantics. See D132/D133 clarify
+            // in CLAUDE_CODE_REFERENCE.md §13.8 for the three-config
+            // matrix (Model C / Model B Lite / Disabled).
             // ════════════════════════════════════════════════════════════
             $mileageBillingExpected = (
                 $periodDistanceKm !== null
                 && $billingType !== 'mileage_only'
-                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) > 0
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
             );
 
-            // D-B: HARD throw on rate-zero-with-allowance-intent.
-            if ($mileageBillingExpected
+            // D-B: HARD throw on rate-zero-with-allowance-intent (D133,
+            // unchanged semantics — promoted to a standalone guard since
+            // $mileageBillingExpected no longer covers it post C1).
+            if ($periodDistanceKm !== null
+                && $billingType !== 'mileage_only'
+                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) > 0
                 && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
             ) {
                 throw new BillingRateException(
