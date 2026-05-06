@@ -202,20 +202,32 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     </template>
 
     <!-- ── Action buttons (status-driven) ─────────────────────── -->
-    <?php if (can('leases', 'edit')): ?>
+    <?php if (can('leases', 'edit') || (can('invoices', 'create') && in_array($lease['status'], ['active', 'completed'], true))): ?>
     <div class="d-flex gap-2" style="margin-bottom:1.5rem;">
 
-        <?php if ($lease['status'] === 'pending'): ?>
+        <?php if (can('leases', 'edit') && $lease['status'] === 'pending'): ?>
         <button class="btn btn-primary" @click="activate()" :disabled="actionInProgress">
             <span x-show="!activating">Activate Lease</span>
             <span x-show="activating">Activating…</span>
         </button>
         <?php endif; ?>
 
-        <?php if ($lease['status'] === 'active'): ?>
+        <?php if (can('leases', 'edit') && $lease['status'] === 'active'): ?>
         <button class="btn btn-warning" @click="openCloseModal()" :disabled="actionInProgress">
             Close Lease
         </button>
+        <?php endif; ?>
+
+        <?php /* S-INVOICE-CREATION-UX C3 (Issue 3): Generate Invoice
+                 navigates to /invoices/create?lease_id={id}; the form's
+                 init() (C2) reads the URL param and triggers onLeaseChange
+                 so the lease is pre-selected and period dates auto-filled.
+                 Permission gated by 'invoices', 'create' to match the
+                 create page's require_permission. Hidden for pending
+                 (no invoicing yet) and cancelled (won't bill). */ ?>
+        <?php if (can('invoices', 'create') && in_array($lease['status'], ['active', 'completed'], true)): ?>
+        <a href="<?= base_url('invoices/create') ?>?lease_id=<?= (int)$lease['id'] ?>"
+           class="btn btn-primary">Generate Invoice</a>
         <?php endif; ?>
 
         <template x-if="actionError">
