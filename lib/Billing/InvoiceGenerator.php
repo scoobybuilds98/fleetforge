@@ -486,11 +486,103 @@ class InvoiceGenerator
             $mileageReviewStatus = 'not_required';
             $mileageReviewMeta   = null;
 
-            if ($periodDistanceKm !== null
+            // ════════════════════════════════════════════════════════════
+            // S-MILEAGE-RATE-VALIDATION D-B / D133 — defensive throw on the
+            // mileage excess block when allowance is configured but rate is 0.
+            // Mirrors the full_month base_rental throw (line ~178) — same
+            // exception class, same fail-loud philosophy. Stage-split the
+            // existing 4-condition AND gate so the throw can attach.
+            //
+            // S-MILEAGE-RATE-VALIDATION D-C / D133 — soft WARNING when
+            // distance flowed through but no rate tier configured at all
+            // (allowance and rate both 0). Uses Sentry::captureMessage at
+            // 'warning' level + audit_log row. Sentry call wrapped in
+            // try/catch — observability MUST NOT block billing.
+            // ════════════════════════════════════════════════════════════
+            $mileageBillingExpected = (
+                $periodDistanceKm !== null
                 && $billingType !== 'mileage_only'
                 && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) > 0
-                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
+            );
+
+            // D-B: HARD throw on rate-zero-with-allowance-intent.
+            if ($mileageBillingExpected
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
             ) {
+                throw new BillingRateException(
+                    sprintf(
+                        'InvoiceGenerator refused to write mileage line: lease_id=%d, period=%s..%s (%d days), '
+                        . 'estimated_mileage_km=%s configured (period_distance_km=%s) but mileage_rate_km=%s. '
+                        . 'Upstream rate-tier-completeness invariant (D133) must be enforced at lease create — see api/v1/leases/create.php.',
+                        $leaseId, $periodStart, $periodEnd, $days,
+                        (string) ($lease['estimated_mileage_km'] ?? '0'),
+                        (string) $periodDistanceKm,
+                        (string) ($lease['mileage_rate_km'] ?? '0')
+                    ),
+                    'mileage_excess', $days,
+                    (string) ($lease['daily_rate']   ?? '0'),
+                    (string) ($lease['weekly_rate']  ?? '0'),
+                    (string) ($lease['monthly_rate'] ?? '0'),
+                    [
+                        'lease_id'             => $leaseId,
+                        'period_start'         => $periodStart,
+                        'period_end'           => $periodEnd,
+                        'estimated_mileage_km' => (string) ($lease['estimated_mileage_km'] ?? '0'),
+                        'mileage_rate_km'      => (string) ($lease['mileage_rate_km'] ?? '0'),
+                        'period_distance_km'   => (string) $periodDistanceKm,
+                        'billing_type'         => $billingType,
+                    ]
+                );
+            }
+
+            // D-C: SOFT WARNING on distance>0 with no rate tier configured at all.
+            // Fires BEFORE the calculation block — the calculation is then skipped
+            // legitimately because no allowance signals "no mileage billing intent".
+            if ($periodDistanceKm !== null
+                && $billingType !== 'mileage_only'
+                && bccomp((string) $periodDistanceKm, '0', 2) > 0
+                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) <= 0
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
+            ) {
+                $warningMsg = sprintf(
+                    'Lease #%d period %s..%s has period_distance_km=%s but mileage block skipped (no rate tier configured). Possible misconfiguration — verify lease intent.',
+                    $leaseId, $periodStart, $periodEnd, (string) $periodDistanceKm
+                );
+
+                // Sentry: WARNING level. SamsaraClient pattern at lib/GPS/SamsaraClient.php:1583-1592.
+                try {
+                    \FleetForge\Observability\Sentry::captureMessage($warningMsg, 'warning');
+                } catch (\Throwable) {
+                    // Observability MUST NOT block the billing path
+                }
+
+                // audit_log: action='update' (the action ENUM doesn't include
+                // 'warning_logged'; descriptive value carried in notes per D102
+                // workaround pattern). entity_type='lease' so it joins the lease
+                // history view a manager would scan.
+                db_insert('audit_log', [
+                    'user_id'      => $params['created_by'] ?? null,
+                    'user_name'    => (function_exists('current_user') && current_user())
+                                        ? (current_user()['name'] ?? 'system') : 'system',
+                    'action'       => 'update',
+                    'module'       => 'billing',
+                    'entity_type'  => 'lease',
+                    'entity_id'    => $leaseId,
+                    'entity_label' => $lease['contract_number'] ?? null,
+                    'notes'        => '[FLEETFORGE_BILLING_WARNING] ' . $warningMsg,
+                    'old_values'   => null,
+                    'new_values'   => json_encode([
+                        'period_distance_km'   => (string) $periodDistanceKm,
+                        'estimated_mileage_km' => (string) ($lease['estimated_mileage_km'] ?? '0'),
+                        'mileage_rate_km'      => (string) ($lease['mileage_rate_km'] ?? '0'),
+                        'period_start'         => $periodStart,
+                        'period_end'           => $periodEnd,
+                    ]),
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+            }
+
+            if ($mileageBillingExpected) {
                 $allowance = \FleetForge\Billing\Mileage::monthlyAllowance($lease);
                 $excess    = \FleetForge\Billing\Mileage::periodExcess(
                     (float) $periodDistanceKm,
