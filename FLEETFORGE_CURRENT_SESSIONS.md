@@ -49,11 +49,8 @@ Open design questions:
 - Transparency level for tax math? (lean: always show full GST/PST/HST breakdown for B2B trucking + CRA defensibility)
 Discussed: 2026-05-07 in planning chat.
 
-**S-INVOICE-CREATION-UX** — QUEUED
-Scope: invoice creation form auto-fill (period_start from prior invoice's period_end + 1 day OR lease.start_date; period_end from billing_cycle + period_start, capped at lease.end_date or actual_return_date). Add "Generate Invoice" button on lease profile page (active + completed leases) navigating to /admin/invoices/create?lease_id={id}. Edge-case handling for early-closed, open-ended, gap-coverage leases.
-Effort: ~60-90 min.
-Dependencies: none.
-Discussed: 2026-05-07 in planning chat.
+**S-INVOICE-CREATION-UX** — SHIPPED 2026-05-07 (commits 044ffef + 6feb94c + cdb59ca + C4 — see PROGRESS.md SESSION LOG)
+Outcome: 4-commit arc covering all three issues. C1 classified Issue 1 as VALIDATION GAP (KNOWN ISSUE #103, queued S-MILEAGE-RATE-VALIDATION-FOLLOWUP). C2 wired period auto-fill on invoice create form (12-fixture node smoke 12/12 PASS). C3 added Generate Invoice button on lease profile (8-cell PHP truth-table smoke 13/13 PASS). C4 = tests + this entry. Both new permanent smoke tests committed at tests/_smoke_invoice_create_period_autofill.js + tests/_smoke_lease_show_generate_invoice_button.php.
 
 **S-UNIT-STATUS-COLOR** — QUEUED
 Scope: small color indicator (dot or pill) next to equipment_unit references across all surfaces — fleet list, unit profile, lease references, invoice references, reservation references, maintenance work orders, universal search results, customer portal. Uses existing semantic tokens from FLEETFORGE_DESIGN_DETAILS.md (green=available, blue=on_lease, amber=maintenance, red=out_of_service/damaged, gray=retired).
@@ -167,8 +164,11 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-07:**
-- S-MILEAGE-RATE-VALIDATION SHIPPED (commits TBD — confirm with operator)
-- S-LOOKUP-RATES-NAMESPACE SHIPPED (7a45534, 7941148, 32293dd) — docs gap supplementary commit pending (S-LOOKUP-RATES-NAMESPACE-COMPLETE)
+- S-INVOICE-CREATION-UX SHIPPED (044ffef + 6feb94c + cdb59ca + C4) — 3 issues from real-use testing: C1 docs-only VALIDATION GAP classification (KNOWN ISSUE #103 + queued S-MILEAGE-RATE-VALIDATION-FOLLOWUP); C2 period auto-fill on invoice create form; C3 Generate Invoice button on lease profile.
+- S-CURRENT-SESSIONS-FILE SHIPPED (4e7da02) — created FLEETFORGE_CURRENT_SESSIONS.md as active session queue companion to PROGRESS.md.
+- S-LOOKUP-RATES-NAMESPACE-COMPLETE SHIPPED (d83c4e3) — D134 architectural lock + KNOWN ISSUE #102 close + K-1 KEY LEARNINGS extraction.
+- S-MILEAGE-RATE-VALIDATION SHIPPED (714e5d6 + 9291d6b + 11476c4 + 61f23df) — defensive engine + API validation + smoke invariants for the mileage rate tier.
+- S-LOOKUP-RATES-NAMESPACE SHIPPED (7a45534 + 7941148 + 32293dd) — rate-lookup endpoint namespace fix.
 
 **2026-05-06:**
 - S-MILEAGE-RATE-ZERO-FIX SHIPPED (bc4db87, 23268f7) — C2 (engine + smoke) and INV-27/INV-84 voids contracted out, deferred to S-MILEAGE-RATE-VALIDATION
