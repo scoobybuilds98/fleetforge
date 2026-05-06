@@ -1322,7 +1322,13 @@ function FF_CreateLease() {
             // empty input becomes '0' so the API can apply the rate-tier
             // completeness invariant (D132) instead of seeing a missing key
             // that the legacy null-coalesce path silently turned into 0.00.
-            const rateFields = ['daily_rate', 'weekly_rate', 'monthly_rate'];
+            // S-MILEAGE-RATE-VALIDATION D133: same coercion now extended to
+            // the mileage rate fields so the API can apply D133 (mileage
+            // rate-tier completeness) without a missing-key blind spot.
+            const rateFields = [
+                'daily_rate', 'weekly_rate', 'monthly_rate',
+                'mileage_rate', 'mileage_rate_km', 'mileage_rate_miles',
+            ];
             const payload = {};
             Object.entries(this.form).forEach(([k, v]) => {
                 if (rateFields.includes(k)) {

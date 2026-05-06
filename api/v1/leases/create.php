@@ -389,6 +389,42 @@ if ($prechargeEnabled === 0 && $prechargeAmount !== null) {
     $prechargeAmount = null;
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// S-MILEAGE-RATE-VALIDATION D-A / D133 — mileage rate-tier completeness
+//
+// Parallel to D132 D-D Layer 2 (rental rate-tier completeness above).
+// Trigger fires on any intent signal that the lease will involve per-km
+// billing: an estimated_mileage value > 0 (allowance configured) OR
+// precharge_enabled = 1 (operator opted into the precharge model). When
+// any trigger is true, mileage_rate must be > 0 (any of the three columns
+// — legacy mileage_rate, dual-unit mileage_rate_km, dual-unit
+// mileage_rate_miles).
+//
+// Permissive on the inverse: a lease with no allowance and no precharge
+// can legitimately have rate=0 (no per-km charge expected). Only the
+// "intent + zero rate" combination is rejected.
+//
+// Origin: closes the create-time hole that produced the zero-rate billing
+// class S-MILEAGE-RATE-ZERO-FIX backfilled. See FLEETFORGE_PROGRESS.md
+// D133 row + REFERENCE.md §13.8 mileage tier extension.
+// ════════════════════════════════════════════════════════════════════════
+$anyAllowancePositive = (
+    ($allowKmRaw    !== null && bccomp($allowKmRaw,    '0', 3) > 0)
+ || ($allowMilesRaw !== null && bccomp($allowMilesRaw, '0', 3) > 0)
+ || bccomp($estimatedMileage, '0', 4) > 0
+);
+$intentSignalPresent = $anyAllowancePositive || ($prechargeEnabled === 1);
+
+if ($intentSignalPresent && !$anyMileageRate) {
+    // Field-level error on mileage_rate_km — the modern dual-unit field that
+    // the form pre-fills from lookup_rates.php and the operator most likely
+    // sees first. Skip if a per-field error already exists so the user gets
+    // the most specific message.
+    if (!isset($fields['mileage_rate_km'])) {
+        $fields['mileage_rate_km'] = 'Mileage rate (mileage_rate_km) must be > 0 when an estimated mileage allowance or precharge is configured. Set a valid rate, or zero out the allowance/precharge if no per-km charge is intended.';
+    }
+}
+
 // ── Date validation ─────────────────────────────────────────────
 if ($startDate && $endDate && $endDate < $startDate) {
     $fields['end_date'] = 'End date must be after start date.';
