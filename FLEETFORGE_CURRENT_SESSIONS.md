@@ -11,9 +11,23 @@
 
 ---
 
+## Pre-flight check (D136)
+
+Per D136, every Code Desktop session begins with a pre-flight read of this file:
+
+1. Read FLEETFORGE_CURRENT_SESSIONS.md.
+2. If any session is marked IN-FLIGHT with Touching domains overlapping the planned scope → halt and surface to operator for direction (serialize and wait, or opt into branch isolation per D136 fallback). IN-FLIGHT-RO sessions never block write sessions; multiple IN-FLIGHT-RO may coexist.
+3. If no IN-FLIGHT collision, register the new session entry here with status IN-FLIGHT (write) or IN-FLIGHT-RO (read-only), start timestamp, agent identifier, and Touching domains (write only). Commit the registration as part of the session's first commit, OR as a standalone single-line edit if the operator wants to register before any work.
+4. On session end, update the entry to SHIPPED (or DEFERRED / SUPERSEDED as applicable) per existing CURRENT_SESSIONS.md discipline. Remove the IN-FLIGHT multi-line details.
+
+Read-only sessions skip the collision check (step 2) but still register (step 3) for operator visibility.
+
+---
+
 ## Status legend
 - **QUEUED** — discussed, prompt drafted (or near-drafted), not yet shipped
-- **IN-FLIGHT** — currently executing in Claude Code Desktop
+- **IN-FLIGHT** — write-mode session currently executing in Code Desktop. Per D136, only one allowed at a time on main. Entry includes start timestamp, agent identifier, and touching domains.
+- **IN-FLIGHT-RO** — read-only session (audit, survey, decision-surfacing) running concurrently. Multiple IN-FLIGHT-RO may coexist with one IN-FLIGHT.
 - **BLOCKED** — waiting on operator input or upstream session
 - **SHIPPED** — landed on origin/main; archive to PROGRESS.md
 - **DEFERRED** — scoped out indefinitely with reason
@@ -21,9 +35,36 @@
 
 ---
 
+## Active session format
+
+For sessions in IN-FLIGHT or IN-FLIGHT-RO status, render the entry across multiple lines:
+
+**S-EXAMPLE-LABEL** — IN-FLIGHT
+  Started: 2026-05-07T14:32 UTC by desktop-1
+  Touching: lib/Billing/, app/admin/leases/, FLEETFORGE_DATABASE_MASTER.sql
+
+Required fields: STATUS keyword, Started (ISO 8601 timestamp + operator-supplied agent identifier).
+Optional metadata: Touching (file paths or directories the session expects to write — used for collision detection in pre-flight check).
+
+For IN-FLIGHT-RO, the Touching field is not required (read-only doesn't lock):
+
+**S-EXAMPLE-AUDIT** — IN-FLIGHT-RO
+  Started: 2026-05-07T14:32 UTC by desktop-2
+
+When the session ships, update the entry to status SHIPPED with commit refs (per existing convention) and remove the multi-line IN-FLIGHT details.
+
+---
+
 ## Active queue (as of 2026-05-07)
 
 ### Documentation cleanup (queued, small)
+
+**S-D135-REFERENCE-PROMOTE** — QUEUED
+Scope: promote D135 (mileage three-configuration matrix — Model C / Model B Lite / Disabled, locked 2026-05-07 via S-MILEAGE-ALLOWANCE-ZERO-FIX) into FLEETFORGE_CLAUDE_CODE_REFERENCE.md. Two pieces: (1) §0 LOCKED DECISIONS index row pointing back to PROGRESS.md DECISIONS for full body (terse one-row format matching D134's pattern); (2) full content body as a §13.8 subsection extension parallel to the existing D132/D133 mileage tier extension. Pre-work scan in S-MULTI-AGENT-DISCIPLINE-IMPL confirmed D135 currently exists ONLY in PROGRESS.md DECISIONS — REFERENCE.md has zero D135 hits.
+Effort: ~15-20 min (single docs commit).
+Dependencies: none.
+Discussed: 2026-05-07 (S-MULTI-AGENT-DISCIPLINE-IMPL pre-work HALT round; operator confirmed conditional handling — pre-work returned 0 REFERENCE.md hits → branched to defer + queue here).
+Notes: low priority. D135 is already authoritative in PROGRESS.md DECISIONS; the REFERENCE.md promotion is for quick-lookup discoverability only. Can be bundled with the next session that already touches REFERENCE.md.
 
 **S-LOOKUP-RATES-NAMESPACE-COMPLETE** — QUEUED
 Scope: close docs rigor gaps from S-LOOKUP-RATES-NAMESPACE original session — D-NEXT architectural lock in CLAUDE_CODE_REFERENCE.md ("category, not template name, is canonical equipment_type for rate tables"); KNOWN ISSUES close in PROGRESS.md; KEY LEARNINGS standalone extraction.
@@ -166,6 +207,7 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-07:**
+- S-MULTI-AGENT-DISCIPLINE-IMPL SHIPPED (this commit) — locks D136 (multi-agent discipline: hybrid single-agent serialization + branch isolation fallback) + K-11 (lock-discipline-before-frequency learning). Upgrades CURRENT_SESSIONS.md status schema with IN-FLIGHT / IN-FLIGHT-RO entries, multi-line entry format, and Pre-flight check section. Backfills S-ACCT-AUDIT SESSION LOG row to close the dangling reference in D136. D135 §0 promotion deferred to separate session (S-D135-REFERENCE-PROMOTE queued). Discipline takes effect immediately for next session.
 - S-LEASE-GPS-COST SHIPPED (71c3e5c + 21c7c58 + 05266e7 + C4) — adds per-lease GPS tracking add-on (gps_opt_in tinyint default 1 + gps_cost decimal default 1.00). Per-day billing rhythm: amount = gps_cost × billing_days. Engine emits 'gps' line item (ENUM extended) when opt_in=1 AND cost>0. Existing leases backfilled to opt_in=1 / cost=$1.00 per Option (i) — auto-bill on next cycle. Stress test 4/4 PASS. D-A through D-G locked.
 - S-MILEAGE-ALLOWANCE-ZERO-FIX SHIPPED (2168bd5 + 764abf1 + ef050e7 + C4) — engine-side fix for the silent-skip class on Model B Lite leases (rate>0 + allowance=0). Closed KNOWN ISSUE #103. D135 locked. Multi-agent reconciliation: parallel agent's commit ef050e7 combined C2+C3; my C1+C2 stand alone. Side-finding queued as S-REVIEW-MILEAGE-TAX-FIX (dormant tax bug in review_mileage.php).
 - S-INVOICE-CREATION-UX SHIPPED (044ffef + 6feb94c + cdb59ca + 430fd91) — 3 issues from real-use testing: C1 docs-only VALIDATION GAP classification (KNOWN ISSUE #103, since RESOLVED above); C2 period auto-fill on invoice create form; C3 Generate Invoice button on lease profile.
