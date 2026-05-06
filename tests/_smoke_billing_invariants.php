@@ -4,12 +4,13 @@ declare(strict_types=1);
 /**
  * tests/_smoke_billing_invariants.php
  *
- * S-BILLING-RATE-FIX D-F / D132 — runtime invariant smoke test for the
- * billing rate-tier discipline. Catches the class of bug found by the
- * 2026-05-06 audit (INV-2026-00086 zero-base-rental) on every code path
+ * S-BILLING-RATE-FIX D-F / D132 + S-MILEAGE-RATE-VALIDATION D-D / D133 —
+ * runtime invariant smoke test for the billing rate-tier discipline.
+ * Catches the class of bug found by the 2026-05-06 audit (INV-2026-00086
+ * zero-base-rental) AND its mileage-tier counterpart on every code path
  * that mutates lease or invoice rows.
  *
- * Three invariants, all must hold:
+ * Five invariants, all must hold:
  *
  *   I1 — No draft invoice carries subtotal=0 unless it has an explicit
  *        legitimate justification. Drafts with subtotal=0 that are NOT
@@ -23,13 +24,25 @@ declare(strict_types=1);
  *
  *   I3 — No equipment_template has the same hole on its default rates.
  *
+ *   I4 — D133 lease-side: no lease (deleted_at IS NULL) has an intent
+ *        signal — estimated_mileage_km > 0 OR precharge_enabled = 1 —
+ *        with mileage_rate_km = 0 (or NULL). Mirrors the C1 engine throw
+ *        and the C2 API validator at the data layer.
+ *
+ *   I5 — D133 invoice-side: no non-void invoice (status IN ('draft','sent'),
+ *        deleted_at IS NULL) has period_distance_km > 0 against a parent
+ *        lease whose mileage_rate_km = 0. Catches any draft/sent invoice
+ *        that records distance against a zero-rate lease — the historical
+ *        silent-zero-billing pattern.
+ *
  * Exit 0 on all pass, exit 1 with the failing rows on any fail.
  *
  * D131 gate: every schema-touching session must run this smoke test
  * alongside tests/_smoke_master_schema_parity.php.
  *
- * Decisions: D131 (smoke gate), D132 (rate-tier-completeness invariant)
- * Spec ref:  S-BILLING-RATE-FIX
+ * Decisions: D131 (smoke gate), D132 (rental rate-tier completeness),
+ *            D133 (mileage rate-tier completeness)
+ * Spec ref:  S-BILLING-RATE-FIX, S-MILEAGE-RATE-VALIDATION
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -139,14 +152,85 @@ if ($rows) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// I4 — D133 lease-side: intent signal present but mileage_rate_km = 0
+//
+// Trigger: estimated_mileage_km > 0 (allowance configured) OR
+//          precharge_enabled = 1 (operator opted into precharge model).
+// Required: mileage_rate_km > 0.
+//
+// COALESCE(NULL, 0) so NULL columns count as 0 in the comparison.
+// ────────────────────────────────────────────────────────────────────────────
+
+$rows = db_select(
+    "SELECT id, contract_number, status,
+            estimated_mileage_km, precharge_enabled,
+            mileage_rate_km, mileage_unit
+     FROM leases
+     WHERE deleted_at IS NULL
+       AND (
+            COALESCE(estimated_mileage_km, 0) > 0
+         OR COALESCE(precharge_enabled,    0) = 1
+       )
+       AND COALESCE(mileage_rate_km, 0) = 0
+     ORDER BY id"
+);
+if ($rows) {
+    $lines = ["I4 FAIL — " . count($rows) . " lease(s) with mileage intent signal but mileage_rate_km = 0 (D133):"];
+    foreach ($rows as $r) {
+        $lines[] = sprintf(
+            "  id=%d  %-30s  status=%-9s  est_km=%s  precharge_enabled=%s  rate_km=%s",
+            $r['id'], $r['contract_number'], $r['status'],
+            $r['estimated_mileage_km']  === null ? 'NULL' : (string)$r['estimated_mileage_km'],
+            (string)(int)($r['precharge_enabled'] ?? 0),
+            $r['mileage_rate_km']       === null ? 'NULL' : (string)$r['mileage_rate_km']
+        );
+    }
+    $failures[] = implode("\n", $lines);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// I5 — D133 invoice-side: non-void invoice with positive distance against a
+// zero-rate lease.
+//
+// Status IN ('draft','sent') excludes void + paid + written_off (a paid
+// invoice is locked; a void invoice already has a structured void_reason).
+// deleted_at IS NULL excludes soft-deleted invoices/leases.
+// ────────────────────────────────────────────────────────────────────────────
+
+$rows = db_select(
+    "SELECT i.id AS invoice_id, i.invoice_number, i.status AS invoice_status,
+            i.lease_id, l.contract_number, i.period_distance_km, l.mileage_rate_km
+     FROM invoices i
+     JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
+     WHERE i.deleted_at IS NULL
+       AND i.status IN ('draft','sent')
+       AND COALESCE(i.period_distance_km, 0) > 0
+       AND COALESCE(l.mileage_rate_km,    0) = 0
+     ORDER BY i.id"
+);
+if ($rows) {
+    $lines = ["I5 FAIL — " . count($rows) . " non-void invoice(s) with period_distance_km > 0 against zero-rate lease (D133):"];
+    foreach ($rows as $r) {
+        $lines[] = sprintf(
+            "  invoice_id=%d  %-16s  status=%-7s  lease_id=%d  %-30s  distance=%s  rate_km=%s",
+            $r['invoice_id'], $r['invoice_number'], $r['invoice_status'],
+            (int)$r['lease_id'], $r['contract_number'],
+            (string)$r['period_distance_km'],
+            (string)$r['mileage_rate_km']
+        );
+    }
+    $failures[] = implode("\n", $lines);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Output
 // ────────────────────────────────────────────────────────────────────────────
 
-echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX, D132)\n";
+echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133)\n";
 echo str_repeat('═', 78), "\n";
 
 if (!$failures) {
-    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes).\n";
+    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease).\n";
     exit(0);
 }
 
