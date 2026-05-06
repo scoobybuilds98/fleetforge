@@ -423,6 +423,20 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                                 ? parseFloat(lease.discount_value).toFixed(2) + '%'
                                                 : '$' + parseFloat(lease.discount_value).toFixed(2)"></td>
                                         </tr>
+                                        <!-- S-LEASE-GPS-COST: Add-ons row block. Insurance + warranty
+                                             are flat-per-period; GPS is per-day (label spells $/day). -->
+                                        <tr x-show="parseInt(lease.insurance_opt_in) === 1 && parseFloat(lease.insurance_cost) > 0">
+                                            <td class="text-secondary">Insurance</td>
+                                            <td class="font-mono" x-text="'$' + parseFloat(lease.insurance_cost).toFixed(2)"></td>
+                                        </tr>
+                                        <tr x-show="parseInt(lease.warranty_opt_in) === 1 && parseFloat(lease.warranty_cost) > 0">
+                                            <td class="text-secondary">Warranty</td>
+                                            <td class="font-mono" x-text="'$' + parseFloat(lease.warranty_cost).toFixed(2)"></td>
+                                        </tr>
+                                        <tr x-show="parseInt(lease.gps_opt_in) === 1 && parseFloat(lease.gps_cost) > 0">
+                                            <td class="text-secondary">GPS Tracking</td>
+                                            <td class="font-mono" x-text="'$' + parseFloat(lease.gps_cost).toFixed(2) + ' / day'"></td>
+                                        </tr>
                                         <tr x-show="lease.rate_notes"><td class="text-secondary">Rate Notes</td><td class="text-sm" x-text="lease.rate_notes"></td></tr>
                                     </tbody>
                                 </table>

@@ -1781,6 +1781,8 @@ if ($rateExplanation) {
                             'tax_adjustment'     => 'badge-neutral',
                             'fuel_surcharge'     => 'badge-neutral',
                             'insurance'          => 'badge-neutral',
+                            'warranty'           => 'badge-neutral',
+                            'gps'                => 'badge-neutral',
                             'admin_fee'          => 'badge-neutral',
                             default              => 'badge-neutral',
                         };
