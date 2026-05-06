@@ -1263,11 +1263,28 @@ If a future session adds an endpoint or cron that writes `daily_rate` / `weekly_
 
 Default behaviour: any `days > 0` call that would produce $0 throws `BillingRateException`. Catch it explicitly in your caller, log to error log + Sentry as ERROR with lease + period context, and refuse to write the invoice. Do NOT silently fall back to a different rate tier — that would mask the upstream defect. The current callers (`InvoiceGenerator::generate()`, cron paths) treat the exception as a hard fail; new callers must do the same.
 
+### Mileage tier extension (D133, S-MILEAGE-RATE-VALIDATION)
+
+D132 (extended via S-MILEAGE-RATE-VALIDATION): rate-tier completeness now covers the mileage tier in addition to daily/weekly/monthly rental tiers. A lease with `estimated_mileage_km > 0` OR `precharge_enabled = 1` OR `period_distance_km > 0` on any related invoice MUST have `mileage_rate_km > 0` (and `mileage_rate_miles` consistent if `mileage_unit = miles`). Smoke test (`tests/_smoke_billing_invariants.php`) catches violations as I4 (lease-side) + I5 (invoice-side).
+
+The same three-layer defence applies, parallel to D132:
+
+- **Layer 2 (API validator):** [api/v1/leases/create.php](api/v1/leases/create.php) — D-A block right after the precharge parsing. Trigger fires on any intent signal (any of the three estimated_mileage columns > 0 OR `precharge_enabled = 1`); required-positive on any of the three rate columns. HTTP 422 with field-level error keyed to `mileage_rate_km`.
+- **Layer 3a (engine HARD throw):** [lib/Billing/InvoiceGenerator.php](lib/Billing/InvoiceGenerator.php) per-period excess block — throws `BillingRateException` with `method='mileage_excess'` when `estimated_mileage_km > 0` and `mileage_rate_km = 0`. Mirrors the full_month base_rental throw structure.
+- **Layer 3b (engine SOFT WARNING):** same block — when `period_distance_km > 0` but allowance AND rate are both 0 (no rate tier configured), emits `Sentry::captureMessage(..., 'warning')` + an `audit_log` row with `[FLEETFORGE_BILLING_WARNING]` prefix. Sentry call wrapped in `try/catch` — observability MUST NOT block billing (mirrors SamsaraClient pattern at [lib/GPS/SamsaraClient.php:1583-1592](lib/GPS/SamsaraClient.php:1583)). Soft signal because "no rate tier" can be legitimate operator intent.
+- **Layer 4 (smoke invariant):** I4 + I5 in [tests/_smoke_billing_invariants.php](tests/_smoke_billing_invariants.php), run on every D131 gate.
+- **Form-side (Layer 1 coercion):** [app/admin/leases/create.php](app/admin/leases/create.php) `rateFields` array extended from 3 to 6 entries — `mileage_rate` + `mileage_rate_km` + `mileage_rate_miles` join the existing daily/weekly/monthly. Blank inputs become `'0'` before POST so the API can apply D133 instead of seeing a missing key.
+
+S-MILEAGE-RATE-ZERO-FIX (data side) backfilled the live state to a clean baseline in commit bc4db87; D133 prevents regression at the lease creation and invoice generation layers from this point forward.
+
 ### See also
 
 - D131 in `FLEETFORGE_PROGRESS.md` — smoke-gate-with-invariants discipline
-- D132 in `FLEETFORGE_PROGRESS.md` — rate-tier validation discipline
+- D132 in `FLEETFORGE_PROGRESS.md` — rate-tier validation discipline (rental tiers)
+- D133 in `FLEETFORGE_PROGRESS.md` — rate-tier validation discipline (mileage tier extension)
 - S-BILLING-RATE-FIX session entry in `FLEETFORGE_PROGRESS.md` — full trace of the 2026-05-06 audit + the four-layer fix
+- S-MILEAGE-RATE-ZERO-FIX session entry — data-side backfill closing the historical zero-rate hole
+- S-MILEAGE-RATE-VALIDATION session entry — code-side trio (engine + API + smoke) that locked D133
 - `THE LAW` in §13 above — the day-count branches the engine is now defending
 
 ---
