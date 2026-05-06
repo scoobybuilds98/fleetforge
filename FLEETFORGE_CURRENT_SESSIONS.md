@@ -60,16 +60,18 @@ Discussed: 2026-05-07 in planning chat.
 
 ### Bug investigation outcomes
 
-**INV-2026-00090 mileage charge investigation** — RESOLVED via S-INVOICE-CREATION-UX C1 (2026-05-07)
-Outcome: VALIDATION GAP classification. Lease 52 has `mileage_rate_km=$0.18` but `estimated_mileage_km=0.000`; InvoiceGenerator's `$mileageBillingExpected` gate at lib/Billing/InvoiceGenerator.php:585 silently skips the excess block when allowance=0, so the 507.04 km recorded distance produced no charge despite Model C math giving expected_charge=$91.27. 13 production leases share this shape (#4, #6, #7, #8, #11, #14, #15, #18, #20, #33 SMOKE, #40, #41, #52). Documented as KNOWN ISSUE #103; fix queued as S-MILEAGE-RATE-VALIDATION-FOLLOWUP (below).
-Side-findings flagged out of scope: (a) duplicate-period drafts INV-2026-00089 + INV-2026-00090 on lease 52; (b) INV-2026-00090 billing_period_end overshoots lease end_date by 1 day (C2 period auto-fill will cap going forward).
+**INV-2026-00090 mileage charge investigation** — RESOLVED via S-MILEAGE-ALLOWANCE-ZERO-FIX (2026-05-07)
+Outcome: VALIDATION GAP classification (S-INVOICE-CREATION-UX C1) was reframed by operator as VALID-CONFIGURATION-NOT-RECOGNIZED. Lease 52's shape (rate=$0.18, allowance=0) is treated as Model B Lite ("bill every km from km 0") rather than a data hole. Engine fix in S-MILEAGE-ALLOWANCE-ZERO-FIX C1 (commit 2168bd5) restructured `$mileageBillingExpected` to key on `mileage_rate_km > 0`. INV-2026-00090 voided + regenerated as INV-2026-00091 with mileage line $91.26 + HST $11.86, total $2803.37 in C3 (commit ef050e7). KNOWN ISSUE #103 closed.
+Side-findings closed: (a) duplicate-period draft INV-2026-00089 voided in C3; (b) period overshoot resolved by S-INVOICE-CREATION-UX C2 form auto-fill cap.
 
-**S-MILEAGE-RATE-VALIDATION-FOLLOWUP** — QUEUED
-Scope: close the fourth-shape gap surfaced by KNOWN ISSUE #103 — leases with `estimated_mileage_km=0 AND mileage_rate_km>0` silently skip mileage billing despite recorded distance. Three layers parallel to D133's HARD/SOFT split: (1) API + form-side guard at api/v1/leases/create.php + app/admin/leases/create.php requiring `estimated_mileage_km > 0` when `mileage_rate_km > 0` (or explicit "rate-only / unlimited allowance" operator opt-in if business intent supports it); (2) new I6 smoke invariant in tests/_smoke_billing_invariants.php flagging the shape on existing leases; (3) InvoiceGenerator decision (HARD throw vs SOFT warning) for residual cases that slip through; (4) data-side backfill of the 13 affected leases mirroring S-MILEAGE-RATE-ZERO-FIX's 12-lease scope.
-Effort: ~90-120 min (parallels S-MILEAGE-RATE-VALIDATION's three-commit shape).
-Dependencies: operator decision on the "rate>0, allowance=0" semantic — is it always a misconfiguration, or is "unlimited / no excess" a valid intent worth preserving via opt-in flag? Backfill writes blocked on that decision.
-Discussed: 2026-05-07 (S-INVOICE-CREATION-UX C1 pre-work diagnostic).
-Notes: INV-2026-00090 itself remains as-is until backfill decision lands; void+regenerate is operator's call per usual void pattern.
+**S-MILEAGE-RATE-VALIDATION-FOLLOWUP** — SUPERSEDED 2026-05-07 by S-MILEAGE-ALLOWANCE-ZERO-FIX
+Reason: original framing assumed defensive validation (reject the rate>0 + allowance=0 shape, queue 13-lease backfill). Operator reframed as engine-fix (admit the shape as Model B Lite, reframe Mileage::periodExcess to handle allowance=0 natively). The four planned layers reduced to one engine-guard restructure plus an I6 smoke invariant — no API rejection, no data backfill needed (12 of 13 affected leases had no exposed invoices; only lease 52's INV-90 needed regen). See S-MILEAGE-ALLOWANCE-ZERO-FIX SESSION LOG entry for full trace.
+
+**S-REVIEW-MILEAGE-TAX-FIX** — QUEUED
+Scope: surfaced in S-MILEAGE-ALLOWANCE-ZERO-FIX C3. `api/v1/invoices/review_mileage.php` lines 213-218 divides line tax by 100 (e.g. `bcdiv(bcmul($amount, $gstRate, 6), '100', 2)`) but `tax_rates` table stores rates as decimal fractions (0.13 = 13%), confirmed via TaxCalculator at lib/Billing/TaxCalculator.php:62. Manager-approved mileage charges would underbill HST by 100× (e.g. $91.26 × 0.13 = $11.86 correct, but $91.26 × 0.13 ÷ 100 = $0.12 produced). Dormant — zero existing `mileage_adjustment` line items in production at fix time. Now exercisable post S-MILEAGE-ALLOWANCE-ZERO-FIX (Model B Lite invoices flow through review approval). Fix: drop the `bcdiv(..., '100', 2)` wrapper to match TaxCalculator's direct multiplication.
+Effort: ~15-30 min (one-line code fix + stress test + smoke gate).
+Dependencies: none.
+Discussed: 2026-05-07 (S-MILEAGE-ALLOWANCE-ZERO-FIX C3 pre-work).
 
 ### Mileage refactor arc (Model B — Avi's preferred billing model)
 
@@ -164,7 +166,8 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-07:**
-- S-INVOICE-CREATION-UX SHIPPED (044ffef + 6feb94c + cdb59ca + C4) — 3 issues from real-use testing: C1 docs-only VALIDATION GAP classification (KNOWN ISSUE #103 + queued S-MILEAGE-RATE-VALIDATION-FOLLOWUP); C2 period auto-fill on invoice create form; C3 Generate Invoice button on lease profile.
+- S-MILEAGE-ALLOWANCE-ZERO-FIX SHIPPED (2168bd5 + 764abf1 + ef050e7 + C4) — engine-side fix for the silent-skip class on Model B Lite leases (rate>0 + allowance=0). Closed KNOWN ISSUE #103. D135 locked. Multi-agent reconciliation: parallel agent's commit ef050e7 combined C2+C3; my C1+C2 stand alone. Side-finding queued as S-REVIEW-MILEAGE-TAX-FIX (dormant tax bug in review_mileage.php).
+- S-INVOICE-CREATION-UX SHIPPED (044ffef + 6feb94c + cdb59ca + 430fd91) — 3 issues from real-use testing: C1 docs-only VALIDATION GAP classification (KNOWN ISSUE #103, since RESOLVED above); C2 period auto-fill on invoice create form; C3 Generate Invoice button on lease profile.
 - S-CURRENT-SESSIONS-FILE SHIPPED (4e7da02) — created FLEETFORGE_CURRENT_SESSIONS.md as active session queue companion to PROGRESS.md.
 - S-LOOKUP-RATES-NAMESPACE-COMPLETE SHIPPED (d83c4e3) — D134 architectural lock + KNOWN ISSUE #102 close + K-1 KEY LEARNINGS extraction.
 - S-MILEAGE-RATE-VALIDATION SHIPPED (714e5d6 + 9291d6b + 11476c4 + 61f23df) — defensive engine + API validation + smoke invariants for the mileage rate tier.

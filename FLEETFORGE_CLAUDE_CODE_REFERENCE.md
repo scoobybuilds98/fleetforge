@@ -1278,6 +1278,26 @@ The same three-layer defence applies, parallel to D132:
 
 S-MILEAGE-RATE-ZERO-FIX (data side) backfilled the live state to a clean baseline in commit bc4db87; D133 prevents regression at the lease creation and invoice generation layers from this point forward.
 
+### Three valid configurations (D132/D133 clarified, S-MILEAGE-ALLOWANCE-ZERO-FIX, 2026-05-07)
+
+The S-MILEAGE-ALLOWANCE-ZERO-FIX engine fix at [lib/Billing/InvoiceGenerator.php](lib/Billing/InvoiceGenerator.php) restructured `$mileageBillingExpected` so it keys on `mileage_rate_km > 0` (operator's per-km billing intent) rather than `estimated_mileage_km > 0`. The lease tier now admits three valid configurations:
+
+| Config | Shape | Engine behavior |
+|---|---|---|
+| **Model C** | `mileage_rate_km > 0` AND `estimated_mileage_km > 0` | Bill only the excess over the period allowance (existing behavior; e.g. allowance=2000 km/mo, distance=3000 → excess=1000 km × rate). |
+| **Model B Lite** | `mileage_rate_km > 0` AND `estimated_mileage_km = 0` | Bill every km from km 0 (allowance=0 interpreted as "no included km"; `Mileage::periodExcess(distance, 0, rate)` → `excess=distance`, `charge=distance × rate`). |
+| **Disabled** | `mileage_rate_km = 0` AND `estimated_mileage_km = 0` AND `precharge_enabled = 0` | No mileage billing on this lease. D-C SOFT WARNING fires if `period_distance_km > 0` is recorded against this shape (Sentry + audit_log) but billing continues. |
+
+Pre-fix bug class: leases in the Model B Lite shape silent-skipped because the old gate required `estimated_mileage_km > 0` to enter the calc block. INV-2026-00090 / lease 52 (MTTS-GJEMC7-2026, distance=507.04 km, rate=$0.18, allowance=0) was the operator-flagged case — engine produced `excess_charge_amount=$0` and `mileage_review_status='not_required'` despite recorded distance. KNOWN ISSUE #103 in PROGRESS.md tracks the trace.
+
+INVALID configurations (rejected by the I4/I5/I6 invariants):
+
+- **I4** — `(estimated_mileage_km > 0 OR precharge_enabled = 1)` AND `mileage_rate_km = 0` (intent signal without rate; rejected at lease creation by D133 API validator + Layer 3a HARD throw at the engine).
+- **I5** — any draft/sent invoice with `period_distance_km > 0` against a `mileage_rate_km = 0` lease (positive distance against zero-rate lease).
+- **I6** (added in S-MILEAGE-ALLOWANCE-ZERO-FIX C2) — any draft/sent invoice on a Model B Lite lease with `period_distance_km > 0`, `mileage_review_status = 'not_required'`, and no mileage line item. Catches the silent-skip bug class regardless of how it was introduced (engine bug, manual SQL, fixture). Scope is deliberately narrow to the Model B Lite shape — Model C silent-skip would require excess vs allowance disambiguation that the engine itself is the source of truth for; I6 doesn't second-guess the engine on Model C.
+
+Full Model B (precharge balance + drawdown) supersedes Model B Lite once S-MILEAGE-2A/2B/3 ships — Model B Lite is the transitional behavior that the engine fix delivered without the precharge schema work.
+
 ### See also
 
 - D131 in `FLEETFORGE_PROGRESS.md` — smoke-gate-with-invariants discipline
@@ -1286,6 +1306,7 @@ S-MILEAGE-RATE-ZERO-FIX (data side) backfilled the live state to a clean baselin
 - S-BILLING-RATE-FIX session entry in `FLEETFORGE_PROGRESS.md` — full trace of the 2026-05-06 audit + the four-layer fix
 - S-MILEAGE-RATE-ZERO-FIX session entry — data-side backfill closing the historical zero-rate hole
 - S-MILEAGE-RATE-VALIDATION session entry — code-side trio (engine + API + smoke) that locked D133
+- S-MILEAGE-ALLOWANCE-ZERO-FIX session entry — engine guard fix (Model B Lite) + I6 invariant + INV-2026-00090 regen
 - `THE LAW` in §13 above — the day-count branches the engine is now defending
 
 ---

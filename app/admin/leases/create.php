@@ -513,7 +513,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <div class="form-error" x-show="errors.estimated_mileage_miles" x-text="errors.estimated_mileage_miles"></div>
                         </div>
                     </div>
-                    <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Estimated total mileage for the lease (informational; billing is per-km on actual usage).</div>
+                    <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Total km included in the lease. Set 0 with a per-km rate to bill every km from 0. Leave 0 with no rate to disable mileage billing.</div>
 
                     <!-- ── Collapsible conversion factor section ── -->
                     <div>
