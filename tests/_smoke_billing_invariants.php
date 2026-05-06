@@ -4,13 +4,14 @@ declare(strict_types=1);
 /**
  * tests/_smoke_billing_invariants.php
  *
- * S-BILLING-RATE-FIX D-F / D132 + S-MILEAGE-RATE-VALIDATION D-D / D133 —
- * runtime invariant smoke test for the billing rate-tier discipline.
- * Catches the class of bug found by the 2026-05-06 audit (INV-2026-00086
- * zero-base-rental) AND its mileage-tier counterpart on every code path
- * that mutates lease or invoice rows.
+ * S-BILLING-RATE-FIX D-F / D132 + S-MILEAGE-RATE-VALIDATION D-D / D133 +
+ * S-MILEAGE-ALLOWANCE-ZERO-FIX D-B / D133 clarification — runtime invariant
+ * smoke test for the billing rate-tier discipline. Catches the class of bug
+ * found by the 2026-05-06 audit (INV-2026-00086 zero-base-rental), its
+ * mileage-tier counterpart, AND the silent-skip class on Model B Lite leases
+ * (rate>0 + allowance=0) on every code path that mutates lease/invoice rows.
  *
- * Five invariants, all must hold:
+ * Six invariants, all must hold:
  *
  *   I1 — No draft invoice carries subtotal=0 unless it has an explicit
  *        legitimate justification. Drafts with subtotal=0 that are NOT
@@ -35,14 +36,23 @@ declare(strict_types=1);
  *        that records distance against a zero-rate lease — the historical
  *        silent-zero-billing pattern.
  *
+ *   I6 — D133 silent-skip class: no non-void invoice with period_distance_km
+ *        > 0 against a rate>0 lease has mileage_review_status='not_required'
+ *        AND no mileage line item. Catches the bug pattern fixed by
+ *        S-MILEAGE-ALLOWANCE-ZERO-FIX C1 — the engine should have flagged
+ *        review='pending' or written a line item; 'not_required' with no line
+ *        means the engine silent-skipped a billable charge. invoice_type
+ *        'mileage_only' excluded (those ARE the mileage line by definition).
+ *
  * Exit 0 on all pass, exit 1 with the failing rows on any fail.
  *
  * D131 gate: every schema-touching session must run this smoke test
  * alongside tests/_smoke_master_schema_parity.php.
  *
  * Decisions: D131 (smoke gate), D132 (rental rate-tier completeness),
- *            D133 (mileage rate-tier completeness)
- * Spec ref:  S-BILLING-RATE-FIX, S-MILEAGE-RATE-VALIDATION
+ *            D133 (mileage rate-tier completeness + silent-skip)
+ * Spec ref:  S-BILLING-RATE-FIX, S-MILEAGE-RATE-VALIDATION,
+ *            S-MILEAGE-ALLOWANCE-ZERO-FIX
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -223,14 +233,85 @@ if ($rows) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// I6 — D133 silent-skip class: non-void invoice with positive distance against
+// a Model B Lite lease (rate>0, allowance=0) has mileage_review_status=
+// 'not_required' AND no mileage line. This is the exact bug shape fixed by
+// S-MILEAGE-ALLOWANCE-ZERO-FIX C1.
+//
+// Pre-fix engine guard required estimated_mileage_km > 0 to enter the calc,
+// so leases with rate>0 + allowance=0 silent-skipped: review_status stayed
+// 'not_required' and no line item was written despite distance being
+// recorded. After the C1 fix, the engine sets review='pending' for any
+// positive excess (allowance=0 means all distance is excess), so any
+// draft in 'not_required' state with this shape is the silent-skip bug.
+//
+// Scope deliberately narrow:
+//   estimated_mileage_km = 0 — Model B Lite lease shape only.
+// Model C silent-skip (rate>0 + allowance>0 + review='not_required') would
+// require excess math vs allowance to disambiguate from the legitimate
+// "distance ≤ allowance" case, which the engine itself is the source of
+// truth for. I6 doesn't second-guess the engine on Model C; it pins the
+// specific Model B Lite shape that the C1 fix targets.
+//
+// Statuses considered:
+//   draft + sent  — checked
+//   void          — excluded (already structured void_reason)
+//   paid + written_off — excluded (post-billing terminal states)
+//
+// review_status mapping:
+//   'not_required'        — engine chose not to flag (BUG for Model B Lite + distance>0)
+//   'pending'             — engine flagged correctly, manager hasn't acted (OK)
+//   'approved'            — manager approved → line item present (OK)
+//   'overridden'          — manager waived/adjusted (OK; line item or zero ack)
+//
+// invoice_type 'mileage_only' excluded — those carry the mileage line by
+// definition and don't go through the regular review gate.
+// ────────────────────────────────────────────────────────────────────────────
+
+$rows = db_select(
+    "SELECT i.id AS invoice_id, i.invoice_number, i.status AS invoice_status,
+            i.lease_id, l.contract_number, i.period_distance_km,
+            l.mileage_rate_km, l.estimated_mileage_km, i.mileage_review_status
+     FROM invoices i
+     JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
+     WHERE i.deleted_at IS NULL
+       AND i.status IN ('draft','sent')
+       AND i.invoice_type != 'mileage_only'
+       AND COALESCE(i.period_distance_km, 0) > 0
+       AND COALESCE(l.mileage_rate_km,    0) > 0
+       AND COALESCE(l.estimated_mileage_km, 0) = 0
+       AND i.mileage_review_status = 'not_required'
+       AND NOT EXISTS (
+         SELECT 1 FROM invoice_line_items ili
+         WHERE ili.invoice_id = i.id
+           AND ili.item_type IN ('mileage_adjustment','mileage_precharge','mileage_credit')
+       )
+     ORDER BY i.id"
+);
+if ($rows) {
+    $lines = ["I6 FAIL — " . count($rows) . " non-void invoice(s) silent-skipped mileage despite rate>0 + distance>0 (D133 silent-skip class):"];
+    foreach ($rows as $r) {
+        $lines[] = sprintf(
+            "  invoice_id=%d  %-16s  status=%-7s  lease_id=%d  %-30s  distance=%s  rate_km=%s  review=%s",
+            $r['invoice_id'], $r['invoice_number'], $r['invoice_status'],
+            (int)$r['lease_id'], $r['contract_number'],
+            (string)$r['period_distance_km'],
+            (string)$r['mileage_rate_km'],
+            (string)$r['mileage_review_status']
+        );
+    }
+    $failures[] = implode("\n", $lines);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Output
 // ────────────────────────────────────────────────────────────────────────────
 
-echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133)\n";
+echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX)\n";
 echo str_repeat('═', 78), "\n";
 
 if (!$failures) {
-    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease).\n";
+    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice).\n";
     exit(0);
 }
 
