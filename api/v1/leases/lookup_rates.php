@@ -76,10 +76,23 @@ if (!$template) {
     json_error('NOT_FOUND', 'Equipment template not found.', 404);
 }
 
-// The equipment_type key used in rate tables is the template NAME (VARCHAR 255)
+// The equipment_type key used in rate tables is the template CATEGORY enum
+// value (chassis|dry_van|reefer|container|flatbed|step_deck|lowboy|tanker|dump|other).
 // rate_card_items.equipment_type and customer_equipment_rates.equipment_type
-// both store this as a string matching the template name.
-$equipmentType = $template['name'];
+// both store this category string. This matches what scripts/demo_seed.php and
+// scripts/seed_dataset.php write, and aligns with the per-category rate semantic
+// (one rate covers all templates sharing a category — e.g. "53ft Dry Van" and
+// "Seed: 53ft Dry Van Wabash" both resolve to category=dry_van and share rates).
+//
+// HISTORY: Pre-S-LOOKUP-RATES-NAMESPACE this used $template['name'] which never
+// matched live data. Lookup silently fell through to Priority 3 (template
+// defaults) for every production template — root cause of the zero-rate bug
+// class closed by S-MILEAGE-RATE-ZERO-FIX (data side) and S-BILLING-RATE-FIX
+// (base_rental side). UI dropdowns at app/admin/{customers/show,rates/create,
+// rates/show}.php still submit template names; the UX dedup question (multiple
+// templates per category) is queued as S-RATES-UI-CATEGORY-DEDUP — this fix
+// does not make that worse but also does not address it.
+$equipmentType = $template['category'];
 $today         = date('Y-m-d');
 
 // -----------------------------------------------------------------------
