@@ -74,7 +74,7 @@ class InvoiceGenerator
      * Follows the Invoice Calculation Order (spec §9):
      * 1. Base rental via ProRateCalculator
      * 2. Mileage lines (pre-charge or reconciliation)
-     * 3. Insurance/warranty add-ons
+     * 3. Insurance/warranty/GPS add-ons
      * 4. subtotal = SUM(line_items)
      * 5. Apply discount
      * 6. subtotal_after_discount
@@ -243,6 +243,30 @@ class InvoiceGenerator
                     'amount'      => (string)$lease['warranty_cost'],
                     'is_credit'   => 0,
                     'taxable'     => 1,
+                ];
+            }
+
+            // --- Step 3: GPS tracking add-on (S-LEASE-GPS-COST) ---
+            // Per-day billing — amount = gps_cost × $days. Diverges from
+            // insurance/warranty (flat-per-period) because GPS is metered
+            // service. Skipped on mileage_only just like the others.
+            if ($billingType !== 'mileage_only'
+                && $lease['gps_opt_in']
+                && bccomp((string)$lease['gps_cost'], '0', 2) > 0) {
+                $gpsAmount = bcmul((string)$lease['gps_cost'], (string)$days, 2);
+                $lineItems[] = [
+                    'sort_order'   => $sortOrder++,
+                    'item_type'    => 'gps',
+                    'description'  => "GPS tracking: {$periodStart} to {$periodEnd} ({$days} days)",
+                    'quantity'     => sprintf('%d.0000', $days),
+                    'unit'         => 'day',
+                    'unit_price'   => (string)$lease['gps_cost'],
+                    'amount'       => $gpsAmount,
+                    'is_credit'    => 0,
+                    'taxable'      => 1,
+                    'billing_days' => $days,
+                    'period_start' => $periodStart,
+                    'period_end'   => $periodEnd,
                 ];
             }
 
