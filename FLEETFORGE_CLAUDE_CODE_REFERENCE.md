@@ -57,6 +57,7 @@ Only build what is missing.
 | D20 | Row locking | FOR UPDATE on: lease create, lease close, payment allocate, credit apply. |
 | D21 | Cron locks | MySQL `GET_LOCK()` on all write-heavy crons. |
 | D22 | Tax exemption | `gst_exempt` and `pst_exempt` are independent booleans. |
+| D134 | **Rate-table `equipment_type` namespace** (locked 2026-05-07 via S-LOOKUP-RATES-NAMESPACE) | `equipment_type` columns in `customer_equipment_rates` and `rate_card_items` store `equipment_templates.category` (e.g., `'dry_van'`), NOT `equipment_templates.name` (e.g., `'53ft Dry Van'`). All writers, readers, and lookup queries align on category. Outlier was `api/v1/leases/lookup_rates.php` line 82 — fixed in commit 7a45534. Future code touching these tables must respect this contract. See D134 in `FLEETFORGE_PROGRESS.md` for full rationale + carry-forward. |
 
 **Routing — base path `/fleetforge`:**
 ```php
