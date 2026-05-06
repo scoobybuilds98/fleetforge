@@ -24,11 +24,17 @@ require_permission('invoices', 'create');
 // SAMSARA-3: also pull odometer_start_km, equipment_unit_id, samsara_vehicle_id,
 // and the last invoice's period-end odometer so the create form can
 // auto-populate the period-start odometer and show the Fetch button.
+// S-INVOICE-CREATION-UX C2 (Issue 2): also pull end_date, actual_return_date,
+// billing_cycle, and the latest non-void invoice's billing_period_end so the
+// form can auto-fill period_start (last_period_end + 1 day OR lease.start_date)
+// and period_end (period_start + 1 month - 1 day, capped at lease end / actual
+// return date per billing_cycle).
 $leases = db_select(
     "SELECT l.id, l.contract_number, l.customer_id, l.company_name_snapshot,
             l.unit_number_snapshot, l.template_name_snapshot, l.status,
             l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
-            l.start_date, l.billing_cycle, l.discount_type, l.discount_value,
+            l.start_date, l.end_date, l.actual_return_date,
+            l.billing_cycle, l.discount_type, l.discount_value,
             l.gst_exempt, l.pst_exempt, l.tax_exempt,
             l.odometer_start_km, l.equipment_unit_id,
             u.samsara_vehicle_id,
@@ -36,7 +42,13 @@ $leases = db_select(
                FROM invoices i
               WHERE i.lease_id = l.id AND i.deleted_at IS NULL
                 AND i.odometer_at_period_end_km IS NOT NULL
-              ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1) AS latest_invoice_end_odo
+              ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1) AS latest_invoice_end_odo,
+            (SELECT i.billing_period_end
+               FROM invoices i
+              WHERE i.lease_id = l.id AND i.deleted_at IS NULL
+                AND i.status != 'void'
+                AND i.billing_period_end IS NOT NULL
+              ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1) AS latest_invoice_period_end
      FROM leases l
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      WHERE l.status IN ('active','completed') AND l.deleted_at IS NULL
@@ -68,7 +80,7 @@ require_once FF_ROOT . '/includes/header.php';
      CREATE INVOICE FORM
      ============================================================ -->
 <!-- FIX #39: wrap in form tag so Enter-to-submit works -->
-<form x-data="FF_InvoiceCreate()" @submit.prevent="submit()" class="card" style="padding:24px; max-width:800px;">
+<form x-data="FF_InvoiceCreate()" x-init="init()" @submit.prevent="submit()" class="card" style="padding:24px; max-width:800px;">
 
     <!-- Lease Selection -->
     <div style="margin-bottom:20px;">
@@ -82,11 +94,15 @@ require_once FF_ROOT . '/includes/header.php';
                     data-monthly="<?= e($lease['monthly_rate']) ?>"
                     data-currency="<?= e($lease['currency']) ?>"
                     data-start="<?= e($lease['start_date']) ?>"
+                    data-end="<?= e($lease['end_date'] ?? '') ?>"
+                    data-actual-return="<?= e($lease['actual_return_date'] ?? '') ?>"
+                    data-billing-cycle="<?= e($lease['billing_cycle']) ?>"
                     data-equipment-unit-id="<?= (int)$lease['equipment_unit_id'] ?>"
                     data-samsara-linked="<?= !empty($lease['samsara_vehicle_id']) ? '1' : '0' ?>"
                     data-lease-start-odo="<?= e($lease['odometer_start_km'] ?? '') ?>"
                     data-lease-start-date="<?= e($lease['start_date']) ?>"
-                    data-prev-end-odo="<?= e($lease['latest_invoice_end_odo'] ?? '') ?>">
+                    data-prev-end-odo="<?= e($lease['latest_invoice_end_odo'] ?? '') ?>"
+                    data-prev-period-end="<?= e($lease['latest_invoice_period_end'] ?? '') ?>">
                 <?= e($lease['contract_number']) ?> — <?= e($lease['company_name_snapshot']) ?>
                 (Unit <?= e($lease['unit_number_snapshot']) ?>, <?= e($lease['status']) ?>)
             </option>
@@ -112,6 +128,15 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
         </div>
+    </template>
+
+    <!-- S-INVOICE-CREATION-UX C2: catch-up / auto-fill warning banner.
+         Shown when the auto-fill logic detects a period that crosses the
+         lease end / actual return date or when the lease ended in the past
+         and no prior invoices exist (single catch-up invoice scenario). -->
+    <template x-if="periodWarning">
+        <div class="alert alert-warning" style="margin-bottom:16px; padding:0.75rem 1rem; font-size:0.875rem;"
+             x-text="periodWarning"></div>
     </template>
 
     <!-- Period Dates -->
@@ -335,6 +360,135 @@ function FF_InvoiceCreate() {
         _leaseStartOdo:     null,     // raw lease.odometer_start_km as float, for cumulative calc
         _leaseStartDate:    '',
 
+        // S-INVOICE-CREATION-UX C2: period auto-fill state
+        periodWarning:      '',       // banner text when auto-fill hits an edge case (catch-up, capped, etc.)
+
+        // S-INVOICE-CREATION-UX C2 / C3: prefill from URL ?lease_id=N so the
+        // "Generate Invoice" button on the lease profile lands here with the
+        // lease pre-selected and the period dates auto-filled.
+        init() {
+            const params = new URLSearchParams(window.location.search);
+            const leaseIdParam = params.get('lease_id');
+            if (leaseIdParam && /^\d+$/.test(leaseIdParam)) {
+                this.form.lease_id = leaseIdParam;
+                // Wait for the <option> elements to render before reading their data attrs.
+                this.$nextTick(() => this.onLeaseChange());
+            }
+        },
+
+        // ── S-INVOICE-CREATION-UX C2 date helpers ──────────────────
+        // JS Date arithmetic without surprise overflow (Jan 31 + 1 month).
+        _ymd(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        },
+        _addDays(dateStr, n) {
+            const d = new Date(dateStr + 'T00:00:00');
+            d.setDate(d.getDate() + n);
+            return this._ymd(d);
+        },
+        // period_start + 1 month - 1 day, with end-of-month clamping so
+        // Jan 31 → Feb 27 (not Mar 2) and Mar 30 → Apr 29 etc.
+        _addOneMonthMinusOneDay(dateStr) {
+            const d = new Date(dateStr + 'T00:00:00');
+            const day = d.getDate();
+            let targetMonth = d.getMonth() + 1;
+            let targetYear  = d.getFullYear();
+            if (targetMonth > 11) { targetMonth = 0; targetYear += 1; }
+            const lastDayOfTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+            const targetDay = Math.min(day, lastDayOfTargetMonth);
+            const target = new Date(targetYear, targetMonth, targetDay);
+            target.setDate(target.getDate() - 1);
+            return this._ymd(target);
+        },
+        _earliest(...dates) {
+            const valid = dates.filter(d => d && typeof d === 'string' && d.length === 10);
+            if (!valid.length) return null;
+            return valid.reduce((a, b) => (a < b ? a : b));
+        },
+        _today() {
+            return this._ymd(new Date());
+        },
+
+        // S-INVOICE-CREATION-UX C2: derive period_start + period_end from
+        // lease shape + prior non-void invoice history.
+        //
+        //   period_start:
+        //     - prev non-void invoice exists → prev.billing_period_end + 1 day
+        //     - else                          → lease.start_date
+        //
+        //   period_end (by lease.billing_cycle):
+        //     - 'monthly'      → period_start + 1 month - 1 day,
+        //                        capped at actual_return_date OR end_date
+        //     - 'on_close_only'→ actual_return_date OR end_date OR today
+        //     - open-ended     → period_start + 1 month - 1 day (uncapped)
+        //
+        // Edge case: lease ended in the past with no prior invoices → fill
+        // through end_date (or actual_return_date) as a single catch-up
+        // invoice and surface a warning banner so the operator knows.
+        _autoFillPeriodDates(opt) {
+            this.periodWarning = '';
+            const startDate    = opt.dataset.start          || '';
+            const endDate      = opt.dataset.end            || '';
+            const actualReturn = opt.dataset.actualReturn   || '';
+            const billingCycle = opt.dataset.billingCycle   || 'monthly';
+            const prevPeriodEnd = opt.dataset.prevPeriodEnd || '';
+            if (!startDate) return;
+
+            // period_start
+            let periodStart;
+            if (prevPeriodEnd) {
+                periodStart = this._addDays(prevPeriodEnd, 1);
+            } else {
+                periodStart = startDate;
+            }
+            this.form.period_start = periodStart;
+
+            // period_end
+            const ceiling = this._earliest(actualReturn || null, endDate || null);
+            const today   = this._today();
+
+            // Defensive: if a prior invoice already covered through past the
+            // lease ceiling (over-invoiced anomaly), refuse to auto-fill
+            // period_end and warn loudly. Operator must enter manually.
+            if (ceiling && periodStart > ceiling) {
+                this.form.period_end = '';
+                this.periodWarning = 'Prior invoice ended on ' + prevPeriodEnd +
+                    ' which is past the lease ceiling (' + ceiling + ') — the lease appears to have been over-invoiced. Auto-fill skipped; enter the period manually after reviewing the invoice history.';
+                return;
+            }
+
+            let periodEnd;
+            if (billingCycle === 'on_close_only') {
+                periodEnd = ceiling || today;
+            } else if (ceiling && ceiling < today && !prevPeriodEnd) {
+                // Catch-up: lease already ended and no prior invoices exist
+                // → fill the entire span as a single catch-up invoice. The
+                // alternative (1 normal month with the rest unbilled) leaves
+                // a coverage gap that's easy to miss.
+                periodEnd = ceiling;
+            } else {
+                // monthly (default)
+                periodEnd = this._addOneMonthMinusOneDay(periodStart);
+                if (ceiling && periodEnd > ceiling) {
+                    periodEnd = ceiling;
+                }
+            }
+            this.form.period_end = periodEnd;
+
+            // Edge-case warnings — fired AFTER the fill so we don't block it.
+            if (ceiling && ceiling < today && !prevPeriodEnd) {
+                this.periodWarning = 'Lease ended on ' + ceiling +
+                    ' and no prior invoices exist — this is a single catch-up invoice covering the full lease span. Multiple billing cycles would normally have been generated; verify the period before submitting.';
+            } else if (ceiling && periodEnd === ceiling && billingCycle === 'monthly') {
+                this.periodWarning = 'Period end capped at ' + ceiling +
+                    ' (lease ' + (actualReturn ? 'returned' : 'ends') + ' on this date). A full month would have ended later.';
+            }
+        },
+        // ───────────────────────────────────────────────────────────
+
         onLeaseChange() {
             const sel = this.$el.closest('[x-data]').querySelector('select');
             const opt = sel.options[sel.selectedIndex];
@@ -350,6 +504,7 @@ function FF_InvoiceCreate() {
                 this.odoBanner = null;
                 this._leaseStartOdo  = null;
                 this._leaseStartDate = '';
+                this.periodWarning = '';
                 return;
             }
             this.selectedLease = {
@@ -360,10 +515,12 @@ function FF_InvoiceCreate() {
                 start:    opt.dataset.start   || '',
                 equipmentUnitId: parseInt(opt.dataset.equipmentUnitId) || null,
             };
-            // Default period_start to lease start if empty
-            if (!this.form.period_start && this.selectedLease.start) {
-                this.form.period_start = this.selectedLease.start;
-            }
+
+            // S-INVOICE-CREATION-UX C2 (Issue 2): auto-fill period_start +
+            // period_end from lease shape + prior-invoice history.
+            // Both fields stay editable so operators can override for
+            // off-cycle invoices.
+            this._autoFillPeriodDates(opt);
             this.updateDays();
 
             // SAMSARA-3: wire up odometer state from the lease option attrs
