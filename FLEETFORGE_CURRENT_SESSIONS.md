@@ -55,6 +55,14 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ---
 
+## Active session
+
+**S-ACCT-FIX-A1** — IN-FLIGHT
+  Started: 2026-05-07T21:30 UTC by desktop-acct-fix-a1
+  Touching: scripts/fix_ar_drift_2026_05_07.php (new), FLEETFORGE_PROGRESS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md, acc_journal_entries (DB writes), acc_journal_entry_lines (DB writes), audit_log (DB writes)
+
+---
+
 ## Active queue (as of 2026-05-07)
 
 ### Documentation cleanup (queued, small)
@@ -66,12 +74,8 @@ Dependencies: none.
 Discussed: 2026-05-07 (S-MULTI-AGENT-DISCIPLINE-IMPL pre-work HALT round; operator confirmed conditional handling — pre-work returned 0 REFERENCE.md hits → branched to defer + queue here).
 Notes: low priority. D135 is already authoritative in PROGRESS.md DECISIONS; the REFERENCE.md promotion is for quick-lookup discoverability only. Can be bundled with the next session that already touches REFERENCE.md.
 
-**S-LOOKUP-RATES-NAMESPACE-COMPLETE** — QUEUED
-Scope: close docs rigor gaps from S-LOOKUP-RATES-NAMESPACE original session — D-NEXT architectural lock in CLAUDE_CODE_REFERENCE.md ("category, not template name, is canonical equipment_type for rate tables"); KNOWN ISSUES close in PROGRESS.md; KEY LEARNINGS standalone extraction.
-Effort: ~10-15 min (single docs commit).
-Dependencies: none.
-Discussed: 2026-05-07 in planning chat.
-Notes: Process gaps from original session (skipped D-* sign-off, inline pre-work) cannot be retroactively closed; this session covers only closeable gaps.
+**S-LOOKUP-RATES-NAMESPACE-COMPLETE** — SHIPPED 2026-05-07 (commit d83c4e3 — see PROGRESS.md SESSION LOG)
+Outcome: Single docs commit closing the docs rigor gaps from the original S-LOOKUP-RATES-NAMESPACE arc. Three pieces: D134 architectural lock added to PROGRESS.md DECISIONS + REFERENCE.md §0 LOCKED DECISIONS (canonical contract: `equipment_type` columns store `equipment_templates.category`, not `name`); KNOWN ISSUE #102 closed with full trace + commit refs; new `## KEY LEARNINGS — searchable index` section introduced with K-1 entry capturing namespace-mismatch fix protocol. SESSION LOG row backfilled in S-DOC-STATUS-RECONCILE-CLOSE (gap surfaced by S-QUEUE-STATUS-RECONCILE diagnostic).
 
 **S-D130-EXTENSION** — QUEUED
 Scope: extend D130 in CLAUDE_CODE_REFERENCE.md to cover scope contraction symmetrically with expansion. Triggered by S-MILEAGE-RATE-ZERO-FIX C1 silently dropping smoke gate work + INV-27/INV-84 voids without operator re-authorization.
@@ -167,20 +171,16 @@ Scope: should the 11-card "Standard 2025" rubric defined in scripts/seed_rate_ca
 Effort: TBD.
 Dependencies: operator answer.
 
-**S-EQUIPMENT-SHOW-RESPONSIVE** — QUEUED
-Scope: equipment/show.php responsive at 375px — currently 5 hardcoded grids, ~10 unwrapped tables, Leaflet map. Time-boxed at 30 min for the map.
-Effort: ~60-90 min.
-Dependencies: none.
+**S-EQUIPMENT-SHOW-RESPONSIVE** — SHIPPED 2026-05-05 (commits 110e6dd + 2294f09 — see PROGRESS.md SESSION LOG line 126)
+Outcome: Responsive layout fixes for app/admin/equipment/show.php at 768px and 375px breakpoints. D-A through D-J locked + T1-T8 results + KEY LEARNINGS already inline in SESSION LOG entry at PROGRESS.md line 126. CURRENT_SESSIONS status was stale (still listed as QUEUED until S-DOC-STATUS-RECONCILE-CLOSE flipped it 2026-05-07) — gap surfaced by S-QUEUE-STATUS-RECONCILE diagnostic.
 
 **S-DOC-FRESHNESS-DISCIPLINE** — QUEUED
 Scope: automated staleness detection across the 6 canonical docs; D131-style discipline gate. Closes the missing tests/_smoke_doc_freshness.php that was referenced as a D131 gate but never built.
 Effort: ~45-60 min.
 Dependencies: none.
 
-**S-MILEAGE-1B-FOLLOWUP** — QUEUED
-Scope: T13 stress test for FIX_GAP scenario (large_gap_detected warning coverage, deferred from S-MILEAGE-1B).
-Effort: ~15 min.
-Dependencies: none.
+**S-MILEAGE-1B-FOLLOWUP** — SHIPPED 2026-05-06 (commit b886d1c — see PROGRESS.md SESSION LOG)
+Outcome: T13 fixture coverage for FIX_GAP scenario (large_gap_detected warning) — closed audit-pass PARTIAL on S-MILEAGE-1B Item 10. T13 added to tests/_smoke_samsara_distance.php asserting distance=='2300.00' / source=='gps' / warnings includes 'large_gap_detected'. Counts updated (12 → 13) across smoke docblock + banner + REFERENCE.md §13.6. SESSION LOG row backfilled in S-DOC-STATUS-RECONCILE-CLOSE (gap surfaced by S-QUEUE-STATUS-RECONCILE diagnostic).
 
 **S-LOOKUP-RATES-PRODUCTION-INVARIANT** — QUEUED (optional)
 Scope: optional preventive smoke invariant from S-LOOKUP-RATES-NAMESPACE C3 (deferred). For every production template with active leases, the customer-equipment-rate AND rate-card-item lookup must yield non-NULL OR template default must be non-NULL.
@@ -207,7 +207,9 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-07:**
-- S-MULTI-AGENT-DISCIPLINE-IMPL SHIPPED (this commit) — locks D136 (multi-agent discipline: hybrid single-agent serialization + branch isolation fallback) + K-11 (lock-discipline-before-frequency learning). Upgrades CURRENT_SESSIONS.md status schema with IN-FLIGHT / IN-FLIGHT-RO entries, multi-line entry format, and Pre-flight check section. Backfills S-ACCT-AUDIT SESSION LOG row to close the dangling reference in D136. D135 §0 promotion deferred to separate session (S-D135-REFERENCE-PROMOTE queued). Discipline takes effect immediately for next session.
+- S-DOC-STATUS-RECONCILE-CLOSE SHIPPED (this commit, on session/S-DOC-STATUS-RECONCILE-CLOSE-20260507-0740 branch per D136 isolation fallback) — closes 4 documentation gaps surfaced by S-QUEUE-STATUS-RECONCILE diagnostic (3 SESSION LOG backfills + 3 CURRENT_SESSIONS status flips). Locks K-12 (documentation divergence as bug class). Extends §Active session format with `(DB writes)` annotation convention per S-ACCT-FIX-A1's organic precedent. NOT touched: S-ACCT-FIX-A1 zombie IN-FLIGHT entry on main (operator chose branch isolation rather than zombie clear). Awaits operator-approved merge.
+- S-QUEUE-STATUS-RECONCILE SHIPPED (no commit — read-only diagnostic, IN-FLIGHT-RO under D136) — first post-D136 IN-FLIGHT-RO session. Cross-referenced 32 session labels; surfaced 4 doc-divergence gaps (closed in S-DOC-STATUS-RECONCILE-CLOSE) + bonus finding: parallel agent S-ACCT-FIX-A1 IN-FLIGHT registration mid-diagnostic verified D136 collision-check works correctly + organic Touching format extension `(DB writes)` annotation.
+- S-MULTI-AGENT-DISCIPLINE-IMPL SHIPPED (f195bee) — locks D136 (multi-agent discipline: hybrid single-agent serialization + branch isolation fallback) + K-11 (lock-discipline-before-frequency learning). Upgrades CURRENT_SESSIONS.md status schema with IN-FLIGHT / IN-FLIGHT-RO entries, multi-line entry format, and Pre-flight check section. Backfills S-ACCT-AUDIT SESSION LOG row to close the dangling reference in D136. D135 §0 promotion deferred to separate session (S-D135-REFERENCE-PROMOTE queued). Discipline takes effect immediately for next session.
 - S-LEASE-GPS-COST SHIPPED (71c3e5c + 21c7c58 + 05266e7 + C4) — adds per-lease GPS tracking add-on (gps_opt_in tinyint default 1 + gps_cost decimal default 1.00). Per-day billing rhythm: amount = gps_cost × billing_days. Engine emits 'gps' line item (ENUM extended) when opt_in=1 AND cost>0. Existing leases backfilled to opt_in=1 / cost=$1.00 per Option (i) — auto-bill on next cycle. Stress test 4/4 PASS. D-A through D-G locked.
 - S-MILEAGE-ALLOWANCE-ZERO-FIX SHIPPED (2168bd5 + 764abf1 + ef050e7 + C4) — engine-side fix for the silent-skip class on Model B Lite leases (rate>0 + allowance=0). Closed KNOWN ISSUE #103. D135 locked. Multi-agent reconciliation: parallel agent's commit ef050e7 combined C2+C3; my C1+C2 stand alone. Side-finding queued as S-REVIEW-MILEAGE-TAX-FIX (dormant tax bug in review_mileage.php).
 - S-INVOICE-CREATION-UX SHIPPED (044ffef + 6feb94c + cdb59ca + 430fd91) — 3 issues from real-use testing: C1 docs-only VALIDATION GAP classification (KNOWN ISSUE #103, since RESOLVED above); C2 period auto-fill on invoice create form; C3 Generate Invoice button on lease profile.
