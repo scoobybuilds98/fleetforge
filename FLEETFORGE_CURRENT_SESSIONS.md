@@ -55,17 +55,16 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ---
 
-## Active session
-
-**S-ACCT-FIX-A1** — IN-FLIGHT
-  Started: 2026-05-07T21:30 UTC by desktop-acct-fix-a1
-  Touching: scripts/fix_ar_drift_2026_05_07.php (new), FLEETFORGE_PROGRESS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md, acc_journal_entries (DB writes), acc_journal_entry_lines (DB writes), audit_log (DB writes)
-
----
-
 ## Active queue (as of 2026-05-07)
 
 ### Documentation cleanup (queued, small)
+
+**S-D136-COMMIT-DISCIPLINE** — QUEUED
+Scope: extend D136 wording to require IN-FLIGHT registration to be COMMITTED (not just working-tree edit) before any subsequent operation. The S-ACCT-FIX-A1 incident (2026-05-07) demonstrated the gap: the parallel agent registered IN-FLIGHT in working tree, then the session crashed without committing — leaving the registration in working-tree-only state. When the next session (S-DOC-STATUS-RECONCILE-CLOSE) created a branch from working tree, the unregistered carryover landed on the branch and ultimately on main (15865c4) until corrected by S-DOC-STATUS-RECONCILE-CLOSE-FIXUP. The discipline gap: D136 doesn't currently mandate the registration commit step, and `git status` doesn't surface uncommitted CURRENT_SESSIONS.md edits to a fresh agent reading the file.
+Effort: ~10-15 min (single docs commit). Two pieces: (1) D136 wording amendment in REFERENCE.md §0 LOCKED DECISIONS — add "Registration MUST be committed before any subsequent file edit; uncommitted IN-FLIGHT entries are invalid"; (2) Pre-flight check section in CURRENT_SESSIONS.md — add "Step 1.5: verify CURRENT_SESSIONS.md is committed-clean (`git diff --cached FLEETFORGE_CURRENT_SESSIONS.md` shows no pending registration); if uncommitted IN-FLIGHT block exists, halt and surface to operator."
+Dependencies: none.
+Discussed: 2026-05-08 (S-DOC-STATUS-RECONCILE-CLOSE-FIXUP corrective + lessons from S-ACCT-FIX-A1 incident).
+Notes: K-12-class learning. The asymmetry of cost-of-discipline (one extra commit at session start) vs cost-of-no-discipline (working-tree state polluting downstream sessions) makes this a low-cost / high-leverage closure. Defer to a single docs commit when convenient.
 
 **S-D135-REFERENCE-PROMOTE** — QUEUED
 Scope: promote D135 (mileage three-configuration matrix — Model C / Model B Lite / Disabled, locked 2026-05-07 via S-MILEAGE-ALLOWANCE-ZERO-FIX) into FLEETFORGE_CLAUDE_CODE_REFERENCE.md. Two pieces: (1) §0 LOCKED DECISIONS index row pointing back to PROGRESS.md DECISIONS for full body (terse one-row format matching D134's pattern); (2) full content body as a §13.8 subsection extension parallel to the existing D132/D133 mileage tier extension. Pre-work scan in S-MULTI-AGENT-DISCIPLINE-IMPL confirmed D135 currently exists ONLY in PROGRESS.md DECISIONS — REFERENCE.md has zero D135 hits.
@@ -207,7 +206,8 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-07:**
-- S-DOC-STATUS-RECONCILE-CLOSE SHIPPED (this commit, on session/S-DOC-STATUS-RECONCILE-CLOSE-20260507-0740 branch per D136 isolation fallback) — closes 4 documentation gaps surfaced by S-QUEUE-STATUS-RECONCILE diagnostic (3 SESSION LOG backfills + 3 CURRENT_SESSIONS status flips). Locks K-12 (documentation divergence as bug class). Extends §Active session format with `(DB writes)` annotation convention per S-ACCT-FIX-A1's organic precedent. NOT touched: S-ACCT-FIX-A1 zombie IN-FLIGHT entry on main (operator chose branch isolation rather than zombie clear). Awaits operator-approved merge.
+- S-DOC-STATUS-RECONCILE-CLOSE SHIPPED (15865c4, fast-forward merged from session/S-DOC-STATUS-RECONCILE-CLOSE-20260507-0740 branch per D136 isolation fallback) — closes 4 documentation gaps surfaced by S-QUEUE-STATUS-RECONCILE diagnostic (3 SESSION LOG backfills + 3 CURRENT_SESSIONS status flips). Locks K-12 (documentation divergence as bug class). Extends §Active session format with `(DB writes)` annotation convention per S-ACCT-FIX-A1's organic precedent. **Wording correction (S-DOC-STATUS-RECONCILE-CLOSE-FIXUP)**: original entry said "S-ACCT-FIX-A1 zombie IN-FLIGHT entry on main" — empirically incorrect, the IN-FLIGHT registration was carried over from the parallel agent's working tree but never committed to main. Carryover block was removed in the FIXUP commit. See S-DOC-STATUS-RECONCILE-CLOSE-FIXUP SESSION LOG row + S-ACCT-FIX-A1 abandonment row.
+- S-DOC-STATUS-RECONCILE-CLOSE-FIXUP SHIPPED (this commit) — corrective fixup post-merge of S-DOC-STATUS-RECONCILE-CLOSE. Removed S-ACCT-FIX-A1 carryover IN-FLIGHT block from CURRENT_SESSIONS.md, corrected misleading "zombie on main" wording in 2 places (this Recent ship history entry + S-DOC-STATUS-RECONCILE-CLOSE SESSION LOG row in PROGRESS.md), added S-ACCT-FIX-A1 abandonment SESSION LOG row, queued S-D136-COMMIT-DISCIPLINE for the working-tree-vs-committed-state discipline gap surfaced by this incident.
 - S-QUEUE-STATUS-RECONCILE SHIPPED (no commit — read-only diagnostic, IN-FLIGHT-RO under D136) — first post-D136 IN-FLIGHT-RO session. Cross-referenced 32 session labels; surfaced 4 doc-divergence gaps (closed in S-DOC-STATUS-RECONCILE-CLOSE) + bonus finding: parallel agent S-ACCT-FIX-A1 IN-FLIGHT registration mid-diagnostic verified D136 collision-check works correctly + organic Touching format extension `(DB writes)` annotation.
 - S-MULTI-AGENT-DISCIPLINE-IMPL SHIPPED (f195bee) — locks D136 (multi-agent discipline: hybrid single-agent serialization + branch isolation fallback) + K-11 (lock-discipline-before-frequency learning). Upgrades CURRENT_SESSIONS.md status schema with IN-FLIGHT / IN-FLIGHT-RO entries, multi-line entry format, and Pre-flight check section. Backfills S-ACCT-AUDIT SESSION LOG row to close the dangling reference in D136. D135 §0 promotion deferred to separate session (S-D135-REFERENCE-PROMOTE queued). Discipline takes effect immediately for next session.
 - S-LEASE-GPS-COST SHIPPED (71c3e5c + 21c7c58 + 05266e7 + C4) — adds per-lease GPS tracking add-on (gps_opt_in tinyint default 1 + gps_cost decimal default 1.00). Per-day billing rhythm: amount = gps_cost × billing_days. Engine emits 'gps' line item (ENUM extended) when opt_in=1 AND cost>0. Existing leases backfilled to opt_in=1 / cost=$1.00 per Option (i) — auto-bill on next cycle. Stress test 4/4 PASS. D-A through D-G locked.
