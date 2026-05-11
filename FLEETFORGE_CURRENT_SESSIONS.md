@@ -55,39 +55,21 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ---
 
-## Active queue (as of 2026-05-07)
-
-### IN-FLIGHT
-
-**S-DOCS-CLUSTER-2026-05-11** — IN-FLIGHT
-  Started: 2026-05-11T16:22 UTC by desktop-1
-  Touching: FLEETFORGE_CLAUDE_CODE_REFERENCE.md, FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md
-  Bundles: S-D136-COMMIT-DISCIPLINE + S-D135-REFERENCE-PROMOTE + S-D130-EXTENSION (docs-only).
+## Active queue (as of 2026-05-11)
 
 ### Documentation cleanup (queued, small)
 
-**S-D136-COMMIT-DISCIPLINE** — QUEUED
-Scope: extend D136 wording to require IN-FLIGHT registration to be COMMITTED (not just working-tree edit) before any subsequent operation. The S-ACCT-FIX-A1 incident (2026-05-07) demonstrated the gap: the parallel agent registered IN-FLIGHT in working tree, then the session crashed without committing — leaving the registration in working-tree-only state. When the next session (S-DOC-STATUS-RECONCILE-CLOSE) created a branch from working tree, the unregistered carryover landed on the branch and ultimately on main (15865c4) until corrected by S-DOC-STATUS-RECONCILE-CLOSE-FIXUP. The discipline gap: D136 doesn't currently mandate the registration commit step, and `git status` doesn't surface uncommitted CURRENT_SESSIONS.md edits to a fresh agent reading the file.
-Effort: ~10-15 min (single docs commit). Two pieces: (1) D136 wording amendment in REFERENCE.md §0 LOCKED DECISIONS — add "Registration MUST be committed before any subsequent file edit; uncommitted IN-FLIGHT entries are invalid"; (2) Pre-flight check section in CURRENT_SESSIONS.md — add "Step 1.5: verify CURRENT_SESSIONS.md is committed-clean (`git diff --cached FLEETFORGE_CURRENT_SESSIONS.md` shows no pending registration); if uncommitted IN-FLIGHT block exists, halt and surface to operator."
-Dependencies: none.
-Discussed: 2026-05-08 (S-DOC-STATUS-RECONCILE-CLOSE-FIXUP corrective + lessons from S-ACCT-FIX-A1 incident).
-Notes: K-12-class learning. The asymmetry of cost-of-discipline (one extra commit at session start) vs cost-of-no-discipline (working-tree state polluting downstream sessions) makes this a low-cost / high-leverage closure. Defer to a single docs commit when convenient.
+**S-D136-COMMIT-DISCIPLINE** — SHIPPED 2026-05-11 (bundled into S-DOCS-CLUSTER-2026-05-11 — see PROGRESS.md SESSION LOG)
+Outcome: D-A of S-DOCS-CLUSTER-2026-05-11. Extended D136 wording in REFERENCE.md §0 LOCKED DECISIONS with a new "**Registration commit requirement (locked 2026-05-11 via S-D136-COMMIT-DISCIPLINE):** IN-FLIGHT registration must be COMMITTED to main before any subsequent operation (file edit, DB write, branch creation). Working-tree-only registration does not count as registered..." clause; cites S-ACCT-FIX-A1 + S-DOC-STATUS-RECONCILE-CLOSE-FIXUP as origin; clarifies branch isolation fallback addresses collision avoidance, not state-divergence avoidance. This session exercised the discipline being locked — IN-FLIGHT registration committed standalone (bd8dbb6) before content edits.
 
-**S-D135-REFERENCE-PROMOTE** — QUEUED
-Scope: promote D135 (mileage three-configuration matrix — Model C / Model B Lite / Disabled, locked 2026-05-07 via S-MILEAGE-ALLOWANCE-ZERO-FIX) into FLEETFORGE_CLAUDE_CODE_REFERENCE.md. Two pieces: (1) §0 LOCKED DECISIONS index row pointing back to PROGRESS.md DECISIONS for full body (terse one-row format matching D134's pattern); (2) full content body as a §13.8 subsection extension parallel to the existing D132/D133 mileage tier extension. Pre-work scan in S-MULTI-AGENT-DISCIPLINE-IMPL confirmed D135 currently exists ONLY in PROGRESS.md DECISIONS — REFERENCE.md has zero D135 hits.
-Effort: ~15-20 min (single docs commit).
-Dependencies: none.
-Discussed: 2026-05-07 (S-MULTI-AGENT-DISCIPLINE-IMPL pre-work HALT round; operator confirmed conditional handling — pre-work returned 0 REFERENCE.md hits → branched to defer + queue here).
-Notes: low priority. D135 is already authoritative in PROGRESS.md DECISIONS; the REFERENCE.md promotion is for quick-lookup discoverability only. Can be bundled with the next session that already touches REFERENCE.md.
+**S-D135-REFERENCE-PROMOTE** — SHIPPED 2026-05-11 (bundled into S-DOCS-CLUSTER-2026-05-11 — see PROGRESS.md SESSION LOG)
+Outcome: D-B of S-DOCS-CLUSTER-2026-05-11. Added D135 index row to REFERENCE.md §0 LOCKED DECISIONS after D134, before D136 (terse-pointer format matching D134's pattern). Renamed existing §13.8 subsection heading from "Three valid configurations (D132/D133 clarified, S-MILEAGE-ALLOWANCE-ZERO-FIX, 2026-05-07)" to "Three valid configurations (D135, S-MILEAGE-ALLOWANCE-ZERO-FIX, 2026-05-07 — clarifies D132/D133)" so the §0 cross-reference resolves. Added D135 to the §13.8 "See also" list. Body content was already present in §13.8 (pre-existing from S-MILEAGE-ALLOWANCE-ZERO-FIX); promotion was the labeling + index row.
 
 **S-LOOKUP-RATES-NAMESPACE-COMPLETE** — SHIPPED 2026-05-07 (commit d83c4e3 — see PROGRESS.md SESSION LOG)
 Outcome: Single docs commit closing the docs rigor gaps from the original S-LOOKUP-RATES-NAMESPACE arc. Three pieces: D134 architectural lock added to PROGRESS.md DECISIONS + REFERENCE.md §0 LOCKED DECISIONS (canonical contract: `equipment_type` columns store `equipment_templates.category`, not `name`); KNOWN ISSUE #102 closed with full trace + commit refs; new `## KEY LEARNINGS — searchable index` section introduced with K-1 entry capturing namespace-mismatch fix protocol. SESSION LOG row backfilled in S-DOC-STATUS-RECONCILE-CLOSE (gap surfaced by S-QUEUE-STATUS-RECONCILE diagnostic).
 
-**S-D130-EXTENSION** — QUEUED
-Scope: extend D130 in CLAUDE_CODE_REFERENCE.md to cover scope contraction symmetrically with expansion. Triggered by S-MILEAGE-RATE-ZERO-FIX C1 silently dropping smoke gate work + INV-27/INV-84 voids without operator re-authorization.
-Effort: ~10 min (single docs commit).
-Dependencies: ship S-LOOKUP-RATES-NAMESPACE-COMPLETE first (operator preference).
-Discussed: 2026-05-07 in planning chat.
+**S-D130-EXTENSION** — SHIPPED 2026-05-11 (bundled into S-DOCS-CLUSTER-2026-05-11 — see PROGRESS.md SESSION LOG)
+Outcome: D-C of S-DOCS-CLUSTER-2026-05-11. Extended D130 in PROGRESS.md DECISIONS with: "**Symmetric rule applies to scope CONTRACTION (locked 2026-05-11 via S-D130-EXTENSION):** if mid-session it becomes clear an originally-scoped item is out of scope, already shipped, or being deferred to another session, the contraction also requires explicit operator re-authorization + SESSION LOG diff capturing original-scope vs final-scope. Silent omission of scoped items is equally a discipline failure as silent addition." Origin cites S-MILEAGE-RATE-ZERO-FIX C1 silently dropping smoke gate work + INV-27/INV-84 voids. Treated as parallel promote-with-extension since D130 had zero REFERENCE.md presence pre-session — added §0 LOCKED DECISIONS row carrying combined expansion + contraction wording.
 
 ### UX session set (from real-use testing 2026-05-07)
 
@@ -211,6 +193,9 @@ Effort: TBD.
 ---
 
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
+
+**2026-05-11:**
+- S-DOCS-CLUSTER-2026-05-11 SHIPPED — bundled docs commit closing three small queued sessions in one shape: S-D136-COMMIT-DISCIPLINE + S-D135-REFERENCE-PROMOTE + S-D130-EXTENSION. Each was single-commit / ≤20 min / touched REFERENCE.md; bundling avoided ceremony tax. Also exercised S-D136-COMMIT-DISCIPLINE's own discipline — IN-FLIGHT registration committed to main standalone (bd8dbb6) BEFORE first content edit. D-A: D136 wording extension in REFERENCE.md §0 (Registration commit requirement clause). D-B: D135 promotion (§0 index row + §13.8 subsection heading labeled with D135 + See-also extension). D-C: D130 contraction extension (PROGRESS.md row extended + new REFERENCE.md §0 row carrying combined expansion+contraction wording). D-D: D136 backfill into PROGRESS.md DECISIONS table. D131 gate: PARITY OK + INVARIANTS OK (I1-I6 all PASS).
 
 **2026-05-07:**
 - S-DOC-STATUS-RECONCILE-CLOSE SHIPPED (15865c4, fast-forward merged from session/S-DOC-STATUS-RECONCILE-CLOSE-20260507-0740 branch per D136 isolation fallback) — closes 4 documentation gaps surfaced by S-QUEUE-STATUS-RECONCILE diagnostic (3 SESSION LOG backfills + 3 CURRENT_SESSIONS status flips). Locks K-12 (documentation divergence as bug class). Extends §Active session format with `(DB writes)` annotation convention per S-ACCT-FIX-A1's organic precedent. **Wording correction (S-DOC-STATUS-RECONCILE-CLOSE-FIXUP)**: original entry said "S-ACCT-FIX-A1 zombie IN-FLIGHT entry on main" — empirically incorrect, the IN-FLIGHT registration was carried over from the parallel agent's working tree but never committed to main. Carryover block was removed in the FIXUP commit. See S-DOC-STATUS-RECONCILE-CLOSE-FIXUP SESSION LOG row + S-ACCT-FIX-A1 abandonment row.
