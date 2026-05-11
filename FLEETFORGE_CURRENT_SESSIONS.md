@@ -22,6 +22,8 @@ Per D136, every Code Desktop session begins with a pre-flight read of this file:
 
 Read-only sessions skip the collision check (step 2) but still register (step 3) for operator visibility.
 
+**Category separation (K-14, locked 2026-05-12 via S-PREDEPLOY-CHECKLIST-CREATE):** This file is the **session queue**. Items that surface during a session and are bug-shaped (a defect in shipped code) file to `FLEETFORGE_PROGRESS.md` → KNOWN ISSUES (`#NNN`). Items that are pre-deploy-shaped (a `.env` key needing a real value, an AWS resource to provision, a DNS record, a smoke/rollback procedure) file to `FLEETFORGE_PREDEPLOY_CHECKLIST.md` in the appropriate category — NOT here, and NOT to KNOWN ISSUES. Filing under the wrong category is documentation divergence (K-12 class).
+
 ---
 
 ## Status legend
@@ -55,15 +57,16 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ---
 
-## Active queue (as of 2026-05-11)
+## Active queue (as of 2026-05-12)
 
 ### IN-FLIGHT
 
-**S-PREDEPLOY-CHECKLIST-CREATE** — IN-FLIGHT
-  Started: 2026-05-11T18:17 UTC by desktop-1
-  Touching: FLEETFORGE_PREDEPLOY_CHECKLIST.md (new), FLEETFORGE_PROGRESS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md, FLEETFORGE_CURRENT_SESSIONS.md
+*(none)*
 
 ### Documentation cleanup (queued, small)
+
+**S-PREDEPLOY-CHECKLIST-CREATE** — SHIPPED 2026-05-12 (commits 7d5e62d + 2c5d146 + this C3 commit — see PROGRESS.md SESSION LOG)
+Outcome: Created `FLEETFORGE_PREDEPLOY_CHECKLIST.md` as the canonical pre-deploy operations file. 21 backfilled obligations originally scoped (1 operator-specified A1 FF_ASSET_VERSION + 1 operator-specified F1 AR drift + 19 pre-existing scattered across SPEC_FINAL.md / REFERENCE.md / runbooks / .env) — expanded to 26 obligations across 8 active categories (A asset cache, B prod .env keys, C DNS, D AWS infra, F accounting state, G smoke, H rollback, I monitoring) + 1 empty placeholder (E data migrations) + 1 References section (J). D-B refinement: each item carries Originating session + Surfaced into checklist sub-fields. D-C refinement: "Original source:" pointer inside Detail. D-D refinement: bidirectional file-header cross-refs to K-14 + S-PREDEPLOY-CHECKLIST-CREATE. K-14 (Pre-deploy obligations category-separation discipline, K-12 extension) locked in PROGRESS.md KEY LEARNINGS. Cross-refs added to REFERENCE.md §0 LOCKED DECISIONS + §1 SEVEN FILES "Deployment-time companion" note; AWS Lightsail cutover entry (this file) extended with pointer to checklist; Pre-flight check section (D136) extended with category-separation note.
 
 **S-D136-COMMIT-DISCIPLINE** — SHIPPED 2026-05-11 (bundled into S-DOCS-CLUSTER-2026-05-11 — see PROGRESS.md SESSION LOG)
 Outcome: D-A of S-DOCS-CLUSTER-2026-05-11. Extended D136 wording in REFERENCE.md §0 LOCKED DECISIONS with a new "**Registration commit requirement (locked 2026-05-11 via S-D136-COMMIT-DISCIPLINE):** IN-FLIGHT registration must be COMMITTED to main before any subsequent operation (file edit, DB write, branch creation). Working-tree-only registration does not count as registered..." clause; cites S-ACCT-FIX-A1 + S-DOC-STATUS-RECONCILE-CLOSE-FIXUP as origin; clarifies branch isolation fallback addresses collision avoidance, not state-divergence avoidance. This session exercised the discipline being locked — IN-FLIGHT registration committed standalone (bd8dbb6) before content edits.
@@ -185,6 +188,7 @@ Dependencies: defer until after Model B refactor (S-MILEAGE-2A/2B/3) and account
 **AWS Lightsail cutover** — QUEUED (multi-session)
 Scope: production deployment to AWS Lightsail Oregon. Currently deferred until feature-complete per D8.
 Status: not yet feature-complete.
+Pre-deploy obligations: see `FLEETFORGE_PREDEPLOY_CHECKLIST.md` — categories C (DNS), D (AWS infra D1-D9 — Lightsail provision, snapshots, S3 bucket + versioning, mysqldump cron, SES sandbox exit, SNS topic, IAM, CloudWatch alarms), G (smoke G1-G4), H (rollback H1-H2), I (monitoring I1-I3) all flow through this multi-session. Each ITEM there carries Originating session + Action + Owner; flip Status → ✅ COMPLETE in the checklist as the cutover progresses. Discipline locked as K-14 (pre-deploy obligations file separate from KNOWN ISSUES and CURRENT_SESSIONS) — see PROGRESS.md KEY LEARNINGS.
 
 **S-PROD-3** — QUEUED
 Scope: self-host CDN deps (Google Fonts, ApexCharts, Leaflet — items #79-81 from prod prep audit).
@@ -193,6 +197,9 @@ Effort: TBD.
 ---
 
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
+
+**2026-05-12:**
+- S-PREDEPLOY-CHECKLIST-CREATE SHIPPED (commits 7d5e62d IN-FLIGHT registration + 2c5d146 file creation + C3 cross-refs commit) — created `FLEETFORGE_PREDEPLOY_CHECKLIST.md` as canonical pre-deploy operations file. 21 backfilled obligations across 9 categories (operator-framed planning count; 26 in final file after D + G expansion: A1 asset cache, B1-B5 prod .env keys, C1 DNS, D1-D9 AWS infra, E empty placeholder, F1 AR drift DEFERRED-TO-QBO, G1-G4 smoke, H1-H2 rollback, I1-I3 monitoring + J references). Each item carries Originating session + Surfaced into checklist sub-fields + "Original source:" pointer + Action + Owner + Status. K-14 locked (pre-deploy obligations category separation discipline, K-12 extension): bug-shaped → KNOWN ISSUES (in PROGRESS.md), session-shaped → CURRENT_SESSIONS, pre-deploy → PREDEPLOY_CHECKLIST. Cross-refs added to REFERENCE.md §0 LOCKED DECISIONS K-14 row + §1 SEVEN FILES "Deployment-time companion" note; CURRENT_SESSIONS.md Pre-flight check section extended with category-separation note + AWS Lightsail cutover entry extended with pointer. D131 gate: PARITY OK + INVARIANTS OK (I1-I6 all PASS).
 
 **2026-05-11:**
 - S-INVOICE-DISPLAY-COMPREHENSIVE SHIPPED (commits 8bc4e5c + aabb087 + 5dc2af2 + df1bd20 + f9130a2) — comprehensive invoice show.php with $0-line draft hide (D-A), per-line + per-tax-row tax base reconciliation in "RATE% on $BASE" inline format with "Applied to N taxable lines totaling $X" tooltip (D-B), Credit Applications card between Line Items and Financial Summary rendering `credit_note_applications` JOIN (D-C, D-G), step-by-step balance due breakdown with dual S-MILEAGE-2A/2B extension markers (D-D), print-parity preserved (D-E), 3 reference invoices verified (INV-19/INV-13/INV-21) (D-F). Incidental fixes per D130: pre-existing tax-rate display bug (0.05% → 5% via ×100 conversion) corrected in C3; print overlay regression on browser Cmd+P fixed in C3-T1-FIX by extending app.css @media print hide list with `.search-modal`+overlay siblings (universal — applies to every admin print). K-13 locked. FF_ASSET_VERSION bumped 1.0.25 → 1.0.26 (uncommitted, .env gitignored).
