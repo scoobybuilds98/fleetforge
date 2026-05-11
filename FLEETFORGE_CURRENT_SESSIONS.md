@@ -57,6 +57,12 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ## Active queue (as of 2026-05-12)
 
+### IN-FLIGHT
+
+**S-FORK-CLOSE-RESOLVE** — IN-FLIGHT
+  Started: 2026-05-12T19:30 UTC by desktop-1
+  Touching: branch state (rebase claude/kind-sanderson-4ed75d onto origin/main + ff-merge to main + delete branch), .gitignore, scripts/ directory (archive S-ACCT-FIX-A1 abandoned script), FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md (SHA cross-ref touch-ups if rebase changes load-bearing references + SESSION LOG entries for S-FORK-CLOSE + S-FORK-CLOSE-RESOLVE + K-17 lock)
+
 ### Documentation cleanup (queued, small)
 
 **S-D136-COMMIT-DISCIPLINE** — QUEUED
