@@ -57,6 +57,12 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ## Active queue (as of 2026-05-11)
 
+### IN-FLIGHT
+
+**S-PREDEPLOY-CHECKLIST-CREATE** — IN-FLIGHT
+  Started: 2026-05-11T18:17 UTC by desktop-1
+  Touching: FLEETFORGE_PREDEPLOY_CHECKLIST.md (new), FLEETFORGE_PROGRESS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md, FLEETFORGE_CURRENT_SESSIONS.md
+
 ### Documentation cleanup (queued, small)
 
 **S-D136-COMMIT-DISCIPLINE** — SHIPPED 2026-05-11 (bundled into S-DOCS-CLUSTER-2026-05-11 — see PROGRESS.md SESSION LOG)
