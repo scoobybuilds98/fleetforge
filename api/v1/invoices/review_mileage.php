@@ -205,17 +205,19 @@ db_transaction(function () use ($id, $action, $notes, $overrideAmount, &$result)
 
     // Per-line tax: use the same blended rate as the invoice. This matches
     // how other line items inherit tax in InvoiceGenerator.
+    // WHY: tax_rates stores rates as decimal fractions already (0.13 = 13%),
+    // so we multiply directly — no division by 100. Matches TaxCalculator.php:62.
     $isTaxable  = true;
     $gstRate    = (string) ($invoice['tax_gst_rate'] ?? '0');
     $pstRate    = (string) ($invoice['tax_pst_rate'] ?? '0');
     $hstRate    = (string) ($invoice['tax_hst_rate'] ?? '0');
 
     $lineGst = $isTaxable && bccomp($gstRate, '0', 4) > 0
-        ? bcdiv(bcmul($appliedAmount, $gstRate, 6), '100', 2) : '0.00';
+        ? bcround(bcmul($appliedAmount, $gstRate, 6), 2) : '0.00';
     $linePst = $isTaxable && bccomp($pstRate, '0', 4) > 0
-        ? bcdiv(bcmul($appliedAmount, $pstRate, 6), '100', 2) : '0.00';
+        ? bcround(bcmul($appliedAmount, $pstRate, 6), 2) : '0.00';
     $lineHst = $isTaxable && bccomp($hstRate, '0', 4) > 0
-        ? bcdiv(bcmul($appliedAmount, $hstRate, 6), '100', 2) : '0.00';
+        ? bcround(bcmul($appliedAmount, $hstRate, 6), 2) : '0.00';
 
     // unit_price = applied amount per km. unit_price column is DECIMAL(12,2)
     // so we round to 2dp; the underlying mileage_rate column carries the
