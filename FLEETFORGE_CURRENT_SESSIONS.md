@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MILEAGE-2A-SPEC-WRITE** — IN-FLIGHT
+  Started: 2026-05-11T20:46 UTC by claude-code-condescending-mestorf-cd0992
+  Touching: FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md
 
 ### Documentation cleanup (queued, small)
 
