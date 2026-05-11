@@ -214,6 +214,71 @@ class InvoiceGenerator
                 ];
             }
 
+            // ════════════════════════════════════════════════════════════════
+            // S-MILEAGE-2A: Invoice 1 mileage_precharge emission point.
+            // S-MILEAGE-2B inserts drawdown logic here: on subsequent invoices
+            // (precharge_invoiced_at NOT NULL), compute
+            //   period_charge = period_distance × mileage_rate
+            // If precharge_balance > 0: emit a `mileage_usage` line at per-km
+            //   rate AND a `mileage_drawdown_credit` line drawing the balance
+            //   down by min(period_charge, precharge_balance); decrement
+            //   leases.precharge_balance by the same amount.
+            // If precharge_balance == 0: emit just the `mileage_usage` line.
+            // Replaces the S-LEASE-MILEAGE per-period excess block at
+            // lib/Billing/InvoiceGenerator.php:~438-486 wholesale.
+            //
+            // 2A emission gate (D-B + (b) cross-invoice uniqueness):
+            //   precharge_enabled = 1                           (lease opted in)
+            //   AND precharge_invoiced_at IS NULL               (Invoice 1 not yet sent)
+            //   AND no prior non-void invoice on this lease carries a
+            //       mileage_precharge line                      ((b) uniqueness gate)
+            //   AND billing_type NOT IN (mileage_only,
+            //                            adjustment, credit_note) (regular invoice type)
+            //
+            // The (b) uniqueness gate prevents duplicate emission across an
+            // advance-batch (generateAdvanceBatch) where N+1 drafts materialize
+            // in a single transaction with precharge_invoiced_at still NULL.
+            // The D-D 409 PRECHARGE_ALREADY_BILLED in send.php is the
+            // racy-concurrent-gen safety net; this gate is the emission-time
+            // prevention so the operator never lands in a strip-N-drafts
+            // workflow. Belt + suspenders mirroring the D-D shape.
+            // ════════════════════════════════════════════════════════════════
+            $prechargeEmit = (
+                (int) ($lease['precharge_enabled'] ?? 0) === 1
+                && ($lease['precharge_invoiced_at'] ?? null) === null
+                && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
+            );
+            if ($prechargeEmit) {
+                $priorPrecharge = db_row(
+                    "SELECT 1 AS hit
+                       FROM invoice_line_items li
+                       JOIN invoices i ON i.id = li.invoice_id
+                      WHERE i.lease_id = ?
+                        AND i.deleted_at IS NULL
+                        AND i.status <> 'void'
+                        AND li.item_type = 'mileage_precharge'
+                      LIMIT 1",
+                    [$leaseId]
+                );
+                if ($priorPrecharge) {
+                    $prechargeEmit = false;
+                }
+            }
+            if ($prechargeEmit) {
+                $prechargeAmt = bcround((string) $lease['precharge_amount'], 2);
+                $lineItems[] = [
+                    'sort_order'  => $sortOrder++,
+                    'item_type'   => 'mileage_precharge',
+                    'description' => "Mileage Precharge: \${$prechargeAmt} (covers excess mileage charges throughout lease)",
+                    'quantity'    => '1.0000',
+                    'unit'        => 'precharge',
+                    'unit_price'  => $prechargeAmt,
+                    'amount'      => $prechargeAmt,
+                    'is_credit'   => 0,
+                    'taxable'     => 1,
+                ];
+            }
+
             // --- Step 3: Insurance add-on ---
             if ($billingType !== 'mileage_only'
                 && $lease['insurance_opt_in']
