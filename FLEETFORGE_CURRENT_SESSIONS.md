@@ -57,6 +57,12 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ## Active queue (as of 2026-05-11)
 
+### IN-FLIGHT
+
+**S-INVOICE-DISPLAY-COMPREHENSIVE** — IN-FLIGHT
+  Started: 2026-05-11T16:56 UTC by desktop-1
+  Touching: app/admin/invoices/show.php, api/v1/invoices/show.php (potential), FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md (potential), FLEETFORGE_DESIGN_DETAILS.md (potential)
+
 ### Documentation cleanup (queued, small)
 
 **S-D136-COMMIT-DISCIPLINE** — SHIPPED 2026-05-11 (bundled into S-DOCS-CLUSTER-2026-05-11 — see PROGRESS.md SESSION LOG)
