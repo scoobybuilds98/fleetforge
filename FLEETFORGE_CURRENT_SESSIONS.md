@@ -110,10 +110,71 @@ Outcome: 4-commit arc (1 IN-FLIGHT registration + 1 fix + 1 INV-92 remediation +
 
 ### Mileage refactor arc (Model B — Avi's preferred billing model)
 
-**S-MILEAGE-2A** — QUEUED
-Scope: Invoice 1 precharge line item + activation balance initialization. Implementation notes: entity_type='samsara_history_query' for audit query (not action), import FleetForge\GPS\SamsaraClient (not Samsara namespace), getDistanceForPeriod is black box, must include integration tests for T8/T10/T12.
-Effort: ~90 min.
-Dependencies: none.
+---
+### S-MILEAGE-2A — Invoice 1 precharge line + activation balance init
+**Status:** QUEUED
+**Estimated effort:** ~90 min
+**Dependencies:** S-MILEAGE-1B shipped (✅), S-INVOICE-DISPLAY-COMPREHENSIVE shipped (✅)
+**Subsequent sessions:** S-MILEAGE-2B (depends on 2A) → S-MILEAGE-3 → S-MILEAGE-5
+
+#### SCOPE (locked)
+- Emit Invoice 1 "Mileage Precharge" line item when lease.precharge_enabled=1 AND lease.precharge_invoiced_at IS NULL.
+- Initialize lease.precharge_balance = lease.precharge_amount on lease status change to 'active'.
+- Set lease.precharge_invoiced_at = NOW() when Invoice 1 containing the precharge line is SENT (not when generated — D14 immutability constrains this).
+- All three operations use FOR UPDATE locks per D20.
+- Place engine-side S-MILEAGE-2A/2B extension point markers in lib/Billing/InvoiceGenerator.php at the precharge emit site (display-layer markers are already placed in show.php — see ARCHITECTURAL NOTES).
+
+#### OUT OF SCOPE for 2A (deferred to subsequent sessions)
+- Drawdown logic on Invoice 2+ (S-MILEAGE-2B)
+- Retiring the Model C per-period excess gate (S-MILEAGE-2B)
+- Odometer & Distance card rewrite (S-MILEAGE-2B)
+- Bug 1: Cumulative Total label fix (rider on S-MILEAGE-2B)
+- Bug 4: backdate invoice warning (rider on S-MILEAGE-2B)
+- Customer portal rendering of precharge balance (S-MILEAGE-4 placeholder)
+- Cash/credit refund toggle (S-MILEAGE-3)
+
+#### HYBRID STATE DURING 2A→2B GAP (live-coherent by design)
+- Invoice 1 on precharge-enabled leases: Model B (precharge line emitted, balance initialized)
+- Invoice 2+ on ALL leases: Model C (per-period excess gate, manager review for excess)
+- Customers on precharge-enabled leases see Invoice 1 as precharge-style; subsequent invoices as legacy until 2B ships. This is an operator-visible transition, not customer-confusing.
+
+#### LINE ITEM SHAPE (Invoice 1 precharge line)
+- item_type = 'mileage_precharge' (ENUM value already exists at FLEETFORGE_DATABASE_MASTER.sql:1898 — no migration needed; see ARCHITECTURAL NOTES for history)
+- description = "Mileage Precharge: $X.XX (covers excess mileage charges throughout lease)"
+- quantity = 1, unit = 'precharge'
+- unit_price = lease.precharge_amount, amount = lease.precharge_amount (bcmath, D16)
+- taxable = 1, taxes computed per invoice tax rates
+- is_credit = 0
+- mileage_distance = NULL, mileage_rate = NULL (the $isMileage detection at show.php:1857 includes 'mileage_precharge'; leaving these NULL on the precharge line suppresses the mileage detail span at show.php:1929-1944)
+
+#### DISPATCH CONTRACT NOTE (per S-INVOICE-DISPLAY-COMPREHENSIVE)
+- The 'mileage_precharge' case is ALREADY in the $itemTypeBadge match at app/admin/invoices/show.php:1891 → 'badge-info', placed by S-INVOICE-DISPLAY-COMPREHENSIVE C3 (5dc2af2) as forward-looking display contract. **No dispatch case addition needed in 2A.**
+- The full LINE TYPE DISPATCH CONTRACT comment block at show.php:1866-1906 (comment 1866-1886 + match table 1889-1906) documents the 3-step protocol (ENUM migration + match case + per-row template hooks) for any future line type. S-MILEAGE-2A doesn't extend it; S-MILEAGE-2B will (mileage_drawdown_credit + mileage_usage).
+- Display template behavior: standard taxable line with leading badge, no special rendering in 2A. Per LINE ITEM SHAPE above, leave mileage_distance/mileage_rate NULL so the detail span doesn't render.
+
+#### INTEGRATION TESTS REQUIRED (carry-forward from S-MILEAGE-1B audit Item 15)
+- T8: synthesize precharge-enabled lease with SamsaraClient fixture mode (FIX_STD), generate Invoice 1, assert mileage_precharge line emitted with correct amount and tax computation
+- T10: malformed precharge_amount (negative, zero with precharge_enabled=1, string injection) → API rejects at lease create/edit validation with field-level error
+- T12: fixture_mode=0 dispatch path — confirm real getDistanceForPeriod would be invoked if called (without actually calling Samsara in tests)
+
+#### D132 EXTENSION (for session prompt)
+- Extend D132 rate-tier completeness to cover precharge: when lease.precharge_enabled=1, lease.precharge_amount must be > 0 (already enforced by `chk_leases_precharge_amount` CHECK at FLEETFORGE_DATABASE_MASTER.sql:2248 — but a D132 invariant smoke I7 must be added so the gate is doc-asserted by the invariant suite, not only DB-asserted by the CHECK).
+
+#### ARCHITECTURAL NOTES FOR CLAUDE CODE
+- SamsaraClient::getDistanceForPeriod is at lib/GPS/SamsaraClient.php:1245. Import as FleetForge\GPS\SamsaraClient (not Samsara namespace).
+- For audit_log queries, use entity_type='samsara_history_query' (NOT action='samsara_history_query' — D102/D125 ENUM workaround).
+- invoice_line_items.item_type ENUM already includes 'mileage_precharge' at FLEETFORGE_DATABASE_MASTER.sql:1898 (Model A vestigial retained for Model B per S-MILEAGE-MODEL-AUDIT 2026-05-04). **NO schema migration needed in 2A.** S-MILEAGE-2A is the first production code path to emit this enum value — InvoiceGenerator currently never produces it.
+- Forward-looking display markers already in app/admin/invoices/show.php (placed by S-INVOICE-DISPLAY-COMPREHENSIVE C3, commit 5dc2af2 — brought to main via merge commit ab122eb):
+  - PHP-side marker: lines 1769-1782 (taxable subtotal docblock with explicit "S-MILEAGE-2A/2B note" at 1775-1781)
+  - HTML-side marker: line 2182 (template comment between line items aggregate and tax block in the Financial Summary section)
+  - LINE TYPE DISPATCH CONTRACT block: lines 1866-1906 (comment 1866-1886 + match table 1889-1906)
+  - mileage_precharge case already in match at line 1891 ('badge-info')
+  - mileage_precharge included in $isMileage detection at line 1857 (rendering picks up mileage_distance/mileage_rate if populated — leave NULL for the precharge line per LINE ITEM SHAPE)
+- lib/Billing/InvoiceGenerator.php currently carries NO S-MILEAGE-2A/2B markers. S-MILEAGE-2A places engine-side markers at the precharge emit site as part of this work.
+- bcmath only (D16). No floats on any precharge math.
+- D14 constrains precharge_invoiced_at write to SEND time, not GENERATE time.
+- D20 FOR UPDATE on lease reads during precharge_balance initialization.
+---
 
 **S-MILEAGE-2B** — QUEUED
 Scope: drawdown logic on subsequent invoices, retire excess gate, Odometer card rewrite, riders Bug 1 (Cumulative Total label) + Bug 4 (backdate warning). DO NOT delete priorExcessKm safeguard (that's S-MILEAGE-3).
