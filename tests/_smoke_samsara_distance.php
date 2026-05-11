@@ -5,16 +5,25 @@ declare(strict_types=1);
  * tests/_smoke_samsara_distance.php
  *
  * S-MILEAGE-1B smoke test for SamsaraClient::getDistanceForPeriod
- * and the FixtureProvider hermetic mode.
+ * and the FixtureProvider hermetic mode + S-MILEAGE-2A surface tests.
  *
- * Runs 13 stress tests covering the success + failure contracts
- * documented in the S-MILEAGE-1B brief. Every test runs through
- * the fixture provider — NO live Samsara calls.
+ * Runs 16 stress tests:
+ *   T1-T13 — Samsara distance / fixture-mode coverage from S-MILEAGE-1B
+ *            (and S-MILEAGE-1B-FOLLOWUP for T13). Every T1-T13 routes
+ *            through FixtureProvider — NO live Samsara calls.
+ *   T14-T16 — S-MILEAGE-2A surface (ADD per operator clarification —
+ *            T8/T10/T12 placeholders preserved as 2B carry-forward
+ *            because 2A does NOT integrate getDistanceForPeriod into
+ *            InvoiceGenerator; that's a 2B drawdown concern). T14
+ *            asserts precharge line emission, T15 asserts
+ *            chk_leases_precharge_amount CHECK rejects malformed
+ *            shapes, T16 confirms fixture/HTTP dispatch via source
+ *            inspection.
  *
  * Each test prints a PASS/FAIL line carrying the actual `distance`
  * string so a reader can scan for float-leak artifacts (Avi's Q4
- * addition). Final summary line is grep-able: "N/13 passed in Xs"
- * or "M/13 passed (FAILED: T4 ..., T8 ...)".
+ * addition). Final summary line is grep-able: "N/16 passed in Xs"
+ * or "M/16 passed (FAILED: T4 ..., T15 ...)".
  *
  * Exit code: 0 on all-pass, 1 on any-fail.
  *
@@ -75,7 +84,7 @@ function record(array &$results, string $id, string $name, bool $passed, string 
 // =====================================================================
 // T1 — Standard 30-day period: returns expected distance, no warnings
 // =====================================================================
-echo "\n[Running 13 stress tests against FixtureProvider…]\n\n";
+echo "\n[Running 16 stress tests: T1-T13 fixture-mode coverage, T14-T16 S-MILEAGE-2A surface]\n\n";
 
 $start = new DateTimeImmutable('2026-04-01T00:00:00Z');
 $end   = new DateTimeImmutable('2026-04-30T23:59:59Z');
@@ -252,6 +261,182 @@ record($results, 'T13', 'large_gap_detected',
     $ok, $ok ? 'distance=2300 source=gps warnings includes large_gap_detected'
              : 'expected distance=2300.00 + large_gap_detected warning; got ' . json_encode($r),
     $r['distance']);
+
+// =====================================================================
+// T14 — S-MILEAGE-2A: precharge-enabled lease → InvoiceGenerator emits a
+// mileage_precharge line with locked D-C shape + computed per-line tax.
+//
+// Hermetic via BEGIN/ROLLBACK. InvoiceGenerator's internal
+// db_transaction() detects the outer transaction (nesting guard in
+// includes/db.php:198-219) so its writes participate in the rollback.
+//
+// Overlaps with the C3 stress test
+// (tests/_stress_invoice_generator_precharge.php) — smoke is continuous
+// regression in the D131 gate, stress is point-in-time proof at C3
+// commit time. Both have value: the stress narrows on 6 emit-gate
+// branches, the smoke proves end-to-end emission lands on every D131
+// pre-commit.
+//
+// FIX_STD fixture-mode is preserved from the file-level flip at line 41
+// — not because 2A calls Samsara (it doesn't; D-F locked pre-session)
+// but as a safety net if a future change accidentally introduces a
+// SamsaraClient call into the precharge emit path.
+// =====================================================================
+require_once FF_ROOT . '/vendor/autoload.php';
+$t14CustomerId = (int) (db_row("SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1")['id'] ?? 0);
+$t14UnitId     = (int) (db_row("SELECT id FROM equipment_units WHERE deleted_at IS NULL ORDER BY id LIMIT 1")['id'] ?? 0);
+$t14UserId     = (int) (db_row("SELECT id FROM users ORDER BY id LIMIT 1")['id'] ?? 0);
+
+$t14Ok  = false;
+$t14Msg = '';
+db_execute("BEGIN");
+try {
+    $t14LeaseId = db_insert('leases', [
+        'contract_number'   => 'SMOKE-2A-T14',
+        'customer_id'       => $t14CustomerId,
+        'equipment_unit_id' => $t14UnitId,
+        'start_date'        => '2026-05-01',
+        'status'            => 'active',
+        'daily_rate'        => '10.00',
+        'weekly_rate'       => '60.00',
+        'monthly_rate'      => '250.00',
+        'currency'          => 'CAD',
+        'billing_cycle'     => 'monthly',
+        'precharge_enabled' => 1,
+        'precharge_amount'  => '500.00',
+        'precharge_balance' => '500.00',
+        'created_by'        => $t14UserId,
+        'updated_by'        => $t14UserId,
+    ]);
+
+    $t14Generator = new \FleetForge\Billing\InvoiceGenerator();
+    $t14Inv = $t14Generator->createFromLease([
+        'lease_id'     => $t14LeaseId,
+        'period_start' => '2026-05-01',
+        'period_end'   => '2026-05-31',
+        'billing_type' => 'full_month',
+        'invoice_type' => 'regular',
+        'created_by'   => $t14UserId,
+    ]);
+
+    $t14Line = db_row(
+        "SELECT amount, description, unit, quantity, taxable, is_credit,
+                tax_gst_amount, tax_pst_amount, tax_hst_amount
+           FROM invoice_line_items
+          WHERE invoice_id = ? AND item_type = 'mileage_precharge'",
+        [$t14Inv['invoice_id']]
+    );
+
+    $t14Ok = (
+        $t14Line !== null
+        && $t14Line['amount']        === '500.00'
+        && $t14Line['unit']          === 'precharge'
+        && (string) $t14Line['quantity'] === '1.0000'
+        && (int) $t14Line['taxable']   === 1
+        && (int) $t14Line['is_credit'] === 0
+        && str_contains((string) $t14Line['description'], 'Mileage Precharge: $500.00')
+    );
+    $t14LineTax = $t14Line
+        ? bcadd(bcadd((string) $t14Line['tax_gst_amount'], (string) $t14Line['tax_pst_amount'], 2), (string) $t14Line['tax_hst_amount'], 2)
+        : '0.00';
+    $t14Msg = $t14Ok
+        ? "line emitted amount={$t14Line['amount']} unit=precharge tax_total={$t14LineTax}"
+        : 'shape mismatch: ' . json_encode($t14Line);
+} catch (\Throwable $ex) {
+    $t14Msg = 'EXCEPTION: ' . $ex->getMessage();
+}
+db_execute("ROLLBACK");
+record($results, 'T14', 'precharge_invoice_emit', $t14Ok, $t14Msg, '');
+
+// =====================================================================
+// T15 — chk_leases_precharge_amount CHECK constraint rejects malformed
+// shapes: precharge_enabled=1 with NULL / 0 / negative precharge_amount.
+// This is the DB-layer last line of defense; the API-layer rejection
+// pattern lives in S-MILEAGE-1 ST4/ST5/ST7/ST9 application-layer stress
+// tests. The smoke version here ensures the CHECK survives any future
+// schema mutation (parity smoke catches column drift; this one catches
+// CHECK-clause drift).
+//
+// Three malformed cases tried in independent BEGIN/ROLLBACK envelopes
+// so a partial failure on one doesn't pollute the others.
+// =====================================================================
+$t15CustomerId = $t14CustomerId;
+$t15UnitId     = $t14UnitId;
+$t15UserId     = $t14UserId;
+$t15Cases = [
+    'enabled=1,amount=NULL' => [1, null],
+    'enabled=1,amount=0'    => [1, '0.00'],
+    'enabled=1,amount=-100' => [1, '-100.00'],
+];
+$t15Failures = [];
+foreach ($t15Cases as $t15CaseName => [$t15Enabled, $t15Amount]) {
+    db_execute("BEGIN");
+    $t15Rejected = false;
+    try {
+        db_insert('leases', [
+            'contract_number'   => 'SMOKE-2A-T15-' . substr(md5($t15CaseName), 0, 6),
+            'customer_id'       => $t15CustomerId,
+            'equipment_unit_id' => $t15UnitId,
+            'start_date'        => '2026-05-01',
+            'status'            => 'pending',
+            'daily_rate'        => '10.00',
+            'weekly_rate'       => '60.00',
+            'monthly_rate'      => '250.00',
+            'currency'          => 'CAD',
+            'billing_cycle'     => 'monthly',
+            'precharge_enabled' => $t15Enabled,
+            'precharge_amount'  => $t15Amount,
+            'created_by'        => $t15UserId,
+            'updated_by'        => $t15UserId,
+        ]);
+        // If we reach here, the CHECK didn't fire — that's a failure.
+    } catch (\Throwable $ex) {
+        if (stripos($ex->getMessage(), 'chk_leases_precharge_amount') !== false) {
+            $t15Rejected = true;
+        }
+    }
+    db_execute("ROLLBACK");
+    if (!$t15Rejected) {
+        $t15Failures[] = $t15CaseName;
+    }
+}
+$t15Ok = empty($t15Failures);
+record($results, 'T15', 'precharge_amount_check',
+    $t15Ok,
+    $t15Ok ? '3/3 malformed shapes rejected by chk_leases_precharge_amount'
+           : 'CHECK did not fire on: ' . implode(', ', $t15Failures),
+    '');
+
+// =====================================================================
+// T16 — Dispatch path confirmation (source-code-inspection, parallel to
+// T8/T10 pattern). Verifies that SamsaraClient::getDistanceForPeriod
+// routes to FixtureProvider only when samsara.fixture_mode='1' (strict
+// string match), else falls through to the production HTTP loop.
+//
+// Source-inspection (not a runtime call with fixture_mode=0) because:
+//   (a) The production HTTP loop would make a live Samsara HTTPS request
+//       if api_token is configured — smoke tests must be hermetic.
+//   (b) The dispatch flag itself is the load-bearing detail; verifying
+//       its presence in source is equivalent to verifying the gate.
+//
+// Spec note: T16 is the new dispatch-path test for 2A's surface. The
+// original T8/T10/T12 placeholders remain reserved for 2B (when
+// InvoiceGenerator integrates getDistanceForPeriod for drawdown, the
+// production HTTP path becomes runtime-exercisable end-to-end).
+// =====================================================================
+$srcSamsara = $src ?? file_get_contents(FF_ROOT . '/lib/GPS/SamsaraClient.php');
+$t16Ok = (
+       strpos($srcSamsara, "(string) settings_get('samsara.fixture_mode') === '1'") !== false
+    && strpos($srcSamsara, 'FixtureProvider::getDistanceForPeriod') !== false
+    && strpos($srcSamsara, 'CURLOPT_RETURNTRANSFER') !== false
+    && strpos($srcSamsara, '/fleet/vehicles/stats/history') !== false
+);
+record($results, 'T16', 'dispatch_path_fixture_vs_http',
+    $t16Ok,
+    $t16Ok
+        ? 'source: fixture_mode==1 routes to FixtureProvider; else production HTTP loop (curl + /fleet/vehicles/stats/history)'
+        : 'dispatch markers missing from SamsaraClient.php — production HTTP path may be broken',
+    '');
 
 // =====================================================================
 // CLEANUP & SUMMARY
