@@ -2123,8 +2123,16 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
             <tbody>
                 <!-- D-B: split subtotal into taxable + non-taxable so the tax-base reconciliation
                      question (does tax_base × rate match the displayed tax amount?) is auditable
-                     row-by-row. The non-taxable row only renders when there's actually
-                     non-taxable revenue on the invoice (zero noise on common case). -->
+                     row-by-row. Three render shapes:
+                       (a) Both taxable + non-taxable lines → show both rows (the split).
+                       (b) Only taxable lines (most common) → show plain "Subtotal" — the
+                           "(taxable lines)" qualifier would be misleading on tax-exempt
+                           customers (lines ARE taxable but no tax is applied per the
+                           customer's gst_exempt/pst_exempt_snapshot).
+                       (c) Only non-taxable lines → show "Subtotal (non-taxable)".
+                -->
+                <?php $hasBothTaxClasses = $taxableLineCount > 0 && $nonTaxableLineCount > 0; ?>
+                <?php if ($hasBothTaxClasses): ?>
                 <tr>
                     <td class="fs-label">Subtotal (taxable lines)</td>
                     <td class="fs-value"
@@ -2132,13 +2140,22 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                         <?= format_currency($taxableSubtotal) ?>
                     </td>
                 </tr>
-                <?php if (bccomp($nonTaxableSubtotal, '0', 2) !== 0): ?>
                 <tr>
                     <td class="fs-label">Subtotal (non-taxable lines)</td>
                     <td class="fs-value"
                         title="Applied to <?= $nonTaxableLineCount ?> non-taxable line<?= $nonTaxableLineCount !== 1 ? 's' : '' ?> totaling <?= format_currency($nonTaxableSubtotal) ?>">
                         <?= format_currency($nonTaxableSubtotal) ?>
                     </td>
+                </tr>
+                <?php elseif ($nonTaxableLineCount > 0 && $taxableLineCount === 0): ?>
+                <tr>
+                    <td class="fs-label">Subtotal (non-taxable)</td>
+                    <td class="fs-value"><?= format_currency($nonTaxableSubtotal) ?></td>
+                </tr>
+                <?php else: ?>
+                <tr>
+                    <td class="fs-label">Subtotal</td>
+                    <td class="fs-value"><?= format_currency($invoice['subtotal']) ?></td>
                 </tr>
                 <?php endif; ?>
 
