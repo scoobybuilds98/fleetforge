@@ -780,8 +780,8 @@ This section documents the schema landed by S-MILEAGE-1 and the lifecycle owners
 |--------|------|-----------------|-------|
 | `precharge_enabled` | `TINYINT(1) NOT NULL DEFAULT 0` | User (lease create/edit) | Off by default. Existing leases stay opted out — no backfill. |
 | `precharge_amount` | `DECIMAL(12,2) NULL` | User (lease create/edit) | Required (>0) when enabled. NULL when disabled. **User-set, not derived.** |
-| `precharge_balance` | `DECIMAL(12,2) NULL` | S-MILEAGE-2 (activation) | Initialized = `precharge_amount` on lease activation. Decremented per invoice. NULL until activation. |
-| `precharge_invoiced_at` | `DATETIME NULL` | S-MILEAGE-2 (Invoice 1 send) | Stamps when the precharge line was billed on Invoice 1. **Lock signal:** non-NULL freezes `precharge_enabled` + `precharge_amount`. |
+| `precharge_balance` | `DECIMAL(12,2) NULL` | ✓ S-MILEAGE-2A SHIPPED 2026-05-12 (activation) | Initialized = `precharge_amount` on lease activation (`api/v1/leases/activate.php` per D137). Decremented per invoice in S-MILEAGE-2B (drawdown). NULL until activation. |
+| `precharge_invoiced_at` | `DATETIME NULL` | ✓ S-MILEAGE-2A SHIPPED 2026-05-12 (Invoice 1 send) | Stamps when the precharge line was billed on Invoice 1 (`api/v1/invoices/send.php` per D140). **Lock signal:** non-NULL freezes `precharge_enabled` + `precharge_amount` (D113 PRECHARGE_LOCKED 409 in `update.php`) AND prevents future invoice generation from emitting another `mileage_precharge` line (D138 lifecycle gate). |
 | `precharge_refund_method` | `ENUM('cash','credit') NULL` | S-MILEAGE-3 (lease close) | Manager picks at close when `precharge_balance > 0`. |
 | `precharge_refund_settled_at` | `DATETIME NULL` | S-MILEAGE-3 (refund posted) | Audit trail — when the cash/credit refund actually moved. |
 
@@ -842,11 +842,11 @@ Forensic-only — only consulted if it turns out an unreviewed seed/fixture writ
 
 ### What S-MILEAGE-2 must do
 
-1. **Activation** (`api/v1/leases/activate.php`): when `precharge_enabled=1`, set `precharge_balance = precharge_amount` inside the activation transaction.
-2. **Invoice 1 generation** (`InvoiceGenerator::createFromLease`): when `precharge_enabled=1` AND this is the activation invoice (no prior invoices for the lease), add a `mileage_precharge` line item for the full `precharge_amount`. Reuse the dormant `'mileage_precharge'` value from `invoice_line_items.item_type` enum.
-3. **Invoice 1 send** (`api/v1/invoices/send.php`): stamp `precharge_invoiced_at = NOW()` on the lease when sending Invoice 1.
-4. **Subsequent invoice generation** (`InvoiceGenerator::createFromLease`): replace the S-LEASE-MILEAGE per-period excess block (lines 438-486) with a balance-drawdown block. Each invoice computes `period_charge = period_distance × mileage_rate`. If `precharge_balance > 0`: emit two visible lines (usage at per-km rate + precharge credit drawing it down); decrement `precharge_balance` by `min(period_charge, precharge_balance)`. If `precharge_balance == 0`: emit just the per-km usage line.
-5. **Retire Model C plumbing**: remove `excess_distance_km`/`excess_charge_amount`/`mileage_review_status` columns from invoices, retire `Mileage::monthlyAllowance` / `periodExcess`, retire the HARD send gate, retire the priorExcessKm transitional safeguard from S-MILEAGE-FIX-0.
+1. ✓ **Activation** (`api/v1/leases/activate.php`): when `precharge_enabled=1`, set `precharge_balance = precharge_amount` inside the activation transaction. **Shipped S-MILEAGE-2A C2 (commit 253b294) — D137.**
+2. ✓ **Invoice 1 generation** (`InvoiceGenerator::createFromLease`): when `precharge_enabled=1` AND this is the activation invoice (no prior invoices for the lease), add a `mileage_precharge` line item for the full `precharge_amount`. **Shipped S-MILEAGE-2A C3 (commit e1918df) — D138 + D139.** The "no prior invoices" condition tightened to a 3-clause gate: lifecycle `precharge_invoiced_at IS NULL` + (b) cross-invoice uniqueness (NOT EXISTS prior non-void `mileage_precharge` line on this lease) + billing_type exclusion (regular invoice types only). The (b) clause prevents duplicate emission across advance-batches.
+3. ✓ **Invoice 1 send** (`api/v1/invoices/send.php`): stamp `precharge_invoiced_at = NOW()` on the lease when sending Invoice 1. **Shipped S-MILEAGE-2A C4 (commit c8e459a) — D140.** Plus the D-D clarification: PRECHARGE_ALREADY_BILLED 409 fires when sending a DIFFERENT invoice that carries a duplicate `mileage_precharge` line after the stamp already landed (defense-in-depth backstop with C3's emission gate).
+4. **Subsequent invoice generation** (`InvoiceGenerator::createFromLease`): replace the S-LEASE-MILEAGE per-period excess block (lines 438-486) with a balance-drawdown block. Each invoice computes `period_charge = period_distance × mileage_rate`. If `precharge_balance > 0`: emit two visible lines (usage at per-km rate + precharge credit drawing it down); decrement `precharge_balance` by `min(period_charge, precharge_balance)`. If `precharge_balance == 0`: emit just the per-km usage line. **(S-MILEAGE-2B — engine marker placed at the C3 emit site, greppable via "S-MILEAGE-2B inserts drawdown logic")**
+5. **Retire Model C plumbing**: remove `excess_distance_km`/`excess_charge_amount`/`mileage_review_status` columns from invoices, retire `Mileage::monthlyAllowance` / `periodExcess`, retire the HARD send gate, retire the priorExcessKm transitional safeguard from S-MILEAGE-FIX-0. **(S-MILEAGE-2B + S-MILEAGE-3)**
 
 ### What S-MILEAGE-3 must do
 
@@ -1088,13 +1088,13 @@ Plus an implicit 7th case: any unknown vehicleId falls through to `reason='unit_
 
 ```sh
 php tests/_smoke_samsara_distance.php
-# → 13/13 passed in 0.0s
-# (or "11/13 passed (FAILED: T# name, ...) in X.Ys" — grep-able for CI)
+# → 16/16 passed in 0.0s
+# (or "14/16 passed (FAILED: T# name, ...) in X.Ys" — grep-able for CI)
 ```
 
-13 stress tests; each PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern.
+16 stress tests across two groups: **T1-T13** Samsara distance + fixture-mode coverage from S-MILEAGE-1B (T13 added in S-MILEAGE-1B-FOLLOWUP for FIX_GAP `large_gap_detected` warning). Each T1-T13 PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern. **T14-T16** S-MILEAGE-2A surface tests added via ADD-not-REPLACE (preserves T8/T10/T12 placeholders as 2B carry-forward per D141): T14 = `precharge_invoice_emit` (BEGIN/ROLLBACK-isolated synthesize precharge lease + `InvoiceGenerator::createFromLease` + assert `mileage_precharge` line with locked D139 shape + per-line tax computed); T15 = `precharge_amount_check` (three malformed shapes via direct `db_insert` hit `chk_leases_precharge_amount` CHECK); T16 = `dispatch_path_fixture_vs_http` (source-inspection on `SamsaraClient.php` confirms strict `fixture_mode === '1'` dispatch gate + production HTTP loop).
 
-T8 (pagination cap) and T10 (malformed response) are documented as source-code-inspection tests because the production HTTP loop / parser are intentionally bypassed in fixture mode. Real coverage of those paths lands when S-MILEAGE-2 integrates the method into `InvoiceGenerator::createFromLease`.
+T8 (pagination cap) and T10 (malformed response) remain documented as source-code-inspection tests because the production HTTP loop / parser are intentionally bypassed in fixture mode. Real coverage of those paths lands when **S-MILEAGE-2B** integrates the method into `InvoiceGenerator::createFromLease` (not 2A — 2A's emit path is fixed-amount + distance-independent per D142). T12 (fixture flag dispatch) verifies via the `SAMSARA_HISTORY_FIXTURE` log line that fixture-mode dispatch executes when configured.
 
 ### See also
 

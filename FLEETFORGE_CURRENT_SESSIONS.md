@@ -61,9 +61,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-MILEAGE-2A** — IN-FLIGHT
-  Started: 2026-05-11T21:26 UTC by desktop-1
-  Touching: api/v1/leases/activate.php, lib/Billing/InvoiceGenerator.php, api/v1/invoices/send.php, tests/_smoke_samsara_distance.php (NEW integration tests T8/T10/T12), tests/_smoke_billing_invariants.php (NEW I7), tests/_stress_smoke_invariants_i7.php (NEW), FLEETFORGE_CLAUDE_CODE_REFERENCE.md (§13.4.1 update), FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md
+*(none)*
 
 ### Documentation cleanup (queued, small)
 
@@ -110,76 +108,13 @@ Outcome: 4-commit arc (1 IN-FLIGHT registration + 1 fix + 1 INV-92 remediation +
 
 ### Mileage refactor arc (Model B — Avi's preferred billing model)
 
----
-### S-MILEAGE-2A — Invoice 1 precharge line + activation balance init
-**Status:** QUEUED
-**Estimated effort:** ~90 min
-**Dependencies:** S-MILEAGE-1B shipped (✅), S-INVOICE-DISPLAY-COMPREHENSIVE shipped (✅)
-**Subsequent sessions:** S-MILEAGE-2B (depends on 2A) → S-MILEAGE-3 → S-MILEAGE-5
-
-#### SCOPE (locked)
-- Emit Invoice 1 "Mileage Precharge" line item when lease.precharge_enabled=1 AND lease.precharge_invoiced_at IS NULL.
-- Initialize lease.precharge_balance = lease.precharge_amount on lease status change to 'active'.
-- Set lease.precharge_invoiced_at = NOW() when Invoice 1 containing the precharge line is SENT (not when generated — D14 immutability constrains this).
-- All three operations use FOR UPDATE locks per D20.
-- Place engine-side S-MILEAGE-2A/2B extension point markers in lib/Billing/InvoiceGenerator.php at the precharge emit site (display-layer markers are already placed in show.php — see ARCHITECTURAL NOTES).
-
-#### OUT OF SCOPE for 2A (deferred to subsequent sessions)
-- Drawdown logic on Invoice 2+ (S-MILEAGE-2B)
-- Retiring the Model C per-period excess gate (S-MILEAGE-2B)
-- Odometer & Distance card rewrite (S-MILEAGE-2B)
-- Bug 1: Cumulative Total label fix (rider on S-MILEAGE-2B)
-- Bug 4: backdate invoice warning (rider on S-MILEAGE-2B)
-- Customer portal rendering of precharge balance (S-MILEAGE-4 placeholder)
-- Cash/credit refund toggle (S-MILEAGE-3)
-
-#### HYBRID STATE DURING 2A→2B GAP (live-coherent by design)
-- Invoice 1 on precharge-enabled leases: Model B (precharge line emitted, balance initialized)
-- Invoice 2+ on ALL leases: Model C (per-period excess gate, manager review for excess)
-- Customers on precharge-enabled leases see Invoice 1 as precharge-style; subsequent invoices as legacy until 2B ships. This is an operator-visible transition, not customer-confusing.
-
-#### LINE ITEM SHAPE (Invoice 1 precharge line)
-- item_type = 'mileage_precharge' (ENUM value already exists at FLEETFORGE_DATABASE_MASTER.sql:1898 — no migration needed; see ARCHITECTURAL NOTES for history)
-- description = "Mileage Precharge: $X.XX (covers excess mileage charges throughout lease)"
-- quantity = 1, unit = 'precharge'
-- unit_price = lease.precharge_amount, amount = lease.precharge_amount (bcmath, D16)
-- taxable = 1, taxes computed per invoice tax rates
-- is_credit = 0
-- mileage_distance = NULL, mileage_rate = NULL (the $isMileage detection at show.php:1857 includes 'mileage_precharge'; leaving these NULL on the precharge line suppresses the mileage detail span at show.php:1929-1944)
-
-#### DISPATCH CONTRACT NOTE (per S-INVOICE-DISPLAY-COMPREHENSIVE)
-- The 'mileage_precharge' case is ALREADY in the $itemTypeBadge match at app/admin/invoices/show.php:1891 → 'badge-info', placed by S-INVOICE-DISPLAY-COMPREHENSIVE C3 (5dc2af2) as forward-looking display contract. **No dispatch case addition needed in 2A.**
-- The full LINE TYPE DISPATCH CONTRACT comment block at show.php:1866-1906 (comment 1866-1886 + match table 1889-1906) documents the 3-step protocol (ENUM migration + match case + per-row template hooks) for any future line type. S-MILEAGE-2A doesn't extend it; S-MILEAGE-2B will (mileage_drawdown_credit + mileage_usage).
-- Display template behavior: standard taxable line with leading badge, no special rendering in 2A. Per LINE ITEM SHAPE above, leave mileage_distance/mileage_rate NULL so the detail span doesn't render.
-
-#### INTEGRATION TESTS REQUIRED (carry-forward from S-MILEAGE-1B audit Item 15)
-- T8: synthesize precharge-enabled lease with SamsaraClient fixture mode (FIX_STD), generate Invoice 1, assert mileage_precharge line emitted with correct amount and tax computation
-- T10: malformed precharge_amount (negative, zero with precharge_enabled=1, string injection) → API rejects at lease create/edit validation with field-level error
-- T12: fixture_mode=0 dispatch path — confirm real getDistanceForPeriod would be invoked if called (without actually calling Samsara in tests)
-
-#### D132 EXTENSION (for session prompt)
-- Extend D132 rate-tier completeness to cover precharge: when lease.precharge_enabled=1, lease.precharge_amount must be > 0 (already enforced by `chk_leases_precharge_amount` CHECK at FLEETFORGE_DATABASE_MASTER.sql:2248 — but a D132 invariant smoke I7 must be added so the gate is doc-asserted by the invariant suite, not only DB-asserted by the CHECK).
-
-#### ARCHITECTURAL NOTES FOR CLAUDE CODE
-- SamsaraClient::getDistanceForPeriod is at lib/GPS/SamsaraClient.php:1245. Import as FleetForge\GPS\SamsaraClient (not Samsara namespace).
-- For audit_log queries, use entity_type='samsara_history_query' (NOT action='samsara_history_query' — D102/D125 ENUM workaround).
-- invoice_line_items.item_type ENUM already includes 'mileage_precharge' at FLEETFORGE_DATABASE_MASTER.sql:1898 (Model A vestigial retained for Model B per S-MILEAGE-MODEL-AUDIT 2026-05-04). **NO schema migration needed in 2A.** S-MILEAGE-2A is the first production code path to emit this enum value — InvoiceGenerator currently never produces it.
-- Forward-looking display markers already in app/admin/invoices/show.php (placed by S-INVOICE-DISPLAY-COMPREHENSIVE C3, commit 5dc2af2 — brought to main via merge commit ab122eb):
-  - PHP-side marker: lines 1769-1782 (taxable subtotal docblock with explicit "S-MILEAGE-2A/2B note" at 1775-1781)
-  - HTML-side marker: line 2182 (template comment between line items aggregate and tax block in the Financial Summary section)
-  - LINE TYPE DISPATCH CONTRACT block: lines 1866-1906 (comment 1866-1886 + match table 1889-1906)
-  - mileage_precharge case already in match at line 1891 ('badge-info')
-  - mileage_precharge included in $isMileage detection at line 1857 (rendering picks up mileage_distance/mileage_rate if populated — leave NULL for the precharge line per LINE ITEM SHAPE)
-- lib/Billing/InvoiceGenerator.php currently carries NO S-MILEAGE-2A/2B markers. S-MILEAGE-2A places engine-side markers at the precharge emit site as part of this work.
-- bcmath only (D16). No floats on any precharge math.
-- D14 constrains precharge_invoiced_at write to SEND time, not GENERATE time.
-- D20 FOR UPDATE on lease reads during precharge_balance initialization.
----
+**S-MILEAGE-2A** — SHIPPED 2026-05-12 (commits b602bd9 IN-FLIGHT + 253b294 C2 activate.php balance init + e1918df C3 InvoiceGenerator precharge emit + (b) gate + engine markers + c8e459a C4 send.php stamp + 409 + 365d541 C5 T14/T15/T16 smoke ADD + b16c0fc C6 I7 invariant + this docs commit — see PROGRESS.md SESSION LOG)
+Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balance init on lease activation (D137), `mileage_precharge` line emitted on Invoice 1 generation under the 3-clause gate (D138: lifecycle + (b) cross-invoice uniqueness + billing_type exclusion), precharge_invoiced_at stamp on Invoice 1 send (D140 happy path) + 409 PRECHARGE_ALREADY_BILLED backstop for duplicate-send protection (D140 unhappy path), I7 invariant for precharge-tier rate-tier completeness (D143 / D132 extension). Decisions D137-D146 (D-A through D-J) locked. Mid-session clarifications surfaced + operator-approved: (b) cross-invoice uniqueness gate at C3 emission site paired with C4 send-time 409 (belt + suspenders defense-in-depth); ADD-not-REPLACE for T14/T15/T16 (preserves T8/T10/T12 placeholders as 2B carry-forward per REFERENCE.md §13.6 framing). All 5 stress tests + 16/16 smoke + I1-I7 invariants + parity + migrate clean on every commit. T1 visual sign-off (5-step walk per D146) operator-driven post-ship.
 
 **S-MILEAGE-2B** — QUEUED
-Scope: drawdown logic on subsequent invoices, retire excess gate, Odometer card rewrite, riders Bug 1 (Cumulative Total label) + Bug 4 (backdate warning). DO NOT delete priorExcessKm safeguard (that's S-MILEAGE-3).
+Scope: drawdown logic on subsequent invoices, retire excess gate, Odometer card rewrite, riders Bug 1 (Cumulative Total label) + Bug 4 (backdate warning). **Spec rewrite (FLEETFORGE_SPEC_FINAL.md Model A → Model B) owned by 2B per D144 locked in S-MILEAGE-2A C7.** DO NOT delete priorExcessKm safeguard (that's S-MILEAGE-3).
 Effort: ~2 hrs.
-Dependencies: S-MILEAGE-2A shipped.
+Dependencies: S-MILEAGE-2A shipped (✅ 2026-05-12).
 
 **S-MILEAGE-3** — QUEUED
 Scope: close + cash/credit refund toggle + retire priorExcessKm transitional safeguard.
@@ -259,6 +194,7 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-12:**
+- S-MILEAGE-2A SHIPPED (b602bd9 IN-FLIGHT registration + 253b294 C2 activate.php precharge_balance init + e1918df C3 InvoiceGenerator mileage_precharge emit + (b) cross-invoice uniqueness gate + engine markers + c8e459a C4 send.php precharge_invoiced_at stamp + PRECHARGE_ALREADY_BILLED 409 + 365d541 C5 T14/T15/T16 smoke ADD + b16c0fc C6 I7 D132-precharge-extension invariant + this docs commit) — 7-commit arc closing Invoice 1 Model B lifecycle end-to-end. C2 lands activation transaction extension (FOR UPDATE on lease per D20 + idempotent UPDATE under WHERE-clause guard + dedicated audit_log entity_type='lease_precharge_balance_init'); 6/6 stress PASS. C3 lands InvoiceGenerator emission with 3-clause gate (lifecycle + (b) cross-invoice uniqueness + billing_type exclusion) + 67-line engine marker block carrying forward-looking 2B drawdown contract (greppable via "S-MILEAGE-2B inserts drawdown logic"); 6/6 stress PASS. C4 lands send.php dispatch (NULL → stamp NOW(), NOT NULL → 409 PRECHARGE_ALREADY_BILLED with locked message wording) under FOR UPDATE on lease + dedicated audit_log entity_type='lease_precharge_invoiced_at_stamp'; PRECHARGE_LOCKED 409 D113 activates for free off the stamp; WHY-comment block at 409 site documents C3 (b) gate ↔ C4 409 paired defense-in-depth (defends against racy concurrent gen, manual UI/API line insertion, future regression weakening C3 gate); 5/5 stress PASS. C5 ADDs T14/T15/T16 to tests/_smoke_samsara_distance.php (preserving T8/T10/T12 placeholders as 2B carry-forward per REFERENCE.md §13.6 framing — operator overrode spec's REPLACE wording to ADD); smoke 13/13 → 16/16 PASS. C6 lands I7 invariant (D132 extension into precharge tier — precharge_enabled=1 must have precharge_amount > 0) + stress test using CREATE TEMPORARY TABLE clone trick (column types copied without CHECK constraints, allowing fault-injection of violation rows); INVARIANTS OK I1 → I7 (6/6 stress PASS). 10 D-decisions locked D137-D146 (D-A through D-J). Mid-session clarifications: D-D 409 status code (409 vs 422 for state-conflict family with D113/D19), D-B (b) uniqueness gate (advance-batch multi-draft gap), D-E ADD framing (preserve 2B placeholders), D-G I7 scope (D132 extension vs activation-init check — operator pick). FLEETFORGE_SPEC_FINAL.md Model A→Model B rewrite deferred to S-MILEAGE-2B per D144; no FF_ASSET_VERSION bump per D145. D131 gate clean on every commit: PARITY OK + INVARIANTS OK + migrate 11/0/0. T1 visual sign-off (5-step walk per D146) operator-driven post-ship: activate fresh lease → confirm precharge_balance init in DB → Invoice 1 carries mileage_precharge line → send invoice + confirm stamp + balance unchanged → re-edit lease → PRECHARGE_LOCKED 409 fires.
 - S-MILEAGE-2A-SPEC-WRITE SHIPPED (86353d4 IN-FLIGHT + 17b2776 C2 spec + 3a9351c C3 Master Plan + K-16 + this docs commit) — docs-only 4-commit arc closing the K-16 mid-arc chat handoff requirement before operator closes a long claude.ai web chat that scoped the Model B refactor across multiple sessions. C1 IN-FLIGHT registered standalone per S-D136-COMMIT-DISCIPLINE (pushed to main immediately). C2 wrote full S-MILEAGE-2A spec into CURRENT_SESSIONS.md (replacing the prior short QUEUED entry of 4 lines with a full spec block: SCOPE / OUT OF SCOPE / HYBRID STATE / LINE ITEM SHAPE / DISPATCH CONTRACT NOTE / INTEGRATION TESTS / D132 EXTENSION / ARCHITECTURAL NOTES). C3 inserted `## Model B Mileage Refactor — Multi-Session Master Plan` section into PROGRESS.md between KNOWN ISSUES and NEXT SESSION STARTS WITH (forward-looking-plans area) + locked K-16 (Mid-arc chat handoff discipline) in KEY LEARNINGS table between K-15 and K-17 per K-17's K-number convention. C4 (this commit) ships out of queue. **Pre-work scan surfaced 4 factual discrepancies between operator's narrative and actual code state, operator authorized path B (correct + transparent SESSION LOG note):** D-1 dual S-MILEAGE-2A/2B extension point markers are in `app/admin/invoices/show.php` (PHP at 1769-1782, HTML at 2182), NOT in `lib/Billing/InvoiceGenerator.php` — verified via `git show 5dc2af2 --stat` (C3 of S-INVOICE-DISPLAY-COMPREHENSIVE touched only show.php); D-2 `mileage_precharge` ENUM already exists at FLEETFORGE_DATABASE_MASTER.sql:1898 (Model A vestigial retained for Model B per S-MILEAGE-MODEL-AUDIT 2026-05-04 — no migration needed); D-3 dispatch case already at show.php:1891 ('badge-info', placed by C3 of S-INVOICE-DISPLAY-COMPREHENSIVE as forward-looking display contract); D-4 supported/pending types lists corrected to match code (14 currently-supported values per show.php:1879-1881 + DB ENUM; pending: mileage_drawdown_credit + mileage_usage only — mileage_precharge is supported but not emitted). Net effect: S-MILEAGE-2A scope shrinks (schema + dispatch pre-wired) but session shape unchanged — engine emit + balance init + precharge_invoiced_at write + InvoiceGenerator markers + D132 invariant I7 + T8/T10/T12 tests. **D131 gate not runnable from this worktree** — no `.env` (gitignored in main repo); smoke tests fail with "Access denied" — worktree environment limitation surfaced to operator before C2; docs-only session has no code/schema/migration changes so D131 gate would not catch anything specific to this session. K-16 locked.
 - S-FORK-CLOSE-RESOLVE SHIPPED (d0a0947 IN-FLIGHT registration + ab122eb merge commit + 834adc2 Phase 2.1 gitignore + c441aa6 Phase 2.2 archive + this docs commit) — 5-commit reconciliation arc. Phase 1 rebase aborted at step 2/11 due to journal-file conflicts (CURRENT_SESSIONS.md + PROGRESS.md SESSION LOG); operator switched to Option B merge commit. Merge `ab122eb` brings 11 worktree-branch commits (S-DOCS-CLUSTER + S-INVOICE-DISPLAY-COMPREHENSIVE + S-PREDEPLOY-CHECKLIST-CREATE arcs) into main alongside the 4 main-side commits (S-REVIEW-MILEAGE-TAX-FIX arc); 4 conflict hunks resolved per sign-off (IN-FLIGHT keep HEAD, Recent ship history descending UTC within date, SESSION LOG ascending UTC, KEY LEARNINGS K-14 before K-15 by K-number convention with chronology-inversion note inline). Phase 2.1 (834adc2): gitignored operator's `FleetForge Prompt Review.md` (file kept in working tree, stops tracking surface area). Phase 2.2 (c441aa6): created `scripts/archive/` with README + moved S-ACCT-FIX-A1 abandoned `fix_ar_drift_2026_05_07.php` into it. K-17 locked (branch divergence reconciliation discipline — merge commit, not rebase, when journal files are in scope). Pre-rebase backup tag `pre-rebase-S-FORK-CLOSE-RESOLVE-backup` preserved at origin for 30 days. D131 gate clean post-merge: PARITY OK + INVARIANTS OK (I1-I6 all PASS) + migrate 11/0/0. Worktree + local + remote `claude/kind-sanderson-4ed75d` branches deleted; main is the only branch.
 - S-FORK-CLOSE SHIPPED (read-only diagnostic — no commits) — 7-step clean-state verification: branch state (surfaced divergence), worktree merges (HALT per operator directive), working tree (2 untracked files surfaced — Prompt Review + fix_ar_drift), CURRENT_SESSIONS.md state (zero IN-FLIGHT both branches; neither branch had all 4 day's sessions in Recent ship history — the documentation-layer visualization of the divergence), D131 gate on main (PASS — confirmed main internally clean despite doc divergence), GitHub sync (matched + 1 expected orphan branch), K-14 discipline check (PASS — A1 captured; S-REVIEW-MILEAGE-TAX-FIX had no missed pre-deploy obligations). Verdict: "FORK NOT CLOSED — 3 issues" → resolved in S-FORK-CLOSE-RESOLVE.
