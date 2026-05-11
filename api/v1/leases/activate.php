@@ -54,13 +54,23 @@ if (!$id) {
 $result = null;
 
 db_transaction(function () use ($id, &$result) {
-    // ── Fetch lease ────────────────────────────────────────────
+    // ── Fetch lease (D20: FOR UPDATE on the lease row) ─────────
+    // S-MILEAGE-2A (D-A): also pull precharge_enabled/_amount/_balance
+    // because the precharge_balance init below decides off them. The
+    // FOR UPDATE here is the X-lock that prevents a concurrent writer
+    // (manual SQL, admin tool) from changing precharge_* between this
+    // read and our UPDATE below. The unit also gets FOR UPDATE further
+    // down — both row locks are inside the same db_transaction so they
+    // release atomically on commit.
     $lease = db_row(
         "SELECT id, status, contract_number, company_name_snapshot,
                 customer_id, equipment_unit_id, start_date, billing_cycle,
                 advance_billing_periods,
-                unit_number_snapshot, last_billed_date
-         FROM leases WHERE id = ? AND deleted_at IS NULL",
+                unit_number_snapshot, last_billed_date,
+                precharge_enabled, precharge_amount, precharge_balance,
+                updated_at
+         FROM leases WHERE id = ? AND deleted_at IS NULL
+         FOR UPDATE",
         [$id]
     );
 
@@ -208,6 +218,59 @@ db_transaction(function () use ($id, &$result) {
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── S-MILEAGE-2A (D-A): precharge_balance initialization ───
+    // On lease activation, initialize the running drawdown balance to
+    // the user-set precharge_amount when the lease opted into Model B
+    // precharge billing. Idempotent by WHERE-clause guard
+    // (precharge_balance IS NULL) so a re-run on a lease whose balance
+    // was already set never double-inits — the state machine at the top
+    // of this transaction prevents real re-activation, but the guard is
+    // defense in depth against a manual-SQL or admin-tool race.
+    // The lease row was FOR UPDATE-locked at the SELECT above (D20) so
+    // no concurrent writer can mutate precharge_* between read + write.
+    // chk_leases_precharge_amount CHECK at the DB layer guarantees
+    // precharge_amount > 0 whenever precharge_enabled = 1; the PHP
+    // guard mirrors the rule so we never fire on a malformed row.
+    // Lifecycle: S-MILEAGE-2B decrements precharge_balance per invoice;
+    // S-MILEAGE-3 surfaces refund picker when close-time balance > 0.
+    if ((int) ($lease['precharge_enabled'] ?? 0) === 1
+        && $lease['precharge_amount'] !== null
+        && $lease['precharge_balance'] === null) {
+        $prechargeInitRows = db_execute(
+            "UPDATE leases
+                SET precharge_balance = precharge_amount,
+                    updated_at = NOW(),
+                    updated_by = ?
+              WHERE id = ?
+                AND precharge_enabled = 1
+                AND precharge_amount IS NOT NULL
+                AND precharge_balance IS NULL",
+            [current_user_id(), $id]
+        );
+
+        if ($prechargeInitRows === 1) {
+            $prechargeAmt = (string) $lease['precharge_amount'];
+            db_insert('audit_log', [
+                'user_id'      => current_user_id(),
+                'user_name'    => $changedBy,
+                'action'       => 'update',
+                'module'       => 'leases',
+                'entity_type'  => 'lease_precharge_balance_init',
+                'entity_id'    => $id,
+                'entity_label' => $lease['contract_number'],
+                'notes'        => "Lease {$lease['contract_number']} precharge balance initialized to \${$prechargeAmt} on activation (S-MILEAGE-2A D-A).",
+                'old_values'   => json_encode([
+                    'precharge_balance' => null,
+                ]),
+                'new_values'   => json_encode([
+                    'precharge_amount'  => $prechargeAmt,
+                    'precharge_balance' => $prechargeAmt,
+                ]),
+                'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+        }
+    }
 
     // ── FIX #17 / ADV-BILL-1: Generate Invoice(s) on activation ────
     // Legacy path: single Invoice 1 (period start_date → end of start month).
