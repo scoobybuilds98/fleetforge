@@ -404,11 +404,6 @@ G. **NEW for 2B**: TaxCalculator behavior on negative line amounts — read `lib
 
 ---
 
-**S-MILEAGE-2B** — QUEUED (one-line summary for index)
-Scope: full Model B drawdown lifecycle on subsequent invoices + Model C plumbing retirement (3 invoice columns + ENUM + 2 helpers + HARD send gate + review_mileage endpoint) + Odometer card rewrite + Financial Summary drawdown breakdown + Riders Bug 1 (Cumulative Total label) + Bug 4 (backdate warning) + FLEETFORGE_SPEC_FINAL.md Model A → Model B rewrite (D144). DO NOT delete priorExcessKm safeguard (S-MILEAGE-3).
-Effort: ~3-4 hrs across 10 commits.
-Dependencies: S-MILEAGE-2A shipped (✅ 2026-05-12).
-
 **S-MILEAGE-3** — QUEUED
 Scope: close + cash/credit refund toggle + retire priorExcessKm transitional safeguard.
 Effort: ~90 min.
