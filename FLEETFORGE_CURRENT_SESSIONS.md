@@ -57,6 +57,12 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ## Active queue (as of 2026-05-07)
 
+### Currently in flight
+
+**S-REVIEW-MILEAGE-TAX-FIX** — IN-FLIGHT
+  Started: 2026-05-11T18:21 UTC by claude-code-worktree-flamboyant-lichterman-db0958
+  Touching: api/v1/invoices/review_mileage.php, FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md (possibly tests/_smoke_billing_invariants.php)
+
 ### Documentation cleanup (queued, small)
 
 **S-D136-COMMIT-DISCIPLINE** — QUEUED
