@@ -103,6 +103,38 @@ $totalApplied = array_reduce($invoicePayments, function($sum, $row) {
     return bcadd($sum, (string)$row['applied_amount'], 6);
 }, '0');
 
+/* ─── Load credit applications against this invoice (S-INVOICE-DISPLAY-COMPREHENSIVE D-G) ─── */
+// WHY: credit_note_applications captures each CN application — invoice's aggregate
+// credits_applied column shows the total $ but not the breakdown (which CN, when, by whom).
+// Mirrors the $invoicePayments query shape (same JOIN pattern, same deleted_at IS NULL guard,
+// same null-safety, same ORDER BY applied-time-ascending). The display contract in D-C requires
+// this breakdown to render between Line Items and Financial Summary when any rows exist.
+$creditApplications = db_select(
+    "SELECT
+        cna.id AS application_id,
+        cna.amount_applied,
+        cna.applied_at,
+        cna.applied_by,
+        cn.id AS credit_note_id,
+        cn.credit_note_number,
+        cn.amount AS credit_note_total,
+        cn.currency AS credit_note_currency,
+        cn.source AS credit_note_source,
+        cn.reason AS credit_note_reason,
+        cn.source_invoice_id,
+        u.name AS applied_by_name
+     FROM credit_note_applications cna
+     JOIN credit_notes cn ON cn.id = cna.credit_note_id AND cn.deleted_at IS NULL
+     LEFT JOIN users u ON u.id = cna.applied_by
+     WHERE cna.invoice_id = ?
+     ORDER BY cna.applied_at ASC",
+    [$invoiceId]
+);
+
+$totalCreditsApplied = array_reduce($creditApplications, function($sum, $row) {
+    return bcadd($sum, (string)$row['amount_applied'], 6);
+}, '0');
+
 /* ─── Load credit notes linked to this invoice ─────────────────── */
 // WHY: Credits sourced FROM this invoice (e.g., mileage overpayment generated a credit)
 $creditNotesFrom = db_select(
