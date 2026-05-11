@@ -5,13 +5,15 @@ declare(strict_types=1);
  * tests/_smoke_billing_invariants.php
  *
  * S-BILLING-RATE-FIX D-F / D132 + S-MILEAGE-RATE-VALIDATION D-D / D133 +
- * S-MILEAGE-ALLOWANCE-ZERO-FIX D-B / D133 clarification — runtime invariant
+ * S-MILEAGE-ALLOWANCE-ZERO-FIX D-B / D133 clarification +
+ * S-MILEAGE-2A C6 / I7 (D132 precharge extension) — runtime invariant
  * smoke test for the billing rate-tier discipline. Catches the class of bug
  * found by the 2026-05-06 audit (INV-2026-00086 zero-base-rental), its
- * mileage-tier counterpart, AND the silent-skip class on Model B Lite leases
- * (rate>0 + allowance=0) on every code path that mutates lease/invoice rows.
+ * mileage-tier counterpart, the silent-skip class on Model B Lite leases
+ * (rate>0 + allowance=0), AND the precharge sanity rule (Model B leases
+ * with precharge_enabled=1 must carry a positive precharge_amount).
  *
- * Six invariants, all must hold:
+ * Seven invariants, all must hold:
  *
  *   I1 — No draft invoice carries subtotal=0 unless it has an explicit
  *        legitimate justification. Drafts with subtotal=0 that are NOT
@@ -44,15 +46,24 @@ declare(strict_types=1);
  *        means the engine silent-skipped a billable charge. invoice_type
  *        'mileage_only' excluded (those ARE the mileage line by definition).
  *
+ *   I7 — D132 precharge extension: no active lease (deleted_at IS NULL) has
+ *        precharge_enabled = 1 with a NULL, zero, or negative precharge_amount.
+ *        Mirror of chk_leases_precharge_amount at the invariant layer —
+ *        catches drift if the CHECK is ever weakened (NOT ENFORCED, dropped,
+ *        rewritten) or if a privileged write bypasses it. Locked by
+ *        S-MILEAGE-2A as a D132 extension into the precharge tier (parallels
+ *        I2/I3/I4 for rental + mileage rate tiers).
+ *
  * Exit 0 on all pass, exit 1 with the failing rows on any fail.
  *
  * D131 gate: every schema-touching session must run this smoke test
  * alongside tests/_smoke_master_schema_parity.php.
  *
- * Decisions: D131 (smoke gate), D132 (rental rate-tier completeness),
- *            D133 (mileage rate-tier completeness + silent-skip)
+ * Decisions: D131 (smoke gate), D132 (rental rate-tier completeness +
+ *            S-MILEAGE-2A precharge extension), D133 (mileage rate-tier
+ *            completeness + silent-skip)
  * Spec ref:  S-BILLING-RATE-FIX, S-MILEAGE-RATE-VALIDATION,
- *            S-MILEAGE-ALLOWANCE-ZERO-FIX
+ *            S-MILEAGE-ALLOWANCE-ZERO-FIX, S-MILEAGE-2A
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -304,14 +315,60 @@ if ($rows) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// I7 — D132 precharge extension: precharge_enabled=1 implies precharge_amount > 0
+//
+// Schema layer (chk_leases_precharge_amount CHECK at
+// FLEETFORGE_DATABASE_MASTER.sql:2248) is the primary enforcement; the CHECK
+// blocks malformed writes at INSERT/UPDATE time. I7 is the invariant-layer
+// mirror: catches drift if the CHECK is ever weakened (ALTER ... NOT ENFORCED,
+// dropped, rewritten under a NULL/zero gap) or if a privileged migration
+// inserts a malformed row directly.
+//
+// The CHECK admits two valid shapes:
+//   precharge_enabled = 0                                  (Model B opt-out)
+//   precharge_enabled = 1 AND precharge_amount > 0         (Model B opt-in)
+//
+// Violations I7 catches:
+//   precharge_enabled = 1 AND precharge_amount IS NULL
+//   precharge_enabled = 1 AND precharge_amount = 0
+//   precharge_enabled = 1 AND precharge_amount < 0
+//
+// COALESCE(precharge_amount, 0) <= 0 collapses NULL/zero/negative into a
+// single condition.
+// ────────────────────────────────────────────────────────────────────────────
+
+$rows = db_select(
+    "SELECT id, contract_number, status, precharge_enabled, precharge_amount,
+            precharge_balance, precharge_invoiced_at
+     FROM leases
+     WHERE deleted_at IS NULL
+       AND precharge_enabled = 1
+       AND COALESCE(precharge_amount, 0) <= 0
+     ORDER BY id"
+);
+if ($rows) {
+    $lines = ["I7 FAIL — " . count($rows) . " lease(s) with precharge_enabled=1 but precharge_amount NULL/zero/negative (D132 precharge extension; chk_leases_precharge_amount drift):"];
+    foreach ($rows as $r) {
+        $lines[] = sprintf(
+            "  id=%d  %-30s  status=%-9s  precharge_amount=%s  precharge_balance=%s  precharge_invoiced_at=%s",
+            $r['id'], $r['contract_number'], $r['status'],
+            $r['precharge_amount']      === null ? 'NULL' : (string)$r['precharge_amount'],
+            $r['precharge_balance']     === null ? 'NULL' : (string)$r['precharge_balance'],
+            $r['precharge_invoiced_at'] === null ? 'NULL' : (string)$r['precharge_invoiced_at']
+        );
+    }
+    $failures[] = implode("\n", $lines);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Output
 // ────────────────────────────────────────────────────────────────────────────
 
-echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX)\n";
+echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX + S-MILEAGE-2A D132 precharge ext.)\n";
 echo str_repeat('═', 78), "\n";
 
 if (!$failures) {
-    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice).\n";
+    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice), I7 (no precharge_enabled=1 with NULL/zero/negative precharge_amount).\n";
     exit(0);
 }
 
