@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MILEAGE-2A** — IN-FLIGHT
+  Started: 2026-05-11T21:26 UTC by desktop-1
+  Touching: api/v1/leases/activate.php, lib/Billing/InvoiceGenerator.php, api/v1/invoices/send.php, tests/_smoke_samsara_distance.php (NEW integration tests T8/T10/T12), tests/_smoke_billing_invariants.php (NEW I7), tests/_stress_smoke_invariants_i7.php (NEW), FLEETFORGE_CLAUDE_CODE_REFERENCE.md (§13.4.1 update), FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md
 
 ### Documentation cleanup (queued, small)
 
