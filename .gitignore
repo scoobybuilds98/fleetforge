@@ -73,3 +73,9 @@ samsara_api*
 .claude/worktrees/
 logs/
 .claude/
+
+# --- Operator's Claude Desktop prompt-review preset ---
+# Personal tooling, not project state. Kept in working tree at repo root for
+# operator convenience; not tracked. Added 2026-05-12 via S-FORK-CLOSE-RESOLVE
+# after the file had sat untracked at repo root since 2026-05-06.
+FleetForge Prompt Review.md
