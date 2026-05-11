@@ -1744,25 +1744,91 @@ if ($rateExplanation) {
 <?php endif; ?>
 
 
+<?php
+/* ─── S-INVOICE-DISPLAY-COMPREHENSIVE D-A: $0 line item display policy ───
+ * Strict by status: drafts hide $0 lines (operator workflow — drafts in
+ * progress shouldn't show noise from lines that resolved to $0). Sent /
+ * partially_paid / paid / overdue / void / written_off render all lines
+ * in full for CRA defensibility (the auditor needs to see every billable
+ * line, including ones that resolved to $0 after credit application or
+ * drawdown — forward-looking discipline for S-MILEAGE-2A/2B drawdown
+ * credit lines which will produce $0-mileage-after-credit invoices).
+ *
+ * Live data at lock time (2026-05-11): zero invoices currently have
+ * $0 line items. Production verification of this branch will happen
+ * organically when 2A/2B starts producing those line shapes.
+ */
+$renderLineItems = $lineItems;
+if ($isDraft) {
+    $renderLineItems = array_values(array_filter($lineItems, function($li) {
+        return bccomp((string)$li['amount'], '0', 2) !== 0;
+    }));
+}
+$hiddenZeroLineCount = count($lineItems) - count($renderLineItems);
+
+/* ─── S-INVOICE-DISPLAY-COMPREHENSIVE D-B: taxable vs non-taxable subtotal split ───
+ * Computed from the line items themselves so the Financial Summary block
+ * can show "Subtotal (taxable) / Subtotal (non-taxable) / Discount /
+ * Tax (X% on $base)" in accountant-friendly format. The per-line
+ * `taxable` boolean drives the split; credits subtract from their side.
+ *
+ * S-MILEAGE-2A/2B note: when drawdown credit + usage lines land, the
+ * taxable subtotal must include the NET amount (usage − credit), not the
+ * gross usage. The current bccomp by sign handles this because is_credit
+ * lines already carry negative semantics in the rendering and the
+ * underlying amount column is positive but with is_credit=1. Confirm the
+ * sign handling when 2A wires up — see SESSION LOG S-MILEAGE-2A entry
+ * for the canonical drawdown line shape.
+ */
+$taxableSubtotal = '0';
+$nonTaxableSubtotal = '0';
+$taxableLineCount = 0;
+$nonTaxableLineCount = 0;
+foreach ($lineItems as $li) {
+    $amt = (string)$li['amount'];
+    if (!empty($li['is_credit'])) {
+        $amt = '-' . $amt;
+    }
+    if (!empty($li['taxable'])) {
+        $taxableSubtotal = bcadd($taxableSubtotal, $amt, 6);
+        $taxableLineCount++;
+    } else {
+        $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, $amt, 6);
+        $nonTaxableLineCount++;
+    }
+}
+$taxableSubtotal = bcadd($taxableSubtotal, '0', 2);
+$nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
+?>
+
 <!-- ================================================================
      LINE ITEMS TABLE — Comprehensive with expandable details
      ================================================================ -->
 <div class="card line-items-card" style="margin-bottom:24px;">
-    <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
+    <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <h3 style="font-size:14px; font-weight:600; margin:0;">Line Items</h3>
-        <span class="badge badge-no-dot badge-neutral"><?= count($lineItems) ?> item<?= count($lineItems) !== 1 ? 's' : '' ?></span>
+        <span class="badge badge-no-dot badge-neutral"><?= count($renderLineItems) ?> item<?= count($renderLineItems) !== 1 ? 's' : '' ?></span>
         <?php if ($creditLineCount > 0): ?>
             <span class="badge badge-no-dot badge-success" style="font-size:11px;"><?= $creditLineCount ?> credit<?= $creditLineCount !== 1 ? 's' : '' ?></span>
         <?php endif; ?>
         <?php if ($mileageLineCount > 0): ?>
             <span class="badge badge-no-dot badge-info" style="font-size:11px;"><?= $mileageLineCount ?> mileage</span>
         <?php endif; ?>
+        <?php if ($hiddenZeroLineCount > 0): ?>
+            <span class="text-sm text-secondary" style="font-size:11px;">(<?= $hiddenZeroLineCount ?> $0 line<?= $hiddenZeroLineCount !== 1 ? 's' : '' ?> hidden — draft view)</span>
+        <?php endif; ?>
     </div>
 
-    <?php if (empty($lineItems)): ?>
+    <?php if (empty($renderLineItems)): ?>
         <div class="empty-state" style="padding:40px;">
-            <p class="empty-state-title">No line items</p>
-            <p class="empty-state-text">This invoice has no line items.</p>
+            <p class="empty-state-title">No line items<?= $hiddenZeroLineCount > 0 ? ' to show' : '' ?></p>
+            <p class="empty-state-text">
+                <?php if ($hiddenZeroLineCount > 0): ?>
+                    This draft has <?= $hiddenZeroLineCount ?> $0 line<?= $hiddenZeroLineCount !== 1 ? 's' : '' ?> hidden. They will appear once the invoice is sent.
+                <?php else: ?>
+                    This invoice has no line items.
+                <?php endif; ?>
+            </p>
         </div>
     <?php else: ?>
         <div class="table-wrapper">
@@ -1780,7 +1846,7 @@ if ($rateExplanation) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($lineItems as $i => $item):
+                    <?php foreach ($renderLineItems as $i => $item):
                         $isCreditLine = (bool)$item['is_credit'];
                         $rowStyle = $isCreditLine ? 'color:var(--color-success);' : '';
                         $hasDetail = !empty($item['_detail']);
@@ -1797,7 +1863,27 @@ if ($rateExplanation) {
                             2
                         );
 
-                        // WHY: Item type badge color mapping
+                        // ────────────────────────────────────────────────────────
+                        // LINE TYPE DISPATCH CONTRACT (for S-MILEAGE-2A/2B extension)
+                        // Each item_type value maps to a badge color + display behavior. To add a new line type:
+                        //   1. Add the item_type value to the invoice_line_items.item_type ENUM (schema migration)
+                        //   2. Add a case to the $itemTypeBadge match() expression below
+                        //   3. Add any type-specific rendering hooks to the per-row template
+                        //      (e.g., the $isMileage block for mileage detail, mirror that pattern)
+                        // Display contract: every line type receives the same row data shape (id, item_type,
+                        // description, detail_lines, quantity, unit, unit_price, amount, is_credit, taxable,
+                        // tax_gst/pst/hst_amount, mileage_*, billing_days, rate_method, period_start/end) and
+                        // must render into the same 8-column table structure (#, Type, Description, Period,
+                        // Qty, Unit Price, Tax, Amount).
+                        // Current supported item_types (from invoice_line_items.item_type ENUM):
+                        //   base_rental, mileage_precharge, mileage_adjustment, mileage_credit,
+                        //   insurance, warranty, late_fee, early_return_credit, manual_adjustment,
+                        //   damage, discount, account_credit_applied, other, gps.
+                        // Pending types (S-MILEAGE-2A/2B): mileage_drawdown_credit + mileage_usage. Model B
+                        // full implementation will supersede the current mileage_precharge/adjustment/credit
+                        // trio — see FLEETFORGE_PROGRESS.md S-MILEAGE-2A/2B SESSION LOG entries for the
+                        // drawdown line type rendering contract.
+                        // ────────────────────────────────────────────────────────
                         // S-MILEAGE-FIX-0 (D-G): replaced stale mileage_charge /
                         // mileage_overage badges with the actual enum values.
                         $itemTypeBadge = match($item['item_type']) {
@@ -1932,22 +2018,132 @@ if ($rateExplanation) {
 
 
 <!-- ================================================================
-     FINANCIAL SUMMARY — Full tax breakdown with visual hierarchy
+     CREDIT APPLICATIONS — S-INVOICE-DISPLAY-COMPREHENSIVE D-C
+     Renders when credit_note_applications rows exist OR the invoice's
+     aggregate credits_applied > 0. Sits between Line Items and
+     Financial Summary so the auditor can see WHICH credits reduced the
+     balance before they look at the totals.
+     ================================================================ -->
+<?php if (!empty($creditApplications) || bccomp($invoice['credits_applied'] ?? '0', '0', 2) > 0): ?>
+<div class="card credit-applications-card" style="margin-bottom:24px;">
+    <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:12px;">
+        <h3 style="font-size:14px; font-weight:600; margin:0;">Credits Applied</h3>
+        <span class="badge badge-no-dot badge-success"><?= count($creditApplications) ?> credit<?= count($creditApplications) !== 1 ? 's' : '' ?></span>
+    </div>
+    <div class="table-wrapper">
+        <table class="table" aria-label="Credit applications against this invoice">
+            <thead>
+                <tr>
+                    <th style="width:160px;">Credit Note</th>
+                    <th style="width:120px;">Source</th>
+                    <th>Reason</th>
+                    <th style="width:130px;">Applied</th>
+                    <th style="text-align:right; width:130px;">Amount Applied</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php
+                $creditSourceLabels = [
+                    'mileage_overpayment' => 'Mileage Overpayment',
+                    'invoice_adjustment'  => 'Invoice Adjustment',
+                    'damage_resolution'   => 'Damage Resolution',
+                    'goodwill'            => 'Goodwill',
+                    'payment_returned'    => 'Payment Returned',
+                    'overpayment'         => 'Overpayment',
+                    'other'               => 'Other',
+                ];
+                foreach ($creditApplications as $ca):
+                ?>
+                <tr>
+                    <td class="font-mono text-sm">
+                        <a href="<?= e(base_url('credit_notes/show?id=' . (int)$ca['credit_note_id'])) ?>"
+                           target="_blank" rel="noopener"
+                           style="color:var(--color-primary);">
+                            <?= e($ca['credit_note_number']) ?>
+                        </a>
+                    </td>
+                    <td>
+                        <span class="text-sm"><?= e($creditSourceLabels[$ca['credit_note_source']] ?? ucwords(str_replace('_', ' ', (string)$ca['credit_note_source']))) ?></span>
+                    </td>
+                    <td>
+                        <div class="text-sm"><?= e($ca['credit_note_reason'] ?? '') ?></div>
+                    </td>
+                    <td class="font-mono text-sm">
+                        <div><?= format_date($ca['applied_at']) ?></div>
+                        <?php if (!empty($ca['applied_by_name'])): ?>
+                            <div class="text-sm text-secondary" style="font-size:11px;">by <?= e($ca['applied_by_name']) ?></div>
+                        <?php endif; ?>
+                    </td>
+                    <td class="font-mono" style="text-align:right; font-weight:600; color:var(--color-success);">
+                        −<?= format_currency($ca['amount_applied']) ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($creditApplications) && bccomp($invoice['credits_applied'] ?? '0', '0', 2) > 0): ?>
+                <tr>
+                    <td colspan="4" class="text-sm text-secondary" style="padding:14px;">
+                        Credit application total recorded on invoice ($<?= format_currency($invoice['credits_applied']) ?>) but no per-application breakdown is available. This typically means credits were applied through a legacy path before per-application tracking was wired.
+                    </td>
+                    <td class="font-mono" style="text-align:right; font-weight:600; color:var(--color-success);">
+                        −<?= format_currency($invoice['credits_applied']) ?>
+                    </td>
+                </tr>
+                <?php endif; ?>
+            </tbody>
+            <?php if (!empty($creditApplications)): ?>
+            <tfoot>
+                <tr style="background:var(--bg-muted);">
+                    <td colspan="4" style="text-align:right; font-weight:600; font-size:13px; padding:12px 14px;">
+                        Total Credits Applied
+                    </td>
+                    <td class="font-mono" style="text-align:right; font-weight:700; padding:12px 14px; color:var(--color-success);">
+                        −<?= format_currency($totalCreditsApplied) ?>
+                    </td>
+                </tr>
+            </tfoot>
+            <?php endif; ?>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
+
+
+<!-- ================================================================
+     FINANCIAL SUMMARY — Step-by-step CRA-defensible breakdown
+     S-INVOICE-DISPLAY-COMPREHENSIVE D-B (tax base transparency) + D-D
+     (step-by-step balance due). Every row hides on zero except Subtotal,
+     Total, and Balance Due which always render for completeness.
      ================================================================ -->
 <div class="card financial-summary-card" style="margin-bottom:24px;">
     <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
         <h3 style="font-size:14px; font-weight:600; margin:0;">Financial Summary</h3>
     </div>
     <div style="padding:16px 20px;">
-        <table class="financial-summary-table" style="max-width:480px; margin-left:auto;">
+        <table class="financial-summary-table" style="max-width:520px; margin-left:auto;">
             <tbody>
-                <!-- Subtotal -->
+                <!-- D-B: split subtotal into taxable + non-taxable so the tax-base reconciliation
+                     question (does tax_base × rate match the displayed tax amount?) is auditable
+                     row-by-row. The non-taxable row only renders when there's actually
+                     non-taxable revenue on the invoice (zero noise on common case). -->
                 <tr>
-                    <td class="fs-label">Subtotal</td>
-                    <td class="fs-value"><?= format_currency($invoice['subtotal']) ?></td>
+                    <td class="fs-label">Subtotal (taxable lines)</td>
+                    <td class="fs-value"
+                        title="<?= $taxableLineCount > 0 ? 'Applied to ' . $taxableLineCount . ' taxable line' . ($taxableLineCount !== 1 ? 's' : '') . ' totaling ' . format_currency($taxableSubtotal) : '' ?>">
+                        <?= format_currency($taxableSubtotal) ?>
+                    </td>
                 </tr>
+                <?php if (bccomp($nonTaxableSubtotal, '0', 2) !== 0): ?>
+                <tr>
+                    <td class="fs-label">Subtotal (non-taxable lines)</td>
+                    <td class="fs-value"
+                        title="Applied to <?= $nonTaxableLineCount ?> non-taxable line<?= $nonTaxableLineCount !== 1 ? 's' : '' ?> totaling <?= format_currency($nonTaxableSubtotal) ?>">
+                        <?= format_currency($nonTaxableSubtotal) ?>
+                    </td>
+                </tr>
+                <?php endif; ?>
 
-                <!-- Discount -->
+                <!-- Discount: applies before tax computation. The Subtotal After Discount row
+                     renders only when there's a discount applied (otherwise it duplicates Subtotal). -->
                 <?php if (bccomp($invoice['discount_amount'] ?? '0', '0', 2) > 0): ?>
                 <tr>
                     <td class="fs-label">
@@ -1961,66 +2157,97 @@ if ($rateExplanation) {
                     <td class="fs-value" style="color:var(--color-success);">−<?= format_currency($invoice['discount_amount']) ?></td>
                 </tr>
                 <tr>
-                    <td class="fs-label">Subtotal After Discount</td>
+                    <td class="fs-label">Subtotal after discount</td>
                     <td class="fs-value"><?= format_currency($invoice['subtotal_after_discount']) ?></td>
                 </tr>
                 <?php endif; ?>
 
-                <!-- Tax Breakdown -->
+                <!-- S-MILEAGE-2A/2B extension point: Model B mileage breakdown (usage − credit) slots here between line items aggregate and tax block. See FLEETFORGE_PROGRESS.md S-MILEAGE-2A/2B SESSION LOG entries for line type rendering contract. -->
+
+                <!-- D-B: tax rows show "rate% on $base" inline so the auditor's first-glance
+                     reconciliation (rate × base == tax_amount) works without scrolling.
+                     Per-tax-row tooltip lists how many taxable lines the tax applies to
+                     and the taxable subtotal — answers the accountant's "does the tax
+                     base reconcile to the taxable subtotal?" audit question. -->
+                <?php
+                // Derive each tax's actual base from the stored amount/rate (lossy reverse-math
+                // but matches what TaxCalculator wrote at invoice time).
+                $taxBaseFromAmount = function(string $amount, string $rate): string {
+                    if (bccomp($rate, '0', 6) <= 0) return '0';
+                    return bcdiv($amount, $rate, 2);
+                };
+                ?>
                 <?php if (bccomp($invoice['tax_gst_amount'] ?? '0', '0', 2) > 0): ?>
+                <?php $gstBase = $taxBaseFromAmount((string)$invoice['tax_gst_amount'], (string)($invoice['tax_gst_rate'] ?? '0')); ?>
                 <tr>
-                    <td class="fs-label">GST (<?= e(rtrim(rtrim(number_format((float)($invoice['tax_gst_rate'] ?? 0), 4), '0'), '.')) ?>%)</td>
-                    <td class="fs-value"><?= format_currency($invoice['tax_gst_amount']) ?></td>
+                    <td class="fs-label">
+                        GST (<?= e(rtrim(rtrim(number_format((float)($invoice['tax_gst_rate'] ?? 0) * 100, 4), '0'), '.')) ?>% on <?= format_currency($gstBase) ?>)
+                    </td>
+                    <td class="fs-value"
+                        title="Applied to <?= $taxableLineCount ?> taxable line<?= $taxableLineCount !== 1 ? 's' : '' ?> totaling <?= format_currency($taxableSubtotal) ?>">
+                        <?= format_currency($invoice['tax_gst_amount']) ?>
+                    </td>
                 </tr>
                 <?php endif; ?>
                 <?php if (bccomp($invoice['tax_pst_amount'] ?? '0', '0', 2) > 0): ?>
+                <?php $pstBase = $taxBaseFromAmount((string)$invoice['tax_pst_amount'], (string)($invoice['tax_pst_rate'] ?? '0')); ?>
                 <tr>
-                    <td class="fs-label">PST (<?= e(rtrim(rtrim(number_format((float)($invoice['tax_pst_rate'] ?? 0), 4), '0'), '.')) ?>%)</td>
-                    <td class="fs-value"><?= format_currency($invoice['tax_pst_amount']) ?></td>
+                    <td class="fs-label">
+                        PST (<?= e(rtrim(rtrim(number_format((float)($invoice['tax_pst_rate'] ?? 0) * 100, 4), '0'), '.')) ?>% on <?= format_currency($pstBase) ?>)
+                    </td>
+                    <td class="fs-value"
+                        title="Applied to <?= $taxableLineCount ?> taxable line<?= $taxableLineCount !== 1 ? 's' : '' ?> totaling <?= format_currency($taxableSubtotal) ?>">
+                        <?= format_currency($invoice['tax_pst_amount']) ?>
+                    </td>
                 </tr>
                 <?php endif; ?>
                 <?php if (bccomp($invoice['tax_hst_amount'] ?? '0', '0', 2) > 0): ?>
+                <?php $hstBase = $taxBaseFromAmount((string)$invoice['tax_hst_amount'], (string)($invoice['tax_hst_rate'] ?? '0')); ?>
                 <tr>
-                    <td class="fs-label">HST (<?= e(rtrim(rtrim(number_format((float)($invoice['tax_hst_rate'] ?? 0), 4), '0'), '.')) ?>%)</td>
-                    <td class="fs-value"><?= format_currency($invoice['tax_hst_amount']) ?></td>
+                    <td class="fs-label">
+                        HST (<?= e(rtrim(rtrim(number_format((float)($invoice['tax_hst_rate'] ?? 0) * 100, 4), '0'), '.')) ?>% on <?= format_currency($hstBase) ?>)
+                    </td>
+                    <td class="fs-value"
+                        title="Applied to <?= $taxableLineCount ?> taxable line<?= $taxableLineCount !== 1 ? 's' : '' ?> totaling <?= format_currency($taxableSubtotal) ?>">
+                        <?= format_currency($invoice['tax_hst_amount']) ?>
+                    </td>
                 </tr>
                 <?php endif; ?>
                 <?php if (bccomp($invoice['tax_total'] ?? '0', '0', 2) > 0): ?>
                 <tr>
-                    <td class="fs-label" style="font-weight:500;">Tax Total</td>
+                    <td class="fs-label" style="font-weight:500;">Tax total</td>
                     <td class="fs-value" style="font-weight:500;"><?= format_currency($invoice['tax_total']) ?></td>
                 </tr>
                 <?php endif; ?>
 
-                <!-- Total Amount -->
+                <!-- Total Amount — always shown (D-D: Subtotal + Total + Balance Due always render) -->
                 <tr class="fs-grand">
-                    <td class="fs-label fs-total">Total Amount</td>
+                    <td class="fs-label fs-total">Total</td>
                     <td class="fs-value fs-total"><?= format_currency($invoice['total_amount']) ?> <?= e($invoice['currency']) ?></td>
                 </tr>
 
-                <!-- Payments & Credits applied -->
+                <!-- D-D: Payments / Credits / Late Fee each render only when their value is non-zero. -->
                 <?php if (bccomp($invoice['amount_paid'] ?? '0', '0', 2) > 0): ?>
                 <tr>
-                    <td class="fs-label">Payments Applied</td>
+                    <td class="fs-label">Payments received</td>
                     <td class="fs-value" style="color:var(--color-success);">−<?= format_currency($invoice['amount_paid']) ?></td>
                 </tr>
                 <?php endif; ?>
                 <?php if (bccomp($invoice['credits_applied'] ?? '0', '0', 2) > 0): ?>
                 <tr>
-                    <td class="fs-label">Credits Applied</td>
+                    <td class="fs-label">Credits applied</td>
                     <td class="fs-value" style="color:var(--color-success);">−<?= format_currency($invoice['credits_applied']) ?></td>
                 </tr>
                 <?php endif; ?>
 
-                <!-- Late Fee -->
                 <?php if ($invoice['late_fee_applied'] && bccomp($invoice['late_fee_amount'] ?? '0', '0', 2) > 0): ?>
                 <tr>
-                    <td class="fs-label" style="color:var(--color-danger);">Late Fee Applied</td>
+                    <td class="fs-label" style="color:var(--color-danger);">Late fee applied</td>
                     <td class="fs-value" style="color:var(--color-danger);">+<?= format_currency($invoice['late_fee_amount']) ?></td>
                 </tr>
                 <?php endif; ?>
 
-                <!-- Balance Due -->
+                <!-- Balance Due — always shown -->
                 <tr class="fs-divider">
                     <td class="fs-label fs-total" style="font-size:16px;">Balance Due</td>
                     <td class="fs-value fs-total" style="font-size:16px; <?= bccomp($invoice['balance_due'], '0', 2) > 0 ? 'color:var(--color-danger);' : 'color:var(--color-success);' ?>">
