@@ -57,6 +57,13 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ## Active queue (as of 2026-05-07)
 
+### IN-FLIGHT
+
+**S-DOCS-CLUSTER-2026-05-11** — IN-FLIGHT
+  Started: 2026-05-11T16:22 UTC by desktop-1
+  Touching: FLEETFORGE_CLAUDE_CODE_REFERENCE.md, FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md
+  Bundles: S-D136-COMMIT-DISCIPLINE + S-D135-REFERENCE-PROMOTE + S-D130-EXTENSION (docs-only).
+
 ### Documentation cleanup (queued, small)
 
 **S-D136-COMMIT-DISCIPLINE** — QUEUED
