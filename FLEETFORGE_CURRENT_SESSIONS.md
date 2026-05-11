@@ -55,13 +55,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ---
 
-## Active queue (as of 2026-05-07)
-
-### Currently in flight
-
-**S-REVIEW-MILEAGE-TAX-FIX** — IN-FLIGHT
-  Started: 2026-05-11T18:21 UTC by claude-code-worktree-flamboyant-lichterman-db0958
-  Touching: api/v1/invoices/review_mileage.php, FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md (possibly tests/_smoke_billing_invariants.php)
+## Active queue (as of 2026-05-12)
 
 ### Documentation cleanup (queued, small)
 
@@ -117,11 +111,8 @@ Side-findings closed: (a) duplicate-period draft INV-2026-00089 voided in C3; (b
 **S-MILEAGE-RATE-VALIDATION-FOLLOWUP** — SUPERSEDED 2026-05-07 by S-MILEAGE-ALLOWANCE-ZERO-FIX
 Reason: original framing assumed defensive validation (reject the rate>0 + allowance=0 shape, queue 13-lease backfill). Operator reframed as engine-fix (admit the shape as Model B Lite, reframe Mileage::periodExcess to handle allowance=0 natively). The four planned layers reduced to one engine-guard restructure plus an I6 smoke invariant — no API rejection, no data backfill needed (12 of 13 affected leases had no exposed invoices; only lease 52's INV-90 needed regen). See S-MILEAGE-ALLOWANCE-ZERO-FIX SESSION LOG entry for full trace.
 
-**S-REVIEW-MILEAGE-TAX-FIX** — QUEUED
-Scope: surfaced in S-MILEAGE-ALLOWANCE-ZERO-FIX C3. `api/v1/invoices/review_mileage.php` lines 213-218 divides line tax by 100 (e.g. `bcdiv(bcmul($amount, $gstRate, 6), '100', 2)`) but `tax_rates` table stores rates as decimal fractions (0.13 = 13%), confirmed via TaxCalculator at lib/Billing/TaxCalculator.php:62. Manager-approved mileage charges would underbill HST by 100× (e.g. $91.26 × 0.13 = $11.86 correct, but $91.26 × 0.13 ÷ 100 = $0.12 produced). Dormant — zero existing `mileage_adjustment` line items in production at fix time. Now exercisable post S-MILEAGE-ALLOWANCE-ZERO-FIX (Model B Lite invoices flow through review approval). Fix: drop the `bcdiv(..., '100', 2)` wrapper to match TaxCalculator's direct multiplication.
-Effort: ~15-30 min (one-line code fix + stress test + smoke gate).
-Dependencies: none.
-Discussed: 2026-05-07 (S-MILEAGE-ALLOWANCE-ZERO-FIX C3 pre-work).
+**S-REVIEW-MILEAGE-TAX-FIX** — SHIPPED 2026-05-12 (commits 3582e78 + 79934a0 + b1adbcd + docs — see PROGRESS.md SESSION LOG)
+Outcome: 4-commit arc (1 IN-FLIGHT registration + 1 fix + 1 INV-92 remediation + 1 docs). C2 replaced the buggy `bcdiv(..., '100', 2)` wrapper at api/v1/invoices/review_mileage.php:213-218 with the canonical `bcround(bcmul(..., 6), 2)` pattern matching TaxCalculator.php:62; added WHY comment block referencing TaxCalculator.php:62 from the calling site; new stress test tests/_stress_review_mileage_tax.php (14 cases across canonical formula + source-pattern regression sentinel; pre-fix 9/14, post-fix 14/14 PASS exit 0). Pre-work scan #7 (full SELECT for ALL `mileage_adjustment` line items per K-15 discipline) surfaced INV-2026-00092 line 175 ($699.84 base, line_hst=$0.90 → $90.98) — created post-C5 audit-pass and missed by inv91_tax_correct_2026_05_07.php. C3 single-transaction audited UPDATE in scripts/inv92_tax_correct_2026_05_12.php mirrored C5's inv91 pattern (--dry-run/--execute + idempotent guard). Visible impact: line tax_hst $0.90 → $90.98 (delta +$90.08); invoice tax_hst_amount $106.21 → $196.29; tax_total $107.11 → $197.19; total_amount $1623.95 → $1714.03; balance_due $1623.95 → $1714.03; lease 52 total_invoiced += $90.08. K-15 locked (data-path coverage discipline). D131 gate clean on every commit.
 
 ### Mileage refactor arc (Model B — Avi's preferred billing model)
 
@@ -210,6 +201,9 @@ Effort: TBD.
 ---
 
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
+
+**2026-05-12:**
+- S-REVIEW-MILEAGE-TAX-FIX SHIPPED (3582e78 + 79934a0 + b1adbcd + docs commit) — 4-commit arc closing the dormant tax-divide-by-100 bug at api/v1/invoices/review_mileage.php:213-218 surfaced in S-MILEAGE-ALLOWANCE-ZERO-FIX C5. C1 standalone IN-FLIGHT registration (per S-D136-COMMIT-DISCIPLINE forecast — first session to commit IN-FLIGHT before any other edit). C2 fix + stress test (replaces bcdiv-by-100 with canonical bcround-bcmul pattern matching TaxCalculator.php:62; new tests/_stress_review_mileage_tax.php 14/14 PASS post-fix). C3 audited UPDATE for INV-2026-00092 line 175 (the one production row with bug applied — surfaced by K-15 data-path coverage scan; +$90.08 HST correction). C4 docs + K-15 lock. D131 clean throughout.
 
 **2026-05-07:**
 - S-DOC-STATUS-RECONCILE-CLOSE SHIPPED (15865c4, fast-forward merged from session/S-DOC-STATUS-RECONCILE-CLOSE-20260507-0740 branch per D136 isolation fallback) — closes 4 documentation gaps surfaced by S-QUEUE-STATUS-RECONCILE diagnostic (3 SESSION LOG backfills + 3 CURRENT_SESSIONS status flips). Locks K-12 (documentation divergence as bug class). Extends §Active session format with `(DB writes)` annotation convention per S-ACCT-FIX-A1's organic precedent. **Wording correction (S-DOC-STATUS-RECONCILE-CLOSE-FIXUP)**: original entry said "S-ACCT-FIX-A1 zombie IN-FLIGHT entry on main" — empirically incorrect, the IN-FLIGHT registration was carried over from the parallel agent's working tree but never committed to main. Carryover block was removed in the FIXUP commit. See S-DOC-STATUS-RECONCILE-CLOSE-FIXUP SESSION LOG row + S-ACCT-FIX-A1 abandonment row.
