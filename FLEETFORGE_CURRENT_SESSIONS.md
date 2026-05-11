@@ -57,12 +57,6 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ## Active queue (as of 2026-05-11)
 
-### IN-FLIGHT
-
-**S-INVOICE-DISPLAY-COMPREHENSIVE** — IN-FLIGHT
-  Started: 2026-05-11T16:56 UTC by desktop-1
-  Touching: app/admin/invoices/show.php, api/v1/invoices/show.php (potential), FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md (potential), FLEETFORGE_DESIGN_DETAILS.md (potential)
-
 ### Documentation cleanup (queued, small)
 
 **S-D136-COMMIT-DISCIPLINE** — SHIPPED 2026-05-11 (bundled into S-DOCS-CLUSTER-2026-05-11 — see PROGRESS.md SESSION LOG)
@@ -79,14 +73,8 @@ Outcome: D-C of S-DOCS-CLUSTER-2026-05-11. Extended D130 in PROGRESS.md DECISION
 
 ### UX session set (from real-use testing 2026-05-07)
 
-**S-INVOICE-DISPLAY-COMPREHENSIVE** — QUEUED (highest leverage of the UX set)
-Scope: comprehensive invoice show.php — full line item breakdown (base rental, mileage with allowance/excess math, insurance, warranty, damage, fees, custom items, mileage adjustments), separate tax rows (GST/PST/HST with rates visible), credit applications, balance due. Resolves Issue 1's UX confusion (Model C "no charge" becomes visibly justified) + improves CRA-defensibility.
-Effort: ~60-90 min.
-Dependencies: none. Operates on app/admin/invoices/show.php and related lib/Billing helpers.
-Open design questions:
-- Show $0 rows or hide? (lean: hide pure $0 fee rows, keep informative ones like mileage allowance context)
-- Transparency level for tax math? (lean: always show full GST/PST/HST breakdown for B2B trucking + CRA defensibility)
-Discussed: 2026-05-07 in planning chat.
+**S-INVOICE-DISPLAY-COMPREHENSIVE** — SHIPPED 2026-05-11 (commits 8bc4e5c + aabb087 + 5dc2af2 + df1bd20 + f9130a2 — see PROGRESS.md SESSION LOG)
+Outcome: 5-commit arc covering D-A through D-G + a T1-surfaced print-overlay fix. C2 (aabb087): backend data load extension — `$creditApplications` query against `credit_note_applications` mirroring `$invoicePayments` shape. C3 (5dc2af2): comprehensive line-item rendering with D-A draft-only $0 hide, dispatch contract comment block for S-MILEAGE-2A/2B extension, Credit Applications card between Line Items and Financial Summary (D-C), step-by-step Financial Summary with taxable/non-taxable split + "RATE% on $BASE" inline tax base + per-tax tooltip (D-B + D-D), dual S-MILEAGE-2B extension markers (HTML + PHP). C3 refinement (df1bd20): Subtotal label adapts to tax shape — plain "Subtotal" for single-class invoices, "(taxable lines) / (non-taxable lines)" only when both exist. C3-T1-FIX (f9130a2): global @media print hide list extended with `.search-modal, .search-overlay, .modal-overlay, .modal-backdrop, .sidebar-overlay` after T1 surfaced a dark semi-transparent overlay in browser Cmd+P / Save as PDF rendering. Side-fix disclosed per D130: pre-existing tax-rate display bug (rendered "0.05%" instead of "5%" since rates are stored as decimal fractions) was incidentally corrected in C3 by adding ×100 conversion in the label. T1 verification: technical via PHP CLI auth-faked render + synthetic CN apply against INV-13 with BEGIN/ROLLBACK isolation (rollback verified clean); operator visual T1 PASS on the 3 reference invoices (INV-19 tax-exempt sent, INV-13 paid ON HST, INV-21 BC GST+PST + discount). KEY LEARNING K-13 locked: global include CSS as universal print concern. `.env` FF_ASSET_VERSION 1.0.25 → 1.0.26 (uncommitted; .env gitignored).
 
 **S-INVOICE-CREATION-UX** — SHIPPED 2026-05-07 (commits 044ffef + 6feb94c + cdb59ca + C4 — see PROGRESS.md SESSION LOG)
 Outcome: 4-commit arc covering all three issues. C1 classified Issue 1 as VALIDATION GAP (KNOWN ISSUE #103, queued S-MILEAGE-RATE-VALIDATION-FOLLOWUP). C2 wired period auto-fill on invoice create form (12-fixture node smoke 12/12 PASS). C3 added Generate Invoice button on lease profile (8-cell PHP truth-table smoke 13/13 PASS). C4 = tests + this entry. Both new permanent smoke tests committed at tests/_smoke_invoice_create_period_autofill.js + tests/_smoke_lease_show_generate_invoice_button.php.
@@ -201,6 +189,7 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-11:**
+- S-INVOICE-DISPLAY-COMPREHENSIVE SHIPPED (commits 8bc4e5c + aabb087 + 5dc2af2 + df1bd20 + f9130a2) — comprehensive invoice show.php with $0-line draft hide (D-A), per-line + per-tax-row tax base reconciliation in "RATE% on $BASE" inline format with "Applied to N taxable lines totaling $X" tooltip (D-B), Credit Applications card between Line Items and Financial Summary rendering `credit_note_applications` JOIN (D-C, D-G), step-by-step balance due breakdown with dual S-MILEAGE-2A/2B extension markers (D-D), print-parity preserved (D-E), 3 reference invoices verified (INV-19/INV-13/INV-21) (D-F). Incidental fixes per D130: pre-existing tax-rate display bug (0.05% → 5% via ×100 conversion) corrected in C3; print overlay regression on browser Cmd+P fixed in C3-T1-FIX by extending app.css @media print hide list with `.search-modal`+overlay siblings (universal — applies to every admin print). K-13 locked. FF_ASSET_VERSION bumped 1.0.25 → 1.0.26 (uncommitted, .env gitignored).
 - S-DOCS-CLUSTER-2026-05-11 SHIPPED — bundled docs commit closing three small queued sessions in one shape: S-D136-COMMIT-DISCIPLINE + S-D135-REFERENCE-PROMOTE + S-D130-EXTENSION. Each was single-commit / ≤20 min / touched REFERENCE.md; bundling avoided ceremony tax. Also exercised S-D136-COMMIT-DISCIPLINE's own discipline — IN-FLIGHT registration committed to main standalone (bd8dbb6) BEFORE first content edit. D-A: D136 wording extension in REFERENCE.md §0 (Registration commit requirement clause). D-B: D135 promotion (§0 index row + §13.8 subsection heading labeled with D135 + See-also extension). D-C: D130 contraction extension (PROGRESS.md row extended + new REFERENCE.md §0 row carrying combined expansion+contraction wording). D-D: D136 backfill into PROGRESS.md DECISIONS table. D131 gate: PARITY OK + INVARIANTS OK (I1-I6 all PASS).
 
 **2026-05-07:**
