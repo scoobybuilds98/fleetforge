@@ -3508,7 +3508,22 @@ html.is-mac .non-mac-only { display: none; }
        restore brand accents that should remain coloured. */
     html, body { background: #ffffff !important; color: #000000 !important; }
 
-    .sidebar, .topbar, #ff-toast-container, .chat-widget { display: none !important; }
+    /* S-INVOICE-DISPLAY-COMPREHENSIVE T1 fix (2026-05-11): extend hide list
+       with global overlay containers. The `.search-modal` modal is rendered
+       on every admin page via includes/footer.php and uses Alpine x-show to
+       toggle visibility. If the modal is open at print time (or Alpine fails
+       to fire before print captures the DOM), its `.search-overlay` child
+       paints rgba(0,0,0,0.5) over the entire viewport, producing a dark
+       semi-transparent overlay across the printed invoice. Same pattern
+       applies to `.modal-overlay` (void/delete/confirm/email modals via
+       footer.php) and `.modal-backdrop` (child element). The `.sidebar-overlay`
+       is the mobile sidebar dim — only painted when the sidebar is open at
+       print time. Hide all of them defensively — they should never appear
+       on a printed billing artifact. */
+    .sidebar, .topbar, #ff-toast-container, .chat-widget,
+    .search-modal, .search-overlay,
+    .modal-overlay, .modal-backdrop,
+    .sidebar-overlay { display: none !important; }
     .app-main { margin-left: 0 !important; }
     .page-content { padding: 0; }
     .card { border: 1px solid #ccc; box-shadow: none !important; background: #ffffff !important; color: #000000 !important; }
