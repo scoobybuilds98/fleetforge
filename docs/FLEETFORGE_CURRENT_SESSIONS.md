@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-REEFER-RATE-AUDIT** — IN-FLIGHT
+  Started: 2026-05-12T22:11 UTC by code-desktop (RO); upgraded to write 2026-05-12T22:16 UTC
+  Touching: scripts/seed_rate_cards.php (comment-only edits), docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
 
 ### Documentation cleanup (queued, small)
 
