@@ -108,6 +108,26 @@ ITEM A2 | 2026-05-12 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to
     cached in opcache; verify with curl -I https://<prod>/assets/css/app.css?v=1.0.27 returns 200.
   Owner: Operator
   Status: PENDING
+
+ITEM A3 | 2026-05-13 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to 1.0.28
+  Originating session: S-MILEAGE-3 (C4 — D-A + D-K close UI precharge refund picker + "Mark Refund Settled"
+    button in app/admin/leases/show.php)
+  Surfaced into checklist: S-MILEAGE-3 C4 (this file's edit commit, post-C4 push)
+  Detail: C4 changed app/admin/leases/show.php substantially — added the Precharge Refund picker section
+    inside the close modal (between Mileage Reconciliation panel and Close Notes; renders only when
+    precharge_enabled=1 AND precharge_balance > 0) with cash/credit radio inputs + manager-notes textarea;
+    added the "Mark Refund Settled" btn-warning to the precharge display row (renders only when
+    status='completed' AND precharge_refund_method='cash' AND precharge_refund_settled_at IS NULL);
+    extended closeForm state with precharge_refund_method (default 'credit') + precharge_refund_notes;
+    closeLease() payload assembly carries the new precharge_refund block; new markRefundSettled() Alpine
+    method POSTs to api/v1/leases/mark_refund_settled. Page-scoped <style> changes via inline styles only;
+    no app.css edit in C4. Operator should bump dev .env (1.0.27 → 1.0.28) + apply same to prod .env at
+    cutover.
+    Original source: .env (gitignored — bumped by operator at session ship).
+  Action: On prod .env (Lightsail instance), set FF_ASSET_VERSION=1.0.28. Restart php-fpm if asset version is
+    cached in opcache; verify with curl -I https://<prod>/assets/css/app.css?v=1.0.28 returns 200.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ### B — Production `.env` keys

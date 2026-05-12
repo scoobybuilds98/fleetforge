@@ -415,6 +415,34 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                                         <span x-text="' · Settled ' + new Date(lease.precharge_refund_settled_at).toLocaleDateString('en-CA')"></span>
                                                     </template>
                                                 </div>
+
+                                                <!-- ── S-MILEAGE-3 D-B (i) / D-K: Mark Refund Settled button ──
+                                                     Renders only when:
+                                                       lease.status = 'completed' AND
+                                                       lease.precharge_refund_method = 'cash' AND
+                                                       lease.precharge_refund_settled_at IS NULL
+                                                     Companion to the close-modal cash branch — once the
+                                                     physical disbursement happens (cheque issued, EFT sent),
+                                                     the operator clicks this to stamp settled_at = NOW().
+                                                     Idempotent on retry (409 PRECHARGE_REFUND_ALREADY_SETTLED).
+                                                     ─────────────────────────────────────────────────── -->
+                                                <template x-if="lease.status === 'completed'
+                                                                && lease.precharge_refund_method === 'cash'
+                                                                && !lease.precharge_refund_settled_at">
+                                                    <div style="margin-top:0.75rem;">
+                                                        <button type="button"
+                                                                class="btn btn-warning btn-sm"
+                                                                @click="markRefundSettled()"
+                                                                :disabled="markRefundInProgress">
+                                                            <span x-show="!markRefundInProgress">Mark Refund Settled</span>
+                                                            <span x-show="markRefundInProgress">Stamping…</span>
+                                                        </button>
+                                                        <template x-if="markRefundError">
+                                                            <div class="form-error" style="margin-top:6px;font-size:0.75rem;"
+                                                                 x-text="markRefundError"></div>
+                                                        </template>
+                                                    </div>
+                                                </template>
                                             </td>
                                         </tr>
                                         <tr x-show="lease.discount_type !== 'none'">
@@ -1292,6 +1320,64 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </div>
                     </template>
 
+                    <!-- ── S-MILEAGE-3 D-A / D-K: Precharge Refund picker ──
+                         Renders ONLY when:
+                           lease.precharge_enabled = 1 AND
+                           parseFloat(lease.precharge_balance) > 0
+                         Skipped when balance == 0 (drawdown fully consumed)
+                         OR when precharge_enabled = 0 (Model B Lite — no
+                         precharge concept). The picker selection drives
+                         the close payload's `precharge_refund` block;
+                         server-side close.php dispatches per D-B (i) /
+                         D-C / D-D / D-E / D-L. Default selection is
+                         "credit" (CRA-friendly + reuses credit_note flow
+                         + matches D85 underage_credit precedent).
+                         ─────────────────────────────────────────────── -->
+                    <template x-if="lease && Number(lease.precharge_enabled) === 1 && parseFloat(lease.precharge_balance || 0) > 0">
+                        <div style="border:2px solid var(--border-color);border-radius:8px;padding:14px 16px;background:var(--bg-surface-2);margin-bottom:12px;">
+                            <div style="font-weight:600;margin-bottom:0.5rem;font-size:0.9rem;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                                Precharge Refund
+                                <span class="badge badge-info">Model B</span>
+                            </div>
+                            <div style="font-size:0.8125rem;color:var(--text-secondary);margin-bottom:0.75rem;">
+                                Precharge balance:
+                                <strong class="font-mono" style="color:var(--text-primary);"
+                                        x-text="'$' + parseFloat(lease.precharge_balance).toFixed(2) + ' ' + (lease.currency || 'CAD')"></strong>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:6px;">
+                                <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                                    <input type="radio" value="credit"
+                                           x-model="closeForm.precharge_refund_method"
+                                           style="margin-top:3px;">
+                                    <span>
+                                        <strong>Apply as Credit</strong>
+                                        <span class="text-secondary text-xs" style="display:block;">
+                                            A credit note will be applied to this customer's account
+                                            and is consumable against any future invoice.
+                                        </span>
+                                    </span>
+                                </label>
+                                <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                                    <input type="radio" value="cash"
+                                           x-model="closeForm.precharge_refund_method"
+                                           style="margin-top:3px;">
+                                    <span>
+                                        <strong>Cash Refund</strong>
+                                        <span class="text-secondary text-xs" style="display:block;">
+                                            You'll need to mark this as settled once the physical payment
+                                            (cheque issued, EFT sent) is dispatched to the customer.
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form-group" style="margin:8px 0 0;">
+                                <label class="form-label" style="font-size:0.75rem;">Manager notes (optional)</label>
+                                <textarea x-model="closeForm.precharge_refund_notes" rows="2" class="form-control"
+                                          placeholder="e.g. Refund issued by cheque #12345 on 2026-05-13."></textarea>
+                            </div>
+                        </div>
+                    </template>
+
                     <div class="form-group">
                         <label class="form-label" for="close_notes">Close Notes</label>
                         <textarea id="close_notes" class="form-control"
@@ -1620,7 +1706,18 @@ function FF_LeaseDetail() {
             adjustment_decision:   '',     // '' | 'credit_note' | 'final_invoice_adjustment' | 'waived' | 'no_adjustment'
             adjustment_override:   '',     // optional manager override of calculated amount
             adjustment_notes:      '',
+            // S-MILEAGE-3 D-A / D-K: precharge refund picker.
+            // Default 'credit' per D-A locked decision (CRA-friendly +
+            // reuses existing credit_note flow). Field only included
+            // in payload when picker renders (precharge_enabled=1 AND
+            // precharge_balance > 0); skipped otherwise.
+            precharge_refund_method: 'credit',
+            precharge_refund_notes:  '',
         },
+        // S-MILEAGE-3 D-K: state for the post-close "Mark Refund Settled"
+        // button (cash branch only; D-B (i) deferred-settle).
+        markRefundInProgress: false,
+        markRefundError:      null,
         // SAMSARA-1: hint shown beneath End Mileage explaining where the
         // value came from (e.g. "Pulled from Samsara: 184,233 km").
         closeFormSamsaraHint: '',
@@ -2318,6 +2415,20 @@ function FF_LeaseDetail() {
             if ((this.lease?.advance_billing_periods || 0) > 0) {
                 payload.reconciliation_mode = this.closeForm.reconciliation_mode || 'refund_unused';
             }
+            // ── S-MILEAGE-3 D-K: include precharge_refund block when
+            // the picker rendered (precharge_enabled=1 AND
+            // precharge_balance > 0). Server-side close.php dispatches
+            // cash/credit per D-B (i) / D-C. When the picker didn't
+            // render, no block is sent and close.php skips refund
+            // dispatch entirely (the needsRefund gate evaluates false).
+            if (this.lease
+                && Number(this.lease.precharge_enabled) === 1
+                && parseFloat(this.lease.precharge_balance || 0) > 0) {
+                payload.precharge_refund = {
+                    method: this.closeForm.precharge_refund_method,
+                    notes:  this.closeForm.precharge_refund_notes || null,
+                };
+            }
             // ── S-LEASE-MILEAGE: include close_adjustment when manager
             // has reviewed the reconciliation panel. Only attached when a
             // decision was selected — leases without billable mileage skip
@@ -2353,6 +2464,33 @@ function FF_LeaseDetail() {
             }
             this.actionInProgress = false;
             this.closing          = false;
+        },
+
+        // S-MILEAGE-3 D-B (i) / D-K: stamps precharge_refund_settled_at
+        // on a closed lease that has method='cash' and settled_at IS NULL.
+        // Companion to the close-modal cash-refund flow — operator clicks
+        // this button on the lease show page once the physical disbursement
+        // has been dispatched (cheque issued, EFT sent, etc.). 409
+        // PRECHARGE_REFUND_ALREADY_SETTLED on retry (idempotent).
+        async markRefundSettled() {
+            if (!confirm('Mark cash refund as settled? This stamps the settlement timestamp and cannot be undone.')) {
+                return;
+            }
+            this.markRefundInProgress = true;
+            this.markRefundError      = null;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/leases/mark_refund_settled') ?>', {
+                    id: <?= $leaseId ?>,
+                });
+                if (r.success) {
+                    window.location.reload();
+                } else {
+                    this.markRefundError = r.message || 'Failed to mark refund as settled.';
+                }
+            } catch(e) {
+                this.markRefundError = 'Network error. Please try again.';
+            }
+            this.markRefundInProgress = false;
         },
 
         statusBadgeClass(status) {
