@@ -1244,7 +1244,7 @@ CREATE TABLE `credit_notes` (
   `credit_note_number` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `customer_id` int unsigned NOT NULL,
   `lease_id` int unsigned DEFAULT NULL,
-  `source` enum('mileage_overpayment','invoice_adjustment','damage_resolution','goodwill','payment_returned','overpayment','other') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source` enum('mileage_overpayment','invoice_adjustment','damage_resolution','goodwill','payment_returned','overpayment','other','precharge_refund') COLLATE utf8mb4_unicode_ci NOT NULL,
   `source_invoice_id` int unsigned DEFAULT NULL,
   `source_payment_id` int unsigned DEFAULT NULL,
   `amount` decimal(12,2) NOT NULL,
