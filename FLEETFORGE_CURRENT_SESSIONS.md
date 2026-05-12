@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MILEAGE-2B** — IN-FLIGHT
+  Started: 2026-05-12T09:05 UTC by desktop-1
+  Touching: lib/Billing/InvoiceGenerator.php, lib/Billing/Mileage.php, lib/Billing/TaxCalculator.php (potentially per D-D spike outcome), api/v1/invoices/send.php, api/v1/invoices/review_mileage.php (DELETE), app/admin/invoices/show.php, app/admin/invoices/review_mileage.* (DELETE), FLEETFORGE_DATABASE_MASTER.sql, db_migrations/ (NEW), tests/_smoke_billing_invariants.php, tests/_smoke_samsara_distance.php, FLEETFORGE_SPEC_FINAL.md, FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md
 
 ### Documentation cleanup (queued, small)
 
