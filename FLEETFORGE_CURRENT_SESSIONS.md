@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MILEAGE-3** — IN-FLIGHT
+  Started: 2026-05-12T19:02 UTC by desktop-1
+  Touching: api/v1/leases/close.php, api/v1/leases/mark_refund_settled.php (NEW), app/admin/leases/show.php, api/v1/credit_notes/, FLEETFORGE_DATABASE_MASTER.sql, db_migrations/ (2 new), tests/_smoke_billing_invariants.php, tests/_stress_refund_state_machine.php (NEW), FLEETFORGE_SPEC_FINAL.md, FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md
 
 ### Documentation cleanup (queued, small)
 
