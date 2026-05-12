@@ -91,6 +91,23 @@ ITEM A1 | 2026-05-11 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to
     cached in opcache; verify with curl -I https://<prod>/assets/css/app.css?v=1.0.26 returns 200.
   Owner: Operator
   Status: PENDING
+
+ITEM A2 | 2026-05-12 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to 1.0.27
+  Originating session: S-MILEAGE-2B (C6 — D-K Odometer card rewrite + D-L Drawdown Reconciliation panel
+    + D-F Financial Summary drawdown breakdown in app/admin/invoices/show.php)
+  Surfaced into checklist: S-MILEAGE-2B C6 (this file's edit commit, post-C6 push)
+  Detail: C6 changed app/admin/invoices/show.php substantially — rewrote the Odometer card to include
+    period_charge + Samsara warnings banner, converted the retired Mileage Review card into a Drawdown
+    Reconciliation panel, added Model B drawdown breakdown rows to the Financial Summary block. Page-scoped
+    <style> changes via inline styles only; no app.css edit in C6 (so the cache buster is showing
+    new markup against an unchanged stylesheet — still worth a bump so returning operators see the new
+    layout immediately rather than waiting for a hard refresh). Operator should bump dev .env (1.0.26 → 1.0.27)
+    + apply same to prod .env at cutover.
+    Original source: .env (gitignored — bumped by operator at session ship).
+  Action: On prod .env (Lightsail instance), set FF_ASSET_VERSION=1.0.27. Restart php-fpm if asset version is
+    cached in opcache; verify with curl -I https://<prod>/assets/css/app.css?v=1.0.27 returns 200.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ### B — Production `.env` keys

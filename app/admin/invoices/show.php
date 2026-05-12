@@ -1457,8 +1457,64 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
      created with odometer data. Silent when no odometer captured.
      ================================================================ -->
 <?php
+// S-MILEAGE-2B C6 (D-K): Odometer & Distance card rewrite — Model B aware.
+// Shows period distance + computed period charge + (when precharge present)
+// pre/post balance + drawdown applied. Also surfaces Samsara advisory
+// warnings from the audit_log entity_type='samsara_history_query' row if
+// the C3 D-C fallback fetch ran for this invoice's lease+period.
 $hasOdometer = ($invoice['odometer_at_period_start_km'] ?? null) !== null
-            || ($invoice['odometer_at_period_end_km']   ?? null) !== null;
+            || ($invoice['odometer_at_period_end_km']   ?? null) !== null
+            || ($invoice['period_distance_km']           ?? null) !== null;
+
+// Drawdown lookup: did C3's drawdown emit fire for THIS invoice?
+// audit_log row entity_type='lease_precharge_balance_drawdown' carries:
+//   old_values.precharge_balance = pre-emission balance
+//   new_values.precharge_balance = post-emission balance
+//   new_values.drawdown_amount    = amount applied
+$drawdownAudit = null;
+if (!empty($invoice['lease_id'])) {
+    $drawdownAudit = db_row(
+        "SELECT old_values, new_values FROM audit_log
+          WHERE entity_type = 'lease_precharge_balance_drawdown'
+            AND JSON_EXTRACT(new_values, '$.invoice_id') = ?
+          ORDER BY created_at DESC LIMIT 1",
+        [(int) $invoice['id']]
+    );
+}
+$drawdownMeta = null;
+if ($drawdownAudit && !empty($drawdownAudit['new_values'])) {
+    $new = json_decode((string) $drawdownAudit['new_values'], true);
+    $old = json_decode((string) ($drawdownAudit['old_values'] ?? '{}'), true);
+    $drawdownMeta = [
+        'pre_balance'     => (string) ($old['precharge_balance'] ?? '0'),
+        'post_balance'    => (string) ($new['precharge_balance'] ?? '0'),
+        'drawdown_amount' => (string) ($new['drawdown_amount']   ?? '0'),
+        'period_charge'   => (string) ($new['period_charge']     ?? '0'),
+    ];
+}
+
+// Samsara advisory warnings: did C3's D-C fallback fetch run for this
+// invoice's lease+period? Pull the latest matching audit_log row.
+$samsaraWarnings = [];
+if (!empty($invoice['lease_id']) && ($invoice['odometer_source'] ?? null) === 'gps') {
+    $samsaraAudit = db_row(
+        "SELECT new_values FROM audit_log
+          WHERE entity_type = 'samsara_history_query'
+            AND entity_id = ?
+            AND created_at BETWEEN ? AND ?
+          ORDER BY created_at DESC LIMIT 1",
+        [
+            (int) $invoice['lease_id'],
+            $invoice['billing_period_start'] . ' 00:00:00',
+            date('Y-m-d H:i:s', strtotime($invoice['billing_period_end'] . ' +2 days')),
+        ]
+    );
+    if ($samsaraAudit && !empty($samsaraAudit['new_values'])) {
+        $samsaraData = json_decode((string) $samsaraAudit['new_values'], true);
+        $samsaraWarnings = (array) ($samsaraData['warnings'] ?? []);
+    }
+}
+
 if ($hasOdometer):
     // Badge class for source
     $odoSourceBadge = match ($invoice['odometer_source'] ?? 'manual') {
@@ -1466,18 +1522,30 @@ if ($hasOdometer):
         'estimated' => ['badge-warning', 'Estimated'],
         default     => ['badge-neutral', 'Manual'],
     };
-    // Look up the lease's starting odometer + start date for the "since" context
     $leaseOdoContext = db_row(
-        "SELECT start_date, odometer_start_km FROM leases WHERE id = ? AND deleted_at IS NULL",
+        "SELECT start_date, odometer_start_km, mileage_rate_km FROM leases WHERE id = ? AND deleted_at IS NULL",
         [$invoice['lease_id']]
     );
+
+    // Compute period charge for display: distance × rate (per Model B)
+    $periodCharge = null;
+    if (($invoice['period_distance_km'] ?? null) !== null
+        && !empty($leaseOdoContext['mileage_rate_km'])
+        && bccomp((string) $leaseOdoContext['mileage_rate_km'], '0', 4) > 0
+    ) {
+        $periodCharge = bcround(bcmul(
+            (string) $invoice['period_distance_km'],
+            (string) $leaseOdoContext['mileage_rate_km'],
+            6
+        ), 2);
+    }
 ?>
 <!-- WHY: Odometer detail is internal telematics context; hidden in print -->
 <div class="card ff-print-hide" style="padding:20px; margin-bottom:20px;">
     <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 12px 0;">
         Odometer &amp; Distance
     </h3>
-    <dl style="display:grid; grid-template-columns:180px 1fr; gap:8px 16px; font-size:13px; margin:0;">
+    <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:200px 1fr; gap:8px 16px; font-size:13px; margin:0;">
         <?php if ($invoice['odometer_at_period_start_km'] !== null): ?>
         <dt class="text-secondary">Period Start</dt>
         <dd class="font-mono"><?= number_format((float)$invoice['odometer_at_period_start_km'], 2) ?> km</dd>
@@ -1496,8 +1564,16 @@ if ($hasOdometer):
         </dd>
         <?php endif; ?>
 
+        <?php if ($periodCharge !== null): ?>
+        <dt class="text-secondary">Period Charge</dt>
+        <dd class="font-mono">
+            $<?= number_format((float) $periodCharge, 2) ?>
+            <span class="text-secondary text-sm">(<?= number_format((float)$invoice['period_distance_km'], 2) ?> km × $<?= e($leaseOdoContext['mileage_rate_km']) ?>/km)</span>
+        </dd>
+        <?php endif; ?>
+
         <?php if ($invoice['cumulative_distance_km'] !== null): ?>
-        <dt class="text-secondary">Cumulative Total</dt>
+        <dt class="text-secondary">Lease-to-Date Distance</dt>
         <dd class="font-mono">
             <?= number_format((float)$invoice['cumulative_distance_km'], 2) ?> km
             <?php if ($leaseOdoContext && $leaseOdoContext['start_date']): ?>
@@ -1520,16 +1596,76 @@ if ($hasOdometer):
             <?php endif; ?>
         </dd>
     </dl>
+
+    <?php if (!empty($samsaraWarnings)): ?>
+    <!-- Samsara advisory warnings per D121 — yellow info banner. -->
+    <div style="margin-top:12px; padding:10px 12px; background:#fef3c7; border:1px solid #fcd34d; border-radius:6px; font-size:12px;">
+        <strong style="color:#92400e;">Samsara advisory warnings:</strong>
+        <ul style="margin:6px 0 0 18px; color:#78350f;">
+            <?php foreach ($samsaraWarnings as $w): ?>
+            <li><code><?= e((string) $w) ?></code></li>
+            <?php endforeach; ?>
+        </ul>
+    </div>
+    <?php endif; ?>
 </div>
 <?php endif; ?>
 
 
 <!-- ================================================================
-     S-MILEAGE-2B C5: MANAGER REVIEW CARD RETIRED
-     Card removed per D-I locked (i) wholesale retire — Model B has no
-     manager-review concept (mileage_review_status column dropped in C4).
-     C6 inserts the Drawdown Reconciliation panel at this site per D-L.
+     S-MILEAGE-2B C6 (D-L): DRAWDOWN RECONCILIATION PANEL
+     Replaces the Model C Mileage Review card retired in C5. Renders
+     when this invoice carries a mileage_usage line (Model B drawdown
+     emit fired in C3) — shows the precharge balance pre/post + drawdown
+     applied, sourced from the audit_log lease_precharge_balance_drawdown
+     row written by C3 at emit time.
+
+     Hidden in print (ff-print-hide) per K-13 — internal audit context.
      ================================================================ -->
+<?php
+$usageLine = !empty($invoice['lease_id'])
+    ? db_row(
+        "SELECT id, amount, mileage_distance, mileage_rate
+           FROM invoice_line_items
+          WHERE invoice_id = ? AND item_type = 'mileage_usage' LIMIT 1",
+        [(int) $invoice['id']]
+    )
+    : null;
+if ($usageLine):
+?>
+<div class="card ff-print-hide" id="drawdown-reconciliation-card"
+     style="padding:20px; margin-bottom:20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0;">
+            Drawdown Reconciliation
+        </h3>
+        <span class="badge badge-info" style="font-size:11px;">Model B</span>
+    </div>
+
+    <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:200px 1fr; gap:6px 16px; font-size:13px; margin:0;">
+        <dt class="text-secondary">Period Distance</dt>
+        <dd class="font-mono"><?= number_format((float) $usageLine['mileage_distance'], 2) ?> km</dd>
+
+        <dt class="text-secondary">Period Charge</dt>
+        <dd class="font-mono">$<?= number_format((float) $usageLine['amount'], 2) ?></dd>
+
+        <?php if ($drawdownMeta !== null): ?>
+        <dt class="text-secondary">Precharge Balance Pre</dt>
+        <dd class="font-mono">$<?= number_format((float) $drawdownMeta['pre_balance'], 2) ?></dd>
+
+        <dt class="text-secondary">Drawdown Applied</dt>
+        <dd class="font-mono" style="color:#16a34a; font-weight:700;">−$<?= number_format((float) $drawdownMeta['drawdown_amount'], 2) ?></dd>
+
+        <dt class="text-secondary">Precharge Balance Post</dt>
+        <dd class="font-mono"><strong>$<?= number_format((float) $drawdownMeta['post_balance'], 2) ?></strong></dd>
+        <?php else: ?>
+        <dt class="text-secondary">Drawdown Applied</dt>
+        <dd class="text-secondary text-sm" style="font-style:italic;">No precharge balance at invoice generation (Model B Lite — bill every km).</dd>
+        <?php endif; ?>
+    </dl>
+</div>
+<?php endif; ?>
+
 
 
 <!-- ================================================================
@@ -2011,7 +2147,47 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                 </tr>
                 <?php endif; ?>
 
-                <!-- S-MILEAGE-2A/2B extension point: Model B mileage breakdown (usage − credit) slots here between line items aggregate and tax block. See FLEETFORGE_PROGRESS.md S-MILEAGE-2A/2B SESSION LOG entries for line type rendering contract. -->
+                <!-- ── S-MILEAGE-2B C6 (D-F): Model B drawdown breakdown ──
+                     Renders when this invoice carries both mileage_usage and
+                     mileage_drawdown_credit lines (full drawdown case). The
+                     POSITIVE-amount + is_credit=1 convention for the credit
+                     line (K-16 clarification) means the aggregator at
+                     InvoiceGenerator.php:357-362 already subtracted the credit
+                     from $subtotal. Tax was computed on the NET subtotal
+                     (TaxCalculator's bcmul sign-propagation handles it
+                     correctly per D-D spike). This breakdown surfaces the
+                     intermediate math (usage / credit / net) for operator
+                     visibility — purely display, no recomputation. -->
+                <?php
+                $mileageUsageRow      = null;
+                $mileageDrawdownRow   = null;
+                foreach ($lineItems as $li) {
+                    if (($li['item_type'] ?? null) === 'mileage_usage')           $mileageUsageRow    = $li;
+                    if (($li['item_type'] ?? null) === 'mileage_drawdown_credit') $mileageDrawdownRow = $li;
+                }
+                if ($mileageUsageRow && $mileageDrawdownRow):
+                    $netMileage = bcsub((string) $mileageUsageRow['amount'], (string) $mileageDrawdownRow['amount'], 2);
+                ?>
+                <tr>
+                    <td class="fs-label" style="padding-left:24px;">
+                        <span class="text-secondary text-sm">Mileage usage</span>
+                    </td>
+                    <td class="fs-value text-sm"><?= format_currency($mileageUsageRow['amount']) ?></td>
+                </tr>
+                <tr>
+                    <td class="fs-label" style="padding-left:24px;">
+                        <span class="text-secondary text-sm">Precharge credit applied</span>
+                    </td>
+                    <td class="fs-value text-sm" style="color:var(--color-success);">−<?= format_currency($mileageDrawdownRow['amount']) ?></td>
+                </tr>
+                <tr>
+                    <td class="fs-label" style="padding-left:24px;">
+                        <strong>Net mileage charge</strong>
+                    </td>
+                    <td class="fs-value"><strong><?= format_currency($netMileage) ?></strong></td>
+                </tr>
+                <?php endif; ?>
+
 
                 <!-- D-B: tax rows show "rate% on $base" inline so the auditor's first-glance
                      reconciliation (rate × base == tax_amount) works without scrolling.
