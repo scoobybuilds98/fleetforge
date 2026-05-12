@@ -61,9 +61,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-MILEAGE-2B-SPEC-LOCK** — IN-FLIGHT
-  Started: 2026-05-12T08:53 UTC by desktop-1
-  Touching: FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md
+*(none)*
 
 ### Documentation cleanup (queued, small)
 
@@ -116,7 +114,7 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 ---
 ### S-MILEAGE-2B — Drawdown on subsequent invoices + Model C retirement + Odometer card rewrite + Bug 1/Bug 4 riders + FLEETFORGE_SPEC_FINAL.md rewrite
 **Status:** QUEUED
-**Estimated effort:** ~3–4 hrs (revised from operator's original ~2 hr — pre-work scan surfaces 19 D-decisions and a proposed 10-commit arc; surface is materially bigger than 2A's 7-commit / ~90-min arc)
+**Estimated effort:** ~3 hrs (revised from operator's original ~2 hr → spec-write surfaced 19 D-decisions and a proposed 9-commit arc; bigger than 2A's 7-commit / ~90-min arc, but Bug 1 + Bug 4 riders scoped out per D-Q reduces budget from ~3-4 hr to ~3 hr)
 **Dependencies:** S-MILEAGE-2A shipped (✅ 2026-05-12 — see commits b602bd9 → 253b294 → e1918df → c8e459a → 365d541 → b16c0fc → 8d17548 + T1 PASS addendum e758f13)
 **Subsequent sessions:** S-MILEAGE-3 (lease close + cash/credit refund toggle + priorExcessKm safeguard retirement) → S-MILEAGE-5 (20 hermetic scenario tests against Model B)
 
@@ -135,17 +133,17 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - Tax handling for the negative `mileage_drawdown_credit` line — TaxCalculator must apply tax to NET (usage − credit) per the S-INVOICE-DISPLAY-COMPREHENSIVE C3 marker contract (D-D).
 - Extend `app/admin/invoices/show.php` LINE TYPE DISPATCH CONTRACT block (1866-1906) — ENUM count 14 → 16, add badge match arms (D-E).
 - Render Financial Summary mileage breakdown between line items aggregate and tax block per the HTML marker at `app/admin/invoices/show.php:2182` (D-F).
-- Retire Model C plumbing: `invoices.excess_distance_km`, `invoices.excess_charge_amount`, `invoices.mileage_review_status` columns + ENUM (D-G — **OPERATOR DECISION REQUIRED**).
+- Retire Model C plumbing: `invoices.excess_distance_km`, `invoices.excess_charge_amount`, `invoices.mileage_review_status` columns + ENUM (D-G — LOCKED (i) wholesale DROP + backup).
 - Retire `Mileage::monthlyAllowance` + `Mileage::periodExcess` helpers; keep `leaseDurationMonths` + `toDisplayUnit` + `formatDistance` (D-H).
-- Retire HARD send gate at `api/v1/invoices/send.php:50-63` (D84 `MILEAGE_REVIEW_REQUIRED` 422); decide disposition of `api/v1/invoices/review_mileage.php` + INV-87 pending row (D-I — **OPERATOR DECISION REQUIRED**).
+- Retire HARD send gate at `api/v1/invoices/send.php:50-63` (D84 `MILEAGE_REVIEW_REQUIRED` 422) + wholesale-retire `api/v1/invoices/review_mileage.php` + INV-87 void+regen as precondition (D-I — LOCKED (i) wholesale retire).
 - Keep priorExcessKm transitional safeguard intact at `api/v1/leases/close.php` — explicit no-touch (D-J).
 - Rewrite Odometer & Distance card at `app/admin/invoices/show.php:1480-1545` (D-K).
-- Mileage Review card disposition at `app/admin/invoices/show.php:1554-1640` (D-L — **OPERATOR DECISION REQUIRED**).
-- Rewrite `FLEETFORGE_SPEC_FINAL.md` mileage section: Model A → Model B per D144 inherited from S-MILEAGE-2A (D-M — **OPERATOR DECISION REQUIRED** on scope: full-lifecycle vs precharge+drawdown-only).
-- `FLEETFORGE_ACCOUNTING_SPEC.md` drawdown accounting entries (D-N — **OPERATOR DECISION REQUIRED**; likely DEFER to S-MILEAGE-3 + accountant conversation).
+- Convert Mileage Review card at `app/admin/invoices/show.php:1554-1640` to Drawdown Reconciliation panel (D-L — LOCKED (ii)).
+- Rewrite `FLEETFORGE_SPEC_FINAL.md` mileage section: Model A → Model B (precharge + drawdown only; close-refund deferred to S-MILEAGE-3) per D144 inherited from S-MILEAGE-2A (D-M — LOCKED (ii)).
+- `FLEETFORGE_ACCOUNTING_SPEC.md` drawdown accounting entries (D-N — DEFER to S-MILEAGE-3 + accountant conversation).
 - New smoke invariant I8 for drawdown math sanity (D-O).
 - Real T8/T10 coverage activation — production HTTP loop + parser paths finally exercise (D-P).
-- Riders: Bug 1 (Cumulative Total label) + Bug 4 (backdate warning) (D-Q — **OPERATOR DECISION REQUIRED** on rider wording).
+- Riders: SCOPED OUT (D-Q) — Bug 1 + Bug 4 filed as separate QUEUED sessions (`S-INVOICE-CUMULATIVE-TOTAL-LABEL`, `S-INVOICE-BACKDATE-WARNING`) in Architectural follow-ups.
 - Schema migration count + ordering — expected 2–3 migrations (D-R).
 - Single PR vs multi-commit arc breakdown — proposed 10-commit shape (D-S).
 
@@ -164,7 +162,7 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - C3: engine flips to drawdown emit. Invoice 1 on precharge-enabled leases continues to emit `mileage_precharge` (2A path). Invoice 2+ on precharge-enabled leases (post-D140 stamp) emits `mileage_usage` + optional `mileage_drawdown_credit` per the drawdown math. **Model C per-period excess block deleted in same commit** — no two-engines hybrid state.
 - C4: Model C plumbing retirement. `excess_distance_km` / `excess_charge_amount` / `mileage_review_status` columns drop (per D-G option (i)) + backup table per D107 + `Mileage::monthlyAllowance` / `periodExcess` retire per D-H. Pre-DROP: K-15 confirmation that INV-87 is dispositioned per D-I in same commit OR earlier (commit ordering depends on operator's D-G / D-I choices).
 - C5: HARD send gate at send.php:50-63 retires; review_mileage.php endpoint disposition per D-I.
-- C6–C10: display polish + riders + smoke + spec rewrite. No engine state change after C3.
+- C6–C9: display polish + smoke + spec rewrite + docs. No engine state change after C3.
 
 #### LOCKED DECISIONS
 
@@ -210,13 +208,13 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - audit_log entry per Samsara call from the InvoiceGenerator path: `entity_type='samsara_history_query'`, `action='cron'` per D102/D123 ENUM workaround.
 - Every distance field MUST remain manually editable per project memory rule ("Samsara is source-of-truth-by-default, never source-of-truth-by-force"). Form-side UX preserved: Samsara source + bookend timestamps surface as helper-text annotations on the user-editable distance input, NOT as a `:readonly` lock.
 
-**D-D — Tax handling for the drawdown credit line — OPERATOR DECISION REQUIRED on TaxCalculator behavior**
-- The credit line is `taxable=1, is_credit=1, amount` = negative. The PHP marker block at `app/admin/invoices/show.php:1775-1781` notes "taxable subtotal must include NET amount" — tax computes on (usage − credit), not on each line independently.
-- **Pre-work scan G (in main 2B session, before C3):** read `lib/Billing/TaxCalculator.php` end-to-end. Determine whether `TaxCalculator::calculate($taxableSubtotal, ...)` is called with a pre-aggregated subtotal (signed sum of line amounts) or whether tax is computed per-line and summed.
-  - **If pre-aggregated (signed sum):** contract holds with no TaxCalculator change. The `$subtotal` at InvoiceGenerator.php:482 already sums line amounts respecting `is_credit` semantics — verify this.
-  - **If line-by-line absolute-value:** scope expansion surface — TaxCalculator must be extended to sign-aware aggregation per D130 scope-expansion discipline. Surface to operator before C3.
-- **Verification stress case:** precharge-enabled lease, Invoice 2 with $100 mileage_usage + $40 mileage_drawdown_credit on a 5% GST invoice → expected $60 taxable subtotal → $3.00 GST (NOT $5.00 − $2.00 = $3.00 by coincidence — the principle is "tax on net". Verifiable by flipping to 13% HST → $7.80 from $60 base, NOT $13.00 − $5.20 = $7.80 by coincidence). Both rates yield the same dollar result by arithmetic equivalence; the discriminator is mixed-rate scenarios (e.g. BC GST+PST where line-by-line absolute-value would over-tax the credit at the wrong rate).
-- Stress test `tests/_stress_tax_calculator_drawdown_net.php` ships with C6.
+**D-D — LOCKED: spike-first.**
+Before main 2B session C2 (the ENUM migration), C1's pre-work includes a 10-minute TaxCalculator behavior spike on negative line amounts: read the existing tax math, trace a synthetic `is_credit=1` negative line item end-to-end, verify sign-aware behavior under the `bcround(bcmul(..., 6), 2)` canonical pattern (per S-REVIEW-MILEAGE-TAX-FIX K-15 + TaxCalculator.php:62). Two branches:
+- If TaxCalculator handles negatives correctly under existing logic → D-D resolves as "no change needed; verify via stress test in C8."
+- If TaxCalculator does NOT handle negatives correctly → D-D resolves as a sign-aware fix landing in a small inserted C2.5 BEFORE the ENUM migration ships.
+
+Spike output reported inline before C2 starts. Spike itself is read-only — no code change in the spike.
+(Operator decision 2026-05-12 — defer-to-spike pattern; locked answer depends on the spike's findings, but the framing is locked.)
 
 **D-E — `app/admin/invoices/show.php` LINE TYPE DISPATCH CONTRACT extension (3-step protocol per show.php:1866-1906)**
 - **Step 1: ENUM migration** — handled by D-A.
@@ -248,15 +246,15 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - Tax base tooltip ("Applied to N taxable lines totaling $X" from S-INVOICE-DISPLAY-COMPREHENSIVE C3) reconciles against the NET mileage charge, NOT the gross usage amount.
 - Reuse existing "RATE% on $BASE" inline format + per-tax tooltip from S-INVOICE-DISPLAY-COMPREHENSIVE C3 (df1bd20 single-class vs both-class subtotal label adaptation preserved).
 
-**D-G — Model C plumbing retirement — OPERATOR DECISION REQUIRED**
-- Affected columns on `invoices`: `excess_distance_km` DECIMAL(10,2), `excess_charge_amount` DECIMAL(12,2), `mileage_review_status` ENUM. Also `mileage_override_amount`, `mileage_reviewed_at`, `mileage_reviewed_by` columns IF they exist (re-verify at C1 pre-work scan).
-- K-15 data: 3 affected invoice rows (drafts INV-87 / INV-91 / INV-92); 2 affected line items (`mileage_adjustment` on INV-91 + INV-92). Zero `mileage_credit` in production.
-- **Two retirement options for operator pick:**
-  - **(i) Wholesale DROP with backup table snapshot:** mirror D107 pattern — `CREATE TABLE invoices_model_c_backup_S_MILEAGE_2B` capturing `(invoice_id, excess_distance_km, excess_charge_amount, mileage_review_status, mileage_override_amount, mileage_reviewed_at, mileage_reviewed_by, snapshot_taken_at)` for ALL invoice rows per D107 capture-all discipline (not just non-NULL — cheap insurance). Then DROP the columns + retire the `mileage_review_status` ENUM type. Drafts INV-91 + INV-92 KEEP their `mileage_adjustment` line items (line items preserved in `invoice_line_items` table; only per-invoice aggregate columns drop). Pre-DROP: INV-87 dispositioned per D-I (`mrs='pending'` becomes structurally invalid after column drop).
-  - **(ii) Preserve in place + nullify forward:** keep columns; new invoices set to NULL via no-op (default behavior post-engine retirement). Risk per D104 / K-15: schema carries dead columns indefinitely; future readers may wire them up by mistake.
-- **Recommended:** option (i) — wholesale DROP with backup table — for schema cleanliness + K-15 / D129 discipline (no dead-column ambiguity; future grep for the column names returns zero hits in production paths).
-- Pre-DROP scan re-run with NO scope filter per D129 (audit-scope-vs-general-usage discipline): repo-wide grep for `excess_distance_km`, `excess_charge_amount`, `mileage_review_status`, `mileage_override_amount`, `mileage_reviewed_at`, `mileage_reviewed_by` across `*.php` / `*.md` / `*.sql` / `*.json` / `*.js` (excluding vendor / node_modules) before destructive ops. Categorize hits per D129 (SCHEMA / HISTORY / PRODUCTION CODE / TESTS / SCRIPTS) so production hits stand out.
-- **Disposition for the 2 historical `mileage_adjustment` line items on INV-91 + INV-92:** preserve as-is. They're drafts; no AR impact; legacy display path renders them as `badge-warning` per D104. The retirement removes the per-period gate but not the historical line item type — `mileage_adjustment` stays in the ENUM as a closed historical category.
+**D-G — LOCKED: (i) wholesale DROP + backup.**
+Migration drops `excess_distance_km`, `excess_charge_amount`, and `mileage_review_status` from the `invoices` table. Backup table `invoices_model_c_backup_S_MILEAGE_2B` snapshots all rows with non-null values in any of the three columns BEFORE the migration runs (D107 pattern).
+
+Disposition of the 3 affected drafts (per SPEC-WRITE pre-work scan):
+- **INV-87** (pending review, $1280.70): void + regenerate under Model B BEFORE the migration runs. The regen folds into C5 (HARD send gate retirement) as a precondition step.
+- **INV-91** (approved, $91.26): the existing `mileage_adjustment` line item (added by review_mileage.php approve flow) survives the column drop — financial state is preserved in `invoice_line_items`; only the review-process metadata drops with the columns.
+- **INV-92** (approved, $699.84): same as INV-91.
+
+(Operator decision 2026-05-12 — locked (i).)
 
 **D-H — Mileage helper retirement**
 - **Delete:** `Mileage::monthlyAllowance` (lib/Billing/Mileage.php:101-125) — Model B drawdown doesn't compute allowance; the engine math is `distance × rate`, no allowance subtraction. Re-grep callsites pre-DELETE per D129 — InvoiceGenerator drawdown emit (post-C3) doesn't call this. Lease close path at close.php still calls it indirectly via the `Mileage::periodExcess` chain → covered by D-J no-touch on close.php. Confirm at edit time.
@@ -264,13 +262,9 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - **Keep:** `Mileage::leaseDurationMonths` (used by close.php), `Mileage::toDisplayUnit` (used by lease/show + invoice/show), `Mileage::formatDistance` (used by display surfaces).
 - D103 pattern applies — vestigial scaffolding deletion only when grep confirms zero callers in production paths.
 
-**D-I — HARD send gate retirement + review_mileage.php disposition — OPERATOR DECISION REQUIRED**
-- **HARD send gate at `api/v1/invoices/send.php:50-63`** (D84 `MILEAGE_REVIEW_REQUIRED` 422): cleanly removed. Drawdown is silent (operator pre-commits the precharge amount at lease activation; the per-invoice drawdown is a deterministic ledger operation, not a policy decision requiring manager review).
-- **review_mileage.php endpoint disposition — OPERATOR DECISION REQUIRED:**
-  - **(i) Wholesale retire:** delete `api/v1/invoices/review_mileage.php` + show.php caller at line 2846 + Alpine state in the Mileage Review card. INV-87 (the lone pending invoice) MUST be dispositioned pre-retirement: (a) void INV-87 + regenerate as a Model B drawdown invoice on the same lease, OR (b) auto-approve INV-87 via direct DB UPDATE setting `mileage_review_status='approved'` + the manager-reviewed audit_log row, OR (c) defer disposition to S-MILEAGE-3 (NOT recommended — D-G column DROP requires `mrs` to be structurally valid pre-DROP).
-  - **(ii) Keep for legacy invoices only:** endpoint stays callable but only resolves the existing `mileage_review_status='pending'` row(s). Future invoices never set `pending` (no engine emits it). Endpoint structurally dead-ends after INV-87 is resolved.
-- **Recommended:** option (i) wholesale retire + INV-87 disposition handled inline in C5. The endpoint has 1 production use; option (ii) leaves a half-retired endpoint that's confusing to future readers + couples C4 (column DROP) to a stale production row. Operator confirms in C1 of main 2B session.
-- **INV-87 disposition recommendation:** option (a) — void + regenerate as Model B drawdown. The $1280.70 excess charge is post-2B redundant (Model B's drawdown handles the same distance billing without a review gate). Regen on the lease with whatever Model B precharge config the lease carries today. If lease's `precharge_enabled=0` (Model B Lite), regen produces a `mileage_usage` line with the same per-km math + no review gate. Operator confirms in C1.
+**D-I — LOCKED: (i) wholesale retire.**
+Wholesale retire `api/v1/invoices/review_mileage.php`: delete the endpoint, its templates, and the HARD send gate (D84 `MILEAGE_REVIEW_REQUIRED` 422) in `api/v1/invoices/send.php`. Contingent on D-G's INV-87 void+regen completing first (zero pending reviews must exist post-migration). The endpoint's `mileage_adjustment` line-item insertion logic does NOT survive in another form — Model B uses `mileage_usage` + `mileage_drawdown_credit` lines emitted directly by InvoiceGenerator, no manager-review step in the lifecycle.
+(Operator decision 2026-05-12 — locked (i).)
 
 **D-J — priorExcessKm transitional safeguard from S-MILEAGE-FIX-0 (D98) — NOT TOUCHED THIS SESSION**
 - Confirmed: `api/v1/leases/close.php` carries the safeguard at lines 810, 834-843, 1051-1069, 1218, 1239-1267, 1306, 1322-1339, 1358 (~24 references including the `priorExcessRow` query at line 810, the unit conversion at 834-843, the inverse-case detection at 1066-1069, the WARNING banner audit at 1239-1267, the SKIPPED waived case at 1322-1339, and the `prior_excess_km` field on the api response).
@@ -293,28 +287,25 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - Responsive treatment: extend S-INVOICE-SHOW-RESPONSIVE pattern (single-column at <768px, 2-column at wider). `ff-print-hide` class preserved (Odometer detail is internal telematics context per K-13).
 - Pull current `lease.precharge_balance` for the post-render lookup OR pull from the audit_log `lease_precharge_balance_drawdown` row keyed on `new_values.invoice_id = $invoice->id` for historical accuracy at the moment the invoice was generated.
 
-**D-L — Mileage Review card disposition — OPERATOR DECISION REQUIRED**
-- Site: `app/admin/invoices/show.php:1554-1640+` (~110 line `<div id="mileage-review-card">` block + Alpine state at line 2846).
-- **Two options for operator pick:**
-  - **(i) Retire wholesale:** delete the card + Alpine state + the api/v1/invoices/review_mileage.php caller. Model B drawdown is silent — no review needed. Page layout gap closes naturally (Financial Summary follows Line Items directly).
-  - **(ii) Convert to "Drawdown Reconciliation" panel:** repurpose the card to display the precharge balance lifecycle on the invoice — pre-drawdown balance, applied amount, post-drawdown balance, link to the lease's full precharge history. Useful for operator inspection / audit trail surfacing on the invoice show page. Reuses existing card surface (badge + 13px heading + paragraphs).
-- **Recommended:** option (ii) — Drawdown Reconciliation panel — for operator UX continuity + audit visibility. The card surface is proven; option (i) leaves a layout gap that some readers will find jarring. The reconciliation data is already needed for D-K's Odometer card; option (ii) extends the visibility without new data fetch surface.
-- Operator confirms in C1 of main 2B session.
+**D-L — LOCKED: (ii) Drawdown Reconciliation panel.**
+Convert the Mileage Review card in `app/admin/invoices/show.php` (line ~1546) to a Drawdown Reconciliation panel for operator inspection at invoice time. Panel shape:
+- Period distance: X km (manually editable per the project rule — "every distance field must be manually editable, even when fetched from Samsara")
+- Period charge: $Y (X × mileage_rate)
+- Precharge balance pre-invoice: $A
+- Drawdown applied: $min(period_charge, A)
+- Precharge balance post-invoice: $(A − drawdown)
+- Samsara advisory warnings (`gateway_reset_detected`, `reading_outside_period`, `sparse_readings`, `large_gap_detected`) per D121 surface as a yellow info banner
 
-**D-M — `FLEETFORGE_SPEC_FINAL.md` Model A → Model B rewrite scope — OPERATOR DECISION REQUIRED**
-- Inherited from D144 (S-MILEAGE-2A): spec rewrite owned by 2B.
-- **Two scope options:**
-  - **(i) Full Model B picture:** precharge (S-MILEAGE-2A) + drawdown (S-MILEAGE-2B this session) + close-refund (S-MILEAGE-3 forecast). Section reads as the full lifecycle including the cash/credit refund toggle, with forward-looking text for unimplemented sections (the original Model A section was speculative until S-MILEAGE-FIX-0 confirmed Model C shipped instead — precedent for forward-looking text in the spec).
-  - **(ii) Precharge + drawdown only:** defer close-refund text to S-MILEAGE-3 owning that section. Section reads as the active state through drawdown; close-refund left as a forward-looking note "see §X for close-refund — S-MILEAGE-3."
-- **Recommended:** option (i) — full Model B picture — the spec's value is describing the canonical model end-to-end, not a snapshot mid-arc.
-- Operator confirms in C1 of main 2B session.
+Panel renders for any Model B invoice with a `mileage_usage` line; hidden for non-mileage invoices. Replaces the Mileage Review card wholesale.
+(Operator decision 2026-05-12 — locked (ii).)
 
-**D-N — `FLEETFORGE_ACCOUNTING_SPEC.md` drawdown accounting entries — OPERATOR DECISION REQUIRED + LIKELY DEFERRED**
-- Accounting framing (preview — not authoritative without accountant sign-off): the precharge is a liability on lease activation (DR Cash / CR Deferred Revenue OR DR Cash / CR Customer Deposit). The drawdown is revenue recognition (DR Deferred Revenue / CR Mileage Revenue + tax accrual on the net amount). The close-time refund is liability extinguishment (DR Deferred Revenue / CR Cash OR CR Customer Credit).
-- **Operator decision:** in scope for 2B, or DEFERRED to S-MILEAGE-3 + accountant conversation?
-- **Recommended:** DEFER to S-MILEAGE-3 + accountant conversation. Accounting entries are accountant-conversation-blocked — the framing above is standard but the specific account code mapping (existing 1030 AR vs new 2030/2040-style Deferred Revenue account) needs accountant sign-off. S-MILEAGE-3 close session is the natural anchor since refund routing is the surface that exercises the full liability-extinguishment path.
-- 2B ships drawdown without accounting-spec edits since the engine emits ledger-neutral line items — the `AutoEntryBridge` at `lib/Accounting/AutoEntryBridge.php::onInvoiceSent` (called from send.php:230) already handles `mileage_*` lines via its existing pattern. Net AR impact is correct because tax accrues on NET subtotal per D-D, and revenue is recognized on the same NET.
-- Operator confirms DEFER in C1 of main 2B session; if NOT deferred, the spec text + AutoEntryBridge extension lands as an additional commit before C9.
+**D-M — LOCKED: (ii) precharge + drawdown only.**
+`FLEETFORGE_SPEC_FINAL.md` rewrite scope limited to Model A → Model B for the precharge + drawdown sections only. Close-refund section deferred to S-MILEAGE-3's spec rewrite when those decisions are locked. Reasoning: S-MILEAGE-3's specifics (cash vs credit picker, refund execution, accounting entries) aren't locked yet; 2B writing speculative spec text for unimplemented behavior risks divergence when S-MILEAGE-3 actually decides. Cleaner separation: each session owns its own spec section.
+(Operator decision 2026-05-12 — locked (ii).)
+
+**D-N — LOCKED: DEFER.**
+`FLEETFORGE_ACCOUNTING_SPEC.md` updates deferred to S-MILEAGE-3. Accountant-conversation-blocked. S-MILEAGE-3 will couple the accounting spec changes with the cash-refund accounting flow it ships.
+(Operator decision 2026-05-12 — DEFER.)
 
 **D-O — New smoke invariant I8 for drawdown math sanity**
 - Predicate: "for every invoice carrying a `mileage_usage` + `mileage_drawdown_credit` line pair, the absolute credit amount must equal `min(usage_amount, pre_emission_precharge_balance)` AND the post-emission `precharge_balance` (from the audit_log `lease_precharge_balance_drawdown` row) must equal `pre − abs(credit)`."
@@ -330,13 +321,13 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - **T12 already exercised by T16 source-inspection in 2A;** T12 either retires (consolidated into T8/T10) or is repurposed as a new dispatch case — confirm at edit time. Smoke count delta: 16 → 16-17 (T8/T10 become real; T12 may retire or convert).
 - Test shape: BEGIN/ROLLBACK isolation, FIX_STD baseline + targeted fixture variants, assert `getDistanceForPeriod` return shape AND InvoiceGenerator downstream behavior.
 
-**D-Q — Bug 1 + Bug 4 rider scope — OPERATOR DECISION REQUIRED on rider wording**
-- **Bug 1 (Cumulative Total label):** per the Master Plan (PROGRESS.md §Model B Mileage Refactor § Out-of-scope-but-tracked items) — "Cumulative Total" label on invoice show page is misleading (should read "Lease-to-Date Distance" or similar). Site: `app/admin/invoices/show.php:1521` (the `<dt class="text-secondary">Cumulative Total</dt>` row in the Odometer & Distance card). Single-string edit. Per K-13 / project memory: also confirm any other surface using the same label (lease show page, customer portal, search results, equipment unit profile) is consistent — repo-wide grep for the exact string `"Cumulative Total"` at edit time.
-- **Bug 4 (backdate warning):** soft validation when `billing_period_start < lease.start_date` on the invoice creation form. Site: `app/admin/invoices/create.php` invoice form. New Alpine soft-validation banner (`x-show="form.billing_period_start && lease.start_date && form.billing_period_start < lease.start_date"`) — does NOT block submit, just warns. May extend to `app/admin/invoices/edit.php` if it exists post-D14 review.
-- **OPERATOR DECISION REQUIRED:** exact wording for both:
-  - Bug 1 label: "Lease-to-Date Distance" (recommended — matches the "since lease start on YYYY-MM-DD" subtitle at show.php:1525) OR "Lease Total Distance" OR "Distance since lease start"?
-  - Bug 4 warning: "Invoice period starts before lease start date — confirm intent" (recommended — soft warning, non-blocking) OR stronger wording requiring acknowledge checkbox?
-- Riders kept narrow per the Master Plan framing — Bug 1 is a 1-line label edit + 1-2 grep confirmations; Bug 4 is a ~10-line UI addition. Combined scope budget: ~15 min. If Bug 4 wording demands more substantial work (acknowledge checkbox + new audit_log entry for backdated invoices) it expands per D130 scope-discipline.
+**D-Q — LOCKED: scope-out.**
+Bug 1 (Cumulative Total label) and Bug 4 (backdate warning) are SCOPED OUT of S-MILEAGE-2B. Filed as two separate QUEUED entries in the Architectural follow-ups section of CURRENT_SESSIONS.md:
+- `S-INVOICE-CUMULATIVE-TOTAL-LABEL` — ~30 min, no dependencies
+- `S-INVOICE-BACKDATE-WARNING` — ~30 min, no dependencies
+
+Rider definitions for both deferred until the sessions are scheduled (operator surfaces wording at that point).
+(Operator decision 2026-05-12 — scope-out.)
 
 **D-R — Schema migration count + ordering**
 - **Migration 1: `YYYYMMDDHHMM_S-MILEAGE-2B_drawdown_line_items.sql`** (D-A) — ENUM addition. Pure additive; no backup table per D128. Lands in C2.
@@ -346,17 +337,16 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - Migration runner state post-arc: 11 → 13 or 14 applied migrations.
 
 **D-S — Single PR vs multi-commit arc breakdown**
-- Proposed 10-commit sequence (mirrors S-MILEAGE-2A's 7-commit shape, scaled for 2B's surface):
-  - **C1:** IN-FLIGHT registration standalone per S-D136-COMMIT-DISCIPLINE (lock domains: lib/Billing/, api/v1/invoices/, app/admin/invoices/, tests/, db_migrations/, FLEETFORGE_DATABASE_MASTER.sql, FLEETFORGE_SPEC_FINAL.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md, FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md). Includes pre-work scan G (TaxCalculator behavior on negative line amounts) + re-confirm scans A-F.
-  - **C2:** ENUM migration (D-A) + show.php dispatch additions (D-E) + DATABASE_MASTER.sql sync + ENUM stress test. PARITY OK confirms ENUM lands cleanly.
+- Proposed 9-commit sequence (mirrors S-MILEAGE-2A's 7-commit shape, scaled for 2B's surface; was 10 pre D-Q scope-out — C7 Riders removed, subsequent commits renumbered):
+  - **C1:** IN-FLIGHT registration standalone per S-D136-COMMIT-DISCIPLINE (lock domains: lib/Billing/, api/v1/invoices/, app/admin/invoices/, tests/, db_migrations/, FLEETFORGE_DATABASE_MASTER.sql, FLEETFORGE_SPEC_FINAL.md, FLEETFORGE_CLAUDE_CODE_REFERENCE.md, FLEETFORGE_PROGRESS.md, FLEETFORGE_CURRENT_SESSIONS.md). Includes pre-work scan G (TaxCalculator behavior on negative line amounts per D-D spike) + re-confirm scans A-F.
+  - **C2:** ENUM migration (D-A) + show.php dispatch additions (D-E) + DATABASE_MASTER.sql sync + ENUM stress test. PARITY OK confirms ENUM lands cleanly. **If D-D spike surfaces a sign-aware fix need, a C2.5 lands here BEFORE the ENUM migration.**
   - **C3:** InvoiceGenerator drawdown emit (D-B) + SamsaraClient::getDistanceForPeriod integration (D-C) + optional samsara_invoice_metadata migration (D-R Migration 3) + new engine markers replacing 2A's forward-looking block + stress test `tests/_stress_invoice_generator_drawdown.php` (6-8 cases mirroring 2A C3 stress shape).
-  - **C4:** Model C plumbing retirement per D-G option (i) — backup table + column DROPs + ENUM retirement + Mileage helper retirement per D-H + `scripts/seed_dataset.php` / `bin/seed.php` cleanup. Stress test confirming retire surface. PARITY OK confirms DROP lands cleanly.
-  - **C5:** HARD send gate retirement per D-I + review_mileage.php disposition (option (i) recommended) + INV-87 disposition (void + regen, recommended) + Mileage Review card disposition per D-L. Stress test confirming send.php no longer rejects on drawdown invoices.
-  - **C6:** Odometer card rewrite (D-K) + Financial Summary drawdown breakdown (D-F) + tax-on-NET verification (D-D) + tax stress test `tests/_stress_tax_calculator_drawdown_net.php`. Visual surface — operator T1 walk includes these. FF_ASSET_VERSION bump consideration (CSS / JS changes likely) per D145.
-  - **C7:** Riders Bug 1 + Bug 4 per D-Q (operator-confirmed wording).
-  - **C8:** Smoke I8 (D-O) + real T8/T10 coverage activation (D-P) + stress `tests/_stress_smoke_invariants_i8.php`. Smoke summary I1-I8 across `_smoke_billing_invariants.php`; samsara_distance smoke gains real T8+T10 coverage.
-  - **C9:** Spec rewrite (D-M option (i) recommended) — `FLEETFORGE_SPEC_FINAL.md` Model A → Model B section overhaul.
-  - **C10:** Docs — SESSION LOG row + DECISIONS table D147-D165 (D-A through D-S of 2B; ~19 rows) + REFERENCE.md §13.4 retirement (replace "Model C is current-and-transitional" subsection with "Model B is current — Model C historical reference") + §13.4.1 lifecycle table closing (4 of 6 columns owned by SHIPPED arcs; 2 remaining for S-MILEAGE-3) + CURRENT_SESSIONS.md S-MILEAGE-2B entry flipped to SHIPPED one-line + Recent ship history extension + T1 visual walk addendum on operator sign-off.
+  - **C4:** Model C plumbing retirement per D-G locked (i) — backup table + column DROPs + ENUM retirement + Mileage helper retirement per D-H + `scripts/seed_dataset.php` / `bin/seed.php` cleanup. Stress test confirming retire surface. PARITY OK confirms DROP lands cleanly.
+  - **C5:** INV-87 disposition (void + regen as precondition per D-G) + HARD send gate retirement per D-I locked (i) + review_mileage.php wholesale retire + Mileage Review card → Drawdown Reconciliation panel per D-L locked (ii). Stress test confirming send.php no longer rejects on drawdown invoices.
+  - **C6:** Odometer card rewrite (D-K) + Financial Summary drawdown breakdown (D-F) + tax-on-NET verification (D-D, post-spike) + tax stress test `tests/_stress_tax_calculator_drawdown_net.php`. Visual surface — operator T1 walk includes these. FF_ASSET_VERSION bump consideration (CSS / JS changes likely) per D145.
+  - **C7:** Smoke I8 (D-O) + real T8/T10 coverage activation (D-P) + stress `tests/_stress_smoke_invariants_i8.php`. Smoke summary I1-I8 across `_smoke_billing_invariants.php`; samsara_distance smoke gains real T8+T10 coverage.
+  - **C8:** Spec rewrite per D-M locked (ii) — `FLEETFORGE_SPEC_FINAL.md` Model A → Model B section, precharge + drawdown only (close-refund deferred to S-MILEAGE-3's spec rewrite).
+  - **C9:** Docs — SESSION LOG row + DECISIONS table D147-D165 (D-A through D-S of 2B; ~19 rows) + REFERENCE.md §13.4 retirement (replace "Model C is current-and-transitional" subsection with "Model B is current — Model C historical reference") + §13.4.1 lifecycle table closing (4 of 6 columns owned by SHIPPED arcs; 2 remaining for S-MILEAGE-3) + CURRENT_SESSIONS.md S-MILEAGE-2B entry flipped to SHIPPED one-line + Recent ship history extension + T1 visual walk addendum on operator sign-off.
 - **T1 visual walk** extends D146's 5-step walk pattern. New steps (post the 5-step 2A walk):
   - (6) Generate Invoice 2 on the same precharge-enabled lease post-Invoice-1-send → confirm both `mileage_usage` + `mileage_drawdown_credit` lines emit at expected amounts in the line items table.
   - (7) Query `leases.precharge_balance` post-Invoice-2-generation → confirm decrement = min(usage, prior_balance) per D-B math.
@@ -364,7 +354,7 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
   - (9) Generate Invoice 3 after `precharge_balance` hits zero → confirm only `mileage_usage` line emits, no `mileage_drawdown_credit`, `precharge_balance` remains at 0.
   - (10) Confirm INV-87 dispositioned per D-I (voided + regenerated, OR auto-approved per operator's pick).
   - (11) Test Model B Lite path: synthesize a precharge_enabled=0 lease with mileage_rate>0 + period_distance>0 → confirm `mileage_usage` line emits (no credit; no balance update).
-- D131 gate (PARITY OK + INVARIANTS OK including new I8 + migrate 11+N/0/0) on every commit C2-C10.
+- D131 gate (PARITY OK + INVARIANTS OK including new I8 + migrate 11+N/0/0) on every commit C2-C9.
 
 #### Implementation notes
 - **Engine-side markers:** the 2A C3 marker block at `lib/Billing/InvoiceGenerator.php:217-245` is REPLACED in C3 of 2B (not preserved). Its purpose was forward-looking — 2B implements the contract it described. New marker block at the same site documents the post-2B engine state + the S-MILEAGE-3 close-refund integration point.
@@ -374,12 +364,11 @@ Outcome: Full Model B Invoice 1 lifecycle landed end-to-end — precharge_balanc
 - **Optimistic-lock retry (D19):** drawdown UPDATE on `leases.precharge_balance` runs under FOR UPDATE (D20) within the InvoiceGenerator transaction — serializes correctly. If a concurrent cron + manual gen contention surfaces, STALE_DATA 409 fires per existing pattern; client retries the invoice generation. Initial implementation: simple FOR UPDATE without explicit optimistic-lock retry inside the engine.
 - **K-15 data-path coverage (per S-REVIEW-MILEAGE-TAX-FIX 2026-05-12):** before any D-G destructive op, the pre-work scan re-runs the Model C column SELECT — verifies count unchanged from 3 (or surfaces diff). Identifies all rows that would lose data on DROP. Operator confirms backup-table snapshot captures them.
 - **K-16 mid-arc chat handoff discipline:** spec authored 2026-05-11/12 (this session) before main 2B session. If the operator surfaces a clarification mid-2B that contradicts a D-A through D-S lock here, the K-16 pattern applies: tighten the spec's literal wording where the spec didn't address an edge case, surface in SESSION LOG with original-scope-vs-final-scope diff per D130 scope-expansion/contraction discipline.
-- **D131 gate discipline:** schema-touching session — both `tests/_smoke_master_schema_parity.php` (PARITY OK) AND `tests/_smoke_billing_invariants.php` (INVARIANTS OK including new I8) must pass before every commit C2-C10. The samsara_distance smoke also runs (16/16 → 16-17/16-17).
+- **D131 gate discipline:** schema-touching session — both `tests/_smoke_master_schema_parity.php` (PARITY OK) AND `tests/_smoke_billing_invariants.php` (INVARIANTS OK including new I8) must pass before every commit C2-C9. The samsara_distance smoke also runs (16/16 → 16-17/16-17).
 - **Concurrent IN-FLIGHT detection (D136):** pre-flight reads CURRENT_SESSIONS.md; collision check on `lib/Billing/InvoiceGenerator.php`, `lib/Billing/Mileage.php`, `lib/Billing/TaxCalculator.php`, `lib/Accounting/AutoEntryBridge.php`, `api/v1/invoices/send.php`, `api/v1/invoices/review_mileage.php`, `api/v1/invoices/create.php`, `app/admin/invoices/show.php`, `app/admin/invoices/create.php`, `tests/_smoke_billing_invariants.php`, `tests/_smoke_samsara_distance.php`, `db_migrations/`, `FLEETFORGE_DATABASE_MASTER.sql`, `FLEETFORGE_SPEC_FINAL.md`, `FLEETFORGE_PROGRESS.md`, `FLEETFORGE_CURRENT_SESSIONS.md`, `FLEETFORGE_CLAUDE_CODE_REFERENCE.md`.
 
-#### Riders (in scope for 2B; small surface — see D-Q)
-- **Bug 1 — Cumulative Total label** at `app/admin/invoices/show.php:1521`: replace "Cumulative Total" with operator-confirmed wording (recommended: "Lease-to-Date Distance"). Repo-wide grep for the exact string confirms no other surface uses the same misleading label. Lands in C7.
-- **Bug 4 — Backdate warning** at `app/admin/invoices/create.php`: Alpine soft-validation banner when `form.billing_period_start < lease.start_date`. Does NOT block submit. Operator-confirmed wording (recommended: "Invoice period starts before lease start date — confirm intent"). Lands in C7.
+#### Riders
+Riders: SCOPED OUT per D-Q — see `S-INVOICE-CUMULATIVE-TOTAL-LABEL` and `S-INVOICE-BACKDATE-WARNING` in Architectural follow-ups.
 
 #### Pre-work scan items for main 2B session (re-run at C1 for currency)
 A. K-15 Model C column data — re-run SELECT on excess_distance_km / excess_charge_amount / mileage_review_status against `invoices`; confirm count unchanged from 3 (or surface diff). Run the same for `invoice_line_items.item_type IN ('mileage_adjustment','mileage_credit')`; confirm count unchanged from 2.
@@ -462,6 +451,18 @@ Outcome: T13 fixture coverage for FIX_GAP scenario (large_gap_detected warning) 
 Scope: optional preventive smoke invariant from S-LOOKUP-RATES-NAMESPACE C3 (deferred). For every production template with active leases, the customer-equipment-rate AND rate-card-item lookup must yield non-NULL OR template default must be non-NULL.
 Effort: ~20 min.
 Dependencies: may be rendered redundant by S-TEMPLATE-MILEAGE-DEFAULTS' NOT NULL schema change. Skip if redundant.
+
+**S-INVOICE-CUMULATIVE-TOTAL-LABEL** — QUEUED
+Scope: [TBD — originally Bug 1 rider on S-MILEAGE-2B, scoped out 2026-05-12 to a separate session; rider definition to be surfaced when scheduled.]
+Effort: ~30 min.
+Dependencies: none.
+Discussed: 2026-05-12 in planning chat (S-MILEAGE-2B-SPEC-LOCK).
+
+**S-INVOICE-BACKDATE-WARNING** — QUEUED
+Scope: [TBD — originally Bug 4 rider on S-MILEAGE-2B, scoped out 2026-05-12 to a separate session; rider definition to be surfaced when scheduled.]
+Effort: ~30 min.
+Dependencies: none.
+Discussed: 2026-05-12 in planning chat (S-MILEAGE-2B-SPEC-LOCK).
 
 ### Strategic / multi-session arcs (planning phase)
 
