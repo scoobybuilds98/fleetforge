@@ -89,6 +89,14 @@ class Mileage
     /**
      * Derive monthly allowance in km for a lease.
      *
+     * **S-MILEAGE-2B C4 (D-H refined):** retained pending portal refactor in
+     * S-PORTAL-MILEAGE-MODEL-B. Active caller: `app/portal/leases/view.php:80`
+     * (Model C residue customer-facing). `app/admin/invoices/show.php:1558`
+     * caller dies in S-MILEAGE-2B C6 (D-L Mileage Review card → Drawdown
+     * Reconciliation panel conversion). Once both callers gone, delete this
+     * method per D-H original intent. Companion helper `Mileage::periodExcess`
+     * was deleted in C4 (zero callers post-C3 engine retirement).
+     *
      * @param array $lease  row from leases table (needs estimated_mileage_km
      *                       OR estimated_mileage, start_date, end_date)
      * @return array{
@@ -124,47 +132,13 @@ class Mileage
         ];
     }
 
-    /**
-     * Compute excess distance and dollar charge for a single billing period.
-     *
-     * Returns excess of zero when period_distance is at/below allowance.
-     * Excess charge is bcmul'd against lease.mileage_rate_km — never floats.
-     *
-     * @param float       $periodDistanceKm   (>= 0)
-     * @param float       $monthlyAllowanceKm (> 0 for charge to apply)
-     * @param string|float $mileageRateKm     dollars per excess km (bc-safe)
-     * @return array{
-     *     excess_km: float,
-     *     excess_charge: string,    // bc-string '0.00' style
-     *     review_required: bool
-     * }
-     */
-    public static function periodExcess(
-        float $periodDistanceKm,
-        float $monthlyAllowanceKm,
-        $mileageRateKm
-    ): array {
-        // Defensive: a negative period distance means odometer regressed,
-        // which is upstream-validated separately. We still floor at 0 here
-        // so a bug in the caller can't manifest as a negative excess charge.
-        if ($periodDistanceKm < 0) $periodDistanceKm = 0.0;
-
-        $excessKm = max(0.0, $periodDistanceKm - $monthlyAllowanceKm);
-        $excessKm = round($excessKm, self::DISTANCE_SCALE);
-
-        // bcmath insists on string operands. Round first to avoid the
-        // 0.0000000001 noise that float subtraction can leave behind.
-        $rateStr = (string) $mileageRateKm;
-        if ($rateStr === '' || !is_numeric($rateStr)) $rateStr = '0';
-
-        $excessCharge = bcmul((string) $excessKm, $rateStr, self::MONEY_SCALE);
-
-        return [
-            'excess_km'       => $excessKm,
-            'excess_charge'   => $excessCharge,
-            'review_required' => bccomp($excessCharge, '0', self::MONEY_SCALE) > 0,
-        ];
-    }
+    // ── periodExcess REMOVED in S-MILEAGE-2B C4 ───────────────────────────
+    // Was: compute excess distance and dollar charge for a single billing period.
+    // Retired per D-H (zero callers post-C3 InvoiceGenerator drawdown emit).
+    // Replaced by direct `distance × rate` math in the C3 drawdown emit block —
+    // Model B has no allowance subtraction. See FLEETFORGE_PROGRESS.md
+    // S-MILEAGE-2B SESSION LOG entry for the full retirement trace.
+    // ──────────────────────────────────────────────────────────────────────
 
     /**
      * Convert km to the lease's primary display unit. If the lease is

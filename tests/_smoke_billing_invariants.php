@@ -279,36 +279,55 @@ if ($rows) {
 // definition and don't go through the regular review gate.
 // ────────────────────────────────────────────────────────────────────────────
 
+// S-MILEAGE-2B C4 refactor: I6 now adapted for Model B (Model C dropped).
+// Original I6 keyed on mileage_review_status='not_required' (dropped in C4).
+// Model B equivalent: invoice with period_distance_km > 0 + lease rate > 0
+// MUST emit at least one mileage line item (mileage_usage from drawdown emit,
+// or mileage_precharge from 2A, or the legacy mileage_adjustment/credit from
+// historical Model C drafts). Silent-skip would be a missing line item.
+//
+// Scope filter: created_at >= MODEL_B_SHIP_DATE. Pre-C3 Model C drafts that
+// correctly skipped mileage under Model C semantics (e.g. distance < allowance)
+// are exempt — they were correct under the engine in effect at their
+// generation time. I6's purpose is to catch BUGS in the current Model B
+// engine, not historical Model C drift (per K-15 / D129 audit scope discipline).
+//
+// MODEL_B_SHIP_DATE = '2026-05-12' (S-MILEAGE-2B C3 InvoiceGenerator drawdown
+// emit shipped 2026-05-12; commit a24cb49).
 $rows = db_select(
     "SELECT i.id AS invoice_id, i.invoice_number, i.status AS invoice_status,
             i.lease_id, l.contract_number, i.period_distance_km,
-            l.mileage_rate_km, l.estimated_mileage_km, i.mileage_review_status
+            l.mileage_rate_km, l.estimated_mileage_km
      FROM invoices i
      JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
      WHERE i.deleted_at IS NULL
        AND i.status IN ('draft','sent')
        AND i.invoice_type != 'mileage_only'
+       AND i.created_at >= '2026-05-12 00:00:00'
        AND COALESCE(i.period_distance_km, 0) > 0
        AND COALESCE(l.mileage_rate_km,    0) > 0
-       AND COALESCE(l.estimated_mileage_km, 0) = 0
-       AND i.mileage_review_status = 'not_required'
        AND NOT EXISTS (
          SELECT 1 FROM invoice_line_items ili
          WHERE ili.invoice_id = i.id
-           AND ili.item_type IN ('mileage_adjustment','mileage_precharge','mileage_credit')
+           AND ili.item_type IN (
+             'mileage_adjustment',
+             'mileage_precharge',
+             'mileage_credit',
+             'mileage_usage',
+             'mileage_drawdown_credit'
+           )
        )
      ORDER BY i.id"
 );
 if ($rows) {
-    $lines = ["I6 FAIL — " . count($rows) . " non-void invoice(s) silent-skipped mileage despite rate>0 + distance>0 (D133 silent-skip class):"];
+    $lines = ["I6 FAIL — " . count($rows) . " non-void invoice(s) silent-skipped mileage despite rate>0 + distance>0 (Model B drawdown emit gap):"];
     foreach ($rows as $r) {
         $lines[] = sprintf(
-            "  invoice_id=%d  %-16s  status=%-7s  lease_id=%d  %-30s  distance=%s  rate_km=%s  review=%s",
+            "  invoice_id=%d  %-16s  status=%-7s  lease_id=%d  %-30s  distance=%s  rate_km=%s",
             $r['invoice_id'], $r['invoice_number'], $r['invoice_status'],
             (int)$r['lease_id'], $r['contract_number'],
             (string)$r['period_distance_km'],
-            (string)$r['mileage_rate_km'],
-            (string)$r['mileage_review_status']
+            (string)$r['mileage_rate_km']
         );
     }
     $failures[] = implode("\n", $lines);

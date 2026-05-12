@@ -838,18 +838,13 @@ class InvoiceGenerator
                 $markupPct = (string) (settings_get('currency.usd_cad_markup_pct', '0.0000') ?? '0.0000');
             }
 
-            // S-MILEAGE-2B C3: legacy Model C invoice-row columns set to defaults.
-            // The excess_distance_km, excess_charge_amount, and
-            // mileage_review_status columns DROP in C4 (D-G option (i) wholesale
-            // retirement). Until that migration lands, the columns still exist
-            // on the invoices table and the invoice INSERT below references
-            // them — defaults of 0.00 / 0.00 / 'not_required' preserve schema
-            // compatibility without producing meaningful Model C metadata.
-            $excessDistanceKm    = '0.00';
-            $excessChargeAmount  = '0.00';
-            $mileageReviewStatus = 'not_required';
-
             // --- Insert invoice ---
+            // S-MILEAGE-2B C4: Model C invoice-row columns DROPPED in
+            // 202605120907_S-MILEAGE-2B_model_c_retirement.sql. excess_distance_km,
+            // excess_charge_amount, mileage_review_status, mileage_override_amount,
+            // mileage_reviewed_at, mileage_reviewed_by_user_id, mileage_review_notes
+            // no longer exist on the invoices table. Removed from this INSERT
+            // tuple at the same time as the migration.
             $invoiceId = db_insert('invoices', [
                 'invoice_number'            => $invoiceNumber,
                 'invoice_type'              => $invoiceType,
@@ -903,10 +898,6 @@ class InvoiceGenerator
                 'cumulative_distance_km'      => $cumulativeDistanceKm,
                 'odometer_source'             => $odometerSource,
                 'odometer_fetched_at'         => $odometerFetchedAt,
-                // S-LEASE-MILEAGE: excess + manager review gate
-                'excess_distance_km'          => $excessDistanceKm,
-                'excess_charge_amount'        => $excessChargeAmount,
-                'mileage_review_status'       => $mileageReviewStatus,
                 'auto_generated'            => (int)($params['auto_generated'] ?? 0),
                 'generation_source'         => $params['generation_source'] ?? 'manual',
                 'created_by'                => $params['created_by'] ?? null,

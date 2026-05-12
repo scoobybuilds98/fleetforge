@@ -2006,13 +2006,6 @@ CREATE TABLE `invoices` (
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` datetime DEFAULT NULL,
-  `excess_distance_km` decimal(10,2) DEFAULT '0.00' COMMENT 'Distance over monthly allowance for this period (km)',
-  `excess_charge_amount` decimal(12,2) DEFAULT '0.00' COMMENT 'Calculated excess mileage charge before manager override',
-  `mileage_review_status` enum('not_required','pending','approved','overridden') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'not_required' COMMENT 'Manager review state for excess mileage charge â€” HARD send gate',
-  `mileage_reviewed_by_user_id` int unsigned DEFAULT NULL COMMENT 'User who approved/overrode the excess',
-  `mileage_reviewed_at` datetime DEFAULT NULL COMMENT 'When the manager review completed',
-  `mileage_review_notes` text COLLATE utf8mb4_unicode_ci COMMENT 'Manager notes â€” required for override or reject actions',
-  `mileage_override_amount` decimal(12,2) DEFAULT NULL COMMENT 'If manager overrode the calculated excess, the actual amount applied',
   PRIMARY KEY (`id`),
   UNIQUE KEY `invoice_number` (`invoice_number`),
   KEY `idx_customer` (`customer_id`),
@@ -2029,7 +2022,6 @@ CREATE TABLE `invoices` (
   KEY `late_fee_invoice_id` (`late_fee_invoice_id`),
   KEY `credit_note_for_invoice_id` (`credit_note_for_invoice_id`),
   KEY `fk_invoices_billing_period` (`billing_period_id`),
-  KEY `idx_mileage_review` (`mileage_review_status`,`lease_id`),
   FULLTEXT KEY `idx_ft_invoices` (`invoice_number`,`company_name_snapshot`),
   CONSTRAINT `fk_invoices_billing_period` FOREIGN KEY (`billing_period_id`) REFERENCES `lease_billing_periods` (`id`) ON DELETE SET NULL,
   CONSTRAINT `invoices_ibfk_1` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE SET NULL,
@@ -2039,6 +2031,23 @@ CREATE TABLE `invoices` (
   CONSTRAINT `invoices_ibfk_5` FOREIGN KEY (`late_fee_invoice_id`) REFERENCES `invoices` (`id`) ON DELETE SET NULL,
   CONSTRAINT `invoices_ibfk_6` FOREIGN KEY (`credit_note_for_invoice_id`) REFERENCES `invoices` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `invoices_model_c_backup_S_MILEAGE_2B` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `invoice_id` int unsigned NOT NULL,
+  `invoice_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `invoice_status` enum('draft','sent','partially_paid','paid','overdue','void','written_off') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `excess_distance_km` decimal(10,2) DEFAULT NULL,
+  `excess_charge_amount` decimal(12,2) DEFAULT NULL,
+  `mileage_review_status` enum('not_required','pending','approved','overridden') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `mileage_override_amount` decimal(12,2) DEFAULT NULL,
+  `mileage_reviewed_at` datetime DEFAULT NULL,
+  `mileage_reviewed_by_user_id` int unsigned DEFAULT NULL,
+  `mileage_review_notes` text COLLATE utf8mb4_unicode_ci,
+  `snapshot_taken_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_invoice_id` (`invoice_id`),
+  KEY `idx_invoice_number` (`invoice_number`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-MILEAGE-2B C4: forensic snapshot of Model C columns on invoices before DROP. See D107 pattern.';
 CREATE TABLE `late_fee_rules` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `customer_id` int unsigned DEFAULT NULL,
