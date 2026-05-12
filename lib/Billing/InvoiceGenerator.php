@@ -215,17 +215,7 @@ class InvoiceGenerator
             }
 
             // ════════════════════════════════════════════════════════════════
-            // S-MILEAGE-2A: Invoice 1 mileage_precharge emission point.
-            // S-MILEAGE-2B inserts drawdown logic here: on subsequent invoices
-            // (precharge_invoiced_at NOT NULL), compute
-            //   period_charge = period_distance × mileage_rate
-            // If precharge_balance > 0: emit a `mileage_usage` line at per-km
-            //   rate AND a `mileage_drawdown_credit` line drawing the balance
-            //   down by min(period_charge, precharge_balance); decrement
-            //   leases.precharge_balance by the same amount.
-            // If precharge_balance == 0: emit just the `mileage_usage` line.
-            // Replaces the S-LEASE-MILEAGE per-period excess block at
-            // lib/Billing/InvoiceGenerator.php:~438-486 wholesale.
+            // S-MILEAGE-2A: Invoice 1 mileage_precharge emission point (SHIPPED 2026-05-12, e1918df).
             //
             // 2A emission gate (D-B + (b) cross-invoice uniqueness):
             //   precharge_enabled = 1                           (lease opted in)
@@ -242,6 +232,15 @@ class InvoiceGenerator
             // racy-concurrent-gen safety net; this gate is the emission-time
             // prevention so the operator never lands in a strip-N-drafts
             // workflow. Belt + suspenders mirroring the D-D shape.
+            //
+            // S-MILEAGE-2B drawdown emit (SHIPPED 2026-05-12, below): on
+            // Invoice 2+ for Model B (full) leases AND every invoice for
+            // Model B Lite leases (D135), emits `mileage_usage` + optional
+            // `mileage_drawdown_credit` per the locked D-B math.
+            //
+            // S-MILEAGE-3 will add close-refund line types (cash refund /
+            // credit_note); this engine block stays the precharge emission
+            // anchor for Model B's Invoice 1 lifecycle.
             // ════════════════════════════════════════════════════════════════
             $prechargeEmit = (
                 (int) ($lease['precharge_enabled'] ?? 0) === 1
@@ -277,6 +276,327 @@ class InvoiceGenerator
                     'is_credit'   => 0,
                     'taxable'     => 1,
                 ];
+            }
+
+            // ════════════════════════════════════════════════════════════════
+            // S-MILEAGE-2B C3 — Odometer & period_distance_km setup
+            // (moved earlier in the flow vs the SAMSARA-3 location since the
+            // drawdown emit below needs period_distance_km available before
+            // the $lineItems subtotal aggregation at line ~356).
+            //
+            // Values come in from callers (api/v1/invoices/create.php or
+            // api/v1/leases/close.php) via $params. They're optional — when
+            // omitted, the four distance columns stay null and the invoice
+            // behaves exactly like it did before SAMSARA-3.
+            //
+            // period_distance_km     = end - start (this period)
+            // cumulative_distance_km = end - lease.odometer_start_km
+            //                          (since lease start)
+            //
+            // D-C Samsara integration (S-MILEAGE-2B): when no caller-supplied
+            // odometer values are present AND the lease has a samsara_vehicle_id
+            // AND we have period start/end dates, optionally fetch distance
+            // via SamsaraClient::getDistanceForPeriod (S-MILEAGE-1B contract).
+            // Per project memory rule ("Samsara is source-of-truth-by-default,
+            // never source-of-truth-by-force"), the caller path with explicit
+            // odometer params takes precedence — Samsara fetch is the fallback
+            // when callers don't pre-populate. Distance fields stay manually
+            // editable post-emit.
+            // ════════════════════════════════════════════════════════════════
+            $odoStartKm = isset($params['odometer_at_period_start_km']) && $params['odometer_at_period_start_km'] !== ''
+                ? (string) $params['odometer_at_period_start_km'] : null;
+            $odoEndKm   = isset($params['odometer_at_period_end_km']) && $params['odometer_at_period_end_km'] !== ''
+                ? (string) $params['odometer_at_period_end_km']   : null;
+
+            $periodDistanceKm     = null;
+            $cumulativeDistanceKm = null;
+            if ($odoStartKm !== null && $odoEndKm !== null) {
+                // Only compute when both ends have a value — prevents nonsense
+                // "cumulative since null" rows in the DB.
+                $diff = bcsub($odoEndKm, $odoStartKm, 2);
+                // Clamp negative period distance to 0 — negative readings
+                // mean a bad user edit, not reality. The UI will already
+                // have surfaced a warning, but defend the DB anyway.
+                $periodDistanceKm = bccomp($diff, '0', 2) >= 0 ? $diff : '0.00';
+            }
+            if ($odoEndKm !== null && !empty($lease['odometer_start_km'])) {
+                $cumDiff = bcsub($odoEndKm, (string) $lease['odometer_start_km'], 2);
+                $cumulativeDistanceKm = bccomp($cumDiff, '0', 2) >= 0 ? $cumDiff : '0.00';
+            }
+
+            $odometerSource = $params['odometer_source'] ?? null;
+            if ($odometerSource !== null && !in_array($odometerSource, ['gps', 'manual', 'estimated'], true)) {
+                $odometerSource = 'manual';
+            }
+            $odometerFetchedAt = null;
+            if (!empty($params['odometer_fetched_at'])) {
+                try {
+                    $dt = new \DateTime((string) $params['odometer_fetched_at']);
+                    $odometerFetchedAt = $dt->format('Y-m-d H:i:s');
+                } catch (\Throwable) {
+                    $odometerFetchedAt = null;
+                }
+            }
+
+            // D-C Samsara fallback fetch — only when caller didn't pre-populate
+            // distance AND lease has a samsara_vehicle_id AND we have valid
+            // period dates AND fetching is not opted out via $params['skip_samsara'].
+            if ($periodDistanceKm === null
+                && !empty($lease['samsara_vehicle_id'])
+                && empty($params['skip_samsara'])
+                && $billingType !== 'mileage_only'
+            ) {
+                try {
+                    $samsara   = new \FleetForge\GPS\SamsaraClient();
+                    $startDtUtc = (new \DateTimeImmutable($periodStart . ' 00:00:00', new \DateTimeZone('UTC')));
+                    $endDtUtc   = (new \DateTimeImmutable($periodEnd   . ' 23:59:59', new \DateTimeZone('UTC')));
+                    $samsaraResult = $samsara->getDistanceForPeriod(
+                        (string) $lease['samsara_vehicle_id'],
+                        $startDtUtc, $endDtUtc, 'km'
+                    );
+                    if ($samsaraResult['distance'] !== null) {
+                        $periodDistanceKm   = (string) $samsaraResult['distance'];
+                        $odometerSource     = $samsaraResult['source'] ?? 'gps';
+                        $odometerFetchedAt  = (new \DateTime())->format('Y-m-d H:i:s');
+                    }
+                    // audit_log row regardless of success/failure (D102/D123 pattern —
+                    // action='cron' since action ENUM doesn't include
+                    // 'samsara_history_query'; entity_type carries the descriptive value).
+                    db_insert('audit_log', [
+                        'user_id'      => $params['created_by'] ?? null,
+                        'user_name'    => (function_exists('current_user') && current_user())
+                                            ? (current_user()['name'] ?? 'system') : 'system',
+                        'action'       => 'cron',
+                        'module'       => 'samsara',
+                        'entity_type'  => 'samsara_history_query',
+                        'entity_id'    => $leaseId,
+                        'entity_label' => $lease['contract_number'] ?? null,
+                        'notes'        => sprintf(
+                            'InvoiceGenerator Samsara distance fetch (S-MILEAGE-2B D-C): vehicle=%s period=%s..%s distance=%s source=%s reason=%s',
+                            (string) $lease['samsara_vehicle_id'],
+                            $periodStart, $periodEnd,
+                            (string) ($samsaraResult['distance'] ?? 'null'),
+                            (string) ($samsaraResult['source'] ?? 'none'),
+                            (string) ($samsaraResult['reason'] ?? 'ok')
+                        ),
+                        'new_values'   => json_encode($samsaraResult),
+                        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                    ]);
+                } catch (\Throwable $e) {
+                    // Samsara fetch must NEVER block billing — log and proceed
+                    // with caller-supplied (or null) distance.
+                    error_log('[InvoiceGenerator Samsara fetch] ' . $e->getMessage());
+                }
+            }
+
+            // ════════════════════════════════════════════════════════════════
+            // S-MILEAGE-2B C3 — Model B drawdown emit
+            //
+            // Gate (locked D-B + K-16 clarification — precharge_invoiced_at
+            // discriminator + Model B Lite passthrough via precharge_enabled=0):
+            //   period_distance_km > 0
+            //   AND mileage_rate_km > 0 (D135 intent signal)
+            //   AND billing_type NOT IN (mileage_only, adjustment, credit_note)
+            //   AND (precharge_invoiced_at IS NOT NULL OR precharge_enabled = 0)
+            //       — Model B (full) Invoice 1: blocked (precharge emit owns it)
+            //       — Model B (full) Invoice 2+: drawdown emits (post-stamp)
+            //       — Model B Lite (precharge_enabled=0): drawdown emits (no
+            //         precharge concept; balance=NULL → falls to second branch,
+            //         emits only mileage_usage)
+            //
+            // K-16 spec clarification vs locked D-B wording:
+            //   - D-B's "negative amount" emit shape collides with
+            //     InvoiceGenerator's signed-aggregator convention at
+            //     lines ~357-362 (POSITIVE amount + is_credit=1 → bcsub).
+            //   - Resolution: emit mileage_drawdown_credit with POSITIVE
+            //     amount + is_credit=1. The aggregator subtracts; per-line
+            //     tax negates internally (line ~856). Financial result is
+            //     identical to D-B's stated intent; matches existing convention
+            //     (mileage_credit, early_return_credit, account_credit_applied).
+            //   - TaxCalculator handles negatives via bcmul sign-propagation
+            //     (lines 67/72/78); D-D spike confirmed no TaxCalculator
+            //     change needed.
+            //
+            // Math (bcmath only per D16):
+            //   period_charge    = bcround(bcmul(distance, rate, 6), 2)
+            //   drawdown_amount  = min(period_charge, precharge_balance)
+            //                     (computed via bccomp + ternary)
+            //   remaining_charge = bcsub(period_charge, drawdown_amount, 2)
+            //
+            // Emission:
+            //   Branch A — precharge_balance > 0:
+            //     mileage_usage line, amount = period_charge, is_credit = 0
+            //     mileage_drawdown_credit line, amount = drawdown_amount
+            //                                  (positive), is_credit = 1
+            //     UPDATE leases.precharge_balance -= drawdown_amount inside
+            //       this transaction; D20 FOR UPDATE on lease row;
+            //       audit_log entity_type='lease_precharge_balance_drawdown'
+            //   Branch B — precharge_balance == 0 or NULL:
+            //     mileage_usage line only; no balance update
+            //
+            // Engine markers — replaces the S-LEASE-MILEAGE per-period excess
+            // block at lib/Billing/InvoiceGenerator.php:559-713 (DELETED below)
+            // + the duplicate odometer setup at 515-557 (DELETED below).
+            // ════════════════════════════════════════════════════════════════
+            $drawdownGate = (
+                $periodDistanceKm !== null
+                && bccomp((string) $periodDistanceKm, '0', 2) > 0
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
+                && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
+                && (
+                    ($lease['precharge_invoiced_at'] ?? null) !== null
+                    || (int) ($lease['precharge_enabled'] ?? 0) === 0
+                )
+            );
+
+            // D-B HARD throw (D133 preserved from Model C era) — rate-zero
+            // with allowance-intent. Fires regardless of drawdown gate since
+            // it's a data-hole guard.
+            if ($periodDistanceKm !== null
+                && $billingType !== 'mileage_only'
+                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) > 0
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
+            ) {
+                throw new BillingRateException(
+                    sprintf(
+                        'InvoiceGenerator refused to write mileage line: lease_id=%d, period=%s..%s (%d days), '
+                        . 'estimated_mileage_km=%s configured (period_distance_km=%s) but mileage_rate_km=%s. '
+                        . 'Upstream rate-tier-completeness invariant (D133) must be enforced at lease create — see api/v1/leases/create.php.',
+                        $leaseId, $periodStart, $periodEnd, $days,
+                        (string) ($lease['estimated_mileage_km'] ?? '0'),
+                        (string) $periodDistanceKm,
+                        (string) ($lease['mileage_rate_km'] ?? '0')
+                    ),
+                    'mileage_excess', $days,
+                    (string) ($lease['daily_rate']   ?? '0'),
+                    (string) ($lease['weekly_rate']  ?? '0'),
+                    (string) ($lease['monthly_rate'] ?? '0'),
+                    [
+                        'lease_id'             => $leaseId,
+                        'period_start'         => $periodStart,
+                        'period_end'           => $periodEnd,
+                        'estimated_mileage_km' => (string) ($lease['estimated_mileage_km'] ?? '0'),
+                        'mileage_rate_km'      => (string) ($lease['mileage_rate_km'] ?? '0'),
+                        'period_distance_km'   => (string) $periodDistanceKm,
+                        'billing_type'         => $billingType,
+                    ]
+                );
+            }
+
+            // D-C SOFT WARNING (D133 preserved) — distance>0 but no rate tier
+            // configured at all. Sentry::captureMessage 'warning' + audit_log
+            // row. Drawdown gate doesn't fire (no rate); warning surfaces the
+            // misconfiguration without blocking the invoice.
+            if ($periodDistanceKm !== null
+                && $billingType !== 'mileage_only'
+                && bccomp((string) $periodDistanceKm, '0', 2) > 0
+                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) <= 0
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
+            ) {
+                $warningMsg = sprintf(
+                    'Lease #%d period %s..%s has period_distance_km=%s but mileage block skipped (no rate tier configured). Possible misconfiguration — verify lease intent.',
+                    $leaseId, $periodStart, $periodEnd, (string) $periodDistanceKm
+                );
+                try {
+                    \FleetForge\Observability\Sentry::captureMessage($warningMsg, 'warning');
+                } catch (\Throwable) {
+                    // Observability MUST NOT block the billing path
+                }
+                db_insert('audit_log', [
+                    'user_id'      => $params['created_by'] ?? null,
+                    'user_name'    => (function_exists('current_user') && current_user())
+                                        ? (current_user()['name'] ?? 'system') : 'system',
+                    'action'       => 'update',
+                    'module'       => 'billing',
+                    'entity_type'  => 'lease',
+                    'entity_id'    => $leaseId,
+                    'entity_label' => $lease['contract_number'] ?? null,
+                    'notes'        => '[FLEETFORGE_BILLING_WARNING] ' . $warningMsg,
+                    'old_values'   => null,
+                    'new_values'   => json_encode([
+                        'period_distance_km'   => (string) $periodDistanceKm,
+                        'estimated_mileage_km' => (string) ($lease['estimated_mileage_km'] ?? '0'),
+                        'mileage_rate_km'      => (string) ($lease['mileage_rate_km'] ?? '0'),
+                        'period_start'         => $periodStart,
+                        'period_end'           => $periodEnd,
+                    ]),
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+            }
+
+            // Drawdown emit (Branch A or B per D-B math).
+            $drawdownAuditMeta = null;
+            if ($drawdownGate) {
+                $rateKm        = (string) $lease['mileage_rate_km'];
+                $periodCharge  = bcround(bcmul((string) $periodDistanceKm, $rateKm, 6), 2);
+
+                // FOR UPDATE re-read of the lease's precharge_balance per D20.
+                // The outer transaction already holds the row implicitly through
+                // its updates, but an explicit FOR UPDATE here makes the
+                // serialization point obvious and survives future refactors.
+                $leaseLocked = db_row(
+                    "SELECT id, precharge_balance, precharge_enabled
+                       FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                    [$leaseId]
+                );
+                $preBalance = $leaseLocked['precharge_balance'] !== null
+                    ? (string) $leaseLocked['precharge_balance']
+                    : '0.00';
+
+                // mileage_usage line (Branch A and B both emit this).
+                $lineItems[] = [
+                    'sort_order'       => $sortOrder++,
+                    'item_type'        => 'mileage_usage',
+                    'description'      => "Mileage usage: " . number_format((float) $periodDistanceKm, 2) . " km × \$" . $rateKm . "/km",
+                    'quantity'         => sprintf('%s', $periodDistanceKm),
+                    'unit'             => 'km',
+                    'unit_price'       => $rateKm,
+                    'amount'           => $periodCharge,
+                    'is_credit'        => 0,
+                    'taxable'          => 1,
+                    'mileage_distance' => (string) $periodDistanceKm,
+                    'mileage_rate'     => $rateKm,
+                    'mileage_unit'     => 'km',
+                    'period_start'     => $periodStart,
+                    'period_end'       => $periodEnd,
+                ];
+
+                if (bccomp($preBalance, '0', 2) > 0) {
+                    // Branch A — precharge_balance > 0: emit drawdown credit + decrement.
+                    $drawdownAmt = bccomp($periodCharge, $preBalance, 2) <= 0
+                        ? $periodCharge
+                        : $preBalance;
+                    $postBalance = bcsub($preBalance, $drawdownAmt, 2);
+
+                    $lineItems[] = [
+                        'sort_order'  => $sortOrder++,
+                        'item_type'   => 'mileage_drawdown_credit',
+                        'description' => "Precharge credit applied: drawdown of \${$drawdownAmt} from precharge balance",
+                        'quantity'    => '1.0000',
+                        'unit'        => 'drawdown',
+                        'unit_price'  => $drawdownAmt,
+                        'amount'      => $drawdownAmt,
+                        'is_credit'   => 1,  // POSITIVE amount + is_credit=1 → aggregator subtracts (K-16 convention)
+                        'taxable'     => 1,
+                    ];
+
+                    db_execute(
+                        "UPDATE leases SET precharge_balance = ?, updated_at = NOW(), updated_by = ?
+                           WHERE id = ?",
+                        [$postBalance, $params['created_by'] ?? null, $leaseId]
+                    );
+
+                    $drawdownAuditMeta = [
+                        'pre_balance'    => $preBalance,
+                        'drawdown_amount'=> $drawdownAmt,
+                        'post_balance'   => $postBalance,
+                        'period_charge'  => $periodCharge,
+                        'period_distance_km' => (string) $periodDistanceKm,
+                        'mileage_rate_km'    => $rateKm,
+                    ];
+                }
+                // Branch B — precharge_balance == 0 or NULL: no credit line,
+                // no balance update. mileage_usage line above stands alone.
             }
 
             // --- Step 3: Insurance add-on ---
@@ -512,205 +832,16 @@ class InvoiceGenerator
                 $markupPct = (string) (settings_get('currency.usd_cad_markup_pct', '0.0000') ?? '0.0000');
             }
 
-            // --- SAMSARA-3: odometer + distance (optional) ---
-            // Values come in from callers (api/v1/invoices/create.php or
-            // api/v1/leases/close.php) via $params. They're optional —
-            // when omitted, the four distance columns stay null and the
-            // invoice behaves exactly like it did before this session.
-            //
-            // period_distance_km     = end - start            (this period)
-            // cumulative_distance_km = end - lease.odometer_start_km
-            //                                                  (since lease start)
-            $odoStartKm = isset($params['odometer_at_period_start_km']) && $params['odometer_at_period_start_km'] !== ''
-                ? (string) $params['odometer_at_period_start_km'] : null;
-            $odoEndKm   = isset($params['odometer_at_period_end_km']) && $params['odometer_at_period_end_km'] !== ''
-                ? (string) $params['odometer_at_period_end_km']   : null;
-
-            $periodDistanceKm     = null;
-            $cumulativeDistanceKm = null;
-            if ($odoStartKm !== null && $odoEndKm !== null) {
-                // Only compute when both ends have a value — prevents nonsense
-                // "cumulative since null" rows in the DB.
-                $diff = bcsub($odoEndKm, $odoStartKm, 2);
-                // Clamp negative period distance to 0 — negative readings
-                // mean a bad user edit, not reality. The UI will already
-                // have surfaced a warning, but defend the DB anyway.
-                $periodDistanceKm = bccomp($diff, '0', 2) >= 0 ? $diff : '0.00';
-            }
-            if ($odoEndKm !== null && !empty($lease['odometer_start_km'])) {
-                $cumDiff = bcsub($odoEndKm, (string) $lease['odometer_start_km'], 2);
-                $cumulativeDistanceKm = bccomp($cumDiff, '0', 2) >= 0 ? $cumDiff : '0.00';
-            }
-
-            $odometerSource = $params['odometer_source'] ?? null;
-            if ($odometerSource !== null && !in_array($odometerSource, ['gps', 'manual', 'estimated'], true)) {
-                $odometerSource = 'manual';
-            }
-            $odometerFetchedAt = null;
-            if (!empty($params['odometer_fetched_at'])) {
-                try {
-                    $dt = new \DateTime((string) $params['odometer_fetched_at']);
-                    $odometerFetchedAt = $dt->format('Y-m-d H:i:s');
-                } catch (\Throwable) {
-                    $odometerFetchedAt = null;
-                }
-            }
-
-            // ── S-LEASE-MILEAGE: per-period excess + manager review gate ───
-            // Excess only applies when:
-            //   • We have a valid period_distance_km (both odometer endpoints)
-            //   • The billing_type is NOT 'mileage_only' (those ARE the excess line)
-            //   • Lease has a positive estimated_mileage_km (otherwise unlimited)
-            //   • Lease has a positive mileage_rate_km (otherwise excess is free)
-            //
-            // When excess > 0, mileage_review_status='pending' triggers the
-            // HARD send guard in api/v1/invoices/send.php — the invoice cannot
-            // be sent until a manager reviews and approves. No role bypass.
-            //
-            // Open-ended leases (no end_date) fall back to a 12-month assumption
-            // for monthly_allowance derivation; the audit_log entry below flags
-            // this so managers know to scrutinize the calculation (D-F).
-            $excessDistanceKm   = '0.00';
-            $excessChargeAmount = '0.00';
+            // S-MILEAGE-2B C3: legacy Model C invoice-row columns set to defaults.
+            // The excess_distance_km, excess_charge_amount, and
+            // mileage_review_status columns DROP in C4 (D-G option (i) wholesale
+            // retirement). Until that migration lands, the columns still exist
+            // on the invoices table and the invoice INSERT below references
+            // them — defaults of 0.00 / 0.00 / 'not_required' preserve schema
+            // compatibility without producing meaningful Model C metadata.
+            $excessDistanceKm    = '0.00';
+            $excessChargeAmount  = '0.00';
             $mileageReviewStatus = 'not_required';
-            $mileageReviewMeta   = null;
-
-            // ════════════════════════════════════════════════════════════
-            // S-MILEAGE-RATE-VALIDATION D-B / D133 — defensive throw on the
-            // mileage excess block when allowance is configured but rate is 0.
-            // Mirrors the full_month base_rental throw (line ~178) — same
-            // exception class, same fail-loud philosophy.
-            //
-            // S-MILEAGE-RATE-VALIDATION D-C / D133 — soft WARNING when
-            // distance flowed through but no rate tier configured at all
-            // (allowance and rate both 0). Uses Sentry::captureMessage at
-            // 'warning' level + audit_log row. Sentry call wrapped in
-            // try/catch — observability MUST NOT block billing.
-            //
-            // S-MILEAGE-ALLOWANCE-ZERO-FIX D-A — `$mileageBillingExpected`
-            // now keys on rate>0 (operator's intent signal) rather than
-            // allowance>0. This admits Model B Lite (rate>0 + allowance=0
-            // → bill every km from km 0) which the old gate silently
-            // skipped. The D-B HARD throw was previously gated by the
-            // allowance-keyed expected flag; promoted to a standalone
-            // guard so it still fires for the (allowance>0 + rate=0)
-            // data-hole case, unchanged semantics. See D132/D133 clarify
-            // in CLAUDE_CODE_REFERENCE.md §13.8 for the three-config
-            // matrix (Model C / Model B Lite / Disabled).
-            // ════════════════════════════════════════════════════════════
-            $mileageBillingExpected = (
-                $periodDistanceKm !== null
-                && $billingType !== 'mileage_only'
-                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
-            );
-
-            // D-B: HARD throw on rate-zero-with-allowance-intent (D133,
-            // unchanged semantics — promoted to a standalone guard since
-            // $mileageBillingExpected no longer covers it post C1).
-            if ($periodDistanceKm !== null
-                && $billingType !== 'mileage_only'
-                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) > 0
-                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
-            ) {
-                throw new BillingRateException(
-                    sprintf(
-                        'InvoiceGenerator refused to write mileage line: lease_id=%d, period=%s..%s (%d days), '
-                        . 'estimated_mileage_km=%s configured (period_distance_km=%s) but mileage_rate_km=%s. '
-                        . 'Upstream rate-tier-completeness invariant (D133) must be enforced at lease create — see api/v1/leases/create.php.',
-                        $leaseId, $periodStart, $periodEnd, $days,
-                        (string) ($lease['estimated_mileage_km'] ?? '0'),
-                        (string) $periodDistanceKm,
-                        (string) ($lease['mileage_rate_km'] ?? '0')
-                    ),
-                    'mileage_excess', $days,
-                    (string) ($lease['daily_rate']   ?? '0'),
-                    (string) ($lease['weekly_rate']  ?? '0'),
-                    (string) ($lease['monthly_rate'] ?? '0'),
-                    [
-                        'lease_id'             => $leaseId,
-                        'period_start'         => $periodStart,
-                        'period_end'           => $periodEnd,
-                        'estimated_mileage_km' => (string) ($lease['estimated_mileage_km'] ?? '0'),
-                        'mileage_rate_km'      => (string) ($lease['mileage_rate_km'] ?? '0'),
-                        'period_distance_km'   => (string) $periodDistanceKm,
-                        'billing_type'         => $billingType,
-                    ]
-                );
-            }
-
-            // D-C: SOFT WARNING on distance>0 with no rate tier configured at all.
-            // Fires BEFORE the calculation block — the calculation is then skipped
-            // legitimately because no allowance signals "no mileage billing intent".
-            if ($periodDistanceKm !== null
-                && $billingType !== 'mileage_only'
-                && bccomp((string) $periodDistanceKm, '0', 2) > 0
-                && bccomp((string) ($lease['estimated_mileage_km'] ?? '0'), '0', 2) <= 0
-                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
-            ) {
-                $warningMsg = sprintf(
-                    'Lease #%d period %s..%s has period_distance_km=%s but mileage block skipped (no rate tier configured). Possible misconfiguration — verify lease intent.',
-                    $leaseId, $periodStart, $periodEnd, (string) $periodDistanceKm
-                );
-
-                // Sentry: WARNING level. SamsaraClient pattern at lib/GPS/SamsaraClient.php:1583-1592.
-                try {
-                    \FleetForge\Observability\Sentry::captureMessage($warningMsg, 'warning');
-                } catch (\Throwable) {
-                    // Observability MUST NOT block the billing path
-                }
-
-                // audit_log: action='update' (the action ENUM doesn't include
-                // 'warning_logged'; descriptive value carried in notes per D102
-                // workaround pattern). entity_type='lease' so it joins the lease
-                // history view a manager would scan.
-                db_insert('audit_log', [
-                    'user_id'      => $params['created_by'] ?? null,
-                    'user_name'    => (function_exists('current_user') && current_user())
-                                        ? (current_user()['name'] ?? 'system') : 'system',
-                    'action'       => 'update',
-                    'module'       => 'billing',
-                    'entity_type'  => 'lease',
-                    'entity_id'    => $leaseId,
-                    'entity_label' => $lease['contract_number'] ?? null,
-                    'notes'        => '[FLEETFORGE_BILLING_WARNING] ' . $warningMsg,
-                    'old_values'   => null,
-                    'new_values'   => json_encode([
-                        'period_distance_km'   => (string) $periodDistanceKm,
-                        'estimated_mileage_km' => (string) ($lease['estimated_mileage_km'] ?? '0'),
-                        'mileage_rate_km'      => (string) ($lease['mileage_rate_km'] ?? '0'),
-                        'period_start'         => $periodStart,
-                        'period_end'           => $periodEnd,
-                    ]),
-                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-                ]);
-            }
-
-            if ($mileageBillingExpected) {
-                $allowance = \FleetForge\Billing\Mileage::monthlyAllowance($lease);
-                $excess    = \FleetForge\Billing\Mileage::periodExcess(
-                    (float) $periodDistanceKm,
-                    (float) $allowance['allowance_km'],
-                    (string) $lease['mileage_rate_km']
-                );
-                $excessDistanceKm   = (string) $excess['excess_km'];
-                $excessChargeAmount = $excess['excess_charge'];
-
-                if ($excess['review_required']) {
-                    $mileageReviewStatus = 'pending';
-                }
-
-                // Stash for the post-insert audit_log entry — we don't have
-                // the invoice id yet at this point in the function.
-                $mileageReviewMeta = [
-                    'period_distance_km'  => (float) $periodDistanceKm,
-                    'monthly_allowance_km'=> $allowance['allowance_km'],
-                    'lease_months'        => $allowance['lease_months'],
-                    'was_open_ended'      => $allowance['was_open_ended'],
-                    'mileage_rate_km'     => (string) $lease['mileage_rate_km'],
-                    'excess_km'           => $excess['excess_km'],
-                    'excess_charge'       => $excess['excess_charge'],
-                ];
-            }
 
             // --- Insert invoice ---
             $invoiceId = db_insert('invoices', [
@@ -803,46 +934,47 @@ class InvoiceGenerator
                 ]);
             }
 
-            // ── S-LEASE-MILEAGE: audit excess calculation ──────────────
-            // Only write when we actually calculated excess (mileageReviewMeta
-            // is set). Captures the assumption flag for open-ended leases per
-            // D-F so reviewing managers know to verify the 12-month default
-            // matches their expectation.
-            if ($mileageReviewMeta !== null) {
-                $assumptionFlag = $mileageReviewMeta['was_open_ended']
-                    ? ' [ASSUMPTION: lease has no end_date — applied 12-month default; manager should verify allowance]'
-                    : '';
-
+            // ── S-MILEAGE-2B C3: audit precharge balance drawdown ──────
+            // Fires when Branch A of the drawdown emit ran (precharge_balance
+            // > 0 → mileage_usage + mileage_drawdown_credit emitted + balance
+            // decremented). new_values JSON carries pre/post balance + drawdown
+            // amount + period charge + distance + rate for searchable per-event
+            // trail. entity_type='lease_precharge_balance_drawdown' searchable
+            // alongside the 2A entity_types 'lease_precharge_balance_init'
+            // (activation) + 'lease_precharge_invoiced_at_stamp' (Invoice 1 send).
+            // D102/D123 workaround: action='update' (action ENUM doesn't include
+            // 'drawdown'; descriptive value carried in entity_type + notes).
+            if ($drawdownAuditMeta !== null) {
                 db_insert('audit_log', [
                     'user_id'      => $params['created_by'] ?? null,
                     'user_name'    => (function_exists('current_user') && current_user())
                                         ? (current_user()['name'] ?? 'system') : 'system',
-                    'action'       => 'create',
+                    'action'       => 'update',
                     'module'       => 'billing',
-                    'entity_type'  => 'invoice',
-                    'entity_id'    => $invoiceId,
-                    'entity_label' => $invoiceNumber,
+                    'entity_type'  => 'lease_precharge_balance_drawdown',
+                    'entity_id'    => $leaseId,
+                    'entity_label' => $lease['contract_number'] ?? null,
                     'notes'        => sprintf(
-                        'Mileage excess calc: period=%.2fkm, allowance=%.2fkm/mo (lease=%.2fmo), excess=%.2fkm × $%s/km = $%s, review=%s%s',
-                        $mileageReviewMeta['period_distance_km'],
-                        $mileageReviewMeta['monthly_allowance_km'],
-                        $mileageReviewMeta['lease_months'],
-                        $mileageReviewMeta['excess_km'],
-                        $mileageReviewMeta['mileage_rate_km'],
-                        $mileageReviewMeta['excess_charge'],
-                        $mileageReviewStatus,
-                        $assumptionFlag
+                        'Precharge balance drawdown on invoice %s: pre=$%s, drawdown=$%s, post=$%s (period_charge=$%s on %s km × $%s/km)',
+                        $invoiceNumber,
+                        $drawdownAuditMeta['pre_balance'],
+                        $drawdownAuditMeta['drawdown_amount'],
+                        $drawdownAuditMeta['post_balance'],
+                        $drawdownAuditMeta['period_charge'],
+                        $drawdownAuditMeta['period_distance_km'],
+                        $drawdownAuditMeta['mileage_rate_km']
                     ),
-                    'old_values'   => null,
+                    'old_values'   => json_encode([
+                        'precharge_balance' => $drawdownAuditMeta['pre_balance'],
+                    ]),
                     'new_values'   => json_encode([
-                        'period_distance_km'    => $mileageReviewMeta['period_distance_km'],
-                        'monthly_allowance_km'  => $mileageReviewMeta['monthly_allowance_km'],
-                        'lease_months'          => $mileageReviewMeta['lease_months'],
-                        'was_open_ended'        => $mileageReviewMeta['was_open_ended'],
-                        'mileage_rate_km'       => $mileageReviewMeta['mileage_rate_km'],
-                        'excess_km'             => $mileageReviewMeta['excess_km'],
-                        'excess_charge'         => $mileageReviewMeta['excess_charge'],
-                        'mileage_review_status' => $mileageReviewStatus,
+                        'precharge_balance'  => $drawdownAuditMeta['post_balance'],
+                        'drawdown_amount'    => $drawdownAuditMeta['drawdown_amount'],
+                        'period_charge'      => $drawdownAuditMeta['period_charge'],
+                        'period_distance_km' => $drawdownAuditMeta['period_distance_km'],
+                        'mileage_rate_km'    => $drawdownAuditMeta['mileage_rate_km'],
+                        'invoice_id'         => $invoiceId,
+                        'invoice_number'     => $invoiceNumber,
                     ]),
                     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
                 ]);
