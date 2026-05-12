@@ -1895,7 +1895,7 @@ CREATE TABLE `invoice_line_items` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `invoice_id` int unsigned NOT NULL,
   `sort_order` tinyint unsigned NOT NULL DEFAULT '0',
-  `item_type` enum('base_rental','mileage_precharge','mileage_adjustment','mileage_credit','insurance','warranty','late_fee','early_return_credit','manual_adjustment','damage','discount','account_credit_applied','other','gps') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `item_type` enum('base_rental','mileage_precharge','mileage_adjustment','mileage_credit','insurance','warranty','late_fee','early_return_credit','manual_adjustment','damage','discount','account_credit_applied','other','gps','mileage_usage','mileage_drawdown_credit') COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `detail_lines` json DEFAULT NULL,
   `quantity` decimal(10,4) NOT NULL DEFAULT '1.0000',

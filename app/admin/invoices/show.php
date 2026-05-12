@@ -281,7 +281,7 @@ $canDelete = ($isDraft || $isSuperAdmin) && can('invoices', 'delete');
 // mileage_precharge lines existed.
 $creditLineCount = 0;
 $mileageLineCount = 0;
-$mileageItemTypes = ['mileage_precharge', 'mileage_adjustment', 'mileage_credit'];
+$mileageItemTypes = ['mileage_precharge', 'mileage_adjustment', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit'];
 foreach ($lineItems as $li) {
     if ($li['is_credit']) $creditLineCount++;
     if (in_array($li['item_type'], $mileageItemTypes, true)) $mileageLineCount++;
@@ -1854,7 +1854,7 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                         // (mileage_precharge / mileage_adjustment / mileage_credit)
                         // rather than the stale mileage_charge / mileage_overage
                         // which are not in invoice_line_items.item_type.
-                        $isMileage = in_array($item['item_type'], ['mileage_precharge', 'mileage_adjustment', 'mileage_credit'], true);
+                        $isMileage = in_array($item['item_type'], ['mileage_precharge', 'mileage_adjustment', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit'], true);
 
                         // WHY: Calculate per-line tax total for display
                         $lineTaxTotal = bcadd(
@@ -1864,7 +1864,7 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                         );
 
                         // ────────────────────────────────────────────────────────
-                        // LINE TYPE DISPATCH CONTRACT (for S-MILEAGE-2A/2B extension)
+                        // LINE TYPE DISPATCH CONTRACT (S-MILEAGE-2A SHIPPED; S-MILEAGE-2B SHIPPED 2026-05-12)
                         // Each item_type value maps to a badge color + display behavior. To add a new line type:
                         //   1. Add the item_type value to the invoice_line_items.item_type ENUM (schema migration)
                         //   2. Add a case to the $itemTypeBadge match() expression below
@@ -1875,34 +1875,38 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                         // tax_gst/pst/hst_amount, mileage_*, billing_days, rate_method, period_start/end) and
                         // must render into the same 8-column table structure (#, Type, Description, Period,
                         // Qty, Unit Price, Tax, Amount).
-                        // Current supported item_types (from invoice_line_items.item_type ENUM):
+                        // Currently supported item_types (16 values from invoice_line_items.item_type ENUM):
                         //   base_rental, mileage_precharge, mileage_adjustment, mileage_credit,
                         //   insurance, warranty, late_fee, early_return_credit, manual_adjustment,
-                        //   damage, discount, account_credit_applied, other, gps.
-                        // Pending types (S-MILEAGE-2A/2B): mileage_drawdown_credit + mileage_usage. Model B
-                        // full implementation will supersede the current mileage_precharge/adjustment/credit
-                        // trio — see FLEETFORGE_PROGRESS.md S-MILEAGE-2A/2B SESSION LOG entries for the
-                        // drawdown line type rendering contract.
+                        //   damage, discount, account_credit_applied, other, gps,
+                        //   mileage_usage, mileage_drawdown_credit.
+                        // Model B drawdown (S-MILEAGE-2B): mileage_usage (per-km charge, positive,
+                        // is_credit=0) + mileage_drawdown_credit (precharge balance drawdown, positive
+                        // amount + is_credit=1 per the signed-aggregator convention in InvoiceGenerator).
+                        // mileage_adjustment retained as a closed historical category for legacy Model C
+                        // invoices (INV-91 + INV-92 in production at 2B ship time).
                         // ────────────────────────────────────────────────────────
                         // S-MILEAGE-FIX-0 (D-G): replaced stale mileage_charge /
                         // mileage_overage badges with the actual enum values.
                         $itemTypeBadge = match($item['item_type']) {
-                            'base_rental'        => 'badge-info',
-                            'mileage_precharge'  => 'badge-info',
-                            'mileage_adjustment' => 'badge-warning',
-                            'mileage_credit'     => 'badge-success',
-                            'late_fee'           => 'badge-danger',
-                            'damage_charge'      => 'badge-danger',
-                            'credit'             => 'badge-success',
-                            'adjustment'         => 'badge-warning',
-                            'discount'           => 'badge-success',
-                            'tax_adjustment'     => 'badge-neutral',
-                            'fuel_surcharge'     => 'badge-neutral',
-                            'insurance'          => 'badge-neutral',
-                            'warranty'           => 'badge-neutral',
-                            'gps'                => 'badge-neutral',
-                            'admin_fee'          => 'badge-neutral',
-                            default              => 'badge-neutral',
+                            'base_rental'             => 'badge-info',
+                            'mileage_precharge'       => 'badge-info',
+                            'mileage_adjustment'      => 'badge-warning',
+                            'mileage_credit'          => 'badge-success',
+                            'mileage_usage'           => 'badge-info',
+                            'mileage_drawdown_credit' => 'badge-success',
+                            'late_fee'                => 'badge-danger',
+                            'damage_charge'           => 'badge-danger',
+                            'credit'                  => 'badge-success',
+                            'adjustment'              => 'badge-warning',
+                            'discount'                => 'badge-success',
+                            'tax_adjustment'          => 'badge-neutral',
+                            'fuel_surcharge'          => 'badge-neutral',
+                            'insurance'               => 'badge-neutral',
+                            'warranty'                => 'badge-neutral',
+                            'gps'                     => 'badge-neutral',
+                            'admin_fee'               => 'badge-neutral',
+                            default                   => 'badge-neutral',
                         };
                     ?>
                     <tr style="<?= $rowStyle ?>">
