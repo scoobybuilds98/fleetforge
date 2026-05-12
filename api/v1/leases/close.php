@@ -72,6 +72,43 @@ $closeNotes       = clean_string($body['close_notes'] ?? null, 5000);
 //     final_amount: decimal (optional — override of calculated amount),
 //     notes: string (required for any decision other than no_adjustment)
 //   }
+// ── S-MILEAGE-3 D-K: precharge_refund block ────────────────────
+// When the lease has precharge_enabled=1 AND precharge_balance > 0
+// at close time, the close request MUST carry a `precharge_refund`
+// block specifying the refund method. The block is parsed here for
+// shape validation; precharge_balance > 0 gate + method-required
+// gate runs inside the transaction (precharge_balance is read under
+// FOR UPDATE on the lease row per D20).
+//
+// Shape:
+//   precharge_refund: {
+//     method: 'cash' | 'credit',
+//     notes:  string (optional, captured in audit_log)
+//   }
+//
+// D-B (i) locked: cash refunds stamp method='cash' with
+// settled_at=NULL at close; operator confirms physical disbursement
+// later via api/v1/leases/mark_refund_settled.php.
+// D-C: credit refunds create a credit_notes row + stamp settled_at
+// at close-commit (credit issuance IS settlement per D-E (ii)).
+$prechargeRefund = null;
+if (isset($body['precharge_refund']) && is_array($body['precharge_refund'])) {
+    $prRaw    = $body['precharge_refund'];
+    $prMethod = $prRaw['method'] ?? null;
+    if (!in_array($prMethod, ['cash', 'credit'], true)) {
+        json_error('VALIDATION_ERROR',
+            "precharge_refund.method must be 'cash' or 'credit'.", 422);
+    }
+    $prNotes = isset($prRaw['notes']) ? trim((string) $prRaw['notes']) : null;
+    if ($prNotes === '') {
+        $prNotes = null;
+    }
+    $prechargeRefund = [
+        'method' => $prMethod,
+        'notes'  => $prNotes,
+    ];
+}
+
 $closeAdjustment = null;
 if (isset($body['close_adjustment']) && is_array($body['close_adjustment'])) {
     $caRaw = $body['close_adjustment'];
@@ -621,7 +658,7 @@ function legacy_append_mileage_to_full_month_draft(
 
 $result = null;
 
-db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $reconMode, $closeAdjustment, &$result) {
+db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $reconMode, $closeAdjustment, $prechargeRefund, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     // SAMSARA-3: include odometer_start_km so we can derive the period
     // start odometer for the final invoice when the user supplies a
@@ -638,6 +675,8 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
                 l.mileage_rate_km, l.mileage_rate_miles, l.km_to_miles_conversion,
                 l.advance_billing_periods, l.currency,
                 l.discount_type, l.discount_value,
+                l.precharge_enabled, l.precharge_amount, l.precharge_balance,
+                l.precharge_invoiced_at, l.precharge_refund_method, l.precharge_refund_settled_at,
                 c.province AS province
          FROM leases l
          LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
@@ -766,6 +805,193 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         'new_values'   => json_encode(['status' => 'completed', 'actual_return_date' => $actualReturnDate]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── S-MILEAGE-3 D-B/D-C/D-D/D-E/D-K/D-L: precharge refund dispatch ──
+    // Per the S-MILEAGE-3 spec block (locked via S-MILEAGE-3-SPEC-WRITE +
+    // SPEC-LOCK), when a lease closes with precharge_enabled=1 AND
+    // precharge_balance > 0, the operator must select a refund method
+    // (cash or credit). The dispatch runs after the lease has flipped
+    // to 'completed' + the lease-close audit row has been written, so
+    // the refund's own state-change and audit row are clearly
+    // distinguishable in the audit_log timeline.
+    //
+    // D-D state machine: precharge_refund_method is immutable once
+    // set. 409 PRECHARGE_REFUND_LOCKED fires if a request reaches here
+    // with the method already populated (edge case — status was
+    // reverted manually). Normal flow can't reach this branch on a
+    // completed lease since the state machine check at line ~653
+    // already rejects non-active leases.
+    //
+    // D-J first-emitter status confirmed (0 leases with method set
+    // pre-session); D-B (i) cash branch defers settled_at; D-C credit
+    // branch stamps settled_at at close-commit (credit_note creation
+    // IS settlement per D-E (ii)).
+    $prechargeRefundResult = null;
+    $needsRefund = (int) ($lease['precharge_enabled'] ?? 0) === 1
+        && $lease['precharge_balance'] !== null
+        && bccomp((string) $lease['precharge_balance'], '0.00', 2) > 0;
+
+    if ($needsRefund) {
+        // D-D 409 gate — must NOT already have a refund method set.
+        // Normal flow has lease.status='active' (validated above), and
+        // active leases shouldn't have refund_method written. This guard
+        // catches the edge case where status was reverted manually but
+        // the column was previously written.
+        if ($lease['precharge_refund_method'] !== null) {
+            json_error('PRECHARGE_REFUND_LOCKED',
+                "Precharge refund method already locked at close. Method cannot be changed once the close transaction has committed.",
+                409);
+        }
+
+        // Required-field gate per D-K.
+        if ($prechargeRefund === null) {
+            json_error('PRECHARGE_REFUND_REQUIRED',
+                "Precharge refund method is required when closing a lease with a positive precharge balance.",
+                422);
+        }
+
+        $refundMethod  = $prechargeRefund['method'];
+        $refundAmount  = (string) $lease['precharge_balance'];   // bcmath string
+        $refundNotes   = $prechargeRefund['notes'];
+        $refundCnId    = null;
+        $refundCnNum   = null;
+        $settledAtSql  = null;   // NULL for cash; NOW() for credit
+
+        if ($refundMethod === 'credit') {
+            // D-C: create credit_note with source='precharge_refund'.
+            // Reuses the gap-free credit_note_number pattern from
+            // api/v1/credit_notes/create.php (FOR UPDATE on settings
+            // row). AutoEntryBridge call deferred per D-I (CPA-blocked):
+            // the credit_notes row is the data source of truth; the JE
+            // shape lands in S-MILEAGE-3-ACCT-SPEC once CPA answers
+            // questions (a-e). For now, follow the credit_notes/create.php
+            // precedent and call onCreditNoteIssued — keeps the
+            // accounting ledger consistent under the existing pattern.
+            $year = date('Y');
+            $cnSettingsKey = "credit_note.next_number.{$year}";
+
+            $cnSettingsRow = db_row(
+                "SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE",
+                [$cnSettingsKey]
+            );
+            $cnNext   = $cnSettingsRow ? (int) $cnSettingsRow['value'] : 1;
+            $cnPrefix = settings_get('credit_note.prefix', 'CN-CR');
+            $refundCnNum = sprintf('%s-%s-%05d', $cnPrefix, $year, $cnNext);
+
+            if ($cnSettingsRow) {
+                db_execute(
+                    "UPDATE settings SET `value` = ? WHERE `key` = ?",
+                    [$cnNext + 1, $cnSettingsKey]
+                );
+            } else {
+                db_execute(
+                    "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
+                    [$cnSettingsKey, $cnNext + 1]
+                );
+            }
+
+            $cnReason = "Precharge balance refund — lease {$lease['contract_number']}"
+                . ($refundNotes ? " ({$refundNotes})" : '');
+
+            $refundCnId = db_insert('credit_notes', [
+                'credit_note_number' => $refundCnNum,
+                'customer_id'        => $lease['customer_id'],
+                'lease_id'           => $id,
+                'source'             => 'precharge_refund',
+                'source_invoice_id'  => null,
+                'source_payment_id'  => null,
+                'amount'             => $refundAmount,
+                'currency'           => $lease['currency'] ?? 'CAD',
+                'amount_remaining'   => $refundAmount,
+                'status'             => 'active',
+                'expires_at'         => null,
+                'reason'             => $cnReason,
+                'internal_notes'     => null,
+                'created_by'         => current_user_id(),
+            ]);
+
+            // Existing accounting integration — DR 4xxx / CR 2060
+            // Customer Credits Liability per S-FIX-2 D47/D48. If CPA
+            // confirms precharge-source credit needs different JE
+            // shape (D-I question d), S-MILEAGE-3-ACCT-SPEC will rework
+            // this call site. Wrapped in try/catch with error_log
+            // fallback to keep the close transaction observable but
+            // not blocking — accounting integration is best-effort
+            // at the AR layer level per S-FIX-2 precedent.
+            try {
+                \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued((int) $refundCnId, current_user_id());
+            } catch (\Throwable $e) {
+                error_log('[S-MILEAGE-3 onCreditNoteIssued] ' . $e->getMessage());
+            }
+
+            $settledAtSql = date('Y-m-d H:i:s');
+        }
+        // else: $refundMethod === 'cash' — settledAtSql stays null;
+        // operator stamps later via api/v1/leases/mark_refund_settled.php
+
+        // D-D state machine UPDATE — write method (+ settled_at for
+        // credit branch) on the lease row. FOR UPDATE lock on the unit
+        // is already held above; the lease row UPDATE here is the
+        // refund-method commitment. precharge_balance is NOT zeroed —
+        // refund == balance at close time, and the balance remains as
+        // the historical at-close figure for the audit trail.
+        $leaseRefundUpdate = [
+            'precharge_refund_method' => $refundMethod,
+        ];
+        if ($settledAtSql !== null) {
+            $leaseRefundUpdate['precharge_refund_settled_at'] = $settledAtSql;
+        }
+        db_update('leases', $leaseRefundUpdate, 'id = ?', [$id]);
+
+        // D-L audit_log: lease_precharge_refund_issued. Uses
+        // action='update' per D102 workaround pattern (the
+        // audit_log.action ENUM doesn't include refund-specific values;
+        // descriptive entity_type carries the routing info).
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => $changedBy,
+            'action'       => 'update',
+            'module'       => 'leases',
+            'entity_type'  => 'lease_precharge_refund_issued',
+            'entity_id'    => $id,
+            'entity_label' => $lease['contract_number'],
+            'notes'        => sprintf(
+                'S-MILEAGE-3 [%s]: precharge refund issued at close. lease=%s, method=%s, amount=%s %s%s%s',
+                $refundMethod,
+                $lease['contract_number'],
+                $refundMethod,
+                $refundAmount,
+                $lease['currency'] ?? 'CAD',
+                $refundCnNum ? ", credit_note={$refundCnNum}" : '',
+                $refundNotes ? ", notes={$refundNotes}" : ''
+            ),
+            'old_values'   => json_encode([
+                'precharge_refund_method'      => null,
+                'precharge_refund_settled_at'  => null,
+            ]),
+            'new_values'   => json_encode([
+                'method'                       => $refundMethod,
+                'amount'                       => $refundAmount,
+                'precharge_balance_at_close'   => $refundAmount,
+                'related_credit_note_id'       => $refundCnId,
+                'related_credit_note_number'   => $refundCnNum,
+                'settled_at'                   => $settledAtSql,
+                'notes'                        => $refundNotes,
+                'closed_by_user_id'            => current_user_id(),
+            ]),
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+
+        $prechargeRefundResult = [
+            'method'                  => $refundMethod,
+            'amount'                  => $refundAmount,
+            'currency'                => $lease['currency'] ?? 'CAD',
+            'settled_at'              => $settledAtSql,
+            'credit_note_id'          => $refundCnId,
+            'credit_note_number'      => $refundCnNum,
+            'notes'                   => $refundNotes,
+        ];
+    }
 
     // ── ADV-BILL-1 D-H: detect prepaid advance batch ───────────
     // If activation generated advance invoices, branch into reconciliation.
@@ -1356,6 +1582,11 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         // close_adjustment was supplied, so callers and ops dashboards
         // can detect prior-excess interactions on the lease.
         'prior_excess_km'   => $priorExcessKm,
+        // S-MILEAGE-3 D-K: precharge refund result. NULL when no refund
+        // was needed (precharge_enabled=0 OR precharge_balance=0).
+        // Populated with method + amount + settled_at + credit_note_*
+        // when refund dispatch fired.
+        'precharge_refund'  => $prechargeRefundResult,
     ];
 
     // ── In-app notifications (NOTIF-1) ─────────────────────────
