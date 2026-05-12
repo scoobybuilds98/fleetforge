@@ -61,9 +61,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-MILEAGE-3-SPEC-LOCK** — IN-FLIGHT
-  Started: 2026-05-12T17:48 UTC by desktop-1
-  Touching: FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md
+*(none)*
 
 ### Documentation cleanup (queued, small)
 
@@ -150,12 +148,11 @@ Locked decisions D-A through D-N:
   - Conditional render: only when `lease.precharge_enabled = 1 AND lease.precharge_balance > 0`. Skipped when `precharge_balance == 0` (no refund needed — typical case when drawdown fully consumed the balance) OR when `precharge_enabled = 0` (Model B Lite — no precharge concept).
   - Optional manager-notes textarea (free-text, captured in audit_log per D-L; no required-field gate since the refund-method itself is the audited decision).
 
-- **D-B — Cash refund execution flow. OPERATOR DECISION REQUIRED.**
-  Pre-work scan D surfaced that the prompt's option (ii) "write a payments row with payment_type='precharge_refund'" is non-viable as written — the `payments` table has no `payment_type` column. The viable shapes:
-  - **(i) Manual** *(recommended)*: operator records the cash payment-out externally (cheque issued, EFT, etc.); the close transaction stamps `precharge_refund_method='cash'` immediately, but `precharge_refund_settled_at` stays NULL until the operator confirms physical disbursement via a follow-up UI action (a "Mark cash refund settled" button on the lease show page, gated to Manager+ role per D84-equivalent). No payments-table row is written. CRA paper trail lives in `audit_log` per D-L. Simplest implementation; respects schema as-shipped.
-  - **(ii) Negative-amount payments row** *(non-standard)*: insert a `payments` row with `amount = -(precharge_balance)`, `payment_method='cash'`, `status='cleared'`, `notes='Precharge refund — lease #N'`. Negative amounts are not designed into the payments table's invoice-allocation flow (would require defensive filtering in payment-listing queries). Adds AR-ledger visibility at the cost of schema churn beyond this session's scope.
-  - **(iii) Out-of-scope cash-refund-payment table extension** *(deferred)*: design a proper outbound-refunds table (separate from `payments`). Larger scope, deferred to a future session if the operator picks (i) here and later wants a richer cash-refund ledger.
-  **Recommendation:** lock (i) Manual. Effort/risk fits the session. (ii) and (iii) are deferred; the audit_log row from D-L gives the CRA-defensible paper trail without payments-table risk. **Surface to operator at session open; halt before C3 if pushback on (i).**
+- **D-B — Cash refund execution flow. LOCKED 2026-05-12 via S-MILEAGE-3-SPEC-LOCK: (i) manual deferred-settle.**
+  Pre-work scan D surfaced that the prompt's original option (ii) "write a payments row with payment_type='precharge_refund'" is non-viable as written — the `payments` table has no `payment_type` column.
+  **Locked outcome — (i) manual deferred-settle.** Two-step UX: at lease close, if `precharge_balance > 0` and operator selects "Cash", the close transaction stamps `precharge_refund_method='cash'` with `precharge_refund_settled_at = NULL` (intent recorded, not yet settled). A separate "Mark cash refund settled" button appears on the lease show page post-close (visible only when `precharge_refund_method='cash' AND precharge_refund_settled_at IS NULL`). Operator clicks it when the physical disbursement happens (cheque issued, EFT sent, etc.); a new endpoint (`api/v1/leases/mark_refund_settled.php`) stamps `precharge_refund_settled_at = NOW()` and writes the audit_log row. No payments table schema change needed. No outbound-payments row written.
+  **Rationale:** matches real disbursement workflow (cash refunds happen outside the system; the system records intent then confirmation). Accountant-friendly intent/settlement separation. No non-standard payments-table usage. Payments table is designed for inbound AR — option (ii) negative-amount row creates ledger semantic drift. Option (iii) outbound-refunds table is the right long-term architecture but out-of-scope for S-MILEAGE-3.
+  **Carry-forward:** the outbound-refunds table extension is a separate future session if ever needed; the manual deferred-settle pattern is sufficient for current operational volume.
 
 - **D-C — Credit refund execution flow.**
   When `precharge_refund_method='credit'` is picked, the close transaction inserts a `credit_notes` row with `source='precharge_refund'` (added in D-J), `customer_id` from the lease, `amount = precharge_balance`, `amount_remaining = amount`, `currency` matching the lease's existing invoice currency, `status='active'`, `notes='Precharge refund issued at lease close — lease #N (contract <num>)'`, `created_by_user_id` from session. The credit is applicable against any future invoice for that customer per D85 Path B precedent (existing `api/v1/credit_notes/apply.php` flow consumes it unchanged). `precharge_refund_settled_at = NOW()` stamps in the same transaction since credit-note creation IS the refund-settled event (no external dispatch step like cash). Audit_log per D-L captures `credit_note_id`.
@@ -166,11 +163,8 @@ Locked decisions D-A through D-N:
   - **Immutable after set:** any subsequent attempt to change the value returns `409 PRECHARGE_REFUND_LOCKED` from the close endpoint (mirrors D113 PRECHARGE_LOCKED pattern + D140 PRECHARGE_ALREADY_BILLED naming family). Error message: *"Precharge refund method already locked at close. Method cannot be changed once the close transaction has committed."*
   - Re-close of an already-closed lease is blocked by the existing lease-status gate (lease must be `active` to close); D-D's 409 fires only on edge cases where status was reverted and the column was previously written.
 
-- **D-E — `precharge_refund_settled_at` stamp timing.**
-  Two semantic options:
-  - **(i) Stamp at close transaction commit** — `settled_at` means refund "intent" was finalized at close.
-  - **(ii) Stamp when refund actually posts** — for credit branch: stamp at the same close transaction commit (credit_note creation IS the posting). For cash branch under D-B option (i): stamp only when the operator confirms physical disbursement via the "Mark cash refund settled" button.
-  **Locked: (ii).** Rationale: `settled_at` means money moved (or the credit was issued and is consumable). For the credit branch, both events collapse into the close commit so the stamp lands there. For the cash branch under D-B (i), the stamp lands later — this distinguishes "method chosen" from "money disbursed" and matches the operator's likely audit-trail mental model.
+- **D-E — `precharge_refund_settled_at` stamp timing. LOCKED 2026-05-12 via S-MILEAGE-3-SPEC-LOCK: (ii) stamp when money actually moves.**
+  Driven by D-B (i) lock — the two-step pattern inherently separates intent from settlement. `precharge_refund_settled_at = NULL` at close means intent recorded; the "Mark cash refund settled" endpoint (`api/v1/leases/mark_refund_settled.php`) stamps it when the operator confirms physical disbursement. For credit refunds, `precharge_refund_settled_at` stamps at credit_note creation commit (creation IS settlement for a credit — no external dispatch step). The locked semantics: `settled_at` means money moved (cash branch) or the credit was issued and is consumable (credit branch); NULL means intent recorded but money has not yet moved.
 
 - **D-F — `priorExcessKm` transitional safeguard retirement (S-MILEAGE-FIX-0 D98).**
   Full removal from [api/v1/leases/close.php](api/v1/leases/close.php). Specifically:
@@ -204,19 +198,21 @@ Locked decisions D-A through D-N:
   - Preserve the D135 three-config matrix intact across close (Model B precharge → refund residue at close; Model B Lite → no refund needed; Disabled → no precharge concept). The close-refund section must reference D135 explicitly so the matrix's invariant readers know close is covered.
   - Update the "Mileage line item types" section to flip `mileage_credit` from CLOSED CATEGORY to DELETED CATEGORY (Model C close-time underage refund — table retired in this session; the ENUM value stays for invoice line-item ENUM but zero new emitters).
 
-- **D-I — `FLEETFORGE_ACCOUNTING_SPEC.md` updates. OPERATOR DECISION REQUIRED — ACCOUNTANT INPUT BLOCKING.**
-  S-MILEAGE-2B C8 D-N / D160 deferred accounting-spec edits to this session pending CPA conversation. The Model B precharge lifecycle's accounting treatment:
-  - **Activation** (S-MILEAGE-2A C2 D137): Cash IN ↔ Liability OUT (precharge_balance is a customer-paid liability the company owes back until consumed or refunded).
-  - **Drawdown** (S-MILEAGE-2B C3 D148): Liability ↓ ↔ Revenue ↑ (drawdown amount converts liability to revenue on each invoice send).
-  - **Cash refund at close** (D-B locked branch): Cash OUT ↔ Liability ↓.
-  - **Credit refund at close** (D-C): Liability ↓ ↔ Customer Credit ↑ (existing credit_notes liability account, per S-FIX-2 D47/D48 pattern).
-  Specific CPA questions blocking D-I lock:
-  - (a) Which GL accounts? Liability account ID for precharge_balance; revenue recognition account for drawdown conversion; customer-credit liability for credit-branch refund.
+- **D-I — `FLEETFORGE_ACCOUNTING_SPEC.md` updates. LOCKED 2026-05-12 via S-MILEAGE-3-SPEC-LOCK: (A) defer to S-MILEAGE-3-ACCT-SPEC follow-up session.**
+  Main S-MILEAGE-3 session ships engine + UI (D-A through D-G + D-J through D-N), excluding accounting spec updates. `FLEETFORGE_ACCOUNTING_SPEC.md` is **NOT touched** in the main session.
+  The 5 CPA questions remain documented here for the accountant conversation but no longer block the main session:
+  - (a) Which GL accounts? Liability account ID for `precharge_balance`; revenue recognition account for drawdown conversion; customer-credit liability for credit-branch refund.
   - (b) Recognition timing — drawdown converts liability → revenue at invoice **emission** OR at invoice **send/settlement**? S-FIX-2 D47 already established a precedent for AR/credit treatment at send-time; CPA should confirm parity.
-  - (c) Cash refund flow under D-B locked option (i) — pass-through Accounts Payable as a customer refund, OR direct cash-out journal entry at `precharge_refund_settled_at` stamp time? D-B (i) defers the cash event from close-commit to operator-confirmed disbursement, so the JE date is the settle date, not the close date.
+  - (c) Cash refund flow under D-B (i) — pass-through Accounts Payable as a customer refund, OR direct cash-out journal entry at `precharge_refund_settled_at` stamp time? D-B (i) defers the cash event from close-commit to operator-confirmed disbursement, so the JE date is the settle date, not the close date.
   - (d) Credit refund flow under D-C — does `credit_notes` row creation drive the JE via existing AutoEntryBridge (`lib/Accounting/AutoEntryBridge.php`'s `onCreditNoteIssued` per S-FIX-2), OR does precharge-source credit need a separate JE branch?
   - (e) Tax handling on refund — original `mileage_precharge` line on Invoice 1 was taxable (S-MILEAGE-2A D-C); does the refund REVERSE the tax (CRA standard for customer refunds), or is the tax retained as a non-refundable component? If reversed, what's the JE shape for the tax leg?
-  **Workflow:** the main S-MILEAGE-3 session may proceed with engine + UI work (D-A through D-G + D-J through D-N) while D-I is accountant-blocked. C8 docs commit lands D-I as DEFERRED status if CPA answers haven't arrived by then; a separate small follow-up session `S-MILEAGE-3-ACCT-SPEC` (≤30 min, single-commit) lands the accounting-spec text once answers come in. Surface as OPERATOR DECISION REQUIRED at session open with explicit "are CPA answers in?" check.
+  Working-context summary of the lifecycle's accounting shape (for the CPA conversation):
+  - **Activation** (S-MILEAGE-2A C2 D137): Cash IN ↔ Liability OUT (precharge_balance is a customer-paid liability the company owes back until consumed or refunded).
+  - **Drawdown** (S-MILEAGE-2B C3 D148): Liability ↓ ↔ Revenue ↑ (drawdown amount converts liability to revenue on each invoice send).
+  - **Cash refund at close** (D-B (i)): Cash OUT ↔ Liability ↓ at `precharge_refund_settled_at` stamp time (not close-commit time).
+  - **Credit refund at close** (D-C): Liability ↓ ↔ Customer Credit ↑ at credit_note creation commit (existing credit_notes liability account, per S-FIX-2 D47/D48 pattern).
+  **Workflow (locked):** main S-MILEAGE-3 session opens against D-A through D-N (excluding D-I). C8 (accounting spec commit) becomes **conditional**: ships if CPA answers arrive before the main session closes, in which case C8 lands the full liability-extinguishment JE pattern; else C8 is **skipped** and the main session formally defers to `S-MILEAGE-3-ACCT-SPEC` follow-up. Either way the main session writes a placeholder C8 entry in the SESSION LOG noting the deferral, and `S-MILEAGE-3-ACCT-SPEC` is opened as a new QUEUED entry (locked here via Edit 6 in this S-MILEAGE-3-SPEC-LOCK session).
+  **Rationale:** unblocks the main session. The engine + UI work (close path, cash/credit picker, priorExcessKm retirement, lease_close_adjustments DROP, refund state machine) is independent of the accounting spec. Accounting spec updates are documentation that can follow the code by days or weeks without any functional gap.
 
 - **D-J — New `credit_notes.source` ENUM value `precharge_refund`.**
   Schema migration `202605MMDDhhmm_S-MILEAGE-3_credit_notes_source_ext.sql` (timestamp at apply time):
@@ -269,18 +265,18 @@ Locked decisions D-A through D-N:
   Smoke summary line updated: I1 → I9 (was I1 → I8).
   Stress test file `tests/_stress_smoke_invariants_i9.php` mirrors S-MILEAGE-2B C7 D161's inline-predicate execution pattern (CREATE TEMPORARY TABLE fault-injection trick where applicable; otherwise direct row-insert + assertion + ROLLBACK in same connection).
 
-Implementation notes — proposed commit arc (7-9 commits + T1):
+Implementation notes — LOCKED commit arc (9 commits + conditional C8 + T1; locked 2026-05-12 via S-MILEAGE-3-SPEC-LOCK):
 
   - **C1**: `S-MILEAGE-3 C1 — register IN-FLIGHT before edits (D136)` — standalone IN-FLIGHT registration commit per S-D136-COMMIT-DISCIPLINE; touching domains `FLEETFORGE_DATABASE_MASTER.sql`, `db_migrations/`, `api/v1/leases/`, `app/admin/leases/`, `tests/`, FLEETFORGE_SPEC_FINAL.md, FLEETFORGE_ACCOUNTING_SPEC.md (conditional on D-I unblock).
-  - **C2**: `S-MILEAGE-3 C2 — credit_notes.source ENUM ext + master mirror (D-J + D-A)` — migration `_credit_notes_source_ext.sql` (ENUM append); master file line 1247 mirror; PARITY OK post-edit; migrate `13 → 14 ok / 0 drift / 0 missing`.
-  - **C3**: `S-MILEAGE-3 C3 — close.php precharge refund dispatch + 409 gate (D-B + D-C + D-D + D-K + D-L)` — server-side close API extension. `precharge_refund` block validation (422 PRECHARGE_REFUND_REQUIRED) + cash/credit dispatch + audit_log rows (entity_type `lease_precharge_refund_issued`) + 409 PRECHARGE_REFUND_LOCKED state-machine guard. NEW endpoint `api/v1/leases/precharge_refund_settle.php` for D-B (i) cash-branch deferred-settle (Manager+ role + 409 PRECHARGE_REFUND_ALREADY_SETTLED). Stress test `tests/_stress_precharge_refund.php` (4 cases: credit branch happy path + cash branch happy path + missing-block-when-required 422 + double-settle 409). PARITY OK + INVARIANTS OK (I1-I8 — I9 not yet added) + samsara distance 16/16 + migrate 14/0/0.
-  - **C4**: `S-MILEAGE-3 C4 — priorExcessKm safeguard retirement + lease_close_adjustments DROP (D-F + D-G)` — close.php deletion (lines 76-101 input parsing + 803-843 priorExcessKm SELECT/computation + 813-1218 close_adjustment block + 1239-1339 audit_log workaround paths + 1306-1358 response payload `prior_excess_km` fields); app/admin/leases/show.php deletion (lines 1146-1281 Mileage Reconciliation panel + 2190+ closeReconciliation Alpine getter + `prior_excess_km` template refs); migration `_close_adjustments_retirement.sql` (backup table per D107 + DROP TABLE per ff_drop_table_if_present); master file lease_close_adjustments CREATE TABLE block deletion (lines 2116+). PARITY OK + INVARIANTS OK (I1-I8 — I9 not yet added) + migrate `14 → 15 ok / 0 drift / 0 missing`.
-  - **C5**: `S-MILEAGE-3 C5 — close UI precharge refund picker (D-A + D-K)` — app/admin/leases/show.php close modal extension (new section between Actual Mileage form-group and ADV-BILL-1 D-H Advance-Billing block); closeForm data shape extension; closeLease() payload assembly; "Mark cash refund settled" button on lease show page (conditional render: `precharge_refund_method='cash' AND precharge_refund_settled_at IS NULL`). FF_ASSET_VERSION bump per K-14 PREDEPLOY_CHECKLIST.md A2.
-  - **C6**: `S-MILEAGE-3 C6 — Smoke I9 + stress (D-N)` — tests/_smoke_billing_invariants.php I9 invariant + summary-line update; tests/_stress_smoke_invariants_i9.php fault-injection stress. INVARIANTS OK I1 → I9 post-edit.
+  - **C2**: `S-MILEAGE-3 C2 — credit_notes.source ENUM ext + master mirror (D-J)` — migration `_credit_notes_source_ext.sql` (ENUM append per D126); master file line 1247 mirror; PARITY OK post-edit; migrate `13 → 14 ok / 0 drift / 0 missing`. **NO payments table change** (D-B (i) lock — payments table not touched).
+  - **C3**: `S-MILEAGE-3 C3 — close.php refund dispatch + 409 gate + mark_refund_settled endpoint (D-B + D-C + D-D + D-K + D-L)` — server-side close API extension. `precharge_refund` block validation (422 PRECHARGE_REFUND_REQUIRED) + cash/credit dispatch + audit_log rows (entity_type `lease_precharge_refund_issued`) + 409 PRECHARGE_REFUND_LOCKED state-machine guard + `precharge_refund_method` state machine. **NEW endpoint** `api/v1/leases/mark_refund_settled.php` for D-B (i) cash-branch deferred-settle (Manager+ role + 409 PRECHARGE_REFUND_ALREADY_SETTLED + audit_log entity_type `lease_precharge_refund_settled`). Both endpoints land in the same commit — same state machine, same business flow. Stress test `tests/_stress_precharge_refund.php` (4 cases: credit branch happy path + cash branch happy path + missing-block-when-required 422 + double-settle 409). PARITY OK + INVARIANTS OK (I1-I8 — I9 not yet added) + samsara distance 16/16 + migrate 14/0/0.
+  - **C4**: `S-MILEAGE-3 C4 — close UI precharge refund picker (D-A + D-K + D-C)` — `app/admin/leases/show.php` close modal extension (new section between Actual Mileage form-group and ADV-BILL-1 D-H Advance-Billing block); `closeForm` data shape extension; `closeLease()` payload assembly; "Mark cash refund settled" button on lease show page (conditional render: `precharge_refund_method='cash' AND precharge_refund_settled_at IS NULL`); credit_note creation flow for credit path per D-C. FF_ASSET_VERSION bump per K-14 PREDEPLOY_CHECKLIST.md A2.
+  - **C5**: `S-MILEAGE-3 C5 — priorExcessKm safeguard retirement + lease_close_adjustments DROP (D-F + D-G)` — close.php deletion (lines 76-101 input parsing + 803-843 priorExcessKm SELECT/computation + 813-1218 close_adjustment block + 1239-1339 audit_log workaround paths + 1306-1358 response payload `prior_excess_km` fields); `app/admin/leases/show.php` deletion (lines 1146-1281 Mileage Reconciliation panel + 2190+ `closeReconciliation` Alpine getter + `prior_excess_km` template refs); migration `_close_adjustments_retirement.sql` (backup table per D107 + DROP TABLE via ff_drop_table_if_present helper); master file `lease_close_adjustments` CREATE TABLE block deletion (lines 2116+). K-15 scan re-runs `COUNT(*) FROM lease_close_adjustments` immediately before DROP — expect 0 per SPEC-WRITE pre-work scan B. PARITY OK + INVARIANTS OK (I1-I8 — I9 not yet added) + migrate `14 → 15 ok / 0 drift / 0 missing`.
+  - **C6**: `S-MILEAGE-3 C6 — Smoke I9 + stress (D-N)` — `tests/_smoke_billing_invariants.php` I9 invariant + summary-line update; `tests/_stress_smoke_invariants_i9.php` fault-injection stress for the refund state machine. INVARIANTS OK I1 → I9 post-edit.
   - **C7**: `S-MILEAGE-3 C7 — FLEETFORGE_SPEC_FINAL.md close-refund rewrite (D-H)` — replace placeholder section with full Model B close-refund semantics; D135 three-config matrix preservation; mileage_credit ENUM value flipped to DELETED CATEGORY.
-  - **C8** *(conditional on D-I unblock)*: `S-MILEAGE-3 C8 — FLEETFORGE_ACCOUNTING_SPEC.md updates (D-I)` — full liability-extinguishment JE pattern per CPA-locked answers (a) through (e). If CPA answers not in by C8-time, this commit DEFERS to a follow-up session `S-MILEAGE-3-ACCT-SPEC` (file QUEUED entry in CURRENT_SESSIONS.md Documentation cleanup; ≤30 min single-commit follow-up).
+  - **C8** *(conditional on D-I unblock per S-MILEAGE-3-SPEC-LOCK D-I (A))*: `S-MILEAGE-3 C8 — FLEETFORGE_ACCOUNTING_SPEC.md updates (D-I)` — full liability-extinguishment JE pattern per CPA-locked answers (a) through (e). **Ships if CPA answers arrive before the main session closes**; otherwise this commit is **skipped** and deferred to `S-MILEAGE-3-ACCT-SPEC` (separate ≤30 min single-commit follow-up session, QUEUED entry locked in this S-MILEAGE-3-SPEC-LOCK session). Either way, C9 SESSION LOG row captures the deferral state.
   - **C9**: `S-MILEAGE-3 C9 — Docs (SESSION LOG + DECISIONS + REFERENCE.md + CURRENT_SESSIONS SHIPPED)` — DECISIONS rows D168-D181 (D-A through D-N + any mid-arc refinements); KEY LEARNINGS row(s) if any surface; REFERENCE.md §13.4 update (close stage flips from "pending S-MILEAGE-3" to "SHIPPED"); REFERENCE.md §13.4.1 lifecycle table flips `precharge_refund_method` + `precharge_refund_settled_at` to ✓ S-MILEAGE-3 SHIPPED; REFERENCE.md §13.4.1 "What S-MILEAGE-3 must do" section replaced with summary; CURRENT_SESSIONS.md S-MILEAGE-3 entry flipped to SHIPPED with full Outcome block.
-  - **T1**: visual walk per D-M (K-19 persistent user; 8-step walk; PARTIAL/PASS filed in Recent ship history per D146 pattern).
+  - **T1**: visual walk per D-M using K-19 persistent dev user; 8-step walk; PARTIAL/PASS filed in Recent ship history per D146 pattern.
 
 Effort: **~75-90 min** for C1-C9 sans T1 (smaller surface than S-MILEAGE-2B given Model C plumbing already retired; the lease_close_adjustments DROP is mechanically trivial post-close.php deletion). T1 adds ~30-45 min depending on Step 7 cash-branch walk-through duration.
 
@@ -308,7 +304,14 @@ Dependencies:
 - ✓ S-PREDEPLOY-CHECKLIST-CREATE SHIPPED 2026-05-12 (K-14 routing for the C5 FF_ASSET_VERSION bump).
 - ⏳ D-I CPA conversation — accountant-blocked; main session may proceed with engine + UI work and defer C8 conditionally.
 
-Status: **QUEUED** (full spec locked 2026-05-12 via S-MILEAGE-3-SPEC-WRITE).
+Status: **QUEUED** (full spec locked 2026-05-12 via S-MILEAGE-3-SPEC-WRITE; 3 operator decisions (D-B, D-E, D-I) locked 2026-05-12 via S-MILEAGE-3-SPEC-LOCK).
+
+**S-MILEAGE-3-ACCT-SPEC** — QUEUED
+Scope: Write the FLEETFORGE_ACCOUNTING_SPEC.md precharge lifecycle section (activation liability, drawdown revenue recognition, cash refund JE per D-B (i) settle-time stamp, credit refund JE per D-C close-commit stamp, tax reversal on refund). Single-commit session landing after the CPA conversation produces answers to the 5 enumerated questions in S-MILEAGE-3 spec D-I (a-e).
+Effort: ≤30 min, 1 commit.
+Dependencies: S-MILEAGE-3 SHIPPED + CPA conversation complete.
+Blocked on: accountant input (D-I 5 questions: GL accounts, recognition timing, cash refund AP-vs-direct-JE, credit refund AutoEntryBridge integration, tax handling on refund).
+Discussed: 2026-05-12 in planning chat (S-MILEAGE-3-SPEC-LOCK).
 
 **S-MILEAGE-5** — QUEUED
 Scope: 20 hermetic scenario tests against Model B.
@@ -353,6 +356,8 @@ Outcome: Responsive layout fixes for app/admin/equipment/show.php at 768px and 3
 Scope: automated staleness detection across the 6 canonical docs; D131-style discipline gate. Closes the missing tests/_smoke_doc_freshness.php that was referenced as a D131 gate but never built.
 Effort: ~45-60 min.
 Dependencies: none.
+Known targets (as of 2026-05-12):
+- PROGRESS.md lines 160-163: leaked tool-call markup garbage (`</content></invoke></content></invoke></content></invoke>`) between SESSION LOG terminating row and `---` separator. Leaked from a prior session's Write tool call. Surfaced by S-MILEAGE-3-SPEC-WRITE; cleanup deferred per D130 scope-contraction discipline.
 
 **S-MILEAGE-1B-FOLLOWUP** — SHIPPED 2026-05-06 (commit b886d1c — see PROGRESS.md SESSION LOG)
 Outcome: T13 fixture coverage for FIX_GAP scenario (large_gap_detected warning) — closed audit-pass PARTIAL on S-MILEAGE-1B Item 10. T13 added to tests/_smoke_samsara_distance.php asserting distance=='2300.00' / source=='gps' / warnings includes 'large_gap_detected'. Counts updated (12 → 13) across smoke docblock + banner + REFERENCE.md §13.6. SESSION LOG row backfilled in S-DOC-STATUS-RECONCILE-CLOSE (gap surfaced by S-QUEUE-STATUS-RECONCILE diagnostic).
