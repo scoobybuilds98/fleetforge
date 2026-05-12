@@ -777,66 +777,157 @@ function calculate_period_charge(days, daily, weekly, monthly):
 - **Invoice send vs email delivery are separate steps** [PASS-15:E3]: marking as 'sent' always succeeds (DB write). Email delivery may fail — invoice stays 'sent' with a yellow warning and Resend button.
 - Final reconciliation invoice at lease close
 
-### Invoice Generation Flow
+### Invoice Generation Flow (Model B — current, S-MILEAGE-1 + S-MILEAGE-2A + S-MILEAGE-2B SHIPPED 2026-05-12)
+
+Model B mileage billing has three lifecycle phases. Phases 1 + 2 are SHIPPED and documented below; phase 3 (close-refund) is locked-but-pending — see "Lease close + refund (S-MILEAGE-3 — pending)" below for the forward-looking note.
+
 ```
 INVOICE 1 — generated on lease creation day (partial_start or single_period)
   Line items:
     1. Base rental — pro_rate(days from start to end of month)
-    2. Mileage pre-charge — estimated_miles × mileage_rate  [ONLY on Invoice 1]
+    2. Mileage precharge — flat operator-set lease.precharge_amount  [ONLY on Invoice 1, gated]
+       Emit gate (D138, S-MILEAGE-2A):
+         lease.precharge_enabled = 1
+         AND lease.precharge_invoiced_at IS NULL
+         AND NOT EXISTS (prior non-void invoice on this lease w/ mileage_precharge line)
+         AND billing_type NOT IN ('mileage_only','adjustment','credit_note')
+       Stamps lease.precharge_invoiced_at = NOW() on Invoice 1 SEND (D140).
+       Future edits to precharge_enabled / precharge_amount on the lease return
+       409 PRECHARGE_LOCKED (D113) once the stamp lands.
 
 INVOICES 2..N — auto-draft on 1st of each subsequent month while lease active
   Line items:
     1. Base rental — monthly_rate flat (full_month)
+    2. Mileage usage — period_distance × mileage_rate_km (Model B drawdown emit, D-B)
+       Emit gate (S-MILEAGE-2B D-B):
+         period_distance_km > 0
+         AND lease.mileage_rate_km > 0
+         AND billing_type NOT IN ('mileage_only','adjustment','credit_note')
+         AND (lease.precharge_invoiced_at IS NOT NULL OR lease.precharge_enabled = 0)
+    3. Mileage drawdown credit — IF lease.precharge_balance > 0 at emit time
+       amount = min(period_charge, precharge_balance)  (POSITIVE bcmath; is_credit=1)
+       UPDATES lease.precharge_balance -= drawdown_amount inside same transaction
+         (FOR UPDATE on lease row per D20; audit_log entity_type=
+          'lease_precharge_balance_drawdown' captures pre/post/delta).
+       Model B Lite (precharge_enabled=0): line 2 emits at per-km rate;
+         no line 3 (no balance to draw down) — D135 three-config matrix.
 
-FINAL INVOICE — generated when lease is closed
-  Edge case: if auto-draft already exists for current month → VOID it first
-  Line items:
-    1. Base rental — pro_rate(days from month start to return date)
-    2. Mileage reconciliation — actual × rate - pre-charge
-       IF positive: mileage_adjustment line item
-       IF negative: mileage_credit line item (reduces total)
+  Distance source: caller-supplied (api/v1/invoices/create.php) takes
+  precedence; otherwise SamsaraClient::getDistanceForPeriod fallback fetch
+  fires when the lease's equipment_unit carries a samsara_vehicle_id
+  (D-C, S-MILEAGE-2B C3). Distance is always manually editable in the
+  invoice form ("Samsara is source-of-truth-by-default, never source-of-
+  truth-by-force").
+
+FINAL INVOICE — generated when lease is closed (S-MILEAGE-3 — pending)
+  Pending Model B refactor. Current behavior (Model C) at api/v1/leases/
+  close.php is transitional and will retire in S-MILEAGE-3. The
+  priorExcessKm safeguard from S-MILEAGE-FIX-0 (D98) survives until
+  S-MILEAGE-3 ships and is documented in §13.4 "Q9 transitional safeguard"
+  of FLEETFORGE_CLAUDE_CODE_REFERENCE.md.
 ```
 
-### Lease Closed in Same Month It Started
-```
-  Single invoice at close:
-    1. Base rental — pro_rate(start → return date)
-    2. Mileage pre-charge
-    3. Mileage reconciliation
-    Net mileage = actual - estimated (can be negative = credit)
-    One invoice, status = draft, user reviews and sends
-```
+### Lease close + refund (S-MILEAGE-3 — pending)
+
+Forward-looking note: at lease close, when `lease.precharge_balance > 0` after the final drawdown emit, the residual balance refunds via a manager-picked toggle:
+- **Cash refund** → DR Cash account / CR AR (refund path)
+- **Account credit** → `credit_notes` row with `source='precharge_refund'` (new enum value; D106 reserved this slot in S-MILEAGE-1)
+
+The `lease.precharge_refund_method` + `lease.precharge_refund_settled_at` columns (also from S-MILEAGE-1 D106) are populated at refund-execution time. Full spec rewrite for close-refund lands in S-MILEAGE-3's spec write — this section gets actively rewritten then. See FLEETFORGE_CURRENT_SESSIONS.md S-MILEAGE-3 queue entry for the session shape.
 
 ### Invoice Calculation Order (ALWAYS this sequence)
 ```
 1. Base rental (ProRateCalculator)
-2. Add mileage pre-charge OR reconciliation line items
-3. Add insurance/warranty if applicable
-4. Add damage charges if applicable
-5. subtotal = SUM(line_items.amount)
-6. Apply discount (% or flat) → discount_amount
-7. subtotal_after_discount = subtotal - discount_amount
-8. Apply tax (GST/PST/HST per lease tax rates — skip GST if gst_exempt, skip PST if pst_exempt) [PASS-13:T2]
-9. total_amount = subtotal_after_discount + tax_total
-10. Apply account credits/credit notes if any
-11. balance_due = total_amount - credits_applied - amount_paid
+2. Add mileage_precharge line on Invoice 1 (D138; gated per Model B emit)
+3. Add mileage_usage + optional mileage_drawdown_credit lines on Invoice 2..N
+   (D-B; Model B drawdown emit per S-MILEAGE-2B C3)
+4. Add insurance/warranty/GPS if applicable
+5. Add damage charges if applicable
+6. subtotal = SUM(line_items.amount) RESPECTING is_credit (bcsub on credit lines)
+7. Apply discount (% or flat) → discount_amount
+8. subtotal_after_discount = subtotal - discount_amount
+9. Apply tax (GST/PST/HST per lease tax rates — skip GST if gst_exempt, skip PST if pst_exempt) [PASS-13:T2]
+   Tax computes on the NET subtotal (signed sum already netted credit lines).
+   Per-line tax negates internally for is_credit=1 lines so tax_*_amount
+   on the line items reflects the credit (D-D, S-MILEAGE-2B C3).
+10. total_amount = subtotal_after_discount + tax_total
+11. Apply account credits/credit notes if any
+12. balance_due = total_amount - credits_applied - amount_paid
 ```
 
-### Mileage Billing
+### Mileage Billing — Model B (current, post-S-MILEAGE-2B)
 ```
-At lease START:
-  estimated_mileage entered manually
-  pre_charge = estimated_mileage × mileage_rate
-  Added as 'mileage_precharge' line item on Invoice 1
-  stored as lease.mileage_precharge_amount
+At lease CREATE:
+  Operator sets:
+    precharge_enabled (0/1, default 0)
+    precharge_amount  (DECIMAL(12,2), required > 0 if precharge_enabled=1)
 
-At lease CLOSE:
-  actual_mileage from GPS (or manual entry)
-  actual_charge = actual_mileage × mileage_rate
-  adjustment = actual_charge - mileage_precharge_amount
-  IF adjustment > 0: add 'mileage_adjustment' line item
-  IF adjustment < 0: add 'mileage_credit' line item (negative amount)
-  IF credit > final invoice total: remainder → customer credit_notes
+At lease ACTIVATION (status: pending → active, S-MILEAGE-2A D137):
+  IF precharge_enabled = 1 AND precharge_balance IS NULL:
+    UPDATE leases SET precharge_balance = precharge_amount
+    (idempotent guard; FOR UPDATE on lease row per D20;
+     audit_log entity_type='lease_precharge_balance_init')
+
+At INVOICE 1 generation (S-MILEAGE-2A D138):
+  Emit mileage_precharge line at lease.precharge_amount (flat operator-set)
+  IF this is the first non-void mileage_precharge emission for the lease.
+  Tax computes on the precharge amount per province + exemptions.
+
+At INVOICE 1 SEND (S-MILEAGE-2A D140):
+  UPDATE leases SET precharge_invoiced_at = NOW()
+  (Idempotency via state machine + 409 PRECHARGE_ALREADY_BILLED if a
+   different invoice tries to send a duplicate mileage_precharge line.)
+  D113 PRECHARGE_LOCKED 409 activates for free on lease update post-stamp.
+
+At INVOICE 2..N generation (S-MILEAGE-2B D-B):
+  period_charge    = period_distance_km × mileage_rate_km  (bcmath)
+  drawdown_amount  = min(period_charge, lease.precharge_balance)
+  remaining_charge = period_charge - drawdown_amount  (informational)
+
+  IF lease.precharge_balance > 0:
+    Emit `mileage_usage` line (amount = period_charge, is_credit = 0)
+    Emit `mileage_drawdown_credit` line
+      (amount = drawdown_amount, POSITIVE bcmath; is_credit = 1
+       → InvoiceGenerator aggregator subtracts at line 357-362).
+    UPDATE lease.precharge_balance -= drawdown_amount
+      (audit_log entity_type='lease_precharge_balance_drawdown').
+
+  IF lease.precharge_balance == 0 (or NULL / Model B Lite):
+    Emit `mileage_usage` line only (no drawdown credit; no balance update).
+
+At lease CLOSE (S-MILEAGE-3 — pending):
+  Final invoice generation per the same drawdown emit logic above.
+  IF lease.precharge_balance > 0 post-final-drawdown:
+    Manager picks refund method (cash | credit) via close UI.
+    UPDATE lease.precharge_refund_method + precharge_refund_settled_at.
+    Cash → DR cash account / CR AR.
+    Credit → credit_notes row source='precharge_refund'.
+  See "Lease close + refund" section above for forward-looking shape.
+
+Model B Lite (D135 three-config matrix, S-MILEAGE-ALLOWANCE-ZERO-FIX):
+  Lease config: precharge_enabled=0 AND mileage_rate_km>0 AND
+  estimated_mileage_km=0. Bills every km from km 0 at per-km rate.
+  No precharge concept; no drawdown credit emitted. Same engine surface
+  as Model B (full) — InvoiceGenerator doesn't branch on Model identity;
+  the precharge_balance value determines whether a credit line emits.
+```
+
+### Mileage line item types (invoice_line_items.item_type ENUM)
+```
+Active (S-MILEAGE-2B SHIPPED):
+  mileage_precharge       — Invoice 1 upfront commit (D139)
+  mileage_usage           — per-km usage charge (Invoice 2..N, D-B)
+  mileage_drawdown_credit — precharge balance applied (Invoice 2..N, D-B;
+                            POSITIVE amount + is_credit=1 per K-16 convention)
+
+Historical (closed categories — not emitted post-S-MILEAGE-2B):
+  mileage_adjustment      — Model C per-period excess approve flow
+                            (api/v1/invoices/review_mileage.php retired in
+                            S-MILEAGE-2B C5; legacy rows on INV-91 + INV-92
+                            preserved for audit trail)
+  mileage_credit          — Model C close-time underage refund line
+                            (lease_close_adjustments table retires in
+                            S-MILEAGE-3; zero production rows at 2B ship)
 ```
 
 ### Rate Locking
