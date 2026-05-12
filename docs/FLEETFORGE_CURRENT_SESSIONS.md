@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-TEMPLATE-MILEAGE-DEFAULTS** — IN-FLIGHT
+  Started: 2026-05-12T22:27 UTC by desktop-1
+  Touching: equipment_templates (data + schema), FLEETFORGE_DATABASE_MASTER.sql, db_migrations/ (NEW), docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_PROGRESS.md
 
 ### Documentation cleanup (queued, small)
 
