@@ -181,17 +181,12 @@ $lease['latest_invoice_number_for_odo']  = $latestOdoInv['invoice_number'] ?? nu
 $lease['latest_invoice_id_for_odo']      = $latestOdoInv && $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
 $lease['samsara_odometer_km']         = $lease['samsara_odometer_km']         !== null ? (float) $lease['samsara_odometer_km']         : null;
 
-// S-MILEAGE-FIX-0 (Q9): expose total prior monthly excess (km canonical)
-// so the close-modal UI can detect the inverse case (priorOverbillKm > 0)
-// and render a warning banner BEFORE the manager picks a decision.
-// Voided invoices excluded — their excess never reached customer AR.
-$priorExcessRow = db_row(
-    "SELECT COALESCE(SUM(excess_distance_km), 0) AS prior_excess
-       FROM invoices
-      WHERE lease_id = ? AND deleted_at IS NULL AND status != 'void'",
-    [$id]
-);
-$lease['prior_excess_km'] = (float) ($priorExcessRow['prior_excess'] ?? 0);
+// S-MILEAGE-3 D-F: prior_excess_km block retired 2026-05-13.
+// excess_distance_km column dropped in S-MILEAGE-2B C4 migration
+// 202605120907; the SUM query above would have failed silently
+// post-C4 (latent bug surfaced + fixed during S-MILEAGE-3 C5
+// retirement scan). Close-modal closeReconciliation Alpine getter
+// (sole consumer) retired in the same commit (D-F + D-G).
 
 // Fetch status log for this lease
 $statusLog = db_select(

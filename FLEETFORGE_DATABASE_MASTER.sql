@@ -2113,25 +2113,24 @@ CREATE TABLE `lease_billing_periods` (
   CONSTRAINT `lease_billing_periods_ibfk_1` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE,
   CONSTRAINT `lease_billing_periods_ibfk_2` FOREIGN KEY (`invoice_id`) REFERENCES `invoices` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `lease_close_adjustments` (
+CREATE TABLE `lease_close_adjustments_backup_S_MILEAGE_3` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `lease_id` int unsigned NOT NULL,
-  `adjustment_type` enum('excess_charge','underage_credit','no_adjustment') COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Direction of the adjustment relative to allowance',
-  `calculated_distance_km` decimal(10,2) NOT NULL COMMENT 'Absolute km over/under allowance at close (always positive)',
-  `calculated_amount` decimal(12,2) NOT NULL COMMENT 'System-calculated charge or credit amount before override',
-  `final_amount` decimal(12,2) NOT NULL COMMENT 'Amount actually applied after any manager override',
-  `decision` enum('credit_note','final_invoice_adjustment','waived','no_adjustment') COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'How the manager chose to apply the adjustment',
-  `related_invoice_id` int unsigned DEFAULT NULL COMMENT 'Invoice that received the adjustment (final_invoice_adjustment)',
-  `related_credit_note_id` int unsigned DEFAULT NULL COMMENT 'Credit note created (credit_note decision)',
-  `approved_by_user_id` int unsigned NOT NULL COMMENT 'User who approved this close adjustment',
+  `adjustment_type` enum('excess_charge','underage_credit','no_adjustment') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `calculated_distance_km` decimal(10,2) NOT NULL,
+  `calculated_amount` decimal(12,2) NOT NULL,
+  `final_amount` decimal(12,2) NOT NULL,
+  `decision` enum('credit_note','final_invoice_adjustment','waived','no_adjustment') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `related_invoice_id` int unsigned DEFAULT NULL,
+  `related_credit_note_id` int unsigned DEFAULT NULL,
+  `approved_by_user_id` int unsigned NOT NULL,
   `approved_at` datetime NOT NULL,
   `notes` text COLLATE utf8mb4_unicode_ci,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `snapshot_taken_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_lease` (`lease_id`),
-  KEY `idx_invoice` (`related_invoice_id`),
-  KEY `idx_credit_note` (`related_credit_note_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-LEASE-MILEAGE: per-lease-close manager review of excess/underage';
+  KEY `idx_lease` (`lease_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-MILEAGE-3 D-G: forensic snapshot of lease_close_adjustments pre-DROP. K-15 scan confirmed 0 rows.';
 CREATE TABLE `lease_status_log` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `lease_id` int unsigned NOT NULL,
