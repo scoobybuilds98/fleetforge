@@ -380,14 +380,95 @@ if ($rows) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// I8 — Drawdown math sanity (S-MILEAGE-2B C7, D-O / D-B verification)
+//
+// For every invoice carrying both a mileage_usage and a mileage_drawdown_credit
+// line, the credit's amount must equal min(usage_amount, pre-emission
+// precharge_balance) AND the post-emission balance must equal pre − credit.
+//
+// Source-of-truth for pre/post balance + drawdown amount: the audit_log row
+// with entity_type='lease_precharge_balance_drawdown' written by the C3
+// drawdown emit. JOIN by JSON_EXTRACT(new_values, '$.invoice_id') = invoice.id.
+//
+// Three violation classes I8 catches:
+//   (a) credit_amount != min(usage_amount, pre_balance)
+//   (b) post_balance  != pre_balance - credit_amount
+//   (c) usage line present + drawdown_credit line present + NO audit_log row
+//       (means the emit happened but the audit_log INSERT failed silently —
+//       data integrity gap)
+//
+// All checks BCmath-aware: amounts compared via bccomp at 2dp scale.
+//
+// Invoices that emit ONLY mileage_usage (Branch B per D-B; no precharge_balance
+// at emit time) are not in scope — no drawdown audit_log row was written, no
+// reconciliation needed.
+// ────────────────────────────────────────────────────────────────────────────
+
+$rows = db_select(
+    "SELECT
+        i.id AS invoice_id,
+        i.invoice_number,
+        i.status AS invoice_status,
+        usage_li.amount AS usage_amount,
+        credit_li.amount AS credit_amount,
+        JSON_UNQUOTE(JSON_EXTRACT(al.old_values, '$.precharge_balance')) AS pre_balance,
+        JSON_UNQUOTE(JSON_EXTRACT(al.new_values, '$.precharge_balance')) AS post_balance,
+        JSON_UNQUOTE(JSON_EXTRACT(al.new_values, '$.drawdown_amount')) AS audit_drawdown_amount
+     FROM invoices i
+     JOIN invoice_line_items usage_li ON usage_li.invoice_id = i.id AND usage_li.item_type = 'mileage_usage'
+     JOIN invoice_line_items credit_li ON credit_li.invoice_id = i.id AND credit_li.item_type = 'mileage_drawdown_credit'
+     LEFT JOIN audit_log al ON al.entity_type = 'lease_precharge_balance_drawdown'
+                            AND JSON_EXTRACT(al.new_values, '$.invoice_id') = i.id
+     WHERE i.deleted_at IS NULL"
+);
+$i8Failures = [];
+foreach ($rows as $r) {
+    $usage  = (string) $r['usage_amount'];
+    $credit = (string) $r['credit_amount'];
+    if ($r['pre_balance'] === null || $r['post_balance'] === null) {
+        $i8Failures[] = sprintf(
+            "  invoice_id=%d  %-16s  status=%-7s  MISSING audit_log row (entity_type='lease_precharge_balance_drawdown')",
+            $r['invoice_id'], $r['invoice_number'], $r['invoice_status']
+        );
+        continue;
+    }
+    $pre  = (string) $r['pre_balance'];
+    $post = (string) $r['post_balance'];
+
+    // (a) credit_amount == min(usage_amount, pre_balance)
+    $expectedCredit = bccomp($usage, $pre, 2) <= 0 ? $usage : $pre;
+    if (bccomp($credit, $expectedCredit, 2) !== 0) {
+        $i8Failures[] = sprintf(
+            "  invoice_id=%d  %-16s  credit=%s != min(usage=%s, pre_balance=%s)=%s",
+            $r['invoice_id'], $r['invoice_number'],
+            $credit, $usage, $pre, $expectedCredit
+        );
+    }
+
+    // (b) post_balance == pre_balance - credit_amount
+    $expectedPost = bcsub($pre, $credit, 2);
+    if (bccomp($post, $expectedPost, 2) !== 0) {
+        $i8Failures[] = sprintf(
+            "  invoice_id=%d  %-16s  post_balance=%s != pre_balance(%s) − credit(%s) = %s",
+            $r['invoice_id'], $r['invoice_number'],
+            $post, $pre, $credit, $expectedPost
+        );
+    }
+}
+if ($i8Failures) {
+    array_unshift($i8Failures, "I8 FAIL — " . count($i8Failures) . " drawdown math violation(s) (D-O / D-B):");
+    $failures[] = implode("\n", $i8Failures);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Output
 // ────────────────────────────────────────────────────────────────────────────
 
-echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX + S-MILEAGE-2A D132 precharge ext.)\n";
+echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX + S-MILEAGE-2A D132 precharge ext. + S-MILEAGE-2B D-O drawdown sanity)\n";
 echo str_repeat('═', 78), "\n";
 
 if (!$failures) {
-    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice), I7 (no precharge_enabled=1 with NULL/zero/negative precharge_amount).\n";
+    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice), I7 (no precharge_enabled=1 with NULL/zero/negative precharge_amount), I8 (drawdown math sanity: credit == min(usage, pre_balance) AND post == pre − credit).\n";
     exit(0);
 }
 

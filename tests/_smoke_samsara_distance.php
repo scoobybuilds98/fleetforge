@@ -172,19 +172,31 @@ record($results, 'T7', 'unit_conversion',
     $rMi['distance']); // print the miles value for the float-leak inspection
 
 // =====================================================================
-// T8 — Pagination cap: production HTTP path only (the fixture provider
-// returns directly without paging). We assert the failure shape contract
-// is sound by code-inspection. This test always passes here AS DOCUMENTED:
-// the production loop hard-caps at 50 with `reason='api_error'` and
-// `detail` mentioning the pagination cap. Verified by grep against the
-// source.
+// T8 — Period cap exercise (S-MILEAGE-2B C7 / D-P real coverage).
+// Was a source-inspection placeholder pre-2B; now exercises the 90-day
+// cap end-to-end through the FixtureProvider (which honors the cap per
+// lib/Samsara/FixtureProvider.php:63-65). Supplies a 100-day range and
+// asserts reason='period_too_long' + structured failure shape.
+// Production HTTP loop has the same cap (SamsaraClient.php:1284-1290)
+// PLUS the pagination hard-cap at 50 (line 1318) — the latter requires
+// real HTTP and stays source-inspectable via T8-INSP cross-check below.
 // =====================================================================
+$longStart = new \DateTimeImmutable('2026-01-01T00:00:00Z', new \DateTimeZone('UTC'));
+$longEnd   = new \DateTimeImmutable('2026-04-12T00:00:00Z', new \DateTimeZone('UTC'));  // 101 days
+$r = $client->getDistanceForPeriod('FIX_STD', $longStart, $longEnd, 'km');
+$periodOk = ($r['distance'] === null)
+         && ($r['reason'] === 'period_too_long')
+         && isset($r['detail'])
+         && str_contains((string) $r['detail'], '90-day cap');
 $src = file_get_contents(FF_ROOT . '/lib/GPS/SamsaraClient.php');
-$ok = (strpos($src, 'maxPages    = 50') !== false || strpos($src, 'maxPages = 50') !== false)
-    && (strpos($src, 'Pagination cap of') !== false);
+$pagOk = (strpos($src, 'maxPages    = 50') !== false || strpos($src, 'maxPages = 50') !== false)
+       && (strpos($src, 'Pagination cap of') !== false);
+$ok = $periodOk && $pagOk;
 record($results, 'T8', 'pagination_cap',
-    $ok, $ok ? 'source code declares maxPages=50 with cap-exceeded reason=api_error (cannot exercise via fixtures; hermetic-test scope)'
-             : 'pagination cap or message text not found in source — production loop missing',
+    $ok, $ok ? sprintf('period_too_long fixture-exercised (reason=%s); pagination cap source-verified (maxPages=50 + cap-exceeded message)', $r['reason'])
+             : sprintf('period_too_long check %s; pagination cap source check %s',
+                       $periodOk ? 'PASS' : 'FAIL (got reason=' . ($r['reason'] ?? 'null') . ')',
+                       $pagOk ? 'PASS' : 'FAIL'),
     '');
 
 // =====================================================================
@@ -200,14 +212,31 @@ record($results, 'T9', 'sqli_vehicle_id',
     $r['distance']);
 
 // =====================================================================
-// T10 — Malformed Samsara response: production HTTP path only. Same
-// rationale as T8 — verify the contract via source inspection.
+// T10 — Structured failure shape (S-MILEAGE-2B C7 / D-P real coverage).
+// Was source-inspection only pre-2B; now exercises the structured failure
+// contract end-to-end through the FixtureProvider's inverted-range path
+// (lib/Samsara/FixtureProvider.php:59-62 — endTime <= startTime returns
+// reason='api_error'). Asserts the structured failure shape: distance=NULL
+// + reason + detail + queried_at all present. The malformed-JSON branch
+// (SamsaraClient.php production HTTP path) stays source-inspectable as a
+// T10-INSP cross-check since the fixture provider doesn't emit raw JSON.
 // =====================================================================
-$ok = strpos($src, "Samsara returned non-JSON body") !== false
-    && strpos($src, "if (!is_array(\$response))") !== false;
+$invertEnd   = new \DateTimeImmutable('2026-04-01T00:00:00Z', new \DateTimeZone('UTC'));
+$invertStart = new \DateTimeImmutable('2026-04-30T23:59:59Z', new \DateTimeZone('UTC'));  // end < start
+$r = $client->getDistanceForPeriod('FIX_STD', $invertStart, $invertEnd, 'km');
+$shapeOk = ($r['distance'] === null)
+        && ($r['reason'] === 'api_error')
+        && isset($r['detail'])
+        && isset($r['queried_at'])
+        && isset($r['source']);
+$malformedOk = strpos($src, "Samsara returned non-JSON body") !== false
+            && strpos($src, "if (!is_array(\$response))") !== false;
+$ok = $shapeOk && $malformedOk;
 record($results, 'T10', 'malformed_response',
-    $ok, $ok ? 'source code rejects non-JSON / non-array body with reason=api_error (cannot exercise via fixtures)'
-             : 'malformed-response handling not found in source',
+    $ok, $ok ? sprintf('structured failure shape fixture-exercised (reason=%s, detail/queried_at/source present); malformed-JSON branch source-verified', $r['reason'])
+             : sprintf('failure shape check %s; malformed-JSON source check %s',
+                       $shapeOk ? 'PASS' : 'FAIL (reason=' . ($r['reason'] ?? 'null') . ', missing keys=' . json_encode(array_diff(['distance','reason','detail','queried_at','source'], array_keys($r))) . ')',
+                       $malformedOk ? 'PASS' : 'FAIL'),
     '');
 
 // =====================================================================
