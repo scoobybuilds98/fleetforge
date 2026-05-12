@@ -61,9 +61,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-MILEAGE-3-SPEC-WRITE** — IN-FLIGHT
-  Started: 2026-05-12T17:10 UTC by desktop-1
-  Touching: FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md
+*(none)*
 
 ### Documentation cleanup (queued, small)
 
@@ -118,9 +116,197 @@ Outcome: Full Model B drawdown lifecycle on subsequent invoices end-to-end + Mod
 
 
 **S-MILEAGE-3** — QUEUED
-Scope: close + cash/credit refund toggle + retire priorExcessKm transitional safeguard.
-Effort: ~90 min.
-Dependencies: S-MILEAGE-2B shipped.
+
+Scope: close the Model B mileage lifecycle. Wire `precharge_refund_method` + `precharge_refund_settled_at` at lease close with a cash/credit picker; emit the chosen refund (credit_note row for credit branch; cash-refund treatment per D-B); retire the S-MILEAGE-FIX-0 priorExcessKm transitional safeguard + Model C `lease_close_adjustments` table + `closeReconciliation` Alpine surface; rewrite `FLEETFORGE_SPEC_FINAL.md` close-refund section (D-H, deferred by S-MILEAGE-2B C8 D-M (ii)); land `FLEETFORGE_ACCOUNTING_SPEC.md` updates (D-I, deferred by S-MILEAGE-2B D-N / D160) conditional on CPA input.
+
+Out of Scope:
+- Partial refunds (full residual `precharge_balance` only — partial-refund UX is a separate session).
+- Void-of-drawdown-invoice reversal of `precharge_balance` (carry-forward from S-MILEAGE-2B D148; surfaces as a KNOWN ISSUE for a follow-up session).
+- `Mileage::monthlyAllowance` final deletion (S-PORTAL-MILEAGE-MODEL-B owns; portal still consumes per D154 + D167).
+- Customer-portal Model B rendering (S-PORTAL-MILEAGE-MODEL-B owns).
+- Mileage-Lite (`precharge_enabled=0`) leases — they have no precharge_balance and skip the refund picker entirely.
+- Cumulative-Total label rider (S-INVOICE-CUMULATIVE-TOTAL-LABEL owns the repo-wide grep beyond the C6 incidental).
+- Backdate-warning rider (S-INVOICE-BACKDATE-WARNING owns).
+
+Pre-work scan findings (verified 2026-05-12 against current code state, S-MILEAGE-3-SPEC-WRITE session):
+- A. `priorExcessKm`/`prior_excess_km`/`prior_excess` refs in [api/v1/leases/close.php](api/v1/leases/close.php) = **26** (operator estimated ~24). Spread: SELECT at 803-810; computation + km→lease-unit conversion at 837-843; close_adjustment-block subtraction at 1051-1069; audit_log payload at 1218 + 1267 + 1306 + 1339; audit_log no-touch path at 1322-1339; response payload at 1358. All retire under D-F.
+- B. `lease_close_adjustments` table row count = **0** in production. Active code refs at close.php:1025 + 1085 + 1178 (insertion site + comments); no FK consumers in `api/v1/`, `lib/`, `app/admin/`, `tests/`. Archived ref at `scripts/archive/fix_ar_drift_2026_05_07.php` (not active). Backup table per D107 capture-all discipline will snapshot 0 rows — forensic-only insurance, retirement is clean per K-15 disposition.
+- C. `credit_notes.source` ENUM at FLEETFORGE_DATABASE_MASTER.sql:1247 = `('mileage_overpayment','invoice_adjustment','damage_resolution','goodwill','payment_returned','overpayment','other')`. `precharge_refund` not present — D-J adds via end-of-ENUM append per D126.
+- D. `payments` table has `payment_method` ENUM `('check','ach','wire','credit_card','cash','e_transfer','account_credit','other')` and per-row refund fields (`refund_amount`, `refund_date`, `refund_method`, `refund_reference`, `refunded_by`) but **no `payment_type` column** — outbound cash refunds have no natural payments-table row shape today. Surfaced as scope-shaping constraint on D-B; the prompt's "auto-record as payments row with payment_type='precharge_refund'" must be reshaped.
+- E. `closeReconciliation` Alpine getter at [app/admin/leases/show.php:2190+](app/admin/leases/show.php) (returns `priorExcessKm`/`rawOverageKm`/`priorOverbillKm` etc.); panel consumers at lines 1146-1281 (~135 LOC). Both retire under D-F.
+- F. `SELECT COUNT(*) FROM leases WHERE precharge_refund_method IS NOT NULL OR precharge_refund_settled_at IS NOT NULL` = **0**. First-emitter status confirmed; D-J's backup-skip per D128 applies.
+- G. K-19 verification: `/Users/avi/Documents/fleetforge/.claude/dev_credentials.json` exists, `chmod 600`, last modified 2026-05-12 22:25, gitignored via `.claude/` entry. T1 walk reuses persistent user per K-19 discipline (no soft-delete cycle).
+
+Locked decisions D-A through D-N:
+
+- **D-A — Close UI cash/credit refund picker (placement, default, conditional rendering).**
+  Surface lives in the existing close modal at [app/admin/leases/show.php:1047-1352](app/admin/leases/show.php) (the canonical close UX — there is no separate `close.php` admin file; the modal is rendered inline on the lease show page). New section added between the Actual Mileage form-group and the ADV-BILL-1 D-H Advance-Billing Reconciliation block, positioned where the Mileage Reconciliation panel (lines 1146-1281) lives today after that panel is removed per D-F. Section shape:
+  - Header row: "Precharge Refund" + badge "Model B" (mirrors S-MILEAGE-2B D158 Drawdown Reconciliation panel chip).
+  - Read-only display: current `lease.precharge_balance` formatted as `$X.XX CAD`.
+  - Refund-method picker: native `<input type="radio">` group with two options — `cash` and `credit`. Mirrors the ADV-BILL-1 D-H radio pattern at lines 1310-1335 (consistent close-modal UX vocabulary).
+  - Default selection: **`credit`** (CRA-friendly + reuses existing credit_note flow + matches D85's underage_credit precedent).
+  - Conditional render: only when `lease.precharge_enabled = 1 AND lease.precharge_balance > 0`. Skipped when `precharge_balance == 0` (no refund needed — typical case when drawdown fully consumed the balance) OR when `precharge_enabled = 0` (Model B Lite — no precharge concept).
+  - Optional manager-notes textarea (free-text, captured in audit_log per D-L; no required-field gate since the refund-method itself is the audited decision).
+
+- **D-B — Cash refund execution flow. OPERATOR DECISION REQUIRED.**
+  Pre-work scan D surfaced that the prompt's option (ii) "write a payments row with payment_type='precharge_refund'" is non-viable as written — the `payments` table has no `payment_type` column. The viable shapes:
+  - **(i) Manual** *(recommended)*: operator records the cash payment-out externally (cheque issued, EFT, etc.); the close transaction stamps `precharge_refund_method='cash'` immediately, but `precharge_refund_settled_at` stays NULL until the operator confirms physical disbursement via a follow-up UI action (a "Mark cash refund settled" button on the lease show page, gated to Manager+ role per D84-equivalent). No payments-table row is written. CRA paper trail lives in `audit_log` per D-L. Simplest implementation; respects schema as-shipped.
+  - **(ii) Negative-amount payments row** *(non-standard)*: insert a `payments` row with `amount = -(precharge_balance)`, `payment_method='cash'`, `status='cleared'`, `notes='Precharge refund — lease #N'`. Negative amounts are not designed into the payments table's invoice-allocation flow (would require defensive filtering in payment-listing queries). Adds AR-ledger visibility at the cost of schema churn beyond this session's scope.
+  - **(iii) Out-of-scope cash-refund-payment table extension** *(deferred)*: design a proper outbound-refunds table (separate from `payments`). Larger scope, deferred to a future session if the operator picks (i) here and later wants a richer cash-refund ledger.
+  **Recommendation:** lock (i) Manual. Effort/risk fits the session. (ii) and (iii) are deferred; the audit_log row from D-L gives the CRA-defensible paper trail without payments-table risk. **Surface to operator at session open; halt before C3 if pushback on (i).**
+
+- **D-C — Credit refund execution flow.**
+  When `precharge_refund_method='credit'` is picked, the close transaction inserts a `credit_notes` row with `source='precharge_refund'` (added in D-J), `customer_id` from the lease, `amount = precharge_balance`, `amount_remaining = amount`, `currency` matching the lease's existing invoice currency, `status='active'`, `notes='Precharge refund issued at lease close — lease #N (contract <num>)'`, `created_by_user_id` from session. The credit is applicable against any future invoice for that customer per D85 Path B precedent (existing `api/v1/credit_notes/apply.php` flow consumes it unchanged). `precharge_refund_settled_at = NOW()` stamps in the same transaction since credit-note creation IS the refund-settled event (no external dispatch step like cash). Audit_log per D-L captures `credit_note_id`.
+
+- **D-D — `precharge_refund_method` state machine + validation.**
+  - NULL at lease activation (D-J first-emitter status confirmed).
+  - Set to `'cash'` or `'credit'` at lease close, ONLY when `precharge_balance > 0`. If `precharge_balance == 0` at close, the column stays NULL (no refund needed).
+  - **Immutable after set:** any subsequent attempt to change the value returns `409 PRECHARGE_REFUND_LOCKED` from the close endpoint (mirrors D113 PRECHARGE_LOCKED pattern + D140 PRECHARGE_ALREADY_BILLED naming family). Error message: *"Precharge refund method already locked at close. Method cannot be changed once the close transaction has committed."*
+  - Re-close of an already-closed lease is blocked by the existing lease-status gate (lease must be `active` to close); D-D's 409 fires only on edge cases where status was reverted and the column was previously written.
+
+- **D-E — `precharge_refund_settled_at` stamp timing.**
+  Two semantic options:
+  - **(i) Stamp at close transaction commit** — `settled_at` means refund "intent" was finalized at close.
+  - **(ii) Stamp when refund actually posts** — for credit branch: stamp at the same close transaction commit (credit_note creation IS the posting). For cash branch under D-B option (i): stamp only when the operator confirms physical disbursement via the "Mark cash refund settled" button.
+  **Locked: (ii).** Rationale: `settled_at` means money moved (or the credit was issued and is consumable). For the credit branch, both events collapse into the close commit so the stamp lands there. For the cash branch under D-B (i), the stamp lands later — this distinguishes "method chosen" from "money disbursed" and matches the operator's likely audit-trail mental model.
+
+- **D-F — `priorExcessKm` transitional safeguard retirement (S-MILEAGE-FIX-0 D98).**
+  Full removal from [api/v1/leases/close.php](api/v1/leases/close.php). Specifically:
+  - DELETE the SELECT at lines 803-810 (prior-excess sum query).
+  - DELETE the legacy partial-end overage subtraction block at lines 837-843 (D100 km→lease-unit conversion; the legacy block continues to compute overage, but no `priorExcessKm` subtraction).
+  - DELETE the close_adjustment-block subtraction at lines 1051-1069 (D98) — moot once D-G drops the close_adjustment block entirely.
+  - DELETE the D102 audit_log workaround paths at 1239-1267 (close_adjustment branch) + 1322-1339 (legacy-path no-touch branch).
+  - DELETE the `prior_excess_km` field from the close response at 1306, 1339, 1358 (`api/v1/leases/show.php` response shape unchanged per D156 verification — the S-MILEAGE-FIX-0 D-B getter dependency on `lease.prior_excess_km` becomes a non-issue once show.php's `closeReconciliation` getter retires under D-F + D-K).
+  - DELETE the `closeReconciliation` Alpine getter at [app/admin/leases/show.php:2190+](app/admin/leases/show.php) + the Mileage Reconciliation panel at lines 1146-1281 + the `prior_excess_km` template references at 2201, 2207, 2218-2223, 2230-2264.
+  - Backup-table or grep-for-callers verification per K-15: pre-work scan A enumerates all 26 ref sites; the retirement scan must re-run before C4 to catch any post-spec-write additions.
+  Audit: the priorExcessKm safeguard's purpose (preventing double-billing kilometres already charged via Model C per-period excess) is structurally obsolete post-S-MILEAGE-2B C3 InvoiceGenerator drawdown rewrite — Model B never bills "excess" on monthly invoices, so there is no quantity to subtract at close. The safeguard's audit_log paper trail (S-MILEAGE-FIX-0 D102) was load-bearing only during the Model C → Model B transition window (2026-05-04 → 2026-05-12); historical audit_log rows remain queryable.
+
+- **D-G — `lease_close_adjustments` table retirement.**
+  Migration `202605MMDDhhmm_S-MILEAGE-3_close_adjustments_retirement.sql` (timestamp at apply time):
+  1. CREATE backup table `lease_close_adjustments_backup_S_MILEAGE_3` mirroring the existing CREATE TABLE shape per D107 capture-all discipline.
+  2. `INSERT INTO lease_close_adjustments_backup_S_MILEAGE_3 SELECT * FROM lease_close_adjustments` (idempotent via empty-check guard + columns-still-exist guard).
+  3. `DROP TABLE lease_close_adjustments` via `ff_drop_table_if_present` (mirrors S-MILEAGE-2B C4 D107/D153 pattern; helper may need adding if absent — verify pre-migration).
+  4. Mirror the DROP into FLEETFORGE_DATABASE_MASTER.sql by removing lines 2116+ (the CREATE TABLE block).
+  Pre-work scan B confirms 0 rows + no FK consumers — DROP is clean. Backup snapshot will capture 0 rows; the empty backup is the discipline marker per K-15 (backup-table cost is one extra CREATE statement; cost-of-skip would be no recovery path if a post-S-MILEAGE-3 audit surfaces a missed historical Model C close).
+  Also DELETE the close.php close_adjustment processing block (lines 813-1218 wholesale — the input parsing at lines 76-101 + the close_adjustment block in the close transaction at 1022-1218 + the audit_log rows at 1197-1267). The block's full deletion is large (~250 LOC) but mechanically straightforward — no live data shape depends on it post-S-MILEAGE-2B C4 Model C plumbing retirement.
+
+- **D-H — `FLEETFORGE_SPEC_FINAL.md` close-refund section rewrite.**
+  S-MILEAGE-2B C8 (commit 47acbb9, D-M (ii) D159) explicitly deferred the close-refund spec text. Now write it:
+  - Replace the current "Lease close + refund (S-MILEAGE-3 — pending)" placeholder section with the full Model B close-refund semantics:
+    - Cash/credit refund picker at close (D-A + D-K).
+    - State machine for `precharge_refund_method` (D-D).
+    - Cash-branch flow per D-B locked option.
+    - Credit-branch flow per D-C.
+    - `settled_at` stamp timing per D-E.
+    - 409 PRECHARGE_REFUND_LOCKED state (D-D).
+  - Preserve the D135 three-config matrix intact across close (Model B precharge → refund residue at close; Model B Lite → no refund needed; Disabled → no precharge concept). The close-refund section must reference D135 explicitly so the matrix's invariant readers know close is covered.
+  - Update the "Mileage line item types" section to flip `mileage_credit` from CLOSED CATEGORY to DELETED CATEGORY (Model C close-time underage refund — table retired in this session; the ENUM value stays for invoice line-item ENUM but zero new emitters).
+
+- **D-I — `FLEETFORGE_ACCOUNTING_SPEC.md` updates. OPERATOR DECISION REQUIRED — ACCOUNTANT INPUT BLOCKING.**
+  S-MILEAGE-2B C8 D-N / D160 deferred accounting-spec edits to this session pending CPA conversation. The Model B precharge lifecycle's accounting treatment:
+  - **Activation** (S-MILEAGE-2A C2 D137): Cash IN ↔ Liability OUT (precharge_balance is a customer-paid liability the company owes back until consumed or refunded).
+  - **Drawdown** (S-MILEAGE-2B C3 D148): Liability ↓ ↔ Revenue ↑ (drawdown amount converts liability to revenue on each invoice send).
+  - **Cash refund at close** (D-B locked branch): Cash OUT ↔ Liability ↓.
+  - **Credit refund at close** (D-C): Liability ↓ ↔ Customer Credit ↑ (existing credit_notes liability account, per S-FIX-2 D47/D48 pattern).
+  Specific CPA questions blocking D-I lock:
+  - (a) Which GL accounts? Liability account ID for precharge_balance; revenue recognition account for drawdown conversion; customer-credit liability for credit-branch refund.
+  - (b) Recognition timing — drawdown converts liability → revenue at invoice **emission** OR at invoice **send/settlement**? S-FIX-2 D47 already established a precedent for AR/credit treatment at send-time; CPA should confirm parity.
+  - (c) Cash refund flow under D-B locked option (i) — pass-through Accounts Payable as a customer refund, OR direct cash-out journal entry at `precharge_refund_settled_at` stamp time? D-B (i) defers the cash event from close-commit to operator-confirmed disbursement, so the JE date is the settle date, not the close date.
+  - (d) Credit refund flow under D-C — does `credit_notes` row creation drive the JE via existing AutoEntryBridge (`lib/Accounting/AutoEntryBridge.php`'s `onCreditNoteIssued` per S-FIX-2), OR does precharge-source credit need a separate JE branch?
+  - (e) Tax handling on refund — original `mileage_precharge` line on Invoice 1 was taxable (S-MILEAGE-2A D-C); does the refund REVERSE the tax (CRA standard for customer refunds), or is the tax retained as a non-refundable component? If reversed, what's the JE shape for the tax leg?
+  **Workflow:** the main S-MILEAGE-3 session may proceed with engine + UI work (D-A through D-G + D-J through D-N) while D-I is accountant-blocked. C8 docs commit lands D-I as DEFERRED status if CPA answers haven't arrived by then; a separate small follow-up session `S-MILEAGE-3-ACCT-SPEC` (≤30 min, single-commit) lands the accounting-spec text once answers come in. Surface as OPERATOR DECISION REQUIRED at session open with explicit "are CPA answers in?" check.
+
+- **D-J — New `credit_notes.source` ENUM value `precharge_refund`.**
+  Schema migration `202605MMDDhhmm_S-MILEAGE-3_credit_notes_source_ext.sql` (timestamp at apply time):
+  - `ALTER TABLE credit_notes MODIFY COLUMN source ENUM('mileage_overpayment','invoice_adjustment','damage_resolution','goodwill','payment_returned','overpayment','other','precharge_refund') NOT NULL` — appended at end per D126 (preserves ordinals; no row rewrite for legacy data).
+  - Mirror into FLEETFORGE_DATABASE_MASTER.sql line 1247.
+  - Backup table per D107 skipped — pre-work scan F confirms zero pre-migration rows with the new value (first emitter); D128 trivial-data backup-skip pattern applies.
+  - PARITY OK post-edit; migrate `13 → 14 ok / 0 drift / 0 missing` (the lease_close_adjustments DROP under D-G is migration `15`).
+
+- **D-K — Close flow UI updates (full UX shape per D-A placement).**
+  The close modal's JavaScript `closeForm` data shape extends with two new keys: `precharge_refund_method` (string, default `'credit'` per D-A) and `precharge_refund_notes` (string, default `''`). The `closeLease()` function at [app/admin/leases/show.php:2297-2356](app/admin/leases/show.php) extends the payload-construction block:
+  ```js
+  // S-MILEAGE-3 D-K: precharge refund picker payload assembly
+  if (this.lease && this.lease.precharge_enabled && parseFloat(this.lease.precharge_balance || 0) > 0) {
+      payload.precharge_refund = {
+          method: this.closeForm.precharge_refund_method,
+          notes:  this.closeForm.precharge_refund_notes || null,
+      };
+  }
+  ```
+  Server-side [api/v1/leases/close.php](api/v1/leases/close.php) receives the new `precharge_refund` block, validates `method ∈ {cash, credit}`, and dispatches:
+  - `method='credit'` → emit credit_notes row per D-C; UPDATE `leases.precharge_refund_method='credit'` + `precharge_refund_settled_at=NOW()` inside the close transaction (D20 FOR UPDATE on lease row already held).
+  - `method='cash'` → UPDATE `leases.precharge_refund_method='cash'` inside close transaction; `precharge_refund_settled_at` stays NULL per D-E (i)/D-B (i) deferred-settle pattern.
+  - When `lease.precharge_enabled=0` OR `lease.precharge_balance == 0`: silent skip — the picker UI didn't render, the payload doesn't carry the block, and the close transaction proceeds unchanged.
+  Validation: missing `precharge_refund` block when `precharge_enabled=1 AND precharge_balance > 0` returns `422 PRECHARGE_REFUND_REQUIRED` with explicit message ("Precharge refund method is required when closing a lease with a positive precharge balance.").
+  New "Mark cash refund settled" follow-up button on lease show page (post-close) when `precharge_refund_method='cash' AND precharge_refund_settled_at IS NULL` — Manager+ role gate (D84 pattern), single endpoint `api/v1/leases/precharge_refund_settle.php` (NEW), stamps `precharge_refund_settled_at=NOW()`, audit_log row per D-L, 409 `PRECHARGE_REFUND_ALREADY_SETTLED` on retry.
+
+- **D-L — Refund audit_log entries (D102 workaround pattern).**
+  Two audit_log entity_types added (both use `action='update'` per audit_log.action ENUM constraint workaround pattern from D102):
+  - `lease_precharge_refund_issued` — written at close transaction commit when refund method is set. `new_values` JSON captures: `method` (cash|credit), `amount` (= precharge_balance at close), `precharge_balance_at_close`, `related_credit_note_id` (credit branch only; NULL for cash), `notes` (optional manager input), `closed_by_user_id`.
+  - `lease_precharge_refund_settled` — written at cash-branch settle stamp commit (only fires for `method='cash'` under D-B (i)). `new_values` JSON captures: `method`, `settled_at`, `settled_by_user_id`. Skipped for credit branch since settled_at is stamped at close-commit time.
+  Sentry capture: silent on success (matches D125 precedent); WARNING-level on validation failure paths (e.g., re-settle attempt on already-settled refund). Both wrapped in try/catch with `error_log` fallback per D102 (observability MUST NOT block close transaction).
+
+- **D-M — T1 visual walk shape (8-step, uses K-19 persistent dev user).**
+  Reuses the persistent user at `/.claude/dev_credentials.json` per K-19 discipline (no create/delete cycle). 8-step walk:
+  1. Restore equipment_unit + lease + fixture state (samsara.fixture_mode='1', equipment_unit 14 samsara_vehicle_id='FIX_STD' per S-MILEAGE-2B-T1 pattern). Create a fresh precharge-enabled lease via SQL (per S-MILEAGE-2B-T1 operator preference noted) with `precharge_amount=$500`.
+  2. Activate the lease → verify `precharge_balance=$500` initialized (D137); Invoice 1 auto-generated with `mileage_precharge $500` line; send Invoice 1 → verify `precharge_invoiced_at` stamps; balance unchanged.
+  3. Generate Invoice 2 with `period_distance_km=1234.56` (fixture FIX_STD); send Invoice 2 → verify `mileage_usage` + `mileage_drawdown_credit` lines emit; `precharge_balance` decrements from $500 to a residual value (e.g., $277.78 if rate=$0.18/km).
+  4. Open close lease modal → verify the "Precharge Refund" section renders (D-A condition met: `precharge_enabled=1 AND precharge_balance > 0`); default selection is `credit`; balance display shows `$277.78`.
+  5. Pick **`credit`** → submit close → verify: (a) `credit_notes` row created with `source='precharge_refund'`, `amount=$277.78`, `customer_id` matches lease; (b) `leases.precharge_refund_method='credit'`; (c) `leases.precharge_refund_settled_at` stamped at close-commit time; (d) audit_log entity_type=`lease_precharge_refund_issued` row with full new_values JSON.
+  6. Attempt to re-close the same lease (UI shouldn't allow this — lease status now `completed`; if force-call via API, expect existing `INVALID_TRANSITION` 409 from close.php). Validates D-D 409 path is unreachable in normal flow.
+  7. Repeat with a new precharge-enabled lease, pick **`cash`** → submit close → verify: (a) NO credit_notes row created; (b) `leases.precharge_refund_method='cash'`; (c) `leases.precharge_refund_settled_at` is NULL (D-E ii / D-B i deferred-settle); (d) audit_log row written. Then click "Mark cash refund settled" button on lease show page → verify settled_at stamps + `lease_precharge_refund_settled` audit_log row + 409 PRECHARGE_REFUND_ALREADY_SETTLED on retry.
+  8. Confirm Model C surface is fully absent post-D-F+D-G retirement: (a) close modal renders without the Mileage Reconciliation panel; (b) lease show page response has no `prior_excess_km` field; (c) `SELECT COUNT(*) FROM lease_close_adjustments` returns "Table doesn't exist"; (d) close.php response payload contains no priorExcessKm fields.
+  Stop conditions per S-MILEAGE-2B-T1 pattern: all 8 steps PASS; failures filed as KNOWN ISSUES (#NNN) in PROGRESS.md per K-12/K-14 routing.
+
+- **D-N — Smoke invariant I9 addition.**
+  New invariant in [tests/_smoke_billing_invariants.php](tests/_smoke_billing_invariants.php) at the I8 slot's logical successor location (~line 466 region). Predicate: for every closed lease (`status='completed'`, `deleted_at IS NULL`) with `precharge_enabled=1 AND precharge_invoiced_at IS NOT NULL AND precharge_balance > 0 AT CLOSE TIME`, **must** have non-NULL `precharge_refund_method` AND (for `method='credit'`) non-NULL `precharge_refund_settled_at`. The "at close time" condition is reconstructible via the audit_log row entity_type=`lease_precharge_refund_issued` `new_values.precharge_balance_at_close` field — the live `precharge_balance` column post-close will be 0 (refunded) or unchanged depending on D-B locked branch, so direct column-read is insufficient. Two violation classes:
+  - (a) Method NULL when refund should have fired (residual balance at close without method set — data integrity gap; would only surface if a close transaction bypassed the D-K validator).
+  - (b) `method='credit'` AND `settled_at IS NULL` (credit-branch should stamp at close-commit; NULL indicates an aborted transaction).
+  Cash-branch `method='cash' AND settled_at IS NULL` is **NOT** a violation by design (D-E ii / D-B i defer-settle pattern).
+  Smoke summary line updated: I1 → I9 (was I1 → I8).
+  Stress test file `tests/_stress_smoke_invariants_i9.php` mirrors S-MILEAGE-2B C7 D161's inline-predicate execution pattern (CREATE TEMPORARY TABLE fault-injection trick where applicable; otherwise direct row-insert + assertion + ROLLBACK in same connection).
+
+Implementation notes — proposed commit arc (7-9 commits + T1):
+
+  - **C1**: `S-MILEAGE-3 C1 — register IN-FLIGHT before edits (D136)` — standalone IN-FLIGHT registration commit per S-D136-COMMIT-DISCIPLINE; touching domains `FLEETFORGE_DATABASE_MASTER.sql`, `db_migrations/`, `api/v1/leases/`, `app/admin/leases/`, `tests/`, FLEETFORGE_SPEC_FINAL.md, FLEETFORGE_ACCOUNTING_SPEC.md (conditional on D-I unblock).
+  - **C2**: `S-MILEAGE-3 C2 — credit_notes.source ENUM ext + master mirror (D-J + D-A)` — migration `_credit_notes_source_ext.sql` (ENUM append); master file line 1247 mirror; PARITY OK post-edit; migrate `13 → 14 ok / 0 drift / 0 missing`.
+  - **C3**: `S-MILEAGE-3 C3 — close.php precharge refund dispatch + 409 gate (D-B + D-C + D-D + D-K + D-L)` — server-side close API extension. `precharge_refund` block validation (422 PRECHARGE_REFUND_REQUIRED) + cash/credit dispatch + audit_log rows (entity_type `lease_precharge_refund_issued`) + 409 PRECHARGE_REFUND_LOCKED state-machine guard. NEW endpoint `api/v1/leases/precharge_refund_settle.php` for D-B (i) cash-branch deferred-settle (Manager+ role + 409 PRECHARGE_REFUND_ALREADY_SETTLED). Stress test `tests/_stress_precharge_refund.php` (4 cases: credit branch happy path + cash branch happy path + missing-block-when-required 422 + double-settle 409). PARITY OK + INVARIANTS OK (I1-I8 — I9 not yet added) + samsara distance 16/16 + migrate 14/0/0.
+  - **C4**: `S-MILEAGE-3 C4 — priorExcessKm safeguard retirement + lease_close_adjustments DROP (D-F + D-G)` — close.php deletion (lines 76-101 input parsing + 803-843 priorExcessKm SELECT/computation + 813-1218 close_adjustment block + 1239-1339 audit_log workaround paths + 1306-1358 response payload `prior_excess_km` fields); app/admin/leases/show.php deletion (lines 1146-1281 Mileage Reconciliation panel + 2190+ closeReconciliation Alpine getter + `prior_excess_km` template refs); migration `_close_adjustments_retirement.sql` (backup table per D107 + DROP TABLE per ff_drop_table_if_present); master file lease_close_adjustments CREATE TABLE block deletion (lines 2116+). PARITY OK + INVARIANTS OK (I1-I8 — I9 not yet added) + migrate `14 → 15 ok / 0 drift / 0 missing`.
+  - **C5**: `S-MILEAGE-3 C5 — close UI precharge refund picker (D-A + D-K)` — app/admin/leases/show.php close modal extension (new section between Actual Mileage form-group and ADV-BILL-1 D-H Advance-Billing block); closeForm data shape extension; closeLease() payload assembly; "Mark cash refund settled" button on lease show page (conditional render: `precharge_refund_method='cash' AND precharge_refund_settled_at IS NULL`). FF_ASSET_VERSION bump per K-14 PREDEPLOY_CHECKLIST.md A2.
+  - **C6**: `S-MILEAGE-3 C6 — Smoke I9 + stress (D-N)` — tests/_smoke_billing_invariants.php I9 invariant + summary-line update; tests/_stress_smoke_invariants_i9.php fault-injection stress. INVARIANTS OK I1 → I9 post-edit.
+  - **C7**: `S-MILEAGE-3 C7 — FLEETFORGE_SPEC_FINAL.md close-refund rewrite (D-H)` — replace placeholder section with full Model B close-refund semantics; D135 three-config matrix preservation; mileage_credit ENUM value flipped to DELETED CATEGORY.
+  - **C8** *(conditional on D-I unblock)*: `S-MILEAGE-3 C8 — FLEETFORGE_ACCOUNTING_SPEC.md updates (D-I)` — full liability-extinguishment JE pattern per CPA-locked answers (a) through (e). If CPA answers not in by C8-time, this commit DEFERS to a follow-up session `S-MILEAGE-3-ACCT-SPEC` (file QUEUED entry in CURRENT_SESSIONS.md Documentation cleanup; ≤30 min single-commit follow-up).
+  - **C9**: `S-MILEAGE-3 C9 — Docs (SESSION LOG + DECISIONS + REFERENCE.md + CURRENT_SESSIONS SHIPPED)` — DECISIONS rows D168-D181 (D-A through D-N + any mid-arc refinements); KEY LEARNINGS row(s) if any surface; REFERENCE.md §13.4 update (close stage flips from "pending S-MILEAGE-3" to "SHIPPED"); REFERENCE.md §13.4.1 lifecycle table flips `precharge_refund_method` + `precharge_refund_settled_at` to ✓ S-MILEAGE-3 SHIPPED; REFERENCE.md §13.4.1 "What S-MILEAGE-3 must do" section replaced with summary; CURRENT_SESSIONS.md S-MILEAGE-3 entry flipped to SHIPPED with full Outcome block.
+  - **T1**: visual walk per D-M (K-19 persistent user; 8-step walk; PARTIAL/PASS filed in Recent ship history per D146 pattern).
+
+Effort: **~75-90 min** for C1-C9 sans T1 (smaller surface than S-MILEAGE-2B given Model C plumbing already retired; the lease_close_adjustments DROP is mechanically trivial post-close.php deletion). T1 adds ~30-45 min depending on Step 7 cash-branch walk-through duration.
+
+Pre-work scan re-run items (must execute at main S-MILEAGE-3 session open, immediately post-IN-FLIGHT commit):
+1. `grep -c "priorExcessKm\|prior_excess_km\|prior_excess" api/v1/leases/close.php` — expect 26 (verify no drift since 2026-05-12).
+2. `SELECT COUNT(*) FROM lease_close_adjustments` — expect 0 (verify no late writers between SPEC-WRITE ship and main session open).
+3. `SHOW COLUMNS FROM credit_notes LIKE 'source'` — verify ENUM still missing `precharge_refund` (no parallel migrator).
+4. `SELECT COUNT(*) FROM leases WHERE precharge_refund_method IS NOT NULL` — expect 0 (verify first-emitter status preserved).
+5. `ls -la /Users/avi/Documents/fleetforge/.claude/dev_credentials.json` — verify K-19 persistent user file intact (chmod 600, gitignored).
+Surface any drift to operator before C2 begins.
+
+NOT TOUCHED IN THIS SESSION:
+- `Mileage::monthlyAllowance` helper deletion (S-PORTAL-MILEAGE-MODEL-B owns final deletion; portal still consumes per D154 + D167).
+- Customer portal `app/portal/leases/view.php` Model B refactor (S-PORTAL-MILEAGE-MODEL-B owns).
+- `lease_billing_periods` table (load-bearing per K-15; S-CLEANUP-LBP-TABLE owns audit).
+- `payments` table schema (D-B locked option (i) Manual avoids any payments-table changes; (ii) and (iii) options deferred).
+- Cumulative-Total label repo-wide grep (S-INVOICE-CUMULATIVE-TOTAL-LABEL owns).
+- Backdate-warning rider (S-INVOICE-BACKDATE-WARNING owns).
+- Existing `mileage_credit` invoice line-item ENUM value (preserved for audit trail on historical Model C close-time refunds; zero new emitters post-D-G).
+
+Dependencies:
+- ✓ S-MILEAGE-2B SHIPPED 2026-05-12 (drawdown engine groundwork).
+- ✓ S-MILEAGE-2A SHIPPED 2026-05-12 (precharge schema + Invoice 1 lifecycle).
+- ✓ S-MILEAGE-1 SHIPPED 2026-05-04 (precharge column schema).
+- ✓ S-PREDEPLOY-CHECKLIST-CREATE SHIPPED 2026-05-12 (K-14 routing for the C5 FF_ASSET_VERSION bump).
+- ⏳ D-I CPA conversation — accountant-blocked; main session may proceed with engine + UI work and defer C8 conditionally.
+
+Status: **QUEUED** (full spec locked 2026-05-12 via S-MILEAGE-3-SPEC-WRITE).
 
 **S-MILEAGE-5** — QUEUED
 Scope: 20 hermetic scenario tests against Model B.
