@@ -696,20 +696,33 @@ audit            VCEDS        V        —           V           V
 
 ---
 
-## 13.4 MILEAGE BILLING — Model C is current-and-transitional
+## 13.4 MILEAGE BILLING — Model B is current (S-MILEAGE-2B SHIPPED 2026-05-12)
 
-(Established **S-MILEAGE-MODEL-AUDIT** + **S-MILEAGE-FIX-0**, 2026-05-04. Replaced wholesale by **S-MILEAGE-1+** Model B refactor.)
+(Established 2026-05-04 as Model C transitional via **S-MILEAGE-MODEL-AUDIT** + **S-MILEAGE-FIX-0**. Replaced wholesale by Model B: **S-MILEAGE-1** (precharge schema, 2026-05-04), **S-MILEAGE-2A** (Invoice 1 precharge emit + activation balance init, 2026-05-12), **S-MILEAGE-2B** (Invoice 2+ drawdown emit + Model C plumbing retirement, 2026-05-12). **S-MILEAGE-3** pending — close + cash/credit refund toggle + `FLEETFORGE_ACCOUNTING_SPEC.md` rewrite + priorExcessKm safeguard retirement.)
 
-**The shipped pipeline implements Model C** (S-LEASE-MILEAGE per-period excess + manager review gate + `lease_close_adjustments` close-time settle), NOT Model A (spec-literal precharge + final reconciliation) and NOT Avi's Model B intent (precharge as drawdown balance).
+**The shipped pipeline implements Model B** (lease-level precharge_balance with drawdown on each subsequent invoice; see §13.4.1 for schema). Historical Model C narrative below preserved for audit trail of pre-2B behavior.
 
-### What runs today
+### What runs today (Model B post-S-MILEAGE-2B)
 
 | Stage | Code path | What it does |
 |-------|-----------|--------------|
-| Lease activation | [api/v1/leases/activate.php](api/v1/leases/activate.php) | Captures `odometer_start_km` via Samsara Path B. **No `mileage_precharge` line is added to Invoice 1.** |
-| Monthly invoice | [cron/invoice_generate_monthly.php](cron/invoice_generate_monthly.php) → [InvoiceGenerator::createFromLease](lib/Billing/InvoiceGenerator.php:98) lines 438-486 | Computes `excess_distance_km` per period vs `monthly_allowance_km = estimated_mileage_km / lease_months`. Sets `mileage_review_status='pending'` when excess > 0. **No line item added at this stage.** |
-| Manager review | [api/v1/invoices/review_mileage.php](api/v1/invoices/review_mileage.php) | Manager approves/overrides/rejects. Approve adds `mileage_adjustment` line item. **HARD send gate** in [send.php:57-63](api/v1/invoices/send.php:57) — no role bypass. |
-| Lease close | [api/v1/leases/close.php](api/v1/leases/close.php) | Optional `close_adjustment` block writes `lease_close_adjustments` row + creates credit_note OR amends final invoice. |
+| Lease activation | [api/v1/leases/activate.php](api/v1/leases/activate.php) | Captures `odometer_start_km` via Samsara Path B AND initializes `precharge_balance = precharge_amount` when `precharge_enabled = 1` (D137 / S-MILEAGE-2A C2). |
+| Invoice 1 generation | [InvoiceGenerator::createFromLease](lib/Billing/InvoiceGenerator.php:98) | Emits `mileage_precharge` line at the flat operator-set `lease.precharge_amount` when the 3-clause gate fires (D138: lifecycle + (b) cross-invoice uniqueness + billing_type exclusion). |
+| Invoice 1 send | [api/v1/invoices/send.php](api/v1/invoices/send.php) | Stamps `precharge_invoiced_at = NOW()` (D140); activates D113 PRECHARGE_LOCKED 409 on the lease. |
+| Invoice 2..N generation | [InvoiceGenerator::createFromLease](lib/Billing/InvoiceGenerator.php:98) drawdown emit block | Emits `mileage_usage` (per-km usage) + optional `mileage_drawdown_credit` per the drawdown math (D148; POSITIVE amount + is_credit=1 K-16 convention per D166). UPDATES `precharge_balance -= drawdown_amount` in same transaction; audit_log entity_type=`lease_precharge_balance_drawdown`. Samsara fallback via [SamsaraClient::getDistanceForPeriod](lib/GPS/SamsaraClient.php:1245) when caller doesn't pre-populate distance AND lease's equipment_unit has samsara_vehicle_id. |
+| Lease close | [api/v1/leases/close.php](api/v1/leases/close.php) | **Pending S-MILEAGE-3**: cash/credit refund toggle for residual `precharge_balance > 0`. priorExcessKm transitional safeguard from S-MILEAGE-FIX-0 (D98) still active until S-MILEAGE-3 ships. |
+
+### Model C pipeline RETIRED in S-MILEAGE-2B C4-C5 (2026-05-12)
+
+Historical narrative for audit trail (Model C ran 2026-05-04 → 2026-05-12):
+
+| ~~Stage~~ | ~~Code path~~ | What it did (retired) |
+|---|---|---|
+| Monthly invoice excess gate | ~~InvoiceGenerator excess block at lines 438-486~~ | Computed `excess_distance_km` per period vs `monthly_allowance_km`. Set `mileage_review_status='pending'` when excess > 0. **DELETED in C3 commit a24cb49.** |
+| Manager review endpoint | ~~api/v1/invoices/review_mileage.php (316 lines)~~ | Manager approves/overrides/rejects. Approve added `mileage_adjustment` line item. HARD send gate in send.php:57-63 — no role bypass. **DELETED in C5 commit 6ed9529.** |
+| Lease close mileage adjustment | ~~api/v1/leases/close.php `lease_close_adjustments`~~ | Optional close_adjustment block. **NOT YET RETIRED** — S-MILEAGE-3 owns retirement. priorExcessKm transitional safeguard (D98) survives until then. |
+
+Backup of Model C invoice column values preserved in `invoices_model_c_backup_S_MILEAGE_2B` table (D107 capture-all snapshot of all 45 invoice rows pre-DROP; forensic-only).
 
 ### Q9 transitional safeguard (S-MILEAGE-FIX-0, 2026-05-04)
 
@@ -733,29 +746,39 @@ The cron-generated full_month draft for the closing month is in the sum automati
 
 **D-E regression safeguard:** every close with `priorExcessKm > 0 AND decision != 'waived'` writes an `audit_log` row (`entity_type='lease_close_with_prior_excess'`, action='update'); WARNING-level Sentry for inverse case. Operators have a paper trail of every close that touched the seam.
 
-### What replaces this in S-MILEAGE-1+
+### What replaced this in S-MILEAGE-1 → S-MILEAGE-2B (now SHIPPED)
 
-**Model B (drawdown balance):** Invoice 1 carries a `mileage_precharge` line for the **user-set** `leases.precharge_amount` (NOT derived from `estimated_mileage_km × rate` — Avi's intent is that the customer picks the upfront commitment, not the system). `leases.precharge_balance` is the running drawdown — initialized = `precharge_amount` at activation, decremented per invoice. Once balance hits zero, monthly invoices bill mileage straight at per-km rate. At close, balance > 0 → refund residue (cash or credit, manager's pick at close per `precharge_refund_method`).
+**Model B (drawdown balance) — SHIPPED 2026-05-12:** Invoice 1 carries a `mileage_precharge` line for the **user-set** `leases.precharge_amount` (NOT derived from `estimated_mileage_km × rate` — operator picks the upfront commitment, not the system). `leases.precharge_balance` is the running drawdown — initialized = `precharge_amount` at activation (D137), decremented per invoice via the drawdown emit (D148). Once balance hits zero, monthly invoices bill mileage straight at per-km rate via the `mileage_usage` line only (no `mileage_drawdown_credit` emitted). At close (S-MILEAGE-3, pending), balance > 0 → refund residue (cash or credit, manager's pick at close per `precharge_refund_method`).
 
-S-MILEAGE-1 (2026-05-04, this session) landed Phase 1 — the schema columns + lease-form precharge toggle/amount + show-page display. The dead Model A columns `mileage_precharge_amount` / `mileage_precharge_invoiced` were dropped (snapshotted in `leases_precharge_backup_S_MILEAGE_1`). See §13.4.1 below.
+Retired in S-MILEAGE-2B C4-C5 (2026-05-12):
+- ✓ The `excess_distance_km` / `excess_charge_amount` / `mileage_review_status` / `mileage_override_amount` / `mileage_reviewed_at` / `mileage_reviewed_by_user_id` / `mileage_review_notes` columns on invoices — DROPPED in migration `202605120907_S-MILEAGE-2B_model_c_retirement.sql`
+- ✓ `Mileage::periodExcess` helper — DELETED (D154 + D167; zero callers post-C3)
+- ✓ The HARD send gate in send.php:57-63 — DELETED (D155)
+- ✓ `api/v1/invoices/review_mileage.php` endpoint (316 lines) — DELETED (D155)
+- ✓ Mileage Review card in app/admin/invoices/show.php (~157 lines) — DELETED + replaced by Drawdown Reconciliation panel (D158)
 
-When that lands, retire:
-- The `excess_distance_km` / `excess_charge_amount` / `mileage_review_status` columns on invoices
+Pending S-MILEAGE-3:
 - The `lease_close_adjustments` table
-- `Mileage::monthlyAllowance` and `periodExcess` helpers
-- The `priorExcessKm` subtraction in close.php (this transitional safeguard)
-- The HARD send gate in send.php
+- The `priorExcessKm` subtraction in close.php (this transitional safeguard, D98)
+- `Mileage::monthlyAllowance` helper — RETAINED pending S-PORTAL-MILEAGE-MODEL-B portal refactor (D154 — 2 callers remain: portal/leases/view.php + show.php's now-converted-to-Drawdown-Reconciliation card)
 - The Mileage Reconciliation panel in [app/admin/leases/show.php](app/admin/leases/show.php) close modal
 
 ### Mileage line-item types — schema enum is the source of truth
 
 ```
-'mileage_precharge'  → upfront precharge (Model A vestige; reserved for Model B reactivation)
-'mileage_adjustment' → customer owes more (close excess OR per-period review approval)
-'mileage_credit'     → customer credit (close underage when decision='final_invoice_adjustment')
+'mileage_precharge'        → Invoice 1 upfront precharge (active; S-MILEAGE-2A D139)
+'mileage_usage'            → per-km usage charge on Invoice 2..N (active; S-MILEAGE-2B D148)
+'mileage_drawdown_credit'  → precharge balance applied as credit (active; S-MILEAGE-2B D148;
+                              POSITIVE amount + is_credit=1 per K-16 convention D166)
+'mileage_adjustment'       → CLOSED CATEGORY — historical Model C per-period review approve flow
+                              (preserved for audit trail on INV-91 + INV-92; no new emissions
+                              post-S-MILEAGE-2B C5 endpoint retirement)
+'mileage_credit'           → CLOSED CATEGORY — historical Model C close-time underage refund
+                              (zero production rows at 2B ship; lease_close_adjustments table
+                              retires in S-MILEAGE-3)
 ```
 
-Anything else (`mileage_charge`, `mileage_overage`, etc.) is NOT in `invoice_line_items.item_type` and will silently fall through to `default => 'badge-neutral'` in match arms. See D104. When adding a new mileage line-item type, update the schema enum AND the badge match in `app/admin/invoices/show.php` AND any `$mileageItemTypes` lookups.
+Anything else (`mileage_charge`, `mileage_overage`, etc.) is NOT in `invoice_line_items.item_type` and will silently fall through to `default => 'badge-neutral'` in match arms. See D104. When adding a new mileage line-item type, update the schema enum AND the badge match in `app/admin/invoices/show.php` AND the `$mileageItemTypes` array at show.php:284 AND the `$isMileage` detection at show.php:1857.
 
 ### See also
 
@@ -780,7 +803,7 @@ This section documents the schema landed by S-MILEAGE-1 and the lifecycle owners
 |--------|------|-----------------|-------|
 | `precharge_enabled` | `TINYINT(1) NOT NULL DEFAULT 0` | User (lease create/edit) | Off by default. Existing leases stay opted out — no backfill. |
 | `precharge_amount` | `DECIMAL(12,2) NULL` | User (lease create/edit) | Required (>0) when enabled. NULL when disabled. **User-set, not derived.** |
-| `precharge_balance` | `DECIMAL(12,2) NULL` | ✓ S-MILEAGE-2A SHIPPED 2026-05-12 (activation) | Initialized = `precharge_amount` on lease activation (`api/v1/leases/activate.php` per D137). Decremented per invoice in S-MILEAGE-2B (drawdown). NULL until activation. |
+| `precharge_balance` | `DECIMAL(12,2) NULL` | ✓ S-MILEAGE-2A SHIPPED 2026-05-12 (activation) + ✓ S-MILEAGE-2B SHIPPED 2026-05-12 (drawdown) | Initialized = `precharge_amount` on lease activation (`api/v1/leases/activate.php` per D137). Decremented per invoice on Invoice 2..N generation via the drawdown emit (`InvoiceGenerator.php` per D148). NULL until activation. |
 | `precharge_invoiced_at` | `DATETIME NULL` | ✓ S-MILEAGE-2A SHIPPED 2026-05-12 (Invoice 1 send) | Stamps when the precharge line was billed on Invoice 1 (`api/v1/invoices/send.php` per D140). **Lock signal:** non-NULL freezes `precharge_enabled` + `precharge_amount` (D113 PRECHARGE_LOCKED 409 in `update.php`) AND prevents future invoice generation from emitting another `mileage_precharge` line (D138 lifecycle gate). |
 | `precharge_refund_method` | `ENUM('cash','credit') NULL` | S-MILEAGE-3 (lease close) | Manager picks at close when `precharge_balance > 0`. |
 | `precharge_refund_settled_at` | `DATETIME NULL` | S-MILEAGE-3 (refund posted) | Audit trail — when the cash/credit refund actually moved. |
@@ -845,8 +868,14 @@ Forensic-only — only consulted if it turns out an unreviewed seed/fixture writ
 1. ✓ **Activation** (`api/v1/leases/activate.php`): when `precharge_enabled=1`, set `precharge_balance = precharge_amount` inside the activation transaction. **Shipped S-MILEAGE-2A C2 (commit 253b294) — D137.**
 2. ✓ **Invoice 1 generation** (`InvoiceGenerator::createFromLease`): when `precharge_enabled=1` AND this is the activation invoice (no prior invoices for the lease), add a `mileage_precharge` line item for the full `precharge_amount`. **Shipped S-MILEAGE-2A C3 (commit e1918df) — D138 + D139.** The "no prior invoices" condition tightened to a 3-clause gate: lifecycle `precharge_invoiced_at IS NULL` + (b) cross-invoice uniqueness (NOT EXISTS prior non-void `mileage_precharge` line on this lease) + billing_type exclusion (regular invoice types only). The (b) clause prevents duplicate emission across advance-batches.
 3. ✓ **Invoice 1 send** (`api/v1/invoices/send.php`): stamp `precharge_invoiced_at = NOW()` on the lease when sending Invoice 1. **Shipped S-MILEAGE-2A C4 (commit c8e459a) — D140.** Plus the D-D clarification: PRECHARGE_ALREADY_BILLED 409 fires when sending a DIFFERENT invoice that carries a duplicate `mileage_precharge` line after the stamp already landed (defense-in-depth backstop with C3's emission gate).
-4. **Subsequent invoice generation** (`InvoiceGenerator::createFromLease`): replace the S-LEASE-MILEAGE per-period excess block (lines 438-486) with a balance-drawdown block. Each invoice computes `period_charge = period_distance × mileage_rate`. If `precharge_balance > 0`: emit two visible lines (usage at per-km rate + precharge credit drawing it down); decrement `precharge_balance` by `min(period_charge, precharge_balance)`. If `precharge_balance == 0`: emit just the per-km usage line. **(S-MILEAGE-2B — engine marker placed at the C3 emit site, greppable via "S-MILEAGE-2B inserts drawdown logic")**
-5. **Retire Model C plumbing**: remove `excess_distance_km`/`excess_charge_amount`/`mileage_review_status` columns from invoices, retire `Mileage::monthlyAllowance` / `periodExcess`, retire the HARD send gate, retire the priorExcessKm transitional safeguard from S-MILEAGE-FIX-0. **(S-MILEAGE-2B + S-MILEAGE-3)**
+4. ✓ **Subsequent invoice generation** (`InvoiceGenerator::createFromLease`): replaced the S-LEASE-MILEAGE per-period excess block (lines 438-486) with the balance-drawdown block per D148. Each invoice computes `period_charge = period_distance × mileage_rate`. If `precharge_balance > 0`: emits `mileage_usage` + `mileage_drawdown_credit` lines (POSITIVE amount + is_credit=1 K-16 convention per D166); decrements `precharge_balance` by `min(period_charge, precharge_balance)`. If `precharge_balance == 0`: emits just the `mileage_usage` line. **Shipped S-MILEAGE-2B C3 (commit a24cb49) — D148.** Samsara fallback via `getDistanceForPeriod` per D149 (silent-bug fix on samsara_vehicle_id JOIN landed in C3.5 commit 64b37cb — see K-18).
+5. ✓ **Retire Model C plumbing** (partial — completed by S-MILEAGE-2B; remainder owned by S-MILEAGE-3):
+   - ✓ Removed 7 Model C columns from invoices (excess_distance_km, excess_charge_amount, mileage_review_status, mileage_override_amount, mileage_reviewed_at, mileage_reviewed_by_user_id, mileage_review_notes) + residual idx_mileage_review index (S-MILEAGE-2B C4 D153 — migration `202605120907`)
+   - ✓ Retired `Mileage::periodExcess` helper (S-MILEAGE-2B C4 D154 + D167); `Mileage::monthlyAllowance` retained pending S-PORTAL-MILEAGE-MODEL-B portal refactor (D154 + D167)
+   - ✓ Retired HARD send gate in send.php:57-63 (S-MILEAGE-2B C5 D155)
+   - ✓ Retired `api/v1/invoices/review_mileage.php` endpoint (S-MILEAGE-2B C5 D155)
+   - ✓ Retired show.php Mileage Review card + Alpine modal state (S-MILEAGE-2B C5/C6 D158 — replaced by Drawdown Reconciliation panel)
+   - **Pending S-MILEAGE-3:** priorExcessKm transitional safeguard at close.php (D98); `lease_close_adjustments` table; final `Mileage::monthlyAllowance` deletion post-portal refactor; `precharge_refund_method` + `precharge_refund_settled_at` column writes.
 
 ### What S-MILEAGE-3 must do
 
@@ -1094,7 +1123,7 @@ php tests/_smoke_samsara_distance.php
 
 16 stress tests across two groups: **T1-T13** Samsara distance + fixture-mode coverage from S-MILEAGE-1B (T13 added in S-MILEAGE-1B-FOLLOWUP for FIX_GAP `large_gap_detected` warning). Each T1-T13 PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern. **T14-T16** S-MILEAGE-2A surface tests added via ADD-not-REPLACE (preserves T8/T10/T12 placeholders as 2B carry-forward per D141): T14 = `precharge_invoice_emit` (BEGIN/ROLLBACK-isolated synthesize precharge lease + `InvoiceGenerator::createFromLease` + assert `mileage_precharge` line with locked D139 shape + per-line tax computed); T15 = `precharge_amount_check` (three malformed shapes via direct `db_insert` hit `chk_leases_precharge_amount` CHECK); T16 = `dispatch_path_fixture_vs_http` (source-inspection on `SamsaraClient.php` confirms strict `fixture_mode === '1'` dispatch gate + production HTTP loop).
 
-T8 (pagination cap) and T10 (malformed response) remain documented as source-code-inspection tests because the production HTTP loop / parser are intentionally bypassed in fixture mode. Real coverage of those paths lands when **S-MILEAGE-2B** integrates the method into `InvoiceGenerator::createFromLease` (not 2A — 2A's emit path is fixed-amount + distance-independent per D142). T12 (fixture flag dispatch) verifies via the `SAMSARA_HISTORY_FIXTURE` log line that fixture-mode dispatch executes when configured.
+T8 (period_too_long real exercise) and T10 (structured failure shape real exercise) updated in **S-MILEAGE-2B C7 (D162)** from source-inspection placeholders to real fixture-mode coverage. T8 supplies a 101-day range to `FixtureProvider::getDistanceForPeriod` and asserts `reason='period_too_long'` + detail mentions "90-day cap" (FixtureProvider honors the cap per `lib/Samsara/FixtureProvider.php:57-70`). T10 supplies an inverted range (end < start) and asserts `reason='api_error'` + structured failure shape with `detail` / `queried_at` / `source` keys present. Production HTTP pagination cap (maxPages=50 + cap-exceeded message) + malformed-JSON branches stay source-inspectable via T8-INSP / T10-INSP cross-checks (these branches require real HTTP and can't be exercised through fixtures). T12 (fixture flag dispatch) verifies via the `SAMSARA_HISTORY_FIXTURE` log line that fixture-mode dispatch executes when configured.
 
 ### See also
 
