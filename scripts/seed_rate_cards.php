@@ -12,6 +12,18 @@ declare(strict_types=1);
  *              non-deleted rate_cards, then inserts fresh data.
  *
  * @usage       php scripts/seed_rate_cards.php
+ *
+ * @note        This script has NEVER been run against the production DB.
+ *              Rates defined here are reference rubrics only. Live
+ *              production template defaults (`equipment_templates`) and
+ *              customer-negotiated rates (`customer_equipment_rates` +
+ *              `rate_card_items`) are managed directly in the DB and
+ *              diverge intentionally from these rubric values per
+ *              operator pricing decisions. See FLEETFORGE_PROGRESS.md
+ *              S-REEFER-RATE-AUDIT (2026-05-13) for documentation of
+ *              the intentional divergence between this seed rubric and
+ *              production data (notably reefer: rubric $0.22 vs live
+ *              template default $0.18 — disposition C).
  */
 
 require_once __DIR__ . '/../config/app.php';
@@ -38,6 +50,17 @@ const EQUIP_CHASSIS   = '53ft Chassis';
 // ============================================================
 const BASE_RATES = [
     EQUIP_DRY_VAN   => ['daily' => 125.00, 'weekly' => 800.00,  'monthly' => 2200.00, 'mileage' => 0.1800],
+    // Reefer mileage: $0.22/km — industry-standard reference rate
+    // (refrigerated trailer commands premium over dry van due to
+    // fuel + refrigeration costs). NOTE: Mainland T&T live production
+    // data uses $0.18/km (equipment_templates id=2 "48ft Reefer"
+    // default_mileage_rate) — this is an intentional operator pricing
+    // decision (reefer billed at parity with dry van per current
+    // standard). Customer-negotiated rates range $0.15-$0.25 (Lepore
+    // $0.15, LP Logistics/Avi Trucking $0.18, Puar Transport $0.25).
+    // The $0.22 figure is retained here as a negotiation reference
+    // benchmark, not as the production default. Documented:
+    // S-REEFER-RATE-AUDIT 2026-05-13 — disposition (C).
     EQUIP_REEFER    => ['daily' => 145.00, 'weekly' => 950.00,  'monthly' => 3200.00, 'mileage' => 0.2200],
     EQUIP_FLATBED   => ['daily' => 120.00, 'weekly' => 780.00,  'monthly' => 2100.00, 'mileage' => 0.1700],
     EQUIP_CONTAINER => ['daily' =>  95.00, 'weekly' => 620.00,  'monthly' => 1700.00, 'mileage' => 0.1500],
