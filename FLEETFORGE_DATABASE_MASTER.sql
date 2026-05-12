@@ -1691,7 +1691,7 @@ CREATE TABLE `equipment_templates` (
   `default_daily_rate` decimal(10,2) DEFAULT NULL,
   `default_weekly_rate` decimal(10,2) DEFAULT NULL,
   `default_monthly_rate` decimal(10,2) DEFAULT NULL,
-  `default_mileage_rate` decimal(8,4) DEFAULT NULL,
+  `default_mileage_rate` decimal(10,4) NOT NULL DEFAULT '0.0000' COMMENT 'Default per-km mileage rate for new leases on this template. 0 = mileage disabled (D135 config 3). NOT NULL enforced post S-TEMPLATE-MILEAGE-DEFAULTS 2026-05-13.',
   `default_currency` enum('CAD','USD') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'CAD',
   `default_mileage_unit` enum('km','miles') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'km',
   `default_notes` text COLLATE utf8mb4_unicode_ci,
