@@ -542,14 +542,124 @@ if ($i9Failures) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// I10 — Refund amount sanity (S-MILEAGE-5, K-21 anti-pattern lock)
+//
+// For every closed precharge lease with a refund issued, the recorded
+// refund amount must equal the preserved (post-drawdown) precharge_
+// balance on the lease. Catches recurrence of the S-MILEAGE-3-FIX-0
+// double-credit bug class (KI #106 RESOLVED 2026-05-13).
+//
+// Pre-fix anti-pattern: the refund dispatch block in close.php read
+// the cached PRE-drawdown `$lease['precharge_balance']` value. The
+// final-invoice generation between transaction-open and the refund
+// dispatch independently fired drawdown emit, decrementing the
+// balance — but the refund block didn't re-read post-drawdown. Result:
+// refund_amount > post-drawdown precharge_balance → financial
+// double-credit (drawdown credit on Invoice N + refund issued for
+// the same dollars). Surfaced by T1 Step 5 of S-MILEAGE-3-FIX-0;
+// fixed by re-SELECT FOR UPDATE post-drawdown.
+//
+// Two paths, both keyed on the SAME amount identity:
+//   credit branch → credit_notes.amount == leases.precharge_balance
+//   cash branch   → audit_log.new_values.amount == leases.precharge_balance
+//
+// D182 anchors the equation: precharge_balance is NOT zeroed at close;
+// the live column retains the post-drawdown at-close residual, which is
+// exactly the amount the refund covers.
+//
+// Scope: closed leases (status='completed'), deleted_at IS NULL,
+// precharge_enabled=1, refund_method set. tolerance 0.005 (i.e., one
+// half-cent) to absorb any sub-cent storage rounding.
+//
+// Currently zero production rows in either path (no closed precharge
+// leases with refund issued in live state as of 2026-05-13). I10
+// protects against future drift if any code path were to regress
+// the K-21 ordering discipline (the SELECT FOR UPDATE re-read).
+//
+// Decisions: K-21 (close-time re-read discipline), D170 (credit branch
+//            credit_notes.amount), D169 (cash branch audit_log amount),
+//            D182 (precharge_balance preserved post-refund).
+// ────────────────────────────────────────────────────────────────────────────
+
+// Credit branch — credit_notes.amount must equal lease.precharge_balance.
+// Tolerance 0.005 (half-cent) absorbs any sub-cent storage rounding.
+$i10CreditRows = db_select(
+    "SELECT l.id              AS lease_id,
+            l.contract_number,
+            l.precharge_balance,
+            cn.id              AS credit_note_id,
+            cn.credit_note_number,
+            cn.amount          AS credit_note_amount
+       FROM leases l
+       JOIN credit_notes cn
+              ON cn.lease_id = l.id
+             AND cn.source   = 'precharge_refund'
+             AND cn.status <> 'void'
+      WHERE l.status                    = 'completed'
+        AND l.deleted_at                IS NULL
+        AND l.precharge_enabled         = 1
+        AND l.precharge_refund_method   = 'credit'
+        AND ABS(
+              CAST(cn.amount         AS DECIMAL(12,2))
+            - CAST(l.precharge_balance AS DECIMAL(12,2))
+        ) > 0.005"
+);
+
+// Cash branch — audit_log new_values.amount must equal lease.precharge_balance.
+// Joins via the lease_precharge_refund_issued audit_log row (the same
+// row that I9 keys on). Cash-branch leases always have an audit_log
+// row even though they lack a credit_note (D-L entity_type).
+$i10CashRows = db_select(
+    "SELECT l.id              AS lease_id,
+            l.contract_number,
+            l.precharge_balance,
+            al.id              AS audit_log_id,
+            JSON_UNQUOTE(JSON_EXTRACT(al.new_values, '$.amount')) AS audit_amount
+       FROM leases l
+       JOIN audit_log al
+              ON al.entity_type = 'lease_precharge_refund_issued'
+             AND al.entity_id   = l.id
+      WHERE l.status                    = 'completed'
+        AND l.deleted_at                IS NULL
+        AND l.precharge_enabled         = 1
+        AND l.precharge_refund_method   = 'cash'
+        AND ABS(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(al.new_values, '$.amount')) AS DECIMAL(12,2))
+            - CAST(l.precharge_balance AS DECIMAL(12,2))
+        ) > 0.005"
+);
+
+$i10Failures = [];
+foreach ($i10CreditRows as $r) {
+    $i10Failures[] = sprintf(
+        "  CREDIT lease_id=%d  %-22s  cn=%s  cn.amount=%s != precharge_balance=%s (K-21 ordering drift?)",
+        (int) $r['lease_id'], $r['contract_number'], $r['credit_note_number'],
+        (string) $r['credit_note_amount'],
+        (string) $r['precharge_balance']
+    );
+}
+foreach ($i10CashRows as $r) {
+    $i10Failures[] = sprintf(
+        "  CASH   lease_id=%d  %-22s  audit_id=%d  audit_amount=%s != precharge_balance=%s (K-21 ordering drift?)",
+        (int) $r['lease_id'], $r['contract_number'], (int) $r['audit_log_id'],
+        (string) $r['audit_amount'],
+        (string) $r['precharge_balance']
+    );
+}
+if ($i10Failures) {
+    array_unshift($i10Failures, "I10 FAIL — " . count($i10Failures) . " refund amount mismatch(es) (K-21 / D182 / D169 / D170):");
+    $failures[] = implode("\n", $i10Failures);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Output
 // ────────────────────────────────────────────────────────────────────────────
 
-echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX + S-MILEAGE-2A D132 precharge ext. + S-MILEAGE-2B D-O drawdown sanity + S-MILEAGE-3 D-N refund state machine)\n";
+echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX + S-MILEAGE-2A D132 precharge ext. + S-MILEAGE-2B D-O drawdown sanity + S-MILEAGE-3 D-N refund state machine + S-MILEAGE-5 I10 K-21 lock)\n";
 echo str_repeat('═', 78), "\n";
 
 if (!$failures) {
-    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice), I7 (no precharge_enabled=1 with NULL/zero/negative precharge_amount), I8 (drawdown math sanity: credit == min(usage, pre_balance) AND post == pre − credit), I9 (refund state machine: closed lease + residual balance → non-NULL method + settled_at for credit branch).\n";
+    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice), I7 (no precharge_enabled=1 with NULL/zero/negative precharge_amount), I8 (drawdown math sanity: credit == min(usage, pre_balance) AND post == pre − credit), I9 (refund state machine: closed lease + residual balance → non-NULL method + settled_at for credit branch), I10 (refund amount == post-drawdown precharge_balance for both credit + cash branches; K-21 anti-pattern lock).\n";
     exit(0);
 }
 
