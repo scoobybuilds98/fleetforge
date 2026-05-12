@@ -20,10 +20,13 @@ declare(strict_types=1);
  * is_credit=1 to match InvoiceGenerator's signed-aggregator at lines
  * ~357-362 (bcsub on is_credit=1).
  *
- * Hermetic via BEGIN/ROLLBACK; no production drift. samsara skipped
- * via skip_samsara=1 param so the C3 D-C Samsara fallback doesn't fire.
+ * Hermetic via BEGIN/ROLLBACK; no production drift. Samsara fallback
+ * skipped automatically because (a) caller pre-populates
+ * odometer_at_period_*_km so $periodDistanceKm is non-null, and
+ * (b) test leases default to samsara_vehicle_id=NULL — either guard
+ * short-circuits the D-C Samsara block.
  *
- * Decisions: D-B (drawdown shape + gate), D-C (Samsara opt-out),
+ * Decisions: D-B (drawdown shape + gate), D-C (Samsara fallback gate),
  *            D135 (three-config matrix — Branch B for Model B Lite)
  * Spec ref:  S-MILEAGE-2B spec in FLEETFORGE_CURRENT_SESSIONS.md
  */
@@ -98,7 +101,6 @@ try {
         'invoice_type'                => 'regular',
         'odometer_at_period_start_km' => '0.00',
         'odometer_at_period_end_km'   => '100.00',
-        'skip_samsara'                => 1,
         'created_by'                  => $userId,
     ]);
     $usageA  = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='mileage_usage'", [$resA['invoice_id']]);
@@ -124,7 +126,6 @@ try {
         'invoice_type'                => 'regular',
         'odometer_at_period_start_km' => '0.00',
         'odometer_at_period_end_km'   => '100.00',
-        'skip_samsara'                => 1,
         'created_by'                  => $userId,
     ]);
     $creditB = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='mileage_drawdown_credit'", [$resB['invoice_id']]);
@@ -146,7 +147,6 @@ try {
         'invoice_type'                => 'regular',
         'odometer_at_period_start_km' => '0.00',
         'odometer_at_period_end_km'   => '100.00',
-        'skip_samsara'                => 1,
         'created_by'                  => $userId,
     ]);
     $usageC  = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='mileage_usage'", [$resC['invoice_id']]);
@@ -171,7 +171,6 @@ try {
         'invoice_type'                => 'regular',
         'odometer_at_period_start_km' => '0.00',
         'odometer_at_period_end_km'   => '100.00',
-        'skip_samsara'                => 1,
         'created_by'                  => $userId,
     ]);
     $usageD  = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='mileage_usage'", [$resD['invoice_id']]);
@@ -196,7 +195,6 @@ try {
         'invoice_type'                => 'regular',
         'odometer_at_period_start_km' => '0.00',
         'odometer_at_period_end_km'   => '100.00',
-        'skip_samsara'                => 1,
         'created_by'                  => $userId,
     ]);
     $usageE  = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='mileage_usage'", [$resE['invoice_id']]);

@@ -116,9 +116,11 @@ class InvoiceGenerator
                         c.pst_exempt_expiry  AS customer_pst_exempt_expiry,
                         c.tax_exempt_expiry  AS customer_tax_exempt_expiry,
                         c.id                  AS customer_row_id,
-                        c.company_name        AS customer_company_name
+                        c.company_name        AS customer_company_name,
+                        eu.samsara_vehicle_id AS samsara_vehicle_id
                  FROM leases l
                  LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
+                 LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
                  WHERE l.id = ? AND l.deleted_at IS NULL",
                 [$leaseId]
             );
@@ -340,10 +342,14 @@ class InvoiceGenerator
 
             // D-C Samsara fallback fetch — only when caller didn't pre-populate
             // distance AND lease has a samsara_vehicle_id AND we have valid
-            // period dates AND fetching is not opted out via $params['skip_samsara'].
+            // period dates. Test callers reach this block in two ways:
+            //   (a) pre-populate odometer_at_period_*_km → first guard skips
+            //   (b) create lease without samsara_vehicle_id → second guard skips
+            // Either guard short-circuits, so no test-only opt-out param is
+            // needed (post-C3 investigation 2026-05-12 — skip_samsara param
+            // was introduced + removed in C4 first hunk per operator review).
             if ($periodDistanceKm === null
                 && !empty($lease['samsara_vehicle_id'])
-                && empty($params['skip_samsara'])
                 && $billingType !== 'mileage_only'
             ) {
                 try {
