@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MILEAGE-2B-T1** — IN-FLIGHT
+  Started: 2026-05-12T16:33 UTC by desktop-1
+  Touching: FLEETFORGE_CURRENT_SESSIONS.md, FLEETFORGE_PROGRESS.md, users table (TEST USER — created + deleted within session per K-1), leases table (TEST LEASE — created + cancelled within session), settings (samsara.fixture_mode flip + restore), equipment_units (samsara_vehicle_id swap + restore)
 
 ### Documentation cleanup (queued, small)
 
