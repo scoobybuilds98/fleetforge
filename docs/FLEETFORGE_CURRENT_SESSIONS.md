@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-LEASE-21-CLEANUP** — IN-FLIGHT
+  Started: 2026-05-12T21:47 UTC by code-desktop (RO); upgraded to write 2026-05-12T22:00 UTC
+  Touching: docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md, DB writes (invoices id=162 void+soft-delete, leases id=21 outstanding_balance counter correction, audit_log row)
 
 ### Documentation cleanup (queued, small)
 
