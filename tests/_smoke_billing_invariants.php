@@ -461,14 +461,95 @@ if ($i8Failures) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// I9 — Precharge refund state machine sanity (S-MILEAGE-3 C6, D-N)
+//
+// For every closed lease (status='completed', deleted_at IS NULL) with
+// precharge_enabled=1 AND precharge_invoiced_at IS NOT NULL AND a
+// residual precharge_balance > 0 AT CLOSE TIME, the lease MUST have a
+// non-NULL precharge_refund_method AND (for method='credit') a non-NULL
+// precharge_refund_settled_at.
+//
+// The "at close time" balance is reconstructed via the audit_log row
+// entity_type='lease_precharge_refund_issued' new_values JSON field
+// `amount` (D-L; equals precharge_balance at close-commit). The live
+// precharge_balance column post-close stays at the historical at-close
+// value per the S-MILEAGE-3-SPEC-LOCK V1 verification (preserve, NOT
+// zero — preserves audit trail of refund-vs-drawdown distinction).
+//
+// Violation classes:
+//   (a) refund_method NULL when a refund should have fired (residual
+//       balance > 0 at close + no method recorded — would only surface
+//       if a close transaction bypassed the D-K validator)
+//   (b) method='credit' AND settled_at IS NULL (credit-branch should
+//       stamp at close-commit per D-E (ii); NULL indicates an aborted
+//       transaction OR a code path that skipped the stamp)
+//
+// Cash-branch method='cash' AND settled_at IS NULL is NOT a violation
+// by design — D-B (i) deferred-settle pattern; operator stamps
+// settled_at later via api/v1/leases/mark_refund_settled.php when the
+// physical disbursement happens.
+//
+// For leases that closed WITHOUT a residual balance (drawdown fully
+// consumed precharge_balance), refund_method stays NULL and I9 doesn't
+// fire — the gate at line ~830 in close.php (needsRefund check)
+// silently skips the refund block.
+// ────────────────────────────────────────────────────────────────────────────
+
+$i9Rows = db_select(
+    "SELECT
+        l.id              AS lease_id,
+        l.contract_number,
+        l.precharge_refund_method,
+        l.precharge_refund_settled_at,
+        JSON_UNQUOTE(JSON_EXTRACT(al.new_values, '$.amount')) AS refund_amount_at_close
+       FROM leases l
+       LEFT JOIN audit_log al
+              ON al.entity_type = 'lease_precharge_refund_issued'
+             AND CAST(JSON_UNQUOTE(JSON_EXTRACT(al.new_values, '$.closed_by_user_id')) AS UNSIGNED) IS NOT NULL
+             AND al.entity_id = l.id
+      WHERE l.status                = 'completed'
+        AND l.deleted_at            IS NULL
+        AND l.precharge_enabled     = 1
+        AND l.precharge_invoiced_at IS NOT NULL
+        AND al.id IS NOT NULL
+        AND CAST(JSON_UNQUOTE(JSON_EXTRACT(al.new_values, '$.amount')) AS DECIMAL(12,2)) > 0"
+);
+
+$i9Failures = [];
+foreach ($i9Rows as $r) {
+    // (a) Method NULL when refund should have fired
+    if ($r['precharge_refund_method'] === null) {
+        $i9Failures[] = sprintf(
+            "  lease_id=%d  %-22s  refund_amount_at_close=%s  but precharge_refund_method IS NULL (D-K validator bypassed?)",
+            $r['lease_id'], $r['contract_number'], $r['refund_amount_at_close']
+        );
+        continue;
+    }
+
+    // (b) Credit branch must have settled_at stamped at close-commit
+    if ($r['precharge_refund_method'] === 'credit' && $r['precharge_refund_settled_at'] === null) {
+        $i9Failures[] = sprintf(
+            "  lease_id=%d  %-22s  method=credit but precharge_refund_settled_at IS NULL (D-E (ii) gap — close commit didn't stamp)",
+            $r['lease_id'], $r['contract_number']
+        );
+    }
+
+    // Cash-branch NULL settled_at is NOT a violation (D-B (i) defer-settle).
+}
+if ($i9Failures) {
+    array_unshift($i9Failures, "I9 FAIL — " . count($i9Failures) . " refund state machine violation(s) (D-N / D-B (i) / D-E (ii)):");
+    $failures[] = implode("\n", $i9Failures);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Output
 // ────────────────────────────────────────────────────────────────────────────
 
-echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX + S-MILEAGE-2A D132 precharge ext. + S-MILEAGE-2B D-O drawdown sanity)\n";
+echo "FleetForge — billing invariants smoke test (S-BILLING-RATE-FIX D132 + S-MILEAGE-RATE-VALIDATION D133 + S-MILEAGE-ALLOWANCE-ZERO-FIX + S-MILEAGE-2A D132 precharge ext. + S-MILEAGE-2B D-O drawdown sanity + S-MILEAGE-3 D-N refund state machine)\n";
 echo str_repeat('═', 78), "\n";
 
 if (!$failures) {
-    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice), I7 (no precharge_enabled=1 with NULL/zero/negative precharge_amount), I8 (drawdown math sanity: credit == min(usage, pre_balance) AND post == pre − credit).\n";
+    echo "INVARIANTS OK — I1 (no unjustified zero-base drafts), I2 (no lease rate-tier holes), I3 (no template rate-tier holes), I4 (no lease mileage-intent + zero-rate hole), I5 (no invoice with distance against zero-rate lease), I6 (no silent-skip mileage on rate>0 + distance>0 invoice), I7 (no precharge_enabled=1 with NULL/zero/negative precharge_amount), I8 (drawdown math sanity: credit == min(usage, pre_balance) AND post == pre − credit), I9 (refund state machine: closed lease + residual balance → non-NULL method + settled_at for credit branch).\n";
     exit(0);
 }
 
