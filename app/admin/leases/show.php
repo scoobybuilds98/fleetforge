@@ -43,7 +43,12 @@ $lease = db_row(
             l.outstanding_balance, l.total_invoiced, l.total_paid, l.po_number,
             l.created_at, l.closed_at,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
-            COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number
+            COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number,
+            -- S-UNIT-STATUS-COLOR 2026-05-14: live unit status for the
+            -- detail table unit-reference badge. Server-side mirror of the
+            -- API endpoint (api/v1/leases/show.php) field so both render
+            -- paths see the same data.
+            u.status AS unit_current_status
      FROM leases l
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
@@ -507,8 +512,17 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                                    class="link" x-text="lease.customer_display_name || lease.company_name_snapshot"></a></td>
                                         </tr>
                                         <tr><td class="text-secondary">Unit</td>
-                                            <td><a :href="'<?= base_url('equipment/show') ?>?id=' + lease.equipment_unit_id"
-                                                   class="font-mono link" x-text="lease.unit_display_number || lease.unit_number_snapshot"></a></td>
+                                            <td>
+                                                <a :href="'<?= base_url('equipment/show') ?>?id=' + lease.equipment_unit_id"
+                                                   class="font-mono link" x-text="lease.unit_display_number || lease.unit_number_snapshot"></a>
+                                                <!-- S-UNIT-STATUS-COLOR 2026-05-14: live equipment_unit.status badge next to the unit reference (DESIGN_DETAILS.md §9 mapping; canonical 6-status ENUM). Hidden when the linked unit is soft-deleted (unit_current_status will be null). -->
+                                                <template x-if="lease.unit_current_status">
+                                                    <span class="badge badge-no-dot text-xs"
+                                                          :class="unitStatusBadgeClass(lease.unit_current_status)"
+                                                          x-text="lease.unit_current_status.replace('_', ' ')"
+                                                          style="margin-left:0.5rem;"></span>
+                                                </template>
+                                            </td>
                                         </tr>
                                         <tr x-show="lease.template_name_snapshot"><td class="text-secondary">Template</td><td x-text="lease.template_name_snapshot"></td></tr>
                                         <tr><td class="text-secondary">GST Exempt</td><td x-text="lease.gst_exempt ? 'Yes' : 'No'"></td></tr>
@@ -2553,6 +2567,24 @@ function FF_LeaseDetail() {
                 pending:   'badge-warning',
                 completed: 'badge-neutral',
                 cancelled: 'badge-danger',
+            };
+            return map[status] || 'badge-neutral';
+        },
+
+        // S-UNIT-STATUS-COLOR 2026-05-14: canonical equipment_units.status →
+        // badge class mapping (mirrors includes/functions.php
+        // unit_status_badge_class() PHP helper + DESIGN_DETAILS.md §9).
+        // JS-side mirror exists because Alpine templates can't call PHP at
+        // render time; lease object is hydrated via API so the badge class
+        // must be computed in the browser.
+        unitStatusBadgeClass(status) {
+            const map = {
+                available:      'badge-success',
+                reserved:       'badge-purple',
+                on_lease:       'badge-info',
+                maintenance:    'badge-warning',
+                inactive:       'badge-neutral',
+                decommissioned: 'badge-danger',
             };
             return map[status] || 'badge-neutral';
         },

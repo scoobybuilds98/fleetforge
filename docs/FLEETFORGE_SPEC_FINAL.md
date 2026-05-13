@@ -861,7 +861,7 @@ At lease close, when `lease.precharge_enabled=1 AND lease.precharge_balance > 0`
 
 **Smoke invariant I9** (D-N): closed leases with residual balance must have non-NULL `precharge_refund_method` AND (for credit branch) non-NULL `precharge_refund_settled_at`. Cash-branch NULL settled_at is NOT a violation by design.
 
-**Carry-forward:** `precharge_balance` post-refund retains the historical at-close value (NOT zeroed) — preserves audit trail of refund-vs-drawdown distinction; I9 invariant predicate keys on this. Portal display of refunded leases is deferred to S-PORTAL-MILEAGE-MODEL-B.
+**Carry-forward:** `precharge_balance` post-refund retains the historical at-close value (NOT zeroed) — preserves audit trail of refund-vs-drawdown distinction; I9 invariant predicate keys on this. Portal display of refunded leases shipped via S-PORTAL-MILEAGE-MODEL-B 2026-05-13.
 
 **Accounting JE pattern** — deferred to `S-MILEAGE-3-ACCT-SPEC` follow-up session pending CPA conversation. See FLEETFORGE_ACCOUNTING_SPEC.md (currently unchanged for this lifecycle phase) + S-MILEAGE-3 spec D-I in FLEETFORGE_CURRENT_SESSIONS.md SESSION LOG for the 5 enumerated CPA questions.
 

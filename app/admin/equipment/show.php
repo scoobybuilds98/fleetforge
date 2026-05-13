@@ -84,17 +84,13 @@ $linkedAssetId = $linkedAsset ? (int) $linkedAsset['id'] : 0;
 $pageTitle = 'Unit ' . e($unit['unit_number']);
 require_once FF_ROOT . '/includes/header.php';
 
-// Badge class helper — matches JS version in index.php
+// statusBadgeClass — page-local alias for the canonical shared helper at
+// includes/functions.php:unit_status_badge_class (S-UNIT-STATUS-COLOR
+// 2026-05-14). Alias retained so existing call sites in this file don't
+// have to change; future pages should call unit_status_badge_class()
+// directly.
 function statusBadgeClass(string $status): string {
-    return match($status) {
-        'available'      => 'badge-success',
-        'on_lease'       => 'badge-info',
-        'reserved'       => 'badge-purple',
-        'maintenance'    => 'badge-warning',
-        'inactive'       => 'badge-neutral',
-        'decommissioned' => 'badge-danger',
-        default          => 'badge-neutral',
-    };
+    return unit_status_badge_class($status);
 }
 
 // healthBadgeClass — map the canonical 4-band health color (S-CRON-3) to

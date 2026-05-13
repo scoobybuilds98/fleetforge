@@ -663,3 +663,44 @@ function equipment_health_color(?int $score): string
     return 'red';
 }
 }
+
+// ============================================================
+// EQUIPMENT UNIT STATUS BADGE HELPER — S-UNIT-STATUS-COLOR
+// ============================================================
+
+// unit_status_badge_class() — map equipment_units.status to badge CSS class.
+//
+// WHY: DESIGN_DETAILS.md §9 locks the status→color mapping for equipment
+// units. Centralized here so every surface (admin pages, server-rendered
+// snippets, search endpoint) routes through one function rather than each
+// page duplicating the map and drifting (see S-UNIT-STATUS-COLOR pre-flight
+// audit which surfaced two existing drifted JS copies: reservations/show.php
+// unitStatusBadge() had reserved→warning + maintenance→danger +
+// decommissioned→neutral; api/v1/search.php $badge_class closure had
+// maintenance→info + inactive→info; both corrected in same session).
+//
+// Mapping (locked per DESIGN_DETAILS.md §9 + equipment_units.status ENUM):
+//   available      → badge-success  (green)
+//   reserved       → badge-purple
+//   on_lease       → badge-info     (blue)
+//   maintenance    → badge-warning  (amber)
+//   inactive       → badge-neutral  (gray)
+//   decommissioned → badge-danger   (red)
+//
+// Returns the matching `.badge-*` class name. Unknown statuses fall through
+// to badge-neutral (defensive default — shouldn't happen given the DB ENUM
+// constraint, but renders sensibly if status is NULL or schema drifts).
+if (!function_exists('unit_status_badge_class')) {
+function unit_status_badge_class(?string $status): string
+{
+    return match ($status) {
+        'available'      => 'badge-success',
+        'reserved'       => 'badge-purple',
+        'on_lease'       => 'badge-info',
+        'maintenance'    => 'badge-warning',
+        'inactive'       => 'badge-neutral',
+        'decommissioned' => 'badge-danger',
+        default          => 'badge-neutral',
+    };
+}
+}

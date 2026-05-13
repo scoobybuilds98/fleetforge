@@ -271,6 +271,20 @@ function priorityBadgeClass(string $p): string {
                            class="link font-mono">
                             <?= e($wo['unit_number']) ?>
                         </a>
+                        <?php
+                        // S-UNIT-STATUS-COLOR 2026-05-14: live equipment_unit.status
+                        // badge next to the unit number. Data is already fetched
+                        // by the existing SELECT at line 43 as eu.status AS
+                        // unit_status — no query extension needed. Routes through
+                        // the shared helper at includes/functions.php so the
+                        // color mapping stays in lockstep with DESIGN_DETAILS.md §9.
+                        if (!empty($wo['unit_status'])):
+                        ?>
+                        <span class="badge badge-no-dot text-xs <?= unit_status_badge_class($wo['unit_status']) ?>"
+                              style="margin-left:0.5rem;">
+                            <?= e(str_replace('_', ' ', $wo['unit_status'])) ?>
+                        </span>
+                        <?php endif; ?>
                         <?php if ($wo['unit_year'] || $wo['brand'] || $wo['model']): ?>
                         <span class="text-secondary"> — <?= e(trim($wo['unit_year'] . ' ' . $wo['brand'] . ' ' . $wo['model'])) ?></span>
                         <?php endif; ?>

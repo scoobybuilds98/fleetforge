@@ -114,6 +114,10 @@ $lease = db_row(
         l.updated_at,
         COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
         COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number,
+        -- S-UNIT-STATUS-COLOR 2026-05-14: live unit status for the lease show
+        -- detail table badge. NULL when the lease's equipment_unit_id has
+        -- been soft-deleted (snapshot still renders, badge does not).
+        u.status AS unit_current_status,
         t.name AS template_display_name,
         -- SAMSARA-1: live telemetry from the linked equipment unit so the
         -- lease detail page can render a GPS card and the Close modal can

@@ -1098,14 +1098,21 @@ function FF_ReservationShow(resId) {
             }[p] || 'badge-neutral';
         },
 
+        // S-UNIT-STATUS-COLOR 2026-05-14: corrected to canonical 6-status
+        // mapping per DESIGN_DETAILS.md §9 + includes/functions.php
+        // unit_status_badge_class(). Pre-fix drift: reserved→warning (now
+        // purple), maintenance→danger (now warning), decommissioned→
+        // neutral (now danger). The PHP-side helper is the source of truth;
+        // this JS-side mirror exists because Alpine templates render
+        // client-side from API data.
         unitStatusBadge(s) {
             return {
-                'available':    'badge-success',
-                'reserved':     'badge-warning',
-                'on_lease':     'badge-info',
-                'maintenance':  'badge-danger',
-                'inactive':     'badge-neutral',
-                'decommissioned':'badge-neutral',
+                'available':     'badge-success',
+                'reserved':      'badge-purple',
+                'on_lease':      'badge-info',
+                'maintenance':   'badge-warning',
+                'inactive':      'badge-neutral',
+                'decommissioned':'badge-danger',
             }[s] || 'badge-neutral';
         },
 

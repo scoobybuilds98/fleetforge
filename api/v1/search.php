@@ -178,7 +178,17 @@ if (can('equipment', 'view')) {
             'subtitle'    => implode(' · ', $subParts),
             'url'         => base_url('equipment/show') . '?id=' . (int) $row['id'],
             'badge'       => $humanize($row['status'] ?? ''),
-            'badge_class' => $badge_class($row['status'] ?? ''),
+            // S-UNIT-STATUS-COLOR 2026-05-14: route equipment_units status
+            // through the canonical helper at includes/functions.php so the
+            // search result badge matches the fleet list + unit profile +
+            // lease show + maintenance show + reservation show. The local
+            // $badge_class closure above is a multi-entity overload that
+            // had drifted color mappings for equipment statuses (reserved →
+            // warning instead of purple; maintenance → info instead of
+            // warning; inactive → info instead of neutral). Other entity
+            // types (leases, invoices, payments, customers) keep using
+            // $badge_class below.
+            'badge_class' => unit_status_badge_class($row['status'] ?? ''),
         ];
         $total++;
     }
