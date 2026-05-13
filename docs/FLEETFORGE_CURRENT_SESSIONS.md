@@ -73,7 +73,14 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-CHECKLIST-WORDING-FIX** — IN-FLIGHT
+Start: 2026-05-14 21:00 UTC
+Agent: Claude Code Desktop
+Touching:
+  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (3 line edits: I1 Status annotation + Owner line; G2 heading parenthetical; Last-touched stamp)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: 3 stale-wording fixes surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13. No Action/Detail content changes; annotation + heading + stamp only.
 
 ### Documentation cleanup (queued, small)
 
