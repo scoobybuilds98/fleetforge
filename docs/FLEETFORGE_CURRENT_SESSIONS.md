@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-SEED-RATE-CARDS-LOAD** — IN-FLIGHT
+  Started: 2026-05-13T09:24 UTC by desktop-1
+  Touching: rate_cards (NEW row), rate_card_items (NEW rows), FLEETFORGE_DATABASE_MASTER.sql (data note comment), db_migrations/ (NEW), docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_PROGRESS.md
 
 ### Documentation cleanup (queued, small)
 
