@@ -73,7 +73,20 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-UNIT-STATUS-COLOR** — IN-FLIGHT
+Start: 2026-05-14 20:06 UTC
+Agent: Claude Code Desktop
+Touching:
+  - lib/Helpers/unit_status_badge.php (NEW — shared PHP helper extracted from equipment/show.php:88 inline)
+  - app/admin/equipment/show.php (refactor inline helper to call shared lib — operator-confirmed)
+  - app/admin/leases/show.php (extend SQL with eu.status; render badge next to unit_display_number)
+  - app/admin/reservations/show.php (add badge next to unit_number reference if not present)
+  - app/admin/maintenance_work_orders/show.php (render badge using already-fetched unit_status data)
+  - api/v1/search.php (universal search — extend equipment results with status if not present)
+  - docs/FLEETFORGE_SPEC_FINAL.md (line 864 carry-forward fold-in: "deferred to" → "shipped via")
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + S-MILEAGE-HELPERS-CLEANUP formalize)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row appended)
+Scope: 6-status DB ENUM badge (available/reserved/on_lease/maintenance/inactive/decommissioned per DESIGN_DETAILS.md §9). NO CSS changes (all 6 badge-* classes already in app.css) → NO FF_ASSET_VERSION bump → NO A4 entry. Two surfaces ALREADY SHIPPED out of scope: app/admin/equipment/index.php (fleet list) + app/admin/equipment/show.php (unit profile main render). SKIP app/admin/invoices/show.php (uses unit_number_invoice_snapshot — historical record) + app/portal/leases/view.php (D10 info-boundary — customer-facing). Operator confirmed all 4 scope decisions via AskUserQuestion at pre-flight. No schema motion; no migration.
 
 ### Documentation cleanup (queued, small)
 
