@@ -139,6 +139,22 @@ require_once FF_ROOT . '/includes/header.php';
              x-text="periodWarning"></div>
     </template>
 
+    <!-- S-INVOICE-BACKDATE-WARNING: reactive advisory banners that fire on
+         two distinct backdate shapes the operator may not intend:
+           (a) Canonical Bug 4 (PROGRESS.md:562, D163 rider): period_start
+               < lease.start_date — the invoice covers time BEFORE the lease
+               began. Risk: billing for pre-contract time.
+           (b) Prompt's Bug 4: period_end < today — the invoice covers an
+               already-past period. Risk: double-billing a period that was
+               already covered by an earlier invoice.
+         Both banners are amber/non-blocking advisories (operator may
+         legitimately backdate — catch-up invoices, late-recorded periods).
+         Server-side validation NOT added; this is UI-only soft signal. -->
+    <template x-for="warn in backdateWarnings()" :key="warn.kind">
+        <div class="alert alert-warning" style="margin-bottom:16px; padding:0.75rem 1rem; font-size:0.875rem;"
+             x-text="warn.text"></div>
+    </template>
+
     <!-- Period Dates -->
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
         <div>
@@ -388,6 +404,57 @@ function FF_InvoiceCreate() {
             const d = new Date(dateStr + 'T00:00:00');
             d.setDate(d.getDate() + n);
             return this._ymd(d);
+        },
+        // S-INVOICE-BACKDATE-WARNING: today's date in YYYY-MM-DD form via the
+        // same _ymd() formatter used by the auto-fill arithmetic. Local-time
+        // zoned (matches what date <input type="date"> stores). Re-evaluated
+        // every reactive read so day-boundary crossings during a long-open
+        // form get reflected the next time period_end changes.
+        _todayYmd() {
+            return this._ymd(new Date());
+        },
+        // S-INVOICE-BACKDATE-WARNING: compute both backdate advisory banners
+        // reactively. Returns an array of {kind, text} entries — one per
+        // active warning. The x-for template renders one alert per entry.
+        //
+        //   - 'pre_lease_start' (canonical Bug 4 / D163 rider): fires when
+        //     form.period_start < the lease's start_date. Uses
+        //     _leaseStartDate set in onLeaseChange() from the option's
+        //     data-lease-start-date attribute.
+        //   - 'past_period_end' (prompt's Bug 4 framing): fires when
+        //     form.period_end < today's date.
+        //
+        // Both checks are advisory (non-blocking). Operator may legitimately
+        // backdate for catch-up invoices, late-recorded periods, etc.
+        backdateWarnings() {
+            const warns = [];
+
+            // Banner (a) — period_start precedes lease.start_date
+            if (this.form.period_start
+                && this._leaseStartDate
+                && this.form.period_start < this._leaseStartDate) {
+                warns.push({
+                    kind: 'pre_lease_start',
+                    text: '⚠️ Period start (' + this.form.period_start
+                        + ') precedes lease start date (' + this._leaseStartDate
+                        + '). Confirm this is intentional — invoices should '
+                        + 'not bill for time before the lease began.'
+                });
+            }
+
+            // Banner (b) — period_end is in the past
+            if (this.form.period_end && this.form.period_end < this._todayYmd()) {
+                warns.push({
+                    kind: 'past_period_end',
+                    text: '⚠️ This invoice covers a past period ('
+                        + (this.form.period_start || '?') + ' to '
+                        + this.form.period_end + '). Verify this period '
+                        + "hasn't already been billed for this lease before "
+                        + 'sending.'
+                });
+            }
+
+            return warns;
         },
         // period_start + 1 month - 1 day, with end-of-month clamping so
         // Jan 31 → Feb 27 (not Mar 2) and Mar 30 → Apr 29 etc.
