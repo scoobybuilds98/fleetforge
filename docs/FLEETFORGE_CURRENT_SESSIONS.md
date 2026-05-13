@@ -73,7 +73,14 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-PROD-2-DOCS-RECONCILE** — IN-FLIGHT
+Start: 2026-05-13 14:28 UTC
+Agent: Claude Code Desktop
+Touching:
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (S-PROD-2 QUEUED → retroactive SHIPPED reference + 2026-05-02 Recent ship history backfill + this session IN-FLIGHT → SHIPPED)
+  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (B3 / B4 / B5 / D7 / I1 detail-line + status-line + action-line flips "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; Last-touched stamp)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row appended after S-DOCS-REORG-RESIDUAL, ascending convention)
+Scope: docs-only reconcile — S-PROD-2 actually SHIPPED 2026-05-02 (PROGRESS.md SESSION LOG line 104 + DECISIONS D75-D78 + lib/Observability/Sentry.php + api/v1/webhooks/ses_notifications.php + docs/runbooks/key_rotation.md + email_bounces migration). The QUEUED entry was added this morning by S-CHECKLIST-DRIFT-FIX C2(b) (commit ec92f32) based on stale info; PREDEPLOY_CHECKLIST.md B3/B4/B5/D7/I1 also drifted. No code/schema/migration motion; surfaces a "trust file over prompt at session-shape scale" learning to memory at session close.
 
 ### Documentation cleanup (queued, small)
 
