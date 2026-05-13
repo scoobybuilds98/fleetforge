@@ -26,6 +26,18 @@ Read-only sessions skip the collision check (step 2) but still register (step 3)
 
 ---
 
+## Active planning chat handoff
+
+**AWS Lightsail cutover chat** — opened 2026-05-13.
+Context: all Tier 1/2/3 sessions complete (23 SHIPPED labels in this file as of HANDOFF-PREP). Model B mileage arc closed (engine via S-MILEAGE-1/-2A/-2B/-3/-3-FIX-0/-5; portal + helper retirement via S-PORTAL-MILEAGE-MODEL-B). Doc freshness smoke green (17/17 PASS exit 0). 17 migrations applied locally, 17 ok / 0 drift / 0 missing. Primary working doc: `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md`. This chat (original) retains history. New chat reads canonical files from `docs/` and picks up from the predeploy checklist. K-16: trust canonical files; do not re-derive locked decisions. The QuickBooks integration chat (`FLEETFORGE_QUICKBOOKS_SPEC.md`) is a separate planning chat, not yet started.
+
+Remaining open queue items independent of cutover and QBO arcs:
+- `S-MILEAGE-3-ACCT-SPEC` — CPA-blocked on 5 enumerated questions (D-I (A) / D176).
+- `S-MILEAGE-HELPERS-CLEANUP` — optional hygiene defer (3 orphan helpers in `lib/Billing/Mileage.php` per S-PORTAL-MILEAGE-MODEL-B D-E).
+- `S-PROD-3` — self-host CDN deps (Google Fonts, ApexCharts, Leaflet).
+
+---
+
 ## Status legend
 - **QUEUED** — discussed, prompt drafted (or near-drafted), not yet shipped
 - **IN-FLIGHT** — write-mode session currently executing in Code Desktop. Per D136, only one allowed at a time on main. Entry includes start timestamp, agent identifier, and touching domains.
@@ -175,10 +187,10 @@ Scope: bidirectional sync with QBO as source of truth for customers + payments, 
 Status: planning will happen in a separate claude.ai web chat with FLEETFORGE_QUICKBOOKS_SPEC.md as the dedicated canonical doc. Not yet started.
 Dependencies: defer until after Model B refactor (S-MILEAGE-2A/2B/3) and accountant conversation.
 
-**AWS Lightsail cutover** — QUEUED (multi-session)
-Scope: production deployment to AWS Lightsail Oregon. Currently deferred until feature-complete per D8.
-Status: not yet feature-complete.
-Pre-deploy obligations: see `FLEETFORGE_PREDEPLOY_CHECKLIST.md` — categories C (DNS), D (AWS infra D1-D9 — Lightsail provision, snapshots, S3 bucket + versioning, mysqldump cron, SES sandbox exit, SNS topic, IAM, CloudWatch alarms), G (smoke G1-G4), H (rollback H1-H2), I (monitoring I1-I3) all flow through this multi-session. Each ITEM there carries Originating session + Action + Owner; flip Status → ✅ COMPLETE in the checklist as the cutover progresses. Discipline locked as K-14 (pre-deploy obligations file separate from KNOWN ISSUES and CURRENT_SESSIONS) — see PROGRESS.md KEY LEARNINGS.
+**AWS Lightsail cutover** — ACTIVE (new chat)
+Scope: production deployment to AWS Lightsail Oregon.
+Pre-deploy obligations: `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md` (26 obligations across categories A-I) — categories C (DNS), D (AWS infra D1-D9 — Lightsail provision, snapshots, S3 bucket + versioning, mysqldump cron, SES sandbox exit, SNS topic, IAM, CloudWatch alarms), G (smoke G1-G4), H (rollback H1-H2), I (monitoring I1-I3). Each ITEM there carries Originating session + Action + Owner; flip Status → ✅ COMPLETE in the checklist as the cutover progresses. Discipline locked as K-14 (pre-deploy obligations file separate from KNOWN ISSUES and CURRENT_SESSIONS) — see PROGRESS.md KEY LEARNINGS.
+Status: Tier 1/2/3 feature sessions complete as of 2026-05-13. New dedicated planning chat opened 2026-05-13 for the cutover arc. Working doc: `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md` (primary reference for the new chat). `FLEETFORGE_QUICKBOOKS_SPEC.md` (separate QBO chat, not yet started).
 
 **S-PROD-3** — QUEUED
 Scope: self-host CDN deps (Google Fonts, ApexCharts, Leaflet — items #79-81 from prod prep audit).

@@ -2,6 +2,30 @@
 
 **Canonical pre-deploy operations file.** Lives alongside `FLEETFORGE_PROGRESS.md` (history), `FLEETFORGE_CURRENT_SESSIONS.md` (queue), and `FLEETFORGE_CLAUDE_CODE_REFERENCE.md` (lookups). Created 2026-05-12 via session **S-PREDEPLOY-CHECKLIST-CREATE**; discipline locked as **K-14** in PROGRESS.md KEY LEARNINGS.
 
+---
+
+## Handoff status (HANDOFF-PREP 2026-05-13)
+
+**Last updated:** 2026-05-13 by HANDOFF-PREP — pre-cutover-chat preparation.
+
+**Platform state at handoff:**
+- **Stack:** PHP 8.2 / MySQL 8.0 / Alpine.js / ApexCharts v3 / mPDF / AWS SDK (per D24 composer.json carries BOTH `mpdf/mpdf` AND `aws/aws-sdk-php`).
+- **Local dev:** Laravel Herd at `http://fleetforge.test/fleetforge/`; MySQL via Homebrew at `127.0.0.1:3306`.
+- **Migrations:** 17 migration files in `db_migrations/`, **17 applied / 0 drift / 0 missing** per `bin/migrate.php --verify`.
+- **FF_ASSET_VERSION:** 1.0.28 in dev `.env` (gitignored). **Filed under A2 in this checklist — bump on prod before deploy.**
+- **SHIPPED sessions:** 23 labels currently in `CURRENT_SESSIONS.md` (Tier 1/2/3 feature work complete). Doc freshness smoke 17/17 PASS exit 0.
+- **Model B mileage arc closed:** engine (S-MILEAGE-1 → -2A → -2B → -3 → -3-FIX-0 → -5) + portal + helper retirement (S-PORTAL-MILEAGE-MODEL-B) all SHIPPED 2026-05-13. Final retirement of `Mileage::monthlyAllowance` complete.
+- **Pending non-blocking:** `S-MILEAGE-3-ACCT-SPEC` is CPA-blocked on 5 enumerated questions per D-I (A) / D176 — independent of cutover; can ship before, during, or after deploy without coupling.
+- **Pending optional:** `S-MILEAGE-HELPERS-CLEANUP` (3 orphan helpers in `lib/Billing/Mileage.php` per S-PORTAL-MILEAGE-MODEL-B D-E) + `S-PROD-3` (self-host CDN deps) — both hygiene-grade, neither blocks deploy.
+- **Repo:** `/Users/avi/Documents/fleetforge` on `origin/main`, working tree clean post-HANDOFF-PREP.
+- **Canonical docs:** all `FLEETFORGE_*.md` files in `docs/` subfolder per DOCS-REORG (2026-05-13); `FLEETFORGE_DATABASE_MASTER.sql` at repo root per SEVEN FILES convention (REFERENCE.md §1).
+
+**Smoke-gate state (D131 four-gate suite):**
+- `php tests/_smoke_doc_freshness.php` → 17/17 PASS exit 0
+- `php tests/_smoke_master_schema_parity.php` → PARITY OK (master matches live DB)
+- `php tests/_smoke_billing_invariants.php` → INVARIANTS OK I1-I10 (10/10 PASS exit 0)
+- `php bin/migrate.php --verify` → 17 ok / 0 drift / 0 missing
+
 **Bidirectional cross-refs:**
 - See `FLEETFORGE_PROGRESS.md` → KEY LEARNINGS → **K-14** for the discipline rule that mandates this file's existence.
 - See `FLEETFORGE_PROGRESS.md` → SESSION LOG → **S-PREDEPLOY-CHECKLIST-CREATE** (2026-05-12) for creation context + backfill inventory.
