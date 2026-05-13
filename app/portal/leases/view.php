@@ -69,68 +69,123 @@ $startTs = strtotime($lease['start_date']);
 $endTs   = $lease['end_date'] ? strtotime($lease['end_date']) : time();
 $daysActive = max(1, (int) ceil(($endTs - $startTs) / 86400) + 1);
 
-// ── S-LEASE-MILEAGE: customer-facing mileage usage ─────────
+// ── S-PORTAL-MILEAGE-MODEL-B: customer-facing mileage section ───
+// Replaces the S-LEASE-MILEAGE Model C allowance card (D154 + D167
+// final retirement). Renders per the D135 three-configuration matrix:
+//   Config 1 (Precharge):    rate>0 + precharge_enabled=1 → precharge
+//                                                            card with
+//                                                            paid /
+//                                                            credits
+//                                                            applied /
+//                                                            balance +
+//                                                            refund
+//                                                            block +
+//                                                            drawdown
+//                                                            history.
+//   Config 2 (Model B Lite): rate>0 + precharge_enabled=0 → usage-only
+//                                                            card with
+//                                                            rate +
+//                                                            history.
+//   Config 3 (Disabled):     rate=0                       → no section
+//                                                            rendered.
 // Customer never sees manager-internal fields (review status, override
-// notes, audit log). Show running totals and a per-month progress card
-// for active leases; final summary for closed leases.
-$mileageCard = null;
-$totalAllowanceKm = (float) ($lease['estimated_mileage_km']
-                              ?? $lease['estimated_mileage'] ?? 0);
-if ($totalAllowanceKm > 0) {
-    $allowanceMeta = \FleetForge\Billing\Mileage::monthlyAllowance($lease);
+// notes, audit log) — same discipline as the retired Model C card.
+$mileageRateKm    = (float) ($lease['mileage_rate_km']     ?? 0);
+$prechargeEnabled = (int)   ($lease['precharge_enabled']   ?? 0);
 
-    // Cumulative usage for an active lease comes from the latest invoice's
-    // cumulative_distance_km column; for a closed lease it's the canonical
-    // lease.total_distance_km.
-    $cumulativeKm = null;
-    $latestInvoiceNumber = null;
-    $latestInvoiceDate   = null;
+$mileageConfig  = null;       // 'precharge' | 'usage_only' | null (hide)
+$mileageHistory = [];
+$prechargeData  = null;
+$refundData     = null;
 
-    if ($lease['status'] === 'completed' && !empty($lease['total_distance_km'])) {
-        $cumulativeKm = (float) $lease['total_distance_km'];
-    } else {
-        $latestInv = db_row(
-            "SELECT cumulative_distance_km, invoice_number, invoice_date
-               FROM invoices
-              WHERE lease_id = ? AND deleted_at IS NULL
-                AND cumulative_distance_km IS NOT NULL
-              ORDER BY billing_period_end DESC, id DESC LIMIT 1",
+if ($mileageRateKm > 0) {
+    $mileageConfig = $prechargeEnabled === 1 ? 'precharge' : 'usage_only';
+
+    // Last 5 sent or paid invoices with mileage_usage lines for this
+    // lease. Customers never see drafts — restrict to status that has
+    // been disclosed to them (draft = internal-only; void = exclude).
+    $mileageHistory = db_select(
+        "SELECT ili.amount        AS usage_amount,
+                ili.quantity      AS km,
+                ili.unit_price    AS rate,
+                ili.description   AS description,
+                i.id              AS invoice_id,
+                i.invoice_number  AS invoice_number,
+                i.billing_period_start,
+                i.billing_period_end,
+                i.status          AS invoice_status,
+                (SELECT cn.amount FROM invoice_line_items cn
+                  WHERE cn.invoice_id = i.id
+                    AND cn.item_type  = 'mileage_drawdown_credit'
+                  LIMIT 1)        AS credit_amount
+           FROM invoice_line_items ili
+           JOIN invoices i ON i.id = ili.invoice_id
+          WHERE i.lease_id = ?
+            AND i.deleted_at IS NULL
+            AND i.status IN ('sent','partially_paid','paid','overdue')
+            AND ili.item_type = 'mileage_usage'
+          ORDER BY i.billing_period_end DESC, i.id DESC
+          LIMIT 5",
+        [$leaseId]
+    );
+
+    if ($mileageConfig === 'precharge') {
+        // Sum of every drawdown credit applied to date — bounded to
+        // non-void disclosed invoices, mirroring history filter.
+        $creditsRow = db_row(
+            "SELECT COALESCE(SUM(ili.amount), 0) AS credits_applied
+               FROM invoice_line_items ili
+               JOIN invoices i ON i.id = ili.invoice_id
+              WHERE i.lease_id = ?
+                AND i.deleted_at IS NULL
+                AND i.status IN ('sent','partially_paid','paid','overdue')
+                AND ili.item_type = 'mileage_drawdown_credit'",
             [$leaseId]
         );
-        if ($latestInv) {
-            $cumulativeKm = (float) $latestInv['cumulative_distance_km'];
-            $latestInvoiceNumber = $latestInv['invoice_number'];
-            $latestInvoiceDate   = $latestInv['invoice_date'];
+        $creditsApplied = (float) ($creditsRow['credits_applied'] ?? 0);
+
+        $prechargeData = [
+            'paid'              => (float) ($lease['precharge_amount']  ?? 0),
+            'credits_applied'   => $creditsApplied,
+            'balance'           => (float) ($lease['precharge_balance'] ?? 0),
+            'invoiced_at'       => $lease['precharge_invoiced_at']      ?? null,
+            'refund_method'     => $lease['precharge_refund_method']    ?? null,
+            'refund_settled_at' => $lease['precharge_refund_settled_at']?? null,
+        ];
+
+        // Refund block surfaces only when a refund method has been
+        // chosen at lease close (state machine: NULL → cash|credit
+        // immutable per D-D / D171). credit branch: pull the
+        // credit_notes row created at close-commit so we can show the
+        // CN number + amount. cash branch: derive amount from the
+        // historical residual balance preserved on the lease row
+        // (precharge_balance NOT zeroed post-refund per D182 — keeps
+        // the at-close value as forensic record).
+        if ($prechargeData['refund_method'] !== null) {
+            $creditNote = null;
+            if ($prechargeData['refund_method'] === 'credit') {
+                $creditNote = db_row(
+                    "SELECT credit_note_number, amount, created_at
+                       FROM credit_notes
+                      WHERE lease_id = ?
+                        AND source    = 'precharge_refund'
+                        AND deleted_at IS NULL
+                        AND status    != 'void'
+                      ORDER BY id DESC LIMIT 1",
+                    [$leaseId]
+                );
+            }
+            $refundData = [
+                'method'             => $prechargeData['refund_method'],
+                'settled_at'         => $prechargeData['refund_settled_at'],
+                'amount'             => $creditNote
+                    ? (float) $creditNote['amount']
+                    : (float) $prechargeData['balance'],
+                'credit_note_number' => $creditNote['credit_note_number'] ?? null,
+                'issued_at'          => $creditNote['created_at']         ?? null,
+            ];
         }
     }
-
-    // Display unit conversion. Internal storage stays km — customer sees
-    // miles on miles-leases via lease.km_to_miles_conversion (D-E).
-    $displayUnit = (string) ($lease['mileage_unit'] ?? 'km');
-    $kmToMiles   = (float) ($lease['km_to_miles_conversion'] ?? 0.621371);
-    if ($kmToMiles <= 0) $kmToMiles = 0.621371;
-
-    $convert = function (float $km) use ($displayUnit, $kmToMiles): float {
-        return $displayUnit === 'miles' ? $km * $kmToMiles : $km;
-    };
-
-    $remainingKm = max(0.0, $totalAllowanceKm - (float) ($cumulativeKm ?? 0));
-    $usagePct    = $totalAllowanceKm > 0
-        ? min(100, max(0, ((float) ($cumulativeKm ?? 0) / $totalAllowanceKm) * 100))
-        : 0;
-
-    $mileageCard = [
-        'total_allowance' => $convert($totalAllowanceKm),
-        'used'            => $convert((float) ($cumulativeKm ?? 0)),
-        'remaining'       => $convert($remainingKm),
-        'monthly_allowance' => $convert((float) $allowanceMeta['allowance_km']),
-        'usage_pct'       => round($usagePct, 1),
-        'unit'            => $displayUnit,
-        'latest_invoice'  => $latestInvoiceNumber,
-        'latest_invoice_date' => $latestInvoiceDate,
-        'is_closed'       => ($lease['status'] === 'completed'),
-        'lease_months'    => $allowanceMeta['lease_months'],
-    ];
 }
 
 $pageTitle = 'Lease ' . $lease['contract_number'];
@@ -265,8 +320,127 @@ $statusBadge = match($lease['status']) {
 
 </div>
 
-<!-- ── S-LEASE-MILEAGE: customer-facing mileage usage card ──── -->
-<?php if ($mileageCard): ?>
+<!-- ── S-PORTAL-MILEAGE-MODEL-B: Model B mileage section ───────
+     Renders per the D135 three-configuration matrix:
+       precharge   → "Mileage Precharge" card (paid / credits applied
+                     / balance remaining + refund block + drawdown
+                     history)
+       usage_only  → "Mileage Usage" card (rate + usage history)
+       null (rate=0) → no section rendered
+     The card surface is read-only — portal is a customer-facing view
+     only. Drawdown history is bounded to non-void disclosed invoices
+     (status IN ('sent','partially_paid','paid','overdue')) so customers
+     don't see drafts. Last 5 invoices per D-D. -->
+<?php if ($mileageConfig === 'precharge'): ?>
+<div class="portal-section">
+    <div class="portal-section-header">
+        <h2 class="portal-section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z"/>
+            </svg>
+            Mileage Precharge
+        </h2>
+    </div>
+    <div class="portal-section-body">
+        <!-- Summary tiles: paid / credits applied / balance remaining -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:14px;">
+            <div>
+                <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Precharge paid</div>
+                <div class="font-mono" style="font-size:1.125rem;">
+                    <?= e(format_currency($prechargeData['paid'])) ?>
+                </div>
+            </div>
+            <div>
+                <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Credits applied to date</div>
+                <div class="font-mono" style="font-size:1.125rem; font-weight:700;">
+                    <?= e(format_currency($prechargeData['credits_applied'])) ?>
+                </div>
+            </div>
+            <div>
+                <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Balance remaining</div>
+                <div class="font-mono" style="font-size:1.125rem;">
+                    <?= e(format_currency($prechargeData['balance'])) ?>
+                </div>
+            </div>
+        </div>
+
+        <?php if ($refundData): ?>
+            <!-- Refund block — visible only after lease close + refund method chosen -->
+            <?php
+            $refundLabel = '';
+            $refundColor = '';
+            if ($refundData['method'] === 'credit') {
+                $refundLabel = 'Credit applied';
+                $refundColor = '#0369a1';
+            } elseif ($refundData['method'] === 'cash' && empty($refundData['settled_at'])) {
+                $refundLabel = 'Cash refund pending';
+                $refundColor = '#b45309';
+            } else {
+                $refundLabel = 'Cash refund issued';
+                $refundColor = '#15803d';
+            }
+            ?>
+            <div style="margin-top:12px; padding:10px 12px; background:#f8fafc; border-left:3px solid <?= e($refundColor) ?>; border-radius:4px;">
+                <span style="color:<?= e($refundColor) ?>; font-weight:600; font-size:0.875rem;">
+                    <?= e($refundLabel) ?>:
+                </span>
+                <span class="font-mono" style="font-weight:700; font-size:0.9375rem;">
+                    <?= e(format_currency($refundData['amount'])) ?>
+                </span>
+                <?php if ($refundData['method'] === 'credit' && $refundData['credit_note_number']): ?>
+                    <span style="color:var(--text-secondary); font-size:0.8125rem;">
+                        · Credit note <?= e($refundData['credit_note_number']) ?>
+                        <?php if ($refundData['issued_at']): ?>
+                            issued on <?= e(format_date($refundData['issued_at'])) ?>
+                        <?php endif; ?>
+                    </span>
+                <?php elseif ($refundData['method'] === 'cash' && !empty($refundData['settled_at'])): ?>
+                    <span style="color:var(--text-secondary); font-size:0.8125rem;">
+                        · Paid on <?= e(format_date($refundData['settled_at'])) ?>
+                    </span>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!empty($mileageHistory)): ?>
+            <!-- Drawdown history — last 5 disclosed invoices with mileage_usage -->
+            <div style="margin-top:16px;">
+                <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase; margin-bottom:8px;">Recent drawdown history</div>
+                <div class="table-responsive">
+                    <table class="portal-table">
+                        <thead>
+                            <tr>
+                                <th>Invoice #</th>
+                                <th>Period</th>
+                                <th class="text-right">Distance</th>
+                                <th class="text-right">Charge</th>
+                                <th class="text-right">Credit applied</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($mileageHistory as $row): ?>
+                            <tr>
+                                <td><a href="<?= e(base_url('portal/invoices/view?id=' . $row['invoice_id'])) ?>" class="portal-table-link"><?= e($row['invoice_number']) ?></a></td>
+                                <td class="font-mono" style="font-size:0.8125rem;">
+                                    <?= e(format_date($row['billing_period_start'])) ?>
+                                    <span style="color:var(--text-secondary);">→</span>
+                                    <?= e(format_date($row['billing_period_end'])) ?>
+                                </td>
+                                <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> km</td>
+                                <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>
+                                <td class="text-right font-mono" style="color:#0369a1;">
+                                    <?= $row['credit_amount'] !== null ? e(format_currency($row['credit_amount'])) : '—' ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php elseif ($mileageConfig === 'usage_only'): ?>
 <div class="portal-section">
     <div class="portal-section-header">
         <h2 class="portal-section-title">
@@ -277,82 +451,55 @@ $statusBadge = match($lease['status']) {
         </h2>
     </div>
     <div class="portal-section-body">
-        <?php if ($mileageCard['is_closed']): ?>
-            <!-- ─── Closed lease: final summary ─── -->
-            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px;">
-                <div>
-                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Total driven</div>
-                    <div class="font-mono" style="font-size:1.25rem; font-weight:700;">
-                        <?= e(number_format($mileageCard['used'], 0)) ?> <?= e($mileageCard['unit']) ?>
-                    </div>
+        <!-- Rate row — read-only customer view of the per-km charge -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:16px; margin-bottom:14px;">
+            <div>
+                <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Rate</div>
+                <div class="font-mono" style="font-size:1.125rem;">
+                    <?= e(format_currency($mileageRateKm)) ?>/km
                 </div>
-                <div>
-                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Total allowance</div>
-                    <div class="font-mono" style="font-size:1.25rem;">
-                        <?= e(number_format($mileageCard['total_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?>
-                    </div>
-                </div>
-                <div>
-                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Final status</div>
-                    <div style="font-size:0.875rem; font-weight:600;">
-                        <?php if ($mileageCard['used'] > $mileageCard['total_allowance']): ?>
-                            <span style="color:#b45309;">Over by <?= e(number_format($mileageCard['used'] - $mileageCard['total_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?></span>
-                        <?php elseif ($mileageCard['used'] < $mileageCard['total_allowance']): ?>
-                            <span style="color:#0369a1;">Under by <?= e(number_format($mileageCard['total_allowance'] - $mileageCard['used'], 0)) ?> <?= e($mileageCard['unit']) ?></span>
-                        <?php else: ?>
-                            <span style="color:#15803d;">Exact</span>
-                        <?php endif; ?>
-                    </div>
+            </div>
+        </div>
+
+        <?php if (!empty($mileageHistory)): ?>
+            <!-- Usage history — last 5 disclosed invoices with mileage_usage -->
+            <div style="margin-top:8px;">
+                <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase; margin-bottom:8px;">Recent usage</div>
+                <div class="table-responsive">
+                    <table class="portal-table">
+                        <thead>
+                            <tr>
+                                <th>Invoice #</th>
+                                <th>Period</th>
+                                <th class="text-right">Distance</th>
+                                <th class="text-right">Charge</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($mileageHistory as $row): ?>
+                            <tr>
+                                <td><a href="<?= e(base_url('portal/invoices/view?id=' . $row['invoice_id'])) ?>" class="portal-table-link"><?= e($row['invoice_number']) ?></a></td>
+                                <td class="font-mono" style="font-size:0.8125rem;">
+                                    <?= e(format_date($row['billing_period_start'])) ?>
+                                    <span style="color:var(--text-secondary);">→</span>
+                                    <?= e(format_date($row['billing_period_end'])) ?>
+                                </td>
+                                <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> km</td>
+                                <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         <?php else: ?>
-            <!-- ─── Active lease: progress bars + monthly snapshot ─── -->
-            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:14px;">
-                <div>
-                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Total allowance</div>
-                    <div class="font-mono" style="font-size:1.125rem;">
-                        <?= e(number_format($mileageCard['total_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?>
-                    </div>
-                </div>
-                <div>
-                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Used to date</div>
-                    <div class="font-mono" style="font-size:1.125rem; font-weight:700;">
-                        <?= e(number_format($mileageCard['used'], 0)) ?> <?= e($mileageCard['unit']) ?>
-                    </div>
-                </div>
-                <div>
-                    <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Remaining</div>
-                    <div class="font-mono" style="font-size:1.125rem;">
-                        <?= e(number_format($mileageCard['remaining'], 0)) ?> <?= e($mileageCard['unit']) ?>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Total-usage progress bar -->
-            <div style="margin-bottom:8px;">
-                <div style="display:flex; justify-content:space-between; align-items:baseline; font-size:0.8125rem; margin-bottom:4px;">
-                    <span style="color:var(--text-secondary);">Total usage</span>
-                    <span class="font-mono" style="font-weight:600;"><?= e($mileageCard['usage_pct']) ?>%</span>
-                </div>
-                <div style="background:#f1f5f9; height:8px; border-radius:4px; overflow:hidden;">
-                    <div style="height:100%; background:<?= $mileageCard['usage_pct'] >= 100 ? '#dc2626' : ($mileageCard['usage_pct'] >= 80 ? '#f59e0b' : '#0ea5e9') ?>; width:<?= e($mileageCard['usage_pct']) ?>%;"></div>
-                </div>
-            </div>
-
-            <!-- Monthly allowance reference -->
-            <div style="font-size:0.8125rem; color:var(--text-secondary); margin-top:12px;">
-                Monthly allowance:
-                <span class="font-mono" style="font-weight:600; color:var(--text-primary);">
-                    <?= e(number_format($mileageCard['monthly_allowance'], 0)) ?> <?= e($mileageCard['unit']) ?>
-                </span>
-                <?php if ($mileageCard['latest_invoice_date']): ?>
-                · Last reading from invoice <?= e($mileageCard['latest_invoice']) ?> on <?= e(format_date($mileageCard['latest_invoice_date'])) ?>
-                <?php endif; ?>
-            </div>
+            <p style="margin:0; color:var(--text-secondary); font-size:0.875rem;">
+                No mileage usage recorded yet. Mileage charges will appear here once invoices begin reporting distance.
+            </p>
         <?php endif; ?>
     </div>
 </div>
-<?php endif; ?>
+<?php endif; /* end mileageConfig === 'precharge'|'usage_only' */ ?>
 
 
 <!-- Invoices for this lease -->

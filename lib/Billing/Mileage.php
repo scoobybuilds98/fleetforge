@@ -86,51 +86,27 @@ class Mileage
         return ['months' => max(1.0, $months), 'was_open_ended' => false];
     }
 
-    /**
-     * Derive monthly allowance in km for a lease.
-     *
-     * **S-MILEAGE-2B C4 (D-H refined):** retained pending portal refactor in
-     * S-PORTAL-MILEAGE-MODEL-B. Active caller: `app/portal/leases/view.php:80`
-     * (Model C residue customer-facing). `app/admin/invoices/show.php:1558`
-     * caller dies in S-MILEAGE-2B C6 (D-L Mileage Review card → Drawdown
-     * Reconciliation panel conversion). Once both callers gone, delete this
-     * method per D-H original intent. Companion helper `Mileage::periodExcess`
-     * was deleted in C4 (zero callers post-C3 engine retirement).
-     *
-     * @param array $lease  row from leases table (needs estimated_mileage_km
-     *                       OR estimated_mileage, start_date, end_date)
-     * @return array{
-     *     allowance_km: float,
-     *     lease_months: float,
-     *     was_open_ended: bool,
-     *     total_estimated_km: float
-     * }
-     */
-    public static function monthlyAllowance(array $lease): array
-    {
-        // Prefer the dual-unit km column from S-LEASE-UNITS; fall back to
-        // the legacy single-unit estimated_mileage if the row pre-dates
-        // the dual-unit migration.
-        $totalKm = isset($lease['estimated_mileage_km']) && $lease['estimated_mileage_km'] !== null
-            ? (float) $lease['estimated_mileage_km']
-            : (float) ($lease['estimated_mileage'] ?? 0);
-
-        $duration = self::leaseDurationMonths(
-            $lease['start_date'] ?? null,
-            $lease['end_date']   ?? null
-        );
-
-        $allowance = $duration['months'] > 0
-            ? $totalKm / $duration['months']
-            : $totalKm;
-
-        return [
-            'allowance_km'        => round($allowance, self::DISTANCE_SCALE),
-            'lease_months'        => $duration['months'],
-            'was_open_ended'      => $duration['was_open_ended'],
-            'total_estimated_km'  => $totalKm,
-        ];
-    }
+    // ── monthlyAllowance REMOVED in S-PORTAL-MILEAGE-MODEL-B ─────────────
+    // Was: derive a monthly-allowance reference in km for the Model C
+    // customer-portal allowance card (last caller: app/portal/leases/view.php:80).
+    // Retired per D154 + D167 final retirement once the portal flipped from
+    // the Model C allowance card to the Model B precharge / usage-only card
+    // shape in this same session. The portal no longer needs a per-month
+    // slice of the lease's estimated_mileage_km — Model B reports actual
+    // mileage_usage / mileage_drawdown_credit line items invoice-by-invoice.
+    //
+    // No surviving callers as of 2026-05-13 (verified post-deletion via
+    // `grep -rn "monthlyAllowance" app/ api/ lib/` → zero hits).
+    //
+    // The internal helper `Mileage::leaseDurationMonths` (above) becomes
+    // orphaned by this deletion but is retained per S-PORTAL-MILEAGE-MODEL-B
+    // D-E operator-confirmed defer — a future S-MILEAGE-HELPERS-CLEANUP
+    // session can sweep it alongside toDisplayUnit + formatDistance (also
+    // orphaned, no external callers) without further blocking the Model B
+    // arc closure.
+    //
+    // If this method is needed again, see git history at this line.
+    // ──────────────────────────────────────────────────────────────────────
 
     // ── periodExcess REMOVED in S-MILEAGE-2B C4 ───────────────────────────
     // Was: compute excess distance and dollar charge for a single billing period.
