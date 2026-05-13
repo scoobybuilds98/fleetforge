@@ -767,7 +767,7 @@ Retired in S-MILEAGE-3 C5 (2026-05-13):
 - ✓ Latent SUM(excess_distance_km) query in api/v1/leases/show.php (would have failed silently post-S-MILEAGE-2B C4 DROP) — caught + cleaned per K-15 READ-coverage extension
 
 Pending future sessions:
-- `Mileage::monthlyAllowance` helper — RETAINED pending S-PORTAL-MILEAGE-MODEL-B portal refactor (D154 — 1 caller remains: portal/leases/view.php)
+- `Mileage::monthlyAllowance` helper — ✓ DELETED 2026-05-13 via S-PORTAL-MILEAGE-MODEL-B (D154 + D167 final retirement; tombstone comment at lib/Billing/Mileage.php replaces the method body; zero callers post-deletion confirmed via repo-wide grep)
 - FLEETFORGE_ACCOUNTING_SPEC.md updates — DEFERRED to S-MILEAGE-3-ACCT-SPEC follow-up per D-I (A) / D176 (CPA-blocked on 5 enumerated questions)
 
 ### Mileage line-item types — schema enum is the source of truth
@@ -878,7 +878,7 @@ Forensic-only — only consulted if it turns out an unreviewed seed/fixture writ
 4. ✓ **Subsequent invoice generation** (`InvoiceGenerator::createFromLease`): replaced the S-LEASE-MILEAGE per-period excess block (lines 438-486) with the balance-drawdown block per D148. Each invoice computes `period_charge = period_distance × mileage_rate`. If `precharge_balance > 0`: emits `mileage_usage` + `mileage_drawdown_credit` lines (POSITIVE amount + is_credit=1 K-16 convention per D166); decrements `precharge_balance` by `min(period_charge, precharge_balance)`. If `precharge_balance == 0`: emits just the `mileage_usage` line. **Shipped S-MILEAGE-2B C3 (commit a24cb49) — D148.** Samsara fallback via `getDistanceForPeriod` per D149 (silent-bug fix on samsara_vehicle_id JOIN landed in C3.5 commit 64b37cb — see K-18).
 5. ✓ **Retire Model C plumbing** (completed across S-MILEAGE-2B + S-MILEAGE-3):
    - ✓ Removed 7 Model C columns from invoices (excess_distance_km, excess_charge_amount, mileage_review_status, mileage_override_amount, mileage_reviewed_at, mileage_reviewed_by_user_id, mileage_review_notes) + residual idx_mileage_review index (S-MILEAGE-2B C4 D153 — migration `202605120907`)
-   - ✓ Retired `Mileage::periodExcess` helper (S-MILEAGE-2B C4 D154 + D167); `Mileage::monthlyAllowance` retained pending S-PORTAL-MILEAGE-MODEL-B portal refactor (D154 + D167)
+   - ✓ Retired `Mileage::periodExcess` helper (S-MILEAGE-2B C4 D154 + D167); `Mileage::monthlyAllowance` ✓ DELETED 2026-05-13 via S-PORTAL-MILEAGE-MODEL-B (D154 + D167 final retirement; tombstone at lib/Billing/Mileage.php; last caller app/portal/leases/view.php:80 removed in same session as the Model C allowance card → Model B precharge/usage card flip)
    - ✓ Retired HARD send gate in send.php:57-63 (S-MILEAGE-2B C5 D155)
    - ✓ Retired `api/v1/invoices/review_mileage.php` endpoint (S-MILEAGE-2B C5 D155)
    - ✓ Retired show.php Mileage Review card + Alpine modal state (S-MILEAGE-2B C5/C6 D158 — replaced by Drawdown Reconciliation panel)
@@ -886,7 +886,8 @@ Forensic-only — only consulted if it turns out an unreviewed seed/fixture writ
    - ✓ Retired `lease_close_adjustments` table — DROPPED in migration `202605121925`; backup table `lease_close_adjustments_backup_S_MILEAGE_3` captured 0 rows (S-MILEAGE-3 C5 D174/D-G)
    - ✓ Retired closeReconciliation Alpine getter + Mileage Reconciliation panel in app/admin/leases/show.php (~240 LOC; S-MILEAGE-3 C5)
    - ✓ Wrote `precharge_refund_method` + `precharge_refund_settled_at` columns at close per state machine (S-MILEAGE-3 C3 D-D/D171)
-   - **Pending future sessions:** `Mileage::monthlyAllowance` final deletion (S-PORTAL-MILEAGE-MODEL-B owns); FLEETFORGE_ACCOUNTING_SPEC.md updates (S-MILEAGE-3-ACCT-SPEC owns; CPA-blocked).
+   - ✓ `Mileage::monthlyAllowance` final deletion + customer portal app/portal/leases/view.php Model C → Model B refactor (S-PORTAL-MILEAGE-MODEL-B SHIPPED 2026-05-13; D154 + D167 discharged).
+   - **Pending future sessions:** FLEETFORGE_ACCOUNTING_SPEC.md updates (S-MILEAGE-3-ACCT-SPEC owns; CPA-blocked).
 
 ### S-MILEAGE-3 — SHIPPED 2026-05-13 (D-A through D-N)
 
