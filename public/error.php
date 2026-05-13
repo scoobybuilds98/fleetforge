@@ -94,9 +94,7 @@ $_ref = date('Ymd-His') . '-' . substr(base_convert((string)mt_rand(), 10, 36), 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <title><?= (int)$_code ?> — <?= htmlspecialchars($_title, ENT_QUOTES, 'UTF-8') ?> · FleetForge</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap">
+    <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <?php if ($_base !== ''): ?>
     <link rel="stylesheet" href="<?= htmlspecialchars($_base . '/assets/css/app.css', ENT_QUOTES, 'UTF-8') ?>">
     <?php endif; ?>

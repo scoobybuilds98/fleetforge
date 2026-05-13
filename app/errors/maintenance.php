@@ -37,9 +37,7 @@ $_faviconUrl = $_baseUrl !== '' ? $_baseUrl . '/assets/icons/favicon.svg' : '';
     <?php if ($_faviconUrl !== ''): ?>
         <link rel="icon" href="<?= htmlspecialchars($_faviconUrl, ENT_QUOTES, 'UTF-8') ?>" type="image/svg+xml">
     <?php endif; ?>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap">
+    <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <?php if ($_cssUrl !== ''): ?>
         <link rel="stylesheet" href="<?= htmlspecialchars($_cssUrl, ENT_QUOTES, 'UTF-8') ?>">
     <?php endif; ?>

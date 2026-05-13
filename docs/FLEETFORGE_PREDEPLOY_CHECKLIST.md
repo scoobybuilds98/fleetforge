@@ -152,6 +152,25 @@ ITEM A3 | 2026-05-13 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to
     cached in opcache; verify with curl -I https://<prod>/assets/css/app.css?v=1.0.28 returns 200.
   Owner: Operator
   Status: PENDING
+
+ITEM A4 | 2026-05-14 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to 1.0.29
+  Originating session: S-PROD-3 C2 — Google Fonts self-hosted (DM Sans + DM Mono via @font-face in app.css)
+  Surfaced into checklist: S-PROD-3 C2 (this file's edit commit)
+  Detail: C2 added 12 @font-face declarations to public/assets/css/app.css (new "00. Self-hosted Fonts"
+    section at lines ~28-160) pointing at 12 woff2 files under public/assets/vendor/fonts/dm-sans/ +
+    dm-mono/ via relative paths (../vendor/fonts/...). Removed the corresponding <link rel="preconnect">
+    + <link rel="stylesheet"> Google Fonts blocks from 17 PHP templates across admin auth, portal auth,
+    portal includes, admin includes, error pages, and the global error handler — replaced each with a
+    single-line HTML comment marker pointing back to the new app.css section. Eliminates ~3 HTTP
+    requests to fonts.googleapis.com + fonts.gstatic.com on every page load. Operator bumped dev .env
+    (1.0.28 → 1.0.29) at session ship.
+    Original source: .env (gitignored — bumped by operator at session ship).
+  Action: On prod .env (Lightsail instance), set FF_ASSET_VERSION=1.0.29. Restart php-fpm if asset
+    version is cached in opcache; verify with curl -I https://<prod>/assets/css/app.css?v=1.0.29
+    returns 200 + verify DevTools Network shows zero requests to fonts.googleapis.com /
+    fonts.gstatic.com on any page.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ### B — Production `.env` keys

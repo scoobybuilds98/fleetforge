@@ -61,9 +61,7 @@ if (!$forcedSetup) {
     <meta name="csrf-token" content="<?= e(generate_csrf_token()) ?>">
     <title>Set Up Two-Factor Authentication — FleetForge</title>
     <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap">
+    <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>" defer></script>
     <!-- S-PROD-1A-FIX-4 T7: forced-setup head does not include footer.php (which loads Alpine).

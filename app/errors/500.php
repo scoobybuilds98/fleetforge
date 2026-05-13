@@ -35,9 +35,7 @@ $_faviconUrl = $_baseUrl . '/assets/icons/favicon.svg';
     <meta name="robots" content="noindex, nofollow">
     <title>500 — Server Error · FleetForge</title>
     <link rel="icon" href="<?= htmlspecialchars($_faviconUrl, ENT_QUOTES, 'UTF-8') ?>" type="image/svg+xml">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap">
+    <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <!-- app.css may fail to load if the error is file-system related; inline fallback below -->
     <link rel="stylesheet" href="<?= htmlspecialchars($_cssUrl, ENT_QUOTES, 'UTF-8') ?>">
     <script>
