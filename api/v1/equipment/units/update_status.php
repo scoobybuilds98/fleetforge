@@ -136,7 +136,7 @@ db_transaction(function () use ($id, $newStatus, $reason, &$result) {
                 message:    "Unit {$unit['unit_number']} has been decommissioned",
                 entityType: 'equipment_unit',
                 entityId:   $id,
-                url:        '/fleetforge/equipment/units/show?id=' . $id,
+                url:        '/fleetforge/equipment/show?id=' . $id,
                 severity:   'warning'
             );
         } else {
@@ -146,7 +146,7 @@ db_transaction(function () use ($id, $newStatus, $reason, &$result) {
                 message:    "Unit {$unit['unit_number']} status changed to {$newStatus}",
                 entityType: 'equipment_unit',
                 entityId:   $id,
-                url:        '/fleetforge/equipment/units/show?id=' . $id
+                url:        '/fleetforge/equipment/show?id=' . $id
             );
         }
     } catch (\Throwable $e) {

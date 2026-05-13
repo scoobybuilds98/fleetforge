@@ -247,7 +247,7 @@ db_transaction(function () use (
             message:    "New unit {$unitNumber} added to fleet",
             entityType: 'equipment_unit',
             entityId:   $newId,
-            url:        '/fleetforge/equipment/units/show?id=' . $newId
+            url:        '/fleetforge/equipment/show?id=' . $newId
         );
     } catch (\Throwable $e) {
         error_log('[NOTIF equipment.created] ' . $e->getMessage());

@@ -243,7 +243,7 @@ try {
                         message:    $a['msg'],
                         entityType: 'equipment_unit',
                         entityId:   $unitId,
-                        url:        '/fleetforge/equipment/units/show?id=' . $unitId,
+                        url:        '/fleetforge/equipment/show?id=' . $unitId,
                         severity:   $a['sev']
                     );
                     db_insert('notification_log', [

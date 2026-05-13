@@ -452,7 +452,7 @@ function FF_Documents() {
             const base = (window.FF_BASE_PATH || '') + '/';
             const m = {
                 customer:       base + 'customers/show?id=' + doc.entity_id,
-                equipment_unit: base + 'equipment/units/show?id=' + doc.entity_id,
+                equipment_unit: base + 'equipment/show?id=' + doc.entity_id,
                 lease:          base + 'leases/show?id=' + doc.entity_id,
                 inspection:     base + 'inspections/show?id=' + doc.entity_id,
                 damage_claim:   base + 'damage_claims/show?id=' + doc.entity_id,

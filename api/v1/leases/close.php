@@ -1243,7 +1243,7 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
                 message:    "Lease {$lease['contract_number']} has been closed.",
                 entityType: 'lease',
                 entityId:   $id,
-                url:        '/fleetforge/portal/leases/show?id=' . $id
+                url:        '/fleetforge/portal/leases/view?id=' . $id
             );
         }
     } catch (\Throwable $e) {

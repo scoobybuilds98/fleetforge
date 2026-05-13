@@ -205,7 +205,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-label">Equipment Unit</div>
         <div class="stat-value">
             <?php if ($claim['equipment_unit_id']): ?>
-            <a href="<?= base_url('equipment/units/show') ?>?id=<?= e($claim['equipment_unit_id']) ?>"
+            <a href="<?= base_url('equipment/show') ?>?id=<?= e($claim['equipment_unit_id']) ?>"
                class="link">
                 <?= e($claim['unit_number'] ?? 'Unit #' . $claim['equipment_unit_id']) ?>
             </a>

@@ -180,7 +180,7 @@ try {
                                   . "Status: {$custStatus} / {$collStatus}.",
                         entityType: 'customer',
                         entityId:   $custId,
-                        url:        '/fleetforge/customers/' . $custId,
+                        url:        '/fleetforge/customers/show?id=' . $custId,
                         severity:   'critical'
                     );
                 }

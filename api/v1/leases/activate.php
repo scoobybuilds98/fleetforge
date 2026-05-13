@@ -371,7 +371,7 @@ db_transaction(function () use ($id, &$result) {
                 message:    "Lease {$lease['contract_number']} is now active.",
                 entityType: 'lease',
                 entityId:   $id,
-                url:        '/fleetforge/portal/leases/show?id=' . $id
+                url:        '/fleetforge/portal/leases/view?id=' . $id
             );
 
             // D-D: single batched portal notification for the advance batch.
@@ -385,7 +385,7 @@ db_transaction(function () use ($id, &$result) {
                     message:    "Total of \${$totalFmt} across periods {$adv['first_period_start']} – {$adv['last_period_end']}.",
                     entityType: 'lease',
                     entityId:   $id,
-                    url:        '/fleetforge/portal/leases/show?id=' . $id
+                    url:        '/fleetforge/portal/leases/view?id=' . $id
                 );
             }
         }

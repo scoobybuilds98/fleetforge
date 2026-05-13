@@ -187,7 +187,7 @@ try {
                               . "Previous: {$oldScore} ({$oldColor}). Review compliance, work orders, and damage claims.",
                     entityType: 'equipment_unit',
                     entityId:   $unitId,
-                    url:        '/fleetforge/equipment/' . $unitId,
+                    url:        '/fleetforge/equipment/show?id=' . $unitId,
                     severity:   $newColor === 'red' ? 'critical' : 'warning'
                 );
                 $notificationsFired++;

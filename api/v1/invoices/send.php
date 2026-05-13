@@ -242,7 +242,7 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
                 message:    "Invoice {$invoice['invoice_number']} — {$amt} due " . ($invoice['due_date'] ?? 'on receipt'),
                 entityType: 'invoice',
                 entityId:   $id,
-                url:        '/fleetforge/portal/invoices/show?id=' . $id
+                url:        '/fleetforge/portal/invoices/view?id=' . $id
             );
         }
     } catch (\Throwable $e) {

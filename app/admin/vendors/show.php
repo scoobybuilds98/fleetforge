@@ -528,7 +528,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <?php foreach ($unitHistory as $u): ?>
                 <tr>
                     <td>
-                        <a href="<?= base_url('equipment/units/show') ?>?id=<?= e($u['id']) ?>"
+                        <a href="<?= base_url('equipment/show') ?>?id=<?= e($u['id']) ?>"
                            class="link font-mono"><?= e($u['unit_number']) ?></a>
                     </td>
                     <td>
@@ -586,7 +586,7 @@ require_once FF_ROOT . '/includes/header.php';
                 ?>
                 <tr>
                     <td>
-                        <a href="<?= base_url('equipment/units/show') ?>?id=<?= e($le['unit_id']) ?>"
+                        <a href="<?= base_url('equipment/show') ?>?id=<?= e($le['unit_id']) ?>"
                            class="link font-mono"><?= e($le['unit_number']) ?></a>
                     </td>
                     <td>

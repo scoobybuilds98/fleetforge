@@ -509,7 +509,7 @@ db_transaction(function () use (
                 message:    "Payment received. Invoice {$invoice['invoice_number']} is now {$newInvoiceStatus}.",
                 entityType: 'invoice',
                 entityId:   (int) $invoiceId,
-                url:        '/fleetforge/portal/invoices/show?id=' . $invoiceId
+                url:        '/fleetforge/portal/invoices/view?id=' . $invoiceId
             );
         }
     } catch (\Throwable $e) {

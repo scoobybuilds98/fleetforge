@@ -95,7 +95,7 @@ try {
                             message:    "Invoice {$invoice['invoice_number']} is overdue. Please contact us to arrange payment.",
                             entityType: 'invoice',
                             entityId:   $invoiceId,
-                            url:        '/fleetforge/portal/invoices/show?id=' . $invoiceId,
+                            url:        '/fleetforge/portal/invoices/view?id=' . $invoiceId,
                             severity:   'warning'
                         );
                     }
