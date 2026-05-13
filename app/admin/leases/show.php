@@ -468,6 +468,32 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                         <tr x-show="lease.rate_notes"><td class="text-secondary">Rate Notes</td><td class="text-sm" x-text="lease.rate_notes"></td></tr>
                                     </tbody>
                                 </table>
+
+                                <!-- ── S-LEASE-RATE-AMENDMENT: amend rates action ──
+                                     Button visible only while the lease is `active`
+                                     (D-B: amendments restricted to active leases —
+                                     completed / cancelled / pending leases hide the
+                                     button). On click opens a structured rate
+                                     amendment modal that POSTs to amend_rate.php.
+                                     Successful amendments write a row to
+                                     lease_amendments (amendment_type='rate_change')
+                                     which surfaces in the existing Amendments tab —
+                                     so this card doesn't duplicate the history
+                                     display; the caption below points operators
+                                     there for the full audit trail. -->
+                                <div x-show="lease.status === 'active'" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                                    <button type="button"
+                                            class="btn btn-secondary btn-sm"
+                                            @click="openRateAmendModal()">
+                                        Amend Rates
+                                    </button>
+                                    <span class="form-hint" style="font-size:0.75rem;color:var(--text-secondary);">
+                                        Rate amendment history is recorded in the
+                                        <a href="#"
+                                           @click.prevent="tab = 'amendments'; loadAmendments()"
+                                           class="link">Amendments tab</a>.
+                                    </span>
+                                </div>
                             </div>
                         </div>
 
@@ -844,6 +870,139 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             :disabled="amendModal.saving">
                         <span x-show="!amendModal.saving">Save Amendment</span>
                         <span x-show="amendModal.saving">Saving…</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- ── S-LEASE-RATE-AMENDMENT: structured rate-amendment modal ──
+         Distinct from the existing AMEND-1 Record Amendment modal
+         (which writes text-descriptive audit rows). This one POSTs
+         to api/v1/leases/amend_rate.php which actually updates the
+         lease rate columns AND writes a structured
+         lease_amendments row with amendment_type='rate_change'.
+
+         Fields are pre-filled from the current lease rates on open
+         (via openRateAmendModal()). Operator edits any subset of
+         the six amendable rate columns — daily_rate, weekly_rate,
+         monthly_rate, mileage_rate_km, mileage_rate_miles, gps_cost.
+         Empty fields are skipped server-side (partial update); only
+         numerically-changed fields trigger column updates. The
+         endpoint emits a 422 if zero rate fields are supplied.
+
+         Operator-locked decisions visible in the UX:
+           D-A prospective only — message in the footer notes that
+               sent invoices remain unchanged (D14).
+           D-B active leases only — the trigger button is hidden
+               for non-active leases so the modal can't be opened
+               from the UI for those states; server enforces too.
+           D-C any admin, immediate — no approval gate UX.
+           D-D no auto credit notes — affected drafts surfaced in
+               the response advisory (read-only), not auto-changed.
+         ─────────────────────────────────────────────────────────── -->
+    <template x-if="rateAmendModal.open">
+        <div class="modal-overlay" @click.self="rateAmendModal.open = false">
+            <div class="modal modal-md" @click.stop>
+                <div class="modal-header">
+                    <h3 class="modal-title">Amend Lease Rates</h3>
+                    <button class="modal-close-btn" @click="rateAmendModal.open = false" aria-label="Close">
+                        <?= heroicon('x-mark', 'modal-icon') ?>
+                    </button>
+                </div>
+                <div class="modal-body">
+
+                    <!-- Error -->
+                    <div x-show="rateAmendModal.error" class="alert alert-danger" style="margin-bottom:12px;">
+                        <span x-text="rateAmendModal.error"></span>
+                    </div>
+
+                    <!-- Helper text — D-A prospective + D-D no auto credits -->
+                    <p class="text-sm text-secondary" style="margin-bottom:14px;">
+                        Rate amendments take effect immediately and apply to invoices
+                        generated <strong>after</strong> this change. Already-sent
+                        invoices remain unchanged (D14 immutability) — issue a manual
+                        credit note if a retroactive adjustment is needed.
+                    </p>
+
+                    <!-- Base-rental rates -->
+                    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                        <div class="form-group">
+                            <label class="form-label">Daily Rate ($)</label>
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.01" min="0"
+                                   x-model="rateAmendModal.new_daily_rate">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Weekly Rate ($)</label>
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.01" min="0"
+                                   x-model="rateAmendModal.new_weekly_rate">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Monthly Rate ($)</label>
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.01" min="0"
+                                   x-model="rateAmendModal.new_monthly_rate">
+                        </div>
+                    </div>
+
+                    <!-- Mileage rates (dual-unit) + GPS -->
+                    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                        <div class="form-group">
+                            <label class="form-label">Mileage Rate ($/km)</label>
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.0001" min="0"
+                                   x-model="rateAmendModal.new_mileage_rate_km">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Mileage Rate ($/mile)</label>
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.0001" min="0"
+                                   x-model="rateAmendModal.new_mileage_rate_miles">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">GPS Cost ($/day)</label>
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.01" min="0"
+                                   x-model="rateAmendModal.new_gps_cost">
+                        </div>
+                    </div>
+
+                    <!-- Reason -->
+                    <div class="form-group">
+                        <label class="form-label">Reason
+                            <span class="form-hint" style="font-weight:400;">(optional)</span>
+                        </label>
+                        <textarea class="form-control"
+                                  x-model="rateAmendModal.reason"
+                                  rows="2"
+                                  maxlength="2000"
+                                  placeholder="e.g. Annual rate review, contract amendment, market adjustment…"></textarea>
+                        <div class="form-hint" x-text="(rateAmendModal.reason || '').length + '/2000'"></div>
+                    </div>
+
+                    <!-- Success advisory shown after successful submit (before close) -->
+                    <div x-show="rateAmendModal.success_advisory"
+                         class="alert alert-warning"
+                         style="margin-top:12px;font-size:0.875rem;">
+                        <span x-text="rateAmendModal.success_advisory"></span>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost btn-sm" @click="rateAmendModal.open = false">Cancel</button>
+                    <button class="btn btn-primary btn-sm"
+                            @click="submitRateAmendment()"
+                            :disabled="rateAmendModal.saving">
+                        <span x-show="!rateAmendModal.saving">Apply Amendment</span>
+                        <span x-show="rateAmendModal.saving">Applying…</span>
                     </button>
                 </div>
             </div>
@@ -1540,6 +1699,26 @@ function FF_LeaseDetail() {
             new_values_text: '',
         },
 
+        // S-LEASE-RATE-AMENDMENT — structured rate-amendment modal state.
+        // Fields are pre-filled from the current lease rates on open
+        // (see openRateAmendModal). Empty string means "skip / leave
+        // unchanged" — only fields with new values get sent server-side
+        // (partial-update philosophy mirrors update.php).
+        // success_advisory carries the post-submit affected-drafts banner
+        // text (cleared before each open so a stale message doesn't carry
+        // between submits).
+        rateAmendModal: {
+            open: false, saving: false, error: '',
+            new_daily_rate:         '',
+            new_weekly_rate:        '',
+            new_monthly_rate:       '',
+            new_mileage_rate_km:    '',
+            new_mileage_rate_miles: '',
+            new_gps_cost:           '',
+            reason:                 '',
+            success_advisory:       '',
+        },
+
         // Documents tab state
         documents:           [],
         docsLoading:         false,
@@ -1667,6 +1846,129 @@ function FF_LeaseDetail() {
                 this.amendModal.error = 'Network error — please try again.';
             }
             this.amendModal.saving = false;
+        },
+
+        // ── S-LEASE-RATE-AMENDMENT (structured rate amend) ───────────
+        // Open the rate amendment modal pre-filled with the lease's
+        // current rate values. The form treats empty strings as "skip"
+        // server-side; pre-filling means the operator only edits what
+        // they want to change rather than having to retype every field.
+        // success_advisory + error are cleared so a prior submission
+        // doesn't bleed into the new modal state.
+        openRateAmendModal() {
+            if (!this.lease) return;
+            const l = this.lease;
+            this.rateAmendModal = {
+                open: true,
+                saving: false,
+                error: '',
+                new_daily_rate:         l.daily_rate !== null && l.daily_rate !== undefined ? String(l.daily_rate) : '',
+                new_weekly_rate:        l.weekly_rate !== null && l.weekly_rate !== undefined ? String(l.weekly_rate) : '',
+                new_monthly_rate:       l.monthly_rate !== null && l.monthly_rate !== undefined ? String(l.monthly_rate) : '',
+                new_mileage_rate_km:    l.mileage_rate_km !== null && l.mileage_rate_km !== undefined ? String(l.mileage_rate_km) : '',
+                new_mileage_rate_miles: l.mileage_rate_miles !== null && l.mileage_rate_miles !== undefined ? String(l.mileage_rate_miles) : '',
+                new_gps_cost:           l.gps_cost !== null && l.gps_cost !== undefined ? String(l.gps_cost) : '',
+                reason:                 '',
+                success_advisory:       '',
+            };
+        },
+
+        // POST the amend_rate request. Server-side does the heavy
+        // lifting: optimistic-lock check (D19 via updated_at), FOR
+        // UPDATE on lease (D20), partial UPDATE against the provided
+        // fields, INSERT lease_amendments + audit_log, affected
+        // draft query.
+        //
+        // On success: reload the lease so the Rates card reflects new
+        // values; invalidate the amendments cache so the Amendments tab
+        // re-fetches on next open; surface affected-drafts advisory in
+        // the modal before letting the operator close it (D-A read-only
+        // surfacing — no auto-regeneration).
+        async submitRateAmendment() {
+            this.rateAmendModal.error = '';
+            this.rateAmendModal.success_advisory = '';
+
+            if (!this.lease) {
+                this.rateAmendModal.error = 'Lease not loaded — refresh the page.';
+                return;
+            }
+
+            // Build the payload — include every numeric field that has
+            // a value AND differs from the current lease value. Skip
+            // fields the operator didn't touch so server-side partial
+            // update only fires for actual changes.
+            const payload = {
+                lease_id:   <?= $leaseId ?>,
+                updated_at: this.lease.updated_at,
+            };
+            const fields = [
+                ['new_daily_rate',         'daily_rate'],
+                ['new_weekly_rate',        'weekly_rate'],
+                ['new_monthly_rate',       'monthly_rate'],
+                ['new_mileage_rate_km',    'mileage_rate_km'],
+                ['new_mileage_rate_miles', 'mileage_rate_miles'],
+                ['new_gps_cost',           'gps_cost'],
+            ];
+            let anyChanged = false;
+            for (const [reqKey, leaseKey] of fields) {
+                const newVal = (this.rateAmendModal[reqKey] || '').toString().trim();
+                if (newVal === '') continue;
+                const currentVal = this.lease[leaseKey];
+                const currentStr = currentVal !== null && currentVal !== undefined ? String(currentVal) : '';
+                // Coarse numeric-equality check — treats '125' and '125.00'
+                // as equal so a no-op pre-fill doesn't generate noise.
+                if (parseFloat(newVal) !== parseFloat(currentStr || '0')) {
+                    payload[reqKey] = newVal;
+                    anyChanged = true;
+                }
+            }
+
+            if (!anyChanged) {
+                this.rateAmendModal.error = 'No rate changes detected. Edit at least one field before submitting.';
+                return;
+            }
+
+            const reason = (this.rateAmendModal.reason || '').trim();
+            if (reason !== '') payload.reason = reason;
+
+            this.rateAmendModal.saving = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/leases/amend_rate') ?>', payload);
+                if (r.success) {
+                    // Refresh lease (rate columns + new updated_at).
+                    await this.loadLease();
+                    // Invalidate the Amendments tab cache so the new
+                    // lease_amendments row appears on next open.
+                    this.amendmentsLoaded = false;
+                    this.amendments = [];
+
+                    const count = r.data.affected_draft_count || 0;
+                    if (count > 0) {
+                        const numbers = (r.data.affected_drafts || [])
+                            .map(d => d.invoice_number).join(', ');
+                        this.rateAmendModal.success_advisory =
+                            'Rate amended. ' + count +
+                            ' draft invoice' + (count === 1 ? '' : 's') +
+                            ' for future periods may need regeneration: ' +
+                            numbers + '. Review before sending.';
+                    }
+                    if (window.FF_Toast) {
+                        FF_Toast.success('Rates amended',
+                            'Lease rates updated. Audit row written to lease_amendments.');
+                    }
+                    // If no advisory, close immediately. With advisory,
+                    // leave open so the operator can read + acknowledge.
+                    if (!this.rateAmendModal.success_advisory) {
+                        this.rateAmendModal.open = false;
+                    }
+                } else {
+                    this.rateAmendModal.error = (r.error && r.error.message)
+                        || 'Could not amend rates.';
+                }
+            } catch (e) {
+                this.rateAmendModal.error = 'Network error — please try again.';
+            }
+            this.rateAmendModal.saving = false;
         },
 
         amendTypeLabel(type) {
