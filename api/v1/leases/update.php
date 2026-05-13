@@ -19,7 +19,10 @@ declare(strict_types=1);
  *              estimated_mileage_km, estimated_mileage_miles, km_to_miles_conversion,
  *              miles_to_km_conversion. When updated, legacy estimated_mileage is
  *              re-synced to primary-unit value for backward compat. Rate fields
- *              (mileage_rate_km/miles) are not editable here — they require amendment.
+ *              (daily_rate, weekly_rate, monthly_rate, mileage_rate_km/miles)
+ *              are explicitly BLOCKED here per S-LEASE-RATE-AMENDMENT — returns
+ *              422 RATE_AMENDMENT_REQUIRED. Use POST /api/v1/leases/amend_rate
+ *              for rate changes (audit-trailed via lease_amendments table).
  *
  * @method      POST
  * @body        JSON — id, updated_at (required for optimistic lock)
@@ -30,8 +33,10 @@ declare(strict_types=1);
  *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
  *              gps_opt_in, gps_cost (S-LEASE-GPS-COST: per-day rate, mutable),
  *              gst_exempt, pst_exempt
- *              NOTE: status, daily_rate, weekly_rate, monthly_rate are immutable
- *              after creation (require amendment record — not implemented here)
+ *              NOTE: status is immutable here (uses dedicated state-machine
+ *              endpoints — activate.php, close.php). daily_rate, weekly_rate,
+ *              monthly_rate, mileage_rate_km/miles are BLOCKED here per
+ *              S-LEASE-RATE-AMENDMENT (use api/v1/leases/amend_rate.php).
  * @auth        Session required; require_permission('leases','edit')
  * @returns     200 { updated_at } | 409 STALE_DATA | 404 NOT_FOUND
  *
@@ -87,6 +92,50 @@ if (!optimistic_lock_matches($updatedAt, $existing['updated_at'])) {
 // VALID-2: collect every error into $fields, one 422 response at the end.
 $data   = [];
 $fields = [];
+
+// ── S-LEASE-RATE-AMENDMENT: rate-field block ──────────────────
+// Rate columns must NOT be changed via this endpoint. Pre-this-block
+// behavior was to silently drop rate fields from the partial-update
+// dispatch (they were never added to $data), which left no audit
+// trail when a client tried to PATCH them — see api/v1/leases/
+// amend_rate.php docblock for the full gap analysis. This explicit
+// block returns a 422 with a clear pointer to the amendment workflow
+// so the client surfaces the right next step instead of a silent
+// no-op.
+//
+// gps_cost is intentionally EXCLUDED from this block per S-LEASE-
+// RATE-AMENDMENT operator decision (option "keep mutable in
+// update.php per S-LEASE-GPS-COST"). gps_cost is mutable here AND
+// amendable via amend_rate.php — operators have both paths.
+//
+// rate_method is intentionally EXCLUDED — no such column exists on
+// leases (the runtime concept lives in InvoiceGenerator). No block
+// needed for a non-existent field.
+$rateBlockedFields = [
+    'daily_rate',
+    'weekly_rate',
+    'monthly_rate',
+    'mileage_rate_km',
+    'mileage_rate_miles',
+];
+$rateBlockedHits = [];
+foreach ($rateBlockedFields as $blocked) {
+    if (array_key_exists($blocked, $body)) {
+        $rateBlockedHits[] = $blocked;
+    }
+}
+if ($rateBlockedHits !== []) {
+    json_error(
+        'RATE_AMENDMENT_REQUIRED',
+        'Rate fields cannot be changed via lease update. Use the Rate '
+        . 'Amendment workflow (POST /api/v1/leases/amend_rate) so the '
+        . 'change is captured in the audit trail. Blocked field'
+        . (count($rateBlockedHits) === 1 ? '' : 's') . ': '
+        . implode(', ', $rateBlockedHits) . '.',
+        422,
+        ['blocked_fields' => $rateBlockedHits]
+    );
+}
 
 if (array_key_exists('end_date', $body))
     $data['end_date'] = clean_date($body['end_date']);
