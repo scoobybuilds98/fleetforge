@@ -73,20 +73,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-UNIT-STATUS-COLOR** — IN-FLIGHT
-Start: 2026-05-14 20:06 UTC
-Agent: Claude Code Desktop
-Touching:
-  - lib/Helpers/unit_status_badge.php (NEW — shared PHP helper extracted from equipment/show.php:88 inline)
-  - app/admin/equipment/show.php (refactor inline helper to call shared lib — operator-confirmed)
-  - app/admin/leases/show.php (extend SQL with eu.status; render badge next to unit_display_number)
-  - app/admin/reservations/show.php (add badge next to unit_number reference if not present)
-  - app/admin/maintenance_work_orders/show.php (render badge using already-fetched unit_status data)
-  - api/v1/search.php (universal search — extend equipment results with status if not present)
-  - docs/FLEETFORGE_SPEC_FINAL.md (line 864 carry-forward fold-in: "deferred to" → "shipped via")
-  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + S-MILEAGE-HELPERS-CLEANUP formalize)
-  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row appended)
-Scope: 6-status DB ENUM badge (available/reserved/on_lease/maintenance/inactive/decommissioned per DESIGN_DETAILS.md §9). NO CSS changes (all 6 badge-* classes already in app.css) → NO FF_ASSET_VERSION bump → NO A4 entry. Two surfaces ALREADY SHIPPED out of scope: app/admin/equipment/index.php (fleet list) + app/admin/equipment/show.php (unit profile main render). SKIP app/admin/invoices/show.php (uses unit_number_invoice_snapshot — historical record) + app/portal/leases/view.php (D10 info-boundary — customer-facing). Operator confirmed all 4 scope decisions via AskUserQuestion at pre-flight. No schema motion; no migration.
+*(none)*
 
 ### Documentation cleanup (queued, small)
 
@@ -125,11 +112,8 @@ Outcome: 5-commit arc covering D-A through D-G + a T1-surfaced print-overlay fix
 **S-INVOICE-CREATION-UX** — SHIPPED 2026-05-07 (commits 044ffef + 6feb94c + cdb59ca + C4 — see PROGRESS.md SESSION LOG)
 Outcome: 4-commit arc covering all three issues. C1 classified Issue 1 as VALIDATION GAP (KNOWN ISSUE #103, queued S-MILEAGE-RATE-VALIDATION-FOLLOWUP). C2 wired period auto-fill on invoice create form (12-fixture node smoke 12/12 PASS). C3 added Generate Invoice button on lease profile (8-cell PHP truth-table smoke 13/13 PASS). C4 = tests + this entry. Both new permanent smoke tests committed at tests/_smoke_invoice_create_period_autofill.js + tests/_smoke_lease_show_generate_invoice_button.php.
 
-**S-UNIT-STATUS-COLOR** — QUEUED
-Scope: small color indicator (dot or pill) next to equipment_unit references across all surfaces — fleet list, unit profile, lease references, invoice references, reservation references, maintenance work orders, universal search results, customer portal. Uses existing semantic tokens from FLEETFORGE_DESIGN_DETAILS.md (green=available, blue=on_lease, amber=maintenance, red=out_of_service/damaged, gray=retired).
-Effort: ~30-45 min.
-Dependencies: none.
-Discussed: 2026-05-07 in planning chat.
+**S-UNIT-STATUS-COLOR** — SHIPPED 2026-05-14 (commits 9385ad7 C1 IN-FLIGHT + f3fc46e C2 helper + admin badges + drift fixes + SPEC fold-in + this C3 docs — see PROGRESS.md SESSION LOG row)
+Outcome: Color status indicators applied across 3 admin surfaces (lease show, reservation show, maintenance work order show) using a new canonical PHP helper `unit_status_badge_class()` at `includes/functions.php` (mirroring equipment_health_color from S-CRON-3). Universal search equipment block routes through the same helper. DESIGN_DETAILS.md §9 6-status mapping locked: available=success / reserved=purple / on_lease=info / maintenance=warning / inactive=neutral / decommissioned=danger. Pre-flight surfaced 4 prompt divergences (5-status assumption with stale names; 2 surfaces already shipped; helper location convention; portal info-boundary concern) — all resolved via operator-confirmed AskUserQuestion. Two drift-fix sub-findings landed in scope: (a) `app/admin/reservations/show.php:1101` JS mapping had reserved→warning + maintenance→danger + decommissioned→neutral (now purple/warning/danger per canonical); (b) `api/v1/search.php` $badge_class closure had maintenance→info + inactive→info + reserved→warning for equipment rows — equipment results now route through shared helper, other entity types keep the multi-entity closure. SPEC_FINAL.md:864 stale "deferred to S-PORTAL-MILEAGE-MODEL-B" forward-pointer folded in: "shipped via S-PORTAL-MILEAGE-MODEL-B 2026-05-13" (carry-forward from S-QUEUE-STATUS-VERIFY). OUT OF SCOPE per operator: equipment/index.php + equipment/show.php main render (already shipped); invoices/show.php (snapshot field, not live); portal/leases/view.php (D10 info-boundary). NO CSS changes; NO FF_ASSET_VERSION bump; NO A4 entry; NO schema/migration motion. D131 gate clean on every commit.
 
 ### Bug investigation outcomes
 
@@ -168,6 +152,13 @@ Outcome: 20-scenario hermetic Model B lifecycle test file shipped at `tests/_smo
 (S-MILEAGE-4 placeholder may dissolve into 2B/3 — remove from queue when confirmed.)
 
 ### Architectural follow-ups (lower priority but real)
+
+**S-MILEAGE-HELPERS-CLEANUP** — QUEUED
+Scope: remove 3 orphaned dead helpers from `lib/Billing/Mileage.php` (identified in S-PORTAL-MILEAGE-MODEL-B D-E: `leaseDurationMonths`, `toDisplayUnit`, `formatDistance` — all zero-caller after `monthlyAllowance` deletion). `Mileage::monthlyAllowance` already deleted in S-PORTAL-MILEAGE-MODEL-B 2026-05-13. Optional hygiene; no behavioral change. Pre-deletion grep across `app/ api/ lib/ scripts/ tests/` must return zero callers per K-15 / K-20 discipline before each helper is dropped.
+Effort: ~15-20 min, 2-commit arc (C1 IN-FLIGHT + C2 deletion + docs).
+Dependencies: S-PORTAL-MILEAGE-MODEL-B SHIPPED (✓ 2026-05-13).
+Discussed: 2026-05-13 (S-QUEUE-STATUS-VERIFY limbo finding — entry was mentioned only in handoff-status block at line 36 without a formal QUEUED entry block; formalized here in S-UNIT-STATUS-COLOR C3 2026-05-14).
+
 
 **S-TEMPLATE-MILEAGE-DEFAULTS** — SHIPPED 2026-05-13 (commits 32dc6f8 C1 IN-FLIGHT + b962f6a C2 migration + master mirror + this C3 docs commit — see PROGRESS.md SESSION LOG)
 Outcome: 3-commit arc landing NOT NULL DEFAULT 0.0000 enforcement on `equipment_templates.default_mileage_rate` with precision widening 8,4 → 10,4 to align with the `leases.mileage_rate_km` / `mileage_rate_miles` convention (S-LEASE-UNITS, master file lines 2171-2172). **Pre-work scan confirmed zero NULLs** at session start — S-MILEAGE-RATE-ZERO-FIX (2026-05-06 per S-REEFER-RATE-AUDIT finding) had already backfilled production templates 1/3/4/5 (id=1 $0.2897 custom; id=3 $0.1700 / id=4 $0.1500 / id=5 $0.1300 all rubric-aligned), and the 7 zero-default seed templates (IDs 6/7/10/11/12/14/17) all have zero active leases per P3 — intentional non-billable types per D135 config 3 (rate=0 → mileage disabled). No backfill executed; migration is the schema-tightening step only. Migration `202605122229_S-TEMPLATE-MILEAGE-DEFAULTS_not_null_default.sql` includes a `ff_assert_no_null_mileage_rates()` pre-flight SIGNAL guard for replay safety. **D131 gate clean on every commit:** PARITY OK + INVARIANTS OK I1-I10 + migrate 16 ok / 0 drift / 0 missing + post-apply `SHOW COLUMNS` confirms `decimal(10,4) Null=NO Default=0.0000` + post-apply zero NULLs. **Renders S-LOOKUP-RATES-PRODUCTION-INVARIANT (QUEUED optional) redundant** — the "template default must be non-NULL" branch of the invariant is permanently trivially true under the new schema; SUPERSEDED in this file below. **Side-fix:** removed 4 stray tool-call closing-tag artifacts at `docs/FLEETFORGE_PROGRESS.md:167-170` left in the SESSION LOG section by the prior S-REEFER-RATE-AUDIT C2 edit (broke markdown table rendering between the last row and the `---` separator).
@@ -227,6 +218,9 @@ Effort: TBD.
 ---
 
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
+
+**2026-05-14:**
+- S-UNIT-STATUS-COLOR SHIPPED (3-commit arc: 9385ad7 C1 IN-FLIGHT + f3fc46e C2 helper + admin badges + drift fixes + SPEC fold-in + this C3 docs — see PROGRESS.md SESSION LOG row) — color status indicators for equipment_units references across 3 admin surfaces (lease show / reservation show / maintenance work order show) + universal search equipment results, all routing through new canonical PHP helper `unit_status_badge_class()` at `includes/functions.php` (DESIGN_DETAILS.md §9 6-status mapping: available=success / reserved=purple / on_lease=info / maintenance=warning / inactive=neutral / decommissioned=danger). Pre-flight surfaced 4 prompt divergences via K-22 discipline: (a) prompt's 5-status list was stale (actual DB ENUM is 6 — reserved/inactive/decommissioned replace prompt's missing-reserved + retired/OOS-damaged); (b) fleet list + unit profile already render badges (skipped); (c) `lib/Helpers/` location diverged from project convention (used `includes/functions.php` alongside `equipment_health_color()`); (d) portal SKIPPED per D10 info-boundary; invoice show SKIPPED per snapshot-vs-live distinction. Two in-scope drift fixes: reservations/show.php JS mapping (reserved/maintenance/decommissioned colors), search.php $badge_class closure (multi-entity overload had wrong equipment colors). SPEC_FINAL.md:864 stale forward-pointer folded in (carry-forward from S-QUEUE-STATUS-VERIFY). S-MILEAGE-HELPERS-CLEANUP formalized from in-limbo handoff-status reference → proper QUEUED entry under Architectural follow-ups. No CSS changes; no FF_ASSET_VERSION bump; no A4 entry; no schema/migration motion. D131 gate clean: PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 17/0/0.
 
 **2026-05-13:**
 - S-K22-LOCK SHIPPED (3-commit arc: 6727297 C1 IN-FLIGHT + 757d517 C2 K-22 row + REFERENCE.md §0 index + this C3 docs — see PROGRESS.md SESSION LOG row) — locks K-22 (planning-chat prompt-drafting must trust on-disk canonical-file state over handoff-prompt narrative). Sourced from today's 3-session cleanup arc (S-CHECKLIST-DRIFT-FIX directional + migrate-count drift; S-DOCS-REORG-RESIDUAL working-tree residual; S-PROD-2-DOCS-RECONCILE session-status drift; ~45-min Code Desktop cleanup cost that would not have been needed had originating prompts verified before issuance). Pairs with the Code-Desktop-side memory entry at /Users/avi/.claude/projects/-Users-avi-Documents-fleetforge/memory/feedback_trust_file_over_prompt.md — K-22 captures the planning-chat-side version of the same trust-file principle. Meta-note: this session's own prompt assumed K-20/K-21 were indexed in REFERENCE.md §0 but they aren't; Code Desktop matched K-14 row shape per the discipline being locked — third-order confirmation that K-22's principle scales. D131 gate clean: PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 17/0/0.
