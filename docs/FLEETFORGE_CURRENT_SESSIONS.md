@@ -73,7 +73,14 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-K22-LOCK** — IN-FLIGHT
+Start: 2026-05-13 14:48 UTC
+Agent: Claude Code Desktop
+Touching:
+  - docs/FLEETFORGE_PROGRESS.md (KEY LEARNINGS K-22 row + SESSION LOG row)
+  - docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md (§0 LOCKED DECISIONS K-22 index pointer)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED flip + ship history)
+Scope: lock K-22 (planning-chat prompt-drafting trust-disk-over-narrative discipline). Pure docs; no code/schema motion.
 
 ### Documentation cleanup (queued, small)
 
