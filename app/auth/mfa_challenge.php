@@ -150,14 +150,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            db_execute(
-                "UPDATE users SET login_attempts = 0, locked_until = NULL,
-                                  last_login_at = NOW(), last_login_ip = ?
-                 WHERE id = ?",
-                [$ip, $pendingUserId]
-            );
-
             $remember = !empty($pending['remember']);
+
+            // S-AUTH-FIX (D-E, D-F): stamp mfa_verified_until = NOW() + 30 days
+            // ONLY when "Keep me signed in" was checked on the login form.
+            // pending['remember'] carries that intent across the password →
+            // MFA step (set in app/auth/login.php at $_SESSION['ff_mfa_pending']).
+            // Without the checkbox there is no ff_remember cookie, so
+            // auth_check_remember_me() never runs for this user — leaving
+            // mfa_verified_until untouched is safe and saves a write.
+            //
+            // The combined UPDATE is atomic (single row, single X-lock per D20).
+            if ($remember) {
+                db_execute(
+                    "UPDATE users
+                       SET login_attempts = 0,
+                           locked_until = NULL,
+                           last_login_at = NOW(),
+                           last_login_ip = ?,
+                           mfa_verified_until = DATE_ADD(NOW(), INTERVAL 30 DAY)
+                     WHERE id = ?",
+                    [$ip, $pendingUserId]
+                );
+            } else {
+                db_execute(
+                    "UPDATE users SET login_attempts = 0, locked_until = NULL,
+                                      last_login_at = NOW(), last_login_ip = ?
+                     WHERE id = ?",
+                    [$ip, $pendingUserId]
+                );
+            }
+
             unset($_SESSION['ff_mfa_pending']);
             auth_login($user, $remember);
 
