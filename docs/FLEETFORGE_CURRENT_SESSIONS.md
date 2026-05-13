@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-INVOICE-BACKDATE-WARNING** — IN-FLIGHT (combined arc with S-INVOICE-CUMULATIVE-TOTAL-LABEL Bug 1 verification — both ship in C2)
+  Started: 2026-05-13T08:39 UTC by desktop-1
+  Touching: app/admin/invoices/* (potentially Bug 4 fix), docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_PROGRESS.md
 
 ### Documentation cleanup (queued, small)
 
