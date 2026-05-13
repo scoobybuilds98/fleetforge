@@ -190,45 +190,55 @@ ITEM B2 | 2026-05-12 | B — Prod .env | Populate AWS_SES_SMTP_USER + AWS_SES_SM
 
 ```
 ITEM B3 | 2026-05-12 | B — Prod .env | Set SENTRY_DSN on prod .env
-  Originating session: S-PROD-2 (queued — Sentry + SES bounce handler + key rotation runbook)
+  Originating session: S-PROD-2 (SHIPPED 2026-05-02 — Sentry + SES bounce handler + key rotation runbook)
   Surfaced into checklist: S-PREDEPLOY-CHECKLIST-CREATE
-  Detail: SENTRY_DSN is not yet present in dev .env (no key reserved in the file). S-PROD-2 will both
-    add the key to .env.example and write the integration; deploy must populate the real DSN.
-    Original source: FLEETFORGE_CURRENT_SESSIONS.md S-PROD-2 entry.
-  Action: After S-PROD-2 ships, create Sentry project `fleetforge-prod`, copy DSN, set SENTRY_DSN on
-    prod .env. Verify by triggering a test exception and confirming it lands in Sentry.
-  Owner: Operator (depends on S-PROD-2 ship)
-  Status: PENDING (blocked on S-PROD-2)
+  Detail: S-PROD-2 (SHIPPED 2026-05-02 per PROGRESS.md SESSION LOG line 104) added `SENTRY_DSN`,
+    `SENTRY_ENVIRONMENT`, and `SENTRY_TRACES_SAMPLE_RATE` to `.env.example` and wired the integration
+    at `lib/Observability/Sentry.php`. Sentry::init() is no-op when DSN is blank (D-A / D75 — dev
+    machines never send events without explicit opt-in). Deploy must populate the real DSN.
+    Original source: lib/Observability/Sentry.php; FLEETFORGE_PROGRESS.md S-PROD-2 SESSION LOG row.
+  Action: Create Sentry project `fleetforge-prod`, copy DSN, set `SENTRY_DSN` on prod .env (plus
+    `SENTRY_ENVIRONMENT=production` and `SENTRY_TRACES_SAMPLE_RATE=0.1` if not already present).
+    Verify by triggering a test exception and confirming it lands in Sentry.
+  Owner: Operator
+  Status: PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; only operator-side Sentry-console + .env step remains)
 ```
 
 ```
-ITEM B4 | 2026-05-12 | B — Prod .env | Set AWS_SNS_BOUNCE_TOPIC_ARN on prod .env
-  Originating session: S-PROD-2 (queued — SES bounce handler routes through SNS)
+ITEM B4 | 2026-05-12 | B — Prod .env | Set AWS_SNS_TOPIC_ARN on prod .env
+  Originating session: S-PROD-2 (SHIPPED 2026-05-02 — SES bounce handler routes through SNS)
   Surfaced into checklist: S-PREDEPLOY-CHECKLIST-CREATE
-  Detail: SES bounce notifications are delivered via SNS topic subscription. The handler endpoint
-    (POST /webhooks/ses-bounce) needs to verify the SNS message signature against the configured
-    topic ARN; mismatch = reject. Key not yet present in dev .env.
-    Original source: FLEETFORGE_CURRENT_SESSIONS.md S-PROD-2 entry.
-  Action: After S-PROD-2 ships, create SNS topic `fleetforge-ses-bounces` in us-west-2, subscribe
-    SES identity to it, copy topic ARN, set on prod .env. Verify by sending to a known-bouncing
-    address and confirming the webhook fires + DB suppression row is created.
-  Owner: Operator (depends on S-PROD-2 ship)
-  Status: PENDING (blocked on S-PROD-2)
+  Detail: S-PROD-2 (SHIPPED 2026-05-02) added `AWS_SNS_TOPIC_ARN` to `.env.example` and wired the
+    handler at `api/v1/webhooks/ses_notifications.php` using `Aws\Sns\MessageValidator` for signature
+    verification (rejects 403 on mismatch). Permanent bounces + complaints → set `email_disabled=1`
+    on `customers` + `portal_users` (NOT a separate `email_suppressions` table — directly-on-row
+    flag pattern per D77 design choice). Transient bounces → `email_bounces` audit row only.
+    Note key name: existing dev `.env.example` uses `AWS_SNS_TOPIC_ARN` (not `AWS_SNS_BOUNCE_TOPIC_ARN`
+    as the original checklist item title suggested).
+    Original source: api/v1/webhooks/ses_notifications.php; FLEETFORGE_PROGRESS.md S-PROD-2 SESSION LOG row.
+  Action: Create SNS topic `fleetforge-ses-bounces` in us-west-2, subscribe SES identity to it (Bounce
+    + Complaint destinations), copy topic ARN, set `AWS_SNS_TOPIC_ARN` on prod .env. Verify by sending
+    to a known-bouncing AWS SES test address (e.g. `bounce@simulator.amazonses.com`) and confirming
+    the webhook fires + `email_disabled=1` is set on the affected row + `email_bounces` row created.
+  Owner: Operator
+  Status: PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; only operator-side AWS SNS topic + .env step remains)
 ```
 
 ```
 ITEM B5 | 2026-05-12 | B — Prod .env | Rotate APP_SECRET + FF_MFA_SECRET_KEY for prod (do not reuse dev)
-  Originating session: S-PROD-2 (queued — key rotation runbook)
+  Originating session: S-PROD-2 (SHIPPED 2026-05-02 — key rotation runbook)
   Surfaced into checklist: S-PREDEPLOY-CHECKLIST-CREATE
   Detail: Dev .env lines 20 + 83 contain dev-only values. Prod must use freshly-generated keys
     (`openssl rand -hex 32`) to avoid CSRF token forgery / MFA secret decryption against leaked dev
-    values. Rotation runbook is S-PROD-2 scope; checklist item ensures it actually happens at cutover.
-    Original source: .env lines 18-20 + line 82-83; FLEETFORGE_CURRENT_SESSIONS.md S-PROD-2 entry.
+    values. Rotation runbook at `docs/runbooks/key_rotation.md` (S-PROD-2 SHIPPED 2026-05-02) covers
+    procedure for 5 secrets including `FF_MFA_SECRET_KEY` AES-256-CBC rotation and the `scripts/
+    rotate_mfa_secret_key.php` follow-up flag (script not yet drafted per runbook §1 note).
+    Original source: .env lines 18-20 + line 82-83; docs/runbooks/key_rotation.md.
   Action: Generate two new 32-byte hex values. Set APP_SECRET + FF_MFA_SECRET_KEY on prod .env.
     BEFORE first prod login, confirm no users have mfa_secret set (re-enrolment is required if dev
-    DB is being migrated). Document the rotation date in the S-PROD-2 runbook.
-  Owner: Operator (depends on S-PROD-2 runbook)
-  Status: PENDING (blocked on S-PROD-2)
+    DB is being migrated). Document the rotation date in docs/runbooks/key_rotation.md.
+  Owner: Operator
+  Status: PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; runbook at docs/runbooks/key_rotation.md)
 ```
 
 ### C — DNS
@@ -340,17 +350,20 @@ ITEM D6 | 2026-05-12 | D — AWS infra | Exit SES sandbox + verify production se
 
 ```
 ITEM D7 | 2026-05-12 | D — AWS infra | Create SNS topic fleetforge-ses-bounces + subscribe SES identity
-  Originating session: S-PROD-2 (queued)
+  Originating session: S-PROD-2 (SHIPPED 2026-05-02)
   Surfaced into checklist: S-PREDEPLOY-CHECKLIST-CREATE
-  Detail: SNS topic that SES publishes bounce/complaint events into. Webhook at
-    /webhooks/ses-bounce subscribes. Pairs with B4 (env key) + I2 (CloudWatch alarm on bounce rate).
-    Original source: FLEETFORGE_CURRENT_SESSIONS.md S-PROD-2 entry.
+  Detail: SNS topic that SES publishes bounce/complaint events into. Webhook handler at
+    api/v1/webhooks/ses_notifications.php (S-PROD-2 SHIPPED 2026-05-02) subscribes; SubscriptionConfirmation
+    auto-confirms by curl-fetching the SubscribeURL on first delivery. Pairs with B4 (env key) +
+    I2 (CloudWatch alarm on bounce rate).
+    Original source: api/v1/webhooks/ses_notifications.php; FLEETFORGE_PROGRESS.md S-PROD-2 SESSION LOG row.
   Action: aws sns create-topic --name fleetforge-ses-bounces --region us-west-2. In SES Console →
     Verified identity → Notifications → set Bounce + Complaint destinations to this SNS topic.
-    Subscribe HTTPS endpoint https://<prod>/webhooks/ses-bounce. Confirm subscription via the
-    callback (handled by S-PROD-2 implementation).
-  Owner: Operator (depends on S-PROD-2)
-  Status: PENDING (blocked on S-PROD-2)
+    Subscribe HTTPS endpoint https://<prod>/webhooks/ses_notifications (mapped from
+    api/v1/webhooks/ses_notifications.php via public/index.php router). Confirm subscription via
+    the auto-confirm callback handled by the shipped endpoint.
+  Owner: Operator
+  Status: PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; only operator-side AWS SNS + SES wiring remains)
 ```
 
 ```
@@ -519,12 +532,13 @@ ITEM H2 | 2026-05-12 | H — Rollback | Document + dry-run mysqldump restore fro
 
 ```
 ITEM I1 | 2026-05-12 | I — Monitoring | Sentry alert routing to operator email/SMS
-  Originating session: S-PROD-2 (queued)
+  Originating session: S-PROD-2 (SHIPPED 2026-05-02)
   Surfaced into checklist: S-PREDEPLOY-CHECKLIST-CREATE
-  Detail: Sentry project exists post-B3 — must configure alert rules so unhandled exceptions
-    actually reach the operator. Default new-issue email is OK as a baseline; consider PagerDuty/SMS
-    for production-level severity later.
-    Original source: FLEETFORGE_CURRENT_SESSIONS.md S-PROD-2 entry.
+  Detail: Sentry SDK integrated at lib/Observability/Sentry.php (S-PROD-2 SHIPPED 2026-05-02) and
+    wired into api/bootstrap.php + includes/header.php + app/portal/includes/header.php + 19 cron
+    files. Project + alert routing are operator-side Sentry-console steps post-B3. Default new-issue
+    email is OK as a baseline; consider PagerDuty/SMS for production-level severity later.
+    Original source: lib/Observability/Sentry.php; FLEETFORGE_PROGRESS.md S-PROD-2 SESSION LOG row.
   Action: In Sentry project Settings → Alerts → create rule: "New issue in environment=production"
     → action: email operator@<domain>. Trigger a test exception (e.g. throw new \RuntimeException
     in a dev branch on prod) to verify routing end-to-end. Disable test path before flipping
@@ -585,4 +599,4 @@ ITEM I3 | 2026-05-12 | I — Monitoring | Lightsail CPU/RAM/disk baseline + alar
 
 ---
 
-*Last touched: 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference).*
+*Last touched: 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift). Prior touch: 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*

@@ -205,29 +205,8 @@ Scope: production deployment to AWS Lightsail Oregon.
 Pre-deploy obligations: `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md` (26 obligations across categories A-I) — categories C (DNS), D (AWS infra D1-D9 — Lightsail provision, snapshots, S3 bucket + versioning, mysqldump cron, SES sandbox exit, SNS topic, IAM, CloudWatch alarms), G (smoke G1-G4), H (rollback H1-H2), I (monitoring I1-I3). Each ITEM there carries Originating session + Action + Owner; flip Status → ✅ COMPLETE in the checklist as the cutover progresses. Discipline locked as K-14 (pre-deploy obligations file separate from KNOWN ISSUES and CURRENT_SESSIONS) — see PROGRESS.md KEY LEARNINGS.
 Status: Tier 1/2/3 feature sessions complete as of 2026-05-13. New dedicated planning chat opened 2026-05-13 for the cutover arc. Working doc: `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md` (primary reference for the new chat). `FLEETFORGE_QUICKBOOKS_SPEC.md` (separate QBO chat, not yet started).
 
-**S-PROD-2** — QUEUED
-Scope: production-readiness instrumentation that 5 PREDEPLOY_CHECKLIST.md
-  items cite as a blocker (B3 SENTRY_DSN, B4 AWS_SNS_BOUNCE_TOPIC_ARN,
-  B5 APP_SECRET + FF_MFA_SECRET_KEY rotation runbook, D7 SNS topic +
-  bounce subscription handler, I1 Sentry alert routing). Three pieces:
-  1. Sentry SDK integration — composer require sentry/sentry; bootstrap
-     in lib/; capture handler in front controller; SENTRY_DSN key added
-     to .env.example with placeholder; transaction context tagged with
-     route + user_id.
-  2. SES bounce webhook handler — new endpoint POST /webhooks/ses-bounce
-     that verifies SNS message signature against AWS_SNS_BOUNCE_TOPIC_ARN
-     env var, parses bounce/complaint payload, writes suppression row
-     to a new email_suppressions table (schema shape locked at session
-     time); AWS_SNS_BOUNCE_TOPIC_ARN added to .env.example.
-  3. Key rotation runbook — docs/RUNBOOK_KEY_ROTATION.md covering
-     APP_SECRET + FF_MFA_SECRET_KEY rotation (openssl rand -hex 32 +
-     deploy via .env + session-continuity verification + MFA re-enrol
-     implications if applicable).
-Effort: 2-3 hours active Code Desktop.
-Dependencies: none — can ship any time ahead of cutover. Unblocks
-  PREDEPLOY_CHECKLIST.md B3/B4/B5/D7/I1 reference accuracy.
-Discussed: 2026-05-13 in planning chat (pre-cutover status review +
-  S-CHECKLIST-DRIFT-FIX surfacing).
+**S-PROD-2** — SHIPPED 2026-05-02 (see PROGRESS.md SESSION LOG row at line 104; DECISIONS D75-D78)
+Outcome: production-readiness instrumentation complete. **Sentry SDK** at `lib/Observability/Sentry.php` with `init()` / `captureException()` / `captureMessage()` and `before_send` PII scrub for bcrypt `$2y$` hashes, `ENC:` AES ciphertext, 12 sensitive key names from request data / cookies / headers / stack frames (D-A no-op when `SENTRY_DSN` blank; D-B scrub locked as D75/D76). Wired into `api/bootstrap.php`, `includes/header.php`, `app/portal/includes/header.php`, all 19 cron files. **SES bounce webhook** at `api/v1/webhooks/ses_notifications.php` with `Aws\Sns\MessageValidator` signature check (403 on fail), SubscriptionConfirmation auto-confirm, permanent bounces + complaints → `email_disabled=1` on `customers` + `portal_users` (NOT a separate `email_suppressions` table — directly-on-row flag pattern per D77 design choice); transient bounces → `email_bounces` audit log only. `Mailer::isEmailDisabled()` pre-send guard (fails-open on DB exception). Manager re-enable via `api/v1/customers/reenable_email.php`. **Key rotation runbook** at `docs/runbooks/key_rotation.md` covering 5 secrets (FF_MFA_SECRET_KEY, AWS access keys, DB password, SES SMTP credentials, Cloudflare API token). Logrotate runbook at `docs/runbooks/logrotate_setup.md`. Staging deferred per D78 until first production month. Schema lives in `db_migrations/S-PROD-2_ses_bounce_handler.sql` (already applied; counted in current migrate 17). PREDEPLOY_CHECKLIST.md B3/B4/B5/D7/I1 reference accuracy flipped retroactively in S-PROD-2-DOCS-RECONCILE 2026-05-13 (after S-CHECKLIST-DRIFT-FIX C2 added a phantom QUEUED entry based on stale info).
 
 **S-PROD-3** — QUEUED
 Scope: self-host CDN deps (Google Fonts, ApexCharts, Leaflet — items #79-81 from prod prep audit).
@@ -282,6 +261,9 @@ Effort: TBD.
 
 **2026-05-06:**
 - S-MILEAGE-RATE-ZERO-FIX SHIPPED (bc4db87, 23268f7) — C2 (engine + smoke) and INV-27/INV-84 voids contracted out, deferred to S-MILEAGE-RATE-VALIDATION
+
+**2026-05-02:** *(retroactive backfill added 2026-05-13 via S-PROD-2-DOCS-RECONCILE — the original ship was tracked only in PROGRESS.md SESSION LOG; surfacing here so AWS Lightsail cutover chat readers can locate it in the rolling window)*
+- S-PROD-2 SHIPPED — production-readiness instrumentation (full detail in PROGRESS.md SESSION LOG row at line 104). Sentry SDK at lib/Observability/Sentry.php with init() / captureException() / captureMessage() + before_send PII scrub for bcrypt $2y$ hashes, ENC: AES ciphertext, 12 sensitive key names; wired into api/bootstrap.php + includes/header.php + app/portal/includes/header.php + 19 cron files. SES bounce/complaint webhook at api/v1/webhooks/ses_notifications.php (Aws\Sns\MessageValidator signature check, SubscriptionConfirmation auto-confirm, permanent+complaint → email_disabled=1 on customers + portal_users, transient → email_bounces audit row only). Mailer::isEmailDisabled() pre-send guard. Manager re-enable via api/v1/customers/reenable_email.php. Key rotation runbook at docs/runbooks/key_rotation.md (5 secrets: FF_MFA_SECRET_KEY, AWS access keys, DB password, SES SMTP credentials, Cloudflare API token). Logrotate runbook at docs/runbooks/logrotate_setup.md. Staging deferred per D78. Schema in db_migrations/S-PROD-2_ses_bounce_handler.sql (email_bounces table + email_disabled columns; counted in current migrate 17). DECISIONS D75-D78 locked. Unblocks PREDEPLOY_CHECKLIST.md B3/B4/B5/D7/I1 (reference accuracy flipped 2026-05-13 via S-PROD-2-DOCS-RECONCILE after S-CHECKLIST-DRIFT-FIX C2 introduced a phantom QUEUED entry based on stale info).
 
 (Older entries archived in FLEETFORGE_PROGRESS.md SESSION LOG.)
 
