@@ -73,18 +73,12 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-DOCS-REORG-RESIDUAL** — IN-FLIGHT
-Start: 2026-05-13 13:55 UTC
-Agent: Claude Code Desktop
-Touching:
-  - THINGS_TO_DO_AT_THE_END.md → docs/THINGS_TO_DO_AT_THE_END.md (git mv)
-  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED flip + ship history)
-  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row appended after
-    S-CHECKLIST-DRIFT-FIX, ascending convention)
-Scope: 2026-05-13 DOCS-REORG residual — single git mv, no content edit.
-  Closes working-tree drag flagged at S-CHECKLIST-DRIFT-FIX close.
+*(none)*
 
 ### Documentation cleanup (queued, small)
+
+**S-DOCS-REORG-RESIDUAL** — SHIPPED 2026-05-13 (commits 02b2dc8 + 15540eb + this C3 commit — see PROGRESS.md SESSION LOG)
+Outcome: THINGS_TO_DO_AT_THE_END.md moved root → docs/ via git mv (history preserved). Closes the 2026-05-13 DOCS-REORG residual / dirty-working-tree drag flagged at S-CHECKLIST-DRIFT-FIX close. No content changes; D131 gate green throughout.
 
 **S-CHECKLIST-DRIFT-FIX** — SHIPPED 2026-05-13 (commits 63a594f + ec92f32 + this C3 commit — see PROGRESS.md SESSION LOG)
 Outcome: 3 docs-only drift fixes against PREDEPLOY_CHECKLIST.md + CURRENT_SESSIONS.md. G2 invariant range bumped I1-I6 → I1-I10 with origin-session citations (I7-I10 added across S-MILEAGE-2A/2B/3/5). S-PROD-2 explicit QUEUED entry added with 3-piece scope (Sentry SDK + SES bounce webhook + key rotation runbook) — unblocks PREDEPLOY_CHECKLIST.md B3/B4/B5/D7/I1 reference accuracy. Active queue date stamp refreshed. No code/schema/migration changes; D131 gate green throughout.
@@ -237,6 +231,7 @@ Effort: TBD.
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-13:**
+- S-DOCS-REORG-RESIDUAL SHIPPED (3-commit arc: 02b2dc8 C1 IN-FLIGHT + 15540eb C2 git mv + this C3 docs — see PROGRESS.md SESSION LOG row) — single-file relocation closing 2026-05-13 DOCS-REORG residual: THINGS_TO_DO_AT_THE_END.md root → docs/ via git mv (history preserved). No content change. Closes the dirty-working-tree drag flagged at S-CHECKLIST-DRIFT-FIX close. D131 gate clean: PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 17/0/0.
 - S-CHECKLIST-DRIFT-FIX SHIPPED (3-commit arc: 63a594f C1 IN-FLIGHT + ec92f32 C2 fixes + this C3 docs — see PROGRESS.md SESSION LOG row) — docs-only drift fixes against PREDEPLOY_CHECKLIST.md G2 wording (I1-I6 → I1-I10 with origin-session citations) + CURRENT_SESSIONS.md S-PROD-2 explicit QUEUED entry (Sentry SDK + SES bounce webhook + key rotation runbook scope) + active queue date stamp refresh. Unblocks PREDEPLOY_CHECKLIST.md B3/B4/B5/D7/I1 reference accuracy. D131 gate clean: PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 17/0/0.
 - S-LEASE-RATE-AMENDMENT SHIPPED (4-commit arc: bf16f10 C1 IN-FLIGHT + e727c9b C2 amend_rate endpoint + update.php block + ea16bd5 C3 show.php UI + this C4 docs commit — see PROGRESS.md SESSION LOG row) — **Tier 3 complete.** NEW `api/v1/leases/amend_rate.php` (282 lines) lands prospective rate-amendment workflow per locked D-A through D-D (prospective only / active-leases only / any admin / no auto credits). Pipeline: FOR UPDATE on lease + status='active' gate + D19 optimistic lock + partial UPDATE + INSERT lease_amendments (amendment_type='rate_change' + structured JSON) + audit_log + affected-drafts SELECT. update.php rate-field block at new lines 90-119 returns 422 RATE_AMENDMENT_REQUIRED for daily/weekly/monthly/mileage_rate_km/mileage_rate_miles; gps_cost intentionally excluded (kept mutable per S-LEASE-GPS-COST); rate_method excluded (no such column). show.php adds "Amend Rates" button (active-only via x-show) + structured rate-amendment modal with pre-filled inputs + reason + affected-drafts advisory. Pre-work surfaced 3 prompt schema mismatches + a MAJOR finding (`lease_amendments` table already exists with `amendment_type='rate_change'`); operator chose option (A) reuse vs new table — drops the prompt's migration commit entirely (4-commit arc instead of 5; D130 scope contraction documented). D131 gate clean on every commit: PHP lint + doc_freshness 17/17 + PARITY OK + INVARIANTS OK I1-I10 + migrate 17/0/0. Stress (a) BEGIN/ROLLBACK happy-path verified; (b)/(c)/(d) code-inspected. No schema / migration / .env / FF_ASSET_VERSION / billing engine / sent invoice surface change.
 - S-SEED-RATE-CARDS-LOAD SHIPPED (3-commit arc: f70ae52 C1 IN-FLIGHT registration + 5e53d8e C2 migration + this C3 docs commit — see PROGRESS.md SESSION LOG row) — Standard 2025 rate card loaded as `is_default=1` system-wide fallback in `rate_cards` (id=5, effective_from='2025-01-01') with 5 full-rate `rate_card_items` rows for the main equipment categories (dry_van/reefer/flatbed/container/chassis) per operator option (A) full-rates choice. Reefer mileage uses live $0.18 per S-REEFER-RATE-AUDIT disposition (C), NOT the seed-script rubric $0.22. Pre-work surfaced two prompt mismatches handled inline: (1) `rate_cards` has no `customer_id` column — adapted INSERT to actual schema; (2) standalone `--` comments don't survive mysqldump round-trip — SKIPPED the master file edit per D127 parity discipline (migration docblock + SESSION LOG row carry the documentation instead). Rate-lookup chain `api/v1/leases/lookup_rates.php` Priority 2 confirmed wired (ORDER BY `rc.is_default DESC` puts Standard 2025 ahead of the 4 existing is_default=0 cards for any covered category). Migration is fully idempotent (NOT EXISTS guards + defensive SIGNAL on soft-delete race). D131 gate clean: PARITY OK + INVARIANTS OK I1-I10 + doc_freshness 17/17 + migrate 17 ok / 0 drift / 0 missing. Existing 4 customer-named cards untouched (still is_default=0). No production .php / schema / equipment_templates / customer_equipment_rates / .env / FF_ASSET_VERSION change.
