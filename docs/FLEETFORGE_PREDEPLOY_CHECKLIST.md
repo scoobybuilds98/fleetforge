@@ -461,7 +461,7 @@ ITEM G1 | 2026-05-12 | G — Smoke | Run tests/_smoke_master_schema_parity.php a
 ```
 
 ```
-ITEM G2 | 2026-05-12 | G — Smoke | Run tests/_smoke_billing_invariants.php against prod DB (I1-I6)
+ITEM G2 | 2026-05-12 | G — Smoke | Run tests/_smoke_billing_invariants.php against prod DB (I1-I10)
   Originating session: D131 smoke gate discipline
   Surfaced into checklist: S-PREDEPLOY-CHECKLIST-CREATE
   Detail: INVARIANTS smoke validates the 10 cross-cutting billing invariants (I1-I10) that the
@@ -562,8 +562,8 @@ ITEM I1 | 2026-05-12 | I — Monitoring | Sentry alert routing to operator email
     → action: email operator@<domain>. Trigger a test exception (e.g. throw new \RuntimeException
     in a dev branch on prod) to verify routing end-to-end. Disable test path before flipping
     cutover.
-  Owner: Operator (depends on B3)
-  Status: PENDING
+  Owner: Operator
+  Status: PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; only operator-side Sentry-console alert rule + SENTRY_DSN prod .env step remains)
 ```
 
 ```
@@ -618,4 +618,4 @@ ITEM I3 | 2026-05-12 | I — Monitoring | Lightsail CPU/RAM/disk baseline + alar
 
 ---
 
-*Last touched: 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift). Prior touch: 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
+*Last touched: 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13). Prior touches: 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
