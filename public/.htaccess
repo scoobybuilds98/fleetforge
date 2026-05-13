@@ -19,12 +19,18 @@ AllowOverride All
 
 # ============================================================
 # SECURITY HEADERS [PASS-1:L4] [Section 4.39]
-# CSP: no Mapbox — removed per spec audit
+# CSP: tightened via S-PROD-3 2026-05-14 — all CDN dependencies
+# (Google Fonts, ApexCharts, Leaflet, Chart.js) now self-hosted
+# at public/assets/vendor/. Removed allowances:
+#   script-src: cdn.jsdelivr.net, fonts.googleapis.com
+#   style-src:  cdn.jsdelivr.net, fonts.googleapis.com, fonts.gstatic.com
+#   font-src:   fonts.gstatic.com
+# img-src 'https:' retained for Leaflet OpenStreetMap tile loads.
 # ============================================================
 <IfModule mod_headers.c>
     # Content Security Policy
     # 'unsafe-inline' required for Alpine.js + inline styles (internal admin tool)
-    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'"
 
     # Prevent MIME type sniffing
     Header always set X-Content-Type-Options "nosniff"

@@ -49,11 +49,9 @@ $samsaraKey    = settings_get('gps.samsara_api_key', '');
 $gpsConfigured = ($samsaraKey !== '');
 ?>
 
-<!-- Leaflet CSS & JS — open-source mapping library, no API key needed -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Leaflet v1.9.4 (pinned, self-hosted via S-PROD-3 2026-05-14) — open-source mapping library, no API key needed -->
+<link rel="stylesheet" href="<?= asset_url('assets/vendor/leaflet/leaflet.css') ?>">
+<script src="<?= asset_url('assets/vendor/leaflet/leaflet.js') ?>"></script>
 
 <div x-data="FF_FleetTracking()" x-init="init()">
 

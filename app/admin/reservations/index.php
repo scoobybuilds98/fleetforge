@@ -1408,8 +1408,8 @@ function FF_Reservations() {
 }
 </script>
 
-<!-- Chart.js (loaded deferred so it doesn't block table render) -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+<!-- Chart.js v4.4.3 (pinned, self-hosted via S-PROD-3 2026-05-14; loaded deferred so it doesn't block table render) -->
+<script src="<?= asset_url('assets/vendor/chartjs/chart.umd.min.js') ?>" defer></script>
 
 <style>
 /* ── Charts grid: donut (narrow) + bar (wide) side by side ─── */

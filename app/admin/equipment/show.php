@@ -1863,12 +1863,10 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 </div><!-- /x-data -->
 
 <!-- WHY: Leaflet CSS/JS loaded here (after content) for unit GPS tracking tab.
-     Only ~40KB JS + ~12KB CSS from CDN (heavily cached). Loaded unconditionally
-     because the tab may be opened at any time via direct URL param. -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+     Self-hosted via S-PROD-3 2026-05-14 (was unpkg.com CDN). Pinned v1.9.4.
+     Loaded unconditionally because the tab may be opened at any time via direct URL param. -->
+<link rel="stylesheet" href="<?= asset_url('assets/vendor/leaflet/leaflet.css') ?>">
+<script src="<?= asset_url('assets/vendor/leaflet/leaflet.js') ?>"></script>
 
 <style>
 /* Unit spec cards — elevated card style for visual separation from page bg */
