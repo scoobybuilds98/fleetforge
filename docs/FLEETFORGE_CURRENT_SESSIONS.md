@@ -73,7 +73,18 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-CHECKLIST-DRIFT-FIX** — IN-FLIGHT
+Start: 2026-05-13 13:34 UTC
+Agent: Claude Code Desktop
+Touching:
+  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (G2 wording + Last-touched stamp)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (active-queue date stamp + new
+    S-PROD-2 queued entry + IN-FLIGHT → SHIPPED flip + Recent ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: 3 docs-only drift fixes — G2 invariant range I1-I6 → I1-I10 with
+  origin-session citations; S-PROD-2 explicit queue entry (was referenced
+  as blocker on B3/B4/B5/D7/I1 but never queued); active-queue date stamp
+  refresh.
 
 ### Documentation cleanup (queued, small)
 
