@@ -73,7 +73,19 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-AUTH-FIX** — IN-FLIGHT
+Start: 2026-05-13 22:11 UTC
+Agent: Claude Code Desktop
+Touching:
+  - db_migrations/<timestamp>_S-AUTH-FIX_mfa_verified_until.sql (new)
+  - FLEETFORGE_DATABASE_MASTER.sql (mfa_verified_until column add)
+  - includes/auth.php (early-return fix + remember-me MFA check)
+  - app/auth/mfa_challenge.php (stamp mfa_verified_until on MFA completion)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (DECISIONS rows + SESSION LOG row)
+Scope: fix session early-return bug + MFA persistence via
+  users.mfa_verified_until. 30-day remember-me restores without
+  re-prompting password or MFA.
 
 ### Documentation cleanup (queued, small)
 
