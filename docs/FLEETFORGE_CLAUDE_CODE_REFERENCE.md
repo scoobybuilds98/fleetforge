@@ -1234,7 +1234,7 @@ Drift detected by the smoke test:
 - `tests/_smoke_master_schema_parity.php` — the parity check
 - D87 in `FLEETFORGE_PROGRESS.md` — original same-session-update rule
 - D126–D127 in `FLEETFORGE_PROGRESS.md` — locked discipline updates (S-DATABASE-MASTER-RECONCILE-2)
-- D131 — extension: parity + invariants smokes both run pre-commit (S-BILLING-RATE-FIX)
+- D131 — extension: parity + invariants + doc freshness smokes all run pre-commit (S-BILLING-RATE-FIX 2026-05-06 added the parity + invariants pair; S-DOC-FRESHNESS-DISCIPLINE 2026-05-13 added the third smoke `tests/_smoke_doc_freshness.php` for canonical-doc existence + SESSION LOG cross-consistency + tool-call markup leak scan + IN-FLIGHT D136 discipline)
 - KNOWN ISSUE #100 — `lease_billing_periods` precharge cleanup (still open; next discipline target)
 - Original Phase 2 reconcile: commit `a54ad7f` for the full-regen procedure
 
