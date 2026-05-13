@@ -73,7 +73,31 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-NOTIFICATION-URL-FIX** — IN-FLIGHT
+Start: 2026-05-13 22:46 UTC
+Agent: Claude Code Desktop
+Touching:
+  - api/v1/payments/create.php (Pattern 1)
+  - api/v1/invoices/send.php (Pattern 1)
+  - cron/invoice_overdue.php (Pattern 1)
+  - api/v1/leases/activate.php (Pattern 2)
+  - api/v1/leases/close.php (Pattern 2)
+  - api/v1/equipment/units/create.php (Pattern 3 — notification URL value only; the API endpoint path is real and unchanged)
+  - api/v1/equipment/units/update_status.php (Pattern 3 — notification URL value only)
+  - cron/samsara_sync.php (Pattern 3)
+  - app/admin/vendors/show.php (Pattern 3 — admin link)
+  - app/admin/damage_claims/show.php (Pattern 3 — admin link)
+  - app/admin/documents/index.php (Pattern 3 — JS admin link)
+  - cron/risk_scores.php (Pattern 4)
+  - cron/health_scores.php (Pattern 4)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: fix 4 broken notification URL patterns across 12 caller files
+  (audit surfaced by S-ISSUES-AUDIT). Option B selected by operator —
+  no DB backfill of existing notifications. NotificationService.php is
+  pass-through; not touched. The `api/v1/equipment/units/*` API endpoint
+  path is a real on-disk directory and is NOT changed — only the URL
+  string values pointing at admin pages are corrected.
 
 ### Bug investigation outcomes
 
