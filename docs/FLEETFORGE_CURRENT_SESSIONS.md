@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-DOC-FRESHNESS-DISCIPLINE** — IN-FLIGHT
+  Started: 2026-05-13T08:26 UTC by desktop-1
+  Touching: tests/_smoke_doc_freshness.php (NEW), docs/FLEETFORGE_PROGRESS.md (cleanup if needed), docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md (D131 gate update)
 
 ### Documentation cleanup (queued, small)
 
