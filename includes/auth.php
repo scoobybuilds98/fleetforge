@@ -31,11 +31,23 @@ function _ff_session_start(): void
 
     // --- Inactivity timeout ---
     // Enforce the SESSION_LIFETIME even if the cookie is still alive.
+    //
+    // S-AUTH-FIX: fall through to remember-me restoration after
+    // destroying the session. The prior code did `return;` here, which
+    // prevented auth_check_remember_me() (below) from ever running on
+    // timeout — so users with a valid 30-day ff_remember cookie were
+    // forced back to login + MFA every time their session aged out.
+    // After destroy(), session_start() in the same request still has a
+    // fresh, empty $_SESSION, so the remember-me check below can repopulate it.
     if (isset($_SESSION['ff_last_activity'])) {
         $lifetime = (int) env('SESSION_LIFETIME', 28800);
         if ((time() - (int) $_SESSION['ff_last_activity']) > $lifetime) {
             _ff_session_destroy();
-            return;
+            // session_start() again so auth_check_remember_me() can write
+            // into $_SESSION (destroy() unsets $_SESSION and closes the session).
+            if (session_status() === PHP_SESSION_NONE) {
+                session_start();
+            }
         }
     }
 
@@ -306,7 +318,38 @@ function auth_check_remember_me(): void
         return;
     }
 
-    // Valid token — restore the session
+    // S-AUTH-FIX: MFA-factor restoration check (D-C, D-D).
+    // remember_token validates the password factor only. For users with
+    // MFA enabled, we also need to confirm the MFA factor is still blessed
+    // for this remember-me cycle. mfa_verified_until is stamped at
+    // mfa_challenge.php on TOTP success when "Keep me signed in" was checked.
+    //
+    //   mfa_enabled = 0  → MFA never required; proceed.
+    //   mfa_enabled = 1, mfa_verified_until NULL or expired → restore the
+    //     session at password level (D-D), but set ff_mfa_pending so the
+    //     next request hits the MFA challenge. ff_remember stays valid; only
+    //     the MFA factor is re-verifying.
+    //   mfa_enabled = 1, mfa_verified_until in the future → both factors
+    //     blessed; restore the full session.
+    $mfaEnabled = (int) ($user['mfa_enabled'] ?? 0) === 1;
+    $mfaUntil   = $user['mfa_verified_until'] ?? null;
+    $mfaValid   = $mfaUntil !== null && strtotime((string) $mfaUntil) > time();
+
+    if ($mfaEnabled && !$mfaValid) {
+        // Restore at password level — auth_login still runs so $_SESSION is
+        // populated and subsequent require_auth() calls succeed. The MFA
+        // gate is enforced by setting ff_mfa_pending below, which the global
+        // request bootstrap is expected to detect (see app/auth/mfa_challenge.php).
+        auth_login($user, rememberMe: false);
+        $_SESSION['ff_mfa_pending'] = [
+            'user_id'    => (int) $user['id'],
+            'started_at' => time(),
+            'remember'   => true, // remember cookie is still valid; stamp on re-verify
+        ];
+        return;
+    }
+
+    // Valid token (both factors) — restore the session
     auth_login($user, rememberMe: false); // re-sets session, does NOT re-issue cookie
 }
 
