@@ -73,7 +73,16 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-DOCS-REORG-RESIDUAL** — IN-FLIGHT
+Start: 2026-05-13 13:55 UTC
+Agent: Claude Code Desktop
+Touching:
+  - THINGS_TO_DO_AT_THE_END.md → docs/THINGS_TO_DO_AT_THE_END.md (git mv)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED flip + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row appended after
+    S-CHECKLIST-DRIFT-FIX, ascending convention)
+Scope: 2026-05-13 DOCS-REORG residual — single git mv, no content edit.
+  Closes working-tree drag flagged at S-CHECKLIST-DRIFT-FIX close.
 
 ### Documentation cleanup (queued, small)
 
