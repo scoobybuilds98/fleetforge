@@ -2910,6 +2910,7 @@ CREATE TABLE `users` (
   `password_reset_token` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `password_reset_expiry` datetime DEFAULT NULL,
   `remember_token` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `mfa_verified_until` datetime DEFAULT NULL,
   `created_by` int unsigned DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
