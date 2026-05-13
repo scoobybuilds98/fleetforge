@@ -158,8 +158,8 @@
      Alpine must be last so it discovers all x-data in the DOM.
      ============================================================ -->
 
-<!-- ApexCharts v3 (pinned) -->
-<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
+<!-- ApexCharts v3.45.1 (pinned, self-hosted via S-PROD-3 2026-05-14) -->
+<script src="<?= asset_url('assets/vendor/apexcharts/apexcharts.min.js') ?>"></script>
 
 <!-- FleetForge application JS -->
 <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
