@@ -73,7 +73,24 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-PROD-3** — IN-FLIGHT
+Start: 2026-05-14 20:20 UTC
+Agent: Claude Code Desktop
+Touching:
+  - public/assets/vendor/fonts/ (NEW — DM Sans + DM Mono woff2 files)
+  - public/assets/vendor/apexcharts/ (NEW — apexcharts.min.js v3.45.1 pinned)
+  - public/assets/vendor/leaflet/ (NEW — leaflet.js + leaflet.css + images/marker-*.png v1.9.4)
+  - public/assets/vendor/chartjs/ (NEW — chart.umd.min.js v4.4.3)
+  - public/assets/css/app.css (NEW @font-face block; FF_ASSET_VERSION bump warranted per K-14)
+  - 16+ PHP templates with Google Fonts <link> tags (admin auth + portal auth + admin pages + error pages — full list captured pre-flight)
+  - includes/footer.php (ApexCharts script tag → asset_url())
+  - app/admin/tracking/index.php + app/admin/equipment/show.php (Leaflet script + link → asset_url())
+  - app/admin/reservations/index.php (Chart.js script tag → asset_url())
+  - .env (FF_ASSET_VERSION bump for C2 Google Fonts @font-face addition)
+  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (A4 entry per K-14 for C2 CSS change)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (DECISIONS rows + SESSION LOG row)
+Scope: self-host 4 CDN dependencies (operator-confirmed scope expanded to include Chart.js 4.4.3 surfaced pre-flight beyond prompt's 3-library list). Existing precedent: public/assets/vendor/alpinejs/ (Alpine.js already self-hosted; same layout pattern). Zero external CDN calls at runtime post-ship. ApexCharts pinned to 3.45.1 per current footer.php reference; Leaflet pinned to 1.9.4; Chart.js pinned to 4.4.3. Google Fonts strategy: centralize via @font-face in app.css + remove all <link> tags (single source of truth). 5-commit arc: C1 IN-FLIGHT; C2 fonts (CSS + bump); C3 ApexCharts; C4 Leaflet + Chart.js (combined); C5 docs. No schema motion; D131 gate baseline 17/0/0.
 
 ### Documentation cleanup (queued, small)
 
