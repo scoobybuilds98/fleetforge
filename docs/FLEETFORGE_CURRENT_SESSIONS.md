@@ -73,7 +73,14 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MILEAGE-HELPERS-CLEANUP** — IN-FLIGHT
+Start: 2026-05-14 20:40 UTC
+Agent: Claude Code Desktop
+Touching:
+  - lib/Billing/Mileage.php (3 dead helper deletions — K-15 verified zero external callers — plus 3 orphan constants per operator-confirmed clean-cleanup option)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: delete 3 orphaned dead helpers per S-PORTAL-MILEAGE-MODEL-B D-E (leaseDurationMonths + toDisplayUnit + formatDistance). Pre-flight surfaced 3 orphan class constants (MONEY_SCALE, OPEN_ENDED_FALLBACK_MONTHS, DISTANCE_SCALE) whose only callers are the methods being deleted; operator authorized clean-cleanup scope expansion via AskUserQuestion to delete the constants in the same commit. Pre-existing tombstone comments (monthlyAllowance + periodExcess) preserved. No behavioral change. Closes Model B helper-retirement surface.
 
 ### Documentation cleanup (queued, small)
 
