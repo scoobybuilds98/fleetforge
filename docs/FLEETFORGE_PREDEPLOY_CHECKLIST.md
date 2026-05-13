@@ -432,13 +432,15 @@ ITEM G1 | 2026-05-12 | G — Smoke | Run tests/_smoke_master_schema_parity.php a
 ITEM G2 | 2026-05-12 | G — Smoke | Run tests/_smoke_billing_invariants.php against prod DB (I1-I6)
   Originating session: D131 smoke gate discipline
   Surfaced into checklist: S-PREDEPLOY-CHECKLIST-CREATE
-  Detail: INVARIANTS smoke validates the 6 cross-cutting billing invariants (I1-I6) that the
+  Detail: INVARIANTS smoke validates the 10 cross-cutting billing invariants (I1-I10) that the
     full-system money math depends on (Path B sent-only counter consistency, invoice-vs-payment
-    sign agreement, etc.). Any I-failure means data is in an inconsistent state and prod traffic
-    must not open.
+    sign agreement, etc.). I7 was added in S-MILEAGE-2A C6 (precharge tier D132 extension);
+    I8 in S-MILEAGE-2B C7 (drawdown emit shape); I9 in S-MILEAGE-3 C6 (close-refund state
+    machine); I10 in S-MILEAGE-5 C2 (credit/cash branch precharge_balance cross-check). Any
+    I-failure means data is in an inconsistent state and prod traffic must not open.
     Original source: FLEETFORGE_PROGRESS.md DECISIONS D131; tests/_smoke_billing_invariants.php.
   Action: After G1 PASS: php tests/_smoke_billing_invariants.php on prod. Expect "INVARIANTS OK"
-    with all of I1-I6 PASS. Any I-fail blocks cutover.
+    with all of I1-I10 PASS. Any I-fail blocks cutover.
   Owner: Operator (post-deploy, pre-traffic)
   Status: PENDING
 ```
@@ -583,4 +585,4 @@ ITEM I3 | 2026-05-12 | I — Monitoring | Lightsail CPU/RAM/disk baseline + alar
 
 ---
 
-*Last touched: 2026-05-12 (S-PREDEPLOY-CHECKLIST-CREATE — file creation).*
+*Last touched: 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference).*
