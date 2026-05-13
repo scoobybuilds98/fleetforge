@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-PORTAL-MILEAGE-MODEL-B** — IN-FLIGHT
+  Started: 2026-05-13T08:58 UTC by desktop-1
+  Touching: app/portal/leases/view.php, lib/Billing/Mileage.php (monthlyAllowance deletion), docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md (§13.4.1 lifecycle table flip)
 
 ### Documentation cleanup (queued, small)
 
