@@ -73,36 +73,15 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-NOTIFICATION-URL-FIX** — IN-FLIGHT
-Start: 2026-05-13 22:46 UTC
-Agent: Claude Code Desktop
-Touching:
-  - api/v1/payments/create.php (Pattern 1)
-  - api/v1/invoices/send.php (Pattern 1)
-  - cron/invoice_overdue.php (Pattern 1)
-  - api/v1/leases/activate.php (Pattern 2)
-  - api/v1/leases/close.php (Pattern 2)
-  - api/v1/equipment/units/create.php (Pattern 3 — notification URL value only; the API endpoint path is real and unchanged)
-  - api/v1/equipment/units/update_status.php (Pattern 3 — notification URL value only)
-  - cron/samsara_sync.php (Pattern 3)
-  - app/admin/vendors/show.php (Pattern 3 — admin link)
-  - app/admin/damage_claims/show.php (Pattern 3 — admin link)
-  - app/admin/documents/index.php (Pattern 3 — JS admin link)
-  - cron/risk_scores.php (Pattern 4)
-  - cron/health_scores.php (Pattern 4)
-  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
-  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
-Scope: fix 4 broken notification URL patterns across 12 caller files
-  (audit surfaced by S-ISSUES-AUDIT). Option B selected by operator —
-  no DB backfill of existing notifications. NotificationService.php is
-  pass-through; not touched. The `api/v1/equipment/units/*` API endpoint
-  path is a real on-disk directory and is NOT changed — only the URL
-  string values pointing at admin pages are corrected.
+*(none)*
 
 ### Bug investigation outcomes
 
 **S-AUTH-FIX** — SHIPPED 2026-05-14 (commits cea88fb-e31b25e + this C5 — see PROGRESS.md SESSION LOG)
 Outcome: fixed session early-return bug (auth.php inactivity timeout fell through before remember-me check) + added MFA persistence via `users.mfa_verified_until`. "Keep me logged in for 30 days" now means no password AND no MFA re-prompt for 30 days. Security gap closed: remember-me with expired MFA restores session at password level but re-gates on MFA (no full logout). Migration 18.
+
+**S-NOTIFICATION-URL-FIX** — SHIPPED 2026-05-14 (commits fb1685c-0964754 + this C3 — see PROGRESS.md SESSION LOG)
+Outcome: 4 broken notification URL patterns fixed across 13 caller files. All notification types now route to existing pages. DB backfill skipped per operator decision (Option B); historical broken URLs age out as new correct notifications replace them. D131 gate green throughout.
 
 ### Documentation cleanup (queued, small)
 
@@ -248,6 +227,7 @@ Outcome: Self-hosted all 4 CDN-delivered front-end dependencies — eliminates e
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-14:**
+- S-NOTIFICATION-URL-FIX SHIPPED (3-commit arc: fb1685c C1 IN-FLIGHT + 0964754 C2 13-file URL fix + this C3 docs — see PROGRESS.md SESSION LOG row) — 4 broken notification URL patterns fixed across 13 files / 14 line edits (audit surfaced by S-ISSUES-AUDIT). (1) `/portal/invoices/show?id=` → `/view?id=` (3 portal-notif callers); (2) `/portal/leases/show?id=` → `/view?id=` (3 portal-notif lines across 2 files); (3) `/equipment/units/show` → `/equipment/show` (4 admin URLs + 4 notification URL values across 6 files); (4) bare `/customers/{id}` + `/equipment/{id}` paths → `.../show?id={id}` form (2 cron files). Post-fix grep zero hits on all 4 patterns; the 3 remaining `equipment/units/show` references are the REAL `api/v1/equipment/units/show.php` API endpoint and were intentionally untouched. All 4 destination files exist; PHP syntax clean on all 13 edited files. STOP 2 Option B selected — no DB backfill of existing notification rows. NotificationService.php passes URLs through (caller-supplied); not a fix target. No schema / migration / DB write / new files / routing-map architecture (latter is a larger future session). D131 gate clean on every commit (18/0/0 sticky from S-AUTH-FIX): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 18/0/0.
 - S-AUTH-FIX SHIPPED (5-commit arc: cea88fb C1 IN-FLIGHT + 2b530f0 C2 schema + 1913435 C3 auth.php + e31b25e C4 mfa_challenge.php stamp + this C5 docs — see PROGRESS.md SESSION LOG row) — session early-return bug fixed (auth.php inactivity timeout now falls through to remember-me restoration instead of returning false before the cookie check runs) + MFA persistence added via `users.mfa_verified_until` DATETIME NULL (migration 18 — `202605132211_S-AUTH-FIX_mfa_verified_until.sql`). 30-day remember-me now covers both factors: stamped at MFA completion when "Keep me signed in" is checked (DATE_ADD(NOW(), INTERVAL 30 DAY)), checked in `auth_check_remember_me()` on restoration. Expired MFA branch restores session at password level + sets `ff_mfa_pending` for re-verification (no full logout). Security gap closed: stolen `remember_token` alone is now insufficient if `mfa_verified_until` has expired — attacker hits MFA wall. 6 DECISIONS locked (D188-D193 = D-A through D-F). Manual smoke 4/4 PASS at C4. D131 gate clean (C2 PARITY + migrate 17→18 EXPECTED): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 18/0/0.
 - S-CHECKLIST-WORDING-FIX SHIPPED (3-commit arc: 11d5149 C1 IN-FLIGHT + d7f1d43 C2 fixes + this C3 docs — see PROGRESS.md SESSION LOG row) — 4 stale-wording fixes in `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md` surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13: (1) I1 Status annotation aligned with B3/B4/B5/D7 pattern (`PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; only operator-side Sentry-console alert rule + SENTRY_DSN prod .env step remains)`); (2) I1 Owner `(depends on B3)` qualifier removed (dependency was narrative-historical post-S-PROD-2); (3) G2 heading parenthetical `(I1-I6)` → `(I1-I10)` closes the follow-up left open at S-CHECKLIST-DRIFT-FIX close 2026-05-13; (4) Last-touched stamp refreshed to 2026-05-14 with this session's label + prior-touch chain noted (S-PROD-3 C2 added A4 earlier today but didn't bump the stamp). No Action/Detail/Originating-session content touched; checklist is internally consistent ahead of operator handoff to Lightsail cutover sequence. D131 gate clean: PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 17/0/0.
 - S-MILEAGE-HELPERS-CLEANUP SHIPPED (3-commit arc: 27b5f32 C1 IN-FLIGHT + 6ba4dbd C2 deletions + this C3 docs — see PROGRESS.md SESSION LOG row) — 3 orphaned dead helpers (leaseDurationMonths + toDisplayUnit + formatDistance) + 3 orphan class constants (MONEY_SCALE + OPEN_ENDED_FALLBACK_MONTHS + DISTANCE_SCALE — clean-cleanup scope expansion per operator-confirmed AskUserQuestion at pre-flight) deleted from `lib/Billing/Mileage.php`. K-15 verified zero external callers pre + post (greps across `app/ + api/ + lib/ + bin/ + tests/ + scripts/`; only matches post-deletion are documentation in the new file-level retirement-history docblock). Class shell retained as tombstone (empty class body + consolidated retirement history for all 5 originally-shipped methods + 3 constants in the file-level docblock). File went 181 → 48 lines. Reflection check post-deletion: `Mileage` class has 0 methods, 0 constants, 0 properties. **Model B mileage arc fully closed** at production-code surface: engine (S-MILEAGE-1 schema → -2A precharge emit → -2B drawdown + Model C retirement → -3 close-refund → -3-FIX-0 dispatch ordering → -5 20-scenario smoke + I10) + portal (S-PORTAL-MILEAGE-MODEL-B) + helper retirement (this session). Pending: S-MILEAGE-3-ACCT-SPEC (CPA-blocked on 5 enumerated questions per D-I (A) / D176 — independent of code path). No behavioral change; no schema/migration/CSS motion. PHP lint clean. D131 gate clean on every commit: PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 17/0/0.
