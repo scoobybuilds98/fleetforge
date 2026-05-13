@@ -61,7 +61,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-LEASE-RATE-AMENDMENT** — IN-FLIGHT
+  Started: 2026-05-13T09:41 UTC by desktop-1
+  Touching: db_migrations/ (NEW), FLEETFORGE_DATABASE_MASTER.sql (NEW table), api/v1/leases/amend_rate.php (NEW), api/v1/leases/update.php (rate-field block), app/admin/leases/show.php (history card + amend form), docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_PROGRESS.md
 
 ### Documentation cleanup (queued, small)
 
