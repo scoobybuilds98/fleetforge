@@ -73,7 +73,23 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-SETTINGS-CLEANUP** — IN-FLIGHT
+Start: 2026-05-14 09:06 UTC
+Agent: Claude Code Desktop
+Touching:
+  - db_migrations/<timestamp>_S-SETTINGS-CLEANUP_security_mfa_labels.sql (new — UPDATEs 3 rows)
+  - app/admin/settings/index.php (query + Security card render + required_roles special-case save + Users tab link-card swap)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (DECISIONS rows D194-D196 + SESSION LOG row)
+Scope: (A) expose MFA configuration in Settings → Integrations → Security
+  card (label backfill for the 3 `security.mfa.*` rows + extend query to
+  include `security` group + render-side multi-checkbox for required_roles
+  JSON array + save-side JSON-encode special case). (B) replace Settings
+  → Users tab content (require_once users.php) with a link card to
+  /fleetforge/users (sidebar Users module is the superset; Portal Users
+  tab unchanged). FLEETFORGE_DATABASE_MASTER.sql NOT touched (master file
+  carries DDL only, no seed-row INSERTs; migration row is the canonical
+  documentation per pre-flight confirmation).
 
 ### Bug investigation outcomes
 
