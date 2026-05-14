@@ -73,39 +73,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-USERS-CONSOLIDATE** — IN-FLIGHT
-Start: 2026-05-14 21:09 UTC
-Agent: Claude Code Desktop
-Touching:
-  - app/admin/users/index.php (C2: enrichments + C3: add Portal Users tab + Alpine tab state + ?tab=portal deep-link)
-  - app/admin/portal_users/show.php (C3: NEW — portal user detail page matching users/show.php pattern; D-B)
-  - api/v1/portal_users/create.php (C3: NEW — ported from settings/portal_users.php create_portal_user)
-  - api/v1/portal_users/update_status.php (C3: NEW — ported from change_portal_status)
-  - api/v1/portal_users/reset_password.php (C3: NEW — ported from reset_portal_password)
-  - api/v1/portal_users/delete.php (C3: NEW — ported from delete_portal_user)
-  - api/v1/portal_users/index.php (C3: NEW — list endpoint for the new tab)
-  - api/v1/portal_users/reenable_email.php (C3: NEW — mirrors api/v1/customers/reenable_email.php for S-PROD-2 email-disabled rows)
-  - app/admin/settings/index.php (C4: Portal Users tab → centred link card)
-  - app/admin/settings/portal_users.php (C4: deprecation comment header; file kept on disk per D-D)
-  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
-  - docs/FLEETFORGE_PROGRESS.md (DECISIONS D197-D201 + SESSION LOG row)
-Scope: unified Users module with two tabs ("Team" + "Portal Users" per
-  D-A operator decision). Portal Users tab includes full list + KPI tiles
-  + create form + per-row action buttons + linked customer column;
-  detail page (portal_users/show.php) per D-B with linked customer,
-  login history from audit_log, email-disabled state with reenable, and
-  the full admin action set. Admin (Team) tab enriched per D-C: MFA
-  status badge, colored role badge, relative last-login time, muted-
-  italic styling for status='invited' rows, KPI tiles refreshed to
-  Total/Active/Pending/MFA% (replaces Total/Active/Invited/Suspended).
-  Settings → Portal Users tab content swapped to link card (matches
-  S-SETTINGS-CLEANUP D-B pattern for admin Users); tab nav entry kept
-  so ?tab=portal_users bookmarks still resolve. settings/portal_users.php
-  kept on disk with deprecation comment per D-D. Pre-flight confirmed:
-  all schema columns exist (no migration); api/v1/portal_users/ does
-  NOT exist (5 new endpoints to extract); admin users index has no tab
-  structure yet (clean Alpine tab addition); Settings Portal Users tab
-  is still full include (not yet a link card).
+*(none)*
 
 ### Bug investigation outcomes
 
@@ -205,6 +173,9 @@ Outcome: 20-scenario hermetic Model B lifecycle test file shipped at `tests/_smo
 
 ### Architectural follow-ups (lower priority but real)
 
+**S-USERS-CONSOLIDATE** — SHIPPED 2026-05-15 (commits 9900d86 C1 + c6df5bd C2 Team enrichments + de763f4 C3 Portal tab + detail + 6 API endpoints + 4a58284 C4 Settings link card + this C5 docs — see PROGRESS.md SESSION LOG)
+Outcome: unified user management under the sidebar Users module — two tabs ("Team" + "Portal Users" per D-A). Team tab enriched per D-C: MFA 3-state pill, colored role badge, relative last-login time, invited-row muted-italic styling, KPI tiles refreshed to Total Team / Active / Pending Invite / MFA Enrolled%. Portal Users tab built with sortable list, KPI tiles (Total / Active / Pending / Email Disabled), inline Create form, customer-link column, Primary + Email Off badges, deep-link via `?tab=portal`. New `app/admin/portal_users/show.php` detail page per D-B (left-rail detail + right-rail actions + recent login activity). 6 new API endpoints under `api/v1/portal_users/` (index, create, update_status, reset_password, delete, reenable_email — the reenable_email closes the S-PROD-2 portal-side gap that didn't exist before). Settings → Portal Users tab swapped to centred link card matching the S-SETTINGS-CLEANUP D195 pattern; settings/portal_users.php kept on disk with DEPRECATED docblock header per D200 (D-D). 5 DECISIONS locked D197-D201. Closes the deferred decommission left open by S-SETTINGS-CLEANUP D195. D131 gate clean throughout (no schema motion; 19/0/0 sticky).
+
 **S-MILEAGE-HELPERS-CLEANUP** — SHIPPED 2026-05-14 (commits 27b5f32 C1 IN-FLIGHT + 6ba4dbd C2 deletions + this C3 docs — see PROGRESS.md SESSION LOG row)
 Outcome: 3 orphaned dead helpers (leaseDurationMonths + toDisplayUnit + formatDistance per S-PORTAL-MILEAGE-MODEL-B D-E) + 3 orphan class constants (MONEY_SCALE, OPEN_ENDED_FALLBACK_MONTHS, DISTANCE_SCALE — operator-confirmed clean-cleanup scope expansion via AskUserQuestion at pre-flight) deleted from `lib/Billing/Mileage.php`. K-15 verified zero external callers pre + post deletion. Class shell retained as tombstone (file-level retirement-history docblock + empty class body) so stale `use` references get class-exists shape rather than class-not-found fatal. **Model B mileage arc fully closed** on production-code surface: engine (S-MILEAGE-1 → -2A → -2B → -3 → -3-FIX-0 → -5) + portal (S-PORTAL-MILEAGE-MODEL-B) + helper retirement (this session). Pending: S-MILEAGE-3-ACCT-SPEC (CPA-blocked, independent of code path). No behavioral change; no schema/migration/CSS motion; D131 gate green throughout.
 
@@ -266,6 +237,9 @@ Outcome: Self-hosted all 4 CDN-delivered front-end dependencies — eliminates e
 ---
 
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
+
+**2026-05-15:**
+- S-USERS-CONSOLIDATE SHIPPED (5-commit arc: 9900d86 C1 IN-FLIGHT + c6df5bd C2 Team enrichments + de763f4 C3 Portal tab + portal_users/show.php + 6 API endpoints + 4a58284 C4 Settings tab → link card + this C5 docs — see PROGRESS.md SESSION LOG row) — unified Users module: two tabs ("Team" + "Portal Users" per D-A). **(A) Team tab enriched** per D-C: MFA 3-state pill (green On / red Required / amber Off — Required surfaces compliance gaps from security.mfa.required_roles); colored role badges (super_admin=danger / manager=warning / dispatcher=info / accountant=success / read_only=neutral); relative last-login `relTime()`; status='invited' rows muted at opacity:0.78 + italic; KPI tiles refreshed to Total Team / Active / Pending Invite / MFA Enrolled% (MFA% denominator = active users). api/v1/users/index.php SELECT extended to include mfa_enabled + mfa_required. **(B) Portal Users tab added** per D-A + D-E: 2-tab Alpine container at users/index.php with `?tab=portal` deep-link (server validates against allowlist, demotes if no settings:view, history.replaceState keeps URL in sync). KPI tiles: Total / Active / Pending / Email Disabled (last surfaces SES bounce-disabled count — new visibility). Inline Create form. Sortable + filterable list with customer-link column + Primary + Email Off badges. **(C) portal_users/show.php detail page built** per D-B: left-rail detail card + right-rail actions (Re-enable Email when email_disabled=1; Send Password Reset 24h; Status toggle; Danger Zone delete for non-primary super_admin) + recent login activity table. **(D) 6 new api/v1/portal_users/ endpoints** (index, create, update_status, reset_password, delete, reenable_email — reenable_email closes the S-PROD-2 portal-side gap). All gated via require_permission('settings',...) matching the legacy super_admin wrap; each emits audit_log. **(E) Settings → Portal Users tab → centred link card** matching S-SETTINGS-CLEANUP D-B pattern; tab nav entry kept so `?tab=portal_users` bookmarks resolve; settings/portal_users.php kept on disk with DEPRECATED docblock header per D-D (inline POST handlers remain functional as fallback). **5 DECISIONS locked** D197-D201. Pre-flight: all schema columns exist (no migration); api/v1/portal_users/ did NOT exist (C3 created 6 endpoints); admin users index had no existing tab structure (clean Alpine addition). Browser-verified in Claude Preview: KPI tiles render correctly, MFA pills + role badges + relative times all visible; Portal tab activates on click + URL updates via replaceState; "Email Off" badge correctly hidden via x-show for email_disabled=0; API GET /api/v1/portal_users/index returned success with total=1. PHP syntax clean on all 10 touched/new files. **Closes the deferred decommission** left open by S-SETTINGS-CLEANUP D195. D131 gate clean on every commit (no schema motion; 19/0/0 sticky from S-SETTINGS-CLEANUP through S-DISPLAY-REVAMP): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 19/0/0.
 
 **2026-05-14:**
 - S-DISPLAY-REVAMP SHIPPED (3-commit arc: b62c5fe C1 IN-FLIGHT + bd1ec62 C2 CSS fix + this C3 docs — see PROGRESS.md SESSION LOG row) — **NARROWED at pre-flight per K-22 trust-file-over-prompt.** Prompt's part (A) "display settings non-functional" premise contradicted by file state: the entire display-settings stack is shipped end-to-end (DB cols users.display_font_size + users.display_density; session hydration at auth.php:217; FOUC-free server-rendered inline `<style id="ff-display-font-size">` at header.php:119; `<body data-density>` at header.php:135; density CSS rules for compact/comfortable/spacious at app.css:1379-1398; Alpine ffDisplaySettings() factory at app.js:400; FF_Display._applyDom + _persist at app.js:337-366; api/v1/users/display_settings/update.php). Real user has font=85 in DB — direct proof the API has been writing successfully. Operator confirmed "narrow scope: drop display work, keep sidebar-badge fix only" via AskUserQuestion. Session keeps the S-DISPLAY-REVAMP label so the SESSION LOG carries the discovery for future audits. **Shipped: part (B) sidebar badge collapsed-state layout fix only.** Root cause at app.css:919 — `.sidebar:not(.is-open) .nav-badge` selector sets opacity:0 + max-width:0 but .nav-badge carries min-width:20px at line 788; CSS spec resolves min-width > max-width, leaving an invisible 20px-wide badge in flex flow that pushed nav-item-icons sideways in icon-only sidebar mode. C2 adds 5-line block (min-width:0 + padding:0 + margin:0 + overflow:hidden on same selector) that fully removes the badge from layout. **Browser-verified in running Claude Preview** (logged in as K-19 dev Manager user; toggled `.sidebar.is-open` off via eval; inspected all 3 badges Invoices/Damage Claims/Compliance — pre-fix width 20-23.5px, post-fix width 0.00px with all box-model props zeroed). FF_ASSET_VERSION 1.0.29 → 1.0.30 on dev .env (gitignored; prod mirror tracked via A5 in PREDEPLOY_CHECKLIST.md). Last-touched stamp refreshed. No DECISIONS locked (narrowed scope didn't introduce architectural choices; pre-flight discovery is the SESSION LOG content). NO schema motion, NO migrations, NO PHP changes. 3-commit arc instead of original 5. D131 gate clean on every commit (19/0/0 sticky): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 19/0/0.
