@@ -73,23 +73,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-SETTINGS-CLEANUP** — IN-FLIGHT
-Start: 2026-05-14 09:06 UTC
-Agent: Claude Code Desktop
-Touching:
-  - db_migrations/<timestamp>_S-SETTINGS-CLEANUP_security_mfa_labels.sql (new — UPDATEs 3 rows)
-  - app/admin/settings/index.php (query + Security card render + required_roles special-case save + Users tab link-card swap)
-  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
-  - docs/FLEETFORGE_PROGRESS.md (DECISIONS rows D194-D196 + SESSION LOG row)
-Scope: (A) expose MFA configuration in Settings → Integrations → Security
-  card (label backfill for the 3 `security.mfa.*` rows + extend query to
-  include `security` group + render-side multi-checkbox for required_roles
-  JSON array + save-side JSON-encode special case). (B) replace Settings
-  → Users tab content (require_once users.php) with a link card to
-  /fleetforge/users (sidebar Users module is the superset; Portal Users
-  tab unchanged). FLEETFORGE_DATABASE_MASTER.sql NOT touched (master file
-  carries DDL only, no seed-row INSERTs; migration row is the canonical
-  documentation per pre-flight confirmation).
+*(none)*
 
 ### Bug investigation outcomes
 
@@ -98,6 +82,9 @@ Outcome: fixed session early-return bug (auth.php inactivity timeout fell throug
 
 **S-NOTIFICATION-URL-FIX** — SHIPPED 2026-05-14 (commits fb1685c-0964754 + this C3 — see PROGRESS.md SESSION LOG)
 Outcome: 4 broken notification URL patterns fixed across 13 caller files. All notification types now route to existing pages. DB backfill skipped per operator decision (Option B); historical broken URLs age out as new correct notifications replace them. D131 gate green throughout.
+
+**S-SETTINGS-CLEANUP** — SHIPPED 2026-05-14 (commits b4ca4c3-5a525d2 + this C4 — see PROGRESS.md SESSION LOG)
+Outcome: MFA config (required_roles / totp_window / backup_code_count) now editable in Settings → Integrations → Security card (migration 19 backfilled labels; multi-checkbox UI for required_roles per D-A). Settings → Users tab replaced with link card to sidebar Users module (D-B); Portal Users tab unchanged. 3 DECISIONS locked D194-D196. D131 gate clean (C2 migrate 18→19 EXPECTED; PARITY OK retained for data-only UPDATE).
 
 ### Documentation cleanup (queued, small)
 
@@ -243,6 +230,7 @@ Outcome: Self-hosted all 4 CDN-delivered front-end dependencies — eliminates e
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-14:**
+- S-SETTINGS-CLEANUP SHIPPED (4-commit arc: b4ca4c3 C1 IN-FLIGHT + a557354 C2 migration 19 + 5a525d2 C3 settings/index.php patch + this C4 docs — see PROGRESS.md SESSION LOG row) — MFA configuration surfaced in Settings → Integrations → Security card (migration 19 backfilled labels on the 3 `security.mfa.*` rows that S-PROD-1A originally seeded with NULL labels; settings query extended to include `security` group; `$sensitiveGroups` foreach renders the Security card alongside gps/ai/email/storage/aws). `required_roles` rendered as multi-checkbox over 5 user_roles slugs (super_admin/manager/dispatcher/accountant/read_only) per D-A; save handler JSON-encodes the submitted array. `totp_window` + `backup_code_count` flow through the existing integer-input branch. Settings → Users tab content swapped to a centred link card pointing at `/fleetforge/users` (sidebar Users is the superset per S-ISSUES-AUDIT — D-B); tab nav entry kept so `?tab=users` bookmarks still resolve; settings/users.php left on disk pending S-USERS-CONSOLIDATE. Portal Users tab unchanged. 3 DECISIONS locked D194-D196 (required_roles UI choice + Users link-card vs hard-remove + rate_limit.* intentionally not exposed per D196). FLEETFORGE_DATABASE_MASTER.sql NOT touched (master is DDL-only, no settings INSERTs; migration row is canonical seed doc per pre-flight). Manual smoke 3/3 PASS at C3. PHP lint clean. D131 gate clean on every commit (C2 migrate 18→19 EXPECTED; PARITY OK retained for data-only UPDATE; all other gates unchanged): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 19/0/0.
 - S-NOTIFICATION-URL-FIX SHIPPED (3-commit arc: fb1685c C1 IN-FLIGHT + 0964754 C2 13-file URL fix + this C3 docs — see PROGRESS.md SESSION LOG row) — 4 broken notification URL patterns fixed across 13 files / 14 line edits (audit surfaced by S-ISSUES-AUDIT). (1) `/portal/invoices/show?id=` → `/view?id=` (3 portal-notif callers); (2) `/portal/leases/show?id=` → `/view?id=` (3 portal-notif lines across 2 files); (3) `/equipment/units/show` → `/equipment/show` (4 admin URLs + 4 notification URL values across 6 files); (4) bare `/customers/{id}` + `/equipment/{id}` paths → `.../show?id={id}` form (2 cron files). Post-fix grep zero hits on all 4 patterns; the 3 remaining `equipment/units/show` references are the REAL `api/v1/equipment/units/show.php` API endpoint and were intentionally untouched. All 4 destination files exist; PHP syntax clean on all 13 edited files. STOP 2 Option B selected — no DB backfill of existing notification rows. NotificationService.php passes URLs through (caller-supplied); not a fix target. No schema / migration / DB write / new files / routing-map architecture (latter is a larger future session). D131 gate clean on every commit (18/0/0 sticky from S-AUTH-FIX): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 18/0/0.
 - S-AUTH-FIX SHIPPED (5-commit arc: cea88fb C1 IN-FLIGHT + 2b530f0 C2 schema + 1913435 C3 auth.php + e31b25e C4 mfa_challenge.php stamp + this C5 docs — see PROGRESS.md SESSION LOG row) — session early-return bug fixed (auth.php inactivity timeout now falls through to remember-me restoration instead of returning false before the cookie check runs) + MFA persistence added via `users.mfa_verified_until` DATETIME NULL (migration 18 — `202605132211_S-AUTH-FIX_mfa_verified_until.sql`). 30-day remember-me now covers both factors: stamped at MFA completion when "Keep me signed in" is checked (DATE_ADD(NOW(), INTERVAL 30 DAY)), checked in `auth_check_remember_me()` on restoration. Expired MFA branch restores session at password level + sets `ff_mfa_pending` for re-verification (no full logout). Security gap closed: stolen `remember_token` alone is now insufficient if `mfa_verified_until` has expired — attacker hits MFA wall. 6 DECISIONS locked (D188-D193 = D-A through D-F). Manual smoke 4/4 PASS at C4. D131 gate clean (C2 PARITY + migrate 17→18 EXPECTED): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 18/0/0.
 - S-CHECKLIST-WORDING-FIX SHIPPED (3-commit arc: 11d5149 C1 IN-FLIGHT + d7f1d43 C2 fixes + this C3 docs — see PROGRESS.md SESSION LOG row) — 4 stale-wording fixes in `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md` surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13: (1) I1 Status annotation aligned with B3/B4/B5/D7 pattern (`PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; only operator-side Sentry-console alert rule + SENTRY_DSN prod .env step remains)`); (2) I1 Owner `(depends on B3)` qualifier removed (dependency was narrative-historical post-S-PROD-2); (3) G2 heading parenthetical `(I1-I6)` → `(I1-I10)` closes the follow-up left open at S-CHECKLIST-DRIFT-FIX close 2026-05-13; (4) Last-touched stamp refreshed to 2026-05-14 with this session's label + prior-touch chain noted (S-PROD-3 C2 added A4 earlier today but didn't bump the stamp). No Action/Detail/Originating-session content touched; checklist is internally consistent ahead of operator handoff to Lightsail cutover sequence. D131 gate clean: PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 17/0/0.
