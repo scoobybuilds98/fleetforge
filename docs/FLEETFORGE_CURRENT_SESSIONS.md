@@ -73,7 +73,36 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-DISPLAY-REVAMP** — IN-FLIGHT
+Start: 2026-05-14 16:08 UTC
+Agent: Claude Code Desktop
+Touching:
+  - public/assets/css/app.css (collapsed-state .nav-badge min-width fix)
+  - .env (FF_ASSET_VERSION bump — CSS change)
+  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (A5 per K-14)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope NARROWED at pre-flight per K-22 trust-file-over-prompt:
+  The prompt's part (A) "display settings are non-functional" premise is
+  contradicted by file state. The system is fully wired end-to-end:
+  DB cols users.display_font_size + users.display_density (verified —
+  current user has font=85 = the api/v1/users/display_settings/update.php
+  endpoint has been writing successfully) → session hydration at
+  auth.php:217 → server-rendered inline <style id="ff-display-font-size">
+  for FOUC-free first paint at header.php:119 → <body data-density>
+  attribute at header.php:135 → density CSS rules at app.css:1379-1398
+  (compact / comfortable / spacious all defined for .page-content
+  descendants) → Alpine factory ffDisplaySettings() at app.js:400 with
+  inc/dec/setDensity/reset → FF_Display._applyDom() live-updates the
+  inline style + body attr → FF_Display._persist() POSTs to the API →
+  update.php validates + writes + syncs session for next page render.
+  No work needed there; operator confirmed "narrow scope" at pre-flight
+  AskUserQuestion. Session keeps the S-DISPLAY-REVAMP label to preserve
+  the SESSION LOG audit trail, but ships only part (B) — the genuine
+  bug at app.css:919 (collapsed-state .nav-badge gets max-width:0 but
+  also has min-width:20px at :788; min-width wins per CSS spec so the
+  badge stays in flow and pushes nav-item-icons sideways). Single
+  CSS-line fix.
 
 ### Bug investigation outcomes
 
