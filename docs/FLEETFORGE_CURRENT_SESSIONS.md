@@ -73,7 +73,39 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-USERS-CONSOLIDATE** — IN-FLIGHT
+Start: 2026-05-14 21:09 UTC
+Agent: Claude Code Desktop
+Touching:
+  - app/admin/users/index.php (C2: enrichments + C3: add Portal Users tab + Alpine tab state + ?tab=portal deep-link)
+  - app/admin/portal_users/show.php (C3: NEW — portal user detail page matching users/show.php pattern; D-B)
+  - api/v1/portal_users/create.php (C3: NEW — ported from settings/portal_users.php create_portal_user)
+  - api/v1/portal_users/update_status.php (C3: NEW — ported from change_portal_status)
+  - api/v1/portal_users/reset_password.php (C3: NEW — ported from reset_portal_password)
+  - api/v1/portal_users/delete.php (C3: NEW — ported from delete_portal_user)
+  - api/v1/portal_users/index.php (C3: NEW — list endpoint for the new tab)
+  - api/v1/portal_users/reenable_email.php (C3: NEW — mirrors api/v1/customers/reenable_email.php for S-PROD-2 email-disabled rows)
+  - app/admin/settings/index.php (C4: Portal Users tab → centred link card)
+  - app/admin/settings/portal_users.php (C4: deprecation comment header; file kept on disk per D-D)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (DECISIONS D197-D201 + SESSION LOG row)
+Scope: unified Users module with two tabs ("Team" + "Portal Users" per
+  D-A operator decision). Portal Users tab includes full list + KPI tiles
+  + create form + per-row action buttons + linked customer column;
+  detail page (portal_users/show.php) per D-B with linked customer,
+  login history from audit_log, email-disabled state with reenable, and
+  the full admin action set. Admin (Team) tab enriched per D-C: MFA
+  status badge, colored role badge, relative last-login time, muted-
+  italic styling for status='invited' rows, KPI tiles refreshed to
+  Total/Active/Pending/MFA% (replaces Total/Active/Invited/Suspended).
+  Settings → Portal Users tab content swapped to link card (matches
+  S-SETTINGS-CLEANUP D-B pattern for admin Users); tab nav entry kept
+  so ?tab=portal_users bookmarks still resolve. settings/portal_users.php
+  kept on disk with deprecation comment per D-D. Pre-flight confirmed:
+  all schema columns exist (no migration); api/v1/portal_users/ does
+  NOT exist (5 new endpoints to extract); admin users index has no tab
+  structure yet (clean Alpine tab addition); Settings Portal Users tab
+  is still full include (not yet a link card).
 
 ### Bug investigation outcomes
 
