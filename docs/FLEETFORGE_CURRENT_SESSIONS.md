@@ -73,7 +73,29 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-NOTIFICATIONS-FULL** — IN-FLIGHT
+Start: 2026-05-14 11:11 UTC
+Agent: Claude Code Desktop
+Touching:
+  - notifications table (C2 — backfill 173 broken-URL rows across 8 patterns in a single transaction + audit_log row)
+  - api/v1/messenger/messages/create.php (C3 — 2 URL prefixes)
+  - api/v1/messenger/threads/create.php (C3 — 1 URL prefix)
+  - app/portal/api/messenger/send.php (C3 — 1 URL prefix)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: comprehensive notification audit + fix (no missing pages,
+  no migrations, no scope expansion). STOP 1 pre-flight findings:
+  (1) invoice 404 on id=244 = soft-deleted row, not a routing bug;
+  (2) 173 broken-URL rows total in notifications table = 166 known
+  patterns (S-NOTIFICATION-URL-FIX Option A backfill, skipped in
+  that session) + 7 newly-surfaced (4 /messenger?thread= admin notif
+  + 2 /portal/messages?thread= portal notif + 1 stale legacy row),
+  all missing /fleetforge/ prefix; (3) 3 messenger caller files
+  emitting URLs missing /fleetforge/ prefix (same gap pattern
+  S-NOTIFICATION-URL-FIX closed for other modules). All destination
+  pages exist with correct $_GET param names — no missing pages, no
+  routing mismatches. Notification UI renders n.url directly with no
+  wrapping. Operator-confirmed C1+C2+C3+C4 scope via AskUserQuestion.
 
 ### Bug investigation outcomes
 
