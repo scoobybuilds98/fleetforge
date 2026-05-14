@@ -475,8 +475,30 @@ if (!empty($grouped['currency'])) {
 <!-- TAB 3: PORTAL USERS (super_admin only)                                  -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <?php if ($isSuperAdmin): ?>
+<?php /* S-USERS-CONSOLIDATE D-B: tab content swapped from settings/portal_users.php
+         (the prior full management surface) to a link card pointing at the
+         unified Users module's Portal Users tab. Matches the S-SETTINGS-CLEANUP
+         pattern used for admin Users. The tab nav entry stays so existing
+         bookmarks to ?tab=portal_users still resolve. The settings/portal_users.php
+         file remains on disk with a deprecation comment per D-D. */ ?>
 <div x-show="activeTab === 'portal_users'" x-transition:enter class="ff-tab-enter">
-    <?php require_once __DIR__ . '/portal_users.php'; ?>
+    <div class="card" style="margin-bottom:20px;">
+        <div class="card-body" style="text-align:center;padding:48px 32px;">
+            <div style="font-size:0.875rem;color:var(--text-secondary);margin-bottom:8px;">
+                Portal user management has moved
+            </div>
+            <h2 style="font-size:1.125rem;font-weight:600;margin:0 0 8px;">Manage portal users in the Users module</h2>
+            <p style="font-size:0.875rem;color:var(--text-tertiary);max-width:560px;margin:0 auto 24px;">
+                Portal users (customer-side logins) are now managed alongside admin users in the
+                dedicated Users module. The new Portal Users tab offers a richer surface — sortable
+                list with company column, status / Email Off badges, per-user detail page with
+                login history, and a Re-enable Email action for SES-bounce recoveries.
+            </p>
+            <a href="<?= base_url('users') ?>?tab=portal" class="btn btn-primary">
+                Go to Users &rarr; Portal Users &rarr;
+            </a>
+        </div>
+    </div>
 </div>
 <?php endif; ?>
 

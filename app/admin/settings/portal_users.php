@@ -4,7 +4,35 @@ declare(strict_types=1);
 /**
  * app/admin/settings/portal_users.php
  *
- * Portal user management tab — normally included by settings/index.php.
+ * ⚠️  DEPRECATED — DO NOT INCLUDE FROM settings/index.php ANY MORE.
+ *
+ * S-USERS-CONSOLIDATE (2026-05-14) replaced the Settings → Portal Users
+ * tab with a link card pointing at the unified Users module's Portal
+ * Users tab (app/admin/users/index.php?tab=portal). The portal user
+ * management surface — list, KPI tiles, create form, status toggle,
+ * password reset, delete, re-enable email — all moved there. All
+ * write actions are now routed through proper API endpoints under
+ * api/v1/portal_users/* rather than the inline POST handlers below.
+ *
+ * This file is KEPT ON DISK per S-USERS-CONSOLIDATE D-D:
+ *   - Avoids breaking any cached routes or bookmarks that hit
+ *     /fleetforge/settings/portal_users directly (the [C0-FIX]
+ *     standalone bootstrap below still works in that case).
+ *   - Preserves the inline-handler reference for any future audit of
+ *     the consolidation arc.
+ *   - Decommissioning to actual file deletion is a separate operator
+ *     decision; this file should not be edited further.
+ *
+ * If you find yourself reading this file because something here looks
+ * broken, the fix probably belongs in api/v1/portal_users/<action>.php
+ * or app/admin/users/index.php (the Portal Users tab) or
+ * app/admin/portal_users/show.php (the detail page) instead.
+ *
+ * Original contract (still functional when reached as a standalone
+ * route /fleetforge/settings/portal_users, but no longer the canonical
+ * portal-user surface):
+ *
+ * Portal user management tab — formerly included by settings/index.php.
  * Super_admin can view, manage, reset passwords for ALL customer portal users.
  * Shows portal_users grouped by customer with status, login info, actions.
  *
