@@ -76,10 +76,14 @@ $whereSQL = implode(' AND ', $where);
 // -----------------------------------------------------------------------
 $total = db_count("SELECT COUNT(*) FROM users u WHERE $whereSQL", $params);
 
+// S-USERS-CONSOLIDATE: include mfa_enabled + mfa_required so the list
+// can render the MFA status pill (green/amber/red) without a follow-up
+// fetch. password_hash + mfa_secret remain excluded — never expose secrets.
 $rows = db_select(
     "SELECT
          u.id, u.name, u.email, u.status, u.phone,
          u.last_login_at, u.created_at,
+         u.mfa_enabled, u.mfa_required,
          ur.name AS role_name, ur.slug AS role_slug
      FROM users u
      JOIN user_roles ur ON ur.id = u.role_id
