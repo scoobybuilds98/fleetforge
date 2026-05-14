@@ -926,6 +926,21 @@ kbd {
         max-width: 0;
     }
 
+    /* S-DISPLAY-REVAMP — the rule above is shared with .nav-item-label etc.
+       but .nav-badge defines `min-width: 20px` at line 788 which beats the
+       generic `max-width: 0` (CSS spec: min-width wins over max-width). That
+       left a 20px-wide invisible badge in the flexbox flow, pushing the
+       nav-item-icon sideways and breaking icon alignment in icon-only mode.
+       Zero min-width + zero padding + zero margin removes it from layout
+       entirely; opacity:0 + pointer-events:none above keep it invisible and
+       non-interactive. */
+    .sidebar:not(.is-open) .nav-badge {
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        overflow: hidden;
+    }
+
     .sidebar:not(.is-open) .sidebar-brand {
         justify-content: center;
         padding: 0 8px;

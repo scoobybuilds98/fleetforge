@@ -171,6 +171,26 @@ ITEM A4 | 2026-05-14 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to
     fonts.gstatic.com on any page.
   Owner: Operator
   Status: PENDING
+
+ITEM A5 | 2026-05-14 | A — Asset cache | Bump FF_ASSET_VERSION on prod .env to 1.0.30
+  Originating session: S-DISPLAY-REVAMP C2 — collapsed sidebar nav-badge layout fix in app.css
+  Surfaced into checklist: S-DISPLAY-REVAMP C2 (this file's edit commit)
+  Detail: C2 added a 5-line CSS block under the existing "Collapsed sidebar (desktop)" media query in
+    public/assets/css/app.css (after line 927) that zeroes min-width / padding / margin and adds
+    overflow:hidden on `.sidebar:not(.is-open) .nav-badge`. The existing rule already set
+    opacity:0 + max-width:0 on the same selector but `.nav-badge` carries `min-width: 20px` at line
+    788 which beats max-width per CSS spec — the invisible badge stayed in flex flow at 20px wide and
+    pushed nav-item-icons sideways in icon-only sidebar mode. The fix removes the badge from layout
+    entirely while keeping it invisible + non-interactive. Operator bumped dev .env (1.0.29 → 1.0.30)
+    at session ship.
+    Original source: .env (gitignored — bumped by operator at session ship).
+  Action: On prod .env (Lightsail instance), set FF_ASSET_VERSION=1.0.30. Restart php-fpm if asset
+    version is cached in opcache; verify with curl -I https://<prod>/assets/css/app.css?v=1.0.30
+    returns 200 + collapse the desktop sidebar (≥1024px viewport) on any admin page that has a
+    badged nav item (e.g. /invoices when overdue_invoices count > 0) and confirm icons align
+    vertically with no sideways shift.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ### B — Production `.env` keys
@@ -618,4 +638,4 @@ ITEM I3 | 2026-05-12 | I — Monitoring | Lightsail CPU/RAM/disk baseline + alar
 
 ---
 
-*Last touched: 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13). Prior touches: 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
+*Last touched: 2026-05-14 (S-DISPLAY-REVAMP C2 — A5 entry added for FF_ASSET_VERSION 1.0.29 → 1.0.30 collapsed sidebar nav-badge layout fix in app.css). Prior touches: 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13); 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
