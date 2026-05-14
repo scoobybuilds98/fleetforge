@@ -114,7 +114,7 @@ try {
             mb_substr($body, 0, 255),
             'messenger_thread',
             $threadId,
-            '/messenger?thread=' . $threadId,
+            '/fleetforge/messenger?thread=' . $threadId,
             $adminIds,
             'info'
         );

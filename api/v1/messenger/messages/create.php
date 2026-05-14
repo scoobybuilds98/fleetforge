@@ -107,7 +107,7 @@ try {
                 'message'        => mb_substr($body, 0, 255),
                 'type'           => 'messenger.new_message',
                 'category'       => 'system',
-                'url'            => '/portal/messages?thread=' . $threadId,
+                'url'            => '/fleetforge/portal/messages?thread=' . $threadId,
                 'entity_type'    => 'messenger_thread',
                 'entity_id'      => $threadId,
                 'severity'       => 'info',
@@ -122,7 +122,7 @@ try {
             mb_substr($body, 0, 255),
             'messenger_thread',
             $threadId,
-            '/portal/messages?thread=' . $threadId
+            '/fleetforge/portal/messages?thread=' . $threadId
         );
     }
 } catch (\Throwable $e) {

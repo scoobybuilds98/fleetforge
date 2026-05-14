@@ -167,7 +167,7 @@ if ($messageId !== null) {
             mb_substr($body, 0, 255),
             'messenger_thread',
             $threadId,
-            '/portal/messages?thread=' . $threadId
+            '/fleetforge/portal/messages?thread=' . $threadId
         );
     } catch (Throwable $e) {
         error_log('[MESSENGER] portal notification failed: ' . $e->getMessage());
