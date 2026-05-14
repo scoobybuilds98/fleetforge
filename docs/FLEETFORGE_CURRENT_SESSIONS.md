@@ -73,29 +73,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-NOTIFICATIONS-FULL** — IN-FLIGHT
-Start: 2026-05-14 11:11 UTC
-Agent: Claude Code Desktop
-Touching:
-  - notifications table (C2 — backfill 173 broken-URL rows across 8 patterns in a single transaction + audit_log row)
-  - api/v1/messenger/messages/create.php (C3 — 2 URL prefixes)
-  - api/v1/messenger/threads/create.php (C3 — 1 URL prefix)
-  - app/portal/api/messenger/send.php (C3 — 1 URL prefix)
-  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship history)
-  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
-Scope: comprehensive notification audit + fix (no missing pages,
-  no migrations, no scope expansion). STOP 1 pre-flight findings:
-  (1) invoice 404 on id=244 = soft-deleted row, not a routing bug;
-  (2) 173 broken-URL rows total in notifications table = 166 known
-  patterns (S-NOTIFICATION-URL-FIX Option A backfill, skipped in
-  that session) + 7 newly-surfaced (4 /messenger?thread= admin notif
-  + 2 /portal/messages?thread= portal notif + 1 stale legacy row),
-  all missing /fleetforge/ prefix; (3) 3 messenger caller files
-  emitting URLs missing /fleetforge/ prefix (same gap pattern
-  S-NOTIFICATION-URL-FIX closed for other modules). All destination
-  pages exist with correct $_GET param names — no missing pages, no
-  routing mismatches. Notification UI renders n.url directly with no
-  wrapping. Operator-confirmed C1+C2+C3+C4 scope via AskUserQuestion.
+*(none)*
 
 ### Bug investigation outcomes
 
@@ -107,6 +85,9 @@ Outcome: 4 broken notification URL patterns fixed across 13 caller files. All no
 
 **S-SETTINGS-CLEANUP** — SHIPPED 2026-05-14 (commits b4ca4c3-5a525d2 + this C4 — see PROGRESS.md SESSION LOG)
 Outcome: MFA config (required_roles / totp_window / backup_code_count) now editable in Settings → Integrations → Security card (migration 19 backfilled labels; multi-checkbox UI for required_roles per D-A). Settings → Users tab replaced with link card to sidebar Users module (D-B); Portal Users tab unchanged. 3 DECISIONS locked D194-D196. D131 gate clean (C2 migrate 18→19 EXPECTED; PARITY OK retained for data-only UPDATE).
+
+**S-NOTIFICATIONS-FULL** — SHIPPED 2026-05-14 (commits 2798e18 C1 + 69e233b C2 DB backfill + cef97e0 C3 messenger callers + this C4 docs — see PROGRESS.md SESSION LOG)
+Outcome: invoice 404 on id=244 traced to soft-deleted invoice (D5 working as designed; no routing bug, no code change). 173 broken-URL rows in notifications table backfilled in a single db_transaction (166 known + 7 newly-surfaced rows missing /fleetforge prefix) via idempotent `scripts/fix_notification_urls_2026_05_14.php` per S-FIX-2 precedent. 3 messenger caller files patched to emit /fleetforge-prefixed URLs (same gap class S-NOTIFICATION-URL-FIX closed for other modules). Full destination-pattern audit: all 23 distinct URL forms map to existing pages with matching $_GET param names; notification UI renders url directly. NO missing pages, NO routing mismatches, NO migrations. D131 gate green throughout.
 
 ### Documentation cleanup (queued, small)
 
@@ -252,6 +233,7 @@ Outcome: Self-hosted all 4 CDN-delivered front-end dependencies — eliminates e
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-14:**
+- S-NOTIFICATIONS-FULL SHIPPED (4-commit arc: 2798e18 C1 IN-FLIGHT + 69e233b C2 173-row DB backfill + cef97e0 C3 messenger caller fixes + this C4 docs — see PROGRESS.md SESSION LOG row) — comprehensive notification audit + fix. Operator-reported invoice 404 (`/invoices/show?id=244`) traced at STOP 1 pre-flight to a **soft-deleted invoice** (`status='void'`, `deleted_at='2026-05-13'`); show.php correctly excludes per D5 — not a routing bug, no code change. Full destination-pattern audit across 23 distinct URL forms confirmed all pages exist with matching $_GET param names; notification UI renders n.url directly with no wrapping. **C2 DB backfill of 173 broken-URL rows** in a single db_transaction (vs Option B no-backfill at S-NOTIFICATION-URL-FIX earlier today — operator re-opened after STOP 1 surfaced 7 NEW broken rows on top of 166 known): 11 portal/invoices/show→view + 25 portal/leases/show→view + 2 equipment/units/show→equipment/show + 64 bare /customers/{ID} + 64 bare /equipment/{ID} + 4 /messenger?thread= + 2 /portal/messages?thread= + 1 stale /accounting/collections (last 7 all missing /fleetforge prefix). Captured as `scripts/fix_notification_urls_2026_05_14.php` per S-FIX-2 precedent (idempotent --dry-run / --execute; re-run reports "all 8 patterns already clean"). Audit-log row inserted with entity_type=`notification_url_backfill`. **C3 3 messenger caller files** patched to emit /fleetforge-prefixed URLs (same gap class S-NOTIFICATION-URL-FIX closed for other modules but messenger callers weren't in that grep): api/v1/messenger/messages/create.php (2 occurrences) + api/v1/messenger/threads/create.php (1) + app/portal/api/messenger/send.php (1). Post-fix grep zero hits. NO missing pages, NO routing mismatches, NO new migrations, NO new modules, no STOP 2 deferral. PHP lint clean on all 3 caller files + remediation script. D131 gate clean on every commit (no schema motion; 19/0/0 sticky from S-SETTINGS-CLEANUP): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 19/0/0.
 - S-SETTINGS-CLEANUP SHIPPED (4-commit arc: b4ca4c3 C1 IN-FLIGHT + a557354 C2 migration 19 + 5a525d2 C3 settings/index.php patch + this C4 docs — see PROGRESS.md SESSION LOG row) — MFA configuration surfaced in Settings → Integrations → Security card (migration 19 backfilled labels on the 3 `security.mfa.*` rows that S-PROD-1A originally seeded with NULL labels; settings query extended to include `security` group; `$sensitiveGroups` foreach renders the Security card alongside gps/ai/email/storage/aws). `required_roles` rendered as multi-checkbox over 5 user_roles slugs (super_admin/manager/dispatcher/accountant/read_only) per D-A; save handler JSON-encodes the submitted array. `totp_window` + `backup_code_count` flow through the existing integer-input branch. Settings → Users tab content swapped to a centred link card pointing at `/fleetforge/users` (sidebar Users is the superset per S-ISSUES-AUDIT — D-B); tab nav entry kept so `?tab=users` bookmarks still resolve; settings/users.php left on disk pending S-USERS-CONSOLIDATE. Portal Users tab unchanged. 3 DECISIONS locked D194-D196 (required_roles UI choice + Users link-card vs hard-remove + rate_limit.* intentionally not exposed per D196). FLEETFORGE_DATABASE_MASTER.sql NOT touched (master is DDL-only, no settings INSERTs; migration row is canonical seed doc per pre-flight). Manual smoke 3/3 PASS at C3. PHP lint clean. D131 gate clean on every commit (C2 migrate 18→19 EXPECTED; PARITY OK retained for data-only UPDATE; all other gates unchanged): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 19/0/0.
 - S-NOTIFICATION-URL-FIX SHIPPED (3-commit arc: fb1685c C1 IN-FLIGHT + 0964754 C2 13-file URL fix + this C3 docs — see PROGRESS.md SESSION LOG row) — 4 broken notification URL patterns fixed across 13 files / 14 line edits (audit surfaced by S-ISSUES-AUDIT). (1) `/portal/invoices/show?id=` → `/view?id=` (3 portal-notif callers); (2) `/portal/leases/show?id=` → `/view?id=` (3 portal-notif lines across 2 files); (3) `/equipment/units/show` → `/equipment/show` (4 admin URLs + 4 notification URL values across 6 files); (4) bare `/customers/{id}` + `/equipment/{id}` paths → `.../show?id={id}` form (2 cron files). Post-fix grep zero hits on all 4 patterns; the 3 remaining `equipment/units/show` references are the REAL `api/v1/equipment/units/show.php` API endpoint and were intentionally untouched. All 4 destination files exist; PHP syntax clean on all 13 edited files. STOP 2 Option B selected — no DB backfill of existing notification rows. NotificationService.php passes URLs through (caller-supplied); not a fix target. No schema / migration / DB write / new files / routing-map architecture (latter is a larger future session). D131 gate clean on every commit (18/0/0 sticky from S-AUTH-FIX): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 18/0/0.
 - S-AUTH-FIX SHIPPED (5-commit arc: cea88fb C1 IN-FLIGHT + 2b530f0 C2 schema + 1913435 C3 auth.php + e31b25e C4 mfa_challenge.php stamp + this C5 docs — see PROGRESS.md SESSION LOG row) — session early-return bug fixed (auth.php inactivity timeout now falls through to remember-me restoration instead of returning false before the cookie check runs) + MFA persistence added via `users.mfa_verified_until` DATETIME NULL (migration 18 — `202605132211_S-AUTH-FIX_mfa_verified_until.sql`). 30-day remember-me now covers both factors: stamped at MFA completion when "Keep me signed in" is checked (DATE_ADD(NOW(), INTERVAL 30 DAY)), checked in `auth_check_remember_me()` on restoration. Expired MFA branch restores session at password level + sets `ff_mfa_pending` for re-verification (no full logout). Security gap closed: stolen `remember_token` alone is now insufficient if `mfa_verified_until` has expired — attacker hits MFA wall. 6 DECISIONS locked (D188-D193 = D-A through D-F). Manual smoke 4/4 PASS at C4. D131 gate clean (C2 PARITY + migrate 17→18 EXPECTED): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 18/0/0.
