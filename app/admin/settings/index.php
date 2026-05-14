@@ -133,6 +133,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                         $val = $raw !== null ? (string)(int)$raw : '0';
                     } elseif ($valueType === 'decimal') {
                         $val = $raw !== null ? (string)preg_replace('/[^0-9.\-]/', '', $raw) : '0';
+                    } elseif ($key === 'security.mfa.required_roles') {
+                        // S-SETTINGS-CLEANUP: multi-checkbox UI submits an
+                        // array of role slugs. Encode as a JSON array to match
+                        // MfaService::requiredRolesList() expectations
+                        // (json_decode'd as string[] of role slugs). Empty
+                        // selection yields '[]' which disables the MFA
+                        // requirement entirely.
+                        $rolesArr = is_array($raw) ? array_values(array_filter(array_map('strval', $raw))) : [];
+                        $val = json_encode($rolesArr, JSON_UNESCAPED_SLASHES);
                     } else {
                         $val = $raw !== null ? (string)$raw : '';
                     }
@@ -164,10 +173,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 // ── Load all settings, grouped ───────────────────────────────────────────────
 // INT-1: include email/storage/aws so the integrations tab can manage
 // SMTP, S3, and SES credentials from the UI instead of editing .env.
+// S-SETTINGS-CLEANUP: include 'security' so the 3 mfa.* rows (labels
+// backfilled by migration 19) appear in the Integrations tab. The 13
+// rate_limit.* rows still have NULL labels and stay hidden via the
+// `label IS NOT NULL` filter (D-C — deferred to a future surface).
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -178,7 +191,9 @@ foreach ($allSettings as $s) {
 }
 
 $primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
-$sensitiveGroups = ['gps', 'ai', 'email', 'storage', 'aws'];
+// S-SETTINGS-CLEANUP: 'security' added so the MFA card renders alongside
+// gps/ai/email/storage/aws in the Integrations tab via the existing render loop.
+$sensitiveGroups = ['gps', 'ai', 'email', 'storage', 'aws', 'security'];
 
 // INT-1: secret keys are rendered as masked password fields.
 // Save handler skips writes when the masked placeholder comes back.
@@ -206,6 +221,7 @@ $groupLabels = [
     'email'         => 'Email (SMTP / SES)',
     'storage'       => 'Storage Driver',
     'aws'           => 'AWS Credentials (S3 + SES)',
+    'security'      => 'Security / MFA',
 ];
 
 // INT-1: helper to mask a secret value, showing only the last 4 chars.
@@ -215,6 +231,20 @@ $maskSecret = static function (string $value): string {
     $tail = substr($value, -4);
     return str_repeat('•', 16) . $tail;
 };
+
+// S-SETTINGS-CLEANUP: roles list for the Security card's required_roles
+// multi-checkbox. Loaded once here so the render loop doesn't re-query
+// per render iteration. Slugs match the JSON values stored at
+// settings.security.mfa.required_roles (e.g. ["super_admin","manager"]).
+$mfaRolesList    = db_select("SELECT slug, name FROM user_roles ORDER BY id ASC");
+$mfaRequiredJson = settings_get('security.mfa.required_roles', '[]');
+$mfaRequiredSet  = [];
+$decoded         = json_decode((string) $mfaRequiredJson, true);
+if (is_array($decoded)) {
+    foreach ($decoded as $slug) {
+        if (is_string($slug)) $mfaRequiredSet[$slug] = true;
+    }
+}
 
 // ── Stats for tab badges ──────────────────────────────────────────────────────
 $userCount = db_count("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL");
@@ -413,10 +443,32 @@ if (!empty($grouped['currency'])) {
 </div><!-- /general tab -->
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
-<!-- TAB 2: ADMIN USERS                                                      -->
+<!-- TAB 2: ADMIN USERS — link to sidebar Users module                       -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php /* S-SETTINGS-CLEANUP D-B: tab content swapped from settings/users.php
+         (a simplified duplicate) to a link card pointing at the sidebar Users
+         module, which is the superset (richer KPIs, inline profile edit,
+         password reset, set-password, MFA disable, permissions matrix).
+         The tab nav entry stays so existing bookmarks to ?tab=users still
+         resolve. The settings/users.php file remains on disk pending the
+         future S-USERS-CONSOLIDATE decommission. */ ?>
 <div x-show="activeTab === 'users'" x-transition:enter class="ff-tab-enter">
-    <?php require_once __DIR__ . '/users.php'; ?>
+    <div class="card" style="margin-bottom:20px;">
+        <div class="card-body" style="text-align:center;padding:48px 32px;">
+            <div style="font-size:0.875rem;color:var(--text-secondary);margin-bottom:8px;">
+                User management has moved
+            </div>
+            <h2 style="font-size:1.125rem;font-weight:600;margin:0 0 8px;">Manage admin users in the Users module</h2>
+            <p style="font-size:0.875rem;color:var(--text-tertiary);max-width:520px;margin:0 auto 24px;">
+                The dedicated Users module offers richer features than the old Settings tab — inline profile editing,
+                password reset emails, set-password (super_admin), per-user permission overrides, MFA disable,
+                and login history. Portal users continue to be managed under the Portal Users tab here.
+            </p>
+            <a href="<?= base_url('users') ?>" class="btn btn-primary">
+                Go to Users module &rarr;
+            </a>
+        </div>
+    </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -475,7 +527,25 @@ if (!empty($grouped['currency'])) {
             ?>
             <div class="form-group" style="margin-bottom:0;">
                 <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
-                <?php if ($vtype === 'boolean'): ?>
+                <?php if ($key === 'security.mfa.required_roles'): ?>
+                <?php /* S-SETTINGS-CLEANUP D-A: multi-checkbox over user_roles
+                         instead of raw JSON text. Submits an array under
+                         security_mfa_required_roles[]; save handler JSON-encodes. */ ?>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                    <?php foreach ($mfaRolesList as $_role): ?>
+                    <label class="form-check" style="margin:0;">
+                        <input type="checkbox"
+                               name="<?= e($key) ?>[]"
+                               value="<?= e($_role['slug']) ?>"
+                               <?= isset($mfaRequiredSet[$_role['slug']]) ? 'checked' : '' ?>
+                               <?= !$canEdit ? 'disabled' : '' ?>>
+                        <span style="margin-left:6px;font-size:0.875rem;"><?= e($_role['name']) ?>
+                            <span class="text-muted" style="font-size:0.75rem;">(<?= e($_role['slug']) ?>)</span>
+                        </span>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+                <?php elseif ($vtype === 'boolean'): ?>
                 <div class="form-check">
                     <input type="checkbox" id="<?= e($key) ?>" name="<?= e($key) ?>" value="1"
                            <?= $val === '1' ? 'checked' : '' ?> <?= !$canEdit ? 'disabled' : '' ?>>
