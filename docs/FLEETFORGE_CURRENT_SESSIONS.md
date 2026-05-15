@@ -28,13 +28,13 @@ Read-only sessions skip the collision check (step 2) but still register (step 3)
 
 ## Active planning chat handoff
 
-**AWS Lightsail cutover chat** — opened 2026-05-13.
-Context: all Tier 1/2/3 sessions complete (23 SHIPPED labels in this file as of HANDOFF-PREP). Model B mileage arc closed (engine via S-MILEAGE-1/-2A/-2B/-3/-3-FIX-0/-5; portal + helper retirement via S-PORTAL-MILEAGE-MODEL-B). Doc freshness smoke green (17/17 PASS exit 0). 17 migrations applied locally, 17 ok / 0 drift / 0 missing. Primary working doc: `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md`. This chat (original) retains history. New chat reads canonical files from `docs/` and picks up from the predeploy checklist. K-16: trust canonical files; do not re-derive locked decisions. The QuickBooks integration chat (`FLEETFORGE_QUICKBOOKS_SPEC.md`) is a separate planning chat, not yet started.
+**AWS Lightsail cutover chat** — PRODUCTION PARTIALLY LIVE 2026-05-16.
+Server: fleetforge-prod (Oregon us-west-2, 4GB/2vCPU, Ubuntu 22.04). Static IP: 44.226.100.133. Domain: mainlandrentals.com (GoDaddy DNS). SSL: Let's Encrypt via certbot. App: https://mainlandrentals.com/fleetforge. DB: MySQL 8.0, 19 migrations applied (17 ok / 0 drift / 0 missing at apply time; 2 manually marked due to FK constraints on fresh DB — the rate-cards seed migration `202605130934_S-SEED-RATE-CARDS-LOAD_standard_2025_default.sql` references a `created_by` user ID that doesn't exist yet on a fresh DB; remediated in queue via S-RATE-CARDS-PROD-FIX). Super admin account: created (via mysql + bcrypt) and verified login working. Outstanding operator server tasks: see `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md` items B6 (SES SMTP credentials, blocked on sandbox approval) + D10 (cron jobs) + D11 (S3 storage test) + D12 (CloudWatch billing alarm) + D13 (SNS topic + SES bounce webhook) + E1 (rate cards seed, blocked on S-RATE-CARDS-PROD-FIX) + G5 (second admin user) + G6 (super admin MFA enrollment) + I4 (error log monitoring) — 9 items total. Outstanding Code Desktop tasks: `S-COMPOSER-LOCK-FIX` + `S-RATE-CARDS-PROD-FIX` (both QUEUED below).
+
+Original handoff context (preserved): all Tier 1/2/3 sessions complete (23 SHIPPED labels in this file as of HANDOFF-PREP). Model B mileage arc closed (engine via S-MILEAGE-1/-2A/-2B/-3/-3-FIX-0/-5; portal + helper retirement via S-PORTAL-MILEAGE-MODEL-B). Doc freshness smoke green (17/17 PASS exit 0). 17 migrations applied at handoff-prep time (now 19 post-S-AUTH-FIX + S-SETTINGS-CLEANUP), 19/0/0 sticky on local + prod. Primary working doc: `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md`. This chat (original) retains history. K-16: trust canonical files; do not re-derive locked decisions. The QuickBooks integration chat (`FLEETFORGE_QUICKBOOKS_SPEC.md`) is a separate planning chat, not yet started.
 
 Remaining open queue items independent of cutover and QBO arcs:
 - `S-MILEAGE-3-ACCT-SPEC` — CPA-blocked on 5 enumerated questions (D-I (A) / D176).
-- `S-MILEAGE-HELPERS-CLEANUP` — optional hygiene defer (3 orphan helpers in `lib/Billing/Mileage.php` per S-PORTAL-MILEAGE-MODEL-B D-E).
-- `S-PROD-3` — self-host CDN deps (Google Fonts, ApexCharts, Leaflet).
 
 ---
 
@@ -69,7 +69,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ---
 
-## Active queue (as of 2026-05-13)
+## Active queue (as of 2026-05-16)
 
 ### IN-FLIGHT
 
@@ -94,6 +94,20 @@ Scope: document outstanding production tasks discovered during the
   Latest DECISIONS row D201 (no D-rows added this session per plan).
 
 ### Bug investigation outcomes
+
+**S-COMPOSER-LOCK-FIX** — QUEUED
+Scope: The 2026-05-16 production deployment ran `composer update` on the server to resolve PHP 8.2 compatibility (composer.lock had symfony v8.x packages requiring PHP >= 8.4). The updated composer.lock on the server differs from the one in the repo. This session pulls the updated composer.lock from the server and commits it to origin/main so future deployments don't require a manual composer update.
+Steps: (1) copy updated composer.lock from server via scp or paste; (2) run `composer install --no-dev` locally to verify it resolves cleanly on PHP 8.2; (3) commit + push.
+Effort: ~20 min. 2-commit arc.
+Dependencies: none — can ship immediately.
+Discovered: 2026-05-16 during Lightsail deployment.
+
+**S-RATE-CARDS-PROD-FIX** — QUEUED
+Scope: The Standard 2025 rate card migration (`202605130934_S-SEED-RATE-CARDS-LOAD_standard_2025_default.sql`) fails on a fresh database because it references a `created_by` user ID that doesn't exist yet (FK constraint on `rate_cards.created_by` → `users.id`). Fix: update the migration to use NULL for `created_by` (the column allows NULL per schema — `ON DELETE SET NULL`). Also re-run the rate card seed on production so Standard 2025 rates are available.
+Steps: (1) update the migration SQL to use NULL `created_by`; (2) update `schema_migrations` checksum; (3) run the seed on prod manually via mysql; (4) commit fix.
+Effort: ~30 min. 3-commit arc.
+Dependencies: none — can ship immediately.
+Discovered: 2026-05-16 during Lightsail deployment.
 
 **S-AUTH-FIX** — SHIPPED 2026-05-14 (commits cea88fb-e31b25e + this C5 — see PROGRESS.md SESSION LOG)
 Outcome: fixed session early-return bug (auth.php inactivity timeout fell through before remember-me check) + added MFA persistence via `users.mfa_verified_until`. "Keep me logged in for 30 days" now means no password AND no MFA re-prompt for 30 days. Security gap closed: remember-me with expired MFA restores session at password level but re-gates on MFA (no full logout). Migration 18.

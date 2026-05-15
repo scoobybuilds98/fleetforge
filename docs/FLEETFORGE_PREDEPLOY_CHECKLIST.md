@@ -278,6 +278,21 @@ ITEM B5 | 2026-05-12 | B — Prod .env | Rotate APP_SECRET + FF_MFA_SECRET_KEY f
     DB is being migrated). Document the rotation date in docs/runbooks/key_rotation.md.
   Owner: Operator
   Status: PENDING (ready — S-PROD-2 SHIPPED 2026-05-02; runbook at docs/runbooks/key_rotation.md)
+
+ITEM B6 | 2026-05-16 | B — Prod .env | SES SMTP credentials
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: SES sandbox exit request submitted 2026-05-16. Once AWS approves (email to
+    mainlandtts@gmail.com, typically 24-72h): go to SES console → SMTP settings → Create SMTP
+    credentials → copy username + password. SSH into server: sudo nano /var/www/fleetforge/.env
+    → fill in AWS_SES_SMTP_USER and AWS_SES_SMTP_PASS. Reload PHP-FPM:
+    sudo systemctl reload php8.2-fpm. Send a test email from FleetForge to verify delivery
+    (e.g. invite a test user or trigger a password reset).
+    Original source: 2026-05-16 deployment session notes.
+  Action: Wait for AWS approval email → create SMTP credentials in SES console → SSH into
+    server → update .env → reload PHP-FPM → send a test email and confirm receipt.
+  Owner: Operator
+  Status: PENDING (blocked on SES sandbox approval)
 ```
 
 ### C — DNS
@@ -435,11 +450,107 @@ ITEM D9 | 2026-05-12 | D — AWS infra | Set up CloudWatch billing alarm + SES b
     requires SES → Reputation tab → enable CloudWatch publication first.
   Owner: Operator
   Status: PENDING
+
+ITEM D10 | 2026-05-16 | D — AWS infrastructure | Set up cron jobs on prod (DB backup + app crons)
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: Two cron jobs needed on the Lightsail instance:
+    (1) Database backup every 6 hours — mysqldump → gzip → push to S3
+        s3://fleetforge-mainland/db-backups/. Requires AWS CLI configured with fleetforge-backup
+        IAM credentials.
+        Command: mysqldump -u fleetforge -p fleetforge | gzip |
+          aws s3 cp - s3://fleetforge-mainland/db-backups/fleetforge-$(date +%Y%m%d-%H%M%S).sql.gz
+          --region us-west-2
+    (2) App crons every minute — php /var/www/fleetforge/bin/cron.php. Handles invoice overdue
+        checks, Samsara sync, promise-to-pay checks, health/risk scores, and other scheduled tasks.
+    Install: sudo nano /etc/cron.d/fleetforge
+    Install AWS CLI first: sudo apt install awscli -y
+    Configure backup credentials: aws configure (use fleetforge-backup IAM key/secret, region
+    us-west-2).
+    Overlaps with D5 (mysqldump cron) + D8 (fleetforge-backup IAM user) at architectural level;
+    D10 is the concrete server-side install step.
+    Original source: 2026-05-16 deployment session notes.
+  Action: SSH into server → sudo apt install awscli -y → aws configure (fleetforge-backup creds)
+    → create /etc/cron.d/fleetforge with both cron entries → verify with sudo crontab -l → test
+    the mysqldump cron manually + confirm a backup appears in s3://fleetforge-mainland/db-backups/.
+  Owner: Operator
+  Status: PENDING
+
+ITEM D11 | 2026-05-16 | D — AWS infrastructure | Test S3 storage end-to-end
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: STORAGE_DRIVER=s3 is set in prod .env and fleetforge-app IAM credentials are configured
+    (B1 / D8). Need to verify end-to-end: upload a document in FleetForge (e.g. attach a file to a
+    damage claim or upload a customer document) → confirm the file appears in
+    s3://fleetforge-mainland/ in the AWS console under the expected prefix. If upload fails,
+    check PHP error logs: sudo tail -f /var/log/nginx/error.log + sudo tail -f /var/log/php8.2-fpm.log.
+    Original source: 2026-05-16 deployment session notes.
+  Action: Log into FleetForge → upload any document → check S3 bucket in AWS console → confirm
+    file is present. If failure: inspect server-side logs per I4.
+  Owner: Operator
+  Status: PENDING
+
+ITEM D12 | 2026-05-16 | D — AWS infrastructure | CloudWatch billing alarm at $50/month
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: AWS billing alarm not yet configured. Should alert when estimated charges exceed
+    $50/month. AWS Console → CloudWatch → Alarms → Create alarm → Billing → Total Estimated
+    Charge → threshold > 50 → SNS topic → email mainlandtts@gmail.com.
+    Conceptually the same target as D9 part (1), surfaced separately here because the operator
+    is working through the deployment punch list and may want to action it independently from
+    the SES bounce-rate alarm.
+    Original source: 2026-05-16 deployment session notes.
+  Action: AWS Console → CloudWatch → Alarms → Create alarm per above. Confirm the SNS topic
+    subscription via the email confirmation link.
+  Owner: Operator
+  Status: PENDING
+
+ITEM D13 | 2026-05-16 | D — AWS infrastructure | SNS topic + SES bounce webhook subscription
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: SNS topic for SES bounce/complaint handling not yet created. Steps:
+    (1) AWS Console → SNS → Create topic → Standard → name: fleetforge-ses-bounces → note the ARN.
+    (2) Create HTTPS subscription pointing to
+        https://mainlandrentals.com/fleetforge/api/v1/webhooks/ses_notifications.php
+        — the app auto-confirms the subscription via the SubscriptionConfirmation handshake.
+    (3) SSH into server → sudo nano /var/www/fleetforge/.env → set
+        AWS_SNS_BOUNCE_TOPIC_ARN=<ARN> → sudo systemctl reload php8.2-fpm.
+    (4) AWS Console → SES → Verified identities → mainlandrentals.com → Notifications → Edit
+        → set Bounces + Complaints to the fleetforge-ses-bounces topic.
+    Overlaps with B4 (AWS_SNS_TOPIC_ARN env key) + D7 (SNS topic creation) at architectural
+    level; D13 is the concrete server-side stitching step.
+    Original source: 2026-05-16 deployment session notes.
+  Action: Create SNS topic → subscribe webhook endpoint → update .env → configure SES to use the
+    topic for bounce + complaint notifications.
+  Owner: Operator
+  Status: PENDING (also blocked on SES sandbox approval per B6)
 ```
 
 ### E — Data migrations
 
-*(No items currently — placeholder. Add here for any one-time prod-only SQL backfill or correction.)*
+```
+ITEM E1 | 2026-05-16 | E — Data | Seed Standard 2025 rate cards on prod
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: The Standard 2025 rate card migration
+    (202605130934_S-SEED-RATE-CARDS-LOAD_standard_2025_default.sql) failed during deployment due
+    to FK constraint (created_by user didn't exist yet on the fresh prod DB). Rate cards are
+    currently EMPTY in production. S-RATE-CARDS-PROD-FIX (queued in CURRENT_SESSIONS.md) will
+    fix the migration file to use NULL for created_by; this E1 item tracks the operator-side
+    follow-up of running the fixed migration on prod once that session ships.
+    Target rate values (per S-SEED-RATE-CARDS-LOAD precedent):
+      dry_van  $125/$800/$2200/$0.18
+      reefer   $145/$950/$3200/$0.18
+      flatbed  $120/$780/$2100/$0.17
+      container $95/$620/$1700/$0.15
+      chassis   $80/$520/$1400/$0.13
+    Original source: 2026-05-16 deployment session notes + db_migrations/202605130934_*.sql.
+  Action: Wait for S-RATE-CARDS-PROD-FIX to ship → SSH into server → cd /var/www/fleetforge →
+    sudo php bin/migrate.php --apply → verify rate cards appear in FleetForge UI under
+    Settings → Rates (or via mysql: SELECT * FROM rate_cards WHERE is_default=1).
+  Owner: Operator (after S-RATE-CARDS-PROD-FIX ships)
+  Status: PENDING (blocked on S-RATE-CARDS-PROD-FIX)
+```
 
 ### F — Accounting state
 
@@ -528,6 +639,36 @@ ITEM G4 | 2026-05-12 | G — Smoke | Confirm FF_TEST_* users exist in prod DB OR
     decided + executed.
   Owner: Operator (decision pending)
   Status: PENDING
+
+ITEM G5 | 2026-05-16 | G — Smoke | Create second admin user in prod
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: Operator requested a second user account in production. Now that FleetForge is live,
+    the cleanest path is to create the second user through the UI: FleetForge → Users → Team tab
+    (S-USERS-CONSOLIDATE — SHIPPED 2026-05-14) → "+ Invite New User" → fill in name + email +
+    role → send invite. The invited user receives an email with a password-set link (requires
+    SES to be working first — see B6 + D13). Alternatively create via mysql directly using the
+    same bcrypt hash approach used for the super admin account during deployment.
+    Original source: 2026-05-16 deployment session notes.
+  Action: Once SES is working (B6 + D13) → FleetForge UI → Users → Team → Invite. Or create via
+    MySQL pre-SES if urgent (bcrypt hash + status='active').
+  Owner: Operator
+  Status: PENDING
+
+ITEM G6 | 2026-05-16 | G — Smoke | Enable MFA for super admin
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: Super admin account is live but MFA is not enrolled. For production security, MFA
+    should be enabled on the super admin account. FleetForge → top-right avatar → Profile →
+    MFA section → scan QR code with Google Authenticator or Authy → verify 6-digit code →
+    download backup codes to a secure location. MFA enforcement is already configured via
+    security.mfa.required_roles (S-SETTINGS-CLEANUP D194 — multi-checkbox UI under Settings →
+    Integrations → Security card); confirm super_admin is in the required-roles list (it is
+    by default).
+    Original source: 2026-05-16 deployment session notes.
+  Action: Log into FleetForge → Profile → enable MFA → save backup codes securely.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ### H — Rollback procedures
@@ -614,6 +755,27 @@ ITEM I3 | 2026-05-12 | I — Monitoring | Lightsail CPU/RAM/disk baseline + alar
     numbers in RUNBOOK_MONITORING.md for future tuning.
   Owner: Operator (post-cutover)
   Status: PENDING
+
+ITEM I4 | 2026-05-16 | I — Monitoring | Nginx + PHP error log monitoring
+  Originating session: 2026-05-16 Lightsail deployment
+  Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS
+  Detail: Error logs on the server should be checked after deployments and when users report
+    issues. Key log files:
+      - Nginx errors:    /var/log/nginx/error.log
+      - Nginx access:    /var/log/nginx/access.log
+      - PHP-FPM errors:  /var/log/php8.2-fpm.log
+      - App cron output: /var/log/fleetforge-cron.log (once D10 ships)
+    Quick-check commands:
+      sudo tail -100 /var/log/nginx/error.log
+      sudo tail -100 /var/log/php8.2-fpm.log
+      sudo tail -100 /var/log/fleetforge-cron.log
+    This is the immediate-recourse triage step; longer-term, Sentry (I1) handles application-
+    level error capture and CloudWatch Logs (future) would handle centralized log retention.
+    Original source: 2026-05-16 deployment session notes.
+  Action: Bookmark the tail commands above. Check logs after each deploy + whenever a user
+    reports an issue. Bake into post-deploy verification habit.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ---
@@ -638,4 +800,4 @@ ITEM I3 | 2026-05-12 | I — Monitoring | Lightsail CPU/RAM/disk baseline + alar
 
 ---
 
-*Last touched: 2026-05-14 (S-DISPLAY-REVAMP C2 — A5 entry added for FF_ASSET_VERSION 1.0.29 → 1.0.30 collapsed sidebar nav-badge layout fix in app.css). Prior touches: 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13); 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
+*Last touched: 2026-05-16 (S-PROD-DEPLOYMENT-DOCS — 8 new items added from 2026-05-16 Lightsail deployment discoveries: B6 SES SMTP credentials, D10 cron jobs, D11 S3 storage test, D12 CloudWatch billing alarm, D13 SNS topic + SES bounce webhook, E1 rate cards prod seed, G5 second admin user, G6 super admin MFA enrollment, I4 error log monitoring). Prior touches: 2026-05-14 (S-DISPLAY-REVAMP C2 — A5 entry added for FF_ASSET_VERSION 1.0.29 → 1.0.30 collapsed sidebar nav-badge layout fix in app.css); 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13); 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
