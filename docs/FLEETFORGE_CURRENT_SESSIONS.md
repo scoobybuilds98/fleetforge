@@ -73,7 +73,25 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-PROD-DEPLOYMENT-DOCS** — IN-FLIGHT
+Start: 2026-05-15 21:54 UTC
+Agent: Claude Code Desktop
+Touching:
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (handoff status update +
+    2 new QUEUED entries + active queue date stamp + IN-FLIGHT →
+    SHIPPED flip + 2026-05-16 Recent ship history block)
+  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (8 new items: B6 +
+    D10-D13 + E1 + G5-G6 + I4 + Last-touched stamp refresh)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: document outstanding production tasks discovered during the
+  2026-05-16 Lightsail deployment. Two Code Desktop sessions queued
+  (S-COMPOSER-LOCK-FIX for composer.lock PHP 8.2 compatibility +
+  S-RATE-CARDS-PROD-FIX for the FK-constrained rate cards migration).
+  8 new operator-side PREDEPLOY items filed across categories B / D /
+  E / G / I. Pure docs session — no code changes. Pre-flight confirmed
+  PREDEPLOY high-water marks: B5 → next B6 ✓, D9 → next D10 ✓, no
+  existing E items → start at E1 ✓, G4 → next G5 ✓, I3 → next I4 ✓.
+  Latest DECISIONS row D201 (no D-rows added this session per plan).
 
 ### Bug investigation outcomes
 
