@@ -44,16 +44,30 @@ class RateLimiter
         $now        = time();
         $windowSecs = $windowMinutes * 60;
 
+        // S-RATELIMITER-TZ-FIX: compare timestamps as Unix integers, not parsed
+        // datetime strings. window_start/blocked_until are stored by MySQL NOW()
+        // under a UTC session timezone (db.php:65 SET time_zone='+00:00'), but
+        // PHP's strtotime() parses bare 'Y-m-d H:i:s' strings in the script's
+        // default timezone (APP_TIMEZONE=America/Vancouver). Same incident on
+        // the write side — date('Y-m-d H:i:s', ...) emitted Vancouver-local
+        // strings that MySQL then stored verbatim under +00:00. Net effect was
+        // a ~7h skew that made window_start always look "in the future" and
+        // blocked_until appear to last 7h longer than configured. Using
+        // UNIX_TIMESTAMP() on read and FROM_UNIXTIME() on write keeps both
+        // sides in epoch-int space — timezone-agnostic by construction.
         $row = db_row(
-            "SELECT id, attempt_count, window_start, blocked_until
+            "SELECT id, attempt_count,
+                    UNIX_TIMESTAMP(window_start)  AS window_start_ts,
+                    UNIX_TIMESTAMP(blocked_until) AS blocked_until_ts
              FROM rate_limit_attempts WHERE bucket_key = ?",
             [$bucketKey]
         );
 
         if ($row) {
             // ── Check active block ────────────────────────────────────────
-            if ($row['blocked_until'] !== null) {
-                $blockedUntilTs = strtotime((string) $row['blocked_until']);
+            // UNIX_TIMESTAMP() returns NULL for a NULL column → no parse needed.
+            if ($row['blocked_until_ts'] !== null) {
+                $blockedUntilTs = (int) $row['blocked_until_ts'];
                 if ($blockedUntilTs > $now) {
                     return [
                         'allowed'              => false,
@@ -64,7 +78,7 @@ class RateLimiter
             }
 
             // ── Check if window has expired ───────────────────────────────
-            $windowStartTs = strtotime((string) $row['window_start']);
+            $windowStartTs = (int) $row['window_start_ts'];
             if (($now - $windowStartTs) >= $windowSecs) {
                 // Start a fresh window for this request
                 db_execute(
@@ -85,15 +99,20 @@ class RateLimiter
             $newCount = (int) $row['attempt_count'] + 1;
 
             if ($newCount > $threshold) {
-                $blockedUntil = $blockMinutes > 0
-                    ? date('Y-m-d H:i:s', $now + $blockMinutes * 60)
+                // S-RATELIMITER-TZ-FIX: pass the absolute Unix timestamp and
+                // let MySQL convert via FROM_UNIXTIME — no PHP-side date()
+                // formatting in any local timezone. FROM_UNIXTIME(NULL) → NULL,
+                // which preserves the "no block window configured" branch.
+                $blockedUntilTs = $blockMinutes > 0
+                    ? $now + $blockMinutes * 60
                     : null;
 
                 db_execute(
                     "UPDATE rate_limit_attempts
-                     SET attempt_count = ?, last_attempt = NOW(), blocked_until = ?
+                     SET attempt_count = ?, last_attempt = NOW(),
+                         blocked_until = FROM_UNIXTIME(?)
                      WHERE bucket_key = ?",
-                    [$newCount, $blockedUntil, $bucketKey]
+                    [$newCount, $blockedUntilTs, $bucketKey]
                 );
 
                 $retryAfter = $blockMinutes > 0
