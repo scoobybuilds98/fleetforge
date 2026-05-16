@@ -1555,7 +1555,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <div class="card" style="margin-bottom:16px;">
                 <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
                     <h3 class="card-title">Lease Documents</h3>
-                    <button class="btn btn-sm btn-primary" @click="openLeaseDocModal()">+ Upload Document</button>
+                    <button class="btn btn-sm btn-primary"
+                            @click="openLeaseDocModal('lease', <?= (int)$leaseId ?>)">+ Upload Document</button>
                 </div>
 
                 <template x-if="!docsLoading && documents.length === 0">
@@ -1648,7 +1649,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             <button class="btn btn-ghost" @click="leaseDocUploadModal.open = false"
                                     :disabled="leaseDocUploadModal.uploading">Cancel</button>
                             <button class="btn btn-primary" @click="submitLeaseDocUpload()"
-                                    :disabled="leaseDocUploadModal.uploading || !leaseDocUploadModal.docType || !leaseDocUploadModal.file">
+                                    :disabled="leaseDocUploadModal.uploading || !leaseDocUploadModal.docType || !leaseDocUploadModal.file || !leaseDocUploadModal.entity_type || !leaseDocUploadModal.entity_id">
                                 <span x-show="!leaseDocUploadModal.uploading">Upload</span>
                                 <span x-show="leaseDocUploadModal.uploading">Uploading…</span>
                             </button>
@@ -1737,8 +1738,12 @@ function FF_LeaseDetail() {
         documents:           [],
         docsLoading:         false,
         docsLoaded:          false,
+        // S-DOC-UPLOAD-ENTITY-TYPE-FIX: entity_type + entity_id live in modal
+        // state and flow into FormData from state. openLeaseDocModal() receives
+        // them from the caller — never hardcoded inside submit.
         leaseDocUploadModal: {
-            open: false, docType: '', title: '', file: null,
+            open: false, entity_type: '', entity_id: '',
+            docType: '', title: '', file: null,
             expiryDate: '', notes: '', uploading: false, error: '',
         },
 
@@ -2125,22 +2130,34 @@ function FF_LeaseDetail() {
             this.docsLoading = false;
         },
 
-        openLeaseDocModal() {
+        // S-DOC-UPLOAD-ENTITY-TYPE-FIX: caller MUST pass entity_type+entity_id.
+        // If either is missing, the modal opens with an inline error and the
+        // submit button is disabled — we never silently default or guess a type.
+        openLeaseDocModal(entityType, entityId) {
+            const hasCtx = !!entityType && !!entityId;
             this.leaseDocUploadModal = {
-                open: true, docType: '', title: '', file: null,
-                expiryDate: '', notes: '', uploading: false, error: '',
+                open: true,
+                entity_type: entityType || '',
+                entity_id:   entityId   || '',
+                docType: '', title: '', file: null,
+                expiryDate: '', notes: '', uploading: false,
+                error: hasCtx ? '' : 'Cannot upload — missing context.',
             };
         },
 
         async submitLeaseDocUpload() {
             const m = this.leaseDocUploadModal;
+            // S-DOC-UPLOAD-ENTITY-TYPE-FIX: refuse to submit if context missing.
+            if (!m.entity_type || !m.entity_id) {
+                m.error = 'Cannot upload — missing context.'; return;
+            }
             if (!m.docType || !m.file) return;
             m.uploading = true;
             m.error     = '';
             try {
                 const fd = new FormData();
-                fd.append('entity_type',   'lease');
-                fd.append('entity_id',     '<?= $leaseId ?>');
+                fd.append('entity_type',   m.entity_type);
+                fd.append('entity_id',     m.entity_id);
                 fd.append('document_type', m.docType);
                 fd.append('document',      m.file);
                 if (m.title)      fd.append('title',           m.title);

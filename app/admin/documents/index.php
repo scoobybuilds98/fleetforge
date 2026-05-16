@@ -288,7 +288,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <button type="button" class="btn btn-secondary"
                         @click="uploadModal.open = false">Cancel</button>
                 <button type="button" class="btn btn-primary"
-                        :disabled="uploadModal.saving"
+                        :disabled="uploadModal.saving || !uploadModal.entity_type || !uploadModal.entity_id"
                         @click="submitUpload()"
                         x-text="uploadModal.saving ? 'Uploading…' : 'Upload'">
                 </button>

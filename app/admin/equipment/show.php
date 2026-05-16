@@ -1439,7 +1439,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
                 <h3 class="card-title">Compliance Documents</h3>
                 <?php if (can('equipment', 'edit')): ?>
-                <button class="btn btn-sm btn-primary" @click="openUploadModal('', '')">+ Upload</button>
+                <button class="btn btn-sm btn-primary"
+                        @click="openUploadModal('', '', 'equipment_unit', <?= (int)$unitId ?>)">+ Upload</button>
                 <?php endif; ?>
             </div>
 
@@ -1562,7 +1563,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 :disabled="uploadModal.uploading">Cancel</button>
                         <button class="btn btn-primary"
                                 @click="submitUpload()"
-                                :disabled="uploadModal.uploading || !uploadModal.file || !uploadModal.docType">
+                                :disabled="uploadModal.uploading || !uploadModal.file || !uploadModal.docType || !uploadModal.entity_type || !uploadModal.entity_id">
                             <span x-show="!uploadModal.uploading">Upload Document</span>
                             <span x-show="uploadModal.uploading">Uploading…</span>
                         </button>
@@ -2039,7 +2040,11 @@ function FF_UnitDetail() {
         documents:    [],
         docsLoading:  false,
         docsLoaded:   false,
-        uploadModal:  { open: false, docType: '', docLabel: '', file: null,
+        // S-DOC-UPLOAD-ENTITY-TYPE-FIX: entity_type + entity_id live in modal
+        // state and flow into FormData from state. openUploadModal() receives
+        // them from the caller — never hardcoded inside submit.
+        uploadModal:  { open: false, entity_type: '', entity_id: '',
+                        docType: '', docLabel: '', file: null,
                         expiryDate: '', uploading: false, error: '' },
 
         // ── Samsara Mapping (SAMSARA-1) ───────────────────────────
@@ -2329,14 +2334,26 @@ function FF_UnitDetail() {
             return this.documents.find(d => d.document_type === docType) || null;
         },
 
-        openUploadModal(docType, docLabel) {
+        // S-DOC-UPLOAD-ENTITY-TYPE-FIX: caller MUST pass entity_type+entity_id.
+        // If either is missing, the modal opens with an inline error and the
+        // submit button is disabled — we never silently default or guess a type.
+        openUploadModal(docType, docLabel, entityType, entityId) {
+            const hasCtx = !!entityType && !!entityId;
             this.uploadModal = {
                 open: true, docType, docLabel,
-                file: null, expiryDate: '', uploading: false, error: '',
+                entity_type: entityType || '',
+                entity_id:   entityId   || '',
+                file: null, expiryDate: '', uploading: false,
+                error: hasCtx ? '' : 'Cannot upload — missing context.',
             };
         },
 
         async submitUpload() {
+            // S-DOC-UPLOAD-ENTITY-TYPE-FIX: refuse to submit if context missing.
+            if (!this.uploadModal.entity_type || !this.uploadModal.entity_id) {
+                this.uploadModal.error = 'Cannot upload — missing context.';
+                return;
+            }
             if (!this.uploadModal.file) return;
             if (!this.uploadModal.docType) {
                 this.uploadModal.error = 'Please select a document type.';
@@ -2346,8 +2363,8 @@ function FF_UnitDetail() {
             this.uploadModal.error = '';
             try {
                 const fd = new FormData();
-                fd.append('entity_type',   'equipment_unit');
-                fd.append('entity_id',     '<?= $unitId ?>');
+                fd.append('entity_type',   this.uploadModal.entity_type);
+                fd.append('entity_id',     this.uploadModal.entity_id);
                 fd.append('document_type', this.uploadModal.docType);
                 if (this.uploadModal.expiryDate) {
                     fd.append('expiration_date', this.uploadModal.expiryDate);

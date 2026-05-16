@@ -1063,7 +1063,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
                 <h3 class="card-title">Customer Documents</h3>
                 <?php if (can('customers', 'edit')): ?>
-                <button class="btn btn-sm btn-primary" @click="openDocUploadModal()">+ Upload</button>
+                <button class="btn btn-sm btn-primary"
+                        @click="openDocUploadModal('customer', <?= (int)$customerId ?>)">+ Upload</button>
                 <?php endif; ?>
             </div>
 
@@ -1319,7 +1320,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 <button type="button" class="btn btn-secondary"
                         @click="docUploadModal.open = false">Cancel</button>
                 <button type="button" class="btn btn-primary"
-                        :disabled="docUploadModal.saving"
+                        :disabled="docUploadModal.saving || !docUploadModal.entity_type || !docUploadModal.entity_id"
                         @click="submitDocUpload()"
                         x-text="docUploadModal.saving ? 'Uploading…' : 'Upload'">
                 </button>
@@ -1389,10 +1390,15 @@ function FF_CustomerProfile() {
         emailsLoaded:    false,
         emailsLoading:   false,
         emailViewModal: { open: false, log: null, loading: false },
+        // S-DOC-UPLOAD-ENTITY-TYPE-FIX: entity_type + entity_id live in
+        // modal state and flow into FormData from state. openDocUploadModal()
+        // receives them from the caller — never hardcoded inside submit.
         docUploadModal: {
             open:            false,
             saving:          false,
             error:           null,
+            entity_type:     '',
+            entity_id:       '',
             document_type:   '',
             title:           '',
             expiration_date: '',
@@ -1751,15 +1757,26 @@ function FF_CustomerProfile() {
             this.docsLoading = false;
         },
 
-        openDocUploadModal() {
+        // S-DOC-UPLOAD-ENTITY-TYPE-FIX: caller MUST pass entity_type+entity_id.
+        // If either is missing, the modal opens with an inline error and the
+        // submit button is disabled — we never silently default or guess a type.
+        openDocUploadModal(entityType, entityId) {
+            const hasCtx = !!entityType && !!entityId;
             this.docUploadModal = {
-                open: true, saving: false, error: null,
+                open: true, saving: false,
+                error: hasCtx ? null : 'Cannot upload — missing context.',
+                entity_type: entityType || '',
+                entity_id:   entityId   || '',
                 document_type: '', title: '', expiration_date: '', notes: '', file: null,
             };
         },
 
         async submitDocUpload() {
             const m = this.docUploadModal;
+            // S-DOC-UPLOAD-ENTITY-TYPE-FIX: refuse to submit if context missing.
+            if (!m.entity_type || !m.entity_id) {
+                m.error = 'Cannot upload — missing context.'; return;
+            }
             if (!m.document_type) { m.error = 'Document type is required.'; return; }
             if (!m.file)          { m.error = 'Please select a file.';      return; }
 
@@ -1768,8 +1785,8 @@ function FF_CustomerProfile() {
             try {
                 const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
                 const fd   = new FormData();
-                fd.append('entity_type',   'customer');
-                fd.append('entity_id',     '<?= $customerId ?>');
+                fd.append('entity_type',   m.entity_type);
+                fd.append('entity_id',     m.entity_id);
                 fd.append('document_type', m.document_type);
                 fd.append('document',      m.file);
                 if (m.title)           fd.append('title',           m.title);
