@@ -73,7 +73,30 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-NGINX-PROD-CONFIG** — IN-FLIGHT
+Start: 2026-05-16 09:04 UTC
+Agent: Claude Code Desktop
+Touching:
+  - docs/runbooks/nginx_config.md (NEW — canonical nginx config + runbook)
+  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (G7 added — note: G5 + G6
+    already taken by S-PROD-DEPLOYMENT-DOCS earlier today; using G7
+    per the dynamic high-water-mark scan)
+  - docs/FLEETFORGE_PROGRESS.md (D202 lock + SESSION LOG row)
+  - docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md (§0 LOCKED DECISIONS
+    index pointer for D202)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship
+    history)
+Scope: lock nginx-as-production-web-server as a permanent decision +
+  capture the working sites-enabled config + post-change verification
+  steps in a runbook. Documents the root cause of the 2026-05-16
+  initial-deploy AJAX 404s (location ~ \.php$ with
+  $realpath_root$fastcgi_script_name resolved API paths under
+  public/ where they don't exist). Pure docs session — no .php / .sql /
+  .css / .js / .env / composer / migration / tests / lib / api / app
+  changes per the explicit STOP CONDITIONS in the session prompt.
+  Pre-work scans: D-NEXT = D202 (max D-row on disk D201); next G-item =
+  G7 (G6 is the high-water mark, not G5 as the prompt template assumed —
+  trust file over prompt per prior memory).
 
 ### Bug investigation outcomes
 
