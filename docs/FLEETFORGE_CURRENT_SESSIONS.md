@@ -73,7 +73,32 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MFA-SETUP-FIX** — IN-FLIGHT
+Start: 2026-05-16 10:18 UTC
+Agent: Claude Code Desktop
+Touching:
+  - api/v1/account/mfa/setup_init.php
+  - api/v1/account/mfa/setup_verify.php
+  - api/v1/account/mfa/disable.php
+  - api/v1/account/mfa/regenerate_codes.php
+  - api/v1/users/disable_mfa.php
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: production fatal error "Call to undefined function require_method()"
+  at api/v1/account/mfa/setup_init.php:23. Root cause: 5 API endpoints
+  bypass `api/bootstrap.php` by loading `config/app.php` + `includes/auth.php`
+  directly. `require_method()` (along with `json_error`, `json_success`,
+  `require_auth_api`, `json_body`, the CSRF middleware, and the JSON
+  exception handler) is defined ONLY in `api/bootstrap.php` — never
+  reached by these files. Pre-flight confirmed `api/v1/webhooks/
+  ses_notifications.php` is intentionally bootstrap-free (SNS webhook
+  with custom auth) and NOT a fix target. Fix: replace the 3-line manual
+  bootstrap pattern (`config/app.php` + `includes/auth.php` + `define
+  FF_API_CONTEXT`) with the standard `require_once dirname(__DIR__, N) .
+  '/api/bootstrap.php';` include used by 100+ other endpoints (N=4 for
+  account/mfa files at depth-4; N=3 for users/disable_mfa.php at depth-3).
+  Bootstrap loads all 3 manually-included items + adds the missing
+  `require_method` function. 2-commit arc. No schema motion expected.
 
 ### Bug investigation outcomes
 
