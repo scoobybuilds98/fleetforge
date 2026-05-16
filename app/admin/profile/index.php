@@ -516,7 +516,7 @@ require_once FF_ROOT . '/includes/header.php';
                 Not enabled. Adding a second factor significantly protects your account.
             </p>
             <?php endif; ?>
-            <a href="<?= e(base_url('account/mfa-setup')) ?>" class="btn btn-primary btn-sm w-full">
+            <a href="<?= e(base_url('account/mfa_setup')) ?>" class="btn btn-primary btn-sm w-full">
                 Set Up Two-Factor Authentication
             </a>
             <?php endif; ?>
