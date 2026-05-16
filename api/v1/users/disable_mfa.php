@@ -18,10 +18,8 @@ declare(strict_types=1);
  * @session S-PROD-1A
  */
 
-require_once __DIR__ . '/../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
-define('FF_API_CONTEXT', true);
 require_method('POST');
 require_auth_api();
 require_role('super_admin');

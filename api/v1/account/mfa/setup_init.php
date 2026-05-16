@@ -16,10 +16,8 @@ declare(strict_types=1);
  * @session S-PROD-1A
  */
 
-require_once __DIR__ . '/../../../../config/app.php';
-require_once FF_ROOT . '/includes/auth.php';
+require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
 
-define('FF_API_CONTEXT', true);
 require_method('POST');
 
 // S-PROD-1A-FIX T6: accept either a fully authenticated session (ff_user)
