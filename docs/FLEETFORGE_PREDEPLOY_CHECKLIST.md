@@ -669,6 +669,24 @@ ITEM G6 | 2026-05-16 | G — Smoke | Enable MFA for super admin
   Action: Log into FleetForge → Profile → enable MFA → save backup codes securely.
   Owner: Operator
   Status: PENDING
+
+ITEM G7 | 2026-05-16 | G — Smoke | Verify nginx config routes all requests through public/index.php before any prod deploy
+  Originating session: S-NGINX-PROD-CONFIG (2026-05-16)
+  Surfaced into checklist: S-NGINX-PROD-CONFIG (this item)
+  Detail: Production is nginx — .htaccess is inert. SCRIPT_FILENAME must be hardcoded to
+    /var/www/fleetforge/public/index.php. Using $realpath_root$fastcgi_script_name causes all
+    API calls to 404 because API files live under /var/www/fleetforge/api/ not under public/.
+    Canonical config + post-change verification: docs/runbooks/nginx_config.md. Decision: D202.
+    Root cause locked from the 2026-05-16 initial-deploy AJAX 404 incident.
+    Original source: 2026-05-16 Lightsail deployment debugging session.
+  Action: Before any future deploy that touches nginx config — confirm
+    /etc/nginx/sites-enabled/fleetforge has SCRIPT_FILENAME hardcoded to the absolute path of
+    public/index.php (never $realpath_root$fastcgi_script_name). Run the post-change
+    verification steps in docs/runbooks/nginx_config.md: nginx -t → reload → curl
+    /api/v1/health.php → expect 200 with db:true.
+  Owner: Operator
+  Status: ✅ COMPLETE (2026-05-16 — deployed and verified: health.php 200 db:true,
+    auth/login 200, dashboard 302)
 ```
 
 ### H — Rollback procedures
@@ -800,4 +818,4 @@ ITEM I4 | 2026-05-16 | I — Monitoring | Nginx + PHP error log monitoring
 
 ---
 
-*Last touched: 2026-05-16 (S-PROD-DEPLOYMENT-DOCS — 8 new items added from 2026-05-16 Lightsail deployment discoveries: B6 SES SMTP credentials, D10 cron jobs, D11 S3 storage test, D12 CloudWatch billing alarm, D13 SNS topic + SES bounce webhook, E1 rate cards prod seed, G5 second admin user, G6 super admin MFA enrollment, I4 error log monitoring). Prior touches: 2026-05-14 (S-DISPLAY-REVAMP C2 — A5 entry added for FF_ASSET_VERSION 1.0.29 → 1.0.30 collapsed sidebar nav-badge layout fix in app.css); 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13); 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
+*Last touched: 2026-05-16 (S-NGINX-PROD-CONFIG — G7 added COMPLETE: nginx config canonicalization, SCRIPT_FILENAME hardcoded to public/index.php, root cause of 2026-05-16 initial-deploy AJAX 404s locked as D202; canonical runbook at docs/runbooks/nginx_config.md). Prior touches: 2026-05-16 (S-PROD-DEPLOYMENT-DOCS — 8 new items added from 2026-05-16 Lightsail deployment discoveries: B6 SES SMTP credentials, D10 cron jobs, D11 S3 storage test, D12 CloudWatch billing alarm, D13 SNS topic + SES bounce webhook, E1 rate cards prod seed, G5 second admin user, G6 super admin MFA enrollment, I4 error log monitoring); 2026-05-14 (S-DISPLAY-REVAMP C2 — A5 entry added for FF_ASSET_VERSION 1.0.29 → 1.0.30 collapsed sidebar nav-badge layout fix in app.css); 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13); 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
