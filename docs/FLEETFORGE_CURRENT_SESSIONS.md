@@ -73,7 +73,21 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-MFA-LINK-FIX** — IN-FLIGHT
+Start: 2026-05-16 10:07 UTC
+Agent: Claude Code Desktop
+Touching:
+  - app/admin/profile/index.php (line 519 — hyphen to underscore)
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → ship history)
+  - docs/FLEETFORGE_PROGRESS.md (SESSION LOG row)
+Scope: one-line fix surfaced by S-MFA-SETUP-URL-FIND earlier today —
+  the Profile page's "Set Up MFA" button at line 519 emits
+  `base_url('account/mfa-setup')` (hyphen) but the file on disk is
+  `app/admin/account/mfa_setup.php` (underscore). The front controller
+  does literal filename matching with no hyphen-underscore normalization
+  (per public/index.php:resolve_route), so clicking the button 404s.
+  Fix: hyphen → underscore at line 519. Two other call sites
+  (mfa_required.php:80 + topbar) already use the correct underscore.
 
 ### Bug investigation outcomes
 
