@@ -73,30 +73,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-NGINX-PROD-CONFIG** — IN-FLIGHT
-Start: 2026-05-16 09:04 UTC
-Agent: Claude Code Desktop
-Touching:
-  - docs/runbooks/nginx_config.md (NEW — canonical nginx config + runbook)
-  - docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md (G7 added — note: G5 + G6
-    already taken by S-PROD-DEPLOYMENT-DOCS earlier today; using G7
-    per the dynamic high-water-mark scan)
-  - docs/FLEETFORGE_PROGRESS.md (D202 lock + SESSION LOG row)
-  - docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md (§0 LOCKED DECISIONS
-    index pointer for D202)
-  - docs/FLEETFORGE_CURRENT_SESSIONS.md (IN-FLIGHT → SHIPPED + ship
-    history)
-Scope: lock nginx-as-production-web-server as a permanent decision +
-  capture the working sites-enabled config + post-change verification
-  steps in a runbook. Documents the root cause of the 2026-05-16
-  initial-deploy AJAX 404s (location ~ \.php$ with
-  $realpath_root$fastcgi_script_name resolved API paths under
-  public/ where they don't exist). Pure docs session — no .php / .sql /
-  .css / .js / .env / composer / migration / tests / lib / api / app
-  changes per the explicit STOP CONDITIONS in the session prompt.
-  Pre-work scans: D-NEXT = D202 (max D-row on disk D201); next G-item =
-  G7 (G6 is the high-water mark, not G5 as the prompt template assumed —
-  trust file over prompt per prior memory).
+*(none)*
 
 ### Bug investigation outcomes
 
@@ -130,6 +107,9 @@ Outcome: invoice 404 on id=244 traced to soft-deleted invoice (D5 working as des
 Outcome: scope NARROWED at pre-flight per K-22. Part (A) "display settings non-functional" premise contradicted by file state — the system is fully wired end-to-end (DB cols + session + FOUC-free server bootstrap + density CSS + Alpine + API; real user has font=85 proving persistence). Part (B) sidebar badge fix shipped: 5-line CSS block under collapsed-sidebar media query zeroes min-width / padding / margin + adds overflow:hidden on `.sidebar:not(.is-open) .nav-badge`. Root cause: min-width:20px at line 788 beat max-width:0 at line 919, leaving a 20px-wide invisible badge in flex flow that pushed icons sideways. Browser-verified in running preview. FF_ASSET_VERSION 1.0.29 → 1.0.30; A5 added. 3-commit arc instead of 5.
 
 ### Documentation cleanup (queued, small)
+
+**S-NGINX-PROD-CONFIG** — SHIPPED 2026-05-16 (commits 14b8e7c C1 + 07bd28b C2 runbook + G7 + this C3 docs — see PROGRESS.md SESSION LOG)
+Outcome: locks D202 (production web server is nginx — not Apache; `.htaccess` inert; SCRIPT_FILENAME hardcoded to `/var/www/fleetforge/public/index.php`). Creates canonical `docs/runbooks/nginx_config.md` with CONTEXT + ROOT CAUSE OF ORIGINAL FAILURE (2026-05-16) + working sites-enabled config + HOW TO UPDATE + POST-CHANGE VERIFICATION. Adds PREDEPLOY G7 (✅ COMPLETE — config deployed + verified 2026-05-16: health.php 200/db:true, auth/login 200, dashboard 302). Root cause of all production AJAX failures at initial deploy now a permanent locked decision. No code/schema/migration touched.
 
 **S-PROD-DEPLOYMENT-DOCS** — SHIPPED 2026-05-16 (commits 23c0d36 C1 + e3a88f3 C2 + this C3 docs — see PROGRESS.md SESSION LOG)
 Outcome: documented all outstanding production tasks from the 2026-05-16 Lightsail deployment. Handoff status updated — production partially live at https://mainlandrentals.com/fleetforge (Oregon us-west-2, 44.226.100.133, 19 migrations applied, super admin verified). 2 Code Desktop sessions queued (S-COMPOSER-LOCK-FIX + S-RATE-CARDS-PROD-FIX). 8 new PREDEPLOY_CHECKLIST.md items filed (B6 SES SMTP creds, D10-D13 cron/S3/billing-alarm/SNS, E1 rate cards seed, G5-G6 second user + super admin MFA, I4 error log monitoring). Pre-flight verified all item numbers against PREDEPLOY high-water marks. Pure docs session — no code/schema/migration motion. D131 gate green throughout.
@@ -279,6 +259,7 @@ Outcome: Self-hosted all 4 CDN-delivered front-end dependencies — eliminates e
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
 
 **2026-05-16:**
+- S-NGINX-PROD-CONFIG SHIPPED 2026-05-16 — locks D202 (nginx prod web server; `.htaccess` inert; SCRIPT_FILENAME hardcoded to `/var/www/fleetforge/public/index.php`). Creates `docs/runbooks/nginx_config.md`. Adds PREDEPLOY G7 ✅ COMPLETE. Root cause of all production AJAX failures at initial deploy now a permanent locked decision. 3-commit arc (14b8e7c C1 IN-FLIGHT + 07bd28b C2 runbook + G7 + this C3 D202 lock + REFERENCE + SHIPPED flip — see PROGRESS.md SESSION LOG row). No code/schema/migration touched per session's STOP CONDITIONS. D131 gate clean on all 3 commits matching P3 baseline exactly: PARITY OK + INVARIANTS OK I1-I10 + doc_freshness 17/17 + migrate 19/0/0.
 - S-PROD-DEPLOYMENT-DOCS SHIPPED (3-commit arc: 23c0d36 C1 IN-FLIGHT + e3a88f3 C2 QUEUED sessions + PREDEPLOY items + handoff status + this C3 docs — see PROGRESS.md SESSION LOG row) — documented outstanding production tasks from the 2026-05-16 Lightsail deployment. **Production partially live** at https://mainlandrentals.com/fleetforge (server: fleetforge-prod in Oregon us-west-2, 4GB/2vCPU Ubuntu 22.04; static IP 44.226.100.133; SSL via Let's Encrypt; MySQL 8.0 with 19 migrations applied (17 ok / 0 drift / 0 missing at apply time; 2 manually marked due to FK constraints on fresh DB); super admin account created via mysql + bcrypt and verified login working). **2 Code Desktop sessions queued** under `### Bug investigation outcomes`: S-COMPOSER-LOCK-FIX (commit the resolved composer.lock from the server back into the repo — composer.lock had symfony v8.x packages requiring PHP ≥ 8.4 but server is on PHP 8.2; ~20 min, 2-commit arc) + S-RATE-CARDS-PROD-FIX (rate cards migration fails FK constraint on fresh DB; fix uses NULL `created_by` per `ON DELETE SET NULL` schema, then re-run seed; ~30 min, 3-commit arc). **8 new PREDEPLOY_CHECKLIST.md items filed** (per K-14 — operator-side pre-deploy obligations file here, not in CURRENT_SESSIONS): B6 SES SMTP credentials (blocked on AWS sandbox approval); D10 cron jobs (DB backup + app crons; concretizes D5 + D8); D11 S3 storage end-to-end test; D12 CloudWatch billing alarm at $50/month; D13 SNS topic + SES bounce webhook subscription (concretizes B4 + D7); E1 Standard 2025 rate cards seed on prod (NEW E section's first entry; blocked on S-RATE-CARDS-PROD-FIX); G5 second admin user (operator request); G6 super admin MFA enrollment; I4 nginx + PHP error log monitoring. **Handoff status updated** in CURRENT_SESSIONS.md "Active planning chat handoff" section: status flipped from "opened 2026-05-13" to "PRODUCTION PARTIALLY LIVE 2026-05-16" with full server detail enumerated; original handoff context preserved below the new block; removed S-MILEAGE-HELPERS-CLEANUP + S-PROD-3 from "Remaining open queue items" list (both shipped 2026-05-14); active-queue date stamp refreshed 2026-05-13 → 2026-05-16. PREDEPLOY Last-touched stamp refreshed with all 8 items enumerated. **Pre-flight verified PREDEPLOY high-water marks** before drafting new item numbers (B5 → B6, D9 → D10, no existing E → E1, G4 → G5, I3 → I4). Pure docs session — zero code/schema/migration changes. D131 gate clean on every commit (19/0/0 sticky from S-SETTINGS-CLEANUP through S-USERS-CONSOLIDATE; no movement this session): PARITY OK + INVARIANTS OK I1-I10 + samsara 16/16 + model_b_lifecycle 20/20 + doc_freshness 17/17 + migrate 19/0/0.
 
 **2026-05-15:**
