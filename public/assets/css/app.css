@@ -3921,6 +3921,62 @@ html.is-mac .non-mac-only { display: none; }
     overflow: hidden;
 }
 
+/* ── Dashboard widget table density ───────────────────────────────
+   S-DASHBOARD-CHART-POLISH (follow-up): when two widget tables sit
+   side-by-side in dashboard-grid--widgets, each card only has
+   ~510px of width at a 1280px viewport with the sidebar expanded.
+   The default .table padding (13/16px) plus monospace contract
+   numbers like "MTTS-9JJ3A-2026" push the table past that, forcing
+   the .table-wrapper's overflow-x:auto scrollbar to engage.
+
+   These rules tighten the cell metrics enough that the table fits
+   natively at common viewport widths, AND make the fallback
+   scrollbar visible (not the system-default near-invisible track)
+   so users know to scroll when content truly doesn't fit. */
+.dashboard-widget .table,
+.dashboard-widget .data-table { font-size: 0.8125rem; }
+
+.dashboard-widget .table thead th,
+.dashboard-widget .data-table thead th {
+    padding: 10px 12px;
+    font-size: 0.625rem;
+    letter-spacing: 0.06em;
+}
+
+.dashboard-widget .table tbody td,
+.dashboard-widget .data-table tbody td {
+    padding: 10px 12px;
+}
+
+/* Contract anchor truncation — when the column is still narrower than
+   the natural mono text width, hide the trailing characters with an
+   ellipsis rather than clipping from the left (which would hide the
+   prefix that distinguishes "CN-…" from "MTTS-…"). */
+.dashboard-widget .table tbody td .font-mono {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+/* Visible horizontal scrollbar inside dashboard widget tables — the
+   underlying .table-wrapper already has overflow-x:auto; this styles
+   the scrollbar so users can actually see they're able to scroll. */
+.dashboard-widget .table-wrapper { scrollbar-width: thin; }
+.dashboard-widget .table-wrapper::-webkit-scrollbar { height: 8px; }
+.dashboard-widget .table-wrapper::-webkit-scrollbar-track {
+    background: var(--bg-surface-2);
+}
+.dashboard-widget .table-wrapper::-webkit-scrollbar-thumb {
+    background: var(--border-color-strong, var(--border-color));
+    border-radius: 4px;
+}
+.dashboard-widget .table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+}
+
 /* ── Responsive: tablet ── */
 @media (max-width: 1023px) {
     .dashboard-grid--charts,
