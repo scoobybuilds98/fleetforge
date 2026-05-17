@@ -404,10 +404,12 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            ══════════════════════════════════════════════════════════════ */
 
         /* ── Background video layer ──────────────────────────────────
-           The wave video is now heavily blurred (24px) so it functions
-           as ambient texture rather than literal imagery. A vertical
-           dark gradient sits above it for legibility under the card,
-           and a soft radial vignette darkens the corners. */
+           Video is lightly blurred so the wave motion + colour stay
+           recognisable but no sharp foreground edges compete with the
+           card. A soft radial vignette darkens the corners just enough
+           to draw the eye toward the card; the linear gradient is
+           kept light so the video reads through. The card's own
+           40px backdrop-filter handles legibility under the form. */
         .video-bg-wrapper {
             position: fixed;
             inset: 0;
@@ -423,19 +425,19 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             min-height: 100%;
             width: auto;
             height: auto;
-            transform: translate(-50%, -50%) scale(1.08);
+            transform: translate(-50%, -50%) scale(1.06);
             object-fit: cover;
-            filter: blur(24px) saturate(1.15) brightness(0.55);
+            filter: blur(10px) saturate(1.25) brightness(0.85);
         }
         .video-bg-overlay {
             position: absolute;
             inset: 0;
             background:
-                radial-gradient(ellipse at center, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0.75) 100%),
-                linear-gradient(180deg, rgba(10,11,14,0.35) 0%, rgba(10,11,14,0.55) 100%);
+                radial-gradient(ellipse at center, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.28) 70%, rgba(0,0,0,0.45) 100%),
+                linear-gradient(180deg, rgba(10,11,14,0.10) 0%, rgba(10,11,14,0.22) 100%);
         }
         @media (max-width: 767px) {
-            .video-bg { filter: blur(16px) saturate(1.15) brightness(0.55); }
+            .video-bg { filter: blur(6px) saturate(1.25) brightness(0.85); }
         }
 
         /* ── Page shell ── */
