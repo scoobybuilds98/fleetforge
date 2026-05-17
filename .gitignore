@@ -17,7 +17,11 @@ node_modules/
 storage/uploads/
 storage/generated/
 storage/documents/
+storage/branding/
 storage/maintenance.flag
+
+# --- Office documents (specs / references kept locally, not in repo) ---
+*.docx
 
 # --- Logs ---
 logs/*.log
