@@ -297,6 +297,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
+<?php
+// ── S-DESIGN-SETTINGS-FOOTER-LOGIN — brand-aware login presentation ──
+// Read company / brand rows so the page can render the customer's
+// own name, tagline, logo and primary color. Every read falls back
+// to a safe default so an un-seeded DB still renders a usable form.
+$loginLogo    = (string) (settings_get('brand.logo_path')    ?? '');
+$loginFavicon = (string) (settings_get('brand.favicon_path') ?? '');
+$loginName    = (string) (settings_get('company.name')       ?: 'FleetForge');
+$loginTagline = (string) (settings_get('company.tagline')    ?? '');
+$loginColor   = (string) (settings_get('brand.primary_color') ?: '#2596be');
+$loginHover   = (string) (settings_get('brand.primary_hover') ?: '#1e7ea0');
+$loginLight   = (string) (settings_get('brand.primary_light') ?: '#e0f4fb');
+
+// Signed storage URLs for logo/favicon — only when paths exist.
+$loginLogoUrl    = $loginLogo    !== '' ? \FleetForge\Storage\StorageClient::url($loginLogo,    3600)  : '';
+$loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url($loginFavicon, 86400) : '';
+?>
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -305,13 +322,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="csrf-token" content="<?= e($_csrfToken) ?>">
     <meta name="robots" content="noindex, nofollow">
 
-    <title>Sign In — FleetForge</title>
+    <title>Sign In — <?= e($loginName) ?></title>
 
+    <?php if ($loginFaviconUrl !== ''): ?>
+    <link rel="icon" type="image/png" href="<?= e($loginFaviconUrl) ?>">
+    <?php else: ?>
     <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
+    <?php endif; ?>
 
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
 
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+
+    <!-- Brand color injection — mirrors includes/header.php so the
+         login card uses the customer's primary color for focus
+         rings, primary buttons and links. -->
+    <style id="ff-login-brand-override">
+        :root {
+            --color-primary:       <?= e($loginColor) ?>;
+            --color-primary-hover: <?= e($loginHover) ?>;
+            --color-primary-light: <?= e($loginLight) ?>;
+        }
+    </style>
 
     <script>
         window.FF_BASE_PATH = <?= json_encode(FF_BASE_PATH) ?>;
@@ -487,6 +519,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 0.875rem;
             color: var(--text-tertiary);
         }
+
+        /* S-DESIGN-SETTINGS-FOOTER-LOGIN — brand-aware login block.
+           Replaces the static auth-logo block when company branding
+           is configured. Scoped to .login-* so it doesn't collide
+           with the legacy .auth-logo styles still used elsewhere. */
+        .login-brand          { text-align:center; margin-bottom:32px; }
+        .login-logo-img       { max-height:56px; max-width:200px; object-fit:contain; margin-bottom:16px; }
+        .login-logo-placeholder { display:inline-flex; margin-bottom:12px; }
+        .login-company-name   { font-size:1.375rem; font-weight:600; color:var(--text-primary); margin:0 0 4px; letter-spacing:-0.01em; }
+        .login-company-tagline{ font-size:0.8125rem; color:var(--text-muted); margin:0; }
+        .login-footer         { text-align:center; margin-top:24px; font-size:0.6875rem; color:var(--text-muted); }
     </style>
 </head>
 <body>
@@ -516,15 +559,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="auth-page">
     <div class="auth-card">
 
-        <!-- Brand mark -->
-        <div class="auth-logo">
-            <div class="auth-logo-mark" aria-hidden="true">
-                <!-- Truck icon (inline fallback if SVG file not yet present) -->
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
-                </svg>
-            </div>
-            <div class="auth-logo-name">FleetForge</div>
+        <!-- Brand mark — uses settings_get('company.logo')/company.name when set,
+             otherwise renders a brand-color SVG truck placeholder. -->
+        <div class="login-brand">
+            <?php if ($loginLogoUrl !== ''): ?>
+                <img src="<?= e($loginLogoUrl) ?>"
+                     alt="<?= e($loginName) ?> logo"
+                     class="login-logo-img">
+            <?php else: ?>
+                <div class="login-logo-placeholder">
+                    <svg width="48" height="48" viewBox="0 0 32 32" fill="none"
+                         xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="2" y="12" width="18" height="11" rx="2" fill="<?= e($loginColor) ?>"/>
+                        <path d="M20 17 L20 23 L28 23 L28 19 L25 13 L22 13 L20 17Z" fill="<?= e($loginColor) ?>"/>
+                        <path d="M22.5 14.5 L24.5 14.5 L26.5 18 L22.5 18Z" fill="<?= e($loginHover) ?>" opacity="0.7"/>
+                        <circle cx="7"  cy="24" r="3"   fill="#1a1a1a" stroke="<?= e($loginColor) ?>" stroke-width="1.5"/>
+                        <circle cx="7"  cy="24" r="1.2" fill="<?= e($loginColor) ?>"/>
+                        <circle cx="23" cy="24" r="3"   fill="#1a1a1a" stroke="<?= e($loginColor) ?>" stroke-width="1.5"/>
+                        <circle cx="23" cy="24" r="1.2" fill="<?= e($loginColor) ?>"/>
+                    </svg>
+                </div>
+            <?php endif; ?>
+            <h1 class="login-company-name"><?= e($loginName) ?></h1>
+            <?php if ($loginTagline !== ''): ?>
+                <p class="login-company-tagline"><?= e($loginTagline) ?></p>
+            <?php endif; ?>
         </div>
 
         <h1 class="auth-heading">Sign in to your account</h1>
@@ -640,6 +699,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <small>Internal tool — authorised personnel only.</small>
         </div>
 
+        <!-- S-DESIGN-SETTINGS-FOOTER-LOGIN — login copyright line.
+             Mirrors the admin footer string so unauthenticated visitors
+             still see the customer brand. -->
+        <footer class="login-footer">
+            <span>&copy; <?= date('Y') ?> <?= e($loginName) ?>. All rights reserved.</span>
+        </footer>
+
     </div>
 </div>
 
@@ -673,5 +739,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </body>
 </html>
 <?php
-unset($_csrfToken, $_flash, $error, $email);
+unset($_csrfToken, $_flash, $error, $email,
+      $loginLogo, $loginFavicon, $loginName, $loginTagline,
+      $loginColor, $loginHover, $loginLight,
+      $loginLogoUrl, $loginFaviconUrl);
 ?>

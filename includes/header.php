@@ -108,6 +108,40 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
     <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
+    <?php
+    // ============================================================
+    // S-DESIGN-SETTINGS-FOOTER-LOGIN — runtime brand override.
+    // Reads brand.primary_color / primary_hover / primary_light
+    // from the settings table and re-binds the matching CSS custom
+    // properties so the whole admin UI repaints in the company's
+    // brand color without redeploying app.css. Empty settings rows
+    // → the <style> block is skipped → app.css defaults survive.
+    // The <style> ID lets us target it from JS for live previews.
+    // ============================================================
+    $_ff_primary = settings_get('brand.primary_color');
+    $_ff_hover   = settings_get('brand.primary_hover');
+    $_ff_light   = settings_get('brand.primary_light');
+    if ($_ff_primary):
+    ?>
+    <style id="ff-brand-override">
+        :root {
+            --color-primary:       <?= e((string) $_ff_primary) ?>;
+            --color-primary-hover: <?= e((string) ($_ff_hover ?: '#1e7ea0')) ?>;
+            --color-primary-light: <?= e((string) ($_ff_light ?: '#e0f4fb')) ?>;
+        }
+    </style>
+    <?php endif; ?>
+
+    <?php
+    // Favicon override — must come AFTER the default <link rel="icon">
+    // above so this one wins via DOM order. Browsers pick the last
+    // matching <link rel="icon"> at load time.
+    $_ff_favicon = settings_get('brand.favicon_path');
+    if ($_ff_favicon):
+    ?>
+    <link rel="icon" type="image/png" href="<?= e(\FleetForge\Storage\StorageClient::url((string) $_ff_favicon, 86400)) ?>">
+    <?php endif; ?>
+
     <!-- ============================================================
          PERM-1 — per-user display font size injection.
          Scoped strictly to .page-content so the sidebar, topbar,
@@ -169,6 +203,7 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
 
 <?php
 // Clean up local variables so they don't leak into page scope
-unset($_theme, $_pageTitle, $_appName, $_timezone, $_displayFontSize, $_displayDensity);
+unset($_theme, $_pageTitle, $_appName, $_timezone, $_displayFontSize, $_displayDensity,
+      $_ff_primary, $_ff_hover, $_ff_light, $_ff_favicon);
 // Note: $_user and $_csrfToken are intentionally kept — pages may need them.
 ?>

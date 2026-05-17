@@ -745,3 +745,53 @@ Confirm you understand this standard before continuing.
 
 *This file fills in the implementation details the spec describes conceptually.*
 *Add to project knowledge alongside FLEETFORGE_SPEC_FINAL.md.*
+
+---
+
+## 2. DESIGN SETTINGS TAB (S-DESIGN-SETTINGS-FOOTER-LOGIN)
+
+New tab in **Settings → Design** (super_admin only).
+API endpoint: `api/v1/settings/brand.php` (POST, multipart/form-data).
+
+**Settings rows added** (seeded by
+`db_migrations/202605170200_S-DESIGN-SETTINGS-FOOTER-LOGIN_brand_settings_seed.sql`,
+all INSERT IGNORE):
+
+- `brand.primary_color`, `brand.primary_hover`, `brand.primary_light`
+- `brand.logo_path`, `brand.favicon_path`
+- `defaults.theme`, `defaults.density`, `defaults.font_size`, `defaults.rows_per_page`
+- `regional.date_format`, `regional.time_format`, `regional.currency_symbol`,
+  `regional.timezone`, `regional.distance_unit`
+- `pdf.invoice_footer_text`, `pdf.show_logo`, `pdf.accent_color`
+- `ui.sidebar_collapsed_default`, `ui.session_timeout_minutes`
+
+**Brand injection:** `includes/header.php` injects `<style id="ff-brand-override">`
+that re-binds `--color-primary` / `--color-primary-hover` / `--color-primary-light`
+from the settings rows. The block sits **after** the `app.css` link so its
+declarations win. When the rows are empty the block is skipped entirely
+and `app.css` defaults survive. A second override below replaces the
+favicon `<link rel="icon">` when `brand.favicon_path` is set.
+
+**Color derivation** (computed server-side in `api/v1/settings/brand.php`
+and stored alongside the primary so the runtime read is flat):
+
+- `primary_hover` = each RGB channel × 0.88 (12% darker)
+- `primary_light` = primary × 0.10 + 255 × 0.90 (90% white mix)
+
+**Footer:** `includes/footer.php` reads `company.name` from settings.
+Copyright string is `"© YYYY {company.name}. All rights reserved."`.
+Fallback to `"Avi Technologies"` when the setting is empty.
+
+**Login page:** `app/auth/login.php` reads `company.name`, `company.tagline`,
+`brand.logo_path`, `brand.primary_color` (and the derived hover/light).
+Shows the uploaded logo if set; otherwise renders an inline SVG truck
+placeholder tinted with the brand color. Brand color is injected via
+inline `<style id="ff-login-brand-override">` in the login page `<head>`.
+Login footer mirrors the admin footer copyright string. Favicon override
+also applies — uses the customer favicon at sign-in when configured.
+
+**File storage:** Logo / favicon writes use `StorageClient::upload()`
+under `branding/` (e.g. `branding/logo_1715961234.png`). Previous file
+at `brand.logo_path` / `brand.favicon_path` is deleted **after** the
+settings transaction commits — orphaned-file risk is preferred over
+orphaned-row risk.

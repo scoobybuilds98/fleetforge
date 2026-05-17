@@ -261,8 +261,12 @@ $csrfToken = $_SESSION['csrf_token'];
 
 // WHY: default tab can come from URL param (e.g. after redirect from sub-page)
 $defaultTab = clean_string($_GET['tab'] ?? 'general');
-$validTabs = ['general', 'users', 'portal_users', 'audit', 'system', 'integrations'];
+// S-DESIGN-SETTINGS-FOOTER-LOGIN: 'design' (super_admin only) added between
+// general and users. Validation list includes it regardless so a deep-link
+// like ?tab=design from a non-super-admin still resolves to general gracefully.
+$validTabs = ['general', 'design', 'users', 'portal_users', 'audit', 'system', 'integrations'];
 if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
+if ($defaultTab === 'design' && !$isSuperAdmin) $defaultTab = 'general';
 ?>
 
 <div x-data="{ activeTab: '<?= e($defaultTab) ?>' }">
@@ -308,6 +312,12 @@ if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
             @click="activeTab = 'general'" role="tab">
         General
     </button>
+    <?php if ($isSuperAdmin): /* S-DESIGN-SETTINGS-FOOTER-LOGIN: super_admin-only Design tab */ ?>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'design' }"
+            @click="activeTab = 'design'" role="tab">
+        Design
+    </button>
+    <?php endif; ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'users' }"
             @click="activeTab = 'users'" role="tab">
         Users <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$userCount) ?></span>
@@ -441,6 +451,15 @@ if (!empty($grouped['currency'])) {
 </div>
 
 </div><!-- /general tab -->
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 1.5: DESIGN — brand color, logo, defaults, regional, PDF, UI (super_admin only) -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php if ($isSuperAdmin): ?>
+<div x-show="activeTab === 'design'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/design.php'; ?>
+</div>
+<?php endif; ?>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- TAB 2: ADMIN USERS — link to sidebar Users module                       -->
