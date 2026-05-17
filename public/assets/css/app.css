@@ -617,20 +617,26 @@ kbd {
     text-decoration: none;
     overflow: hidden;
     min-width: 0;
+    /* S-DESIGN-LOGO-WIDE: claim the full horizontal track so a width:100%
+       child img actually grows to fill the sidebar (minus padding and the
+       collapse button to its right). Without flex:1 the link sized to its
+       single child's natural width, leaving dead space. */
+    flex: 1;
+    justify-content: center;
 }
 
-/* S-DESIGN-LOGO-BIGGER: logo grows to 72px tall × auto width within a
-   220px max so wide wordmarks (e.g. "BLUE CAPITAL — EQUIPMENT FINANCE")
-   read clearly. width:auto preserves the source aspect ratio; max-width
-   caps it so the logo never collides with the collapse button on the
-   right. object-fit:contain ensures no cropping. */
+/* S-DESIGN-LOGO-WIDE: logo fills the available horizontal space in
+   the brand area (was previously height-driven, leaving dead space
+   to the right of narrower-aspect wordmarks). width:100% claims the
+   full flex width; max-height caps total visual presence; height:auto
+   preserves the source aspect ratio. object-fit:contain ensures no
+   cropping when the natural width is less than 100%. */
 .sidebar-logo {
-    height: 72px;
-    width: auto;
-    max-width: 220px;
+    width: 100%;
+    height: auto;
+    max-height: 80px;
     border-radius: var(--radius-md);
     object-fit: contain;
-    flex-shrink: 0;
 }
 
 .sidebar-brand-icon {
