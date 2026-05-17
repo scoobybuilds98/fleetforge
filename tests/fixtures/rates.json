@@ -1,0 +1,13 @@
+{
+  "standard":      { "daily": "50.00",   "weekly": "350.00",  "monthly": "700.00"  },
+  "tiny":          { "daily": "0.01",    "weekly": "0.07",    "monthly": "0.30"    },
+  "high_value":    { "daily": "1000.00", "weekly": "5000.00", "monthly": "20000.00" },
+  "cheap_daily_expensive_monthly": { "daily": "10.00", "weekly": "70.00", "monthly": "3000.00" },
+  "inverted":      { "daily": "700.00",  "weekly": "350.00",  "monthly": "50.00"   },
+  "uniform":       { "daily": "50.00",   "weekly": "50.00",   "monthly": "50.00"   },
+  "edge_recurring":{ "daily": "23.33",   "weekly": "163.33",  "monthly": "700.00"  },
+  "zero":          { "daily": "0.00",    "weekly": "0.00",    "monthly": "0.00"    },
+  "zero_daily":    { "daily": "0.00",    "weekly": "350.00",  "monthly": "700.00"  },
+  "zero_weekly":   { "daily": "50.00",   "weekly": "0.00",    "monthly": "700.00"  },
+  "zero_monthly":  { "daily": "50.00",   "weekly": "350.00",  "monthly": "0.00"    }
+}

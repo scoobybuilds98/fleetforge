@@ -1,0 +1,42 @@
+{
+  "standard_bc": {
+    "contact_name":  "Test Customer BC",
+    "company_name":  "Test Co BC",
+    "email":         "test-bc@example.test",
+    "province":      "BC",
+    "country":       "Canada",
+    "gst_exempt":    0,
+    "pst_exempt":    0,
+    "tax_exempt":    0
+  },
+  "ontario_hst": {
+    "contact_name":  "Test Customer ON",
+    "company_name":  "Test Co ON",
+    "email":         "test-on@example.test",
+    "province":      "ON",
+    "country":       "Canada",
+    "gst_exempt":    0,
+    "pst_exempt":    0,
+    "tax_exempt":    0
+  },
+  "gst_exempt": {
+    "contact_name":  "Test Exempt",
+    "company_name":  "Test Exempt Co",
+    "email":         "test-exempt@example.test",
+    "province":      "BC",
+    "country":       "Canada",
+    "gst_exempt":    1,
+    "pst_exempt":    0,
+    "tax_exempt":    0
+  },
+  "fully_exempt": {
+    "contact_name":  "Test Full Exempt",
+    "company_name":  "Test Full Exempt Co",
+    "email":         "test-fullexempt@example.test",
+    "province":      "BC",
+    "country":       "Canada",
+    "gst_exempt":    1,
+    "pst_exempt":    1,
+    "tax_exempt":    0
+  }
+}

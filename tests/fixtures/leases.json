@@ -1,0 +1,155 @@
+{
+  "standard_monthly": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic"
+  },
+  "model_b_full": {
+    "daily_rate":   "75.00",
+    "weekly_rate":  "500.00",
+    "monthly_rate": "1000.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "precharge_enabled": 1,
+    "precharge_amount":  "500.00",
+    "precharge_balance": "500.00",
+    "mileage_unit":     "km",
+    "mileage_rate_km":  "0.5000",
+    "estimated_mileage_km": "5000.000"
+  },
+  "model_b_lite": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "precharge_enabled": 0,
+    "mileage_unit":     "km",
+    "mileage_rate_km":  "0.5000",
+    "estimated_mileage_km": "5000.000"
+  },
+  "usd_lease": {
+    "daily_rate":   "40.00",
+    "weekly_rate":  "280.00",
+    "monthly_rate": "560.00",
+    "billing_cycle": "monthly",
+    "currency":     "USD",
+    "engine_version": "holistic"
+  },
+  "exempt_customer_lease": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "gst_exempt": 1,
+    "pst_exempt": 1
+  },
+  "high_value": {
+    "daily_rate":   "1000.00",
+    "weekly_rate":  "5000.00",
+    "monthly_rate": "20000.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic"
+  },
+  "minimal_value": {
+    "daily_rate":   "1.00",
+    "weekly_rate":  "5.00",
+    "monthly_rate": "20.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic"
+  },
+  "zero_rate": {
+    "daily_rate":   "0.00",
+    "weekly_rate":  "0.00",
+    "monthly_rate": "0.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic"
+  },
+  "edge_rate": {
+    "daily_rate":   "23.33",
+    "weekly_rate":  "163.33",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic"
+  },
+  "with_insurance": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "insurance_opt_in": 1,
+    "insurance_cost":   "50.00"
+  },
+  "with_warranty": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "warranty_opt_in": 1,
+    "warranty_cost":   "30.00"
+  },
+  "with_gps": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "gps_opt_in": 1,
+    "gps_cost":   "2.00"
+  },
+  "with_all_addons": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "insurance_opt_in": 1, "insurance_cost": "50.00",
+    "warranty_opt_in":  1, "warranty_cost":  "30.00",
+    "gps_opt_in":       1, "gps_cost":       "2.00"
+  },
+  "with_discount_10pct": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "discount_type":  "percentage",
+    "discount_value": "10.0000"
+  },
+  "with_discount_flat50": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "holistic",
+    "discount_type":  "flat",
+    "discount_value": "50.0000"
+  },
+  "period_independent_lease": {
+    "daily_rate":   "50.00",
+    "weekly_rate":  "350.00",
+    "monthly_rate": "700.00",
+    "billing_cycle": "monthly",
+    "currency":     "CAD",
+    "engine_version": "period_independent"
+  }
+}
