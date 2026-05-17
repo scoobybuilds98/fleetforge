@@ -1032,3 +1032,51 @@ Single-source-of-truth for company / legal metadata + 6 public legal pages + 3 f
 | Portal  | `app/portal/includes/footer.php`    | `.portal-footer` — 2-column commercial (brand block left with logo + tagline + Avi attribution; Legal + Support link columns right; copyright + version pill bottom; collapses to single column under 768px) |
 
 All three footers read company name from `settings_get('company.name')` with fallback to `legal_config('company.brand_name')` = "Avi Technologies". All legal links use `legal_url()` so route changes propagate from a single point.
+
+---
+
+### 3.1 New Client Deployment Recipe
+
+When deploying FleetForge for a client other than Mainland Truck & Trailer:
+
+**Step 1 — config/legal.php**
+Replace: `legal_name`, `brand_name`, `product_name`, `address`,
+`governing_law`, and all four `email_*` fields with the new operator's info.
+
+**Step 2 — Settings → Design (in the running app)**
+Set: `company.name`, `company.tagline`
+Upload: `brand.logo_path`, `brand.favicon_path`
+Pick: `brand.primary_color`
+
+**Step 3 — Static logo fallback (optional)**
+Drop `media/login-logo.{ext}` as a fallback only if Step 2 isn't done.
+
+**Step 4 — Legal pages review**
+Review each `app/legal/*.php` for client-specific claims:
+jurisdiction clauses, sub-processor lists, retention periods.
+
+The footers need no manual edits — they pull everything automatically
+from `settings_get()` + `legal_config()`.
+
+---
+
+### 3.2 Key Distinctions & Watch Points
+
+**Two separate "company name" concepts — do not conflate:**
+- `company.name` (DB settings) — customer-facing name shown in footers
+  e.g. "Mainland Truck & Trailer Sales"
+- `company.brand_name` (config/legal.php) — the SOFTWARE VENDOR shown as
+  "A software by …" e.g. "Avi Technologies"
+  This never changes per deployment — it always refers to Avi Technologies.
+
+**Legal pages are public routes:**
+`/legal/*` pages are intentionally accessible without login so customers
+can audit terms. If a deployment ever needs to gate them (e.g. white-label
+where the vendor identity is confidential), add a route guard in
+`public/index.php` before the legal route block.
+
+**Legal email addresses are hardcoded in config/legal.php, not DB-editable:**
+This is intentional — legal contacts rarely change and DB-editing risks
+an admin pointing them at the wrong inbox. If DB-editable legal emails
+are ever needed, move them to `settings_get('legal.email_*')` with
+`legal_config()` as fallback — approximately a 10-minute change.
