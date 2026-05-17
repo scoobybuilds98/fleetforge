@@ -16,6 +16,7 @@ node_modules/
 # --- Storage — user uploads and generated files (go to S3 in prod) ---
 storage/uploads/
 storage/generated/
+storage/documents/
 storage/maintenance.flag
 
 # --- Logs ---
