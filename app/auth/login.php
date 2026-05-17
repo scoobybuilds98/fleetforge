@@ -466,7 +466,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             background: rgba(20, 20, 19, 0.78);
             border: 1px solid rgba(255, 255, 255, 0.06);
             border-radius: 20px;
-            padding: 44px 44px 36px;
+            padding: 32px 44px 36px;
             backdrop-filter: blur(40px) saturate(1.4);
             -webkit-backdrop-filter: blur(40px) saturate(1.4);
             box-shadow:
@@ -494,9 +494,13 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
         /* ── Brand block ── */
         /* Logo sized to claim the card's interior width (~352px after
            padding). max-height generous so width-dominant wordmarks can
-           render at full size without the height cap clipping in. */
-        .login-brand           { text-align: center; margin-bottom: 28px; }
-        .login-logo-img        { max-height: 160px; max-width: 320px; object-fit: contain; display: block; margin: 0 auto; }
+           render at full size without the height cap clipping in.
+           Negative top/bottom margins compensate for the transparent
+           padding most logo PNGs carry inside their bounding box —
+           the visible logo stays the same size but the empty space
+           around it collapses, pulling the heading closer. */
+        .login-brand           { text-align: center; margin-bottom: 8px; }
+        .login-logo-img        { max-height: 160px; max-width: 320px; object-fit: contain; display: block; margin: -24px auto -24px; }
         .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
         .login-company-name    {
             font-size: 1.5rem;

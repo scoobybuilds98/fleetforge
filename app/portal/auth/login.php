@@ -233,7 +233,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
             background: rgba(20, 20, 19, 0.78);
             border: 1px solid rgba(255, 255, 255, 0.06);
             border-radius: 20px;
-            padding: 44px 44px 36px;
+            padding: 32px 44px 36px;
             backdrop-filter: blur(40px) saturate(1.4);
             -webkit-backdrop-filter: blur(40px) saturate(1.4);
             box-shadow:
@@ -260,15 +260,19 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
             }
         }
 
-        /* ── Brand block ── */
-        .portal-login-brand   { text-align: center; margin-bottom: 28px; }
+        /* ── Brand block ──
+           Negative top/bottom margins on the logo compensate for the
+           transparent padding most logo PNGs carry inside their
+           bounding box — visible logo stays the same size, empty
+           space around it collapses. Mirrors app/auth/login.php. */
+        .portal-login-brand   { text-align: center; margin-bottom: 8px; }
         .portal-login-logo    { display: flex; justify-content: center; margin: 0 auto; }
         .portal-login-logo-img {
             max-height: 160px;
             max-width: 320px;
             object-fit: contain;
             display: block;
-            margin: 0 auto;
+            margin: -24px auto -24px;
         }
         .portal-login-logo-placeholder { display: flex; justify-content: center; margin: 0 auto 14px; }
         .portal-login-title {
