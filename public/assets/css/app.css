@@ -944,19 +944,17 @@ kbd {
         max-width: 0;
     }
 
-    /* S-DISPLAY-REVAMP — the rule above is shared with .nav-item-label etc.
-       but .nav-badge defines `min-width: 20px` at line 788 which beats the
-       generic `max-width: 0` (CSS spec: min-width wins over max-width). That
-       left a 20px-wide invisible badge in the flexbox flow, pushing the
-       nav-item-icon sideways and breaking icon alignment in icon-only mode.
-       Zero min-width + zero padding + zero margin removes it from layout
-       entirely; opacity:0 + pointer-events:none above keep it invisible and
-       non-interactive. */
+    /* S-SIDEBAR-COLLAPSED-ICON-FIX — display:none on the badge in
+       collapsed mode is the definitive fix. The previous combo
+       (opacity:0 + max-width:0 + min-width:0 + padding:0 + margin:0)
+       removed the badge from view but it still counted as a flex
+       child, so CSS `gap` (10px on .nav-item) still reserved a slot
+       between the icon and the empty badge — shifting the icon off
+       center. display:none removes it from the flex flow entirely.
+       Same reasoning applies to the label; see the gap:0 rule below
+       which handles any remaining hidden-but-present children. */
     .sidebar:not(.is-open) .nav-badge {
-        min-width: 0;
-        padding: 0;
-        margin: 0;
-        overflow: hidden;
+        display: none !important;
     }
 
     .sidebar:not(.is-open) .sidebar-brand {
@@ -993,6 +991,16 @@ kbd {
     .sidebar:not(.is-open) .nav-item {
         justify-content: center;
         padding: 8px;
+        /* S-SIDEBAR-COLLAPSED-ICON-FIX — zero the inter-child gap so
+           any hidden-but-flex-present child (e.g. .nav-item-label
+           with max-width:0) can't reserve a 10px slot that pushes
+           the icon off center. */
+        gap: 0;
+    }
+    .sidebar:not(.is-open) .nav-item-icon,
+    .sidebar:not(.is-open) .nav-icon {
+        margin: 0 auto;
+        flex-shrink: 0;
     }
 
     .sidebar:not(.is-open) .sidebar-user {
@@ -5629,7 +5637,6 @@ dl.detail-grid dd {
     }
     .sidebar .sidebar-brand-name,
     .sidebar .nav-item-label,
-    .sidebar .nav-badge,
     .sidebar .nav-section-label,
     .sidebar .nav-group-arrow,
     .sidebar .sidebar-user-info,
@@ -5639,6 +5646,11 @@ dl.detail-grid dd {
         max-width: 0;
         visibility: hidden;
     }
+    /* S-SIDEBAR-COLLAPSED-ICON-FIX — pulled .nav-badge out of the
+       shared rule above and given display:none so it can't reserve
+       a flex slot between the icon and the (hidden) label. The
+       desktop collapsed block at line ~955 does the same thing. */
+    .sidebar .nav-badge { display: none !important; }
     .sidebar .sidebar-brand {
         justify-content: center;
         padding: 0 8px;
@@ -5664,6 +5676,15 @@ dl.detail-grid dd {
     .sidebar .nav-item {
         justify-content: center;
         padding: 10px 8px;
+        /* S-SIDEBAR-COLLAPSED-ICON-FIX — zero inter-child gap so the
+           hidden .nav-item-label can't reserve a 10px slot that
+           pushes the icon off center. */
+        gap: 0;
+    }
+    .sidebar .nav-item-icon,
+    .sidebar .nav-icon {
+        margin: 0 auto;
+        flex-shrink: 0;
     }
     .sidebar .sidebar-user {
         justify-content: center;
