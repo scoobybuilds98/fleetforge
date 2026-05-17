@@ -60,8 +60,12 @@ if (!empty($_me['name'])) {
 }
 
 // Human-readable role label.
+// S-ROLE-LABEL-SUPERADMIN: the display label for the super_admin
+// slug renders as "Developer" (uppercased to "DEVELOPER" in the
+// topbar pill via CSS text-transform). The underlying role slug
+// 'super_admin' is unchanged — only the human-readable label.
 $_roleMap = [
-    'super_admin' => 'Super Admin',
+    'super_admin' => 'Developer',
     'manager'     => 'Manager',
     'dispatcher'  => 'Dispatcher',
     'accountant'  => 'Accountant',

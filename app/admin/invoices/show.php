@@ -249,7 +249,7 @@ $isVoid       = ($invoice['status'] === 'void');
 $isWrittenOff = ($invoice['status'] === 'written_off');
 $isPaid       = ($invoice['status'] === 'paid');
 $canRecordPayment = in_array($invoice['status'], ['sent', 'partially_paid', 'overdue']);
-// WHY: Super admin can edit/delete invoices of any status — all other roles are draft-only (D12)
+// WHY: super_admin role can edit/delete invoices of any status — all other roles are draft-only (D12)
 $isSuperAdmin = is_super_admin();
 $canEdit   = ($isDraft || $isSuperAdmin) && can('invoices', 'edit');
 $canDelete = ($isDraft || $isSuperAdmin) && can('invoices', 'delete');

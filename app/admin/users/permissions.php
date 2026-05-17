@@ -37,7 +37,7 @@ require_once FF_ROOT . '/includes/auth.php';
 
 require_auth();
 
-// Super admin only — no exceptions.
+// super_admin role only — no exceptions.
 if (!is_super_admin()) {
     http_response_code(403);
     $errorFile = FF_ROOT . '/app/errors/403.php';

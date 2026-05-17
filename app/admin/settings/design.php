@@ -33,7 +33,7 @@ if (!is_super_admin()) {
     http_response_code(403);
     echo '<div class="card"><div class="card-body" style="text-align:center;padding:48px;">'
        . '<strong>Forbidden</strong><p style="color:var(--text-muted);font-size:0.875rem;margin-top:8px;">'
-       . 'Design settings are limited to super-admin users.</p></div></div>';
+       . 'Design settings are limited to Developer users.</p></div></div>';
     return;
 }
 

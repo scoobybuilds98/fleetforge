@@ -83,7 +83,7 @@ require FF_ROOT . '/includes/legal_header.php';
 <div class="legal-section" id="access">
     <h2>4. Access Controls</h2>
     <ul>
-        <li><strong>Role-based access control</strong> — five built-in roles (Super Admin, Manager, Dispatcher, Accountant, Read-only) plus per-user permission overrides</li>
+        <li><strong>Role-based access control</strong> — five built-in roles (Developer, Manager, Dispatcher, Accountant, Read-only) plus per-user permission overrides</li>
         <li><strong>Audit logging</strong> — every create / update / delete recorded in an immutable audit log with user, IP, user-agent, and timestamp</li>
         <li><strong>Admin-only account creation</strong> — no public self-registration; new users join only by invitation from an existing admin</li>
         <li><strong>Multi-factor authentication</strong> — TOTP-based MFA supported; required-for-role policy enforceable per Client</li>
