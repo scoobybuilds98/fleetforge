@@ -3,95 +3,187 @@
 
 ---
 
-## 1. DARK / LIGHT THEME — EXACT CSS VARIABLE VALUES
+## 1. DESIGN TOKENS — EXACT CSS VARIABLE VALUES
 
-The spec names the variables but never provides the hex values. These are the definitive values.
+The full token system lives at `public/assets/css/app.css` section "02. CSS Custom Properties (Design Tokens)" (lines ~215-337) with a dark-theme refresh block at lines 398-497 ("THEME-1 (2026-04-08) — Dark theme refresh"). **Brand identity is orange `#f97316`** ("fleet/logistics identity") — NOT blue. **Default theme is DARK** at `:root`; light is opt-in via `[data-theme="light"]`.
+
+The runtime can override `--color-primary` / `--color-primary-hover` / `--color-primary-light` at request-time via `<style id="ff-brand-override">` injected in `includes/header.php` from the `brand.*` settings rows (S-DESIGN-SETTINGS-FOOTER-LOGIN, see Section 2 below). When those settings are empty, `app.css` defaults survive.
+
+### 1.1 :root (dark theme — DEFAULT)
 
 ```css
-/* ============================================================
-   LIGHT THEME (default)
-   ============================================================ */
-[data-theme="light"] {
-  /* Backgrounds */
-  --bg-page:        #f5f5f4;        /* stone-100 — page canvas */
-  --bg-card:        #ffffff;        /* white — card surfaces */
-  --bg-muted:       #f0efed;        /* warm gray — subtle sections, table alt rows */
-  --bg-sidebar:     #1a1a1a;        /* near-black — sidebar is ALWAYS dark */
-  --bg-input:       #ffffff;
-  --bg-hover:       #f5f4f2;        /* row/item hover */
-  --bg-selected:    #eff6ff;        /* blue-50 — selected row */
+:root {
+  /* Brand colours */
+  --color-primary:         #f97316;   /* orange — fleet/logistics identity */
+  --color-primary-hover:   #ea6f00;
+  --color-primary-light:   rgba(249, 115, 22, 0.14);
+  --color-primary-text:    #fb923c;
+
+  /* Semantic colours (same names in both themes; values change between :root and [data-theme="light"]) */
+  --color-success:         #22c55e;   --color-success-light:   rgba(34, 197, 94, 0.13);   --color-success-text:    #4ade80;
+  --color-warning:         #eab308;   --color-warning-light:   rgba(234, 179, 8, 0.13);   --color-warning-text:    #facc15;
+  --color-danger:          #ef4444;   --color-danger-light:    rgba(239, 68, 68, 0.13);   --color-danger-text:     #f87171;
+  --color-info:            #06b6d4;   --color-info-light:      rgba(6, 182, 212, 0.12);   --color-info-text:       #22d3ee;
+
+  /* Dark surfaces (default theme) */
+  --bg-body:               #0a0b0e;
+  --bg-surface:            #111318;
+  --bg-surface-2:          #181b23;
+  --bg-surface-hover:      #1e2230;
 
   /* Text */
-  --text-primary:   #1c1c1a;        /* near-black */
-  --text-secondary: #6b6b66;        /* warm gray-500 */
-  --text-muted:     #a3a39e;        /* warm gray-400 */
-  --text-inverse:   #ffffff;        /* on dark backgrounds */
+  --text-primary:          #f1f5f9;
+  --text-secondary:        #94a3b8;
+  --text-tertiary:         #64748b;
+  --text-on-primary:       #ffffff;
+  --text-on-danger:        #ffffff;
 
   /* Borders */
-  --border-color:   #e5e5e2;        /* light warm gray */
-  --border-strong:  #d4d4cf;        /* darker for emphasis */
+  --border-color:          #1d2133;
+  --border-color-strong:   #2a3347;
+  --border-focus:          #f97316;
 
-  /* Shadows */
-  --shadow-sm:  0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md:  0 2px 8px rgba(0,0,0,0.08);
-  --shadow-lg:  0 4px 16px rgba(0,0,0,0.10);
-}
+  /* Sidebar (always dark — sidebar doesn't theme-shift) */
+  --sidebar-width:           240px;
+  --sidebar-width-collapsed:  64px;
+  --sidebar-bg:              #0d0e12;
+  --sidebar-border:          rgba(255, 255, 255, 0.06);
+  --sidebar-text:            #6b7280;
+  --sidebar-text-hover:      #f9fafb;
+  --sidebar-text-active:     #ffffff;
+  --sidebar-item-hover-bg:   rgba(255, 255, 255, 0.05);
+  --sidebar-item-active-bg:  rgba(249, 115, 22, 0.15);   /* brand orange @ 15% */
+  --sidebar-icon-active:     #f97316;
+  --sidebar-section-text:    #4b5563;
+  --sidebar-brand-text:      #f9fafb;
 
-/* ============================================================
-   DARK THEME
-   ============================================================ */
-[data-theme="dark"] {
-  --bg-page:        #0f0f0f;        /* near-black canvas */
-  --bg-card:        #1a1a1a;        /* dark gray card surfaces */
-  --bg-muted:       #242424;        /* subtle sections */
-  --bg-sidebar:     #1a1a1a;        /* same as card — sidebar blends */
-  --bg-input:       #242424;
-  --bg-hover:       #2a2a2a;
-  --bg-selected:    #1e2a3a;        /* dark blue tint */
+  /* Topbar */
+  --topbar-height:         60px;
+  --topbar-bg:             #111318;
+  --topbar-border:         #1d2133;
+  --topbar-text:           #f1f5f9;
 
-  --text-primary:   #e8e8e4;
-  --text-secondary: #9c9c96;
-  --text-muted:     #6b6b66;
-  --text-inverse:   #1c1c1a;
+  /* Shadows (deeper alpha on dark bg) */
+  --shadow-xs:  0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-sm:  0 1px 4px rgba(0, 0, 0, 0.40), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.25);
+  --shadow-lg:  0 10px 24px rgba(0, 0, 0, 0.55), 0 4px 8px rgba(0, 0, 0, 0.30);
+  --shadow-xl:  0 20px 40px rgba(0, 0, 0, 0.60), 0 8px 16px rgba(0, 0, 0, 0.35);
+  --shadow-glow-primary: 0 0 20px rgba(249, 115, 22, 0.18);
 
-  --border-color:   #2e2e2e;
-  --border-strong:  #404040;
+  /* Radius */
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:  12px;
+  --radius-full: 9999px;
 
-  --shadow-sm:  0 1px 2px rgba(0,0,0,0.20);
-  --shadow-md:  0 2px 8px rgba(0,0,0,0.30);
-  --shadow-lg:  0 4px 16px rgba(0,0,0,0.40);
-}
+  /* Transitions */
+  --transition-fast:   120ms ease;
+  --transition-base:   200ms ease;
+  --transition-slow:   280ms ease;
 
-/* ============================================================
-   SEMANTIC COLORS — Same in both themes
-   ============================================================ */
-:root {
-  --color-accent:   #3b82f6;       /* blue-500 — primary actions, links */
-  --color-accent-hover: #2563eb;   /* blue-600 */
-  --color-success:  #16a34a;       /* green-600 */
-  --color-warning:  #d97706;       /* amber-600 */
-  --color-danger:   #dc2626;       /* red-600 */
-  --color-info:     #0891b2;       /* cyan-600 */
+  /* Z-index stack */
+  --z-sidebar:   40;
+  --z-topbar:    30;
+  --z-dropdown:  50;
+  --z-modal:     60;
+  --z-toast:     70;
 
-  /* Status badge backgrounds (light tinted) */
-  --badge-success-bg:  #dcfce7;    --badge-success-text: #166534;
-  --badge-warning-bg:  #fef3c7;    --badge-warning-text: #92400e;
-  --badge-danger-bg:   #fee2e2;    --badge-danger-text:  #991b1b;
-  --badge-info-bg:     #cffafe;    --badge-info-text:    #155e75;
-  --badge-neutral-bg:  #f3f4f6;    --badge-neutral-text: #374151;
-  --badge-purple-bg:   #f3e8ff;    --badge-purple-text:  #6b21a8;
-}
+  /* Form (Apple-aesthetic — see Section 1.5 for the full pill-input docs) */
+  --input-height:      40px;
+  --input-height-sm:   32px;
+  --input-height-lg:   48px;
+  --input-bg:          rgba(140, 130, 115, 0.18);
+  --input-bg-focus:    rgba(140, 130, 115, 0.32);
+  --input-border:      #2a3347;
+  --input-text:        rgba(255, 255, 255, 0.96);
+  --input-placeholder: rgba(235, 230, 220, 0.40);
+  --label-text:        rgba(235, 230, 220, 0.60);
+  --label-text-strong: rgba(255, 255, 255, 0.85);
 
-/* Dark theme badge overrides */
-[data-theme="dark"] {
-  --badge-success-bg:  #052e16;    --badge-success-text: #4ade80;
-  --badge-warning-bg:  #451a03;    --badge-warning-text: #fbbf24;
-  --badge-danger-bg:   #450a0a;    --badge-danger-text:  #f87171;
-  --badge-info-bg:     #083344;    --badge-info-text:    #22d3ee;
-  --badge-neutral-bg:  #1f2937;    --badge-neutral-text: #9ca3af;
-  --badge-purple-bg:   #2e1065;    --badge-purple-text:  #c084fc;
+  /* Spec-name aliases (FIX #28) — keep both conventions working */
+  --bg-page:      var(--bg-body);
+  --bg-card:      var(--bg-surface);
+  --color-accent: var(--color-primary);
+  --color-accent-hover: var(--color-primary-hover);
+  --text-muted:   var(--text-tertiary);
+  --text-inverse: var(--text-on-primary);
+  --border-strong: var(--border-color-strong);
+  --bg-selected:  rgba(249, 115, 22, 0.12);   /* FIX #35 */
 }
 ```
+
+### 1.2 [data-theme="light"]
+
+```css
+[data-theme="light"] {
+  --color-primary:         #ea6f00;
+  --color-primary-hover:   #c45f00;
+  --color-primary-light:   #fff7ed;
+  --color-primary-text:    #c2410c;
+
+  --color-success:         #16a34a;   --color-success-light:   #dcfce7;   --color-success-text:    #15803d;
+  --color-warning:         #d97706;   --color-warning-light:   #fef3c7;   --color-warning-text:    #b45309;
+  --color-danger:          #dc2626;   --color-danger-light:    #fee2e2;   --color-danger-text:     #b91c1c;
+  --color-info:            #0891b2;   --color-info-light:      #cffafe;   --color-info-text:       #0e7490;
+
+  --bg-body:               #f8fafc;
+  --bg-surface:            #ffffff;
+  --bg-surface-2:          #f1f5f9;
+  --bg-surface-hover:      #f8fafc;
+
+  --text-primary:          #0f172a;
+  --text-secondary:        #475569;
+  --text-tertiary:         #94a3b8;
+
+  --border-color:          #e2e8f0;
+  --border-color-strong:   #cbd5e1;
+  --border-focus:          #ea6f00;
+
+  --topbar-bg:             #ffffff;
+  --topbar-border:         #e2e8f0;
+  --topbar-text:           #0f172a;
+
+  --shadow-xs:  0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md:  0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg:  0 10px 15px -3px rgba(0, 0, 0, 0.10), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl:  0 20px 25px -5px rgba(0, 0, 0, 0.10), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+  /* Apple cool gray (118,118,128) for light-mode inputs */
+  --input-bg:          rgba(118, 118, 128, 0.12);
+  --input-bg-focus:    rgba(118, 118, 128, 0.22);
+  --input-border:      #cbd5e1;
+  --input-text:        rgba(0, 0, 0, 0.92);
+  --input-placeholder: rgba(60, 60, 67, 0.40);
+  --label-text:        rgba(60, 60, 67, 0.72);   /* bumped from Apple 0.60 for WCAG AA */
+  --label-text-strong: rgba(0, 0, 0, 0.85);
+}
+```
+
+### 1.3 [data-theme="dark"] (explicit refresh — THEME-1, 2026-04-08)
+
+A warm brownish-black palette overlays the `:root` defaults when the user explicitly toggles dark mode. Strictly scoped to `[data-theme="dark"]`; light is untouched. Variable NAMES match `:root` so the rest of the codebase keeps rendering — only VALUES are rebased onto the warm palette. New spec names (`--bg-card`, `--bg-page`, `--bg-muted`, `--bg-hover`, `--bg-input`, `--bg-secondary`, `--text-disabled`, `--input-focus-bg`, `--scrollbar-*`, `--table-*`, `--sidebar-text-muted`, `--sidebar-hover`, `--sidebar-active`, `--sidebar-icon`) are added so spec selectors work without rewriting every existing rule. `--bg-card` + `--bg-page` are *redefined* (overriding the `:root` aliases) so cards get the deep `#141413` instead of the fall-through `var(--bg-surface)`. `--color-accent` / `--color-success` / `--color-warning` / `--color-danger` / `--color-info` are NEVER touched — they stay theme-agnostic.
+
+```css
+[data-theme="dark"] {
+  --bg-body:               #262624;
+  --bg-page:               #262624;
+  --bg-surface:            #141413;
+  --bg-card:               #141413;
+  --bg-surface-2:          #1f1e1d;
+  /* … plus the spec-name aliases listed above … */
+}
+```
+
+See `public/assets/css/app.css:418-497` for the full block.
+
+### 1.4 Status badge palette (theme-aware)
+
+Badge backgrounds + text colours live in the `--color-{success,warning,danger,info}-light` and `--color-{success,warning,danger,info}-text` token pairs above. There are no separate `--badge-*` tokens — `.badge-success`, `.badge-warning`, etc. consume the light/text token pairs directly. Light mode: lighter pastel fills with darker text; dark mode: darker fills with brighter text (per `:root` defaults).
+
+For status → badge-class mapping by domain (Customer / Equipment / Lease / Invoice / Payment / Reservation / Work Order / Risk Score) see Section 9 below.
 
 ---
 
@@ -795,3 +887,106 @@ under `branding/` (e.g. `branding/logo_1715961234.png`). Previous file
 at `brand.logo_path` / `brand.favicon_path` is deleted **after** the
 settings transaction commits — orphaned-file risk is preferred over
 orphaned-row risk.
+
+**Save mechanics (S-DESIGN-SETTINGS-DEBUG, 2026-05-17):** the brand
+endpoint writes via `INSERT ... ON DUPLICATE KEY UPDATE` (not UPDATE-only)
+so saves self-heal when the seed migration has not yet been applied.
+This is the canonical pattern for any settings write.
+
+**Sidebar logo render (S-DESIGN-SETTINGS-DEBUG / S-DESIGN-LOGO-* arc):**
+`includes/sidebar.php` reads `brand.logo_path` (NOT the never-written
+`company.logo_url`) and resolves it through `StorageClient::url()` for
+the signed URL. The `.sidebar-brand` area is 96px tall (S-DESIGN-LOGO-BIGGER),
+the logo fills the track via `width:100% height:auto max-height:80px`
+(S-DESIGN-LOGO-WIDE), and the company name moved out of the sidebar to
+a `.topbar-company-name` breadcrumb root with a `›` separator before
+the page title (S-DESIGN-LOGO-TOPBAR). Collapsed-sidebar (≥1024px) +
+tablet (768-1023px) breakpoints shrink the brand area back to topbar
+height + cap the logo at 40×44 so wide wordmarks don't overflow the
+64px icon-only track.
+
+---
+
+## 3. UNDOCUMENTED COMPONENT SECTIONS (rolling index)
+
+`public/assets/css/app.css` carries 24+ named sections. Sections covered
+elsewhere in this doc: 02 (Tokens — §1 above), 10 (Forms — §1.5 above),
+S-LEASE-UNITS (§1.6 above), 04 (Dashboard Grid — §4 below), 09 (Badges —
+§9 below). The remaining sections are listed here as a navigation index
+with one-line descriptions. Source-of-truth values stay in `app.css`.
+
+| § | app.css section | Range | What it owns |
+|---|------------------|-------|--------------|
+| 03 | Typography | ~498-552 | DM Sans (UI) + DM Mono (data) — base font scale, heading sizes, `.font-mono` data cell |
+| 04 | App Layout Shell | ~552-573 | `.app-shell`, `.app-main`, `.sidebar-collapsed` modifier, viewport-height container math |
+| 05 | Sidebar | ~573-1011 | `.sidebar`, `.sidebar-brand` (96px tall per S-DESIGN-LOGO-BIGGER), `.sidebar-logo` (width:100% per S-DESIGN-LOGO-WIDE), nav items, collapsed-state media queries, scrollbar |
+| 06 | Topbar | ~1012-1714 | `.topbar`, `.topbar-company-name` breadcrumb root (S-DESIGN-LOGO-TOPBAR), `›` separator, global search trigger, notifications bell, display-settings popover (PERM-1 font/density), user menu (NOTIF-1 follow-up) |
+| 07 | Page Content & Panels | ~1714-1918 | `.page-content` density variants (PERM-1: compact/comfortable/spacious), `.dl-grid` label/value detail grid, `.section-divider` eyebrow separator, show-page sub-table height containment |
+| Stats | Stats / Summary tiles | ~1919-2102 | `.stat-card` modern + legacy structures, currency value sizing (~$1,234,567.89 must fit), `.stat-card__header` / `.stat-card__icon` |
+| 08 | Buttons | ~2102-2360 | 8 variants × 5 sizes — see §2 above |
+| VALID-2 | Field validation messaging | ~2527-2674 | `.is-invalid` / `.ff-invalid` ring rules + helper text below input + form-level error summary card |
+| 11 | Tables | ~2675-2830 | `.table` base, `.table-wrapper` overflow shell, sort indicators, sticky headers, density modifiers |
+| 12 | Modals | ~2831-2951 | Size variants — see §6 above |
+| 13 | Toasts | ~2952-3045 | Position/duration/animation — see §5 above |
+| 14 | Notification Dropdown | ~3046-3073 | Alpine x-transition rules for the notifications-bell dropdown |
+| 14b | Accounting Sub-Nav | ~3074-3243 | `.acc-topnav` — accounting module's secondary nav strip |
+| 15 | Global Search Modal | ~3244-3390 | Cmd-K palette modal, `.search-input`, result list, keyboard nav |
+| 16 | Skeleton Loaders | ~3391-3451 | Shimmer animation — see §7 above |
+| 17 | Utilities | ~3452-3547 | Margin/padding helpers, `.text-*`, display utilities |
+| 18 | Alpine Helpers | ~3548-3593 | x-transition presets, `[x-cloak]` hide rule |
+| 19 | Responsive / Mobile | ~3594-3789 | Breakpoint media queries — see §10 below |
+| 20 | Dashboard & Page-Specific | ~3789-4321 | `.dashboard-grid` family (S-DASHBOARD-CHART-POLISH: `--charts 2fr 1fr` / `--equal 1fr 1fr` / `--widgets 1fr 1fr` + single-column under 1024px), `.chart-wrap` flex shrink-past-content trio, `.dashboard-widget` density (S-DASHBOARD-CHART-POLISH C2: font 0.8125rem + cell padding 10/12px + font-mono ellipsis-END), `.dashboard-grid--widgets th/td:last-child` hide (S-DASHBOARD-CHART-POLISH C3) |
+| 30 | Customer Portal (S024) | ~4322-6316 | Portal-mirror class set: `.portal-form-*`, `.portal-search-input`, `.portal-filter-select`, portal layout shell, mobile bottom tab bar (≤640px) |
+| NOTIF-1 | Notifications system | ~6317-6692 | Bell, dropdown card, full-page index, badge counts, mark-read transitions |
+| EMAIL-1 | Email Compose Modal | ~6693-6996 | Global email composer (record-picker integration, attachment dropzone, recipient autocomplete) |
+| MEDIA-1 | Sound mute toggle | ~6997-7029 | Topbar mute button + persistence |
+| CHAT-1 | Team Chat | ~7030-8018 | Channel sidebar, message list, composer, reactions, threading |
+| MSGR-1 (admin) | Customer Messenger admin | ~8019-8182 | Admin-side messenger thread list + composer + recipient picker |
+| MSGR-1 (portal) | Customer Messenger portal | ~8183-8516 | Portal-side messenger UI (mirror of admin, simplified for customers) |
+| FF_RecordPicker | Reusable record selector | ~8517-9004 | Search-as-you-type entity picker (Customer / Lease / Equipment / Invoice / etc.), used by email compose + chat attach + portal request flows |
+| S-LEASE-UNITS | Segmented control | ~9005+ | Apple iOS pill toggle — see §1.6 above |
+
+Sections added since 2026-05-13 (rolling 30-day window): `00. Self-hosted Fonts` (S-PROD-3, 2026-05-14), display-settings density rules in section 06 (PERM-1 2026-05-14 / S-DISPLAY-REVAMP 2026-05-14 collapsed-sidebar nav-badge fix at app.css:927), the `.dashboard-grid` family in section 20 (S-DASHBOARD-CHART-POLISH, 2026-05-17), and the `.topbar-company-name` block in section 06 (S-DESIGN-LOGO-TOPBAR, 2026-05-17).
+
+---
+
+## 4. SETTINGS REGISTRY (live DB snapshot — 2026-05-17)
+
+The `settings` table is the runtime config store. Schema: `id` / `key` UNIQUE / `value` longtext / `value_type` enum / `group_name` / `label` / `description` / `is_public` tinyint / `updated_by` / `updated_at`. Only `is_public=1` rows are readable by portal users; admin-side reads bypass the gate.
+
+**Group count (live, 147 rows total):**
+
+| Group | Rows | Originating session(s) |
+|-------|-----:|------------------------|
+| accounting | 31 | S028 (Phase 1 — Accounting Foundation, 2026-04-05) + S028-b (audit + cron overrides, 2026-04-05) + S028-c (root-cause fix + Top Nav, 2026-04-05) + S034 (Fixed Assets, 2026-04-07) + S035 (Tax, 2026-04-07) |
+| ai | 6 | S027 (Claude AI Integration Phase 16, 2026-04-05) — `ai.enabled`, `ai.daily_token_limit`, `ai.model`, `ai.anthropic_api_key`, `ai.cache_summaries`, `ai.summary_ttl_hours` |
+| alerts | 4 | S003 (Seed Data Foundation, 2026-04-01) — `alerts.compliance_warning_days`, `alerts.compliance_critical_days`, `alerts.lease_end_reminder_days`, `alerts.overdue_invoice_days` |
+| app | 1 | S001 (Foundation) — `app.url` |
+| archive | 2 | S-CRON-2 (Integrity & Cleanup, 2026-05-02) — `archive.audit_log_retention_days`, `archive.notification_log_retention_days` |
+| aws | 4 | S001 / S-PROD-2 (Sentry + SES, 2026-05-02) — `aws.access_key_id`, `aws.region`, `aws.s3_bucket`, `aws.secret_access_key` |
+| billing | 1 | S-BILLING-HOLISTIC-ENGINE (2026-05-17) — `billing.engine_version` (migration 202605170105, INSERT IGNORE, is_public=0) |
+| brand | 5 | S-DESIGN-SETTINGS-FOOTER-LOGIN (2026-05-17) — `brand.primary_color`, `brand.primary_hover`, `brand.primary_light`, `brand.logo_path`, `brand.favicon_path` |
+| company | 20 | S001 + S003 (seed) + S025 (Settings Overhaul, 2026-04-05) — `company.name`, `company.address`, `company.phone`, `company.email`, `company.website`, `company.gst_number`, `company.pst_number`, `company.timezone`, `company.tagline`, `company.logo_url`, `company.currency_symbol`, `company.currency`, `company.country`, `company.city`, `company.province`, `company.postal_code`, `company.bank_name`, `company.bank_account`, `company.check_payable_to`, `company.payment_instructions` |
+| credit_notes | 1 | S011 (Credit Notes Module, 2026-04-02) — `credit_note.next_number.2026` |
+| currency | 1 | migration 036 (currency_markup) — `currency.usd_cad_markup_pct` |
+| damage_claims | 1 | S012 (Damage Claims, 2026-04-02) — `damage_claim.next_number.2026` |
+| defaults | 4 | S-DESIGN-SETTINGS-FOOTER-LOGIN (2026-05-17) — `defaults.theme`, `defaults.density`, `defaults.font_size`, `defaults.rows_per_page` |
+| email | 6 | S025 / S-PROD-2 — `email.from_email`, `email.from_name`, `email.smtp_host`, `email.smtp_port`, `email.smtp_user`, `email.smtp_pass` |
+| gps | 7 | S026 (Samsara GPS Tracking Phase 10, 2026-04-05) + SAMSARA-1 (Full Integration, 2026-04-07) — `gps.primary_provider`, `gps.samsara_api_key`, `gps.samsara_org_id`, `gps.geotab_username`, `gps.geotab_password`, `gps.geotab_database`, `gps.sync_interval_minutes` |
+| insp | 1 | S016 (Inspections Module, 2026-04-03) — `insp.next_number.2026` |
+| invoices | 8 | S003 + S008 (Invoices Module, 2026-04-02) + migration 037 (advance billing) — `invoice.prefix`, `invoice.due_days_default`, `invoice.payment_instructions`, `invoice.late_fee_percentage`, `invoice.next_number.2026`, `billing.max_advance_periods`, `credit_note.prefix`, `payment.prefix` |
+| leases | 3 | S007 (Leases Module, 2026-04-01) + migration 038 (lease_dual_units) — `lease.prefix`, `lease.km_to_miles_default`, `lease.miles_to_km_default` |
+| maintenance | 1 | S015 (Maintenance Work Orders, 2026-04-03) — `damage_claim.prefix` (filed under maintenance group historically) |
+| notifications | 8 | S025 + S-CRON-3 (Notifications & Digest, 2026-05-02) — `notifications.digest_hour`, `notifications.email_enabled`, `notifications.smtp_from`, `notifications.smtp_from_name`, `notifications.smtp_host`, `notifications.smtp_port`, `notifications.smtp_user`, `notifications.smtp_pass` |
+| payments | 1 | S009 (Payments Module, 2026-04-02) — `payment.next_number.2026` |
+| pdf | 3 | S-DESIGN-SETTINGS-FOOTER-LOGIN (2026-05-17) — `pdf.invoice_footer_text`, `pdf.show_logo`, `pdf.accent_color` |
+| regional | 5 | S-DESIGN-SETTINGS-FOOTER-LOGIN (2026-05-17) — `regional.date_format`, `regional.time_format`, `regional.currency_symbol`, `regional.timezone`, `regional.distance_unit` |
+| reservations | 1 | S018 (Reservations Module, 2026-04-03) — `reservations.stale_after_days` |
+| samsara | 1 | S-MILEAGE-1B (Samsara historical-distance, 2026-05-04) — `samsara.fixture_mode` (boolean, gates the FixtureProvider path) |
+| security | 16 | S-PROD-1A (MFA + IP rate limiting, 2026-05-02) + S-SETTINGS-CLEANUP (2026-05-14, label backfill via migration 202605140907) — `security.mfa.required_roles`, `security.mfa.totp_window`, `security.mfa.backup_code_count`, plus 13 `security.rate_limit.*` rows (login_ip, mfa_ip, mfa_user, forgot_password_ip, ai_user — each with threshold + window_minutes + block_minutes where applicable) |
+| storage | 1 | S001 — `storage.driver` (local / s3) |
+| ui | 2 | S-DESIGN-SETTINGS-FOOTER-LOGIN (2026-05-17) — `ui.sidebar_collapsed_default`, `ui.session_timeout_minutes` |
+| wo | 1 | S015 — `wo.next_number.2026` |
+| yards | 1 | S018-EXT (Reservations UX — Yards Management, 2026-04-03) — `yard.default` |
+
+**Editing surface:** the runtime Settings UI lives at `app/admin/settings/index.php` with tabs for Company / Branding / Notifications / Integrations / Users / Portal Users / Audit Log / Email Templates / System / **Design** (super_admin only — S-DESIGN-SETTINGS-FOOTER-LOGIN, 2026-05-17). Design tab covers `brand.*` + `defaults.*` + `regional.*` + `pdf.*` + `ui.*` (the 19 rows seeded by migration 202605170200). Integrations tab carries the MFA + AWS + GPS + Email/SMTP blocks. Counter rows (`*.next_number.YYYY`) are updated by their owning modules at issuance time, never exposed in the UI.

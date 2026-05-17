@@ -4,27 +4,29 @@
 
 ---
 
-## Handoff status (HANDOFF-PREP 2026-05-13)
+## Handoff status (HANDOFF-PREP 2026-05-13 + S-DOCS-RECONCILE-FULL refresh 2026-05-17)
 
-**Last updated:** 2026-05-13 by HANDOFF-PREP — pre-cutover-chat preparation.
+**Last updated:** 2026-05-17 by S-DOCS-RECONCILE-FULL — migration count + asset version refreshed against on-disk reality.
 
 **Platform state at handoff:**
 - **Stack:** PHP 8.2 / MySQL 8.0 / Alpine.js / ApexCharts v3 / mPDF / AWS SDK (per D24 composer.json carries BOTH `mpdf/mpdf` AND `aws/aws-sdk-php`).
 - **Local dev:** Laravel Herd at `http://fleetforge.test/fleetforge/`; MySQL via Homebrew at `127.0.0.1:3306`.
-- **Migrations:** 17 migration files in `db_migrations/`, **17 applied / 0 drift / 0 missing** per `bin/migrate.php --verify`.
-- **FF_ASSET_VERSION:** 1.0.28 in dev `.env` (gitignored). **Filed under A2 in this checklist — bump on prod before deploy.**
-- **SHIPPED sessions:** 23 labels currently in `CURRENT_SESSIONS.md` (Tier 1/2/3 feature work complete). Doc freshness smoke 17/17 PASS exit 0.
+- **Migrations:** 26 migration files in `db_migrations/`, **26 applied / 0 drift / 0 missing** per `bin/migrate.php --verify`. (Bumped from 19 at HANDOFF-PREP via S-BILLING-HOLISTIC-ENGINE +6 migrations 0100-0105 on 2026-05-17, and S-DESIGN-SETTINGS-FOOTER-LOGIN +1 migration 202605170200.) Legacy `database/migrations/` directory holds 12 historical files (027-038) NOT scanned by the runner — `lib/Migrations/Runner.php` reads only `db_migrations/`.
+- **FF_ASSET_VERSION:** 1.0.30 in dev `.env` (gitignored). **Filed under A5 in this checklist — bump on prod before deploy.** Prior level 1.0.28 stamp was from S-MILEAGE-3 (2026-05-13); subsequent bumps S-PROD-3 → 1.0.29 (A4) and S-DISPLAY-REVAMP → 1.0.30 (A5) on 2026-05-14.
+- **SHIPPED sessions:** 30+ labels currently in `CURRENT_SESSIONS.md` Recent ship history (2026-05-13 → 2026-05-17). Tier 1/2/3 feature work complete, plus production-deployment (2026-05-16) + post-deployment fixes (2026-05-17). Doc freshness smoke status unknown post-2026-05-17 (not run as part of this docs reconcile).
 - **Model B mileage arc closed:** engine (S-MILEAGE-1 → -2A → -2B → -3 → -3-FIX-0 → -5) + portal + helper retirement (S-PORTAL-MILEAGE-MODEL-B) all SHIPPED 2026-05-13. Final retirement of `Mileage::monthlyAllowance` complete.
-- **Pending non-blocking:** `S-MILEAGE-3-ACCT-SPEC` is CPA-blocked on 5 enumerated questions per D-I (A) / D176 — independent of cutover; can ship before, during, or after deploy without coupling.
-- **Pending optional:** `S-MILEAGE-HELPERS-CLEANUP` (3 orphan helpers in `lib/Billing/Mileage.php` per S-PORTAL-MILEAGE-MODEL-B D-E) + `S-PROD-3` (self-host CDN deps) — both hygiene-grade, neither blocks deploy.
-- **Repo:** `/Users/avi/Documents/fleetforge` on `origin/main`, working tree clean post-HANDOFF-PREP.
+- **Production deploy status (2026-05-16):** partially live at https://mainlandrentals.com/fleetforge — Lightsail Oregon us-west-2, static IP 44.226.100.133, SSL via Let's Encrypt, super admin verified. Open punch list: B6 + D10-D13 + E1 + G5-G6 + I4 (9 items below).
+- **Holistic billing engine live (2026-05-17):** S-BILLING-HOLISTIC-ENGINE locked all 23 active/pending leases to `engine_version='period_independent'`; new leases default to `'holistic'`. Phased migration — old leases continue on ProRateCalculator until close, new leases use running-reconciliation `lib/Billing/HolisticLeaseEngine.php`.
+- **Design + branding live (2026-05-17):** S-DESIGN-SETTINGS-FOOTER-LOGIN added Settings → Design tab (super_admin) with brand color picker + logo/favicon upload + 19 seeded settings rows. Follow-up arc (S-DESIGN-SETTINGS-DEBUG + S-DESIGN-LOGO-TOPBAR + -BIGGER + -WIDE) iterated logo sizing + relocated company name to topbar breadcrumb root. S-DASHBOARD-CHART-POLISH closed dashboard chart-reflow + grid + widget-cropping bugs in 3-commit arc.
+- **Pending non-blocking:** `S-MILEAGE-3-ACCT-SPEC` (CPA-blocked, D-I (A) / D176); `S-COMPOSER-LOCK-FIX` + `S-RATE-CARDS-PROD-FIX` (server-side, queued from 2026-05-16 deployment).
+- **Repo:** `/Users/avi/Documents/fleetforge` on `origin/main`. Untracked at audit time: `lib/Billing/FleetForge_Holistic_Billing_Engine_Spec.docx` (operator's reference spec, not committed) + `storage/branding/` (uploaded brand assets — gitignored class).
 - **Canonical docs:** all `FLEETFORGE_*.md` files in `docs/` subfolder per DOCS-REORG (2026-05-13); `FLEETFORGE_DATABASE_MASTER.sql` at repo root per SEVEN FILES convention (REFERENCE.md §1).
 
-**Smoke-gate state (D131 four-gate suite):**
-- `php tests/_smoke_doc_freshness.php` → 17/17 PASS exit 0
-- `php tests/_smoke_master_schema_parity.php` → PARITY OK (master matches live DB)
-- `php tests/_smoke_billing_invariants.php` → INVARIANTS OK I1-I10 (10/10 PASS exit 0)
-- `php bin/migrate.php --verify` → 17 ok / 0 drift / 0 missing
+**Smoke-gate state (D131 four-gate suite, as of 2026-05-14 last published — not refreshed in this docs reconcile):**
+- `php tests/_smoke_doc_freshness.php` → was 17/17 PASS exit 0 at S-NOTIFICATIONS-FULL 2026-05-14
+- `php tests/_smoke_master_schema_parity.php` → was PARITY OK at S-BILLING-HOLISTIC-ENGINE 2026-05-17 (after audit-column repositioning)
+- `php tests/_smoke_billing_invariants.php` → was INVARIANTS OK I1-I10 at S-BILLING-HOLISTIC-ENGINE 2026-05-17
+- `php bin/migrate.php --verify` → 26 ok / 0 drift / 0 missing (2026-05-17 reconcile)
 
 **Bidirectional cross-refs:**
 - See `FLEETFORGE_PROGRESS.md` → KEY LEARNINGS → **K-14** for the discipline rule that mandates this file's existence.
@@ -818,4 +820,4 @@ ITEM I4 | 2026-05-16 | I — Monitoring | Nginx + PHP error log monitoring
 
 ---
 
-*Last touched: 2026-05-16 (S-NGINX-PROD-CONFIG — G7 added COMPLETE: nginx config canonicalization, SCRIPT_FILENAME hardcoded to public/index.php, root cause of 2026-05-16 initial-deploy AJAX 404s locked as D202; canonical runbook at docs/runbooks/nginx_config.md). Prior touches: 2026-05-16 (S-PROD-DEPLOYMENT-DOCS — 8 new items added from 2026-05-16 Lightsail deployment discoveries: B6 SES SMTP credentials, D10 cron jobs, D11 S3 storage test, D12 CloudWatch billing alarm, D13 SNS topic + SES bounce webhook, E1 rate cards prod seed, G5 second admin user, G6 super admin MFA enrollment, I4 error log monitoring); 2026-05-14 (S-DISPLAY-REVAMP C2 — A5 entry added for FF_ASSET_VERSION 1.0.29 → 1.0.30 collapsed sidebar nav-badge layout fix in app.css); 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13); 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
+*Last touched: 2026-05-17 (S-DOCS-RECONCILE-FULL — Handoff status refreshed: migrate count 17 → 26 (S-BILLING-HOLISTIC-ENGINE +6 + S-DESIGN-SETTINGS-FOOTER-LOGIN +1), FF_ASSET_VERSION reference 1.0.28 → 1.0.30 (A4 + A5 superseding A2), 2026-05-17 sessions enumerated, smoke-gate freshness flagged as not-refreshed-this-pass). Prior touches: 2026-05-16 (S-NGINX-PROD-CONFIG — G7 added COMPLETE: nginx config canonicalization, SCRIPT_FILENAME hardcoded to public/index.php, root cause of 2026-05-16 initial-deploy AJAX 404s locked as D202; canonical runbook at docs/runbooks/nginx_config.md). 2026-05-16 (S-PROD-DEPLOYMENT-DOCS — 8 new items added from 2026-05-16 Lightsail deployment discoveries: B6 SES SMTP credentials, D10 cron jobs, D11 S3 storage test, D12 CloudWatch billing alarm, D13 SNS topic + SES bounce webhook, E1 rate cards prod seed, G5 second admin user, G6 super admin MFA enrollment, I4 error log monitoring); 2026-05-14 (S-DISPLAY-REVAMP C2 — A5 entry added for FF_ASSET_VERSION 1.0.29 → 1.0.30 collapsed sidebar nav-badge layout fix in app.css); 2026-05-14 (S-CHECKLIST-WORDING-FIX — I1 Status annotation added + Owner "(depends on B3)" qualifier removed; G2 heading parenthetical I1-I6 → I1-I10; Last-touched stamp refresh. Surfaced by S-PREDEPLOY-FULL-VERIFY 2026-05-13); 2026-05-14 (S-PROD-3 C2 — A4 entry added for FF_ASSET_VERSION 1.0.28 → 1.0.29 self-hosted Google Fonts CSS change); 2026-05-13 (S-PROD-2-DOCS-RECONCILE — B3/B4/B5/D7/I1 detail-line + status-line flips from "blocked on S-PROD-2" → "ready, S-PROD-2 SHIPPED 2026-05-02"; corrects the S-CHECKLIST-DRIFT-FIX C2 phantom-QUEUED drift); 2026-05-13 (S-CHECKLIST-DRIFT-FIX — G2 invariant range bump I1-I6 → I1-I10 with origin-session citations; S-PROD-2 explicit queue reference, since corrected).*
