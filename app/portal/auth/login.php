@@ -493,34 +493,54 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
         }
         .portal-login-error svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
 
-        /* ── Admin cross-link chip (inverse of admin's "customer portal" chip) ── */
+        /* ── Admin cross-link chip ── two-line layout: muted question
+           on top, brand-color CTA below. Mirrors .auth-portal-link
+           on the admin login. */
         .portal-admin-link {
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 6px;
+            justify-content: space-between;
+            gap: 12px;
             margin-top: 20px;
             padding: 12px 16px;
             border-radius: 10px;
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.06);
-            font-size: 0.8125rem;
-            color: rgba(235, 230, 220, 0.72);
             text-decoration: none;
-            letter-spacing: -0.005em;
-            transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+            transition: background 150ms ease, border-color 150ms ease;
         }
         .portal-admin-link:hover {
             background: rgba(255, 255, 255, 0.07);
             border-color: rgba(255, 255, 255, 0.12);
-            color: #ffffff;
         }
-        .portal-admin-link strong {
+        .portal-admin-link__text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            text-align: left;
+            min-width: 0;
+        }
+        .portal-admin-link__q {
+            font-size: 0.75rem;
+            color: rgba(235, 230, 220, 0.55);
+            letter-spacing: -0.005em;
+        }
+        .portal-admin-link__cta {
+            font-size: 0.875rem;
             font-weight: 600;
             color: var(--color-primary, #2596be);
+            letter-spacing: -0.005em;
         }
-        .portal-admin-link .arrow { transition: transform 150ms ease; }
-        .portal-admin-link:hover .arrow { transform: translateX(3px); }
+        .portal-admin-link .arrow {
+            color: rgba(235, 230, 220, 0.55);
+            font-size: 1rem;
+            flex-shrink: 0;
+            transition: transform 150ms ease, color 150ms ease;
+        }
+        .portal-admin-link:hover .arrow {
+            transform: translateX(3px);
+            color: var(--color-primary, #2596be);
+        }
 
         /* ── Legal footer inside the card ── */
         .portal-auth-footer {
@@ -667,9 +687,13 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
             <button type="submit" class="portal-login-btn">Sign in</button>
         </form>
 
-        <!-- Admin cross-link (inverse of the customer chip on the admin login) -->
+        <!-- Admin cross-link (inverse of the customer chip on the admin login).
+             Two-line layout — muted question on top, brand-color CTA below. -->
         <a href="<?= e(base_url('auth/login')) ?>" class="portal-admin-link">
-            <span>Staff member? <strong>Sign in to the admin panel</strong></span>
+            <span class="portal-admin-link__text">
+                <span class="portal-admin-link__q">Staff member?</span>
+                <span class="portal-admin-link__cta">Sign in to the admin panel</span>
+            </span>
             <span class="arrow" aria-hidden="true">→</span>
         </a>
 
