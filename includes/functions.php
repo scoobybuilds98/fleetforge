@@ -309,6 +309,55 @@ function settings_get(string $key, mixed $default = null): mixed
 }
 
 // ============================================================
+// LEGAL / COMPANY METADATA
+// S-LEGAL-FOOTER-COMMERCIAL: helpers over $GLOBALS['_ff_legal']
+// (populated by config/app.php from config/legal.php).
+// ============================================================
+
+/**
+ * Read a value from the legal config using dot notation.
+ *
+ * Examples:
+ *   legal_config()                          → full config array
+ *   legal_config('company.legal_name')      → "Avi Technologies Inc."
+ *   legal_config('pages.terms.title')       → "Terms of Service"
+ *   legal_config('nonexistent.key')         → null
+ */
+if (!function_exists('legal_config')) {
+function legal_config(string $key = ''): mixed
+{
+    $cfg = $GLOBALS['_ff_legal'] ?? [];
+
+    if ($key === '') {
+        return $cfg;
+    }
+
+    // Dot-notation walk — any missing segment short-circuits to null.
+    foreach (explode('.', $key) as $part) {
+        if (!is_array($cfg) || !array_key_exists($part, $cfg)) {
+            return null;
+        }
+        $cfg = $cfg[$part];
+    }
+    return $cfg;
+}
+}
+
+/**
+ * Build the full URL to a /legal/{slug} page.
+ *
+ * Examples:
+ *   legal_url('terms')   → "/fleetforge/legal/terms"
+ *   legal_url('privacy') → "/fleetforge/legal/privacy"
+ */
+if (!function_exists('legal_url')) {
+function legal_url(string $page): string
+{
+    return base_url('/legal/' . ltrim($page, '/'));
+}
+}
+
+// ============================================================
 // ID GENERATION
 // ============================================================
 

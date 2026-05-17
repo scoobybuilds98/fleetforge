@@ -188,6 +188,14 @@ if (str_starts_with($localPath, '/api/') || $localPath === '/api') {
     $routeRoot  = FF_ROOT . '/app/portal';
     $routeLocal = substr($localPath, strlen('/portal')) ?: '/';
 
+} elseif (str_starts_with($localPath, '/legal/') || $localPath === '/legal') {
+    // S-LEGAL-FOOTER-COMMERCIAL: public /legal/* pages — no auth required.
+    // The resolved page files under app/legal/ deliberately do NOT call
+    // require_auth() / require_auth_api() so they remain accessible to
+    // anonymous visitors (linked from login page + portal + emails).
+    $routeRoot  = FF_ROOT . '/app/legal';
+    $routeLocal = substr($localPath, strlen('/legal')) ?: '/';
+
 } elseif (str_starts_with($localPath, '/webhooks/') || $localPath === '/webhooks') {
     $routeRoot  = FF_ROOT . '/webhooks';
     $routeLocal = substr($localPath, strlen('/webhooks')) ?: '/';

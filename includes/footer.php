@@ -8,8 +8,26 @@
              user scrolls far enough; on short pages it sits naturally at the
              bottom of the content area. -->
         <footer class="app-footer">
-            <span>&copy; <?= date('Y') ?> <?= e(settings_get('company.name') ?: 'Avi Technologies') ?>. All rights reserved.</span>
-            <span>FleetForge <?= e(FF_VERSION) ?></span>
+            <div class="app-footer-left">
+                <span class="app-footer-brand">A software by <strong>Avi Technologies</strong></span>
+                <span class="app-footer-divider">·</span>
+                <span class="app-footer-version">FleetForge <?= e(FF_VERSION) ?></span>
+            </div>
+            <div class="app-footer-legal">
+                <?php // S-LEGAL-FOOTER-COMMERCIAL: renders /legal/terms, /legal/privacy, /legal/aup, /legal/security ?>
+                <?php foreach (['terms', 'privacy', 'aup', 'security'] as $_slug): ?>
+                    <a href="<?= e(legal_url($_slug)) ?>"
+                       target="_blank"
+                       rel="noopener"
+                       class="app-footer-legal-link">
+                        <?= e(legal_config('pages.' . $_slug . '.title')) ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+            <div class="app-footer-right">
+                &copy; <?= date('Y') ?>
+                <?= e(settings_get('company.name') ?: legal_config('company.brand_name')) ?>
+            </div>
         </footer>
 
     </div>

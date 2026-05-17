@@ -550,11 +550,22 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            is configured. Scoped to .login-* so it doesn't collide
            with the legacy .auth-logo styles still used elsewhere. */
         .login-brand          { text-align:center; margin-bottom:32px; }
-        .login-logo-img       { max-height:56px; max-width:200px; object-fit:contain; margin-bottom:16px; }
-        .login-logo-placeholder { display:inline-flex; margin-bottom:12px; }
+        /* S-LEGAL-FOOTER-COMMERCIAL: logo enlarged 2.5x and explicitly
+           centered. Previous 56x200 looked tiny relative to the 400px
+           card; the bumped max-height 140 + display:block + margin auto
+           guarantees a strong, centered presence regardless of the
+           source image's natural aspect ratio. */
+        .login-logo-img       { max-height:140px; max-width:300px; object-fit:contain; display:block; margin:0 auto 18px; }
+        .login-logo-placeholder { display:flex; justify-content:center; margin:0 auto 18px; }
         .login-company-name   { font-size:1.375rem; font-weight:600; color:var(--text-primary); margin:0 0 4px; letter-spacing:-0.01em; }
         .login-company-tagline{ font-size:0.8125rem; color:var(--text-muted); margin:0; }
-        .login-footer         { text-align:center; margin-top:24px; font-size:0.6875rem; color:var(--text-muted); }
+        /* S-LEGAL-FOOTER-COMMERCIAL: richer login footer (legal links + copyright + brand attribution) */
+        .login-footer         { text-align:center; margin-top:28px; }
+        .login-footer-links   { display:flex; flex-wrap:wrap; justify-content:center; gap:4px 16px; margin-bottom:10px; }
+        .login-footer-links a { font-size:0.75rem; color:var(--text-muted); text-decoration:none; }
+        .login-footer-links a:hover { color:var(--text-primary); text-decoration:underline; }
+        .login-footer-copy    { font-size:0.6875rem; color:var(--text-muted); margin:0; line-height:1.5; }
+        .login-footer-copy strong { font-weight:500; color:var(--text-secondary); }
     </style>
 </head>
 <body>
@@ -724,11 +735,23 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             <small>Internal tool — authorised personnel only.</small>
         </div>
 
-        <!-- S-DESIGN-SETTINGS-FOOTER-LOGIN — login copyright line.
-             Mirrors the admin footer string so unauthenticated visitors
-             still see the customer brand. -->
+        <!-- S-LEGAL-FOOTER-COMMERCIAL — public legal links + copyright +
+             brand attribution. Mirrors the admin footer's information density
+             at smaller scale appropriate to the login card width.
+             Renders: /legal/terms, /legal/privacy, /legal/aup, /legal/security -->
         <footer class="login-footer">
-            <span>&copy; <?= date('Y') ?> <?= e($loginName) ?>. All rights reserved.</span>
+            <div class="login-footer-links">
+                <a href="<?= e(legal_url('terms')) ?>">Terms of Service</a>
+                <a href="<?= e(legal_url('privacy')) ?>">Privacy Policy</a>
+                <a href="<?= e(legal_url('aup')) ?>">Acceptable Use</a>
+                <a href="<?= e(legal_url('security')) ?>">Security</a>
+                <a href="mailto:<?= e(legal_config('company.email_support')) ?>">Support</a>
+            </div>
+            <p class="login-footer-copy">
+                &copy; <?= date('Y') ?> <?= e($loginName) ?>. All rights reserved.
+                &nbsp;·&nbsp;
+                A software by <strong>Avi Technologies</strong>
+            </p>
         </footer>
 
     </div>

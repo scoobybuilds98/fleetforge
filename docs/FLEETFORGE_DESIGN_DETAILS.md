@@ -990,3 +990,45 @@ The `settings` table is the runtime config store. Schema: `id` / `key` UNIQUE / 
 | yards | 1 | S018-EXT (Reservations UX — Yards Management, 2026-04-03) — `yard.default` |
 
 **Editing surface:** the runtime Settings UI lives at `app/admin/settings/index.php` with tabs for Company / Branding / Notifications / Integrations / Users / Portal Users / Audit Log / Email Templates / System / **Design** (super_admin only — S-DESIGN-SETTINGS-FOOTER-LOGIN, 2026-05-17). Design tab covers `brand.*` + `defaults.*` + `regional.*` + `pdf.*` + `ui.*` (the 19 rows seeded by migration 202605170200). Integrations tab carries the MFA + AWS + GPS + Email/SMTP blocks. Counter rows (`*.next_number.YYYY`) are updated by their owning modules at issuance time, never exposed in the UI.
+
+---
+
+## 3. LEGAL PAGES & FOOTER SYSTEM (S-LEGAL-FOOTER-COMMERCIAL, 2026-05-17)
+
+Single-source-of-truth for company / legal metadata + 6 public legal pages + 3 footer variants tuned for their surface.
+
+### Config + helpers
+
+- **`config/legal.php`** — company info (legal_name, brand_name, product_name, address, governing_law, support / privacy / legal / security emails, website), effective + last-updated dates, registry of 6 legal pages (slug → title + URL).
+- Loaded into `$GLOBALS['_ff_legal']` by `config/app.php` at boot.
+- **`legal_config('dot.path')`** in `includes/functions.php` reads the config with dot notation; returns `null` for missing keys.
+- **`legal_url('slug')`** returns the full URL via `base_url('/legal/' . slug)`.
+
+### Public routes
+
+`public/index.php` routes `/legal/*` to `FF_ROOT . '/app/legal/'`. Resolved page files deliberately do NOT call `require_auth*()` so anonymous visitors can read them. The same `resolve_route()` security guarantees apply (segment validation, traversal blocked, realpath verified inside tree).
+
+| Slug | URL | File |
+|------|-----|------|
+| terms    | `/fleetforge/legal/terms`    | `app/legal/terms.php`    |
+| privacy  | `/fleetforge/legal/privacy`  | `app/legal/privacy.php`  |
+| aup      | `/fleetforge/legal/aup`      | `app/legal/aup.php`      |
+| dpa      | `/fleetforge/legal/dpa`      | `app/legal/dpa.php`      |
+| cookies  | `/fleetforge/legal/cookies`  | `app/legal/cookies.php`  |
+| security | `/fleetforge/legal/security` | `app/legal/security.php` |
+
+### Shared shell
+
+- **`includes/legal_header.php`** — light-theme-forced standalone surface with sticky nav (brand logo + Terms / Privacy / Acceptable Use / Security / Contact links) and self-contained CSS scoped under `.legal-*` so the global tokens are not inherited.
+- **`includes/legal_footer.php`** — full 6-page link list + support email + copyright + Avi Technologies attribution.
+- Nav logo follows the same 3-source resolution chain as `app/auth/login.php`: `brand.logo_path` settings → `public/media/login-logo.{svg,png,jpg,jpeg}` file → inline SVG truck.
+
+### Footer variants
+
+| Surface | File | Layout |
+|---------|------|--------|
+| Admin   | `includes/footer.php`               | `.app-footer` — slim flex row (brand attribution left, 4 legal links middle, copyright right; collapses to centered single-column under 900px) |
+| Login   | `app/auth/login.php`                | `.login-footer` — centered (5 legal links + copyright + Avi attribution; lives inside the auth-card) |
+| Portal  | `app/portal/includes/footer.php`    | `.portal-footer` — 2-column commercial (brand block left with logo + tagline + Avi attribution; Legal + Support link columns right; copyright + version pill bottom; collapses to single column under 768px) |
+
+All three footers read company name from `settings_get('company.name')` with fallback to `legal_config('company.brand_name')` = "Avi Technologies". All legal links use `legal_url()` so route changes propagate from a single point.

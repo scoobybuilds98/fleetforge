@@ -166,3 +166,11 @@ unset($_autoload);
 // here because this entire block is inside the FF_LOADED guard.
 require_once FF_ROOT . '/includes/db.php';
 require_once FF_ROOT . '/includes/functions.php';
+
+// ============================================================
+// S-LEGAL-FOOTER-COMMERCIAL: load legal/company metadata into
+// $GLOBALS['_ff_legal']. legal_config() in functions.php reads
+// from here so every footer, login page, customer portal, and
+// /legal/* page sees a single source of truth.
+// ============================================================
+$GLOBALS['_ff_legal'] = require FF_ROOT . '/config/legal.php';
