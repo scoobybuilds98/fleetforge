@@ -271,11 +271,11 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
         .portal-login-brand   { text-align: center; margin-bottom: 14px; }
         .portal-login-logo    { display: flex; justify-content: center; margin: 0 auto; }
         .portal-login-logo-img {
-            max-height: 160px;
-            max-width: 320px;
+            max-height: 128px;
+            max-width: 256px;
             object-fit: contain;
             display: block;
-            margin: -22px auto -4px;
+            margin: -18px auto -4px;
         }
         .portal-login-logo-placeholder { display: flex; justify-content: center; margin: 0 auto 14px; }
         .portal-login-title {

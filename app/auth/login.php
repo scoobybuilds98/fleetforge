@@ -505,7 +505,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            Long-term clean fix is a tightly-cropped PNG (see
            DESIGN_DETAILS.md §3.1 step 2). */
         .login-brand           { text-align: center; margin-bottom: 14px; }
-        .login-logo-img        { max-height: 160px; max-width: 320px; object-fit: contain; display: block; margin: -22px auto -4px; }
+        .login-logo-img        { max-height: 128px; max-width: 256px; object-fit: contain; display: block; margin: -18px auto -4px; }
         .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
         .login-company-name    {
             font-size: 1.5rem;
