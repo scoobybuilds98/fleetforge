@@ -613,9 +613,14 @@ kbd {
     min-width: 0;
 }
 
+/* S-DESIGN-LOGO-TOPBAR: logo enlarged from 32×32 to 44px-tall × auto-width
+   so an uploaded wordmark is actually legible. width:auto preserves the
+   source aspect ratio; max-width caps a very wide logo so it does not
+   crowd the collapse button. */
 .sidebar-logo {
-    width: 32px;
-    height: 32px;
+    height: 44px;
+    width: auto;
+    max-width: 168px;
     border-radius: var(--radius-md);
     object-fit: contain;
     flex-shrink: 0;
@@ -625,16 +630,16 @@ kbd {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
     background: var(--color-primary);
     border-radius: var(--radius-md);
     flex-shrink: 0;
 }
 
 .brand-icon {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     color: #ffffff;
 }
 
@@ -946,6 +951,18 @@ kbd {
         padding: 0 8px;
     }
 
+    /* S-DESIGN-LOGO-TOPBAR: cap the bigger logo when the sidebar
+       collapses to icon-only so a wide wordmark doesn't overflow
+       the 64px-wide collapsed track. */
+    .sidebar:not(.is-open) .sidebar-logo {
+        max-width: 40px;
+        height: 36px;
+    }
+    .sidebar:not(.is-open) .sidebar-brand-icon {
+        width: 36px;
+        height: 36px;
+    }
+
     .sidebar:not(.is-open) .sidebar-collapse-btn {
         display: none; /* hide collapse btn when collapsed; topbar menu btn takes over */
     }
@@ -1009,6 +1026,40 @@ kbd {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* S-DESIGN-LOGO-TOPBAR — company name as breadcrumb root in topbar.
+   Sized so it reads as the dominant brand element on every page;
+   page title (.topbar-title) sits to the right as a secondary label
+   separated by a › chevron. */
+.topbar-company-name {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--topbar-text);
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+    letter-spacing: -0.01em;
+    transition: color var(--transition-fast);
+}
+.topbar-company-name:hover { color: var(--color-primary); }
+
+.topbar-breadcrumb-sep {
+    color: var(--text-muted);
+    font-size: 1rem;
+    font-weight: 400;
+    margin: 0 -2px;
+    flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+    /* On phones the topbar is tight — drop the breadcrumb so only
+       the page title shows. Company name is still visible in the
+       sidebar / hamburger menu for context. */
+    .topbar-company-name,
+    .topbar-breadcrumb-sep { display: none; }
 }
 
 /* Mobile menu toggle — hidden on desktop */

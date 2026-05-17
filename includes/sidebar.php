@@ -146,8 +146,13 @@ $_sidebarUser = current_user();
 <aside class="sidebar" id="ff-sidebar" :class="{ 'is-open': sidebarOpen }">
 
     <!-- ── Brand / Logo ──────────────────────────────────── -->
+    <!-- S-DESIGN-LOGO-TOPBAR: company name moved to topbar. Sidebar
+         now shows only the logo (or fallback truck icon) so the upload
+         can render at a readable size without competing with text. -->
     <div class="sidebar-brand">
-        <a href="<?= e(base_url('dashboard')) ?>" class="sidebar-brand-link">
+        <a href="<?= e(base_url('dashboard')) ?>"
+           class="sidebar-brand-link"
+           aria-label="<?= e($_companyName) ?> — Dashboard">
             <?php if ($_logoUrl): ?>
                 <img src="<?= e($_logoUrl) ?>"
                      alt="<?= e($_companyName) ?>"
@@ -158,7 +163,6 @@ $_sidebarUser = current_user();
                     <?= heroicon('truck', 'brand-icon') ?>
                 </span>
             <?php endif; ?>
-            <span class="sidebar-brand-name"><?= e($_companyName) ?></span>
         </a>
 
         <!-- Collapse toggle (visible on desktop) -->

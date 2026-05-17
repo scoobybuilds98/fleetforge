@@ -118,7 +118,18 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             <?= heroicon('home', 'nav-icon') ?>
         </a>
 
+        <?php
+        // S-DESIGN-LOGO-TOPBAR: company name shown as a breadcrumb root.
+        // Reads from settings_get so it tracks Design tab edits live.
+        // Clicking returns to dashboard (matches existing topbar-home-btn behaviour).
+        $_topbarCompany = settings_get('company.name', 'FleetForge');
+        ?>
+        <a href="<?= base_url('dashboard') ?>" class="topbar-company-name" title="<?= e($_topbarCompany) ?>">
+            <?= e($_topbarCompany) ?>
+        </a>
+
         <?php if ($_topbarTitle !== ''): ?>
+            <span class="topbar-breadcrumb-sep" aria-hidden="true">›</span>
             <h1 class="topbar-title"><?= e($_topbarTitle) ?></h1>
         <?php endif; ?>
 
@@ -698,5 +709,5 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
 </header>
 
 <?php
-unset($_unreadCount, $_topbarTitle, $_me, $_initials, $_roleMap, $_roleLabel, $_creates);
+unset($_unreadCount, $_topbarTitle, $_topbarCompany, $_me, $_initials, $_roleMap, $_roleLabel, $_creates);
 ?>
