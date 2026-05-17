@@ -487,8 +487,16 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             pointer-events: none;
         }
         @media (max-width: 480px) {
-            .auth-card { padding: 36px 28px 28px; border-radius: 16px; }
+            .auth-card { padding: 28px 22px 24px; border-radius: 16px; }
             .auth-card { backdrop-filter: blur(24px) saturate(1.3); -webkit-backdrop-filter: blur(24px) saturate(1.3); }
+            /* S-MOBILE-CHROME-CLEANUP: tighter login layout on phones.
+               Less padding around the card, less gap between logo and
+               Welcome back, and a more aggressive negative top margin
+               on the logo to compensate for the PNG's transparent
+               padding (which is more visually obvious on a small
+               viewport). */
+            .login-brand { margin-bottom: 24px; }
+            .login-logo-img { margin-top: -22px; max-height: 88px; max-width: 180px; }
         }
 
         /* ── Brand block ── */

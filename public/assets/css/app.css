@@ -1109,6 +1109,14 @@ kbd {
     display: none;
 }
 
+/* S-MOBILE-CHROME-CLEANUP — mobile-only search icon button.
+   Hidden on desktop+tablet where .search-wrapper renders inline;
+   revealed at <768px (see the mobile media block) where it opens
+   the existing ⌘K global search modal. */
+.topbar-search-icon-btn {
+    display: none;
+}
+
 /* Search trigger */
 .topbar-search-btn {
     display: flex;
@@ -3656,10 +3664,13 @@ textarea.form-input {
         width: 100%;
     }
 
-    /* Show mobile menu toggle in topbar */
-    .topbar-menu-btn {
-        display: inline-flex;
-    }
+    /* S-MOBILE-CHROME-CLEANUP: removed the .topbar-menu-btn display
+       override here. The legacy menu button stays display:none across
+       all breakpoints — .hamburger-btn (declared at line ~5608) is the
+       sole topbar hamburger and is visible only at <768px. On tablet
+       (768-1023) the sidebar is a permanent 64px rail so no toggle is
+       needed; on desktop the sidebar's own .sidebar-collapse-btn
+       (chevron) handles the open/collapsed toggle. */
 
     /* Search hint text condensed on mobile */
     .search-hint span:not(.search-kbd) {
@@ -5769,7 +5780,51 @@ dl.detail-grid dd {
         gap: 4px;
     }
     .topbar-title {
-        font-size: 0.9375rem;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       S-MOBILE-CHROME-CLEANUP — mobile topbar simplification
+
+       Goal: only show what's essential on a phone-width topbar.
+       Keep visible:
+         hamburger · page title · + (icon-only pill) · 🔍 · 🔔 · avatar
+       Hide on mobile (still available on desktop/tablet):
+         home button, theme toggle, A+ display, sound toggle,
+         team chat, AI sparkles, inline search input
+       Rationale: AI + chat live in the sidebar nav / floating bubble;
+       theme + display + sound are once-set preferences that don't
+       need to be on the topbar of a phone; search collapses to an
+       icon that opens the existing ⌘K modal full-screen.
+       ════════════════════════════════════════════════════════════ */
+
+    /* + New: drop the text label, keep just the "+" icon for a
+       compact pill that still hints at the quick-create dropdown. */
+    .topbar-create-btn__label { display: none; }
+    .topbar-create-btn {
+        padding: 8px;
+        min-width: 36px;
+        justify-content: center;
+    }
+
+    /* Hide the inline search input; show the magnifying-glass icon
+       that opens the existing ⌘K global search modal. */
+    .search-wrapper { display: none; }
+    .topbar-search-icon-btn { display: inline-flex; }
+
+    /* Hide secondary topbar controls — they live elsewhere or are
+       once-set preferences not needed on every page-load on mobile. */
+    .topbar-home-btn,
+    .topbar-theme-btn,
+    .topbar-display,
+    .topbar-display-btn,
+    .sound-toggle-btn,
+    .topbar-chat-btn,
+    .topbar-ai-btn,
+    .topbar-company-name,
+    .topbar-breadcrumb-sep {
+        display: none !important;
     }
     .topbar-home-btn {
         display: none;
@@ -7117,6 +7172,10 @@ table td {
    Matches the visual language of .chat-topbar-btn so the
    group of topbar icons stays cohesive.
    ============================================================ */
+/* S-MOBILE-CHROME-CLEANUP: normalised to match .btn-icon — transparent
+   surface + hover-only background fill. The previous solid bg-card +
+   1px border made this button look visually distinct from theme / A+ /
+   bell / avatar in the topbar group, breaking visual consistency. */
 .sound-toggle-btn {
   position: relative;
   width: 36px;
@@ -7124,16 +7183,17 @@ table td {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-card);
-  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast);
   flex-shrink: 0;
 }
 .sound-toggle-btn:hover {
-  background: var(--bg-hover);
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
 }
 .sound-toggle-btn.is-muted {
   color: var(--text-muted);
@@ -7152,6 +7212,10 @@ table td {
    ============================================================ */
 
 /* ── Topbar chat icon ──────────────────────────────────────── */
+/* S-MOBILE-CHROME-CLEANUP: normalised to match .btn-icon — transparent
+   surface + hover-only fill. Previously had solid bg-card + 1px border
+   that made chat + AI topbar buttons look like distinct boxed elements
+   in the topbar group while theme / A+ / bell / avatar rendered flat. */
 .chat-topbar-btn {
   position: relative;
   width: 36px;
@@ -7159,20 +7223,20 @@ table td {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-card);
-  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
   text-decoration: none;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast);
   flex-shrink: 0;
 }
 .chat-topbar-btn:hover {
-  background: var(--bg-hover);
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
 }
 .chat-topbar-btn.has-unread {
   color: var(--color-accent);
-  border-color: var(--color-accent);
 }
 .chat-badge {
   position: absolute;

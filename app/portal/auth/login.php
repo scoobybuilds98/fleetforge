@@ -253,11 +253,16 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
         }
         @media (max-width: 480px) {
             .portal-login-card {
-                padding: 36px 28px 28px;
+                padding: 28px 22px 24px;
                 border-radius: 16px;
                 backdrop-filter: blur(24px) saturate(1.3);
                 -webkit-backdrop-filter: blur(24px) saturate(1.3);
             }
+            /* S-MOBILE-CHROME-CLEANUP: tighter mobile layout. Mirrors
+               app/auth/login.php — less padding, less brand-block gap,
+               more aggressive logo negative top margin. */
+            .portal-login-brand { margin-bottom: 24px; }
+            .portal-login-logo-img { margin-top: -22px; max-height: 88px; max-width: 180px; }
         }
 
         /* ── Brand block ──

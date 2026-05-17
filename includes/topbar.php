@@ -158,7 +158,7 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
                      style="width:15px;height:15px;flex-shrink:0;">
                     <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z"/>
                 </svg>
-                <span>New</span>
+                <span class="topbar-create-btn__label">New</span>
             </button>
 
             <div class="topbar-create-dropdown"
@@ -186,6 +186,18 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
             </div>
         </div>
         <?php endif; ?>
+
+        <!-- ── Mobile-only magnifying-glass icon ──
+             Hidden on tablet+desktop where .search-wrapper is shown
+             inline. On mobile (<768px) the wrapper hides and this
+             icon takes over — tapping it opens the existing ⌘K
+             global search modal via FF_Search.open(). -->
+        <button type="button"
+                class="btn-icon topbar-search-icon-btn"
+                onclick="window.FF_Search && FF_Search.open()"
+                aria-label="Search">
+            <?= heroicon('magnifying-glass', 'nav-icon') ?>
+        </button>
 
         <!-- ── Global search (SEARCH-1 — inline input with dropdown) ─── -->
         <!-- WHY FF_SearchWidget: Alpine component owns query/open/loading/groups
