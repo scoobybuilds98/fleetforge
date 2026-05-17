@@ -492,8 +492,11 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
         }
 
         /* ── Brand block ── */
+        /* Logo sized to claim the card's interior width (~352px after
+           padding). max-height generous so width-dominant wordmarks can
+           render at full size without the height cap clipping in. */
         .login-brand           { text-align: center; margin-bottom: 28px; }
-        .login-logo-img        { max-height: 88px; max-width: 240px; object-fit: contain; display: block; margin: 0 auto; }
+        .login-logo-img        { max-height: 160px; max-width: 320px; object-fit: contain; display: block; margin: 0 auto; }
         .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
         .login-company-name    {
             font-size: 1.5rem;
@@ -702,10 +705,45 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
                 0 4px 12px -2px color-mix(in srgb, var(--color-primary, #2596be) 35%, transparent);
         }
 
+        /* ── Customer portal call-out ── visually distinct from the
+           staff "Internal tool" disclaimer so a misrouted customer
+           reads it before the disclaimer below. */
+        .auth-portal-link {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 20px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 0.8125rem;
+            color: rgba(235, 230, 220, 0.72);
+            text-decoration: none;
+            letter-spacing: -0.005em;
+            transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+        }
+        .auth-portal-link:hover {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+        }
+        .auth-portal-link strong {
+            font-weight: 600;
+            color: var(--color-primary, #2596be);
+        }
+        .auth-portal-link .arrow {
+            transition: transform 150ms ease;
+        }
+        .auth-portal-link:hover .arrow {
+            transform: translateX(3px);
+        }
+
         /* ── Below-button micro-copy ── */
         .auth-card .auth-footer-link {
             text-align: center;
-            margin-top: 18px;
+            margin-top: 14px;
             font-size: 0.75rem;
             color: rgba(235, 230, 220, 0.42);
             letter-spacing: -0.005em;
@@ -933,6 +971,15 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             </button>
 
         </form>
+
+        <!-- S-LOGIN-AESTHETIC: customer portal call-out. Distinct visual
+             treatment from the staff "internal tool" disclaimer below so
+             a customer who lands here by mistake is redirected naturally
+             without making the staff form feel cluttered. -->
+        <a href="<?= e(base_url('portal/auth/login')) ?>" class="auth-portal-link">
+            <span>Are you a customer? <strong>Sign in to the customer portal</strong></span>
+            <span class="arrow" aria-hidden="true">→</span>
+        </a>
 
         <div class="auth-footer-link">
             <small>Internal tool — authorised personnel only.</small>
