@@ -271,11 +271,11 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
         .portal-login-brand   { text-align: center; margin-bottom: 28px; }
         .portal-login-logo    { display: flex; justify-content: center; margin: 0 auto; }
         .portal-login-logo-img {
-            max-height: 128px;
-            max-width: 256px;
+            max-height: 100px;
+            max-width: 200px;
             object-fit: contain;
             display: block;
-            margin: -18px auto -4px;
+            margin: -14px auto -4px;
         }
         .portal-login-logo-placeholder { display: flex; justify-content: center; margin: 0 auto 14px; }
         .portal-login-title {
@@ -573,9 +573,10 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
             font-size: 0.6875rem;
             color: rgba(235, 230, 220, 0.36);
             margin: 0;
-            line-height: 1.55;
+            line-height: 1.6;
             letter-spacing: -0.005em;
         }
+        .portal-auth-footer-copy span { display: block; }
         .portal-auth-footer-copy strong {
             font-weight: 500;
             color: rgba(235, 230, 220, 0.62);
@@ -710,9 +711,8 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
                 <a href="mailto:<?= e(legal_config('company.email_support')) ?>">Support</a>
             </div>
             <p class="portal-auth-footer-copy">
-                &copy; <?= date('Y') ?> <?= e($_companyName) ?>. All rights reserved.
-                &nbsp;·&nbsp;
-                A software by <strong>Avi Technologies</strong>
+                <span>&copy; <?= date('Y') ?> <?= e($_companyName) ?>. All rights reserved.</span>
+                <span>A software by <strong>Avi Technologies</strong></span>
             </p>
         </footer>
 

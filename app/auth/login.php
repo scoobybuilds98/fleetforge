@@ -505,7 +505,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            Long-term clean fix is a tightly-cropped PNG (see
            DESIGN_DETAILS.md §3.1 step 2). */
         .login-brand           { text-align: center; margin-bottom: 28px; }
-        .login-logo-img        { max-height: 128px; max-width: 256px; object-fit: contain; display: block; margin: -18px auto -4px; }
+        .login-logo-img        { max-height: 100px; max-width: 200px; object-fit: contain; display: block; margin: -14px auto -4px; }
         .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
         .login-company-name    {
             font-size: 1.5rem;
@@ -806,9 +806,10 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             font-size: 0.6875rem;
             color: rgba(235, 230, 220, 0.36);
             margin: 0;
-            line-height: 1.55;
+            line-height: 1.6;
             letter-spacing: -0.005em;
         }
+        .login-footer-copy span { display: block; }
         .login-footer-copy strong {
             font-weight: 500;
             color: rgba(235, 230, 220, 0.62);
@@ -1030,9 +1031,8 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
                 <a href="mailto:<?= e(legal_config('company.email_support')) ?>">Support</a>
             </div>
             <p class="login-footer-copy">
-                &copy; <?= date('Y') ?> <?= e($loginName) ?>. All rights reserved.
-                &nbsp;·&nbsp;
-                A software by <strong>Avi Technologies</strong>
+                <span>&copy; <?= date('Y') ?> <?= e($loginName) ?>. All rights reserved.</span>
+                <span>A software by <strong>Avi Technologies</strong></span>
             </p>
         </footer>
 
