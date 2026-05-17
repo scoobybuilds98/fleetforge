@@ -549,14 +549,14 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            Replaces the static auth-logo block when company branding
            is configured. Scoped to .login-* so it doesn't collide
            with the legacy .auth-logo styles still used elsewhere. */
-        .login-brand          { text-align:center; margin-bottom:32px; }
-        /* S-LEGAL-FOOTER-COMMERCIAL: logo enlarged 2.5x and explicitly
-           centered. Previous 56x200 looked tiny relative to the 400px
-           card; the bumped max-height 140 + display:block + margin auto
-           guarantees a strong, centered presence regardless of the
-           source image's natural aspect ratio. */
-        .login-logo-img       { max-height:140px; max-width:300px; object-fit:contain; display:block; margin:0 auto 18px; }
-        .login-logo-placeholder { display:flex; justify-content:center; margin:0 auto 18px; }
+        /* S-LOGIN-LOGO-DEDUP: tighter margins. When only a wordmark logo
+           renders (no <h1>), the brand block no longer needs the 32px
+           bottom — 20px is enough breathing room before "Sign in to your
+           account". The image's own bottom margin drops to 0 because the
+           parent already supplies the gap. */
+        .login-brand          { text-align:center; margin-bottom:20px; }
+        .login-logo-img       { max-height:140px; max-width:300px; object-fit:contain; display:block; margin:0 auto; }
+        .login-logo-placeholder { display:flex; justify-content:center; margin:0 auto 12px; }
         .login-company-name   { font-size:1.375rem; font-weight:600; color:var(--text-primary); margin:0 0 4px; letter-spacing:-0.01em; }
         .login-company-tagline{ font-size:0.8125rem; color:var(--text-muted); margin:0; }
         /* S-LEGAL-FOOTER-COMMERCIAL: richer login footer (legal links + copyright + brand attribution) */
@@ -595,12 +595,21 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
 <div class="auth-page">
     <div class="auth-card">
 
-        <!-- Brand mark — uses settings_get('company.logo')/company.name when set,
-             otherwise renders a brand-color SVG truck placeholder. -->
+        <!-- Brand mark — branches on whether an uploaded logo exists:
+             (a) Uploaded logo: show only the <img>. The wordmark logo already
+                 carries the company name, so rendering an <h1> with the same
+                 text below would be visual redundancy AND inflate vertical
+                 space (any transparent padding inside the source PNG becomes
+                 a visible gap).
+             (b) No logo: show the SVG truck placeholder (which has no name)
+                 PLUS an <h1> with the company name so the page still has a
+                 clear brand identity.
+             Tagline, when configured, renders in both branches because it
+             is supplementary information not duplicated by either form. -->
         <div class="login-brand">
             <?php if ($loginLogoUrl !== ''): ?>
                 <img src="<?= e($loginLogoUrl) ?>"
-                     alt="<?= e($loginName) ?> logo"
+                     alt="<?= e($loginName) ?>"
                      class="login-logo-img">
             <?php else: ?>
                 <div class="login-logo-placeholder">
@@ -615,8 +624,8 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
                         <circle cx="23" cy="24" r="1.2" fill="<?= e($loginColor) ?>"/>
                     </svg>
                 </div>
+                <h1 class="login-company-name"><?= e($loginName) ?></h1>
             <?php endif; ?>
-            <h1 class="login-company-name"><?= e($loginName) ?></h1>
             <?php if ($loginTagline !== ''): ?>
                 <p class="login-company-tagline"><?= e($loginTagline) ?></p>
             <?php endif; ?>
