@@ -3841,6 +3841,99 @@ html.is-mac .non-mac-only { display: none; }
     .grid-2-1 { grid-template-columns: 1fr; }
 }
 
+/* ════════════════════════════════════════════════════════════
+   S-DASHBOARD-CHART-POLISH — dashboard chart + widget layout.
+
+   Existing pages used .card with optional .card--accent-* modifiers,
+   producing inconsistent 3px coloured top borders on the dashboard.
+   These new classes give every chart card / widget card a uniform
+   appearance and properly contain the ApexCharts SVG so it can flex
+   to fit when the sidebar collapses/expands.
+   ════════════════════════════════════════════════════════════ */
+
+/* Dashboard row grid wrappers — semantic aliases over .grid-2 / .grid-2-1.
+   Kept separate so dashboard.php doesn't accidentally inherit unrelated
+   adjustments to those generic utility classes from other modules. */
+.dashboard-grid {
+    display: grid;
+    gap: 20px;
+}
+.dashboard-grid--charts  { grid-template-columns: 2fr 1fr; gap: 20px; }
+.dashboard-grid--equal   { grid-template-columns: 1fr 1fr; gap: 20px; }
+.dashboard-grid--widgets { grid-template-columns: 1fr 1fr; gap: 20px; }
+
+/* Chart card — the uniform wrapper around every chart panel.
+   Flex column so card-body can fill remaining height and the chart
+   inside it (.chart-wrap) can shrink past content height via min-height:0. */
+.chart-card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+.chart-card .card-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.chart-card .card-header h3,
+.chart-card .card-header .card-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: 0;
+}
+.chart-card .card-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px;
+}
+
+/* Chart wrap — sits inside .card-body and holds the ApexCharts target.
+   min-height:0 is the critical flex-shrink unlock that lets the chart
+   reflow to a smaller width when the sidebar expands and reclaims space. */
+.chart-wrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+.chart-wrap > div { width: 100% !important; }
+
+/* ApexCharts inline overflow:hidden was clipping tooltip + datalabel
+   overflow into the next card. Visible at the wrap level is fine because
+   the parent .chart-card already has overflow:hidden for the skeleton. */
+.chart-wrap .apexcharts-canvas { overflow: visible !important; }
+
+/* Dashboard list widgets (recent activity, pickups, etc.) — uniform shell. */
+.dashboard-widget {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+/* ── Responsive: tablet ── */
+@media (max-width: 1023px) {
+    .dashboard-grid--charts,
+    .dashboard-grid--equal,
+    .dashboard-grid--widgets { grid-template-columns: 1fr; }
+}
+
+/* ── Responsive: mobile ── */
+@media (max-width: 767px) {
+    .dashboard-grid { gap: 12px; }
+    .chart-card .card-body { padding: 12px 14px; }
+}
+
 /* Activity feed — timeline design */
 .activity-feed {
     list-style: none;

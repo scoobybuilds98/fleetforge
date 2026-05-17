@@ -151,7 +151,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 
     <!-- ── ACTIVE LEASES TABLE (full width) ──────────────────────── -->
-    <div class="card card--accent-primary" style="margin-bottom:24px;">
+    <div class="card dashboard-widget" style="margin-bottom:24px;">
         <div class="card-header">
             <span class="card-title">Active Leases</span>
             <a href="<?= base_url('leases') ?>?status=active" class="btn btn-ghost btn-sm">View all →</a>
@@ -236,97 +236,112 @@ require_once FF_ROOT . '/includes/header.php';
 
 
     <!-- ── ROW 1: Revenue trend (2/3) + Fleet status donut (1/3) ─ -->
-    <div class="grid-2-1" style="margin-bottom:24px;">
+    <!-- S-DASHBOARD-CHART-POLISH: card--accent-* removed; uniform .chart-card
+         wraps every chart. .chart-wrap is the flex-shrinking container that
+         lets ApexCharts reflow when the sidebar toggles. -->
+    <div class="dashboard-grid dashboard-grid--charts" style="margin-bottom:24px;">
 
-        <div class="card card--accent-primary">
+        <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">Revenue — Last 12 Months</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                     style="height:220px;"></div>
-                <div x-show="chartsLoaded" id="chart-revenue-trend"
-                     style="height:220px;" aria-label="Revenue over time chart"></div>
+                     style="height:320px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-revenue-trend" style="min-height:320px;"
+                         aria-label="Revenue over time chart"></div>
+                </div>
             </div>
         </div>
 
-        <div class="card card--accent-success">
+        <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">Fleet Status</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                     style="height:220px;"></div>
-                <div x-show="chartsLoaded" id="chart-fleet-status"
-                     style="height:220px;" aria-label="Fleet status donut chart"></div>
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-fleet-status" style="min-height:300px;"
+                         aria-label="Fleet status donut chart"></div>
+                </div>
             </div>
         </div>
 
     </div>
 
     <!-- ── ROW 2: AR Aging (1/2) + Utilization Trend (1/2) ───── -->
-    <div class="grid-2" style="margin-bottom:24px;">
+    <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
 
-        <div class="card card--accent-danger">
+        <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">AR Aging</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                     style="height:180px;"></div>
-                <div x-show="chartsLoaded" id="chart-ar-aging"
-                     style="height:180px;" aria-label="AR aging bar chart"></div>
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-ar-aging" style="min-height:300px;"
+                         aria-label="AR aging bar chart"></div>
+                </div>
             </div>
         </div>
 
-        <div class="card card--accent-info">
+        <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">Utilization Trend</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                     style="height:180px;"></div>
-                <div x-show="chartsLoaded" id="chart-utilization-trend"
-                     style="height:180px;" aria-label="Fleet utilization trend chart"></div>
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-utilization-trend" style="min-height:300px;"
+                         aria-label="Fleet utilization trend chart"></div>
+                </div>
             </div>
         </div>
 
     </div>
 
     <!-- ── ROW 3: Top Customers (1/2) + Leases Trend (1/2) ───── -->
-    <div class="grid-2" style="margin-bottom:24px;">
+    <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
 
-        <div class="card card--accent-warning">
+        <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">Top Customers — YTD</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                     style="height:180px;"></div>
-                <div x-show="chartsLoaded" id="chart-top-customers"
-                     style="height:180px;" aria-label="Top customers by revenue chart"></div>
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-top-customers" style="min-height:300px;"
+                         aria-label="Top customers by revenue chart"></div>
+                </div>
             </div>
         </div>
 
-        <div class="card card--accent-purple">
+        <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">Leases Opened vs Closed</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                     style="height:180px;"></div>
-                <div x-show="chartsLoaded" id="chart-leases-trend"
-                     style="height:180px;" aria-label="Leases opened vs closed chart"></div>
+                     style="height:320px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-leases-trend" style="min-height:320px;"
+                         aria-label="Leases opened vs closed chart"></div>
+                </div>
             </div>
         </div>
 
     </div>
 
     <!-- ── ROW 4: Pending Activations (1/2) + Upcoming Returns (1/2) ── -->
-    <div class="grid-2" style="margin-bottom:24px;">
+    <div class="dashboard-grid dashboard-grid--widgets" style="margin-bottom:24px;">
 
         <!-- Pending Activations table -->
-        <div class="card card--accent-warning">
+        <div class="card dashboard-widget">
             <div class="card-header">
                 <span class="card-title">Pending Activations</span>
                 <a href="<?= base_url('leases') ?>?status=pending"
@@ -400,7 +415,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
 
         <!-- Upcoming Returns table -->
-        <div class="card card--accent-info">
+        <div class="card dashboard-widget">
             <div class="card-header">
                 <span class="card-title">Upcoming Returns</span>
                 <span class="text-secondary text-sm">Next 60 days</span>
@@ -473,10 +488,10 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── ROW 5: Activity Feed (1/2) + Revenue by Type donut + Weekly Heatmap -->
-    <div class="grid-2" style="margin-bottom:24px;">
+    <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
 
         <!-- Recent Activity Feed -->
-        <div class="card card--accent-primary">
+        <div class="card dashboard-widget">
             <div class="card-header">
                 <span class="card-title">Recent Activity</span>
             </div>
@@ -522,30 +537,34 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
 
         <!-- Revenue by Equipment Type (donut) -->
-        <div class="card card--accent-success">
+        <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">Revenue by Equipment Type — YTD</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                     style="height:280px;"></div>
-                <div x-show="chartsLoaded" id="chart-revenue-by-type"
-                     style="height:280px;" aria-label="Revenue by equipment type donut chart"></div>
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-revenue-by-type" style="min-height:300px;"
+                         aria-label="Revenue by equipment type donut chart"></div>
+                </div>
             </div>
         </div>
 
     </div>
 
     <!-- ── ROW 6: Weekly Revenue Heatmap (full width) ─────────── -->
-    <div class="card card--accent-info" style="margin-bottom:24px;">
+    <div class="card chart-card" style="margin-bottom:24px;">
         <div class="card-header">
             <span class="card-title">Daily Revenue — Last 12 Weeks</span>
         </div>
         <div class="card-body">
             <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
-                 style="height:160px;"></div>
-            <div x-show="chartsLoaded" id="chart-weekly-heatmap"
-                 style="height:160px;" aria-label="Weekly revenue heatmap"></div>
+                 style="height:300px;"></div>
+            <div x-show="chartsLoaded" class="chart-wrap">
+                <div id="chart-weekly-heatmap" style="min-height:300px;"
+                     aria-label="Weekly revenue heatmap"></div>
+            </div>
         </div>
     </div>
 
@@ -699,31 +718,83 @@ function FF_Dashboard() {
             const border  = cssVar('--border-color')   || '#1d2133';
             const gridBg  = cssVar('--bg-surface')     || '#111318';
 
-            // Shared base options applied to all charts
+            // Shared base options applied to all charts.
+            // S-DASHBOARD-CHART-POLISH:
+            //   - parentHeightOffset:0 stops ApexCharts from adding ~30px of
+            //     phantom vertical space that pushed chart bodies past the
+            //     card-body's allotted height and caused the visible clipping.
+            //   - redrawOnParentResize / redrawOnWindowResize default true in
+            //     ApexCharts v3 but we set them explicitly so the patched
+            //     constructor in app.js can't accidentally clear them.
+            //   - animateGradually:false keeps the chart's "draw-in" feel but
+            //     fires it once on render rather than slowly per-datapoint.
+            //   - grid.padding gives bars/lines breathing room from card edges.
             const base = {
-                chart: { toolbar: { show: true, tools: { download: true, selection: false, zoom: false, zoomin: false, zoomout: false, pan: false, reset: false } }, background: 'transparent', fontFamily: 'DM Sans, sans-serif' },
+                chart: {
+                    background: 'transparent',
+                    fontFamily: 'DM Sans, sans-serif',
+                    toolbar: {
+                        show: true,
+                        tools: {
+                            download: true, selection: false, zoom: false,
+                            zoomin: false, zoomout: false, pan: false, reset: false,
+                        },
+                    },
+                    animations: { enabled: true, speed: 400, animateGradually: { enabled: false } },
+                    parentHeightOffset: 0,
+                    redrawOnParentResize: true,
+                    redrawOnWindowResize: true,
+                },
                 theme: { mode: isLight ? 'light' : 'dark' },
                 colors: palette,
-                grid:   { borderColor: border },
+                grid: {
+                    borderColor: border,
+                    strokeDashArray: 3,
+                    padding: { top: 0, right: 8, bottom: 0, left: 8 },
+                },
                 tooltip: { theme: isLight ? 'light' : 'dark' },
                 legend: { labels: { colors: fg } },
-                xaxis:  { labels: { style: { colors: fgMuted } }, axisBorder: { color: border }, axisTicks: { color: border } },
-                yaxis:  { labels: { style: { colors: fgMuted } } },
+                xaxis: { labels: { style: { colors: fgMuted } }, axisBorder: { color: border }, axisTicks: { color: border } },
+                yaxis: { labels: { style: { colors: fgMuted } } },
             };
+
+            // S-DASHBOARD-CHART-POLISH — shared donut + hbar plot options.
+            // Defined once so both donut charts share donut.size + total label
+            // and both horizontal bars share barHeight + datalabel placement.
+            const donutPlot = {
+                pie: {
+                    donut: {
+                        size: '68%',
+                        labels: {
+                            show: true,
+                            total: { show: true, fontSize: '14px', fontWeight: 600, color: fg },
+                        },
+                    },
+                },
+            };
+            const hbarPlot = {
+                bar: {
+                    horizontal: true,
+                    borderRadius: 4,
+                    barHeight: '60%',
+                    dataLabels: { position: 'right' },
+                },
+            };
+            const moneyFmt = (v) => '$' + this.formatMoney(v);
 
             // 1. Revenue trend — area
             if (d.revenue_trend && document.getElementById('chart-revenue-trend')) {
                 c.revenue_trend = new ApexCharts(
                     document.getElementById('chart-revenue-trend'),
                     Object.assign({}, base, {
-                        chart: Object.assign({}, base.chart, { type: 'area', height: 220 }),
+                        chart: Object.assign({}, base.chart, { type: 'area', height: 320 }),
                         stroke: { curve: 'smooth', width: 2 },
                         fill:   { type: 'gradient', gradient: { opacityFrom: 0.3, opacityTo: 0.05 } },
                         dataLabels: { enabled: false },
                         xaxis: Object.assign({}, base.xaxis, { categories: d.revenue_trend.labels }),
-                        yaxis: Object.assign({}, base.yaxis, { labels: { style: { colors: fgMuted }, formatter: v => '$' + this.formatMoney(v) } }),
+                        yaxis: Object.assign({}, base.yaxis, { labels: { style: { colors: fgMuted }, formatter: moneyFmt } }),
                         series: d.revenue_trend.series,
-                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: v => '$' + this.formatMoney(v) } }),
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: moneyFmt } }),
                     })
                 );
                 c.revenue_trend.render();
@@ -734,11 +805,14 @@ function FF_Dashboard() {
                 c.fleet_status = new ApexCharts(
                     document.getElementById('chart-fleet-status'),
                     Object.assign({}, base, {
-                        chart:  Object.assign({}, base.chart, { type: 'donut', height: 220 }),
+                        chart:  Object.assign({}, base.chart, { type: 'donut', height: 300 }),
                         labels: d.fleet_status.labels,
                         series: d.fleet_status.series,
-                        legend: Object.assign({}, base.legend, { position: 'bottom' }),
-                        plotOptions: { pie: { donut: { size: '60%' } } },
+                        legend: Object.assign({}, base.legend, {
+                            position: 'bottom', offsetY: 4, fontSize: '12px',
+                            markers: { size: 8, shape: 'circle' },
+                        }),
+                        plotOptions: donutPlot,
                         dataLabels: { enabled: false },
                     })
                 );
@@ -750,12 +824,17 @@ function FF_Dashboard() {
                 c.ar_aging = new ApexCharts(
                     document.getElementById('chart-ar-aging'),
                     Object.assign({}, base, {
-                        chart:  Object.assign({}, base.chart, { type: 'bar', height: 180 }),
-                        plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
-                        dataLabels: { enabled: false },
-                        xaxis: Object.assign({}, base.xaxis, { categories: d.ar_aging.labels, labels: { style: { colors: fgMuted }, formatter: v => '$' + this.formatMoney(v) } }),
+                        chart:  Object.assign({}, base.chart, { type: 'bar', height: 300 }),
+                        plotOptions: hbarPlot,
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (v) => '$' + Math.round(v).toLocaleString(),
+                            offsetX: 4,
+                            style: { fontSize: '11px', fontWeight: 500, colors: [fg] },
+                        },
+                        xaxis: Object.assign({}, base.xaxis, { categories: d.ar_aging.labels, labels: { style: { colors: fgMuted }, formatter: moneyFmt } }),
                         series: d.ar_aging.series,
-                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: v => '$' + this.formatMoney(v) } }),
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: moneyFmt } }),
                     })
                 );
                 c.ar_aging.render();
@@ -766,7 +845,7 @@ function FF_Dashboard() {
                 c.utilization_trend = new ApexCharts(
                     document.getElementById('chart-utilization-trend'),
                     Object.assign({}, base, {
-                        chart: Object.assign({}, base.chart, { type: 'line', height: 180 }),
+                        chart: Object.assign({}, base.chart, { type: 'line', height: 300 }),
                         stroke: { curve: 'smooth', width: 2 },
                         dataLabels: { enabled: false },
                         markers: { size: 3 },
@@ -784,12 +863,17 @@ function FF_Dashboard() {
                 c.top_customers = new ApexCharts(
                     document.getElementById('chart-top-customers'),
                     Object.assign({}, base, {
-                        chart:  Object.assign({}, base.chart, { type: 'bar', height: 180 }),
-                        plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
-                        dataLabels: { enabled: false },
-                        xaxis: Object.assign({}, base.xaxis, { categories: d.top_customers.labels, labels: { style: { colors: fgMuted }, formatter: v => '$' + this.formatMoney(v) } }),
+                        chart:  Object.assign({}, base.chart, { type: 'bar', height: 300 }),
+                        plotOptions: hbarPlot,
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (v) => '$' + Math.round(v).toLocaleString(),
+                            offsetX: 4,
+                            style: { fontSize: '11px', fontWeight: 500, colors: [fg] },
+                        },
+                        xaxis: Object.assign({}, base.xaxis, { categories: d.top_customers.labels, labels: { style: { colors: fgMuted }, formatter: moneyFmt } }),
                         series: d.top_customers.series,
-                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: v => '$' + this.formatMoney(v) } }),
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: moneyFmt } }),
                     })
                 );
                 c.top_customers.render();
@@ -800,7 +884,7 @@ function FF_Dashboard() {
                 c.leases_trend = new ApexCharts(
                     document.getElementById('chart-leases-trend'),
                     Object.assign({}, base, {
-                        chart: Object.assign({}, base.chart, { type: 'bar', height: 180 }),
+                        chart: Object.assign({}, base.chart, { type: 'bar', height: 320 }),
                         plotOptions: { bar: { columnWidth: '60%', borderRadius: 2 } },
                         dataLabels: { enabled: false },
                         xaxis: Object.assign({}, base.xaxis, { categories: d.leases_trend.labels }),
@@ -816,13 +900,16 @@ function FF_Dashboard() {
                     c.revenue_by_type = new ApexCharts(
                         document.getElementById('chart-revenue-by-type'),
                         Object.assign({}, base, {
-                            chart:  Object.assign({}, base.chart, { type: 'donut', height: 280 }),
+                            chart:  Object.assign({}, base.chart, { type: 'donut', height: 300 }),
                             labels: d.revenue_by_type.labels,
                             series: d.revenue_by_type.series,
-                            legend: Object.assign({}, base.legend, { position: 'bottom' }),
-                            plotOptions: { pie: { donut: { size: '60%' } } },
+                            legend: Object.assign({}, base.legend, {
+                                position: 'bottom', offsetY: 4, fontSize: '12px',
+                                markers: { size: 8, shape: 'circle' },
+                            }),
+                            plotOptions: donutPlot,
                             dataLabels: { enabled: false },
-                            tooltip: Object.assign({}, base.tooltip, { y: { formatter: v => '$' + this.formatMoney(v) } }),
+                            tooltip: Object.assign({}, base.tooltip, { y: { formatter: moneyFmt } }),
                         })
                     );
                     c.revenue_by_type.render();
@@ -837,17 +924,22 @@ function FF_Dashboard() {
                 c.weekly_heatmap = new ApexCharts(
                     document.getElementById('chart-weekly-heatmap'),
                     Object.assign({}, base, {
-                        chart:      Object.assign({}, base.chart, { type: 'heatmap', height: 160 }),
+                        chart:      Object.assign({}, base.chart, { type: 'heatmap', height: 300 }),
                         dataLabels: { enabled: false },
                         stroke:     { width: 2, colors: [gridBg] },
                         colors:     ['#f97316'],
                         plotOptions: { heatmap: { shadeIntensity: 0.8, radius: 2, useFillColorAsStroke: false } },
                         series: d.weekly_heatmap.series,
-                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: v => '$' + this.formatMoney(v) } }),
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: moneyFmt } }),
                     })
                 );
                 c.weekly_heatmap.render();
             }
+
+            // S-DASHBOARD-CHART-POLISH: register instances at window scope so
+            // the sidebar-toggle reflow handler in app.js can iterate them
+            // without poking at Alpine internals. Idempotent — last render wins.
+            window.FF_DashboardCharts = c;
         },
 
         // ── Helpers ────────────────────────────────────────────

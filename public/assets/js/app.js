@@ -4371,6 +4371,52 @@ document.addEventListener('DOMContentLoaded', function () {
         observer.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
     }
 
+    // ── S-DASHBOARD-CHART-POLISH — ApexCharts reflow on sidebar toggle ──
+    // When Alpine flips sidebarOpen, .sidebar gains/loses .is-open and
+    // .app-main gains/loses .sidebar-collapsed. The width of .app-main
+    // changes by ~176px (240 - 64), so any ApexCharts living inside it
+    // still draws to the old width and leaves whitespace or overflows.
+    //
+    // We do two things AFTER the CSS transition finishes (~200ms):
+    //   1) dispatch a window resize event — every chart with
+    //      redrawOnWindowResize:true (which the dashboard sets) re-fits
+    //   2) fallback: iterate window.FF_DashboardCharts (registered by
+    //      the dashboard component) and call .render() on each, so pages
+    //      that didn't set the redraw flag still reflow.
+    //
+    // Always active (not gated to mobile) because the primary use case
+    // is desktop sidebar expand/collapse.
+    if (sidebar) {
+        let _reflowTimer = null;
+        function FF_ReflowCharts() {
+            if (_reflowTimer) return;        // coalesce rapid class flips
+            _reflowTimer = setTimeout(() => {
+                _reflowTimer = null;
+                try { window.dispatchEvent(new Event('resize')); } catch (_e) {}
+                const charts = window.FF_DashboardCharts;
+                if (charts && typeof charts === 'object') {
+                    Object.values(charts).forEach((ch) => {
+                        try { ch && typeof ch.render === 'function' && ch.render(); } catch (_e) {}
+                    });
+                }
+            }, 260);                         // 200ms transition + 60ms buffer
+        }
+
+        const reflowObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.attributeName === 'class') { FF_ReflowCharts(); break; }
+            }
+        });
+        reflowObserver.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
+
+        // Also watch .app-main since its .sidebar-collapsed class is the
+        // signal Alpine commits on the other side of the toggle.
+        const appMain = document.querySelector('.app-main');
+        if (appMain) {
+            reflowObserver.observe(appMain, { attributes: true, attributeFilter: ['class'] });
+        }
+    }
+
     // Re-check on resize (collapse overlay logic on wide screens)
     window.addEventListener('resize', function () {
         if (window.innerWidth >= 1024) {
