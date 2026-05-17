@@ -129,8 +129,16 @@ foreach ($_nav as $_i => $_item) {
 $_currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
 
 // Company branding
+// S-DESIGN-SETTINGS-DEBUG: prior code read 'company.logo_url' which was
+// never written anywhere. The Design tab (S-DESIGN-SETTINGS-FOOTER-LOGIN)
+// saves the upload as a StorageClient key under brand.logo_path; we sign
+// it here so the sidebar serves it via the same signed-URL pathway as
+// every other uploaded file.
 $_companyName = settings_get('company.name', 'FleetForge');
-$_logoUrl     = settings_get('company.logo_url', '');
+$_logoKey     = (string) (settings_get('brand.logo_path') ?? '');
+$_logoUrl     = $_logoKey !== ''
+    ? \FleetForge\Storage\StorageClient::url($_logoKey, 86400)
+    : '';
 
 $_sidebarUser = current_user();
 ?>
@@ -390,5 +398,5 @@ unset($_nav, $_vis, $_nCount, $_i, $_j, $_item, $_currentPath,
       $_matchPrefixes, $_mp, $_isActive, $_badgeCount, $_hasChildren,
       $_childActive, $_groupOpen, $_child, $_childPrefixes, $_cp,
       $_childIsActive, $_childBadge, $_ci,
-      $_companyName, $_logoUrl, $_sidebarUser);
+      $_companyName, $_logoKey, $_logoUrl, $_sidebarUser);
 ?>

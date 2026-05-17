@@ -124,15 +124,40 @@ function ff_mix_with_white(string $hex, float $whiteWeight): string
 }
 
 /**
- * Persist one setting row by `key`. Skips silently if the row
- * does not exist — Task 1 seed creates every row up-front so a
- * missing row here means an out-of-sync schema, never a typo.
+ * Persist one setting row by `key`.
+ *
+ * S-DESIGN-SETTINGS-DEBUG: switched from UPDATE-only to upsert.
+ * The original implementation assumed the seed migration had run
+ * — if it hadn't, every save was a silent 0-row no-op. Upsert is
+ * self-healing: a never-seeded row is created on first save with
+ * the value_type inferred from the column heuristic below; an
+ * existing row has only `value` / `updated_by` / `updated_at`
+ * touched, leaving the seeded `value_type` / `group_name` / `label`
+ * / `description` untouched (ON DUPLICATE KEY UPDATE never visits
+ * the columns it doesn't list).
  */
 function ff_settings_write(string $key, string $value): void
 {
+    // value_type / group_name are only used on the INSERT branch.
+    // Once a row exists they are intentionally left alone — the
+    // seed migration is the canonical source of those columns.
+    // We infer reasonable defaults so the auto-created row is
+    // still queryable by the existing index.php settings tab
+    // filter (`label IS NOT NULL` would hide it; we leave label
+    // null to signal "auto-created, please re-run seed").
+    $group = explode('.', $key, 2)[0] ?? 'general';
+    $type  = 'string';
+    if (preg_match('/(font_size|rows_per_page|session_timeout_minutes)$/', $key)) $type = 'integer';
+    if (preg_match('/(show_logo|sidebar_collapsed_default)$/', $key))             $type = 'boolean';
+
     db_execute(
-        "UPDATE settings SET `value` = ?, updated_by = ?, updated_at = NOW() WHERE `key` = ?",
-        [$value, current_user_id(), $key]
+        "INSERT INTO settings (`key`, `value`, `value_type`, `group_name`, `updated_by`, `updated_at`)
+         VALUES (?, ?, ?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE
+            `value`      = VALUES(`value`),
+            `updated_by` = VALUES(`updated_by`),
+            `updated_at` = NOW()",
+        [$key, $value, $type, $group, current_user_id()]
     );
 }
 
