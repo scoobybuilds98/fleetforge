@@ -944,17 +944,28 @@ kbd {
         max-width: 0;
     }
 
-    /* S-SIDEBAR-COLLAPSED-ICON-FIX — display:none on the badge in
-       collapsed mode is the definitive fix. The previous combo
-       (opacity:0 + max-width:0 + min-width:0 + padding:0 + margin:0)
-       removed the badge from view but it still counted as a flex
-       child, so CSS `gap` (10px on .nav-item) still reserved a slot
-       between the icon and the empty badge — shifting the icon off
-       center. display:none removes it from the flex flow entirely.
-       Same reasoning applies to the label; see the gap:0 rule below
-       which handles any remaining hidden-but-present children. */
+    /* S-SIDEBAR-COLLAPSED-BADGE-DOT — keep notification badges visible
+       in collapsed mode but pin them to the top-right of the nav item
+       as a small iOS-style dot. position:absolute removes the badge
+       from the flex flow so it cannot reserve a gap slot that pushes
+       the icon off center. Override every "hide" property the shared
+       rule above sets (opacity / pointer-events / max-width) to make
+       sure the badge actually renders. Smaller dimensions + tighter
+       padding + smaller font appropriate for the 64px collapsed track. */
     .sidebar:not(.is-open) .nav-badge {
-        display: none !important;
+        position: absolute;
+        top: 4px;
+        right: 8px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        font-size: 0.5625rem;    /* 9px */
+        line-height: 1;
+        opacity: 1;
+        pointer-events: auto;
+        max-width: none;
+        visibility: visible;
+        z-index: 1;
     }
 
     .sidebar:not(.is-open) .sidebar-brand {
@@ -5646,11 +5657,25 @@ dl.detail-grid dd {
         max-width: 0;
         visibility: hidden;
     }
-    /* S-SIDEBAR-COLLAPSED-ICON-FIX — pulled .nav-badge out of the
-       shared rule above and given display:none so it can't reserve
-       a flex slot between the icon and the (hidden) label. The
-       desktop collapsed block at line ~955 does the same thing. */
-    .sidebar .nav-badge { display: none !important; }
+    /* S-SIDEBAR-COLLAPSED-BADGE-DOT — pin notification badges to the
+       top-right of the nav item as a small iOS-style dot. Mirrors the
+       desktop collapsed rule at line ~947. position:absolute removes
+       the badge from the flex flow so it cannot reserve a gap slot. */
+    .sidebar .nav-badge {
+        position: absolute;
+        top: 4px;
+        right: 8px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        font-size: 0.5625rem;
+        line-height: 1;
+        opacity: 1;
+        pointer-events: auto;
+        max-width: none;
+        visibility: visible;
+        z-index: 1;
+    }
     .sidebar .sidebar-brand {
         justify-content: center;
         padding: 0 8px;
