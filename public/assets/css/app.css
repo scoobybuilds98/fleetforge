@@ -3977,6 +3977,18 @@ html.is-mac .non-mac-only { display: none; }
     background: var(--text-tertiary);
 }
 
+/* Drop the trailing "View" action column when the widget sits inside
+   the side-by-side dashboard-grid--widgets row. At ~510px per card the
+   column gets clipped on the right; the contract number in the first
+   column is already a styled link to the same detail page so the View
+   button is duplicate navigation. Scoped to --widgets only so the
+   full-width Active Leases table at the top of the dashboard keeps its
+   per-row View button intact. */
+.dashboard-grid--widgets .dashboard-widget .table thead th:last-child,
+.dashboard-grid--widgets .dashboard-widget .table tbody td:last-child {
+    display: none;
+}
+
 /* ── Responsive: tablet ── */
 @media (max-width: 1023px) {
     .dashboard-grid--charts,
