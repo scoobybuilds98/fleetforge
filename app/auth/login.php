@@ -384,21 +384,36 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
     </script>
 
     <style>
-        /* ──────────────────────────────────────────────────────
-           MEDIA-1 — Background video layer.
-           WHY inline: the video is only used on this login page
-           so there's no reason to bloat app.css with it. Fallback
-           background keeps the page readable if the mp4 fails.
-           ────────────────────────────────────────────────────── */
+        /* ══════════════════════════════════════════════════════════════
+           S-LOGIN-AESTHETIC — Apple-inspired login surface.
+
+           Aesthetic principles applied throughout this stylesheet:
+             1. Heavy backdrop blur so the video reads as atmosphere,
+                not as competing visual content
+             2. Layered shadows + a 1px specular highlight on the card's
+                top edge (Apple's "vibrancy material" silhouette)
+             3. Generous internal padding so content breathes
+             4. Confident typography: tight tracking on headlines,
+                muted secondary text, sentence-case throughout
+             5. Inputs that feel like soft chips with a brand-color
+                focus ring + outer bloom
+             6. The primary button has a subtle vertical gradient,
+                scale-on-press, and a brand-color glow on hover
+             7. Restraint: a single semantic accent (brand color),
+                everything else neutral
+           ══════════════════════════════════════════════════════════════ */
+
+        /* ── Background video layer ──────────────────────────────────
+           The wave video is now heavily blurred (24px) so it functions
+           as ambient texture rather than literal imagery. A vertical
+           dark gradient sits above it for legibility under the card,
+           and a soft radial vignette darkens the corners. */
         .video-bg-wrapper {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            inset: 0;
             z-index: 0;
             overflow: hidden;
-            background: #0f0f0f; /* fallback if video fails */
+            background: #0a0b0e; /* fallback if video fails */
         }
         .video-bg {
             position: absolute;
@@ -408,164 +423,335 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             min-height: 100%;
             width: auto;
             height: auto;
-            transform: translate(-50%, -50%);
+            transform: translate(-50%, -50%) scale(1.08);
             object-fit: cover;
+            filter: blur(24px) saturate(1.15) brightness(0.55);
         }
         .video-bg-overlay {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.55);
+            inset: 0;
+            background:
+                radial-gradient(ellipse at center, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0.75) 100%),
+                linear-gradient(180deg, rgba(10,11,14,0.35) 0%, rgba(10,11,14,0.55) 100%);
+        }
+        @media (max-width: 767px) {
+            .video-bg { filter: blur(16px) saturate(1.15) brightness(0.55); }
         }
 
-        /* Auth-page layout — centred card, no sidebar.
-           z-index raises it above the video-bg-wrapper (z:0). */
+        /* ── Page shell ── */
         .auth-page {
             position: relative;
             z-index: 10;
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 24px 16px;
-            background-color: transparent; /* let the video show through */
+            padding: 32px 20px;
+            background-color: transparent;
         }
 
-        /* Glass-morphism effect on the card so the form is
-           clearly readable but the video is still visible
-           behind it. Uses the same bg-surface var but at 92% so
-           the fallback dark color still works if --bg-surface
-           isn't in rgb form. */
+        /* ── Auth card ── vibrancy material.
+           rgba surface allows the blurred video to bleed through at low
+           opacity. The 1px white-alpha border + ::before highlight
+           together produce the subtle specular edge Apple's translucent
+           panels are known for. */
         .auth-card {
             position: relative;
             z-index: 11;
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-        }
-        @media (max-width: 767px) {
-            .auth-card {
-                backdrop-filter: blur(4px);
-                -webkit-backdrop-filter: blur(4px);
-            }
-        }
-
-        .auth-card {
             width: 100%;
-            max-width: 400px;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-xl);
-            box-shadow: var(--shadow-lg);
-            padding: 36px 32px 32px;
+            max-width: 440px;
+            background: rgba(20, 20, 19, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 20px;
+            padding: 44px 44px 36px;
+            backdrop-filter: blur(40px) saturate(1.4);
+            -webkit-backdrop-filter: blur(40px) saturate(1.4);
+            box-shadow:
+                0 1px 0 rgba(255, 255, 255, 0.05) inset,
+                0 32px 64px -16px rgba(0, 0, 0, 0.55),
+                0 12px 24px -8px rgba(0, 0, 0, 0.40),
+                0 0 0 1px rgba(0, 0, 0, 0.10);
+            overflow: hidden;
+        }
+        /* Specular highlight — a hairline of brighter alpha across the
+           very top edge gives the surface a sense of physical light. */
+        .auth-card::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.16) 50%, transparent 100%);
+            pointer-events: none;
+        }
+        @media (max-width: 480px) {
+            .auth-card { padding: 36px 28px 28px; border-radius: 16px; }
+            .auth-card { backdrop-filter: blur(24px) saturate(1.3); -webkit-backdrop-filter: blur(24px) saturate(1.3); }
         }
 
-        .auth-logo {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin-bottom: 28px;
+        /* ── Brand block ── */
+        .login-brand           { text-align: center; margin-bottom: 28px; }
+        .login-logo-img        { max-height: 88px; max-width: 240px; object-fit: contain; display: block; margin: 0 auto; }
+        .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
+        .login-company-name    {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #ffffff;
+            margin: 0 0 6px;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+        }
+        .login-company-tagline {
+            font-size: 0.875rem;
+            color: rgba(235, 230, 220, 0.55);
+            margin: 4px 0 0;
+            letter-spacing: -0.005em;
+        }
+
+        /* ── Headings ── */
+        .auth-heading {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #ffffff;
+            margin: 0 0 4px;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
             text-align: center;
         }
-
-        .auth-logo-mark {
-            width: 48px;
-            height: 48px;
-            background: var(--color-primary);
-            border-radius: var(--radius-lg);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 12px;
-        }
-
-        .auth-logo-mark svg {
-            width: 28px;
-            height: 28px;
-            color: #ffffff;
-        }
-
-        .auth-logo-name {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            letter-spacing: -0.01em;
-        }
-
-        .auth-heading {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-        }
-
         .auth-subheading {
-            font-size: 0.875rem;
-            color: var(--text-tertiary);
-            margin-bottom: 24px;
+            font-size: 0.9375rem;
+            color: rgba(235, 230, 220, 0.55);
+            margin: 0 0 28px;
+            text-align: center;
+            letter-spacing: -0.005em;
         }
 
-        /* Password reveal toggle */
-        .input-password-wrap {
-            position: relative;
+        /* ── Form fields ── */
+        .auth-card .form-group { margin-bottom: 18px; }
+        .auth-card .form-label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            color: rgba(235, 230, 220, 0.62);
+            margin-bottom: 7px;
+            display: block;
+        }
+        .auth-card .form-control {
+            height: 48px;
+            border-radius: 10px;
+            border: none;
+            background: rgba(255, 255, 255, 0.06);
+            color: #ffffff;
+            font-size: 0.9375rem;
+            letter-spacing: -0.005em;
+            padding: 0 14px;
+            width: 100%;
+            transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+        }
+        .auth-card .form-control::placeholder {
+            color: rgba(235, 230, 220, 0.32);
+        }
+        .auth-card .form-control:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .auth-card .form-control:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.10);
+            box-shadow:
+                0 0 0 2px var(--color-primary, #2596be),
+                0 0 0 6px color-mix(in srgb, var(--color-primary, #2596be) 22%, transparent);
+        }
+        .auth-card .form-control.is-invalid {
+            box-shadow:
+                0 0 0 2px var(--color-danger, #ef4444),
+                0 0 0 6px color-mix(in srgb, var(--color-danger, #ef4444) 22%, transparent);
         }
 
-        .input-password-wrap .form-control {
-            padding-right: 44px;
+        /* ── Password row label + Forgot link ── */
+        .auth-pw-label-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: 7px;
+            gap: 12px;
         }
+        .auth-pw-label-row .form-label { margin: 0; }
+        .auth-pw-forgot {
+            font-size: 0.75rem;
+            color: rgba(235, 230, 220, 0.55);
+            text-decoration: none;
+            transition: color 150ms ease;
+        }
+        .auth-pw-forgot:hover { color: var(--color-primary, #2596be); }
 
+        /* ── Password reveal toggle ── */
+        .input-password-wrap { position: relative; }
+        .input-password-wrap .form-control { padding-right: 46px; }
         .password-toggle {
             position: absolute;
             right: 10px;
             top: 50%;
             transform: translateY(-50%);
-            color: var(--text-tertiary);
+            color: rgba(235, 230, 220, 0.40);
             background: none;
             border: none;
-            padding: 4px;
+            padding: 6px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: var(--radius-sm);
-            transition: color var(--transition-fast);
+            border-radius: 6px;
+            transition: color 150ms ease, background 150ms ease;
         }
-
-        .password-toggle:hover { color: var(--text-secondary); }
+        .password-toggle:hover {
+            color: rgba(235, 230, 220, 0.85);
+            background: rgba(255, 255, 255, 0.05);
+        }
         .password-toggle svg { width: 18px; height: 18px; pointer-events: none; }
         .password-toggle .icon-hide { display: none; }
         .password-toggle.is-visible .icon-show { display: none; }
         .password-toggle.is-visible .icon-hide { display: block; }
 
-        .auth-footer-link {
-            text-align: center;
-            margin-top: 20px;
-            font-size: 0.875rem;
-            color: var(--text-tertiary);
+        /* ── Remember me — refined Apple-style checkbox ── */
+        .auth-card .form-group--check { margin: 4px 0 24px; }
+        .auth-card .form-check {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+            margin: 0;
+        }
+        .auth-card .form-check-input {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            cursor: pointer;
+            position: relative;
+            flex-shrink: 0;
+            transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+        }
+        .auth-card .form-check-input:hover {
+            border-color: rgba(255, 255, 255, 0.28);
+        }
+        .auth-card .form-check-input:checked {
+            background: var(--color-primary, #2596be);
+            border-color: var(--color-primary, #2596be);
+        }
+        .auth-card .form-check-input:checked::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='3.5,8.5 6.5,11.5 12.5,5'/></svg>");
+            background-size: 14px 14px;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        .auth-card .form-check-input:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #2596be) 35%, transparent);
+        }
+        .auth-card .form-check-label {
+            font-size: 0.8125rem;
+            color: rgba(235, 230, 220, 0.72);
+            letter-spacing: -0.005em;
         }
 
-        /* S-DESIGN-SETTINGS-FOOTER-LOGIN — brand-aware login block.
-           Replaces the static auth-logo block when company branding
-           is configured. Scoped to .login-* so it doesn't collide
-           with the legacy .auth-logo styles still used elsewhere. */
-        /* S-LOGIN-LOGO-DEDUP: tighter margins. When only a wordmark logo
-           renders (no <h1>), the brand block no longer needs the 32px
-           bottom — 20px is enough breathing room before "Sign in to your
-           account". The image's own bottom margin drops to 0 because the
-           parent already supplies the gap. */
-        .login-brand          { text-align:center; margin-bottom:20px; }
-        .login-logo-img       { max-height:140px; max-width:300px; object-fit:contain; display:block; margin:0 auto; }
-        .login-logo-placeholder { display:flex; justify-content:center; margin:0 auto 12px; }
-        .login-company-name   { font-size:1.375rem; font-weight:600; color:var(--text-primary); margin:0 0 4px; letter-spacing:-0.01em; }
-        .login-company-tagline{ font-size:0.8125rem; color:var(--text-muted); margin:0; }
-        /* S-LEGAL-FOOTER-COMMERCIAL: richer login footer (legal links + copyright + brand attribution) */
-        .login-footer         { text-align:center; margin-top:28px; }
-        .login-footer-links   { display:flex; flex-wrap:wrap; justify-content:center; gap:4px 16px; margin-bottom:10px; }
-        .login-footer-links a { font-size:0.75rem; color:var(--text-muted); text-decoration:none; }
-        .login-footer-links a:hover { color:var(--text-primary); text-decoration:underline; }
-        .login-footer-copy    { font-size:0.6875rem; color:var(--text-muted); margin:0; line-height:1.5; }
-        .login-footer-copy strong { font-weight:500; color:var(--text-secondary); }
+        /* ── Sign in button ── subtle gradient + brand-color glow */
+        .auth-card .btn-signin {
+            width: 100%;
+            height: 52px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(180deg,
+                color-mix(in srgb, var(--color-primary, #2596be) 100%, white 6%) 0%,
+                var(--color-primary, #2596be) 100%);
+            color: #ffffff;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            letter-spacing: -0.005em;
+            cursor: pointer;
+            transition: transform 120ms ease, box-shadow 200ms ease, filter 150ms ease;
+            box-shadow:
+                0 1px 0 rgba(255, 255, 255, 0.15) inset,
+                0 4px 12px -2px color-mix(in srgb, var(--color-primary, #2596be) 35%, transparent),
+                0 1px 2px rgba(0, 0, 0, 0.20);
+        }
+        .auth-card .btn-signin:hover {
+            filter: brightness(1.06);
+            box-shadow:
+                0 1px 0 rgba(255, 255, 255, 0.18) inset,
+                0 6px 18px -2px color-mix(in srgb, var(--color-primary, #2596be) 45%, transparent),
+                0 2px 4px rgba(0, 0, 0, 0.22);
+        }
+        .auth-card .btn-signin:active {
+            transform: scale(0.985);
+            filter: brightness(0.96);
+        }
+        .auth-card .btn-signin:focus-visible {
+            outline: none;
+            box-shadow:
+                0 0 0 2px rgba(20, 20, 19, 1),
+                0 0 0 4px var(--color-primary, #2596be),
+                0 4px 12px -2px color-mix(in srgb, var(--color-primary, #2596be) 35%, transparent);
+        }
+
+        /* ── Below-button micro-copy ── */
+        .auth-card .auth-footer-link {
+            text-align: center;
+            margin-top: 18px;
+            font-size: 0.75rem;
+            color: rgba(235, 230, 220, 0.42);
+            letter-spacing: -0.005em;
+        }
+        .auth-card .auth-footer-link small { font-size: inherit; }
+
+        /* ── Login card footer (legal + copyright) ──
+           Lives inside the card, separated by a hairline divider. */
+        .login-footer {
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            text-align: center;
+        }
+        .login-footer-links {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px 18px;
+            margin-bottom: 12px;
+        }
+        .login-footer-links a {
+            font-size: 0.75rem;
+            color: rgba(235, 230, 220, 0.50);
+            text-decoration: none;
+            transition: color 150ms ease;
+            letter-spacing: -0.005em;
+        }
+        .login-footer-links a:hover {
+            color: rgba(255, 255, 255, 0.90);
+        }
+        .login-footer-copy {
+            font-size: 0.6875rem;
+            color: rgba(235, 230, 220, 0.36);
+            margin: 0;
+            line-height: 1.55;
+            letter-spacing: -0.005em;
+        }
+        .login-footer-copy strong {
+            font-weight: 500;
+            color: rgba(235, 230, 220, 0.62);
+        }
+
+        /* ── Toast positioning override for login (relative, not fixed) ── */
+        .auth-card .toast {
+            border-radius: 10px;
+            font-size: 0.875rem;
+        }
     </style>
 </head>
 <body>
@@ -631,8 +817,14 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             <?php endif; ?>
         </div>
 
-        <h1 class="auth-heading">Sign in to your account</h1>
-        <p class="auth-subheading">Enter your credentials to continue.</p>
+        <?php
+        // S-LOGIN-AESTHETIC: confident Apple-style heading hierarchy.
+        // Primary line is a warm "Welcome back" rather than the generic
+        // "Sign in to your account"; secondary line names the destination
+        // ("Sign in to {Company}") which doubles as gentle brand reinforcement.
+        ?>
+        <h1 class="auth-heading">Welcome back</h1>
+        <p class="auth-subheading">Sign in to <?= e($loginName) ?> to continue</p>
 
         <!-- Flash message (password reset success, session expired, etc.) -->
         <?php if ($_flash !== ''): ?>
@@ -686,10 +878,10 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             </div>
 
             <div class="form-group">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                    <label class="form-label" for="password" style="margin-bottom:0">Password</label>
+                <div class="auth-pw-label-row">
+                    <label class="form-label" for="password">Password</label>
                     <a href="<?= e(base_url('auth/forgot_password')) ?>"
-                       class="btn-link btn-sm"
+                       class="auth-pw-forgot"
                        tabindex="-1">
                         Forgot password?
                     </a>
@@ -722,7 +914,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
                 </div>
             </div>
 
-            <div class="form-group" style="margin-bottom:20px;">
+            <div class="form-group form-group--check">
                 <label class="form-check">
                     <input type="checkbox"
                            name="remember"
@@ -730,11 +922,11 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
                            class="form-check-input"
                            value="1"
                            <?= !empty($_POST['remember']) ? 'checked' : '' ?>>
-                    <span class="form-check-label">Keep me signed in for 30 days</span>
+                    <span class="form-check-label">Stay signed in for 30 days</span>
                 </label>
             </div>
 
-            <button type="submit" class="btn btn-primary w-full btn-lg">
+            <button type="submit" class="btn-signin">
                 Sign in
             </button>
 
