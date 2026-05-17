@@ -311,7 +311,32 @@ $loginHover   = (string) (settings_get('brand.primary_hover') ?: '#1e7ea0');
 $loginLight   = (string) (settings_get('brand.primary_light') ?: '#e0f4fb');
 
 // Signed storage URLs for logo/favicon — only when paths exist.
-$loginLogoUrl    = $loginLogo    !== '' ? \FleetForge\Storage\StorageClient::url($loginLogo,    3600)  : '';
+// Resolve the login logo URL with a two-source fallback:
+//   1) brand.logo_path settings row → StorageClient signed URL
+//      (this is what Settings → Design writes when an admin uploads a logo).
+//   2) public/media/login-logo.{svg,png,jpg,jpeg} → asset_url() to the file
+//      (drop-file workflow — no DB involvement, useful for environments
+//      where the Design tab hasn't been touched yet or for one-off branding).
+// First match wins. If neither resolves, the SVG truck placeholder below
+// renders instead.
+$loginLogoUrl = '';
+if ($loginLogo !== '') {
+    try {
+        $loginLogoUrl = \FleetForge\Storage\StorageClient::url($loginLogo, 3600);
+    } catch (\Throwable $e) {
+        // Settings pointed at a missing/invalid storage key — fall through
+        // to the static-file fallback rather than 500-ing the login page.
+    }
+}
+if ($loginLogoUrl === '') {
+    foreach (['svg', 'png', 'jpg', 'jpeg'] as $ext) {
+        $candidate = FF_ROOT . '/public/media/login-logo.' . $ext;
+        if (is_file($candidate)) {
+            $loginLogoUrl = asset_url('media/login-logo.' . $ext);
+            break;
+        }
+    }
+}
 $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url($loginFavicon, 86400) : '';
 ?>
 <!DOCTYPE html>
