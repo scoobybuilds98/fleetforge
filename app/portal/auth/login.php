@@ -268,7 +268,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
            The 14px brand-block margin-bottom then guarantees the
            heading never overlaps the visible logo. Mirrors admin
            login. Long-term clean fix is a tightly-cropped PNG. */
-        .portal-login-brand   { text-align: center; margin-bottom: 14px; }
+        .portal-login-brand   { text-align: center; margin-bottom: 28px; }
         .portal-login-logo    { display: flex; justify-content: center; margin: 0 auto; }
         .portal-login-logo-img {
             max-height: 128px;
@@ -304,11 +304,14 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
             text-align: center;
         }
         .portal-auth-subheading {
-            font-size: 0.9375rem;
+            font-size: 0.875rem;
             color: rgba(235, 230, 220, 0.55);
             margin: 0 0 28px;
             text-align: center;
             letter-spacing: -0.005em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         /* ── Form fields (inline overrides scoped to .portal-login-card) ── */

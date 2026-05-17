@@ -504,7 +504,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            regardless of the PNG's exact internal padding ratio.
            Long-term clean fix is a tightly-cropped PNG (see
            DESIGN_DETAILS.md §3.1 step 2). */
-        .login-brand           { text-align: center; margin-bottom: 14px; }
+        .login-brand           { text-align: center; margin-bottom: 28px; }
         .login-logo-img        { max-height: 128px; max-width: 256px; object-fit: contain; display: block; margin: -18px auto -4px; }
         .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
         .login-company-name    {
@@ -533,11 +533,14 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             text-align: center;
         }
         .auth-subheading {
-            font-size: 0.9375rem;
+            font-size: 0.875rem;
             color: rgba(235, 230, 220, 0.55);
             margin: 0 0 28px;
             text-align: center;
             letter-spacing: -0.005em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         /* ── Form fields ── */
@@ -885,10 +888,12 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
         // S-LOGIN-AESTHETIC: confident Apple-style heading hierarchy.
         // Primary line is a warm "Welcome back" rather than the generic
         // "Sign in to your account"; secondary line names the destination
-        // ("Sign in to {Company}") which doubles as gentle brand reinforcement.
+        // ("Sign in to {Company}") — terse on purpose so it fits in a
+        // single line even for company names up to ~32 characters at the
+        // current font size (0.875rem) inside a 440px card.
         ?>
         <h1 class="auth-heading">Welcome back</h1>
-        <p class="auth-subheading">Sign in to <?= e($loginName) ?> to continue</p>
+        <p class="auth-subheading">Sign in to <?= e($loginName) ?></p>
 
         <!-- Flash message (password reset success, session expired, etc.) -->
         <?php if ($_flash !== ''): ?>
