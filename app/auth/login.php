@@ -849,7 +849,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            loop
            playsinline
            preload="auto">
-        <source src="<?= asset_url('media/video1.mp4') ?>" type="video/mp4">
+        <source src="<?= asset_url('media/video1.mp4') ?>?v=<?= e(FF_ASSET_VERSION) ?>" type="video/mp4">
     </video>
     <div class="video-bg-overlay"></div>
 </div>

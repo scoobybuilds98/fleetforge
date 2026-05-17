@@ -593,7 +593,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
 <!-- Background video — same wave footage as admin login for brand consistency -->
 <div class="video-bg-wrapper" aria-hidden="true">
     <video class="video-bg" autoplay muted loop playsinline preload="auto">
-        <source src="<?= asset_url('media/video1.mp4') ?>" type="video/mp4">
+        <source src="<?= asset_url('media/video1.mp4') ?>?v=<?= e(FF_ASSET_VERSION) ?>" type="video/mp4">
     </video>
     <div class="video-bg-overlay"></div>
 </div>
