@@ -1792,6 +1792,35 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 /* S-LEGAL-FOOTER-COMMERCIAL: admin footer extended with a middle slot
    for legal links. Outer flex row stays slim; inner pieces wrap on
    narrow screens so the layout degrades gracefully without overflow. */
+/* S-SIDEBAR-COLLAPSED-TOOLTIP — body-positioned tooltip for collapsed
+   sidebar nav items. Appended to <body> at runtime by the script in
+   includes/sidebar.php; that's what lets it escape the sidebar's
+   overflow:hidden clipping context (a pure-CSS tooltip can't escape
+   without breaking the inner sidebar-nav scroll). position:fixed +
+   coordinates calculated from each nav-item's bounding rect on hover. */
+.ff-nav-tooltip {
+    position: fixed;
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: var(--shadow-md);
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 80ms ease;
+    letter-spacing: -0.005em;
+}
+.ff-nav-tooltip.is-visible {
+    opacity: 1;
+}
+
 .app-footer {
     flex-shrink: 0;
     display: flex;

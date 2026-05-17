@@ -236,6 +236,7 @@ $_sidebarUser = current_user();
                     <div class="nav-group<?= $_groupOpen ? ' is-open' : '' ?>">
                         <a href="<?= e(base_url(ltrim($_item['url'], '/'))) ?>"
                            class="nav-item<?= $_isActive ? ' is-active' : '' ?>"
+                           aria-label="<?= e($_item['label']) ?>"
                            <?= $_isActive ? 'aria-current="page"' : '' ?>>
 
                             <span class="nav-item-icon">
@@ -272,6 +273,7 @@ $_sidebarUser = current_user();
                             ?>
                                 <a href="<?= e(base_url(ltrim($_child['url'], '/'))) ?>"
                                    class="nav-item nav-item--child<?= $_childIsActive ? ' is-active' : '' ?>"
+                                   aria-label="<?= e($_child['label']) ?>"
                                    <?= $_childIsActive ? 'aria-current="page"' : '' ?>>
 
                                     <span class="nav-item-icon">
@@ -294,6 +296,7 @@ $_sidebarUser = current_user();
                     <!-- Regular nav item -->
                     <a href="<?= e(base_url(ltrim($_item['url'], '/'))) ?>"
                        class="nav-item<?= $_isActive ? ' is-active' : '' ?>"
+                       aria-label="<?= e($_item['label']) ?>"
                        <?= $_isActive ? 'aria-current="page"' : '' ?>>
 
                         <span class="nav-item-icon">
@@ -393,6 +396,91 @@ $_sidebarUser = current_user();
     } else {
         scrollActiveIntoView();
     }
+})();
+
+// ============================================================
+// S-SIDEBAR-COLLAPSED-TOOLTIP — show module name on hover when
+// the sidebar is collapsed.
+//
+// Why JS and not pure CSS: the outer .sidebar has overflow:hidden
+// and the inner .sidebar-nav has overflow-x:hidden (required for
+// the vertical scroll setup). A CSS-positioned tooltip inside a
+// .nav-item gets clipped at the sidebar edge. We escape every
+// clipping context by appending the tooltip to <body> and using
+// position:fixed with coordinates from the nav-item's
+// getBoundingClientRect() — same pattern Linear / Notion / Figma
+// use for their sidebar tooltips.
+//
+// Only fires when the sidebar is in collapsed state, evaluated
+// per hover (so toggling expand/collapse mid-session is handled):
+//   - Desktop (>=1024px): collapsed = .sidebar without .is-open
+//   - Tablet  (768-1023px): always collapsed (permanent 64px rail)
+//   - Mobile  (<768px): sidebar is an overlay drawer with the full
+//     label visible when open, no tooltip needed.
+// ============================================================
+(function setupSidebarTooltips() {
+    var sidebar = document.getElementById('ff-sidebar');
+    if (!sidebar) return;
+
+    var tooltip = null;
+    var hideTimer = null;
+
+    function isCollapsed() {
+        var w = window.innerWidth;
+        if (w >= 1024) return !sidebar.classList.contains('is-open');
+        if (w >= 768)  return true;   // tablet — permanent rail
+        return false;                  // mobile — full-label drawer
+    }
+
+    function ensureTip() {
+        if (tooltip) return tooltip;
+        tooltip = document.createElement('div');
+        tooltip.className = 'ff-nav-tooltip';
+        tooltip.setAttribute('role', 'tooltip');
+        document.body.appendChild(tooltip);
+        return tooltip;
+    }
+
+    function readLabel(item) {
+        var labelEl = item.querySelector('.nav-item-label');
+        return labelEl ? labelEl.textContent.trim() : '';
+    }
+
+    function show(e) {
+        if (!isCollapsed()) return;
+        var item = e.currentTarget;
+        var text = readLabel(item);
+        if (!text) return;
+
+        var tip = ensureTip();
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+
+        tip.textContent = text;
+
+        // Position to the right of the nav-item, vertically centered.
+        // 8px gap from the sidebar edge so the tooltip doesn't touch
+        // the icon's hover surface.
+        var rect = item.getBoundingClientRect();
+        tip.style.left = (rect.right + 8) + 'px';
+        tip.style.top  = (rect.top + rect.height / 2) + 'px';
+        tip.classList.add('is-visible');
+    }
+
+    function hide() {
+        if (!tooltip) return;
+        // Tiny delay so tooltip doesn't flicker if the mouse moves
+        // between adjacent nav-items in quick succession.
+        hideTimer = setTimeout(function () {
+            tooltip.classList.remove('is-visible');
+        }, 40);
+    }
+
+    sidebar.querySelectorAll('.nav-item').forEach(function (item) {
+        item.addEventListener('mouseenter', show);
+        item.addEventListener('mouseleave', hide);
+        item.addEventListener('focus',  show);
+        item.addEventListener('blur',   hide);
+    });
 })();
 </script>
 
