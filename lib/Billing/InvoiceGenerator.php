@@ -57,15 +57,20 @@ namespace FleetForge\Billing;
 
 class InvoiceGenerator
 {
-    private ProRateCalculator $proRate;
-    private TaxCalculator     $taxCalc;
-    private LateFeeEngine     $lateFee;
+    private ProRateCalculator     $proRate;
+    private HolisticLeaseEngine   $holistic;
+    private TaxCalculator         $taxCalc;
+    private LateFeeEngine         $lateFee;
 
     public function __construct()
     {
-        $this->proRate = new ProRateCalculator();
-        $this->taxCalc = new TaxCalculator();
-        $this->lateFee = new LateFeeEngine();
+        $this->proRate  = new ProRateCalculator();
+        // S-BILLING-HOLISTIC-ENGINE: new running-reconciliation engine.
+        // Dispatched in createFromLease() based on lease.engine_version
+        // ('holistic' → this engine; 'period_independent' → ProRateCalculator).
+        $this->holistic = new HolisticLeaseEngine();
+        $this->taxCalc  = new TaxCalculator();
+        $this->lateFee  = new LateFeeEngine();
     }
 
     /**
@@ -134,24 +139,135 @@ class InvoiceGenerator
             $endDt = new \DateTimeImmutable($periodEnd);
             $days = (int)$startDt->diff($endDt)->days + 1;
 
-            // --- Step 1: Base rental via ProRateCalculator ---
+            // --- Step 1: Base rental — engine dispatch ---
+            // S-BILLING-HOLISTIC-ENGINE: branch on lease.engine_version.
+            //   'holistic'           → HolisticLeaseEngine (running reconciliation)
+            //   'period_independent' → ProRateCalculator (legacy THE LAW per period)
+            //
             // ADV-BILL-1: 'mileage_only' (used by close.php for advance leases when
             // mileage overage needs its own invoice) skips the base rental entirely —
             // the only line items come from extra_lines.
             $lineItems = [];
             $sortOrder = 0;
 
+            // Holistic-engine audit fields. Populated only on the holistic
+            // path; remain NULL for the legacy path so the invoices row
+            // truthfully reflects which engine generated it.
+            $holisticTotalDays         = null;
+            $holisticCumulativeCorrect = null;
+            $holisticAlreadyBilled     = null;
+            $holisticAuditMeta         = null;
+
+            // Default values for the legacy path's existing variables.
+            $rentalAmount = '0.00';
+            $rateMethod   = 'none';
+            $explanation  = [];
+            $holisticLineItem = null;  // Set by holistic branch when delta != 0
+
+            $engineVersion = (string)($lease['engine_version'] ?? 'period_independent');
+
             if ($billingType === 'mileage_only') {
+                // Both engines skip base_rental for mileage_only invoices.
                 $rentalAmount = '0.00';
                 $rateMethod   = 'none';
                 $explanation  = ['Mileage-only adjustment — no base rental.'];
+            } elseif ($engineVersion === 'holistic') {
+                // ── Holistic engine path ────────────────────────────
+                // D20: lock the lease row for the duration of the
+                // already_billed read + later UPDATE counters. Mirrors
+                // the drawdown emit pattern at lines ~543-547 so concurrent
+                // invoice generation on the same lease serializes cleanly.
+                db_row(
+                    "SELECT id FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                    [$leaseId]
+                );
+
+                // Spec §35.3: activation = first invoice on this lease (i.e.
+                // already_billed = 0.00). The engine itself confirms this
+                // against ground truth; we pass true when billing_type is
+                // partial_start (the typical activation signature) and let
+                // the engine veto if already_billed > 0.
+                $callerActivationGuess = in_array($billingType, ['partial_start', 'full_month', 'single_period'], true);
+
+                $engineResult = $this->holistic->calculateForInvoice([
+                    'lease_id'             => $leaseId,
+                    'start_date'           => (string)$lease['start_date'],
+                    'period_start'         => $periodStart,
+                    'period_end'           => $periodEnd,
+                    'daily_rate'           => (string)$lease['daily_rate'],
+                    'weekly_rate'          => (string)$lease['weekly_rate'],
+                    'monthly_rate'         => (string)$lease['monthly_rate'],
+                    'is_activation_invoice'=> $callerActivationGuess,
+                ]);
+
+                // Capture audit-column values for the invoices INSERT and
+                // the audit_log entry. Always populated on the holistic path
+                // (even when the engine emits no line item, the audit
+                // columns reflect the engine's evaluation).
+                $holisticTotalDays         = $engineResult['total_days_so_far'];
+                $holisticCumulativeCorrect = $engineResult['cumulative_correct'];
+                $holisticAlreadyBilled     = $engineResult['already_billed'];
+                $holisticAuditMeta         = $engineResult['audit_meta'];
+
+                // rate_method_used is constrained by the invoices.rate_method_used
+                // ENUM ('daily','weekly','weekly_capped','monthly','none').
+                // Map the engine's richer tier vocabulary to that column.
+                $rateMethod = $this->mapTierToRateMethod($engineResult['tier']);
+                // For the line item, also map via a separate helper so the
+                // invoice_line_items.rate_method ENUM (same set + null) is
+                // never assigned a value outside its domain.
+                $lineRateMethod = $rateMethod === 'none' ? null : $rateMethod;
+                $explanation    = $engineResult['explanation'];
+
+                // For the legacy variable rentalAmount (used by lease_billing_periods
+                // base_amount + the D132 zero-base backstop below): use the
+                // engine's chosen amount when emitting base_rental, else $0.
+                // The reconciliation-credit case legitimately ships $0 base_amount
+                // on lease_billing_periods (the credit is on the new line item).
+                if ($engineResult['line_item_type'] === 'base_rental') {
+                    $rentalAmount = $engineResult['amount'];
+                } else {
+                    $rentalAmount = '0.00';
+                }
+
+                // Emit the engine's chosen line (if any). The legacy
+                // per-line append below for the period_independent branch
+                // handles the 'base_rental' shape; for the holistic engine
+                // we go through a parallel append so the description and
+                // detail_lines reflect the running reconciliation.
+                if ($engineResult['line_item_type'] !== 'none') {
+                    $holisticDescription = $engineResult['line_item_type'] === 'base_rental'
+                        ? "Base rental: {$periodStart} to {$periodEnd} ({$days} days, lease day "
+                          . max(1, $holisticTotalDays - $days + 1) . "-{$holisticTotalDays})"
+                        : "Base rental reconciliation credit: prior periods overcharged at lower tier (lease day {$holisticTotalDays} cumulative \${$holisticCumulativeCorrect} vs already billed \${$holisticAlreadyBilled})";
+
+                    $holisticLineItem = [
+                        'sort_order'   => $sortOrder++,
+                        'item_type'    => $engineResult['line_item_type'],
+                        'description'  => $holisticDescription,
+                        'detail_lines' => json_encode($holisticAuditMeta),
+                        'quantity'     => '1.0000',
+                        'unit'         => 'period',
+                        'unit_price'   => $engineResult['amount'],
+                        'amount'       => $engineResult['amount'],
+                        'is_credit'    => $engineResult['is_credit'],
+                        'taxable'      => 1,
+                        'billing_days' => $days,
+                        'rate_method'  => $lineRateMethod,
+                        'period_start' => $periodStart,
+                        'period_end'   => $periodEnd,
+                    ];
+                    $lineItems[] = $holisticLineItem;
+                }
+                // If line_item_type === 'none' (delta = 0), emit no
+                // base_rental line — spec §7.5.
             } elseif ($billingType === 'full_month') {
-                // Full month = flat monthly rate, no formula
+                // Legacy period_independent path: full month = flat monthly rate
                 $rentalAmount = bcround((string)$lease['monthly_rate'], 2);
                 $rateMethod = 'monthly';
                 $explanation = ['Full month — flat monthly rate: $' . $rentalAmount];
             } else {
-                // Partial period — use THE LAW
+                // Legacy period_independent path: partial period — use THE LAW
                 $result = $this->proRate->calculate(
                     $days,
                     (string)$lease['daily_rate'],
@@ -173,9 +289,18 @@ class InvoiceGenerator
             // would silently ship a $0 base_rental. Mirror the calculator's
             // fail-loud behaviour here. mileage_only / adjustment / credit_note
             // legitimately carry $0 base_rental and are exempt.
+            //
+            // S-BILLING-HOLISTIC-ENGINE: the holistic engine throws its own
+            // BillingRateException for the analogous zero-rate-with-period-days
+            // case (mirrors ProRateCalculator::assertNonZero), AND legitimately
+            // emits $0 base_rental when delta=0 OR when the engine emitted a
+            // reconciliation credit instead of a base_rental. So the holistic
+            // path is exempt from this belt-and-suspenders check — its own
+            // throw at the engine boundary is the load-bearing guard.
             // ════════════════════════════════════════════════════════════════
             $zeroAllowed = ['mileage_only', 'adjustment', 'credit_note'];
-            if (!in_array($billingType, $zeroAllowed, true)
+            if ($engineVersion !== 'holistic'
+                && !in_array($billingType, $zeroAllowed, true)
                 && bccomp($rentalAmount, '0', 2) <= 0) {
                 throw new BillingRateException(
                     sprintf(
@@ -197,7 +322,11 @@ class InvoiceGenerator
 
             // ADV-BILL-1: skip the base_rental and insurance/warranty lines on
             // mileage_only adjustment invoices — they only carry mileage extra_lines.
-            if ($billingType !== 'mileage_only') {
+            //
+            // S-BILLING-HOLISTIC-ENGINE: the holistic path emits its own line
+            // above (or none, for delta=0). Skip the legacy append in both
+            // cases.
+            if ($billingType !== 'mileage_only' && $engineVersion !== 'holistic') {
                 $lineItems[] = [
                     'sort_order'   => $sortOrder++,
                     'item_type'    => 'base_rental',
@@ -688,55 +817,85 @@ class InvoiceGenerator
                 }
             }
 
-            // --- S-FIX-2 Bug #3: mileage_credit overflow cap ---
+            // --- S-FIX-2 Bug #3 + S-BILLING-HOLISTIC-ENGINE: credit overflow cap ---
             // If the credit lines drive subtotal below $0, cap the first
-            // mileage_credit line so subtotal floors at $0 and route the
-            // remainder to a credit_notes row (source='mileage_overpayment').
-            // The credit_note is created AFTER the invoice INSERT below; we
-            // capture the overflow here so the invoice rows reflect the cap.
-            $mileageOverflow = '0.00';
+            // cappable credit line (mileage_credit OR
+            // base_rental_reconciliation_credit) so subtotal floors at $0
+            // and route the remainder to a credit_notes row. Source:
+            //   mileage_credit                       → 'mileage_overpayment'
+            //   base_rental_reconciliation_credit    → 'base_rental_reconciliation_overflow'
+            //
+            // The credit_note is created AFTER the invoice INSERT below;
+            // we capture the overflow + source here so the invoice rows
+            // reflect the cap.
+            //
+            // S-BILLING-HOLISTIC-ENGINE extension: the holistic engine
+            // can emit a base_rental_reconciliation_credit larger than
+            // the rest of the invoice subtotal (e.g. when a single
+            // big-tier-drop reconciliation lands on a low-add-on invoice).
+            // The cap mechanism is identical to the mileage_credit path —
+            // only the credit_notes.source differs so reports can
+            // distinguish the two overflow sources.
+            $mileageOverflow         = '0.00';   // legacy name retained for blast-radius minimality
+            $mileageOverflowSource   = null;     // null | 'mileage_overpayment' | 'base_rental_reconciliation_overflow'
             if (bccomp($subtotal, '0', 2) < 0) {
                 $mileageOverflow = bcmul($subtotal, '-1', 2); // abs($subtotal)
 
+                // Cappable types in priority order. mileage_credit goes
+                // first to preserve the pre-S-BILLING-HOLISTIC-ENGINE
+                // behaviour byte-for-byte when both credit types are
+                // present on the same invoice (vanishingly rare in
+                // practice — the holistic engine emits a reconciliation
+                // credit on an invoice that already carries a mileage
+                // credit only in a contrived test scenario).
+                $cappableTypes = ['mileage_credit', 'base_rental_reconciliation_credit'];
+
                 $capApplied = false;
-                foreach ($lineItems as &$capItem) {
-                    if (($capItem['item_type'] ?? '') === 'mileage_credit'
-                        && !empty($capItem['is_credit'])) {
-                        $originalCredit = (string) $capItem['amount'];
-                        $newCredit      = bcsub($originalCredit, $mileageOverflow, 2);
-                        if (bccomp($newCredit, '0', 2) < 0) {
-                            // The overflow exceeds this single line — not expected,
-                            // but defensively cap to 0 and surface the residual.
-                            $newCredit = '0.00';
-                        }
-                        $capItem['amount'] = $newCredit;
+                foreach ($cappableTypes as $cappableType) {
+                    foreach ($lineItems as &$capItem) {
+                        if (($capItem['item_type'] ?? '') === $cappableType
+                            && !empty($capItem['is_credit'])) {
+                            $originalCredit = (string) $capItem['amount'];
+                            $newCredit      = bcsub($originalCredit, $mileageOverflow, 2);
+                            if (bccomp($newCredit, '0', 2) < 0) {
+                                // The overflow exceeds this single line — not expected,
+                                // but defensively cap to 0 and surface the residual.
+                                $newCredit = '0.00';
+                            }
+                            $capItem['amount'] = $newCredit;
 
-                        $detail = isset($capItem['detail_lines'])
-                            ? json_decode((string) $capItem['detail_lines'], true)
-                            : [];
-                        if (!is_array($detail)) {
-                            $detail = ['note' => (string) ($capItem['detail_lines'] ?? '')];
-                        }
-                        $detail['cap_applied']                    = true;
-                        $detail['original_credit_amount']         = $originalCredit;
-                        $detail['capped_to']                      = $newCredit;
-                        $detail['overflow_routed_to_credit_note'] = $mileageOverflow;
-                        $capItem['detail_lines'] = json_encode($detail);
+                            $detail = isset($capItem['detail_lines'])
+                                ? json_decode((string) $capItem['detail_lines'], true)
+                                : [];
+                            if (!is_array($detail)) {
+                                $detail = ['note' => (string) ($capItem['detail_lines'] ?? '')];
+                            }
+                            $detail['cap_applied']                    = true;
+                            $detail['original_credit_amount']         = $originalCredit;
+                            $detail['capped_to']                      = $newCredit;
+                            $detail['overflow_routed_to_credit_note'] = $mileageOverflow;
+                            $capItem['detail_lines'] = json_encode($detail);
 
-                        $capApplied = true;
-                        break;
+                            $mileageOverflowSource = $cappableType === 'mileage_credit'
+                                ? 'mileage_overpayment'
+                                : 'base_rental_reconciliation_overflow';
+
+                            $capApplied = true;
+                            break 2;  // exit both loops
+                        }
                     }
+                    unset($capItem);
                 }
-                unset($capItem);
 
                 if (!$capApplied) {
-                    // No mileage_credit line is present, yet the subtotal went
-                    // negative. That means a different is_credit line (manual,
-                    // goodwill, etc.) caused it — refuse rather than silently
+                    // No mileage_credit or base_rental_reconciliation_credit
+                    // line is present, yet the subtotal went negative. That
+                    // means a different is_credit line (manual, goodwill,
+                    // etc.) caused it — refuse rather than silently
                     // rewriting a deliberate adjustment. Caller should split.
                     json_error(
                         'VALIDATION_ERROR',
-                        'Invoice subtotal is negative but no mileage_credit line is present to cap. Reduce other credit line items or split into a separate credit_note.',
+                        'Invoice subtotal is negative but no mileage_credit or base_rental_reconciliation_credit line is present to cap. Reduce other credit line items or split into a separate credit_note.',
                         422
                     );
                 }
@@ -898,6 +1057,13 @@ class InvoiceGenerator
                 'cumulative_distance_km'      => $cumulativeDistanceKm,
                 'odometer_source'             => $odometerSource,
                 'odometer_fetched_at'         => $odometerFetchedAt,
+                // S-BILLING-HOLISTIC-ENGINE: forensic audit columns. NULL
+                // for period_independent leases; populated for every holistic
+                // invoice so a future auditor can replay the math without
+                // rebuilding it from line items.
+                'total_days_at_period_end'    => $holisticTotalDays,
+                'cumulative_correct_amount'   => $holisticCumulativeCorrect,
+                'already_billed_before_this'  => $holisticAlreadyBilled,
                 'auto_generated'            => (int)($params['auto_generated'] ?? 0),
                 'generation_source'         => $params['generation_source'] ?? 'manual',
                 'created_by'                => $params['created_by'] ?? null,
@@ -977,6 +1143,50 @@ class InvoiceGenerator
                 ]);
             }
 
+            // ── S-BILLING-HOLISTIC-ENGINE: audit holistic engine ────────
+            // Fires for every invoice generated by the holistic engine
+            // (including delta=0 invoices that emit no line item — the
+            // audit trail still records that the engine evaluated this
+            // period). Spec §20.3 + Appendix C.
+            //
+            // entity_type='invoice_holistic_reconciliation' searchable
+            // alongside the other invoice-related entity_types. action
+            // ENUM doesn't include 'reconcile'; carry descriptive value
+            // in entity_type + notes per D102/D123 pattern. Single row
+            // per invoice — the JSON payload (audit_meta) carries the
+            // full forensic trail.
+            if ($holisticAuditMeta !== null) {
+                $auditNotes = sprintf(
+                    'Holistic engine: tier=%s, total_days=%d, cumulative_correct=$%s, already_billed=$%s, delta=$%s (line_item_type=%s, rule=%s)',
+                    $holisticAuditMeta['tier'],
+                    $holisticAuditMeta['total_days_so_far'],
+                    $holisticAuditMeta['cumulative_correct'],
+                    $holisticAuditMeta['already_billed'],
+                    $holisticAuditMeta['delta'],
+                    $holisticAuditMeta['line_item_type'],
+                    $holisticAuditMeta['rule']
+                );
+                db_insert('audit_log', [
+                    'user_id'      => $params['created_by'] ?? null,
+                    'user_name'    => (function_exists('current_user') && current_user())
+                                        ? (current_user()['name'] ?? 'system') : 'system',
+                    'action'       => 'create',
+                    'module'       => 'billing',
+                    'entity_type'  => 'invoice_holistic_reconciliation',
+                    'entity_id'    => $invoiceId,
+                    'entity_label' => $invoiceNumber,
+                    'notes'        => $auditNotes,
+                    'new_values'   => json_encode(array_merge(
+                        $holisticAuditMeta,
+                        [
+                            'invoice_id'     => $invoiceId,
+                            'invoice_number' => $invoiceNumber,
+                        ]
+                    )),
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+            }
+
             // --- Insert line items ---
             foreach ($lineItems as $item) {
                 // Calculate per-line tax for line items that are taxable
@@ -1043,11 +1253,16 @@ class InvoiceGenerator
             // (Historical comment "Trap 6 customer outstanding_balance" removed —
             //  the customer counter now follows Path B canonical truth.)
 
-            // S-FIX-2 Bug #3: route the mileage credit overflow (if any) to a
-            // credit_notes row with source='mileage_overpayment'. Created after
-            // the invoice INSERT so source_invoice_id can reference the new
-            // invoice. Same db_transaction → JE rolls back if either fails.
-            // No tax: a customer credit liability is not a billable line.
+            // S-FIX-2 Bug #3 + S-BILLING-HOLISTIC-ENGINE: route the credit
+            // overflow (if any) to a credit_notes row. The source is chosen
+            // above by the cap loop:
+            //   'mileage_overpayment'                  — mileage_credit cap
+            //   'base_rental_reconciliation_overflow'  — holistic reconciliation cap
+            //
+            // Created after the invoice INSERT so source_invoice_id can
+            // reference the new invoice. Same db_transaction → JE rolls
+            // back if either fails. No tax: a customer credit liability
+            // is not a billable line.
             if (bccomp($mileageOverflow ?? '0', '0', 2) > 0) {
                 $cnYear   = date('Y');
                 $cnKey    = "credit_note.next_number.{$cnYear}";
@@ -1064,17 +1279,28 @@ class InvoiceGenerator
                     );
                 }
 
+                // Branch the human-readable reason on the source. Defaults
+                // to the legacy mileage wording when source wasn't set
+                // (paranoia — the cap loop always sets it when overflow > 0).
+                $effectiveSource = $mileageOverflowSource ?? 'mileage_overpayment';
+                $cnReason = $effectiveSource === 'base_rental_reconciliation_overflow'
+                    ? "Base rental reconciliation credit exceeded invoice subtotal — overflow routed to account credit (S-BILLING-HOLISTIC-ENGINE, invoice {$invoiceNumber})."
+                    : "Mileage credit exceeded final invoice subtotal — overflow routed to account credit (S-FIX-2 Bug #3, invoice {$invoiceNumber}).";
+                $cnAuditNote = $effectiveSource === 'base_rental_reconciliation_overflow'
+                    ? "Auto-created from base_rental_reconciliation_credit overflow (S-BILLING-HOLISTIC-ENGINE) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$mileageOverflow}."
+                    : "Auto-created from mileage credit overflow (S-FIX-2 Bug #3) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$mileageOverflow}.";
+
                 $cnId = db_insert('credit_notes', [
                     'credit_note_number' => $cnNumber,
                     'customer_id'        => $lease['customer_id'],
                     'lease_id'           => $leaseId,
-                    'source'             => 'mileage_overpayment',
+                    'source'             => $effectiveSource,
                     'source_invoice_id'  => $invoiceId,
                     'amount'             => $mileageOverflow,
                     'currency'           => $lease['currency'],
                     'amount_remaining'   => $mileageOverflow,
                     'status'             => 'active',
-                    'reason'             => "Mileage credit exceeded final invoice subtotal — overflow routed to account credit (S-FIX-2 Bug #3, invoice {$invoiceNumber}).",
+                    'reason'             => $cnReason,
                     'created_by'         => $params['created_by'] ?? null,
                 ]);
 
@@ -1087,7 +1313,7 @@ class InvoiceGenerator
                     'entity_type'  => 'credit_note',
                     'entity_id'    => $cnId,
                     'entity_label' => $cnNumber,
-                    'notes'        => "Auto-created from mileage credit overflow (S-FIX-2 Bug #3) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$mileageOverflow}.",
+                    'notes'        => $cnAuditNote,
                     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
                 ]);
 
@@ -1534,5 +1760,30 @@ class InvoiceGenerator
         }
 
         return $invoiceNumber;
+    }
+
+    /**
+     * S-BILLING-HOLISTIC-ENGINE: map the holistic engine's tier
+     * vocabulary to the invoices.rate_method_used ENUM domain
+     * (daily / weekly / weekly_capped / monthly / none).
+     *
+     * The engine reports tiers as: 'none', 'daily', 'weekly_flat',
+     * 'weekly_math', 'weekly_capped', 'monthly_math'. The DB column
+     * doesn't distinguish flat-vs-math weeklies (both bill weekly)
+     * and uses 'monthly' for any 30+ day tier. Collapse accordingly.
+     *
+     * The same mapping is reused for invoice_line_items.rate_method,
+     * which shares the ENUM with one nullable difference (caller wraps).
+     */
+    private function mapTierToRateMethod(string $tier): string
+    {
+        return match ($tier) {
+            'daily'         => 'daily',
+            'weekly_flat'   => 'weekly',
+            'weekly_math'   => 'weekly',
+            'weekly_capped' => 'weekly_capped',
+            'monthly_math'  => 'monthly',
+            default         => 'none',  // 'none' or any unknown
+        };
     }
 }
