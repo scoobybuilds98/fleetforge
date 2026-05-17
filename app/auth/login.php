@@ -504,7 +504,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
            regardless of the PNG's exact internal padding ratio.
            Long-term clean fix is a tightly-cropped PNG (see
            DESIGN_DETAILS.md §3.1 step 2). */
-        .login-brand           { text-align: center; margin-bottom: 28px; }
+        .login-brand           { text-align: center; margin-bottom: 40px; }
         .login-logo-img        { max-height: 100px; max-width: 200px; object-fit: contain; display: block; margin: -14px auto -4px; }
         .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
         .login-company-name    {
