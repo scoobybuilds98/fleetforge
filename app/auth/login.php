@@ -495,12 +495,17 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
         /* Logo sized to claim the card's interior width (~352px after
            padding). max-height generous so width-dominant wordmarks can
            render at full size without the height cap clipping in.
-           Negative top/bottom margins compensate for the transparent
-           padding most logo PNGs carry inside their bounding box —
-           the visible logo stays the same size but the empty space
-           around it collapses, pulling the heading closer. */
-        .login-brand           { text-align: center; margin-bottom: 8px; }
-        .login-logo-img        { max-height: 160px; max-width: 320px; object-fit: contain; display: block; margin: -24px auto -24px; }
+           Asymmetric negative margins compensate for the transparent
+           padding inside the source PNG: the top padding is larger
+           than the bottom in the operator's current logo, so we pull
+           the image UP harder (-22px) than we pull the following
+           content UP (-4px). The 14px brand-block margin-bottom then
+           guarantees the heading never overlaps the visible logo
+           regardless of the PNG's exact internal padding ratio.
+           Long-term clean fix is a tightly-cropped PNG (see
+           DESIGN_DETAILS.md §3.1 step 2). */
+        .login-brand           { text-align: center; margin-bottom: 14px; }
+        .login-logo-img        { max-height: 160px; max-width: 320px; object-fit: contain; display: block; margin: -22px auto -4px; }
         .login-logo-placeholder{ display: flex; justify-content: center; margin: 0 auto 14px; }
         .login-company-name    {
             font-size: 1.5rem;

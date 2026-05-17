@@ -261,18 +261,21 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
         }
 
         /* ── Brand block ──
-           Negative top/bottom margins on the logo compensate for the
-           transparent padding most logo PNGs carry inside their
-           bounding box — visible logo stays the same size, empty
-           space around it collapses. Mirrors app/auth/login.php. */
-        .portal-login-brand   { text-align: center; margin-bottom: 8px; }
+           Asymmetric negative margins compensate for the transparent
+           padding inside the source PNG: top padding > bottom padding
+           in the operator's current logo, so we pull the image UP
+           harder (-22px) than we pull the following content UP (-4px).
+           The 14px brand-block margin-bottom then guarantees the
+           heading never overlaps the visible logo. Mirrors admin
+           login. Long-term clean fix is a tightly-cropped PNG. */
+        .portal-login-brand   { text-align: center; margin-bottom: 14px; }
         .portal-login-logo    { display: flex; justify-content: center; margin: 0 auto; }
         .portal-login-logo-img {
             max-height: 160px;
             max-width: 320px;
             object-fit: contain;
             display: block;
-            margin: -24px auto -24px;
+            margin: -22px auto -4px;
         }
         .portal-login-logo-placeholder { display: flex; justify-content: center; margin: 0 auto 14px; }
         .portal-login-title {
