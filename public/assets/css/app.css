@@ -594,12 +594,18 @@ kbd {
 }
 
 /* ── Brand / Logo ──────────────────────── */
+/* S-DESIGN-LOGO-BIGGER: brand area decoupled from --topbar-height
+   so the logo can render at a presence-worthy size regardless of
+   the topbar's 60px constraint. 96px tall gives a wide wordmark
+   room to breathe in the open sidebar. The topbar still anchors
+   at 60px, producing a deliberate L-step that reads as "brand
+   block extends below header" — common premium-app pattern. */
 .sidebar-brand {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 12px 0 16px;
-    height: var(--topbar-height);
+    padding: 12px 12px 12px 16px;
+    height: 96px;
     border-bottom: 1px solid var(--sidebar-border);
     flex-shrink: 0;
 }
@@ -613,14 +619,15 @@ kbd {
     min-width: 0;
 }
 
-/* S-DESIGN-LOGO-TOPBAR: logo enlarged from 32×32 to 44px-tall × auto-width
-   so an uploaded wordmark is actually legible. width:auto preserves the
-   source aspect ratio; max-width caps a very wide logo so it does not
-   crowd the collapse button. */
+/* S-DESIGN-LOGO-BIGGER: logo grows to 72px tall × auto width within a
+   220px max so wide wordmarks (e.g. "BLUE CAPITAL — EQUIPMENT FINANCE")
+   read clearly. width:auto preserves the source aspect ratio; max-width
+   caps it so the logo never collides with the collapse button on the
+   right. object-fit:contain ensures no cropping. */
 .sidebar-logo {
-    height: 44px;
+    height: 72px;
     width: auto;
-    max-width: 168px;
+    max-width: 220px;
     border-radius: var(--radius-md);
     object-fit: contain;
     flex-shrink: 0;
@@ -630,16 +637,16 @@ kbd {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
+    width: 56px;
+    height: 56px;
     background: var(--color-primary);
     border-radius: var(--radius-md);
     flex-shrink: 0;
 }
 
 .brand-icon {
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     color: #ffffff;
 }
 
@@ -951,16 +958,26 @@ kbd {
         padding: 0 8px;
     }
 
-    /* S-DESIGN-LOGO-TOPBAR: cap the bigger logo when the sidebar
+    /* S-DESIGN-LOGO-BIGGER: cap the bigger logo when the sidebar
        collapses to icon-only so a wide wordmark doesn't overflow
-       the 64px-wide collapsed track. */
+       the 64px-wide collapsed track. Brand area also returns to
+       topbar-height in collapsed mode so the L-step disappears
+       when the user has compacted the chrome. */
+    .sidebar:not(.is-open) .sidebar-brand {
+        height: var(--topbar-height);
+        padding: 0 8px;
+    }
     .sidebar:not(.is-open) .sidebar-logo {
-        max-width: 40px;
-        height: 36px;
+        max-width: 44px;
+        height: 40px;
     }
     .sidebar:not(.is-open) .sidebar-brand-icon {
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
+    }
+    .sidebar:not(.is-open) .brand-icon {
+        width: 24px;
+        height: 24px;
     }
 
     .sidebar:not(.is-open) .sidebar-collapse-btn {
@@ -5386,6 +5403,21 @@ dl.detail-grid dd {
     .sidebar .sidebar-brand {
         justify-content: center;
         padding: 0 8px;
+        /* S-DESIGN-LOGO-BIGGER: tablet sidebar is always icon-only,
+           so the brand area should match topbar height (no L-step). */
+        height: var(--topbar-height);
+    }
+    .sidebar .sidebar-logo {
+        max-width: 44px;
+        height: 40px;
+    }
+    .sidebar .sidebar-brand-icon {
+        width: 40px;
+        height: 40px;
+    }
+    .sidebar .brand-icon {
+        width: 24px;
+        height: 24px;
     }
     .sidebar .sidebar-collapse-btn {
         display: none;
