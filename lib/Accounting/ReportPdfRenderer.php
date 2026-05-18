@@ -245,6 +245,53 @@ class ReportPdfRenderer
         self::emit($html, $title, 'A4', 'L');
     }
 
+    /**
+     * Render the Book vs Tax temporary-difference schedule (portrait A4).
+     * Session: S-ACCT-CCA-2
+     */
+    public static function bookTaxDifferences(array $report): void
+    {
+        $title  = 'Book vs Tax — Temporary Differences';
+        $period = 'Fiscal Year ' . $report['fiscal_year'];
+
+        $html  = self::headerHtml($title, $period);
+
+        $html .= '<div class="banner-amber">';
+        $html .= '<strong>Method: ' . htmlspecialchars($report['method']) . '</strong> — '
+               . htmlspecialchars($report['disclosure_note']);
+        $html .= '</div>';
+
+        $html .= '<table class="rpt"><thead><tr>';
+        $html .= '<th>Item</th>';
+        $html .= '<th style="text-align:right;">Book Amount</th>';
+        $html .= '<th style="text-align:right;">Tax Amount</th>';
+        $html .= '<th style="text-align:right;">Temp Diff</th>';
+        $html .= '<th>Nature</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($report['items'] as $i) {
+            $hl = bccomp($i['temp_diff'], '0', 2) !== 0 ? ' style="background:#f7f9fc;"' : '';
+            $html .= '<tr' . $hl . '>';
+            $html .= '<td>' . htmlspecialchars($i['item']) . '</td>';
+            $html .= '<td class="amt">' . self::money($i['book_amount']) . '</td>';
+            $html .= '<td class="amt">' . self::money($i['tax_amount']) . '</td>';
+            $html .= '<td class="amt"><strong>' . self::money($i['temp_diff']) . '</strong></td>';
+            $html .= '<td>' . htmlspecialchars($i['nature']) . '</td>';
+            $html .= '</tr>';
+            if (!empty($i['note'])) {
+                $html .= '<tr><td colspan="5" style="background:#fafafa;font-size:8pt;color:#555;font-style:italic;padding:4px 12px;">'
+                       . htmlspecialchars($i['note']) . '</td></tr>';
+            }
+        }
+
+        $html .= '<tr class="grand"><td colspan="3"><strong>Total Temporary Difference</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($report['total_temp_diff']) . '</strong></td>';
+        $html .= '<td></td></tr>';
+        $html .= '</tbody></table>';
+
+        self::emit($html, $title, 'A4', 'P');
+    }
+
     public static function balanceSheet(array $report): void
     {
         $title  = 'Balance Sheet';

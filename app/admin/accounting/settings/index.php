@@ -336,7 +336,19 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
-        <!-- WHY: Tax rates and reminder settings will be added in the Tax Management phase (S033) -->
+        <!-- S-ACCT-CCA-2: AIIP proposed reinstatement toggle. -->
+        <div style="margin-top:20px;padding:14px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-subtle);">
+            <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+                <input type="checkbox" x-model="tax_filing.aiip_proposed_reinstatement_enabled">
+                AIIP 2024 FES Proposed Reinstatement
+            </label>
+            <p style="margin:6px 0 0 24px;font-size:0.75rem;color:#6b4900;background:#fff7d6;border:1px solid #b8860b;padding:8px 12px;border-radius:4px;">
+                ⚠ This toggle applies a proposed-but-not-yet-enacted CRA rule. When enabled,
+                acquisitions on or after Jan 1 2025 receive full AIIP (1.5× multiplier,
+                half-year suspended) per the proposed Budget 2024 reinstatement.
+                <strong>Confirm with your accountant before enabling.</strong>
+            </p>
+        </div>
 
         <div style="margin-top:20px;">
             <button class="btn btn-primary btn-sm" @click="saveTaxFiling()" :disabled="saving.tax_filing">
@@ -403,10 +415,11 @@ function FF_AcctSettings() {
         },
 
         // WHY: DB keys are accounting.gst_filing_frequency, accounting.pst_filing_frequency
-        // No depreciation account or tax rate/reminder settings in DB yet
+        // S-ACCT-CCA-2 added aiip_proposed_reinstatement_enabled (boolean stored as '0'/'1' string).
         tax_filing: {
             gst_filing_frequency:  <?= json_encode($settings['gst_filing_frequency'] ?? 'quarterly') ?>,
-            pst_filing_frequency:  <?= json_encode($settings['pst_filing_frequency'] ?? 'quarterly') ?>
+            pst_filing_frequency:  <?= json_encode($settings['pst_filing_frequency'] ?? 'quarterly') ?>,
+            aiip_proposed_reinstatement_enabled: <?= json_encode(($settings['aiip_proposed_reinstatement_enabled'] ?? '0') === '1') ?>
         },
 
         // ── Saving state per tab ───────────────────────────────
@@ -648,7 +661,8 @@ function FF_AcctSettings() {
             if (!this.validateTaxFiling()) return;
             this._save('tax_filing', {
                 'accounting.gst_filing_frequency':  this.tax_filing.gst_filing_frequency,
-                'accounting.pst_filing_frequency':  this.tax_filing.pst_filing_frequency
+                'accounting.pst_filing_frequency':  this.tax_filing.pst_filing_frequency,
+                'accounting.aiip_proposed_reinstatement_enabled': this.tax_filing.aiip_proposed_reinstatement_enabled ? '1' : '0'
             });
         }
     };

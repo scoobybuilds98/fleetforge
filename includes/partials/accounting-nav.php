@@ -74,6 +74,7 @@ $_accNavGroups = [
             ['label' => 'Asset Schedule',  'url' => '/accounting/reports/asset-schedule',  'icon' => 'truck'],
             ['label' => 'Trial Balance',   'url' => '/accounting/reports/trial-balance',   'icon' => 'scale'],
             ['label' => 'Working Trial Balance', 'url' => '/accounting/reports/working-trial-balance', 'icon' => 'clipboard-document-check'],
+            ['label' => 'Book vs Tax Differences', 'url' => '/accounting/reports/book-tax-differences', 'icon' => 'document-text'],
         ],
     ],
     [

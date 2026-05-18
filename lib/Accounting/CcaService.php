@@ -5,28 +5,37 @@ declare(strict_types=1);
  * lib/Accounting/CcaService.php
  *
  * Capital Cost Allowance (T2 Schedule 8) continuity engine per
- * ACCOUNTING_SPEC §23.3. Computes per-fiscal-year per-class UCC roll-forward
- * (opening → additions → dispositions → AIIP → half-year → CCA → recapture →
- * terminal loss → closing) and persists to acc_cca_continuity.
+ * ACCOUNTING_SPEC §23.3 + §23.4. Computes per-fiscal-year per-class UCC
+ * roll-forward (opening → additions → dispositions → AIIP → half-year →
+ * CCA → recapture → terminal loss → closing) and persists to
+ * acc_cca_continuity.
  *
- * AIIP scope: §23.4 phase-out rules are implemented in S-ACCT-CCA-2.
- * CCA-1 leaves aiip_adjustment = '0.00' and flags it in the row's notes
- * field. The half-year-rule short-circuit when AIIP is non-zero is wired
- * but currently unreachable (since aiip is always 0 here).
+ * AIIP rules (S-ACCT-CCA-2, spec §23.4) applied per-asset by
+ * computeAiipForClass() keyed off COALESCE(available_for_use_date,
+ * acquisition_date):
+ *   - Before 2018-11-20:     no AIIP, standard half-year
+ *   - 2018-11-20..2023-12-31: full AIIP (1.5× multiplier), half-year suspended
+ *   - 2024-01-01..2027-12-31: phase-out (no multiplier, half-year suspended)
+ *   - 2028-01-01..:          no AIIP, standard half-year
+ *   - Proposed 2024 FES reinstatement (when setting enabled):
+ *       2025-01-01..2029-12-31 → full AIIP reinstated
+ *       2030-01-01..2033-12-31 → phase-out treatment (simplified)
+ *       2034-01-01..           → expired, standard half-year
  *
- * Required by: api/v1/accounting/cca/{compute,export,show,lock}.php
+ * Required by: api/v1/accounting/cca/{compute,export,show,lock,aiip-detail,adjust}.php
  * Depends on: acc_cca_classes (seeded), acc_cca_continuity (per year),
  *             acc_fixed_assets.cca_class_id (set by operator),
- *             acc_asset_disposals.proceeds (per CRA on-disk column name).
+ *             acc_asset_disposals.proceeds (per CRA on-disk column name),
+ *             accounting.aiip_proposed_reinstatement_enabled (setting).
  *
- * Pre-flight column-name catches (K-22, S-ACCT-CCA-1):
+ * Pre-flight column-name catches (K-22, locked in REFERENCE.md §11 Traps 16-19):
  *   - acc_fixed_assets.acquisition_cost  (not original_cost)
  *   - acc_fixed_assets.asset_class       (not asset_category)
  *   - acc_asset_disposals.proceeds       (matches spec §23.3)
  *   - acc_fixed_assets has NO deleted_at column (hard-delete only)
  *
- * Spec ref: FLEETFORGE_ACCOUNTING_SPEC.md §23.3
- * Session: S-ACCT-CCA-1
+ * Spec refs: FLEETFORGE_ACCOUNTING_SPEC.md §23.3 (Schedule 8), §23.4 (AIIP)
+ * Sessions:  S-ACCT-CCA-1 (engine + Schedule 8 + admin), S-ACCT-CCA-2 (AIIP)
  */
 
 namespace FleetForge\Accounting;
@@ -211,20 +220,14 @@ class CcaService
         );
         $uccAfter = bcsub($uccAfter, $proceeds, 2);
 
-        // Step 6 — AIIP adjustment (CCA-2 scope)
-        $aiipAdjustment = '0.00';
-
-        // Step 7 — Half-year adjustment
-        // 0.5 × (additions − proceeds), floored at 0 (never increases base).
-        // Skipped when AIIP > 0 (CCA-2 will short-circuit). Skipped when
-        // class.half_year_rule = 0 (e.g. Class 12 100% write-off).
-        $halfYearAdjustment = '0.00';
-        if ($halfYear && bccomp($aiipAdjustment, '0', 2) === 0) {
-            $netAdditions = bcsub($additions, $proceeds, 2);
-            if (bccomp($netAdditions, '0', 2) > 0) {
-                $halfYearAdjustment = bcmul($netAdditions, '0.5', 2);
-            }
-        }
+        // Step 6 + 7 — AIIP adjustment + half-year (S-ACCT-CCA-2)
+        // computeAiipForClass returns both the aggregate AIIP adjustment and
+        // the half-year adjustment because the half-year rule is suspended
+        // when ANY asset in the class triggers AIIP suspension (spec §23.4).
+        $aiip = self::computeAiipForClass($classId, $fiscalYear, $additions, $proceeds, $halfYear);
+        $aiipAdjustment      = $aiip['aiip_adjustment'];
+        $halfYearAdjustment  = $aiip['half_year_adjustment'];
+        $aiipFallbackCount   = $aiip['fallback_count'];
 
         // Step 8 — Base amount for CCA
         $base = bcadd($uccAfter, $aiipAdjustment, 2);
@@ -272,10 +275,8 @@ class CcaService
         }
 
         $notes = null;
-        if ($fallbackCount > 0) {
-            $notes = "AIIP pending CCA-2. {$fallbackCount} addition(s) used acquisition_date fallback (available_for_use_date NULL).";
-        } else {
-            $notes = "AIIP pending CCA-2.";
+        if ($fallbackCount > 0 || $aiipFallbackCount > 0) {
+            $notes = "{$fallbackCount} addition(s) and {$aiipFallbackCount} AIIP determination(s) used acquisition_date fallback (available_for_use_date NULL).";
         }
 
         return [
@@ -461,5 +462,231 @@ class CcaService
         return 'GVWR > 11,788 kg (≈ 25,990 lbs) typically qualifies as Class 16 '
              . '(40% declining balance) or Class 55 for ZEV equivalents. '
              . 'Consider updating the CCA class.';
+    }
+
+    /**
+     * Apply the AIIP rules table (spec §23.4) to one asset based on its
+     * available-for-use date and the proposed-reinstatement setting.
+     *
+     * Returns ['treatment', 'multiplier', 'half_year_suspended', 'reason']:
+     *   treatment = short label for UI display
+     *   multiplier = bcmath string applied to acquisition_cost
+     *                (0.00 = no AIIP contribution to base)
+     *   half_year_suspended = true → class-level half-year skipped
+     *   reason = human-readable rule citation
+     *
+     * Date thresholds use string comparison on Y-m-d formatted dates.
+     */
+    public static function classifyAiipTreatment(string $availableDate, bool $reinstatementEnabled): array
+    {
+        // Before AIIP existed.
+        if ($availableDate < '2018-11-20') {
+            return [
+                'treatment' => 'no_aiip',
+                'multiplier' => '0',
+                'half_year_suspended' => false,
+                'reason' => 'Before 2018-11-20: standard half-year, no AIIP.',
+            ];
+        }
+
+        // Full AIIP era.
+        if ($availableDate >= '2018-11-20' && $availableDate <= '2023-12-31') {
+            return [
+                'treatment' => 'aiip_full',
+                'multiplier' => '1.5',
+                'half_year_suspended' => true,
+                'reason' => '2018-11-20 to 2023-12-31: full AIIP (1.5× multiplier), half-year suspended (3× first-year CCA).',
+            ];
+        }
+
+        // Phase-out era (2024-2027). Proposed reinstatement (if enabled)
+        // overrides this for 2025+ acquisitions.
+        if ($availableDate >= '2024-01-01' && $availableDate <= '2027-12-31') {
+            if ($reinstatementEnabled && $availableDate >= '2025-01-01') {
+                return [
+                    'treatment' => 'aiip_full_reinstated',
+                    'multiplier' => '1.5',
+                    'half_year_suspended' => true,
+                    'reason' => 'Proposed 2024 FES reinstatement (2025-2029): full AIIP restored.',
+                ];
+            }
+            return [
+                'treatment' => 'aiip_phaseout',
+                'multiplier' => '0',
+                'half_year_suspended' => true,
+                'reason' => '2024-2027 phase-out: half-year suspended, no multiplier (2× first-year CCA).',
+            ];
+        }
+
+        // 2028+ era (proposed reinstatement may extend AIIP to 2029).
+        if ($availableDate >= '2028-01-01' && $availableDate <= '2029-12-31') {
+            if ($reinstatementEnabled) {
+                return [
+                    'treatment' => 'aiip_full_reinstated',
+                    'multiplier' => '1.5',
+                    'half_year_suspended' => true,
+                    'reason' => 'Proposed 2024 FES reinstatement (2025-2029): full AIIP restored.',
+                ];
+            }
+            return [
+                'treatment' => 'no_aiip',
+                'multiplier' => '0',
+                'half_year_suspended' => false,
+                'reason' => '2028+: no AIIP, standard half-year (current law).',
+            ];
+        }
+
+        // 2030-2033 proposed reinstatement phase-down (simplified — CCA-2
+        // scope decision). 2030-2033 reinstatement phase-down: simplified to
+        // phase-out treatment. Update when CRA publishes step-down schedule.
+        if ($reinstatementEnabled && $availableDate >= '2030-01-01' && $availableDate <= '2033-12-31') {
+            return [
+                'treatment' => 'aiip_reinstatement_phaseout',
+                'multiplier' => '0',
+                'half_year_suspended' => true,
+                'reason' => 'Proposed 2024 FES reinstatement 2030-2033 phase-down: simplified to phase-out (no multiplier, half-year suspended). Update when CRA publishes step-down schedule.',
+            ];
+        }
+
+        // 2034+ or any date with reinstatement disabled past 2028.
+        return [
+            'treatment' => 'no_aiip',
+            'multiplier' => '0',
+            'half_year_suspended' => false,
+            'reason' => '2034+ or post-AIIP era: standard half-year, no AIIP.',
+        ];
+    }
+
+    /**
+     * Compute AIIP adjustment + half-year adjustment for a class in a
+     * fiscal year. Applies the spec §23.4 rules table per-asset, then
+     * aggregates: aiip_adjustment = Σ (multiplier × acquisition_cost) over
+     * AIIP-eligible assets; half-year = 0.5 × (additions − proceeds) unless
+     * ANY asset in the class triggers half-year suspension (in which case 0).
+     *
+     * The is_aiip_eligible flag on the asset overrides the date-based rules:
+     * an asset with is_aiip_eligible=0 always reverts to standard half-year
+     * (no multiplier contribution, no class-level half-year suspension by
+     * THAT asset — other assets can still trigger it).
+     *
+     * Internal helper to compute(). Public for the aiip-detail.php endpoint
+     * to surface the per-asset breakdown.
+     *
+     * Returns array of:
+     *   aiip_adjustment      — bcmath string, sum of per-asset contributions
+     *   half_year_adjustment — bcmath string, 0 when any asset suspends it
+     *   half_year_suspended  — bool, true when any asset suspends half-year
+     *   reinstatement_active — bool, whether the setting was on at compute time
+     *   fallback_count       — int, assets that used acquisition_date fallback
+     *   per_asset_breakdown  — array of {asset_id, asset_number, name,
+     *     acquisition_cost, effective_date, is_aiip_eligible,
+     *     treatment, multiplier, half_year_suspended, aiip_contribution, reason}
+     *
+     * @param int $classId
+     * @param int $fiscalYear
+     * @param string $netAdditions  Pre-computed additions − proceeds (bcmath)
+     *                              — provided by caller for half-year math.
+     *                              Actually receives $additions and $proceeds
+     *                              separately for transparency.
+     * @param string $additions
+     * @param string $proceeds
+     * @param bool $classHalfYearRule  Whether the CLASS supports half-year
+     *                                  (Class 12 has half_year_rule=0).
+     */
+    public static function computeAiipForClass(
+        int $classId,
+        int $fiscalYear,
+        string $additions,
+        string $proceeds,
+        bool $classHalfYearRule
+    ): array {
+        $reinstatementEnabled = ((string) \settings_get('accounting.aiip_proposed_reinstatement_enabled', '0')) === '1';
+
+        // All assets in this class with an effective date in the fiscal year.
+        // Note: AIIP-ineligible assets are still pulled — they contribute 0
+        // to aiip_adjustment but do not flip class-level half-year suspension.
+        // K-22 trap: no deleted_at column on acc_fixed_assets (hard-delete only).
+        $assets = \db_select(
+            "SELECT id, asset_number, name, acquisition_cost,
+                    available_for_use_date, acquisition_date, is_aiip_eligible
+               FROM acc_fixed_assets
+              WHERE cca_class_id = ?
+                AND YEAR(COALESCE(available_for_use_date, acquisition_date)) = ?",
+            [$classId, $fiscalYear]
+        );
+
+        $totalAiipAdjustment = '0.00';
+        $classHalfYearSuspended = false;
+        $fallbackCount = 0;
+        $breakdown = [];
+
+        foreach ($assets as $a) {
+            $cost = (string) $a['acquisition_cost'];
+            $availDate = $a['available_for_use_date'] ?: $a['acquisition_date'];
+            if (empty($a['available_for_use_date'])) {
+                $fallbackCount++;
+            }
+            $isEligible = (int) $a['is_aiip_eligible'] === 1;
+
+            // Ineligible assets: no AIIP contribution, no half-year suspension.
+            if (!$isEligible) {
+                $breakdown[] = [
+                    'asset_id'             => (int) $a['id'],
+                    'asset_number'         => $a['asset_number'],
+                    'name'                 => $a['name'],
+                    'acquisition_cost'     => $cost,
+                    'effective_date'       => $availDate,
+                    'effective_date_source' => empty($a['available_for_use_date']) ? 'acquisition_fallback' : 'available_for_use',
+                    'is_aiip_eligible'     => 0,
+                    'treatment'            => 'ineligible',
+                    'multiplier'           => '0',
+                    'half_year_suspended'  => false,
+                    'aiip_contribution'    => '0.00',
+                    'reason'               => 'Asset flagged is_aiip_eligible=0 — standard half-year regardless of date.',
+                ];
+                continue;
+            }
+
+            $rule = self::classifyAiipTreatment($availDate, $reinstatementEnabled);
+            $contribution = bcmul($cost, $rule['multiplier'], 2);
+            $totalAiipAdjustment = bcadd($totalAiipAdjustment, $contribution, 2);
+            if ($rule['half_year_suspended']) {
+                $classHalfYearSuspended = true;
+            }
+
+            $breakdown[] = [
+                'asset_id'             => (int) $a['id'],
+                'asset_number'         => $a['asset_number'],
+                'name'                 => $a['name'],
+                'acquisition_cost'     => $cost,
+                'effective_date'       => $availDate,
+                'effective_date_source' => empty($a['available_for_use_date']) ? 'acquisition_fallback' : 'available_for_use',
+                'is_aiip_eligible'     => 1,
+                'treatment'            => $rule['treatment'],
+                'multiplier'           => $rule['multiplier'],
+                'half_year_suspended'  => $rule['half_year_suspended'],
+                'aiip_contribution'    => $contribution,
+                'reason'               => $rule['reason'],
+            ];
+        }
+
+        // Class-level half-year: only applied when the CLASS supports it AND
+        // no asset in the class has triggered suspension via AIIP.
+        $halfYearAdjustment = '0.00';
+        if ($classHalfYearRule && !$classHalfYearSuspended) {
+            $net = bcsub($additions, $proceeds, 2);
+            if (bccomp($net, '0', 2) > 0) {
+                $halfYearAdjustment = bcmul($net, '0.5', 2);
+            }
+        }
+
+        return [
+            'aiip_adjustment'      => $totalAiipAdjustment,
+            'half_year_adjustment' => $halfYearAdjustment,
+            'half_year_suspended'  => $classHalfYearSuspended,
+            'reinstatement_active' => $reinstatementEnabled,
+            'fallback_count'       => $fallbackCount,
+            'per_asset_breakdown'  => $breakdown,
+        ];
     }
 }
