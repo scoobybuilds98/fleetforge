@@ -604,6 +604,59 @@ ITEM F1 | 2026-05-02 | F — Accounting | AR drift remediation: idempotency conf
     idempotent and can be re-run.
   Owner: Deferred (to QBO sync — S-QBO arc)
   Status: ✅ COMPLETE (S-FIX-2 / 2026-05-02 — pre-cutover state is correct; QBO will subsume)
+
+ITEM F-CRONS-ACCT-1 | 2026-05-19 | F — Accounting | Install accounting crontab block on production
+  Originating session: S037-CRONS (3 missing accounting crons + crontab runbook)
+  Surfaced into checklist: S037-CRONS
+  Detail: docs/runbooks/crontab_accounting.md ships the canonical crontab block for all 5
+    accounting crons (S037-CRONS + S037-FX + S037-REC). It must be installed on the
+    production Lightsail server via `sudo -u www-data crontab -e`. Use the exact block from
+    the runbook §"Crontab block (copy-paste into production)". The crontab user MUST be
+    www-data (or whichever PHP-FPM user) so the cron processes inherit the right filesystem
+    permissions for storage/ + the right Sentry DSN from .env.
+  Action: SSH to mainlandrentals.com → `sudo -u www-data crontab -e` → paste runbook block →
+    save → `sudo -u www-data crontab -l` to verify.
+  Owner: Operator
+  Status: PENDING
+
+ITEM F-CRONS-ACCT-2 | 2026-05-19 | F — Accounting | Provision /var/log/fleetforge-cron.log
+  Originating session: S037-CRONS
+  Surfaced into checklist: S037-CRONS
+  Detail: All accounting cron lines redirect both stdout + stderr to
+    /var/log/fleetforge-cron.log. The log file must exist, be owned by the cron user
+    (www-data), and be world-readable (0644) so the operator can `tail -f` for live
+    diagnostics without sudo.
+  Action: `sudo touch /var/log/fleetforge-cron.log && sudo chown www-data:www-data
+    /var/log/fleetforge-cron.log && sudo chmod 0644 /var/log/fleetforge-cron.log`
+  Owner: Operator
+  Status: PENDING
+
+ITEM F-CRONS-ACCT-3 | 2026-05-19 | F — Accounting | One-time manual run of accounting_generate_periods.php
+  Originating session: S037-CRONS
+  Surfaced into checklist: S037-CRONS
+  Detail: After installing the crontab (F-CRONS-ACCT-1), run accounting_generate_periods.php
+    ONCE manually so the period horizon is current immediately rather than waiting until the
+    next 1st-of-month tick. Without this, validatePeriodForPosting() can fail intermittently
+    if production was already past the existing horizon at deploy time.
+  Action: `sudo -u www-data php /var/www/fleetforge/cron/accounting_generate_periods.php`.
+    Expected output: "Generated N period(s). Horizon through YYYY-MM-DD." Verify N ≥ 0.
+  Owner: Operator
+  Status: PENDING
+
+ITEM F-CRONS-ACCT-4 | 2026-05-19 | F — Accounting | Dry-run verify accounting_auto_reverse.php pre-go-live
+  Originating session: S037-CRONS
+  Surfaced into checklist: S037-CRONS
+  Detail: Before the 1st cron tick post-deploy, run accounting_auto_reverse.php manually to
+    confirm no JEs are unexpectedly pending reversal. Expected count = 0 unless an FX
+    revaluation JE was posted in the days before cutover with auto_reverse_date <= today.
+    If count > 0, review each JE before letting the cron auto-fire.
+  Action: `sudo -u www-data php /var/www/fleetforge/cron/accounting_auto_reverse.php`.
+    Expected output: "Summary YYYY-MM-DD: reversed=0 failed=0" on first manual run if
+    no auto-reverse JEs are pending. If reversed > 0, verify the resulting JEs in
+    /fleetforge/accounting/journal-entries are correct + match expected FX-revaluation
+    reversal shape.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ### G — Smoke + verification procedures
