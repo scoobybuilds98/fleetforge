@@ -30,6 +30,7 @@
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
 
 use FleetForge\Accounting\FixedAssetService;
+use FleetForge\Accounting\CcaService;
 
 require_method('POST');
 require_auth_api();
@@ -107,6 +108,13 @@ $data = [
     'asset_class'             => $assetClass,
     'cra_class'               => clean_string($body['cra_class'] ?? null, 20),
     'cra_cca_rate'            => $ccaRate,
+    // S-ACCT-CCA-1: new FK-driven CCA mapping (optional — assets without
+    // a cca_class_id are excluded from Schedule 8 until operator assigns).
+    'cca_class_id'            => clean_int($body['cca_class_id'] ?? null),
+    'available_for_use_date'  => clean_date($body['available_for_use_date'] ?? null),
+    'is_aiip_eligible'        => array_key_exists('is_aiip_eligible', $body)
+                                    ? (!empty($body['is_aiip_eligible']) ? 1 : 0)
+                                    : 1,
     'equipment_unit_id'       => clean_int($body['equipment_unit_id'] ?? null),
     'acquisition_date'        => $acquisitionDate,
     'depreciation_start_date' => clean_date($body['depreciation_start_date'] ?? null),
@@ -162,6 +170,29 @@ try {
     elseif (stripos($msg, 'total_expected_units') !== false) $slot = 'total_expected_units';
     elseif (stripos($msg, 'depreciation_method') !== false) $slot = 'depreciation_method';
     json_validation_error([$slot => $msg], $msg);
+}
+
+// S-ACCT-CCA-1: GVWR validator — attach non-blocking warning as `_cca_warning`
+// on the asset row (preserves the existing response shape — callers that
+// don't read `_cca_warning` are unaffected).
+// GVWR proxy on disk is equipment_units.weight_capacity_lbs (lbs, not kg)
+// per pre-flight K-22 catch. Threshold 11,788 kg ≈ 25,990 lbs.
+$gvwrKg  = clean_int($body['gvwr_kg']  ?? null);
+$gvwrLbs = clean_int($body['gvwr_lbs'] ?? null);
+if (!$gvwrLbs && !empty($asset['equipment_unit_id'])) {
+    $row = db_row(
+        "SELECT weight_capacity_lbs FROM equipment_units WHERE id = ?",
+        [(int) $asset['equipment_unit_id']]
+    );
+    $gvwrLbs = $row ? (int) $row['weight_capacity_lbs'] : null;
+}
+$warning = CcaService::classifyGvwrWarning(
+    !empty($asset['cca_class_id']) ? (int) $asset['cca_class_id'] : null,
+    $gvwrKg,
+    $gvwrLbs
+);
+if ($warning) {
+    $asset['_cca_warning'] = $warning;
 }
 
 json_success($asset, 201);

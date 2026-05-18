@@ -470,6 +470,50 @@ CREATE TABLE `acc_capex_requests` (
   CONSTRAINT `acc_capex_requests_ibfk_5` FOREIGN KEY (`approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_capex_requests_ibfk_6` FOREIGN KEY (`completed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_cca_classes` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `class_number` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `rate` decimal(5,4) NOT NULL,
+  `method` enum('declining_balance','straight_line') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'declining_balance',
+  `half_year_rule` tinyint(1) NOT NULL DEFAULT '1',
+  `aiip_eligible` tinyint(1) NOT NULL DEFAULT '1',
+  `recapture_applies` tinyint(1) NOT NULL DEFAULT '1',
+  `terminal_loss_applies` tinyint(1) NOT NULL DEFAULT '1',
+  `one_asset_per_class` tinyint(1) NOT NULL DEFAULT '0',
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_class_number` (`class_number`),
+  KEY `idx_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_cca_continuity` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `fiscal_year` int NOT NULL,
+  `cca_class_id` int unsigned NOT NULL,
+  `opening_ucc` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `cost_of_additions` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `adjustments_transfers` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `proceeds_of_disposition` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `ucc_after_additions_dispositions` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `aiip_adjustment` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `base_amount_for_cca` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `half_year_adjustment` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `cca_claimed` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `recapture` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `terminal_loss` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `closing_ucc` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `is_locked` tinyint(1) NOT NULL DEFAULT '0',
+  `computed_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `computed_by` int unsigned DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_year_class` (`fiscal_year`,`cca_class_id`),
+  KEY `fk_cca_cont_class` (`cca_class_id`),
+  KEY `fk_cca_cont_user` (`computed_by`),
+  CONSTRAINT `fk_cca_cont_class` FOREIGN KEY (`cca_class_id`) REFERENCES `acc_cca_classes` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_cca_cont_user` FOREIGN KEY (`computed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_categorization_rules` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -631,10 +675,13 @@ CREATE TABLE `acc_fixed_assets` (
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `asset_class` enum('fleet_equipment','vehicles','office_equipment','leasehold_improvements','land','building','other') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `cca_class_id` int unsigned DEFAULT NULL,
   `cra_class` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `cra_cca_rate` decimal(5,4) DEFAULT NULL,
   `equipment_unit_id` int unsigned DEFAULT NULL,
   `acquisition_date` date NOT NULL,
+  `available_for_use_date` date DEFAULT NULL,
+  `is_aiip_eligible` tinyint(1) NOT NULL DEFAULT '1',
   `acquisition_cost` decimal(15,2) NOT NULL,
   `purchase_tax_gst` decimal(12,2) DEFAULT NULL,
   `purchase_tax_pst` decimal(12,2) DEFAULT NULL,
@@ -681,13 +728,15 @@ CREATE TABLE `acc_fixed_assets` (
   KEY `accum_depr_account_id` (`accum_depr_account_id`),
   KEY `depr_expense_account_id` (`depr_expense_account_id`),
   KEY `created_by` (`created_by`),
+  KEY `fk_fa_cca_class` (`cca_class_id`),
   CONSTRAINT `acc_fixed_assets_ibfk_1` FOREIGN KEY (`equipment_unit_id`) REFERENCES `equipment_units` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_fixed_assets_ibfk_2` FOREIGN KEY (`acquisition_bill_id`) REFERENCES `acc_bills` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_fixed_assets_ibfk_3` FOREIGN KEY (`vendor_id`) REFERENCES `vendors` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_fixed_assets_ibfk_4` FOREIGN KEY (`asset_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `acc_fixed_assets_ibfk_5` FOREIGN KEY (`accum_depr_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `acc_fixed_assets_ibfk_6` FOREIGN KEY (`depr_expense_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `acc_fixed_assets_ibfk_7` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `acc_fixed_assets_ibfk_7` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_fa_cca_class` FOREIGN KEY (`cca_class_id`) REFERENCES `acc_cca_classes` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_fx_revaluations` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

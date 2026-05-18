@@ -850,6 +850,36 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="field-error" x-show="createErrors.total_expected_units" x-text="createErrors.total_expected_units" x-cloak></div>
                 </div>
 
+                <!-- ── CCA Schedule 8 (S-ACCT-CCA-1) ──────────────── -->
+                <div class="section-header">
+                    <h3 class="section-title">CCA — Capital Cost Allowance</h3>
+                    <span class="section-hint">For T2 Schedule 8 (optional — can be assigned later)</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px;">
+                    <div class="form-group">
+                        <label>CCA Class</label>
+                        <select class="form-control form-control-sm" x-model="createForm.cca_class_id">
+                            <option value="">— Not assigned —</option>
+                            <template x-for="c in ccaClasses" :key="c.id">
+                                <option :value="c.id" x-text="'Class ' + c.class_number + ' — ' + (parseFloat(c.rate) * 100).toFixed(0) + '% ' + c.description"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Available for Use Date</label>
+                        <input type="date" class="form-control form-control-sm" x-model="createForm.available_for_use_date">
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:flex-end;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;cursor:pointer;">
+                            <input type="checkbox" x-model="createForm.is_aiip_eligible">
+                            AIIP eligible (default yes)
+                        </label>
+                    </div>
+                </div>
+                <p style="font-size:0.75rem;color:var(--text-secondary);margin:4px 0 12px;">
+                    GVWR &gt; 11,788 kg (≈ 25,990 lbs) typically belongs in Class 16 (40% DB) or Class 55 (ZEV equivalent). Server-side validator surfaces a non-blocking warning if the chosen class doesn't match the equipment unit's weight.
+                </p>
+
                 <!-- ── GL Accounts ──────────────────────────────── -->
                 <div class="section-header">
                     <h3 class="section-title">GL Accounts</h3>
@@ -1098,6 +1128,10 @@ function FF_FixedAssets() {
         createErrors: {},
         createFormError: '',
 
+        // S-ACCT-CCA-1: populated by loadCcaClasses() — list of CCA classes
+        // for the CCA section dropdown.
+        ccaClasses: [],
+
         editOpen: false,
         editBusy: false,
         editForm: {},
@@ -1123,6 +1157,15 @@ function FF_FixedAssets() {
         async init() {
             this.resetCreateForm();
             await this.load();
+            this.loadCcaClasses();
+        },
+
+        // S-ACCT-CCA-1: fetch active CCA classes for the dropdown.
+        async loadCcaClasses() {
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/accounting/cca/classes') ?>');
+                if (r.success) this.ccaClasses = r.data || [];
+            } catch (e) { /* non-critical — dropdown stays empty */ }
         },
 
         resetCreateForm() {
@@ -1135,6 +1178,10 @@ function FF_FixedAssets() {
                 depreciation_method: 'straight_line',
                 useful_life_years: '',
                 cra_cca_rate: '',
+                // S-ACCT-CCA-1: new CCA fields
+                cca_class_id: '',
+                available_for_use_date: '',
+                is_aiip_eligible: true,
                 total_expected_units: '',
                 asset_account_id: '',
                 accum_depr_account_id: '',

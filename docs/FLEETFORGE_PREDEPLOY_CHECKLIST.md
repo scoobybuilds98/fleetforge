@@ -657,6 +657,41 @@ ITEM F-CRONS-ACCT-4 | 2026-05-19 | F — Accounting | Dry-run verify accounting_
     reversal shape.
   Owner: Operator
   Status: PENDING
+
+ITEM F-CCA-1 | 2026-05-19 | F — Accounting | Assign CCA classes to all 20 existing fixed assets
+  Originating session: S-ACCT-CCA-1
+  Surfaced into checklist: S-ACCT-CCA-1
+  Detail: S-ACCT-CCA-1 introduces acc_fixed_assets.cca_class_id (FK to acc_cca_classes).
+    20 existing assets have cca_class_id=NULL after the migration. Assets with NULL
+    cca_class_id are EXCLUDED from T2 Schedule 8 — they will not appear in the CCA
+    continuity engine's output, the CSV export, or the locked workpaper.
+    The pre-existing legacy cra_class varchar field on 20 assets shows "10" — these
+    should map to CCA class id 2 (Class 10 motor vehicles ≤ $30K). Verify each
+    asset's intended class before assignment — some heavy trucks may belong in
+    Class 16 (id 5) if GVWR exceeds 11,788 kg (≈ 25,990 lbs).
+    NOTE: K-22 — checklist category labelled F (Accounting) on disk; prompt referred
+    to category H but that's the rollback section. Items renamed to F-CCA-N.
+  Action: For each asset in acc_fixed_assets (20 rows): UPDATE acc_fixed_assets
+    SET cca_class_id = <correct_id> WHERE id = <asset_id>. Or via admin UI at
+    /fleetforge/accounting/fixed-assets — open each asset, set CCA Class, Save.
+    Verify via /fleetforge/accounting/cca → Compute → row count > 0.
+  Owner: Operator (with accountant review)
+  Status: PENDING
+
+ITEM F-CCA-2 | 2026-05-19 | F — Accounting | Set available_for_use_date on all existing assets
+  Originating session: S-ACCT-CCA-1
+  Surfaced into checklist: S-ACCT-CCA-1
+  Detail: S-ACCT-CCA-1 introduces acc_fixed_assets.available_for_use_date (DATE NULL).
+    20 existing assets have available_for_use_date=NULL. The CCA engine falls back
+    to acquisition_date with a logged warning in the continuity row's notes when
+    this happens — engine result is still correct for assets that became available
+    on their acquisition date, but the auditor should review each asset.
+  Action: Review each asset on /fleetforge/accounting/fixed-assets. If the asset
+    was available for use on a date different from its acquisition date (e.g.
+    capital project commissioning, vehicle registration delay), set
+    available_for_use_date explicitly. Otherwise the fallback is correct.
+  Owner: Operator (with accountant review)
+  Status: PENDING
 ```
 
 ### G — Smoke + verification procedures

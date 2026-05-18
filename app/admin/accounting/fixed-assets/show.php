@@ -128,8 +128,32 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="font-mono"><?= $asset['useful_life_years'] !== null ? e((string) $asset['useful_life_years']) : '<span style="color:var(--text-secondary);">—</span>' ?></div>
         </div>
         <div>
-            <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">CRA Class</div>
+            <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">CRA Class (legacy text)</div>
             <div class="font-mono"><?= $asset['cra_class'] ? e($asset['cra_class']) : '<span style="color:var(--text-secondary);">—</span>' ?></div>
+        </div>
+        <?php
+        // S-ACCT-CCA-1: resolve CCA class label from the FK if assigned.
+        $ccaClassLabel = null;
+        if (!empty($asset['cca_class_id'])) {
+            $ccaRow = db_row("SELECT class_number, description, rate FROM acc_cca_classes WHERE id = ?", [(int) $asset['cca_class_id']]);
+            if ($ccaRow) {
+                $ccaClassLabel = 'Class ' . $ccaRow['class_number']
+                    . ' — ' . number_format(((float) $ccaRow['rate']) * 100, 0) . '% '
+                    . $ccaRow['description'];
+            }
+        }
+        ?>
+        <div>
+            <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">CCA Class (Schedule 8)</div>
+            <div><?= $ccaClassLabel ? e($ccaClassLabel) : '<span style="color:var(--text-secondary);">— not assigned — <a href="' . e(base_url('accounting/fixed-assets')) . '?edit=' . (int) $asset['id'] . '">assign</a></span>' ?></div>
+        </div>
+        <div>
+            <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">Available for Use Date</div>
+            <div class="font-mono"><?= !empty($asset['available_for_use_date']) ? e($asset['available_for_use_date']) : '<span style="color:var(--text-secondary);">— (uses acquisition date)</span>' ?></div>
+        </div>
+        <div>
+            <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">AIIP Eligible</div>
+            <div><?= ((int) ($asset['is_aiip_eligible'] ?? 1)) === 1 ? '<span class="badge badge-success" style="padding:2px 8px;font-size:0.6875rem;">Yes</span>' : '<span class="badge badge-neutral" style="padding:2px 8px;font-size:0.6875rem;">No</span>' ?></div>
         </div>
         <?php if (!empty($asset['equipment_unit_id'])): ?>
         <div>

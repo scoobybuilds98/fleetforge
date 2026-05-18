@@ -22,6 +22,7 @@
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
 
 use FleetForge\Accounting\FixedAssetService;
+use FleetForge\Accounting\CcaService;
 
 require_method('POST');
 require_auth_api();
@@ -51,6 +52,10 @@ $updatableFields = [
     'asset_class'             => 'string',
     'cra_class'               => 'string',
     'cra_cca_rate'            => 'decimal',
+    // S-ACCT-CCA-1: new CCA fields on the FK side.
+    'cca_class_id'            => 'int',
+    'available_for_use_date'  => 'date',
+    'is_aiip_eligible'        => 'bool',
     'equipment_unit_id'       => 'int',
     'depreciation_method'     => 'string',
     'useful_life_years'       => 'decimal',
@@ -90,6 +95,8 @@ foreach ($updatableFields as $field => $type) {
         } elseif ($type === 'bool') {
             // Coerce any truthy value to 1, any falsy value to 0.
             $data[$field] = !empty($val) ? 1 : 0;
+        } elseif ($type === 'date') {
+            $data[$field] = clean_date($val);
         } else {
             $data[$field] = clean_string($val, 2000);
         }
@@ -145,6 +152,26 @@ try {
         if (preg_match('/^([a-z_]+)\s+cannot/i', $msg, $m)) $slot = $m[1];
     }
     json_validation_error([$slot => $msg], $msg);
+}
+
+// S-ACCT-CCA-1: GVWR validator — attach non-blocking warning as `_cca_warning`
+// on the asset row (preserves the existing response shape).
+$gvwrKg  = clean_int($body['gvwr_kg']  ?? null);
+$gvwrLbs = clean_int($body['gvwr_lbs'] ?? null);
+if (!$gvwrLbs && !empty($asset['equipment_unit_id'])) {
+    $row = db_row(
+        "SELECT weight_capacity_lbs FROM equipment_units WHERE id = ?",
+        [(int) $asset['equipment_unit_id']]
+    );
+    $gvwrLbs = $row ? (int) $row['weight_capacity_lbs'] : null;
+}
+$warning = CcaService::classifyGvwrWarning(
+    !empty($asset['cca_class_id']) ? (int) $asset['cca_class_id'] : null,
+    $gvwrKg,
+    $gvwrLbs
+);
+if ($warning) {
+    $asset['_cca_warning'] = $warning;
 }
 
 json_success($asset);

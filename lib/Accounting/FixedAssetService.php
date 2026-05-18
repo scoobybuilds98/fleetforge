@@ -158,10 +158,18 @@ class FixedAssetService
                 'name'                     => $data['name'],
                 'description'              => $data['description'] ?? null,
                 'asset_class'              => $data['asset_class'],
+                // S-ACCT-CCA-1: cca_class_id is the FK-driven CCA mapping.
+                // Legacy cra_class (varchar) + cra_cca_rate kept for backward
+                // compatibility with depreciation engine — CCA engine uses the FK.
+                'cca_class_id'             => $data['cca_class_id'] ?? null,
                 'cra_class'                => $data['cra_class'] ?? null,
                 'cra_cca_rate'             => $data['cra_cca_rate'] ?? null,
                 'equipment_unit_id'        => $data['equipment_unit_id'] ?? null,
                 'acquisition_date'         => $data['acquisition_date'],
+                'available_for_use_date'   => $data['available_for_use_date'] ?? null,
+                'is_aiip_eligible'         => array_key_exists('is_aiip_eligible', $data)
+                                                ? (!empty($data['is_aiip_eligible']) ? 1 : 0)
+                                                : 1,
                 'acquisition_cost'         => $cost,
                 // ── PAYOFF-1: acquisition cost breakdown ────────────
                 // WHY: Total acquisition cost for payoff includes more
@@ -244,6 +252,8 @@ class FixedAssetService
 
             $editable = [
                 'name', 'description', 'asset_class', 'cra_class', 'cra_cca_rate',
+                // S-ACCT-CCA-1: new CCA fields editable on the asset form.
+                'cca_class_id', 'available_for_use_date', 'is_aiip_eligible',
                 'equipment_unit_id', 'depreciation_method', 'useful_life_years',
                 'salvage_value', 'total_expected_units', 'vendor_id',
                 'asset_account_id', 'accum_depr_account_id', 'depr_expense_account_id',

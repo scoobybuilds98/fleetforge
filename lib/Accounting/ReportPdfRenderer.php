@@ -155,6 +155,96 @@ class ReportPdfRenderer
         self::emit($html, $title, 'A4', 'L');
     }
 
+    /**
+     * Render the T2 Schedule 8 CCA continuity (landscape A4).
+     * Session: S-ACCT-CCA-1
+     */
+    public static function ccaSchedule8(array $schedule): void
+    {
+        $title  = 'CCA Schedule 8';
+        $period = 'Fiscal Year ' . $schedule['fiscal_year'];
+
+        $html  = self::headerHtml($title, $period);
+
+        $rows = $schedule['rows'] ?? [];
+        if (!$rows) {
+            $html .= '<div class="banner-amber">No CCA continuity rows exist for FY '
+                   . htmlspecialchars((string) $schedule['fiscal_year'])
+                   . '. Run Compute first.</div>';
+        }
+
+        $html .= '<table class="rpt"><thead><tr>';
+        $html .= '<th>Class</th><th>Description</th>';
+        $html .= '<th style="text-align:right;">Opening UCC</th>';
+        $html .= '<th style="text-align:right;">Additions</th>';
+        $html .= '<th style="text-align:right;">Disposals</th>';
+        $html .= '<th style="text-align:right;">UCC Before CCA</th>';
+        $html .= '<th style="text-align:right;">Rate</th>';
+        $html .= '<th style="text-align:right;">Half-Year</th>';
+        $html .= '<th style="text-align:right;">CCA Claimed</th>';
+        $html .= '<th style="text-align:right;">Closing UCC</th>';
+        $html .= '<th style="text-align:right;">Recapture</th>';
+        $html .= '<th style="text-align:right;">Terminal Loss</th>';
+        $html .= '</tr></thead><tbody>';
+
+        $totOpening = '0.00'; $totAdd = '0.00'; $totDisp = '0.00';
+        $totUcc = '0.00'; $totHalf = '0.00'; $totCca = '0.00';
+        $totClose = '0.00'; $totRecap = '0.00'; $totTerm = '0.00';
+
+        foreach ($rows as $r) {
+            $rate = number_format(((float) $r['class_rate']) * 100, 2) . '%';
+            $hl   = (bccomp($r['recapture'], '0', 2) > 0
+                    || bccomp($r['terminal_loss'], '0', 2) > 0)
+                ? ' style="background:#fff7d6;"' : '';
+
+            $html .= '<tr' . $hl . '>';
+            $html .= '<td>' . htmlspecialchars($r['class_number']) . '</td>';
+            $html .= '<td>' . htmlspecialchars(substr($r['class_description'], 0, 40)) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['opening_ucc']) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['cost_of_additions']) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['proceeds_of_disposition']) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['ucc_after_additions_dispositions']) . '</td>';
+            $html .= '<td class="amt">' . $rate . '</td>';
+            $html .= '<td class="amt">' . self::money($r['half_year_adjustment']) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['cca_claimed']) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['closing_ucc']) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['recapture']) . '</td>';
+            $html .= '<td class="amt">' . self::money($r['terminal_loss']) . '</td>';
+            $html .= '</tr>';
+
+            $totOpening = bcadd($totOpening, $r['opening_ucc'], 2);
+            $totAdd     = bcadd($totAdd,     $r['cost_of_additions'], 2);
+            $totDisp    = bcadd($totDisp,    $r['proceeds_of_disposition'], 2);
+            $totUcc     = bcadd($totUcc,     $r['ucc_after_additions_dispositions'], 2);
+            $totHalf    = bcadd($totHalf,    $r['half_year_adjustment'], 2);
+            $totCca     = bcadd($totCca,     $r['cca_claimed'], 2);
+            $totClose   = bcadd($totClose,   $r['closing_ucc'], 2);
+            $totRecap   = bcadd($totRecap,   $r['recapture'], 2);
+            $totTerm    = bcadd($totTerm,    $r['terminal_loss'], 2);
+        }
+
+        $html .= '<tr class="grand"><td colspan="2"><strong>TOTAL</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totOpening) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totAdd) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totDisp) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totUcc) . '</strong></td>';
+        $html .= '<td></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totHalf) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totCca) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totClose) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totRecap) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($totTerm) . '</strong></td>';
+        $html .= '</tr>';
+        $html .= '</tbody></table>';
+
+        $html .= '<p style="margin-top:14px;font-size:8pt;color:#6b4900;">'
+               . '⚠ AIIP adjustment is $0.00 (placeholder). Full AIIP phase-out '
+               . 'and the proposed 2024 FES reinstatement rules are implemented '
+               . 'in S-ACCT-CCA-2.</p>';
+
+        self::emit($html, $title, 'A4', 'L');
+    }
+
     public static function balanceSheet(array $report): void
     {
         $title  = 'Balance Sheet';
