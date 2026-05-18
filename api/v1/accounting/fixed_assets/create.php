@@ -101,6 +101,26 @@ if ($fields) {
     json_validation_error($fields);
 }
 
+// S-ACCT-COMP: optional parent_asset_id — when set, the new asset becomes
+// a component of an existing parent. Validate parent exists + is itself
+// a top-level asset (no nested components per spec §23.5).
+$parentAssetId = clean_int($body['parent_asset_id'] ?? null);
+if ($parentAssetId !== null) {
+    $parentRow = db_row(
+        "SELECT id, is_component FROM acc_fixed_assets WHERE id = ?",
+        [$parentAssetId]
+    );
+    if (!$parentRow) {
+        json_validation_error(['parent_asset_id' => 'Parent asset not found.']);
+    }
+    if ((int) $parentRow['is_component'] === 1) {
+        json_validation_error(
+            ['parent_asset_id' => 'Cannot nest components — parent is already a component (ASPE 3061.18 flat model).'],
+            'Cannot nest components.'
+        );
+    }
+}
+
 // Build a sanitized payload — service does its own validation
 $data = [
     'name'                    => $name,
@@ -159,6 +179,16 @@ $data = [
 
 try {
     $asset = FixedAssetService::create($data, current_user_id());
+
+    // S-ACCT-COMP: post-stamp parent + is_component after the standard create.
+    // Done outside the service to keep create()'s signature/contract unchanged.
+    if ($parentAssetId !== null) {
+        db_update('acc_fixed_assets', [
+            'parent_asset_id' => $parentAssetId,
+            'is_component'    => 1,
+        ], 'id = ?', [(int) $asset['id']]);
+        $asset = db_row("SELECT * FROM acc_fixed_assets WHERE id = ?", [(int) $asset['id']]);
+    }
 } catch (\RuntimeException $e) {
     // Map service errors back to field slots when possible
     $msg  = $e->getMessage();

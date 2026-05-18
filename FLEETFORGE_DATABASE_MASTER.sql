@@ -327,6 +327,7 @@ CREATE TABLE `acc_bill_lines` (
   `tax_pst_amount` decimal(15,2) NOT NULL DEFAULT '0.00',
   `tax_hst_amount` decimal(15,2) NOT NULL DEFAULT '0.00',
   `capitalize` tinyint(1) NOT NULL DEFAULT '0',
+  `betterment_note` text COLLATE utf8mb4_unicode_ci,
   `asset_id` int unsigned DEFAULT NULL,
   `sort_order` tinyint unsigned NOT NULL DEFAULT '0',
   `is_auto_categorized` tinyint(1) NOT NULL DEFAULT '0',
@@ -671,6 +672,8 @@ CREATE TABLE `acc_dunning_letters` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_fixed_assets` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `parent_asset_id` int unsigned DEFAULT NULL,
+  `is_component` tinyint(1) NOT NULL DEFAULT '0',
   `asset_number` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
@@ -729,6 +732,7 @@ CREATE TABLE `acc_fixed_assets` (
   KEY `depr_expense_account_id` (`depr_expense_account_id`),
   KEY `created_by` (`created_by`),
   KEY `fk_fa_cca_class` (`cca_class_id`),
+  KEY `fk_fa_parent` (`parent_asset_id`),
   CONSTRAINT `acc_fixed_assets_ibfk_1` FOREIGN KEY (`equipment_unit_id`) REFERENCES `equipment_units` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_fixed_assets_ibfk_2` FOREIGN KEY (`acquisition_bill_id`) REFERENCES `acc_bills` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_fixed_assets_ibfk_3` FOREIGN KEY (`vendor_id`) REFERENCES `vendors` (`id`) ON DELETE SET NULL,
@@ -736,7 +740,8 @@ CREATE TABLE `acc_fixed_assets` (
   CONSTRAINT `acc_fixed_assets_ibfk_5` FOREIGN KEY (`accum_depr_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `acc_fixed_assets_ibfk_6` FOREIGN KEY (`depr_expense_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `acc_fixed_assets_ibfk_7` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_fa_cca_class` FOREIGN KEY (`cca_class_id`) REFERENCES `acc_cca_classes` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_fa_cca_class` FOREIGN KEY (`cca_class_id`) REFERENCES `acc_cca_classes` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_fa_parent` FOREIGN KEY (`parent_asset_id`) REFERENCES `acc_fixed_assets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_fx_revaluations` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

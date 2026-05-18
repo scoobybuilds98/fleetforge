@@ -64,6 +64,30 @@ $statusBadgeClass = static function (?string $status): string {
     };
 };
 
+// S-ACCT-COMP: pre-fetch component children + parent context for display.
+$components    = [];
+$totalNbv      = (string) $asset['net_book_value'];
+$parentSummary = null;
+if ((int) ($asset['is_component'] ?? 0) === 0) {
+    $components = db_select(
+        "SELECT id, asset_number, name, asset_class, acquisition_cost,
+                accumulated_depreciation, net_book_value, useful_life_years,
+                depreciation_method, status
+           FROM acc_fixed_assets
+          WHERE parent_asset_id = ?
+          ORDER BY id ASC",
+        [(int) $asset['id']]
+    );
+    foreach ($components as $c) {
+        $totalNbv = bcadd($totalNbv, (string) $c['net_book_value'], 2);
+    }
+} elseif (!empty($asset['parent_asset_id'])) {
+    $parentSummary = db_row(
+        "SELECT id, asset_number, name FROM acc_fixed_assets WHERE id = ?",
+        [(int) $asset['parent_asset_id']]
+    );
+}
+
 $pageTitle = 'Asset ' . $asset['asset_number'];
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -92,6 +116,17 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
+
+<?php if ($parentSummary): ?>
+<div class="card" style="padding:12px 16px;margin-bottom:14px;background:#eef2ff;border:1px solid #6366f1;color:#3730a3;font-size:0.8125rem;">
+    <strong>Part of:</strong>
+    <a href="<?= base_url('accounting/fixed-assets/show?id=' . (int) $parentSummary['id']) ?>" style="color:#3730a3;text-decoration:underline;font-family:var(--font-mono);">
+        <?= e($parentSummary['asset_number']) ?>
+    </a>
+    — <?= e($parentSummary['name']) ?>
+    (this asset is a component, ASPE 3061.18)
+</div>
+<?php endif; ?>
 
 <div class="card" style="padding:18px;margin-bottom:14px;">
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
@@ -179,6 +214,177 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
 </div>
+
+<?php if ((int) ($asset['is_component'] ?? 0) === 0): ?>
+<!-- ── Components (S-ACCT-COMP — ASPE 3061.18) ─────────────────────────── -->
+<div class="card" style="padding:18px;margin-bottom:14px;" x-data="componentsPanel(<?= (int) $asset['id'] ?>)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div>
+            <h3 style="margin:0;font-size:0.95rem;font-weight:600;">Components</h3>
+            <div style="font-size:0.75rem;color:var(--text-secondary);">
+                ASPE 3061.18 — significant components with different useful lives depreciate separately.
+            </div>
+        </div>
+        <button class="btn btn-primary btn-sm" @click="openModal()">+ Add Component</button>
+    </div>
+
+    <?php if (empty($components)): ?>
+    <div style="padding:18px;text-align:center;color:var(--text-secondary);font-size:0.8125rem;border:1px dashed var(--border-default);border-radius:6px;">
+        No components yet. Add a component (e.g. reefer unit, engine, cab) to depreciate it separately from the parent.
+    </div>
+    <?php else: ?>
+    <table class="table" style="font-size:0.8125rem;margin-bottom:8px;">
+        <thead>
+            <tr>
+                <th>Asset #</th>
+                <th>Name</th>
+                <th>Class</th>
+                <th class="text-right">Cost</th>
+                <th class="text-right">Accum Depr</th>
+                <th class="text-right">NBV</th>
+                <th>Life (yr)</th>
+                <th>Method</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($components as $c): ?>
+            <tr>
+                <td>
+                    <a class="font-mono" style="color:var(--color-accent);text-decoration:none;"
+                       href="<?= base_url('accounting/fixed-assets/show?id=' . (int) $c['id']) ?>"><?= e($c['asset_number']) ?></a>
+                </td>
+                <td><?= e($c['name']) ?></td>
+                <td style="text-transform:capitalize;font-size:0.75rem;"><?= e(str_replace('_', ' ', $c['asset_class'])) ?></td>
+                <td class="font-mono text-right"><?= e('$' . number_format((float) $c['acquisition_cost'], 2)) ?></td>
+                <td class="font-mono text-right"><?= e('$' . number_format((float) $c['accumulated_depreciation'], 2)) ?></td>
+                <td class="font-mono text-right" style="font-weight:600;"><?= e('$' . number_format((float) $c['net_book_value'], 2)) ?></td>
+                <td class="font-mono"><?= e((string) ($c['useful_life_years'] ?? '—')) ?></td>
+                <td style="text-transform:capitalize;font-size:0.75rem;"><?= e(str_replace('_', ' ', (string) $c['depreciation_method'])) ?></td>
+                <td><span class="badge <?= e($statusBadgeClass((string) $c['status'])) ?>" style="padding:2px 8px;font-size:0.6875rem;text-transform:capitalize;"><?= e(str_replace('_', ' ', (string) $c['status'])) ?></span></td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+        <tfoot>
+            <tr style="font-weight:600;border-top:2px solid var(--border-default);">
+                <td colspan="5" class="text-right">Total NBV (parent + components)</td>
+                <td class="font-mono text-right"><?= e('$' . number_format((float) $totalNbv, 2)) ?></td>
+                <td colspan="3"></td>
+            </tr>
+        </tfoot>
+    </table>
+    <?php endif; ?>
+
+    <!-- Add Component modal -->
+    <div x-show="modal.open" x-cloak class="modal-backdrop" @click.self="modal.open = false"
+         style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;">
+        <div class="card" style="padding:24px;width:min(640px,95vw);max-height:90vh;overflow:auto;">
+            <h3 style="margin-top:0;font-size:1rem;font-weight:600;">Add Component to <?= e($asset['asset_number']) ?></h3>
+            <p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 12px;">
+                The component depreciates independently — set its own useful life, method, and salvage value.
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div style="grid-column:span 2;">
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Name *</label>
+                    <input type="text" x-model="form.name" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;">
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Asset Class *</label>
+                    <select x-model="form.asset_class" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;">
+                        <option value="fleet_equipment">Fleet Equipment</option>
+                        <option value="vehicles">Vehicles</option>
+                        <option value="office_equipment">Office Equipment</option>
+                        <option value="leasehold_improvements">Leasehold Improvements</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Acquisition Cost *</label>
+                    <input type="number" step="0.01" min="0.01" x-model="form.acquisition_cost" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Acquisition Date *</label>
+                    <input type="date" x-model="form.acquisition_date" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;">
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Useful Life (years)</label>
+                    <input type="number" step="0.5" min="0.5" x-model="form.useful_life_years" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Depreciation Method</label>
+                    <select x-model="form.depreciation_method" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;">
+                        <option value="straight_line">Straight Line</option>
+                        <option value="declining_balance">Declining Balance</option>
+                        <option value="units_of_production">Units of Production</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Salvage Value</label>
+                    <input type="number" step="0.01" min="0" x-model="form.salvage_value" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Asset GL Acct ID *</label>
+                    <input type="number" min="1" x-model="form.asset_account_id" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Accum Depr Acct ID *</label>
+                    <input type="number" min="1" x-model="form.accum_depr_account_id" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
+                </div>
+                <div>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Depr Expense Acct ID *</label>
+                    <input type="number" min="1" x-model="form.depr_expense_account_id" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
+                </div>
+                <div style="grid-column:span 2;">
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Notes</label>
+                    <textarea x-model="form.notes" rows="2" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;"></textarea>
+                </div>
+                <p x-show="modal.error" x-cloak style="grid-column:span 2;font-size:0.75rem;color:var(--color-danger);margin:0;" x-text="modal.error"></p>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                <button class="btn btn-ghost" @click="modal.open = false">Cancel</button>
+                <button class="btn btn-primary" :disabled="modal.saving" @click="save()">
+                    <span x-show="!modal.saving">Add Component</span>
+                    <span x-show="modal.saving">Saving...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function componentsPanel(parentId) {
+    return {
+        parentId: parentId,
+        modal: { open: false, saving: false, error: null },
+        form: {
+            name: '', asset_class: 'fleet_equipment',
+            acquisition_cost: '', acquisition_date: new Date().toISOString().slice(0,10),
+            useful_life_years: '5', depreciation_method: 'straight_line', salvage_value: '0',
+            asset_account_id: '', accum_depr_account_id: '', depr_expense_account_id: '',
+            notes: '',
+        },
+        openModal() {
+            this.modal.open = true; this.modal.error = null;
+        },
+        async save() {
+            this.modal.saving = true; this.modal.error = null;
+            try {
+                const payload = Object.assign({ parent_asset_id: this.parentId }, this.form);
+                const r = await FF_Api.post('<?= base_url('api/v1/accounting/fixed_assets/add_component') ?>', payload);
+                if (r.success) {
+                    FF_Toast.success('Component added.');
+                    this.modal.open = false;
+                    window.location.reload();
+                } else {
+                    this.modal.error = (r.error && (r.error.message || JSON.stringify(r.error.fields || {}))) || 'Save failed.';
+                }
+            } catch (e) { this.modal.error = 'Network error.'; }
+            this.modal.saving = false;
+        },
+    };
+}
+</script>
+<?php endif; ?>
 
 <!-- ── Documents ───────────────────────────────────────────────────────── -->
 <?php

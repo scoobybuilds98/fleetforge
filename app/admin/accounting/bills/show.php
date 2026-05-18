@@ -203,12 +203,116 @@ require_once FF_ROOT . '/includes/header.php';
                     <td class="font-mono" style="padding:8px 10px;text-align:right;"><?= e('$' . number_format((float) $l['unit_cost'], 2)) ?></td>
                     <td class="font-mono" style="padding:8px 10px;text-align:right;font-weight:600;"><?= e('$' . number_format((float) $l['amount'], 2)) ?></td>
                 </tr>
+                <?php
+                // S-ACCT-COMP: betterment/repair classification row when line is asset-linked.
+                if (!empty($l['asset_id'])):
+                    $assetRow = db_row("SELECT id, asset_number, name FROM acc_fixed_assets WHERE id = ?", [(int) $l['asset_id']]);
+                    $isCapitalized = (int) ($l['capitalize'] ?? 0) === 1;
+                ?>
+                <tr style="border-bottom:1px solid var(--border-default);background:#fafafa;">
+                    <td colspan="5" style="padding:10px 14px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;font-size:0.8125rem;">
+                            <div>
+                                <span style="color:var(--text-secondary);font-size:0.75rem;">Linked to:</span>
+                                <?php if ($assetRow): ?>
+                                    <a class="font-mono" style="color:var(--color-accent);text-decoration:none;margin-left:4px;"
+                                       href="<?= base_url('accounting/fixed-assets/show?id=' . (int) $assetRow['id']) ?>"><?= e($assetRow['asset_number']) ?></a>
+                                    — <?= e($assetRow['name']) ?>
+                                <?php else: ?>
+                                    <span class="font-mono">#<?= (int) $l['asset_id'] ?></span> (asset row not found)
+                                <?php endif; ?>
+                            </div>
+                            <?php if ($isCapitalized): ?>
+                                <span class="badge badge-success" style="padding:3px 10px;font-size:0.6875rem;">
+                                    ✓ Capitalized to <?= e($assetRow['asset_number'] ?? '?') ?>
+                                </span>
+                            <?php elseif ($assetRow && !empty($l['betterment_note']) && (int) $l['capitalize'] === 0): ?>
+                                <span class="badge badge-neutral" style="padding:3px 10px;font-size:0.6875rem;">
+                                    → Expensed (repair)
+                                </span>
+                            <?php else: ?>
+                            <div x-data="classifyLine(<?= (int) $l['id'] ?>, <?= (int) $l['asset_id'] ?>, <?= json_encode((string) $l['amount']) ?>)" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                                <details style="font-size:0.75rem;color:var(--text-secondary);">
+                                    <summary style="cursor:pointer;">ASPE 3061.14 rule</summary>
+                                    <div style="margin-top:4px;max-width:480px;">
+                                        <strong>Betterment:</strong> increases service potential or extends useful life.<br>
+                                        <strong>Repair:</strong> maintains service potential without extending life.
+                                    </div>
+                                </details>
+                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                    <input type="radio" name="classify_<?= (int) $l['id'] ?>" value="repair" x-model="form.choice">
+                                    🔧 Repair (expense)
+                                </label>
+                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                    <input type="radio" name="classify_<?= (int) $l['id'] ?>" value="betterment" x-model="form.choice">
+                                    ⬆ Betterment (capitalize)
+                                </label>
+                                <input type="text" x-model="form.note" placeholder="Describe..." x-show="form.choice === 'betterment'" x-cloak
+                                       style="padding:4px 8px;border:1px solid var(--border-default);border-radius:4px;font-size:0.8125rem;min-width:220px;">
+                                <button class="btn btn-primary btn-xs" :disabled="!form.choice || form.busy" @click="submit()">
+                                    <span x-show="!form.busy">Classify</span>
+                                    <span x-show="form.busy">Saving...</span>
+                                </button>
+                                <span x-show="form.error" x-cloak style="font-size:0.75rem;color:var(--color-danger);" x-text="form.error"></span>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                    </td>
+                </tr>
+                <?php endif; ?>
             <?php endforeach; ?>
             </tbody>
         </table>
     </div>
     <?php endif; ?>
 </div>
+
+<script>
+function classifyLine(lineId, assetId, amount) {
+    return {
+        lineId: lineId, assetId: assetId, amount: amount,
+        form: { choice: '', note: '', busy: false, error: null },
+        async submit() {
+            const m = this.form;
+            if (m.choice === 'betterment' && (!m.note || m.note.trim().length < 5)) {
+                m.error = 'Betterment note (≥ 5 chars) is required.';
+                return;
+            }
+            m.busy = true; m.error = null;
+            try {
+                if (m.choice === 'betterment') {
+                    const r = await FF_Api.post('<?= base_url('api/v1/accounting/fixed_assets/betterment') ?>', {
+                        asset_id: this.assetId, amount: this.amount,
+                        note: m.note.trim(), bill_line_id: this.lineId,
+                    });
+                    if (r.success) {
+                        FF_Toast.success('Betterment capitalized.');
+                        window.location.reload();
+                    } else {
+                        m.error = (r.error && (r.error.message || JSON.stringify(r.error.fields || {}))) || 'Save failed.';
+                    }
+                } else {
+                    // Repair → mark capitalize=0 + note via the classify_line endpoint.
+                    // No asset-cost mutation; just stamps the audit trail.
+                    const noteFinal = m.note && m.note.trim().length >= 5
+                        ? m.note.trim()
+                        : 'Classified as repair (ASPE 3061.14): maintains service potential without extending life.';
+                    const r = await FF_Api.post('<?= base_url('api/v1/accounting/bills/classify_line') ?>', {
+                        line_id: this.lineId, note: noteFinal,
+                    });
+                    if (r.success) {
+                        FF_Toast.success('Line classified as repair (expensed).');
+                        window.location.reload();
+                    } else {
+                        m.error = (r.error && (r.error.message || JSON.stringify(r.error.fields || {}))) || 'Save failed.';
+                    }
+                }
+            } catch (e) { m.error = 'Network error.'; }
+            m.busy = false;
+        },
+    };
+}
+</script>
 
 <!-- ── Payments ────────────────────────────────────────────────────────── -->
 <div class="card" style="padding:18px;margin-bottom:14px;">

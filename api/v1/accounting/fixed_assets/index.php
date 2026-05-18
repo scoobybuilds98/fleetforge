@@ -80,7 +80,10 @@ $rows = db_select(
         a.serial_number,
         a.last_depreciation_date,
         a.created_at,
-        a.updated_at
+        a.updated_at,
+        a.is_component,
+        a.parent_asset_id,
+        (SELECT COUNT(*) FROM acc_fixed_assets c WHERE c.parent_asset_id = a.id) AS component_count
      FROM acc_fixed_assets a
      LEFT JOIN equipment_units eu ON eu.id = a.equipment_unit_id
      {$whereSQL}

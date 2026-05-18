@@ -60,9 +60,40 @@ $impairments = db_select(
     [$id]
 );
 
+// S-ACCT-COMP: component children + parent context. Skipped when the asset
+// is itself a component (no nesting) — instead surface a parent_summary
+// pointing back up so the UI can render a "Part of: {parent}" link.
+$components = [];
+$totalNbv   = (string) $asset['net_book_value'];
+$parentSummary = null;
+if ((int) ($asset['is_component'] ?? 0) === 0) {
+    $components = db_select(
+        "SELECT id, asset_number, name, asset_class, acquisition_date,
+                available_for_use_date, acquisition_cost, accumulated_depreciation,
+                net_book_value, useful_life_years, depreciation_method, status,
+                cca_class_id, is_aiip_eligible
+           FROM acc_fixed_assets
+          WHERE parent_asset_id = ?
+          ORDER BY id ASC",
+        [$id]
+    );
+    foreach ($components as $c) {
+        $totalNbv = bcadd($totalNbv, (string) $c['net_book_value'], 2);
+    }
+} elseif (!empty($asset['parent_asset_id'])) {
+    $parentSummary = db_row(
+        "SELECT id, asset_number, name FROM acc_fixed_assets WHERE id = ?",
+        [(int) $asset['parent_asset_id']]
+    );
+}
+
 json_success([
-    'asset'       => $asset,
-    'schedule'    => $schedule,
-    'disposal'    => $disposal,
-    'impairments' => $impairments,
+    'asset'           => $asset,
+    'schedule'        => $schedule,
+    'disposal'        => $disposal,
+    'impairments'     => $impairments,
+    'components'      => $components,
+    'component_count' => count($components),
+    'total_nbv'       => $totalNbv,
+    'parent_summary'  => $parentSummary,
 ]);

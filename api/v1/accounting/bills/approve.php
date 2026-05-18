@@ -26,6 +26,7 @@ require_permission('accounts_payable', 'edit');
 
 use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
+use FleetForge\Accounting\FixedAssetService;
 
 // VALID-2: accept both JSON and form-encoded payloads.
 $jsonBody = json_body();
@@ -151,12 +152,52 @@ $result = db_transaction(function () use ($id) {
         'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
+    // S-ACCT-COMP: surface pre-classified vs un-classified asset-linked lines.
+    // - capitalize=1 + asset_id NOT NULL → fire FixedAssetService::capitalize()
+    //   immediately so the asset's depreciable_cost reflects the betterment.
+    // - capitalize=0/NULL + asset_id NOT NULL → soft warning in response.
+    //   (Not blocking — operator may post the expense and classify later.)
+    $capitalized        = [];
+    $uncategorizedCount = 0;
+    foreach ($lines as $line) {
+        if (empty($line['asset_id'])) continue;
+        if ((int) $line['capitalize'] === 1) {
+            $note = trim((string) ($line['betterment_note'] ?? '')) !== ''
+                ? (string) $line['betterment_note']
+                : "Bill {$bill['bill_number']} line auto-capitalized on bill approval.";
+            try {
+                FixedAssetService::capitalize(
+                    (int) $line['asset_id'],
+                    (string) $line['amount'],
+                    current_user_id(),
+                    $note,
+                    (int) $line['id']
+                );
+                $capitalized[] = (int) $line['asset_id'];
+            } catch (\RuntimeException $e) {
+                // Don't abort the whole approval — log + continue.
+                error_log("S-ACCT-COMP: capitalize failed for bill_line #{$line['id']}: {$e->getMessage()}");
+            }
+        } else {
+            $uncategorizedCount++;
+        }
+    }
+
     return [
-        'id'               => $id,
-        'bill_number'      => $bill['bill_number'],
-        'status'           => 'approved',
-        'journal_entry_id' => (int) $je['id'],
+        'id'                  => $id,
+        'bill_number'         => $bill['bill_number'],
+        'status'              => 'approved',
+        'journal_entry_id'    => (int) $je['id'],
+        'capitalized_assets'  => $capitalized,
+        'uncategorized_count' => $uncategorizedCount,
     ];
 });
+
+// S-ACCT-COMP: append soft warning when asset-linked lines were left unclassified.
+if (!empty($result['uncategorized_count'])) {
+    $result['warning'] = "{$result['uncategorized_count']} bill line(s) linked to fixed assets "
+                       . "have not been classified as betterment or repair. "
+                       . "Visit the bill to classify before year-end.";
+}
 
 json_success($result);

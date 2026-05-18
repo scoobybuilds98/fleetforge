@@ -1606,4 +1606,137 @@ class FixedAssetService
             return \db_row("SELECT * FROM acc_capex_requests WHERE id = ?", [$crId]);
         });
     }
+
+    // ── S-ACCT-COMP — PP&E Componentization (ASPE 3061.18) ─────────────────
+
+    /**
+     * Fetch a parent asset row with its component children + a roll-up
+     * total_nbv (parent NBV + sum of all component NBVs). Used by the asset
+     * show endpoint and the asset schedule report.
+     *
+     * @param int $assetId  Parent asset id.
+     * @return array { ...parent_row, components: [...], component_count: int,
+     *                 total_nbv: bcmath string }
+     */
+    public static function getWithComponents(int $assetId): array
+    {
+        $parent = \db_row("SELECT * FROM acc_fixed_assets WHERE id = ?", [$assetId]);
+        if (!$parent) {
+            throw new \RuntimeException('Asset not found.');
+        }
+
+        $components = \db_select(
+            "SELECT id, asset_number, name, asset_class, acquisition_date,
+                    available_for_use_date, acquisition_cost, depreciable_cost,
+                    accumulated_depreciation, net_book_value, salvage_value,
+                    useful_life_years, depreciation_method, status,
+                    cca_class_id, is_aiip_eligible
+               FROM acc_fixed_assets
+              WHERE parent_asset_id = ?
+              ORDER BY id ASC",
+            [$assetId]
+        );
+
+        $totalNbv = (string) ($parent['net_book_value'] ?? '0.00');
+        foreach ($components as $c) {
+            $totalNbv = bcadd($totalNbv, (string) ($c['net_book_value'] ?? '0.00'), 2);
+        }
+
+        $parent['components']      = $components;
+        $parent['component_count'] = count($components);
+        $parent['total_nbv']       = $totalNbv;
+        return $parent;
+    }
+
+    /**
+     * Sum NBV for parent + all component children. Returns '0.00' when the
+     * asset has no children (caller can fall back to parent.net_book_value).
+     */
+    public static function getParentNbv(int $parentAssetId): string
+    {
+        $row = \db_row(
+            "SELECT COALESCE(SUM(net_book_value), 0) AS total
+               FROM acc_fixed_assets
+              WHERE id = ? OR parent_asset_id = ?",
+            [$parentAssetId, $parentAssetId]
+        );
+        return (string) ($row['total'] ?? '0.00');
+    }
+
+    /**
+     * Capitalize a betterment to a fixed asset (ASPE 3061.14). Adds $amount
+     * to acquisition_cost and recomputes depreciable_cost (= acquisition_cost
+     * − salvage_value). Does NOT directly touch net_book_value or
+     * accumulated_depreciation — depreciation runs handle those.
+     *
+     * Remaining-life calculation note: spec referenced useful_life_months
+     * but the on-disk column is `useful_life_years` (K-22 trap). For
+     * straight-line assets the existing previewRun()/calculateForPeriod()
+     * path will pick up the new depreciable_cost on the next run and amortize
+     * over remaining life automatically — no per-asset manual recompute
+     * needed here.
+     *
+     * Optional bill_line_id parameter: when provided, the caller already
+     * marked acc_bill_lines.capitalize=1 + betterment_note=$note. We just
+     * cite it in the audit-log note.
+     *
+     * @throws \RuntimeException when amount ≤ 0, asset disposed, or the
+     *         new depreciable_cost would go negative (salvage > new cost).
+     */
+    public static function capitalize(
+        int $assetId,
+        string $amount,
+        ?int $userId = null,
+        string $note = '',
+        ?int $billLineId = null
+    ): array {
+        $amount = self::money($amount);
+        if (bccomp($amount, '0.00', 2) <= 0) {
+            throw new \RuntimeException('Betterment amount must be greater than zero.');
+        }
+        if (trim($note) === '') {
+            throw new \RuntimeException('Betterment note is required (ASPE 3061.14 justification).');
+        }
+
+        return \db_transaction(function () use ($assetId, $amount, $userId, $note, $billLineId) {
+            $asset = \db_row("SELECT * FROM acc_fixed_assets WHERE id = ? FOR UPDATE", [$assetId]);
+            if (!$asset) {
+                throw new \RuntimeException('Asset not found.');
+            }
+            if ($asset['status'] === 'disposed') {
+                throw new \RuntimeException('Cannot capitalize betterment on a disposed asset.');
+            }
+
+            $oldCost     = (string) $asset['acquisition_cost'];
+            $newCost     = bcadd($oldCost, $amount, 2);
+            $salvage     = (string) $asset['salvage_value'];
+            $newDeprBase = bcsub($newCost, $salvage, 2);
+
+            // STOP CONDITION: never let the new depreciable_cost go negative.
+            if (bccomp($newDeprBase, '0.00', 2) < 0) {
+                throw new \RuntimeException(
+                    'Betterment amount would produce negative depreciable cost. '
+                    . 'Check salvage value configuration for this asset.'
+                );
+            }
+
+            \db_update('acc_fixed_assets', [
+                'acquisition_cost' => $newCost,
+                'depreciable_cost' => $newDeprBase,
+                'updated_at'       => date('Y-m-d H:i:s'),
+            ], 'id = ?', [$assetId]);
+
+            $billRef = $billLineId ? " Bill line #{$billLineId}." : '';
+            self::audit(
+                $userId,
+                'update',
+                'fixed_asset',
+                $assetId,
+                "{$asset['asset_number']} {$asset['name']}",
+                "Betterment capitalized: +\${$amount} (cost {$oldCost} → {$newCost})." . $billRef . " Note: {$note}"
+            );
+
+            return \db_row("SELECT * FROM acc_fixed_assets WHERE id = ?", [$assetId]);
+        });
+    }
 }

@@ -169,6 +169,14 @@ require_once FF_ROOT . '/includes/header.php';
                                 <template x-if="a.equipment_unit_number">
                                     <div class="text-secondary text-xs" x-text="'Unit: ' + a.equipment_unit_number"></div>
                                 </template>
+                                <template x-if="parseInt(a.is_component) === 1">
+                                    <span class="badge badge-blue" style="padding:1px 6px;font-size:0.625rem;margin-left:4px;" title="Component of a parent asset (ASPE 3061.18)">C</span>
+                                </template>
+                                <template x-if="(a.component_count || 0) > 0">
+                                    <span class="badge badge-purple" style="padding:1px 6px;font-size:0.625rem;margin-left:4px;" :title="a.component_count + ' component(s) under this asset'">
+                                        <span x-text="a.component_count"></span>×C
+                                    </span>
+                                </template>
                             </td>
                             <td x-text="formatClass(a.asset_class)"></td>
                             <td x-text="formatMethod(a.depreciation_method)"></td>
