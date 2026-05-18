@@ -299,6 +299,13 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
 
 </div><!-- /x-data -->
 
+<!-- ── Documents ───────────────────────────────────────────────────────── -->
+<?php
+$entityType = 'tax_filing';
+$entityId   = (int) $period['id'];
+require FF_ROOT . '/includes/partials/acc-documents-section.php';
+?>
+
 <script>
 function FF_TaxPeriodDetail(periodId) {
     return {

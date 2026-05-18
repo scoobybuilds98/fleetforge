@@ -180,7 +180,10 @@ require_once FF_ROOT . '/includes/header.php';
                                     <span class="badge" :class="{'badge-success':t.status==='matched','badge-warning':t.status==='unmatched','badge-neutral':t.status==='excluded'}" x-text="t.status"></span>
                                 </td>
                                 <td style="font-size:0.75rem;" x-text="t.matched_type ? t.matched_type + ' #' + t.matched_id : '—'"></td>
-                                <td>
+                                <td style="white-space:nowrap;">
+                                    <a :href="'<?= e(base_url('accounting/bank-transactions/show')) ?>?id=' + t.id"
+                                       class="btn btn-ghost btn-xs"
+                                       title="View transaction (and attach documents)">View</a>
                                     <?php if ($canEdit): ?>
                                     <template x-if="t.status==='unmatched'">
                                         <button class="btn btn-ghost btn-xs" @click="excludeTxn(t.id, 1)" title="Exclude">✕</button>

@@ -247,10 +247,11 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 </div>
 
-<!-- ── Documents stub ──────────────────────────────────────────────────── -->
-<div class="card" style="padding:18px;margin-bottom:14px;">
-    <div style="font-weight:600;font-size:0.95rem;margin-bottom:8px;">Documents</div>
-    <div style="font-size:0.8125rem;color:var(--text-secondary);">Documents (coming soon)</div>
-</div>
+<!-- ── Documents ───────────────────────────────────────────────────────── -->
+<?php
+$entityType = 'ap_payment';
+$entityId   = (int) $payment['id'];
+require FF_ROOT . '/includes/partials/acc-documents-section.php';
+?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>
