@@ -202,6 +202,21 @@ $result = db_transaction(function () use (
         'created_by'       => current_user_id(),
     ]);
 
+    // S-ACCT-FIX-AP guard: verify the subledger row was actually inserted.
+    // db_insert returns the new id or throws, so this is defense-in-depth
+    // against any future refactor or driver quirk that could silently skip
+    // the row while reporting success. If the row is missing here we throw
+    // — the surrounding db_transaction() rolls back the JE write as well,
+    // so we never commit an orphan ap_payment JE. See spec §20.2 and
+    // docs/FLEETFORGE_ACCOUNTING_AUDIT_2026-05-07.md §4 for the 2026-04-07
+    // orphan-JE incident that motivates this check.
+    $verifyPayment = db_row("SELECT id FROM acc_ap_payments WHERE id = ?", [$paymentId]);
+    if (!$verifyPayment) {
+        throw new \RuntimeException(
+            "AP payment JE created but subledger row not found — transaction will roll back. payment_id={$paymentId}"
+        );
+    }
+
     // Allocate to bills and update bill balances
     foreach ($validatedAllocations as $alloc) {
         db_insert('acc_ap_payment_allocations', [

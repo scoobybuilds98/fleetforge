@@ -35,9 +35,25 @@ echo "=== FleetForge demo accounting seeder ===\n\n";
 // Idempotent: clear any accounting data from prior runs of this script.
 // We're only clearing what this script creates — not the 20 fixed assets,
 // bank accounts, or FX rate, which are seeded by demo_seed.php.
+//
+// WHY acc_ap_payment_allocations + acc_ap_payments are in this list
+// (added S-ACCT-FIX-AP Phase 4, 2026-05-18):
+//   Prior to this fix, the demo emitted ap_payment JEs (via postJE() with
+//   source_type='ap_payment') but did NOT write rows into acc_ap_payments
+//   or acc_ap_payment_allocations — leaving AP subledger drill-down
+//   impossible. The 6 orphan JEs (JE-2026-00036/00038/00040/00042/00045/00047)
+//   surfaced in docs/FLEETFORGE_ACCOUNTING_AUDIT_2026-05-07.md §4 were the
+//   downstream symptom. The Phase 2 reversal of those JEs is one-shot;
+//   re-running this demo without seeding the subledger would recreate the
+//   orphan condition. This block now truncates the subledger AND the demo
+//   writes proper subledger rows in the paid-bill block below.
+// Order note: acc_ap_payment_allocations cascades from acc_ap_payments via
+//   ON DELETE CASCADE, but we list both explicitly for clarity. The
+//   SET FOREIGN_KEY_CHECKS = 0 wrap makes the order irrelevant.
 echo "Clearing prior accounting seed data (idempotent)...\n";
 db_execute('SET FOREIGN_KEY_CHECKS = 0', []);
 foreach (['acc_journal_entry_lines', 'acc_journal_entries', 'acc_bank_transactions',
+          'acc_ap_payment_allocations', 'acc_ap_payments',
           'acc_bill_lines', 'acc_bills', 'acc_depreciation_run_lines',
           'acc_depreciation_runs', 'acc_capex_requests', 'acc_year_end_checklist',
           'vendors'] as $t) {
@@ -354,7 +370,11 @@ $maintAcct = db_row("SELECT id FROM acc_accounts WHERE code = '6070' OR name LIK
 $insuranceAcct = db_row("SELECT id FROM acc_accounts WHERE name LIKE '%Insurance%' AND account_type IN ('operating_expense','cost_of_revenue') ORDER BY code LIMIT 1", []);
 $gstRcvbleAcct = db_row("SELECT id FROM acc_accounts WHERE name LIKE '%GST/HST%' AND account_type = 'asset' LIMIT 1", []);
 
-$billCount = 0; $billJeCount = 0;
+// $apPaymentCount: per-paid-bill counter for APAY-YYYY-NNNNN payment-number
+// generation (added S-ACCT-FIX-AP Phase 4). The live path generates payment
+// numbers via AccountingService::nextApPaymentNumber(); the demo uses its
+// own sprintf scheme to stay self-contained and not advance the live counter.
+$billCount = 0; $billJeCount = 0; $apPaymentCount = 0;
 foreach ($billDefs as $b) {
     $billDate = date('Y-m-d', strtotime("{$b['date_offset']} days"));
     $dueDate  = date('Y-m-d', strtotime($billDate . ' +30 days'));
@@ -446,15 +466,30 @@ foreach ($billDefs as $b) {
     db_execute("UPDATE acc_bills SET journal_entry_id = ? WHERE id = ?", [$jeId, $billId]);
     $billJeCount++;
 
-    // For paid bills, also post the cash-out JE
+    // For paid bills, post (1) the cash-out JE, (2) the acc_ap_payments
+    // subledger row, (3) the acc_ap_payment_allocations row linking the
+    // payment to the bill, and (4) the matching bank withdrawal.
+    //
+    // Pre-S-ACCT-FIX-AP this block only wrote (1) and (4), leaving the AP
+    // subledger empty and the JE orphan. The orphan-JE class fixed in
+    // S-ACCT-FIX-AP Phase 2 (reversal of JE-2026-00036/00038/00040/00042/
+    // 00045/00047) was caused by that missing-write, not by a TRUNCATE
+    // ordering bug. The forward link pattern (acc_ap_payments.journal_entry_id
+    // → acc_journal_entries.id) matches what api/v1/accounting/ap-payments/
+    // create.php writes in the live UI flow. acc_journal_entries.source_id
+    // is then updated to point at the new ap_payment row so subledger
+    // drill-down via (source_type, source_id) works (spec §16 + §15).
     if ($status === 'paid') {
-        postJE(
+        $paymentDate = date('Y-m-d', strtotime($billDate . ' +10 days'));
+
+        $jePaymentId = postJE(
             [
-                'entry_date'  => date('Y-m-d', strtotime($billDate . ' +10 days')),
+                'entry_date'  => $paymentDate,
                 'description' => "AP payment — {$b['vendor']}",
-                'reference'   => "BILL-" . str_pad((string) $billCount, 5, '0', STR_PAD_LEFT),
+                'reference'   => sprintf('APAY-%d-%05d', date('Y'), ++$apPaymentCount),
                 'source_type' => 'ap_payment',
-                'source_id'   => $billId,
+                // source_id is wired below once the acc_ap_payments row exists
+                'source_id'   => null,
                 'currency'    => 'CAD',
             ],
             [
@@ -473,19 +508,52 @@ foreach ($billDefs as $b) {
             ]
         );
 
+        // Subledger row — the missing write that caused the 6 orphan JEs
+        // pre-S-ACCT-FIX-AP. assert (via foreign-key shape): vendor + bank
+        // + journal_entry_id all resolve; status='cleared' to mirror the
+        // live create.php default.
+        $apPaymentId = db_insert('acc_ap_payments', [
+            'payment_number'   => sprintf('APAY-%d-%05d', date('Y'), $apPaymentCount),
+            'vendor_id'        => $vendorId,
+            'bank_account_id'  => $cadBank,
+            'payment_date'     => $paymentDate,
+            'payment_method'   => 'eft',
+            'amount'           => number_format($total, 2, '.', ''),
+            'currency'         => 'CAD',
+            'status'           => 'cleared',
+            'journal_entry_id' => $jePaymentId,
+            'notes'            => "Demo seed payment for {$b['vendor']} — bill #{$billCount}",
+            'created_by'       => $userId,
+        ]);
+
+        // Wire JE.source_id back to the subledger row for drill-down
+        // (spec §16: "All auto-entries reference source_type and source_id
+        // in acc_journal_entries").
+        db_execute(
+            "UPDATE acc_journal_entries SET source_id = ? WHERE id = ?",
+            [$apPaymentId, $jePaymentId]
+        );
+
+        // Allocation: this demo payment clears the full bill balance.
+        db_insert('acc_ap_payment_allocations', [
+            'ap_payment_id'  => $apPaymentId,
+            'bill_id'        => $billId,
+            'amount_applied' => number_format($total, 2, '.', ''),
+        ]);
+
         // Matching bank withdrawal
         db_insert('acc_bank_transactions', [
             'bank_account_id'  => $cadBank,
-            'transaction_date' => date('Y-m-d', strtotime($billDate . ' +10 days')),
+            'transaction_date' => $paymentDate,
             'description'      => "AP payment — {$b['vendor']}",
-            'reference'        => sprintf('BILL-%d-%05d', date('Y'), $billCount),
+            'reference'        => sprintf('APAY-%d-%05d', date('Y'), $apPaymentCount),
             'amount'           => number_format(-$total, 2, '.', ''),
             'transaction_type' => 'withdrawal',
             'source'           => 'system',
             'status'           => 'matched',
             'matched_type'     => 'other',
             'is_cleared'       => 1,
-            'cleared_date'     => date('Y-m-d', strtotime($billDate . ' +10 days')),
+            'cleared_date'     => $paymentDate,
             'created_by'       => $userId,
         ]);
     }

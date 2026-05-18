@@ -80,6 +80,7 @@ $_accNavGroups = [
         'icon'  => 'document-text',
         'children' => [
             ['label' => 'Bills',          'url' => '/accounting/bills',          'icon' => 'document-text'],
+            ['label' => 'Payments',       'url' => '/accounting/ap-payments',    'icon' => 'banknotes'],
             ['label' => 'AP Aging',       'url' => '/accounting/ap-aging',       'icon' => 'clock'],
             ['label' => 'Vendor Credits', 'url' => '/accounting/vendor-credits', 'icon' => 'banknotes'],
         ],
