@@ -1176,4 +1176,57 @@ function FF_Dashboard() {
 }
 </script>
 
+<!-- ── S-CAROUSEL-CARD-3D: Mouse-tilt 3D effect for carousel cards ──────────
+     FF_CardTilt adds a perspective rotateX/rotateY transform on mousemove,
+     simulating a physical card reacting to the light source (cursor position).
+     The sheen (::before pseudo-element) tracks the same position via CSS vars
+     --sheen-x and --sheen-y so the radial-gradient highlight follows the mouse.
+     Touch devices don't fire mousemove so no tilt occurs there — no detection
+     needed. Re-runs after a 900ms delay to wait for Alpine x-if rendering to
+     insert the .carousel-card--link elements into the DOM. ─────────────────── -->
+<script>
+function FF_CardTilt() {
+    const cards = document.querySelectorAll('.carousel-card--link');
+    if (!cards.length) return;
+
+    cards.forEach(function (card) {
+        card.addEventListener('mousemove', function (e) {
+            const rect    = card.getBoundingClientRect();
+            const x       = (e.clientX - rect.left)  / rect.width  - 0.5;
+            const y       = (e.clientY - rect.top)   / rect.height - 0.5;
+
+            // Max ±10° tilt each axis
+            const rotateX = (-y * 10).toFixed(2);
+            const rotateY = ( x * 10).toFixed(2);
+
+            card.style.transform =
+                'perspective(800px) ' +
+                'rotateX(' + rotateX + 'deg) ' +
+                'rotateY(' + rotateY + 'deg) ' +
+                'translateY(-8px) ' +
+                'scale(1.01)';
+
+            // Move sheen with mouse for dynamic light-source effect
+            const sheenX = (x * 60 + 50).toFixed(0);
+            const sheenY = (y * 60 + 50).toFixed(0);
+            card.style.setProperty('--sheen-x', sheenX + '%');
+            card.style.setProperty('--sheen-y', sheenY + '%');
+        });
+
+        card.addEventListener('mouseleave', function () {
+            card.style.transform = '';
+            card.style.removeProperty('--sheen-x');
+            card.style.removeProperty('--sheen-y');
+        });
+    });
+}
+
+// WHY 900ms: Alpine x-if renders cards asynchronously after tablesLoaded flips
+// to true. 900ms gives the fetch + Alpine render cycle time to complete before
+// we query for .carousel-card--link. Re-attaches if Alpine re-renders.
+document.addEventListener('DOMContentLoaded', function () {
+    setTimeout(FF_CardTilt, 900);
+});
+</script>
+
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

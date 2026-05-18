@@ -9627,11 +9627,18 @@ body:has(.chat-page-content) #ff-chat-widget {
     display: none;              /* Chrome / Safari */
 }
 
-/* ══ CAROUSEL CARDS — Apple-style redesign (S-CAROUSEL-CARD-REDESIGN) ══ */
+/* ══ CAROUSEL CARDS — Apple-style redesign (S-CAROUSEL-CARD-REDESIGN)
+       3D depth + mouse-tilt (S-CAROUSEL-CARD-3D) ══════════════════════ */
 .carousel-card {
     flex: 0 0 240px;
     scroll-snap-align: start;
-    background: var(--bg-card);
+    /* Gradient background — light source from top-left */
+    background: linear-gradient(
+        145deg,
+        color-mix(in srgb, var(--bg-card) 85%, white 15%) 0%,
+        var(--bg-card) 50%,
+        color-mix(in srgb, var(--bg-card) 92%, black 8%) 100%
+    );
     border: 1px solid var(--border-color);
     border-radius: 18px;
     padding: 18px;
@@ -9641,38 +9648,67 @@ body:has(.chat-page-content) #ff-chat-widget {
     min-height: 200px;
     position: relative;
     overflow: hidden;
-    transition: border-color 180ms ease,
-                transform 180ms ease,
-                box-shadow 180ms ease;
+    /* Layered shadows: inner highlight + inner depth + contact + mid + ambient */
+    box-shadow:
+        0 1px 0  rgba(255, 255, 255, 0.07) inset,   /* top inner highlight */
+        0 -1px 0 rgba(0, 0, 0, 0.35) inset,          /* bottom inner depth  */
+        0 2px  4px  rgba(0, 0, 0, 0.25),             /* contact shadow      */
+        0 8px  20px rgba(0, 0, 0, 0.28),             /* mid lift shadow     */
+        0 24px 48px rgba(0, 0, 0, 0.18);             /* ambient shadow      */
+    /* Required for 3D perspective transforms */
+    transform-style: preserve-3d;
+    will-change: transform, box-shadow;
+    transition:
+        transform  200ms cubic-bezier(0.23, 1, 0.32, 1),
+        box-shadow 200ms cubic-bezier(0.23, 1, 0.32, 1),
+        border-color 200ms ease;
 }
-/* Subtle top-edge glow line */
+/* Top-surface sheen — tracks mouse via --sheen-x / --sheen-y CSS vars (set by FF_CardTilt) */
 .carousel-card::before {
     content: '';
     position: absolute;
-    top: 0; left: 16px; right: 16px;
-    height: 1px;
-    background: linear-gradient(
-        90deg,
-        transparent,
-        rgba(255, 255, 255, 0.08),
-        transparent
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(
+        circle at var(--sheen-x, 30%) var(--sheen-y, 20%),
+        rgba(255, 255, 255, 0.09) 0%,
+        rgba(255, 255, 255, 0.03) 40%,
+        transparent 65%
     );
+    pointer-events: none;
+    z-index: 0;
+}
+/* WHY: card children must sit above the ::before sheen layer (z-index:0) */
+.carousel-card > * {
+    position: relative;
+    z-index: 1;
 }
 .carousel-card--link {
     text-decoration: none;
     color: inherit;
     cursor: pointer;
 }
+/* Hover — card lifts off surface; contact shadow stretches; primary glow ring */
 .carousel-card--link:hover {
     border-color: var(--color-primary);
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
-                0 0 0 1px var(--color-primary) inset;
+    transform: translateY(-8px) scale(1.01);
+    box-shadow:
+        0 1px 0  rgba(255, 255, 255, 0.10) inset,
+        0 -1px 0 rgba(0, 0, 0, 0.4) inset,
+        0 4px  8px  rgba(0, 0, 0, 0.20),
+        0 16px 32px rgba(0, 0, 0, 0.32),
+        0 40px 72px rgba(0, 0, 0, 0.22),
+        0 0 0 1px color-mix(in srgb, var(--color-primary) 40%, transparent);
     text-decoration: none;
 }
+/* Press — snaps back slightly before releasing */
 .carousel-card--link:active {
-    transform: translateY(-1px);
-    transition-duration: 60ms;
+    transform: translateY(-2px) scale(0.995);
+    transition-duration: 80ms;
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.06) inset,
+        0 2px 8px  rgba(0, 0, 0, 0.3),
+        0 8px 16px rgba(0, 0, 0, 0.25);
 }
 
 /* ── Top row ─────────────────────────────────────────────────── */
