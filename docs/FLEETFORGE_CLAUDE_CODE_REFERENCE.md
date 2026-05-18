@@ -698,6 +698,113 @@ Repo-wide grep across `api/v1/accounting/reports/` confirms only `journal_entrie
 
 **Source:** K-22 catch surfaced in S-ACCT-WTB (WTB v2 + lead-schedule + workpaper-annotations endpoints). Locked 2026-05-19.
 
+### Trap 16: `acc_fixed_assets` uses `acquisition_cost` NOT `original_cost`
+The fixed-asset cost-basis column is `acc_fixed_assets.acquisition_cost` (decimal(15,2), NOT NULL). It is NOT `original_cost`. The CCA spec and several session prompts reference `original_cost`; the term is correct as a CCA CONCEPT but the COLUMN NAME on disk is `acquisition_cost`. Use it when:
+
+- Summing additions for CCA Schedule 8 (`SUM(acquisition_cost) WHERE cca_class_id = N`)
+- Capping disposal proceeds at the original cost basis per CRA (`LEAST(d.proceeds, fa.acquisition_cost)`)
+- Computing depreciable cost / NBV (`depreciable_cost = acquisition_cost - salvage_value`)
+
+```sql
+-- WRONG (column does not exist)
+SELECT SUM(original_cost) FROM acc_fixed_assets WHERE cca_class_id = 5;
+
+-- RIGHT
+SELECT SUM(acquisition_cost) FROM acc_fixed_assets WHERE cca_class_id = 5;
+```
+
+**Source:** K-22 catch surfaced in S-ACCT-CCA-1 (CcaService::computeClass + pre-flight schema scan). Locked 2026-05-19.
+
+### Trap 17: `acc_fixed_assets` uses `asset_class` NOT `asset_category`
+The internal asset categorisation column is `acc_fixed_assets.asset_class` (ENUM('fleet_equipment','vehicles','office_equipment','leasehold_improvements','land','building','other')). It is NOT `asset_category`. This is the operational class — separate from the CRA tax class (`cra_class` varchar legacy + `cca_class_id` FK from S-ACCT-CCA-1). When writing ALTER TABLE with AFTER clauses, or admin-form filters, use `asset_class`.
+
+```sql
+-- WRONG (column does not exist — ALTER fails at the AFTER clause)
+ALTER TABLE acc_fixed_assets ADD COLUMN cca_class_id INT UNSIGNED NULL AFTER asset_category;
+
+-- RIGHT
+ALTER TABLE acc_fixed_assets ADD COLUMN cca_class_id INT UNSIGNED NULL AFTER asset_class;
+```
+
+Three related-but-distinct fields all live on this table:
+- `asset_class` — operational ENUM (what KIND of thing)
+- `cra_class` — legacy varchar(20) free text (e.g. "10", "16") populated pre-S-ACCT-CCA-1
+- `cca_class_id` — FK to `acc_cca_classes.id` (S-ACCT-CCA-1 onward)
+
+`cra_class` + `cra_cca_rate` continue to feed the **depreciation engine**; `cca_class_id` feeds the **CCA Schedule 8 engine**. The two are intentionally separate concerns — do not collapse them.
+
+**Source:** K-22 catch surfaced in S-ACCT-CCA-1 (migration AFTER clause). Locked 2026-05-19.
+
+### Trap 18: `acc_fixed_assets` has NO `deleted_at` column — hard-delete only
+The fixed-assets table does NOT participate in soft-delete (§5). It is hard-delete only. Disposal is tracked via `acc_fixed_assets.status = 'disposed'` + a row in `acc_asset_disposals` — NOT via `deleted_at`. When filtering "live assets" in CCA, terminal-loss, or any cross-join query, use the status flag:
+
+```sql
+-- WRONG (column does not exist — query 500s with "Unknown column 'deleted_at'")
+SELECT COUNT(*) FROM acc_fixed_assets
+WHERE cca_class_id = ? AND deleted_at IS NULL;
+
+-- RIGHT (Terminal-loss check: class is "empty at year-end")
+SELECT COUNT(*) FROM acc_fixed_assets
+WHERE cca_class_id = ? AND status <> 'disposed';
+```
+
+Same applies to `acc_asset_disposals` — operational record, hard-delete only, no `deleted_at`. The SOFT_DELETE_TABLES list in §5 is authoritative; assume hard-delete unless a table is listed there.
+
+**Source:** K-22 catch surfaced in S-ACCT-CCA-1 (CcaService Step 11 terminal-loss query). Locked 2026-05-19.
+
+### Trap 19: GVWR is `equipment_units.weight_capacity_lbs` in POUNDS, not kg
+There is no `gvwr_kg` or `gvwr` column anywhere. The closest field is `equipment_units.weight_capacity_lbs` (int unsigned, **pounds**). Several specs reference GVWR in kilograms (e.g. "Class 16 threshold = 11,788 kg GVWR"). When comparing on-disk weight against a CRA threshold expressed in kg, convert first:
+
+```
+11,788 kg × 2.20462 lb/kg = 25,988 lbs (≈ 25,990 lbs)
+```
+
+Use the lbs-side value in any comparison against `weight_capacity_lbs`:
+
+```php
+// WRONG — comparing kg threshold against a lbs column silently underflags
+if ($equipmentUnit['weight_capacity_lbs'] > 11788) { /* will trigger far too often */ }
+
+// RIGHT — compare lbs to lbs
+$gvwrLbs = (int) $equipmentUnit['weight_capacity_lbs'];
+if ($gvwrLbs > 25990) {
+    // Class 16 (or Class 55 for ZEV) suggestion
+}
+```
+
+The S-ACCT-CCA-1 GVWR validator (`CcaService::classifyGvwrWarning`) accepts both `$gvwrKg` and `$gvwrLbs` parameters so callers can pass either — but the live data path through `equipment_units` is always lbs.
+
+**Source:** K-22 catch surfaced in S-ACCT-CCA-1 (Class 16 GVWR validator + pre-flight schema scan). Locked 2026-05-19.
+
+### Trap 20: PREDEPLOY_CHECKLIST.md category F = Accounting, NOT category H
+The pre-deploy checklist (`docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md`) uses these category letters on disk:
+
+- **A** — Asset cache invalidation
+- **B** — Production `.env` keys
+- **C** — DNS
+- **D** — AWS infrastructure
+- **E** — Data migrations
+- **F** — Accounting state (cron installs, account assignments, CCA backfills, etc.)
+- **G** — Smoke + verification procedures
+- **H** — Rollback procedures
+- **I** — Post-deploy monitoring
+- **J** — References
+
+Several session prompts have referred to "category H — Accounting" — that is incorrect. H is RESERVED for rollback steps; placing an accounting backfill there is a category divergence (K-14 class). When filing PREDEPLOY items for new accounting features, use **F-** prefix:
+
+```
+ITEM F-CCA-1 | 2026-05-19 | F — Accounting | Assign CCA classes to all 20 existing fixed assets
+  Originating session: S-ACCT-CCA-1
+  Surfaced into checklist: S-ACCT-CCA-1
+  Detail: ...
+  Owner: Operator
+  Status: PENDING
+```
+
+If a genuinely new category is needed, propose it explicitly in the session prompt + extend the category list above — do not silently invent one.
+
+**Source:** K-22 catch surfaced in S-ACCT-CCA-1 (prompt said "H-CCA-1/2" — actually filed as F-CCA-1/2 on disk). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
