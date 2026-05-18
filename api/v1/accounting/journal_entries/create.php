@@ -57,12 +57,22 @@ if ($fields) {
 }
 
 // --- Build header and lines for the service ---
+$entryType        = clean_string($body['entry_type'] ?? 'manual', 50);
+$postImmediately  = (bool) ($body['post_immediately'] ?? false);
+
+// AJE types must enter the draft → review workflow (S-ACCT-AJE / spec §23.1).
+// Force post_immediately=false so the service stamps entry_status='draft'
+// and the entry begins the submit/approve chain.
+if (JournalEntryService::isAjeType($entryType)) {
+    $postImmediately = false;
+}
+
 $header = [
     'entry_date'       => $entryDate,
     'description'      => $desc,
     'reference'        => clean_string($body['reference'] ?? null, 255),
-    'entry_type'       => clean_string($body['entry_type'] ?? 'manual', 50),
-    'post_immediately' => (bool) ($body['post_immediately'] ?? false),
+    'entry_type'       => $entryType,
+    'post_immediately' => $postImmediately,
 ];
 
 // ── Per-line validation — accumulate line-level problems

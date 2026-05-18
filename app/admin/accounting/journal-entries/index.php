@@ -24,10 +24,16 @@ require_auth();
 require_permission('journal_entries', 'view');
 
 // -- KPI tiles -- server-side for accuracy on initial load ----------------------
-$totalJE  = db_count("SELECT COUNT(*) FROM acc_journal_entries");
-$draftJE  = db_count("SELECT COUNT(*) FROM acc_journal_entries WHERE status = 'draft'");
-$postedJE = db_count("SELECT COUNT(*) FROM acc_journal_entries WHERE status = 'posted'");
-$todayJE  = db_count("SELECT COUNT(*) FROM acc_journal_entries WHERE entry_date = CURDATE()");
+$totalJE   = db_count("SELECT COUNT(*) FROM acc_journal_entries");
+$draftJE   = db_count("SELECT COUNT(*) FROM acc_journal_entries WHERE status = 'draft'");
+$postedJE  = db_count("SELECT COUNT(*) FROM acc_journal_entries WHERE status = 'posted'");
+$pendingJE = db_count("SELECT COUNT(*) FROM acc_journal_entries WHERE entry_status = 'submitted'");
+
+// S-ACCT-AJE workflow context — exposed to Alpine for per-row action gating.
+$ajeReviewRequired = ((string) settings_get('accounting.aje_review_required', '0')) === '1';
+$currentRole       = current_user()['role_slug'] ?? '';
+$currentUserId     = (int) (current_user_id() ?? 0);
+$canApprove        = in_array($currentRole, ['super_admin', 'manager', 'accountant'], true);
 
 $pageTitle = 'Journal Entries';
 require_once FF_ROOT . '/includes/header.php';
@@ -81,11 +87,12 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-label">Posted</div>
         <div class="stat-value font-mono"><?= e((string) $postedJE) ?></div>
     </div>
-    <div class="stat-card" style="cursor:pointer"
-         onclick="(function(){var d=new Date();var iso=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');window.dispatchEvent(new CustomEvent('ff-je-filter',{detail:{tab:'all',date:iso}}));})()">
-        <span class="stat-icon"><svg><use href="#icon-calendar"/></svg></span>
-        <div class="stat-label">Today's Entries</div>
-        <div class="stat-value font-mono"><?= e((string) $todayJE) ?></div>
+    <div class="stat-card stat-card--orange" style="cursor:pointer"
+         onclick="window.dispatchEvent(new CustomEvent('ff-je-filter',{detail:{tab:'pending'}}))"
+         title="AJE entries awaiting approval">
+        <span class="stat-icon stat-icon--orange"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label">Pending Review</div>
+        <div class="stat-value font-mono"><?= e((string) $pendingJE) ?></div>
     </div>
 </div>
 
@@ -102,7 +109,15 @@ require_once FF_ROOT . '/includes/header.php';
      ">
 
     <!-- -- TAB BAR ------------------------------------------------ -->
+    <!-- S-ACCT-AJE: "Drafts & Pending" filters entry_status IN ('draft','submitted') -
+         the AJE workflow queue. "Draft" still filters status='draft' for all
+         non-AJE drafts and legacy entries. -->
     <div class="tab-bar" role="tablist">
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'pending' }"
+                @click="setTab('pending')" :aria-selected="activeTab === 'pending'" role="tab"
+                title="AJE workflow: draft + submitted entries">
+            Drafts &amp; Pending
+        </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'draft' }"
                 @click="setTab('draft')" :aria-selected="activeTab === 'draft'" role="tab">
             Draft
@@ -140,9 +155,13 @@ require_once FF_ROOT . '/includes/header.php';
                     aria-label="Filter by entry type">
                 <option value="">All Types</option>
                 <option value="manual">Manual</option>
-                <option value="auto">Auto</option>
+                <option value="system">System</option>
+                <option value="recurring">Recurring</option>
                 <option value="reversing">Reversing</option>
+                <option value="year_end">Year-End</option>
                 <option value="adjusting">Adjusting</option>
+                <option value="reclassifying">Reclassifying</option>
+                <option value="prior_period">Prior Period</option>
                 <option value="closing">Closing</option>
             </select>
 
@@ -259,23 +278,45 @@ require_once FF_ROOT . '/includes/header.php';
                                 <td class="font-mono text-sm text-right"
                                     x-text="'$' + formatMoney(je.credit_total)"></td>
                                 <td>
+                                    <!-- Workflow badge: shows entry_status when distinct from posted/reversed terminal state. -->
                                     <span class="badge badge-no-dot"
-                                          :class="statusBadge(je.status)"
-                                          x-text="capitalize(je.status)"></span>
+                                          :class="workflowBadge(je)"
+                                          x-text="workflowLabel(je)"></span>
                                 </td>
                                 <td style="text-align:right;white-space:nowrap;">
                                     <button class="btn btn-ghost btn-xs"
                                             @click="viewEntryDetail(je.id)"
                                             title="View details">View</button>
                                     <?php if (can('journal_entries', 'edit')): ?>
-                                    <button class="btn btn-ghost btn-xs"
-                                            x-show="je.status === 'draft'"
-                                            @click="postEntry(je.id)"
-                                            title="Post entry">Post</button>
-                                    <button class="btn btn-ghost btn-xs"
-                                            x-show="je.status === 'posted'"
-                                            @click="reverseEntry(je.id)"
-                                            title="Reverse entry">Reverse</button>
+                                    <!-- AJE draft, review required -> Submit for Review.
+                                         AJE draft, review off OR non-AJE draft -> Post.
+                                         AJE submitted -> Approve & Post (role-gated) + Recall (submitter/super_admin).
+                                         Posted -> Reverse. -->
+                                    <template x-if="canSubmit(je)">
+                                        <button class="btn btn-ghost btn-xs"
+                                                @click="submitEntry(je.id)"
+                                                title="Submit for review">Submit for Review</button>
+                                    </template>
+                                    <template x-if="canPost(je)">
+                                        <button class="btn btn-ghost btn-xs"
+                                                @click="postEntry(je.id)"
+                                                title="Post entry">Post</button>
+                                    </template>
+                                    <template x-if="canApproveRow(je)">
+                                        <button class="btn btn-primary btn-xs"
+                                                @click="approveEntry(je.id)"
+                                                title="Approve and post">Approve &amp; Post</button>
+                                    </template>
+                                    <template x-if="canRecall(je)">
+                                        <button class="btn btn-ghost btn-xs"
+                                                @click="recallEntry(je.id)"
+                                                title="Recall to draft">Recall</button>
+                                    </template>
+                                    <template x-if="je.status === 'posted'">
+                                        <button class="btn btn-ghost btn-xs"
+                                                @click="reverseEntry(je.id)"
+                                                title="Reverse entry">Reverse</button>
+                                    </template>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -316,8 +357,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <span class="font-mono" x-text="viewEntry ? viewEntry.entry_number : ''"></span>
                         <template x-if="viewEntry">
                             <span class="badge badge-no-dot"
-                                  :class="statusBadge(viewEntry.status)"
-                                  x-text="capitalize(viewEntry.status)"
+                                  :class="workflowBadge(viewEntry)"
+                                  x-text="workflowLabel(viewEntry)"
                                   style="margin-left:8px;vertical-align:middle;"></span>
                         </template>
                     </h3>
@@ -395,11 +436,30 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="modal-footer">
                     <?php if (can('journal_entries', 'edit')): ?>
-                    <button class="btn btn-primary btn-sm"
-                            x-show="viewEntry && viewEntry.status === 'draft'"
-                            @click="postEntry(viewEntry.id); showViewModal = false;">
-                        Post Entry
-                    </button>
+                    <template x-if="viewEntry && canSubmit(viewEntry)">
+                        <button class="btn btn-primary btn-sm"
+                                @click="submitEntry(viewEntry.id); showViewModal = false;">
+                            Submit for Review
+                        </button>
+                    </template>
+                    <template x-if="viewEntry && canPost(viewEntry)">
+                        <button class="btn btn-primary btn-sm"
+                                @click="postEntry(viewEntry.id); showViewModal = false;">
+                            Post Entry
+                        </button>
+                    </template>
+                    <template x-if="viewEntry && canApproveRow(viewEntry)">
+                        <button class="btn btn-primary btn-sm"
+                                @click="approveEntry(viewEntry.id); showViewModal = false;">
+                            Approve &amp; Post
+                        </button>
+                    </template>
+                    <template x-if="viewEntry && canRecall(viewEntry)">
+                        <button class="btn btn-secondary btn-sm"
+                                @click="recallEntry(viewEntry.id); showViewModal = false;">
+                            Recall
+                        </button>
+                    </template>
                     <button class="btn btn-danger btn-sm"
                             x-show="viewEntry && viewEntry.status === 'posted'"
                             @click="reverseEntry(viewEntry.id); showViewModal = false;">
@@ -445,9 +505,16 @@ require_once FF_ROOT . '/includes/header.php';
                                     @change="createErrors.entry_type = ''"
                                     :disabled="saving">
                                 <option value="manual">Manual</option>
-                                <option value="adjusting">Adjusting</option>
+                                <option value="adjusting">Adjusting (AJE — workflow)</option>
+                                <option value="reclassifying">Reclassifying (AJE — workflow)</option>
+                                <option value="prior_period">Prior Period (AJE — workflow)</option>
                             </select>
                             <div class="field-error" x-show="createErrors.entry_type" x-cloak x-text="createErrors.entry_type"></div>
+                            <!-- WHY: AJE types route through draft/submit/approve workflow -
+                                 the "Post immediately" checkbox is force-overridden server-side. -->
+                            <small class="text-secondary" x-show="isAjeType(form.entry_type)" x-cloak>
+                                Adjusting entries begin as drafts and require review per accounting settings.
+                            </small>
                         </div>
                     </div>
 
@@ -595,10 +662,16 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                     </div>
 
-                    <!-- Post immediately checkbox -->
-                    <label class="form-label" style="display:flex;align-items:center;gap:8px;">
-                        <input type="checkbox" x-model="form.post_immediately" :disabled="saving">
-                        Post immediately (skip draft)
+                    <!-- Post immediately checkbox (AJE types ignore this — see PHP create.php gate). -->
+                    <label class="form-label" style="display:flex;align-items:center;gap:8px;"
+                           :style="isAjeType(form.entry_type) ? 'opacity:0.5;' : ''">
+                        <input type="checkbox"
+                               x-model="form.post_immediately"
+                               :disabled="saving || isAjeType(form.entry_type)">
+                        <span x-show="!isAjeType(form.entry_type)">Post immediately (skip draft)</span>
+                        <span x-show="isAjeType(form.entry_type)" x-cloak>
+                            Post immediately disabled — AJE workflow always begins as draft
+                        </span>
                     </label>
                 </div>
                 <div class="modal-footer">
@@ -617,15 +690,27 @@ require_once FF_ROOT . '/includes/header.php';
 </div><!-- /x-data -->
 
 <script>
+// S-ACCT-AJE — workflow context passed from PHP to gate per-row actions.
+window.FF_JE_CTX = window.FF_JE_CTX || {
+    reviewRequired: <?= $ajeReviewRequired ? 'true' : 'false' ?>,
+    role:           <?= json_encode($currentRole, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>,
+    userId:         <?= (int) $currentUserId ?>,
+    canApprove:     <?= $canApprove ? 'true' : 'false' ?>,
+};
+
 function FF_JournalEntries() {
     return {
         // -- List state ---------------------------------------------------
         entries:     [],
         loading:     true,
         loadError:   null,
-        activeTab:   'all',
+        activeTab:   'pending',
         pagination:  {},
         page:        1,
+
+        // S-ACCT-AJE context (mirror of window.FF_JE_CTX for template access)
+        ctx: window.FF_JE_CTX,
+        ajeTypes: ['adjusting','reclassifying','prior_period'],
 
         filters: {
             search:    '',
@@ -700,7 +785,11 @@ function FF_JournalEntries() {
             params.set('sort',     this.filters.sort);
             params.set('dir',      this.filters.dir);
 
-            if (this.activeTab !== 'all') {
+            // S-ACCT-AJE: 'pending' tab is an entry_status filter, not a status filter.
+            // Other tabs continue to filter by the GL status column.
+            if (this.activeTab === 'pending') {
+                params.set('entry_status', 'draft,submitted');
+            } else if (this.activeTab !== 'all') {
                 params.set('status', this.activeTab);
             }
             if (this.filters.search)    params.set('q',         this.filters.search);
@@ -864,12 +953,12 @@ function FF_JournalEntries() {
                 this.createErrors.entry_date = 'Entry date is required.';
                 ok = false;
             }
-            const types = ['manual','adjusting'];
+            const types = ['manual','adjusting','reclassifying','prior_period'];
             if (!this.form.entry_type) {
                 this.createErrors.entry_type = 'Entry type is required.';
                 ok = false;
             } else if (!types.includes(this.form.entry_type)) {
-                this.createErrors.entry_type = 'Entry type must be manual or adjusting.';
+                this.createErrors.entry_type = 'Entry type must be one of: manual, adjusting, reclassifying, prior_period.';
                 ok = false;
             }
             if (!this.form.description || !this.form.description.trim()) {
@@ -1014,19 +1103,164 @@ function FF_JournalEntries() {
             return map[status] || 'badge-neutral';
         },
 
+        // S-ACCT-AJE: workflowBadge / workflowLabel surface entry_status when
+        // it's distinct from the terminal posted/reversed state, otherwise
+        // fall back to the GL status. Reversed/posted are terminal — they
+        // already match between status + entry_status.
+        workflowBadge(je) {
+            if (!je) return 'badge-neutral';
+            if (je.status === 'reversed')     return 'badge-danger';
+            if (je.status === 'posted')       return 'badge-success';
+            var es = je.entry_status || 'posted';
+            if (es === 'submitted')           return 'badge-amber';
+            if (es === 'approved')            return 'badge-blue';
+            if (es === 'draft')               return 'badge-neutral';
+            return this.statusBadge(je.status);
+        },
+        workflowLabel(je) {
+            if (!je) return '';
+            if (je.status === 'reversed')     return 'Reversed';
+            if (je.status === 'posted')       return 'Posted';
+            var es = je.entry_status || 'posted';
+            if (es === 'submitted')           return 'Pending Review';
+            if (es === 'approved')            return 'Approved';
+            if (es === 'draft')               return 'Draft';
+            return this.capitalize(je.status);
+        },
+
+        isAjeType(type) {
+            return this.ajeTypes.indexOf(type) !== -1;
+        },
+
+        // -- AJE workflow per-row action gating ---------------------------
+        // canSubmit: AJE draft + review required + still status='draft'.
+        canSubmit(je) {
+            if (!je || je.status !== 'draft') return false;
+            if (!this.isAjeType(je.entry_type)) return false;
+            if ((je.entry_status || 'posted') !== 'draft') return false;
+            return !!this.ctx.reviewRequired;
+        },
+        // canPost: status='draft' AND not in an AJE workflow gate.
+        // Non-AJE draft (entry_status='posted'): always postable.
+        // AJE draft + review off: postable directly (single-step approval).
+        // AJE submitted/approved: NOT postable here — use approveEntry instead.
+        canPost(je) {
+            if (!je || je.status !== 'draft') return false;
+            var es = je.entry_status || 'posted';
+            if (!this.isAjeType(je.entry_type)) return es !== 'submitted';
+            // AJE row: only postable when no review required AND still in draft.
+            return !this.ctx.reviewRequired && es === 'draft';
+        },
+        // canApproveRow: entry_status='submitted' + caller has approver role
+        // + (when review required) caller != submitter.
+        canApproveRow(je) {
+            if (!je || (je.entry_status || 'posted') !== 'submitted') return false;
+            if (!this.ctx.canApprove) return false;
+            if (this.ctx.reviewRequired
+                && je.submitted_by_id != null
+                && Number(je.submitted_by_id) === Number(this.ctx.userId)) {
+                return false;
+            }
+            return true;
+        },
+        // canRecall: entry_status='submitted' + (caller is submitter OR super_admin).
+        canRecall(je) {
+            if (!je || (je.entry_status || 'posted') !== 'submitted') return false;
+            var isSubmitter = je.submitted_by_id != null
+                && Number(je.submitted_by_id) === Number(this.ctx.userId);
+            return isSubmitter || this.ctx.role === 'super_admin';
+        },
+
+        // -- AJE workflow actions -----------------------------------------
+        submitEntry(id) {
+            FF_Confirm.show({
+                title:        'Submit Adjusting Entry',
+                message:      'Submit this entry for review? Another user will need to approve before it posts to the GL.',
+                confirmLabel: 'Submit',
+                dangerMode:   false,
+                onConfirm:    async () => {
+                    try {
+                        var r = await FF_Api.post('<?= base_url('api/v1/accounting/journal_entries/submit') ?>', { id: id });
+                        if (r.success) {
+                            FF_Toast.success('Adjusting entry submitted for review.');
+                            this.loadEntries();
+                        } else {
+                            FF_Toast.error(this.extractError(r, 'Failed to submit entry.'));
+                        }
+                    } catch(e) {
+                        FF_Toast.error('Network error. Please try again.');
+                    }
+                }
+            });
+        },
+
+        approveEntry(id) {
+            FF_Confirm.show({
+                title:        'Approve & Post Adjusting Entry',
+                message:      'Approve this adjusting entry and post it to the GL? This action affects account balances.',
+                confirmLabel: 'Approve & Post',
+                dangerMode:   false,
+                onConfirm:    async () => {
+                    try {
+                        var r = await FF_Api.post('<?= base_url('api/v1/accounting/journal_entries/approve') ?>', { id: id });
+                        if (r.success) {
+                            FF_Toast.success('Adjusting entry approved and posted.');
+                            this.loadEntries();
+                        } else {
+                            FF_Toast.error(this.extractError(r, 'Failed to approve entry.'));
+                        }
+                    } catch(e) {
+                        FF_Toast.error('Network error. Please try again.');
+                    }
+                }
+            });
+        },
+
+        recallEntry(id) {
+            FF_Confirm.show({
+                title:        'Recall Adjusting Entry',
+                message:      'Recall this entry back to draft? The submission stamps will be cleared.',
+                confirmLabel: 'Recall',
+                dangerMode:   false,
+                onConfirm:    async () => {
+                    try {
+                        var r = await FF_Api.post('<?= base_url('api/v1/accounting/journal_entries/recall') ?>', { id: id });
+                        if (r.success) {
+                            FF_Toast.success('Adjusting entry recalled to draft.');
+                            this.loadEntries();
+                        } else {
+                            FF_Toast.error(this.extractError(r, 'Failed to recall entry.'));
+                        }
+                    } catch(e) {
+                        FF_Toast.error('Network error. Please try again.');
+                    }
+                }
+            });
+        },
+
         typeBadge(type) {
             var map = {
-                manual:    'badge-blue',
-                auto:      'badge-purple',
-                reversing: 'badge-amber',
-                adjusting: 'badge-blue',
-                closing:   'badge-neutral',
+                manual:        'badge-blue',
+                system:        'badge-purple',
+                auto:          'badge-purple',
+                recurring:     'badge-purple',
+                reversing:     'badge-amber',
+                year_end:      'badge-neutral',
+                adjustment:    'badge-blue',
+                adjusting:     'badge-blue',
+                reclassifying: 'badge-blue',
+                prior_period:  'badge-amber',
+                closing:       'badge-neutral',
             };
             return map[type] || 'badge-neutral';
         },
 
         capitalize(s) {
-            return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+            if (!s) return '';
+            // Underscore-aware: "prior_period" → "Prior Period".
+            return String(s).split('_').map(function(part) {
+                return part ? part.charAt(0).toUpperCase() + part.slice(1) : '';
+            }).join(' ');
         },
 
         formatDate(d) {

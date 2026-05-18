@@ -34,6 +34,19 @@ if ($status = clean_string($_GET['status'] ?? null)) {
     $params[] = $status;
 }
 
+if ($entryStatus = clean_string($_GET['entry_status'] ?? null)) {
+    // S-ACCT-AJE: AJE workflow filter (draft → submitted → approved → posted).
+    // Accept comma-separated list for the "Drafts & Pending" tab use case.
+    $values = array_filter(array_map('trim', explode(',', $entryStatus)));
+    $allowed = ['draft','submitted','approved','posted','reversed'];
+    $values = array_values(array_intersect($values, $allowed));
+    if ($values) {
+        $placeholders = implode(',', array_fill(0, count($values), '?'));
+        $where[] = "je.entry_status IN ({$placeholders})";
+        foreach ($values as $v) $params[] = $v;
+    }
+}
+
 if ($type = clean_string($_GET['type'] ?? null)) {
     $where[]  = 'je.entry_type = ?';
     $params[] = $type;
@@ -82,6 +95,13 @@ $rows = db_select(
         je.entry_date,
         je.entry_type,
         je.status,
+        je.entry_status,
+        je.submitted_by_id,
+        je.submitted_at,
+        je.approved_by_id,
+        je.approved_at,
+        su.name AS submitted_by_name,
+        au.name AS approved_by_name,
         je.description,
         je.reference,
         je.source_type,
@@ -92,9 +112,13 @@ $rows = db_select(
         je.posted_by,
         je.posted_at,
         je.created_by,
-        je.created_at
+        je.created_at,
+        (SELECT COALESCE(SUM(jel.debit),0)  FROM acc_journal_entry_lines jel WHERE jel.journal_entry_id = je.id) AS debit_total,
+        (SELECT COALESCE(SUM(jel.credit),0) FROM acc_journal_entry_lines jel WHERE jel.journal_entry_id = je.id) AS credit_total
      FROM acc_journal_entries je
      LEFT JOIN acc_periods p ON p.id = je.period_id
+     LEFT JOIN users su ON su.id = je.submitted_by_id
+     LEFT JOIN users au ON au.id = je.approved_by_id
      {$whereSQL}
      ORDER BY je.{$sort} {$dir}
      LIMIT {$perPage} OFFSET {$offset}",

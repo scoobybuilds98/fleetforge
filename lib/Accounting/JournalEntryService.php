@@ -19,6 +19,14 @@ namespace FleetForge\Accounting;
 class JournalEntryService
 {
     /**
+     * Entry types that participate in the adjusting-entry approval workflow
+     * (S-ACCT-AJE / spec §23.1). Manual, system, recurring, reversing, year_end,
+     * adjustment (legacy singular), and closing post directly without the
+     * draft → submitted → approved review chain.
+     */
+    private const AJE_TYPES = ['adjusting', 'reclassifying', 'prior_period'];
+
+    /**
      * Create a journal entry (draft or posted).
      *
      * Each line must have: account_id, debit (string), credit (string).
@@ -98,6 +106,20 @@ class JournalEntryService
         $postImmediately = (bool) ($header['post_immediately'] ?? false);
         $status = $postImmediately ? 'posted' : 'draft';
 
+        // WHY: entry_status carries the AJE workflow layer (S-ACCT-AJE / D-AJE-1).
+        // Bridge JEs + manual non-AJE drafts both reach 'posted'; only AJE drafts
+        // (adjusting/reclassifying/prior_period via post_immediately=false) enter
+        // the 'draft' → 'submitted' → 'approved' chain. Default 'posted' keeps
+        // bridge code unchanged (D-AJE-2).
+        $entryType = $header['entry_type'] ?? 'manual';
+        if ($postImmediately) {
+            $entryStatus = 'posted';
+        } elseif (in_array($entryType, self::AJE_TYPES, true)) {
+            $entryStatus = 'draft';
+        } else {
+            $entryStatus = 'posted';
+        }
+
         if ($postImmediately) {
             $periodError = AccountingService::validatePeriodForPosting($period['id']);
             if ($periodError) {
@@ -106,7 +128,7 @@ class JournalEntryService
         }
 
         // ── Create entry ────────────────────────────────────
-        $result = \db_transaction(function () use ($header, $lines, $userId, $period, $entryDate, $status) {
+        $result = \db_transaction(function () use ($header, $lines, $userId, $period, $entryDate, $status, $entryStatus, $entryType) {
             $year = substr($entryDate, 0, 4);
             $entryNumber = AccountingService::nextJeNumber($year);
 
@@ -114,8 +136,9 @@ class JournalEntryService
                 'entry_number'     => $entryNumber,
                 'period_id'        => $period['id'],
                 'entry_date'       => $entryDate,
-                'entry_type'       => $header['entry_type'] ?? 'manual',
+                'entry_type'       => $entryType,
                 'status'           => $status,
+                'entry_status'     => $entryStatus,
                 'description'      => $header['description'] ?? '',
                 'reference'        => $header['reference'] ?? null,
                 'source_type'      => $header['source_type'] ?? null,
@@ -189,6 +212,26 @@ class JournalEntryService
                 throw new \RuntimeException("Cannot post — entry is already {$entry['status']}.");
             }
 
+            // AJE gate (S-ACCT-AJE / D-AJE-1, D-AJE-4): when review is required
+            // and the entry type is an AJE type, post() must run via the
+            // approveAndPost path — direct post() is not allowed from 'draft'.
+            // From 'approved' it is permitted (this is the second leg of
+            // approveAndPost). From 'submitted' it is not (caller must approve).
+            if (in_array($entry['entry_type'], self::AJE_TYPES, true)) {
+                $reviewRequired = (string) \settings_get('accounting.aje_review_required', '0') === '1';
+                $entryStatus = $entry['entry_status'] ?? 'posted';
+                if ($reviewRequired && $entryStatus === 'draft') {
+                    throw new \RuntimeException(
+                        'This adjusting entry requires review before posting. Submit it for approval first.'
+                    );
+                }
+                if ($entryStatus === 'submitted') {
+                    throw new \RuntimeException(
+                        'This adjusting entry is awaiting approval. Use Approve & Post to complete it.'
+                    );
+                }
+            }
+
             // Validate period is open
             $periodError = AccountingService::validatePeriodForPosting((int) $entry['period_id']);
             if ($periodError) {
@@ -206,9 +249,10 @@ class JournalEntryService
             }
 
             \db_update('acc_journal_entries', [
-                'status'    => 'posted',
-                'posted_by' => $userId,
-                'posted_at' => date('Y-m-d H:i:s'),
+                'status'       => 'posted',
+                'entry_status' => 'posted',
+                'posted_by'    => $userId,
+                'posted_at'    => date('Y-m-d H:i:s'),
             ], 'id = ?', [$entryId]);
 
             \db_insert('audit_log', [
@@ -218,8 +262,8 @@ class JournalEntryService
                 'entity_type' => 'journal_entry',
                 'entity_id'   => $entryId,
                 'notes'       => "Journal entry {$entry['entry_number']} posted",
-                'old_values'  => json_encode(['status' => 'draft']),
-                'new_values'  => json_encode(['status' => 'posted']),
+                'old_values'  => json_encode(['status' => 'draft', 'entry_status' => $entry['entry_status'] ?? null]),
+                'new_values'  => json_encode(['status' => 'posted', 'entry_status' => 'posted']),
                 'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
             ]);
 
@@ -337,6 +381,196 @@ class JournalEntryService
 
             return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$reversalId]);
         });
+    }
+
+    /**
+     * Submit an AJE draft for review (S-ACCT-AJE / spec §23.1).
+     * Transitions entry_status 'draft' → 'submitted' and stamps submitter.
+     * Only valid for AJE types (adjusting/reclassifying/prior_period).
+     *
+     * @param int $entryId
+     * @param int|null $userId
+     * @return array Updated entry row
+     * @throws \RuntimeException
+     */
+    public static function submit(int $entryId, ?int $userId = null): array
+    {
+        return \db_transaction(function () use ($entryId, $userId) {
+            $entry = \db_row(
+                "SELECT * FROM acc_journal_entries WHERE id = ? FOR UPDATE",
+                [$entryId]
+            );
+
+            if (!$entry) {
+                throw new \RuntimeException('Journal entry not found.');
+            }
+            if (!in_array($entry['entry_type'], self::AJE_TYPES, true)) {
+                throw new \RuntimeException(
+                    'Only adjusting, reclassifying, or prior-period entries use the review workflow.'
+                );
+            }
+            if ($entry['status'] !== 'draft') {
+                throw new \RuntimeException("Cannot submit — entry is already {$entry['status']}.");
+            }
+            if (($entry['entry_status'] ?? 'posted') !== 'draft') {
+                throw new \RuntimeException(
+                    "Cannot submit — entry is already {$entry['entry_status']}."
+                );
+            }
+
+            \db_update('acc_journal_entries', [
+                'entry_status'    => 'submitted',
+                'submitted_by_id' => $userId,
+                'submitted_at'    => date('Y-m-d H:i:s'),
+            ], 'id = ?', [$entryId]);
+
+            \db_insert('audit_log', [
+                'user_id'     => $userId,
+                'action'      => 'status_change',
+                'module'      => 'accounting',
+                'entity_type' => 'journal_entry',
+                'entity_id'   => $entryId,
+                'notes'       => "AJE {$entry['entry_number']} submitted for review by user #{$userId}",
+                'old_values'  => json_encode(['entry_status' => 'draft']),
+                'new_values'  => json_encode(['entry_status' => 'submitted']),
+                'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+
+            return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$entryId]);
+        });
+    }
+
+    /**
+     * Approve a submitted AJE and post it in the same transaction
+     * (S-ACCT-AJE / spec §23.1). Transitions entry_status 'submitted' →
+     * 'approved' → 'posted' and (via post()) flips status='posted'.
+     *
+     * When accounting.aje_review_required='1', the approver must be a
+     * different user from the submitter (D-AJE-4).
+     *
+     * Atomicity (STOP CONDITION): the entry_status update + post() run
+     * inside one db_transaction. If post() throws (period closed,
+     * unbalanced), the entry_status update rolls back — the entry stays
+     * 'submitted' and an error is returned.
+     *
+     * @param int $entryId
+     * @param int|null $userId
+     * @return array Updated entry row
+     * @throws \RuntimeException
+     */
+    public static function approveAndPost(int $entryId, ?int $userId = null): array
+    {
+        return \db_transaction(function () use ($entryId, $userId) {
+            $entry = \db_row(
+                "SELECT * FROM acc_journal_entries WHERE id = ? FOR UPDATE",
+                [$entryId]
+            );
+
+            if (!$entry) {
+                throw new \RuntimeException('Journal entry not found.');
+            }
+            if (!in_array($entry['entry_type'], self::AJE_TYPES, true)) {
+                throw new \RuntimeException(
+                    'Only adjusting, reclassifying, or prior-period entries use the review workflow.'
+                );
+            }
+            if (($entry['entry_status'] ?? 'posted') !== 'submitted') {
+                throw new \RuntimeException(
+                    "Cannot approve — entry is {$entry['entry_status']}, expected 'submitted'."
+                );
+            }
+
+            $reviewRequired = (string) \settings_get('accounting.aje_review_required', '0') === '1';
+            if ($reviewRequired
+                && $entry['submitted_by_id'] !== null
+                && (int) $entry['submitted_by_id'] === (int) $userId
+            ) {
+                throw new \RuntimeException(
+                    'Approver cannot be the same user who submitted this entry.'
+                );
+            }
+
+            // Stamp approval first (within same transaction as the post()).
+            \db_update('acc_journal_entries', [
+                'entry_status'   => 'approved',
+                'approved_by_id' => $userId,
+                'approved_at'    => date('Y-m-d H:i:s'),
+            ], 'id = ?', [$entryId]);
+
+            \db_insert('audit_log', [
+                'user_id'     => $userId,
+                'action'      => 'status_change',
+                'module'      => 'accounting',
+                'entity_type' => 'journal_entry',
+                'entity_id'   => $entryId,
+                'notes'       => "AJE {$entry['entry_number']} approved and posted by user #{$userId}",
+                'old_values'  => json_encode(['entry_status' => 'submitted']),
+                'new_values'  => json_encode(['entry_status' => 'approved']),
+                'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+
+            // post() will flip status='posted' + entry_status='posted'.
+            // It runs inside the same outer transaction (db_transaction nests),
+            // so a post() failure rolls back the approved stamp.
+            return self::post($entryId, $userId);
+        });
+    }
+
+    /**
+     * Recall a submitted AJE back to draft (S-ACCT-AJE).
+     * Permitted to the original submitter or a super_admin (the caller
+     * enforces that gate; this method only validates the state transition).
+     *
+     * @param int $entryId
+     * @param int|null $userId
+     * @return array Updated entry row
+     * @throws \RuntimeException
+     */
+    public static function recall(int $entryId, ?int $userId = null): array
+    {
+        return \db_transaction(function () use ($entryId, $userId) {
+            $entry = \db_row(
+                "SELECT * FROM acc_journal_entries WHERE id = ? FOR UPDATE",
+                [$entryId]
+            );
+
+            if (!$entry) {
+                throw new \RuntimeException('Journal entry not found.');
+            }
+            if (($entry['entry_status'] ?? 'posted') !== 'submitted') {
+                throw new \RuntimeException(
+                    "Cannot recall — entry is {$entry['entry_status']}, expected 'submitted'."
+                );
+            }
+
+            \db_update('acc_journal_entries', [
+                'entry_status'    => 'draft',
+                'submitted_by_id' => null,
+                'submitted_at'    => null,
+            ], 'id = ?', [$entryId]);
+
+            \db_insert('audit_log', [
+                'user_id'     => $userId,
+                'action'      => 'status_change',
+                'module'      => 'accounting',
+                'entity_type' => 'journal_entry',
+                'entity_id'   => $entryId,
+                'notes'       => "AJE {$entry['entry_number']} recalled from review by user #{$userId}",
+                'old_values'  => json_encode(['entry_status' => 'submitted']),
+                'new_values'  => json_encode(['entry_status' => 'draft']),
+                'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+
+            return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$entryId]);
+        });
+    }
+
+    /**
+     * True if entry_type participates in the AJE workflow (spec §23.1).
+     */
+    public static function isAjeType(string $entryType): bool
+    {
+        return in_array($entryType, self::AJE_TYPES, true);
     }
 
     /**

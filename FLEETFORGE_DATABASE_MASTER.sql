@@ -715,8 +715,13 @@ CREATE TABLE `acc_journal_entries` (
   `entry_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `period_id` int unsigned NOT NULL,
   `entry_date` date NOT NULL,
-  `entry_type` enum('manual','system','recurring','reversing','year_end','adjustment') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual',
+  `entry_type` enum('manual','system','recurring','reversing','year_end','adjustment','adjusting','reclassifying','closing','prior_period') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'manual',
   `status` enum('draft','posted','reversed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
+  `entry_status` enum('draft','submitted','approved','posted','reversed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'posted',
+  `submitted_by_id` int unsigned DEFAULT NULL,
+  `submitted_at` datetime DEFAULT NULL,
+  `approved_by_id` int unsigned DEFAULT NULL,
+  `approved_at` datetime DEFAULT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `reference` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `source_type` enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -745,11 +750,15 @@ CREATE TABLE `acc_journal_entries` (
   KEY `reversed_by_id` (`reversed_by_id`),
   KEY `posted_by` (`posted_by`),
   KEY `created_by` (`created_by`),
+  KEY `fk_je_submitted_by` (`submitted_by_id`),
+  KEY `fk_je_approved_by` (`approved_by_id`),
   CONSTRAINT `acc_journal_entries_ibfk_1` FOREIGN KEY (`period_id`) REFERENCES `acc_periods` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `acc_journal_entries_ibfk_2` FOREIGN KEY (`reversal_of_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_journal_entries_ibfk_3` FOREIGN KEY (`reversed_by_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_journal_entries_ibfk_4` FOREIGN KEY (`posted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `acc_journal_entries_ibfk_5` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `acc_journal_entries_ibfk_5` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_je_approved_by` FOREIGN KEY (`approved_by_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_je_submitted_by` FOREIGN KEY (`submitted_by_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_journal_entry_lines` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

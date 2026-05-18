@@ -635,7 +635,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 6 | S037-REC | B | ✅ DONE | M | Sonnet | S037-YE |
 | 7 | S037-CRONS | B | ✅ DONE | M | Sonnet | S037-REC |
 | 8 | S037-CRUD | B | ✅ DONE | M | Sonnet | S037-CRONS |
-| 9 | S-ACCT-AJE | C | 📋 PLANNED | M | Sonnet | S037-CRUD |
+| 9 | S-ACCT-AJE | C | ✅ DONE | M | Sonnet | S037-CRUD |
 | 10 | S-ACCT-WTB | C | 📋 PLANNED | L | Opus | S-ACCT-AJE |
 | 11 | S-ACCT-CCA-1 | C | 📋 PLANNED | L | Opus | S-ACCT-WTB |
 | 12 | S-ACCT-CCA-2 | C | 📋 PLANNED | M | Opus | S-ACCT-CCA-1 |
