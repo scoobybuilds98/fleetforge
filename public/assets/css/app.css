@@ -9627,86 +9627,178 @@ body:has(.chat-page-content) #ff-chat-widget {
     display: none;              /* Chrome / Safari */
 }
 
-/* ── Individual carousel card ─────────────────────────────────── */
+/* ══ CAROUSEL CARDS — Apple-style redesign (S-CAROUSEL-CARD-REDESIGN) ══ */
 .carousel-card {
-    flex: 0 0 260px;            /* fixed width on mobile */
+    flex: 0 0 240px;
     scroll-snap-align: start;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg, 12px);
-    padding: 16px;
+    border-radius: 18px;
+    padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    min-height: 220px;          /* S-DASHBOARD-CAROUSEL-ENRICH: taller for richer rows */
+    gap: 0;
+    min-height: 200px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 180ms ease,
+                transform 180ms ease,
+                box-shadow 180ms ease;
 }
-.carousel-card-row {
+/* Subtle top-edge glow line */
+.carousel-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 16px; right: 16px;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.08),
+        transparent
+    );
+}
+.carousel-card--link {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+}
+.carousel-card--link:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
+                0 0 0 1px var(--color-primary) inset;
+    text-decoration: none;
+}
+.carousel-card--link:active {
+    transform: translateY(-1px);
+    transition-duration: 60ms;
+}
+
+/* ── Top row ─────────────────────────────────────────────────── */
+.cc-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    gap: 8px;
+}
+/* WHY: cc-id uses flex:1 + min-width:0 so it shrinks before the pill does */
+.cc-id {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6875rem;
+    color: var(--color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+}
+
+/* ── Status pills ─────────────────────────────────────────────── */
+.cc-pill {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.cc-pill--active  { background: rgba(34, 197, 94, .15);  color: #22c55e; }
+.cc-pill--danger  { background: rgba(239, 68, 68, .15);  color: #ef4444; }
+.cc-pill--warning { background: rgba(245, 158, 11, .15); color: #f59e0b; }
+.cc-pill--info    { background: rgba(37, 150, 190, .15); color: #2596be; }
+
+/* ── Customer name — hero text ───────────────────────────────── */
+.cc-customer {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Equipment + unit line ───────────────────────────────────── */
+.cc-equipment {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cc-dot {
+    margin: 0 4px;
+    opacity: 0.4;
+}
+
+/* ── Divider ─────────────────────────────────────────────────── */
+.cc-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin-bottom: 14px;
+    opacity: 0.6;
+}
+
+/* ── Rate / hero number ──────────────────────────────────────── */
+.cc-rate {
+    margin-bottom: 14px;
+    flex: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+}
+.cc-rate-amount {
+    font-size: 1.375rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+}
+.cc-rate-period {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+.cc-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: auto;
+}
+.cc-footer-item {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    /* WHY: min-width:0 lets the inner value/link span shrink so
-       text-overflow:ellipsis can actually kick in for long names. */
     min-width: 0;
 }
-.carousel-card-label {
-    font-size: 0.625rem;
+.cc-footer-item--right {
+    text-align: right;
+    align-items: flex-end;
+}
+.cc-footer-label {
+    font-size: 0.5625rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     color: var(--text-muted);
+    opacity: 0.7;
 }
-.carousel-card-value {
-    font-size: 0.875rem;
-    color: var(--text-primary);
+.cc-footer-value {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-/* WHY: subvalue sits below the main value in the same row — used for
-   contextual sub-labels like "42d active" or "3d overdue". */
-.carousel-card-subvalue {
-    font-size: 0.6875rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.carousel-card-subvalue.text-danger  { color: var(--color-danger); }
-.carousel-card-subvalue.text-warning { color: var(--color-warning); }
-.carousel-card-link {
-    font-size: 0.875rem;
-    color: var(--color-primary);
-    font-family: 'DM Mono', monospace;
-    text-decoration: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-}
-.carousel-card-link:hover {
-    text-decoration: underline;
-}
-
-/* ── Full-card clickable variant (S-CAROUSEL-CARD-CLICKABLE) ──── */
-/* WHY: <a> wrapper needs display:flex + flex-direction:column to keep
-   the card-row children laid out identically to the <div> version. */
-.carousel-card--link {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    text-decoration: none;
-    color: inherit;
-    cursor: pointer;
-    transition: border-color 150ms, transform 150ms, box-shadow 150ms;
-}
-.carousel-card--link:hover {
-    border-color: var(--color-primary);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, .25);
-    text-decoration: none;
-}
-.carousel-card--link:active {
-    transform: translateY(0);
 }
 
 /* ── Empty / loading / error state ────────────────────────────── */
@@ -9716,15 +9808,15 @@ body:has(.chat-page-content) #ff-chat-widget {
     padding: 24px 4px;
 }
 
-/* ── Desktop: wider cards, more visible at once ───────────────── */
+/* ── Responsive card widths ──────────────────────────────────── */
 @media (min-width: 768px) {
     .carousel-card {
-        flex: 0 0 300px;
+        flex: 0 0 260px;
     }
 }
 @media (min-width: 1280px) {
     .carousel-card {
-        flex: 0 0 320px;
+        flex: 0 0 280px;
     }
 }
 /* ════════════════════════════════════════════════════════════════════

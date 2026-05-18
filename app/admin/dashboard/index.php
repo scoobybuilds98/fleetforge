@@ -184,42 +184,56 @@ require_once FF_ROOT . '/includes/header.php';
                 <template x-for="row in tables.active_leases" :key="row.id">
                     <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
                        class="carousel-card carousel-card--link">
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Contract</span>
-                            <span class="carousel-card-link"
-                                  x-text="row.contract_number"></span>
+
+                        <!-- TOP: contract number + status pill -->
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill cc-pill--active">Active</span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Customer</span>
-                            <span class="carousel-card-value" x-text="row.customer_name"></span>
+
+                        <!-- HERO: customer name -->
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <!-- SECONDARY: equipment · unit -->
+                        <div class="cc-equipment">
+                            <span x-text="row.template_name_snapshot || 'Unknown type'"></span>
+                            <span class="cc-dot">·</span>
+                            <span x-text="row.unit_number"></span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Equipment</span>
-                            <span class="carousel-card-value" x-text="row.template_name_snapshot ?? '—'"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Unit</span>
-                            <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Rate</span>
+
+                        <div class="cc-divider"></div>
+
+                        <!-- RATE: hero number -->
+                        <div class="cc-rate">
                             <template x-if="parseFloat(row.monthly_rate) > 0">
-                                <span class="carousel-card-value"
-                                      x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
+                                    <span class="cc-rate-period">/mo</span>
+                                </span>
                             </template>
-                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
-                                <span class="carousel-card-value"
-                                      x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
+                            <template x-if="parseFloat(row.monthly_rate) <= 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
+                                    <span class="cc-rate-period">/day</span>
+                                </span>
                             </template>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Started</span>
-                            <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
+
+                        <!-- FOOTER: started + days active -->
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Started</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Active</span>
+                                <span class="cc-footer-value"
+                                      x-text="Math.max(0, parseInt(row.days_active)) + 'd'"></span>
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Active For</span>
-                            <span class="carousel-card-subvalue" x-text="row.days_active + ' days'"></span>
-                        </div>
+
                     </a>
                 </template>
             </div>
@@ -258,45 +272,57 @@ require_once FF_ROOT . '/includes/header.php';
                 <template x-for="row in tables.pending_leases" :key="row.id">
                     <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
                        class="carousel-card carousel-card--link">
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Contract</span>
-                            <span class="carousel-card-link"
-                                  x-text="row.contract_number"></span>
+
+                        <!-- TOP: contract number + overdue/pending pill -->
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill"
+                                  :class="parseInt(row.days_overdue) > 0 ? 'cc-pill--danger' : 'cc-pill--warning'">
+                                <span x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + 'd overdue' : 'Pending'"></span>
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Customer</span>
-                            <span class="carousel-card-value" x-text="row.customer_name"></span>
+
+                        <!-- HERO: customer name -->
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <!-- SECONDARY: unit number -->
+                        <div class="cc-equipment">
+                            <span x-text="row.unit_number || '—'"></span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Unit</span>
-                            <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Rate</span>
+
+                        <div class="cc-divider"></div>
+
+                        <!-- RATE: hero number -->
+                        <div class="cc-rate">
                             <template x-if="parseFloat(row.monthly_rate) > 0">
-                                <span class="carousel-card-value"
-                                      x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
+                                    <span class="cc-rate-period">/mo</span>
+                                </span>
                             </template>
                             <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
-                                <span class="carousel-card-value"
-                                      x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
+                                    <span class="cc-rate-period">/day</span>
+                                </span>
                             </template>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Scheduled</span>
-                            <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
+
+                        <!-- FOOTER: scheduled start + created date -->
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Scheduled</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Created</span>
+                                <!-- created_at is datetime; slice to YYYY-MM-DD so fmtDate parses cleanly -->
+                                <span class="cc-footer-value" x-text="fmtDate(row.created_at && row.created_at.slice(0,10))"></span>
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Created</span>
-                            <!-- created_at is datetime; slice to YYYY-MM-DD so fmtDate parses cleanly -->
-                            <span class="carousel-card-subvalue" x-text="fmtDate(row.created_at && row.created_at.slice(0,10))"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Overdue</span>
-                            <span class="carousel-card-value"
-                                  :class="{'text-danger': parseInt(row.days_overdue) > 0, 'text-success': parseInt(row.days_overdue) <= 0}"
-                                  x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + ' days' : '—'"></span>
-                        </div>
+
                     </a>
                 </template>
             </div>
@@ -337,33 +363,54 @@ require_once FF_ROOT . '/includes/header.php';
                 <template x-for="row in tables.upcoming_returns" :key="row.id">
                     <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
                        class="carousel-card carousel-card--link">
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Contract</span>
-                            <span class="carousel-card-link"
-                                  x-text="row.contract_number"></span>
+
+                        <!-- TOP: contract number + days-remaining pill -->
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill"
+                                  :class="{
+                                      'cc-pill--danger':  parseInt(row.days_remaining) <= 3,
+                                      'cc-pill--warning': parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7,
+                                      'cc-pill--info':    parseInt(row.days_remaining) > 7
+                                  }">
+                                <span x-text="row.days_remaining + 'd left'"></span>
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Customer</span>
-                            <span class="carousel-card-value" x-text="row.customer_name"></span>
+
+                        <!-- HERO: customer name -->
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <!-- SECONDARY: equipment · unit -->
+                        <div class="cc-equipment">
+                            <span x-text="row.template_name_snapshot || '—'"></span>
+                            <span class="cc-dot">·</span>
+                            <span x-text="row.unit_number"></span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Equipment</span>
-                            <span class="carousel-card-value" x-text="row.template_name_snapshot ?? '—'"></span>
+
+                        <div class="cc-divider"></div>
+
+                        <!-- Return date as hero display -->
+                        <div class="cc-rate" style="font-size:1.125rem;">
+                            <span x-text="fmtDate(row.end_date)"></span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Unit</span>
-                            <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
+
+                        <!-- FOOTER: return date label + days remaining colour-coded -->
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Return date</span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Days remaining</span>
+                                <span class="cc-footer-value"
+                                      :class="{
+                                          'text-danger':  parseInt(row.days_remaining) <= 3,
+                                          'text-warning': parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7,
+                                          'text-success': parseInt(row.days_remaining) > 7
+                                      }"
+                                      x-text="row.days_remaining + ' days'"></span>
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Return Date</span>
-                            <span class="carousel-card-value" x-text="fmtDate(row.end_date)"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Days Left</span>
-                            <span class="carousel-card-value"
-                                  :class="parseInt(row.days_remaining) <= 3 ? 'text-danger' : (parseInt(row.days_remaining) <= 7 ? 'text-warning' : 'text-success')"
-                                  x-text="row.days_remaining + ' days'"></span>
-                        </div>
+
                     </a>
                 </template>
             </div>
@@ -402,40 +449,50 @@ require_once FF_ROOT . '/includes/header.php';
                 <template x-for="row in tables.invoices" :key="row.id">
                     <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
                        class="carousel-card carousel-card--link">
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Invoice</span>
-                            <span class="carousel-card-link"
-                                  x-text="row.invoice_number"></span>
+
+                        <!-- TOP: invoice number + status pill -->
+                        <!-- WHY 'partially_paid' not 'partial': DB enum uses partially_paid -->
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.invoice_number"></span>
+                            <span class="cc-pill"
+                                  :class="{
+                                      'cc-pill--danger':  row.status === 'overdue',
+                                      'cc-pill--warning': row.status === 'partially_paid',
+                                      'cc-pill--info':    row.status === 'sent'
+                                  }"
+                                  x-text="row.status === 'partially_paid' ? 'Partial' : (row.status.charAt(0).toUpperCase() + row.status.slice(1))">
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Customer</span>
-                            <span class="carousel-card-value" x-text="row.customer_name"></span>
+
+                        <!-- HERO: customer name -->
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-divider"></div>
+
+                        <!-- Balance due as hero number -->
+                        <div class="cc-rate"
+                             :class="parseFloat(row.balance_due) > 0 ? 'text-danger' : ''">
+                            <span class="cc-rate-amount"
+                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2})"></span>
+                            <span class="cc-rate-period"> owing</span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Invoiced</span>
-                            <span class="carousel-card-value" x-text="fmtDate(row.invoice_date)"></span>
+
+                        <!-- FOOTER: due date + invoice total -->
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Due</span>
+                                <!-- days_overdue > 0 means past due date -->
+                                <span class="cc-footer-value"
+                                      :class="parseInt(row.days_overdue) > 0 ? 'text-danger' : ''"
+                                      x-text="fmtDate(row.due_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Total</span>
+                                <span class="cc-footer-value"
+                                      x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA',{minimumFractionDigits:2})"></span>
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Due</span>
-                            <!-- days_overdue > 0 ⇒ past due (red). Spec: red if days_overdue > 0. -->
-                            <span class="carousel-card-value"
-                                  :class="{'text-danger': parseInt(row.days_overdue) > 0}"
-                                  x-text="fmtDate(row.due_date)"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Balance Due</span>
-                            <span class="carousel-card-value"
-                                  :class="{'text-danger': parseFloat(row.balance_due) > 0}"
-                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2})"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Status</span>
-                            <!-- Spec: overdue→danger, partial→warning, sent→info.
-                                 DB enum uses 'partially_paid' not 'partial'. -->
-                            <span class="badge"
-                                  :class="{'badge-danger': row.status==='overdue', 'badge-warning': row.status==='partially_paid', 'badge-info': row.status==='sent'}"
-                                  x-text="row.status === 'partially_paid' ? 'Partial' : (row.status.charAt(0).toUpperCase() + row.status.slice(1))"></span>
-                        </div>
+
                     </a>
                 </template>
             </div>
@@ -480,42 +537,51 @@ require_once FF_ROOT . '/includes/header.php';
                 <template x-for="row in tables.reservations" :key="row.id">
                     <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
                        class="carousel-card carousel-card--link">
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Reservation</span>
-                            <span class="carousel-card-link"
-                                  x-text="row.reservation_number"></span>
+
+                        <!-- TOP: reservation number + days-until pill -->
+                        <!-- WHY reservation_number is synthesized: reservations table has no
+                             natural reservation_number column — CONCAT('RES-', id) from API. -->
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.reservation_number"></span>
+                            <span class="cc-pill"
+                                  :class="{
+                                      'cc-pill--warning': parseInt(row.days_until_pickup) <= 2,
+                                      'cc-pill--info':    parseInt(row.days_until_pickup) > 2
+                                  }"
+                                  x-text="row.days_until_pickup + 'd away'">
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Customer</span>
-                            <span class="carousel-card-value" x-text="row.customer_name"></span>
+
+                        <!-- HERO: customer name -->
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <!-- SECONDARY: equipment type · unit (both NULL from schema limitation) -->
+                        <div class="cc-equipment">
+                            <span x-text="row.equipment_type || '—'"></span>
+                            <template x-if="row.unit_number && row.unit_number !== '—'">
+                                <span> · <span x-text="row.unit_number"></span></span>
+                            </template>
                         </div>
-                        <div class="carousel-card-row">
-                            <!-- WHY equipment_type / unit_number / return_date are NULL from the API:
-                                 the reservations table has no equipment_template_id FK, no
-                                 equipment_unit_id FK, and no return_date column. The card still
-                                 renders these rows for layout consistency with leases. -->
-                            <span class="carousel-card-label">Equipment</span>
-                            <span class="carousel-card-value" x-text="row.equipment_type ?? '—'"></span>
+
+                        <div class="cc-divider"></div>
+
+                        <!-- Pickup date as hero display -->
+                        <div class="cc-rate" style="font-size:1.125rem;">
+                            <span x-text="fmtDate(row.pickup_date)"></span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Unit</span>
-                            <span class="carousel-card-value" x-text="row.unit_number ?? '—'"></span>
+
+                        <!-- FOOTER: pickup label + return date (NULL from schema) -->
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Pickup</span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Returns</span>
+                                <!-- return_date is NULL — schema has no return_date column -->
+                                <span class="cc-footer-value" x-text="fmtDate(row.return_date)"></span>
+                            </span>
                         </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Pickup</span>
-                            <span class="carousel-card-value" x-text="fmtDate(row.pickup_date)"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Return</span>
-                            <span class="carousel-card-value" x-text="fmtDate(row.return_date)"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">In</span>
-                            <!-- Spec: amber if ≤ 2 days until pickup -->
-                            <span class="carousel-card-value"
-                                  :class="{'text-warning': parseInt(row.days_until_pickup) <= 2}"
-                                  x-text="row.days_until_pickup + ' days'"></span>
-                        </div>
+
                     </a>
                 </template>
             </div>
