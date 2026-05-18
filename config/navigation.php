@@ -243,10 +243,34 @@ return [
                     '/accounting/ledger',
                     '/accounting/chart-of-accounts',
                     '/accounting/journal-entries',
+                ],
+                'module' => 'journal_entries',
+                'badge'  => null,
+            ],
+            [
+                // S036 — Phase B Reports group. Trial Balance moved out of
+                // General Ledger to join the rest of the financial statements.
+                'label'        => 'Reports',
+                'icon'         => 'chart-bar',
+                'url'          => '/accounting/reports/profit-loss',
+                'match_prefix' => [
+                    '/accounting/reports/profit-loss',
+                    '/accounting/reports/balance-sheet',
+                    '/accounting/reports/cash-flow',
+                    '/accounting/reports/asset-schedule',
                     '/accounting/reports/trial-balance',
                 ],
                 'module' => 'journal_entries',
                 'badge'  => null,
+            ],
+            [
+                // S036 — Phase B Budgets module.
+                'label'        => 'Budgets',
+                'icon'         => 'document-text',
+                'url'          => '/accounting/budgets',
+                'match_prefix' => ['/accounting/budgets'],
+                'module'       => 'journal_entries',
+                'badge'        => null,
             ],
             [
                 'label'        => 'Receivables',

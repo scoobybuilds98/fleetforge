@@ -52,10 +52,17 @@ class SummaryEngine
         int    $entityId,
         string $summaryType,
         ?int   $userId = null,
-        bool   $forceRefresh = false
+        bool   $forceRefresh = false,
+        array  $reportContext = []
     ): ?array {
-        // WHY: Check cache first unless explicitly refreshing
-        if (!$forceRefresh && (bool) settings_get('ai.cache_summaries', true)) {
+        // WHY: Check cache first unless explicitly refreshing.
+        // Date-range reports (P&L / BS / CF / budget_variance) skip cache
+        // because the same (entity_type, entity_id, summary_type) tuple can
+        // legitimately produce different narratives for different ranges.
+        $skipCacheForDateRange = in_array($summaryType, [
+            'pl_narrative', 'bs_narrative', 'cashflow_narrative', 'budget_variance',
+        ], true);
+        if (!$forceRefresh && !$skipCacheForDateRange && (bool) settings_get('ai.cache_summaries', true)) {
             $cached = self::getCached($entityType, $entityId, $summaryType);
             if ($cached !== null) {
                 return [
@@ -67,7 +74,7 @@ class SummaryEngine
         }
 
         // Build the context data and prompt for this summary type
-        $context = self::gatherContext($entityType, $entityId, $summaryType, $userId);
+        $context = self::gatherContext($entityType, $entityId, $summaryType, $userId, $reportContext);
         if ($context === null) {
             return null;
         }
@@ -179,7 +186,7 @@ class SummaryEngine
     // Collects relevant data for the summary by calling the
     // appropriate tool handlers directly.
     // ────────────────────────────────────────────────────────────
-    private static function gatherContext(string $entityType, int $entityId, string $summaryType, ?int $userId): ?array
+    private static function gatherContext(string $entityType, int $entityId, string $summaryType, ?int $userId, array $reportContext = []): ?array
     {
         try {
             return match ($summaryType) {
@@ -189,11 +196,53 @@ class SummaryEngine
                 'fleet_health'        => self::gatherFleetContext(),
                 'payment_risk'        => self::gatherPaymentRiskContext($entityId, $userId),
                 'accounting_overview' => self::gatherAccountingContext($userId),
+                // ── S036 Phase B accounting narratives ──────────────
+                'pl_narrative'        => self::gatherPLContext($reportContext, $userId),
+                'bs_narrative'        => self::gatherBSContext($reportContext, $userId),
+                'cashflow_narrative'  => self::gatherCashFlowContext($reportContext, $userId),
+                'budget_variance'     => self::gatherBudgetVarianceContext($entityId, $reportContext, $userId),
                 default               => null,
             };
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Pull a P&L block for the requested date range. Drill-down JE-line
+     * ids are stripped to keep the prompt small.
+     */
+    private static function gatherPLContext(array $ctx, ?int $userId): ?array
+    {
+        $from = (string) ($ctx['from'] ?? date('Y-01-01'));
+        $to   = (string) ($ctx['to']   ?? date('Y-m-d'));
+        $report = \FleetForge\Accounting\ReportingService::profitAndLoss($from, $to);
+        foreach (['revenue', 'direct_costs', 'operating_expenses', 'other'] as $g) {
+            foreach ($report[$g] as &$row) unset($row['je_line_ids']);
+            unset($row);
+        }
+        return ['report' => $report];
+    }
+
+    private static function gatherBSContext(array $ctx, ?int $userId): ?array
+    {
+        $asOf = (string) ($ctx['as_of'] ?? date('Y-m-d'));
+        return ['report' => \FleetForge\Accounting\ReportingService::balanceSheet($asOf)];
+    }
+
+    private static function gatherCashFlowContext(array $ctx, ?int $userId): ?array
+    {
+        $from = (string) ($ctx['from'] ?? date('Y-01-01'));
+        $to   = (string) ($ctx['to']   ?? date('Y-m-d'));
+        return ['report' => \FleetForge\Accounting\ReportingService::cashFlow($from, $to)];
+    }
+
+    private static function gatherBudgetVarianceContext(int $budgetId, array $ctx, ?int $userId): ?array
+    {
+        if ($budgetId <= 0) return null;
+        $from = (string) ($ctx['from'] ?? date('Y-01-01'));
+        $to   = (string) ($ctx['to']   ?? date('Y-m-d'));
+        return ['report' => \FleetForge\Accounting\BudgetService::variance($budgetId, $from, $to)];
     }
 
     private static function gatherCustomerContext(int $customerId, ?int $userId): array
@@ -366,6 +415,72 @@ Provide a concise accounting health snapshot for the CFO/controller (5-7 bullet 
 Format monetary values with \$ and currency (CAD/USD). Include specific customer/vendor names where relevant. Do NOT just repeat the numbers — summarize what they mean.
 
 Accounting data:
+{$dataJson}
+PROMPT,
+
+            'pl_narrative' => <<<PROMPT
+You are a Canadian CPA reviewing this Profit & Loss statement. Provide a 3-5 paragraph narrative that a senior controller would write to the CFO.
+
+Cover:
+- Top revenue drivers and any notable concentrations
+- Direct cost composition and gross margin trends
+- Operating expense composition — which categories dominate
+- Any "Other Income / Expense" items worth flagging
+- Bottom line: net income result and what it means for the period
+- 1-2 recommendations or watch items
+
+Format monetary values with \$ and the CAD currency. Reference specific account names + codes where it sharpens the point. Do NOT just restate every account — synthesise.
+
+P&L data:
+{$dataJson}
+PROMPT,
+
+            'bs_narrative' => <<<PROMPT
+You are a Canadian CPA explaining this Balance Sheet to a small-business owner. Provide a 3-5 paragraph narrative.
+
+Cover:
+- Liquidity (current assets vs current liabilities) — flag if working capital is thin or strained
+- Long-term asset base — what is the company tied up in
+- Liability composition — short-term operating debt vs long-term financing
+- Equity position and the YTD net income contribution
+- If `is_balanced` is false: explain that the drift indicates a reconciliation gap and is being tracked as a separate item (do NOT speculate on the cause beyond "AR or AP reconciliation")
+- 1-2 recommendations or watch items
+
+Format monetary values with \$ and CAD. Be plain-language but accurate.
+
+Balance Sheet data:
+{$dataJson}
+PROMPT,
+
+            'cashflow_narrative' => <<<PROMPT
+You are a Canadian CPA explaining this Cash Flow Statement (ASPE 1540 indirect method) to a CEO.
+
+Provide a 3-5 paragraph narrative covering:
+- Operating cash — start with net income, then explain the non-cash adjustments (depreciation, etc.) and the working-capital movement (which assets/liabilities consumed or freed cash)
+- Investing activities — capital expenditure and any disposal proceeds
+- Financing activities — debt drawdown/repayment, dividends or owner draws
+- Bottom line: net change in cash and whether the closing balance reconciles to the GL
+- If `is_tied_out` is false: note the small tie-out difference as a known reconciliation item
+
+Format monetary values with \$ and CAD. Be plain-language but accurate.
+
+Cash Flow data:
+{$dataJson}
+PROMPT,
+
+            'budget_variance' => <<<PROMPT
+You are a Canadian CPA reviewing this Budget vs Actual variance report. Provide a 3-5 paragraph narrative for the management team.
+
+Cover:
+- Revenue performance — favorable / unfavorable variance and what's driving it
+- Major expense variances — which categories are over- or under-budget and by how much
+- Accounts that cross the variance warning threshold (`crosses_threshold = true`) — call them out specifically
+- Overall budgeted vs actual net (the totals.budgeted_net vs totals.actual_net)
+- 1-2 corrective actions if any category is materially adverse
+
+Format monetary values with \$ and CAD. Reference account codes + names. A favorable variance means actual is better than budget for that account's normal-balance side.
+
+Budget variance data:
 {$dataJson}
 PROMPT,
 

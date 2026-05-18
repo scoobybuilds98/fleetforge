@@ -1049,7 +1049,7 @@ CREATE TABLE `ai_summaries` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `entity_type` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `entity_id` int unsigned NOT NULL,
-  `summary_type` enum('lease_summary','customer_insights','fleet_health','unit_analysis','payment_risk','forecast','anomaly','accounting_overview') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `summary_type` enum('lease_summary','customer_insights','fleet_health','unit_analysis','payment_risk','forecast','anomaly','accounting_overview','pl_narrative','bs_narrative','cashflow_narrative','budget_variance') COLLATE utf8mb4_unicode_ci NOT NULL,
   `content` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
   `tokens_used` int unsigned DEFAULT NULL,
   `model_used` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,

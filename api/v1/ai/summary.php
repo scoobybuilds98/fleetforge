@@ -57,22 +57,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $entityType  = trim($body['entity_type'] ?? '');
 $entityId    = (int) ($body['entity_id'] ?? 0);
 $summaryType = trim($body['summary_type'] ?? '');
+$reportContext = is_array($body['context'] ?? null) ? $body['context'] : [];
 
-// Validate entity_type
-$validEntityTypes = ['customer', 'lease', 'equipment_unit', 'fleet'];
+// S036: 'accounting' joins the entity_type whitelist for the 4 new
+// narrative types. P&L / BS / CF use entity_id=0 (no specific entity);
+// budget_variance uses entity_id = budget_id.
+$validEntityTypes = ['customer', 'lease', 'equipment_unit', 'fleet', 'accounting'];
 if (!in_array($entityType, $validEntityTypes, true)) {
     json_error('VALIDATION_ERROR', 'Invalid entity_type. Must be one of: ' . implode(', ', $validEntityTypes), 400);
 }
 
 // Validate summary_type
-$validSummaryTypes = ['customer_insights', 'lease_summary', 'unit_analysis', 'fleet_health', 'payment_risk', 'forecast', 'anomaly', 'accounting_overview'];
+$validSummaryTypes = [
+    'customer_insights', 'lease_summary', 'unit_analysis', 'fleet_health',
+    'payment_risk', 'forecast', 'anomaly', 'accounting_overview',
+    // S036 Phase B narratives
+    'pl_narrative', 'bs_narrative', 'cashflow_narrative', 'budget_variance',
+];
 if (!in_array($summaryType, $validSummaryTypes, true)) {
     json_error('VALIDATION_ERROR', 'Invalid summary_type. Must be one of: ' . implode(', ', $validSummaryTypes), 400);
 }
 
-// fleet-level summaries (fleet_health, accounting_overview) don't need an entity_id
-$fleetLevelTypes = ['fleet_health', 'accounting_overview'];
-if (!in_array($summaryType, $fleetLevelTypes, true) && $entityType !== 'fleet' && $entityId <= 0) {
+// Fleet-level + date-range summaries don't need an entity_id (they're not entity-bound).
+// budget_variance is the exception — entity_id is required = budget_id.
+$dateRangeTypes = ['pl_narrative', 'bs_narrative', 'cashflow_narrative'];
+$fleetLevelTypes = array_merge(['fleet_health', 'accounting_overview'], $dateRangeTypes);
+if ($summaryType === 'budget_variance' && $entityId <= 0) {
+    json_error('VALIDATION_ERROR', 'entity_id (budget_id) is required for budget_variance', 400);
+}
+if (!in_array($summaryType, $fleetLevelTypes, true)
+    && $summaryType !== 'budget_variance'
+    && $entityType !== 'fleet'
+    && $entityId <= 0) {
     json_error('VALIDATION_ERROR', 'entity_id is required', 400);
 }
 
@@ -84,11 +100,12 @@ if (!$ai->isEnabled()) {
 
 // ── Generate or retrieve summary ───────────────────────────
 $result = \FleetForge\AI\SummaryEngine::generate(
-    entityType:   $entityType,
-    entityId:     $entityId,
-    summaryType:  $summaryType,
-    userId:       $userId,
-    forceRefresh: $forceRefresh
+    entityType:    $entityType,
+    entityId:      $entityId,
+    summaryType:   $summaryType,
+    userId:        $userId,
+    forceRefresh:  $forceRefresh,
+    reportContext: $reportContext
 );
 
 if ($result === null) {

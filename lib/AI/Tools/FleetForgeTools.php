@@ -132,6 +132,12 @@ class FleetForgeTools
             // ── Budget tools (S028) ─────────────────────────────
             'get_budgets'              => self::getBudgets($userId),
 
+            // ── Phase B reporting tools (S036) ──────────────────
+            'get_profit_and_loss'      => self::getProfitAndLoss($input, $userId),
+            'get_balance_sheet'        => self::getBalanceSheet($input, $userId),
+            'get_cash_flow'            => self::getCashFlow($input, $userId),
+            'get_budget_variance'      => self::getBudgetVariance($input, $userId),
+
             // ── Tax tools (S028) ────────────────────────────────
             'get_tax_filing_periods'   => self::getTaxFilingPeriods($input, $userId),
 
@@ -2477,5 +2483,66 @@ class FleetForgeTools
             }
             return $row;
         }, $rows);
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  PHASE B REPORTING TOOLS (S036)
+    //  Thin wrappers over FleetForge\Accounting\ReportingService and
+    //  BudgetService. All four require `journal_entries.view`; the
+    //  data returned is summary-shaped (no PII, no line-level
+    //  drill-down) and safe for the AI to interpret.
+    // ════════════════════════════════════════════════════════════
+
+    private static function getProfitAndLoss(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial reports.';
+        }
+        $from = (string) ($input['from'] ?? date('Y-01-01'));
+        $to   = (string) ($input['to']   ?? date('Y-m-d'));
+        $report = \FleetForge\Accounting\ReportingService::profitAndLoss($from, $to);
+        // Strip drill-down JE-line ids — large arrays inflate token cost
+        foreach (['revenue', 'direct_costs', 'operating_expenses', 'other'] as $g) {
+            foreach ($report[$g] as &$row) unset($row['je_line_ids']);
+            unset($row);
+        }
+        return $report;
+    }
+
+    private static function getBalanceSheet(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial reports.';
+        }
+        $asOf = (string) ($input['as_of'] ?? date('Y-m-d'));
+        return \FleetForge\Accounting\ReportingService::balanceSheet($asOf);
+    }
+
+    private static function getCashFlow(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial reports.';
+        }
+        $from = (string) ($input['from'] ?? date('Y-01-01'));
+        $to   = (string) ($input['to']   ?? date('Y-m-d'));
+        return \FleetForge\Accounting\ReportingService::cashFlow($from, $to);
+    }
+
+    private static function getBudgetVariance(array $input, ?int $userId): array|string
+    {
+        if (!self::canViewFinancials($userId)) {
+            return 'Access denied: you do not have permission to view financial reports.';
+        }
+        $budgetId = (int) ($input['budget_id'] ?? 0);
+        if ($budgetId <= 0) {
+            return 'budget_id is required.';
+        }
+        $from = (string) ($input['from'] ?? date('Y-01-01'));
+        $to   = (string) ($input['to']   ?? date('Y-m-d'));
+        try {
+            return \FleetForge\Accounting\BudgetService::variance($budgetId, $from, $to);
+        } catch (\Throwable $e) {
+            return 'Budget not found or unavailable.';
+        }
     }
 }

@@ -62,8 +62,23 @@ $_accNavGroups = [
             ['label' => 'Chart of Accounts', 'url' => '/accounting/chart-of-accounts',       'icon' => 'list-bullet'],
             ['label' => 'Journal Entries',   'url' => '/accounting/journal-entries',         'icon' => 'pencil-square'],
             ['label' => 'Ledger',            'url' => '/accounting/ledger',                  'icon' => 'folder-open'],
-            ['label' => 'Trial Balance',     'url' => '/accounting/reports/trial-balance',   'icon' => 'scale'],
         ],
+    ],
+    [
+        'label' => 'Reports',
+        'icon'  => 'chart-bar',
+        'children' => [
+            ['label' => 'Profit & Loss',   'url' => '/accounting/reports/profit-loss',     'icon' => 'chart-bar'],
+            ['label' => 'Balance Sheet',   'url' => '/accounting/reports/balance-sheet',   'icon' => 'scale'],
+            ['label' => 'Cash Flow',       'url' => '/accounting/reports/cash-flow',       'icon' => 'banknotes'],
+            ['label' => 'Asset Schedule',  'url' => '/accounting/reports/asset-schedule',  'icon' => 'truck'],
+            ['label' => 'Trial Balance',   'url' => '/accounting/reports/trial-balance',   'icon' => 'scale'],
+        ],
+    ],
+    [
+        'label' => 'Budgets',
+        'url'   => '/accounting/budgets',
+        'icon'  => 'document-text',
     ],
     [
         'label' => 'Receivables',

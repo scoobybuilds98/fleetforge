@@ -712,6 +712,60 @@ class ToolRegistry
                 '_tags' => ['chat', 'report'],
             ],
 
+            // ── Phase B Reporting Tools (S036) ──────────────────
+            [
+                'name' => 'get_profit_and_loss',
+                'description' => 'Compute the Profit & Loss statement for a date range. Returns revenue, direct costs, gross profit, operating expenses, operating income, other income/expense, tax provision, and net income — all bcmath strings.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'from' => ['type' => 'string', 'description' => 'Period start YYYY-MM-DD (defaults to year-start)'],
+                        'to'   => ['type' => 'string', 'description' => 'Period end YYYY-MM-DD (defaults to today)'],
+                    ],
+                    'required' => [],
+                ],
+                '_tags' => ['chat', 'report'],
+            ],
+            [
+                'name' => 'get_balance_sheet',
+                'description' => 'Compute the Balance Sheet as of a given date. Returns assets (current + long-term), liabilities (current + long-term), equity with YTD net income injected, balance check (is_balanced + drift).',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'as_of' => ['type' => 'string', 'description' => 'As-of date YYYY-MM-DD (defaults to today)'],
+                    ],
+                    'required' => [],
+                ],
+                '_tags' => ['chat', 'report'],
+            ],
+            [
+                'name' => 'get_cash_flow',
+                'description' => 'Compute the Cash Flow Statement (indirect method, ASPE 1540) for a date range. Returns operating / investing / financing sections with the non-cash adjustments, working capital changes, and tie-out check.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'from' => ['type' => 'string', 'description' => 'Period start YYYY-MM-DD'],
+                        'to'   => ['type' => 'string', 'description' => 'Period end YYYY-MM-DD'],
+                    ],
+                    'required' => [],
+                ],
+                '_tags' => ['chat', 'report'],
+            ],
+            [
+                'name' => 'get_budget_variance',
+                'description' => 'Compute the budget variance report for a date range. Returns per-account budgeted vs actual amounts, variance $ and %, and favorable/unfavorable classification by account normal-balance side.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'budget_id' => ['type' => 'integer', 'description' => 'Budget ID to compare against actuals'],
+                        'from'      => ['type' => 'string',  'description' => 'Period start YYYY-MM-DD'],
+                        'to'        => ['type' => 'string',  'description' => 'Period end YYYY-MM-DD'],
+                    ],
+                    'required' => ['budget_id'],
+                ],
+                '_tags' => ['chat', 'report'],
+            ],
+
             // ── Tax Tools ───────────────────────────────────────
             [
                 'name' => 'get_tax_filing_periods',
