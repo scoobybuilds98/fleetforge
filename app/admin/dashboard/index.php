@@ -182,12 +182,12 @@ require_once FF_ROOT . '/includes/header.php';
         <template x-if="tablesLoaded && tables.active_leases.length > 0">
             <div class="dashboard-carousel">
                 <template x-for="row in tables.active_leases" :key="row.id">
-                    <div class="carousel-card">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Contract</span>
-                            <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                               class="carousel-card-link"
-                               x-text="row.contract_number"></a>
+                            <span class="carousel-card-link"
+                                  x-text="row.contract_number"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Customer</span>
@@ -220,7 +220,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="carousel-card-label">Active For</span>
                             <span class="carousel-card-subvalue" x-text="row.days_active + ' days'"></span>
                         </div>
-                    </div>
+                    </a>
                 </template>
             </div>
         </template>
@@ -256,12 +256,12 @@ require_once FF_ROOT . '/includes/header.php';
         <template x-if="tablesLoaded && tables.pending_leases.length > 0">
             <div class="dashboard-carousel">
                 <template x-for="row in tables.pending_leases" :key="row.id">
-                    <div class="carousel-card">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Contract</span>
-                            <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                               class="carousel-card-link"
-                               x-text="row.contract_number"></a>
+                            <span class="carousel-card-link"
+                                  x-text="row.contract_number"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Customer</span>
@@ -297,7 +297,7 @@ require_once FF_ROOT . '/includes/header.php';
                                   :class="{'text-danger': parseInt(row.days_overdue) > 0, 'text-success': parseInt(row.days_overdue) <= 0}"
                                   x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + ' days' : '—'"></span>
                         </div>
-                    </div>
+                    </a>
                 </template>
             </div>
         </template>
@@ -335,12 +335,12 @@ require_once FF_ROOT . '/includes/header.php';
         <template x-if="tablesLoaded && tables.upcoming_returns.length > 0">
             <div class="dashboard-carousel">
                 <template x-for="row in tables.upcoming_returns" :key="row.id">
-                    <div class="carousel-card">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Contract</span>
-                            <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                               class="carousel-card-link"
-                               x-text="row.contract_number"></a>
+                            <span class="carousel-card-link"
+                                  x-text="row.contract_number"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Customer</span>
@@ -364,7 +364,7 @@ require_once FF_ROOT . '/includes/header.php';
                                   :class="parseInt(row.days_remaining) <= 3 ? 'text-danger' : (parseInt(row.days_remaining) <= 7 ? 'text-warning' : 'text-success')"
                                   x-text="row.days_remaining + ' days'"></span>
                         </div>
-                    </div>
+                    </a>
                 </template>
             </div>
         </template>
@@ -400,12 +400,12 @@ require_once FF_ROOT . '/includes/header.php';
         <template x-if="tablesLoaded && tables.invoices.length > 0">
             <div class="dashboard-carousel">
                 <template x-for="row in tables.invoices" :key="row.id">
-                    <div class="carousel-card">
+                    <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Invoice</span>
-                            <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
-                               class="carousel-card-link"
-                               x-text="row.invoice_number"></a>
+                            <span class="carousel-card-link"
+                                  x-text="row.invoice_number"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Customer</span>
@@ -436,7 +436,7 @@ require_once FF_ROOT . '/includes/header.php';
                                   :class="{'badge-danger': row.status==='overdue', 'badge-warning': row.status==='partially_paid', 'badge-info': row.status==='sent'}"
                                   x-text="row.status === 'partially_paid' ? 'Partial' : (row.status.charAt(0).toUpperCase() + row.status.slice(1))"></span>
                         </div>
-                    </div>
+                    </a>
                 </template>
             </div>
         </template>
@@ -478,12 +478,12 @@ require_once FF_ROOT . '/includes/header.php';
         <template x-if="tablesLoaded && tables.reservations.length > 0">
             <div class="dashboard-carousel">
                 <template x-for="row in tables.reservations" :key="row.id">
-                    <div class="carousel-card">
+                    <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Reservation</span>
-                            <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
-                               class="carousel-card-link"
-                               x-text="row.reservation_number"></a>
+                            <span class="carousel-card-link"
+                                  x-text="row.reservation_number"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Customer</span>
@@ -516,7 +516,7 @@ require_once FF_ROOT . '/includes/header.php';
                                   :class="{'text-warning': parseInt(row.days_until_pickup) <= 2}"
                                   x-text="row.days_until_pickup + ' days'"></span>
                         </div>
-                    </div>
+                    </a>
                 </template>
             </div>
         </template>
