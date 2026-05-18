@@ -654,6 +654,50 @@ echo json_encode(['error' => true, 'message' => 'Record modified.']);
 
 `json_error()` lives in `api/bootstrap.php`; pages-side equivalent is the page-level exception handler installed by `_ff_session_start()`.
 
+### Trap 13: `acc_accounts` uses `code` NOT `account_number`
+The Chart of Accounts column is `acc_accounts.code` (varchar(20), UNIQUE KEY). It is NOT `account_number`. Multiple session prompts have referenced `account_number` and the resulting code fails at the PDO layer with "Unknown column 'account_number'". When writing seed UPDATEs, CSV import column mappings, or report queries that JOIN on the COA, always use `code`.
+
+```sql
+-- WRONG (column does not exist)
+UPDATE acc_accounts SET lead_schedule_code = 'A-100' WHERE account_number = '1010';
+
+-- RIGHT
+UPDATE acc_accounts SET lead_schedule_code = 'A-100' WHERE code = '1010';
+```
+
+**Source:** K-22 catch surfaced in S037-CRUD (CSV-import column mapping) and re-confirmed in S-ACCT-WTB (lead-schedule seed file). Locked 2026-05-19.
+
+### Trap 14: `acc_periods` uses `year` NOT `fiscal_year`
+The accounting period year column is `acc_periods.year` (smallint unsigned). It is NOT `fiscal_year`. Several spec sections and session prompts have referenced `fiscal_year`; the term is correct as a CONCEPT but the COLUMN NAME on disk is `year`. When deriving PY-end dates from a period row, or filtering by year, use `year`.
+
+```php
+// WRONG (column does not exist)
+$pyEnd = ((int) $period['fiscal_year'] - 1) . '-12-31';
+
+// RIGHT
+$pyEnd = ((int) $period['year'] - 1) . '-12-31';
+```
+
+The full `acc_periods` schema also uses `year` + `month` + `name` (e.g. "May 2026") + `start_date` + `end_date` + `status` ENUM(open|closed|locked) + `is_year_end` flag — there is no `fiscal_year_start` or `fiscal_year_end` column either.
+
+**Source:** K-22 catch surfaced in S-ACCT-WTB pre-flight (working-trial-balance.php PY-end derivation). Locked 2026-05-19.
+
+### Trap 15: accounting reports use `journal_entries` permission, NOT `financial_reports`
+There is NO `financial_reports` permission module in the on-disk permission set. The accounting report endpoints (P&L, Balance Sheet, Cash Flow, Trial Balance, Asset Schedule, Working Trial Balance, Lead Schedule) all use `require_permission('journal_entries', 'view')` for read access and `require_permission('journal_entries', 'create')` for any record-creating endpoint (e.g. workpaper annotations). Spec sections and prompts sometimes refer to `financial_reports` as a logical permission area; on disk the module name is `journal_entries`.
+
+```php
+// WRONG (module does not exist — silently 403s)
+require_permission('financial_reports');
+
+// RIGHT (matches the pattern used by all existing reports)
+require_permission('journal_entries', 'view');     // GET endpoints
+require_permission('journal_entries', 'create');   // POST endpoints (annotations, etc.)
+```
+
+Repo-wide grep across `api/v1/accounting/reports/` confirms only `journal_entries` (and `accounts_payable` for the AP-specific aging report) appear. Any new accounting report endpoint should follow this convention.
+
+**Source:** K-22 catch surfaced in S-ACCT-WTB (WTB v2 + lead-schedule + workpaper-annotations endpoints). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
