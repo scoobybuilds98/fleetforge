@@ -195,7 +195,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Unit</span>
-                            <span class="carousel-card-value" x-text="row.unit_number"></span>
+                            <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Rate</span>
@@ -203,7 +203,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <span class="carousel-card-value"
                                       x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
                             </template>
-                            <template x-if="parseFloat(row.monthly_rate) <= 0 && parseFloat(row.daily_rate) > 0">
+                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
                                 <span class="carousel-card-value"
                                       x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
                             </template>
@@ -211,6 +211,11 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Started</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
+                            <span class="carousel-card-subvalue" x-text="parseInt(row.days_active) + 'd'"></span>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Ends</span>
+                            <span class="carousel-card-value" x-text="row.end_date ? fmtDate(row.end_date) : 'Open term'"></span>
                         </div>
                     </div>
                 </template>
@@ -261,21 +266,43 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Unit</span>
-                            <span class="carousel-card-value" x-text="row.unit_number"></span>
+                            <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Start Date</span>
+                            <span class="carousel-card-label">Rate</span>
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span class="carousel-card-value"
+                                      x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
+                            </template>
+                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.weekly_rate) > 0">
+                                <span class="carousel-card-value"
+                                      x-text="'$' + parseFloat(row.weekly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/wk'"></span>
+                            </template>
+                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && !(parseFloat(row.weekly_rate) > 0) && parseFloat(row.daily_rate) > 0">
+                                <span class="carousel-card-value"
+                                      x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
+                            </template>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Starts</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Ends</span>
+                            <span class="carousel-card-value" x-text="row.end_date ? fmtDate(row.end_date) : '—'"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Overdue</span>
                             <template x-if="parseInt(row.days_overdue) > 0">
-                                <span class="carousel-card-value"
-                                      style="color:var(--color-danger);"
-                                      x-text="row.days_overdue + ' days'"></span>
+                                <span class="badge badge-danger"
+                                      x-text="row.days_overdue + 'd overdue'"></span>
                             </template>
-                            <template x-if="parseInt(row.days_overdue) <= 0">
-                                <span class="carousel-card-value text-secondary">—</span>
+                            <template x-if="parseInt(row.days_overdue) === 0">
+                                <span class="badge badge-warning">Due today</span>
+                            </template>
+                            <template x-if="parseInt(row.days_overdue) < 0">
+                                <span class="carousel-card-value"
+                                      x-text="'Starts in ' + Math.abs(parseInt(row.days_overdue)) + 'd'"></span>
                             </template>
                         </div>
                     </div>
@@ -329,7 +356,18 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Unit</span>
-                            <span class="carousel-card-value" x-text="row.unit_number"></span>
+                            <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Rate</span>
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span class="carousel-card-value"
+                                      x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
+                            </template>
+                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
+                                <span class="carousel-card-value"
+                                      x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
+                            </template>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Return</span>
@@ -337,9 +375,18 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Days Left</span>
-                            <span class="carousel-card-value"
-                                  :style="parseInt(row.days_remaining) <= 3 ? 'color:var(--color-danger);' : (parseInt(row.days_remaining) <= 7 ? 'color:var(--color-warning);' : '')"
-                                  x-text="row.days_remaining + ' days'"></span>
+                            <template x-if="parseInt(row.days_remaining) <= 3">
+                                <span class="badge badge-danger"
+                                      x-text="row.days_remaining + 'd'"></span>
+                            </template>
+                            <template x-if="parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7">
+                                <span class="badge badge-warning"
+                                      x-text="row.days_remaining + 'd'"></span>
+                            </template>
+                            <template x-if="parseInt(row.days_remaining) > 7">
+                                <span class="carousel-card-value"
+                                      x-text="row.days_remaining + ' days'"></span>
+                            </template>
                         </div>
                     </div>
                 </template>
@@ -391,23 +438,39 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Amount</span>
                             <span class="carousel-card-value"
-                                  x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA', {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                  x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2})"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Balance</span>
-                            <span class="carousel-card-value"
-                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA', {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                            <span class="carousel-card-value" style="font-weight:600;"
+                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2})"></span>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Issued</span>
+                            <span class="carousel-card-value" x-text="fmtDate(row.invoice_date)"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Due</span>
+                            <!-- days_overdue > 0 means past due; < 0 means days until due -->
                             <span class="carousel-card-value"
-                                  :style="row.status === 'overdue' ? 'color:var(--color-danger);' : ((new Date(row.due_date + 'T00:00:00') - new Date()) / 86400000 <= 7 && (new Date(row.due_date + 'T00:00:00') - new Date()) / 86400000 >= 0 ? 'color:var(--color-warning);' : '')"
+                                  :style="parseInt(row.days_overdue) > 0 ? 'color:var(--color-danger);' : (parseInt(row.days_overdue) >= -7 ? 'color:var(--color-warning);' : '')"
                                   x-text="fmtDate(row.due_date)"></span>
+                            <template x-if="parseInt(row.days_overdue) > 0">
+                                <span class="carousel-card-subvalue text-danger"
+                                      x-text="row.days_overdue + 'd overdue'"></span>
+                            </template>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Status</span>
-                            <span class="carousel-card-value"
-                                  x-text="row.status.charAt(0).toUpperCase() + row.status.slice(1).replace(/_/g, ' ')"></span>
+                            <template x-if="row.status === 'overdue'">
+                                <span class="badge badge-danger">Overdue</span>
+                            </template>
+                            <template x-if="row.status === 'partially_paid'">
+                                <span class="badge badge-warning">Partial</span>
+                            </template>
+                            <template x-if="row.status === 'sent'">
+                                <span class="badge badge-info">Sent</span>
+                            </template>
                         </div>
                     </div>
                 </template>
@@ -455,25 +518,46 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="carousel-card-label">Reservation</span>
                             <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
                                class="carousel-card-link"
-                               x-text="'#' + row.id"></a>
+                               x-text="row.reservation_number"></a>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Customer</span>
                             <span class="carousel-card-value" x-text="row.customer_name"></span>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Quantity</span>
+                            <span class="carousel-card-label">Qty</span>
                             <span class="carousel-card-value"
                                   x-text="row.quantity + ' unit' + (parseInt(row.quantity) !== 1 ? 's' : '')"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Pickup</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.pickup_date)"></span>
+                            <template x-if="row.pickup_time">
+                                <span class="carousel-card-subvalue" x-text="row.pickup_time.slice(0,5)"></span>
+                            </template>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">In</span>
+                            <template x-if="parseInt(row.days_until_pickup) === 0">
+                                <span class="badge badge-danger">Today</span>
+                            </template>
+                            <template x-if="parseInt(row.days_until_pickup) > 0 && parseInt(row.days_until_pickup) <= 3">
+                                <span class="badge badge-warning"
+                                      x-text="row.days_until_pickup + 'd'"></span>
+                            </template>
+                            <template x-if="parseInt(row.days_until_pickup) > 3">
+                                <span class="carousel-card-value"
+                                      x-text="row.days_until_pickup + ' days'"></span>
+                            </template>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Status</span>
-                            <span class="carousel-card-value"
-                                  x-text="row.status.charAt(0).toUpperCase() + row.status.slice(1)"></span>
+                            <template x-if="row.status === 'confirmed'">
+                                <span class="badge badge-info">Confirmed</span>
+                            </template>
+                            <template x-if="row.status === 'pending'">
+                                <span class="badge badge-warning">Pending</span>
+                            </template>
                         </div>
                     </div>
                 </template>

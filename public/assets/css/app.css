@@ -9638,7 +9638,7 @@ body:has(.chat-page-content) #ff-chat-widget {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    min-height: 160px;
+    min-height: 220px;          /* S-DASHBOARD-CAROUSEL-ENRICH: taller for richer rows */
 }
 .carousel-card-row {
     display: flex;
@@ -9662,6 +9662,17 @@ body:has(.chat-page-content) #ff-chat-widget {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* WHY: subvalue sits below the main value in the same row — used for
+   contextual sub-labels like "42d active" or "3d overdue". */
+.carousel-card-subvalue {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.carousel-card-subvalue.text-danger  { color: var(--color-danger); }
+.carousel-card-subvalue.text-warning { color: var(--color-warning); }
 .carousel-card-link {
     font-size: 0.875rem;
     color: var(--color-primary);
