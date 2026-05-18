@@ -73,7 +73,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S037-CRUD** — IN-FLIGHT
+  Started: 2026-05-19T00:00 UTC by desktop-1
+  Touching: api/v1/accounting/ar/collection_notes/{show,update,delete}.php, api/v1/accounting/ar/promise_to_pay/delete.php, api/v1/accounting/vendor-credits/{update,delete}.php, api/v1/accounting/ap-payments/update.php, api/v1/accounting/accounts/import.php, app/admin/accounting/tax/remittances/index.php, app/admin/accounting/bank-transactions/index.php, includes/partials/accounting-nav.php, database/seeds/{011,012,013}_acc_*.sql, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md
 
 **S037-CRONS** — SHIPPED 2026-05-19 (commit a25d949 — see PROGRESS.md SESSION LOG row)
 Outcome: 3 missing accounting crons + canonical crontab runbook. **No migration** (29/0/0 sticky). `accounting_generate_periods.php` (`0 4 1 * *`) ensures 12-month period horizon via idempotent existence-check against `uq_period(year, month)`. `accounting_auto_reverse.php` (`30 2 * * *`) auto-posts reversing entries for JEs with auto_reverse=1 + auto_reverse_date=today + reversed_by_id IS NULL via JournalEntryService::reverse() with per-JE exception isolation. `accounting_tax_filing_reminders.php` (`30 7 * * *`) dispatches NotificationService::notify('accounting.tax_filing_due', ...) at 30/14/7/1 day thresholds with idempotency on (entity_id, day_bucket). Documentation: `docs/runbooks/crontab_accounting.md` (NEW, ~140 lines) — inventory table of all 7 accounting crons + canonical crontab block + per-cron smoke + troubleshooting. PREDEPLOY +4 F-CRONS-ACCT-1..4 items (install crontab, provision /var/log/fleetforge-cron.log, one-time generate_periods post-deploy, dry-run auto_reverse pre-go-live). Live smoke: cron 1 generated 5 new periods (Jan-May 2027, horizon now 2027-05-31), cron 2 found 0 pending reversals, cron 3 found 0 tax periods within reminder windows — all exit 0. D131 6/6 PASS.
