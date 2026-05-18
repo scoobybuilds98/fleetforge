@@ -105,7 +105,8 @@ return [
         'compliance'    => $VCED,
         'reports'       => $VCE,
         'analytics'     => $VCE,
-        'users'         => $V,
+        // S-PERM-USERS-SUPERADMIN-ONLY — Users module restricted to super_admin only
+        'users'         => $NONE,
         'settings'      => $V,
         'audit'         => $V,
         'ai'            => $VCE,

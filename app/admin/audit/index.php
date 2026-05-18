@@ -229,8 +229,14 @@ require_once FF_ROOT . '/includes/header.php';
                     </td>
                     <td>
                         <?php if ($row['user_id']): ?>
+                        <?php /* S-PERM-USERS-SUPERADMIN-ONLY — gate /users/show link to super_admin only;
+                                 fall back to plain text so non-super_admins still see who acted. */ ?>
+                        <?php if (can('users', 'view')): ?>
                         <a href="<?= base_url('users/show') ?>?id=<?= e($row['user_id']) ?>"
                            class="link"><?= e($row['user_name'] ?? '—') ?></a>
+                        <?php else: ?>
+                        <?= e($row['user_name'] ?? '—') ?>
+                        <?php endif; ?>
                         <?php else: ?>
                         <span class="text-muted"><?= e($row['user_name'] ?? 'system') ?></span>
                         <?php endif; ?>

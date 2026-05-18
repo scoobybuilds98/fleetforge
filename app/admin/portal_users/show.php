@@ -83,7 +83,10 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <div class="page-header">
+    <?php /* S-PERM-USERS-SUPERADMIN-ONLY — gate hardcoded /users link to super_admin only. */ ?>
+    <?php if (can('users', 'view')): ?>
     <a href="<?= base_url('users') ?>?tab=portal" class="btn btn-secondary btn-sm">← Portal Users</a>
+    <?php endif; ?>
     <h1 class="page-header-title"><?= e($pu['name']) ?></h1>
     <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
         <span class="badge <?= e($statusBadges[$pu['status']] ?? 'badge-neutral') ?>">

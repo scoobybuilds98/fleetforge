@@ -483,9 +483,12 @@ if (!empty($grouped['currency'])) {
                 password reset emails, set-password (super_admin), per-user permission overrides, MFA disable,
                 and login history. Portal users continue to be managed under the Portal Users tab here.
             </p>
+            <?php /* S-PERM-USERS-SUPERADMIN-ONLY — gate hardcoded /users link to super_admin only. */ ?>
+            <?php if (can('users', 'view')): ?>
             <a href="<?= base_url('users') ?>" class="btn btn-primary">
                 Go to Users module &rarr;
             </a>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -513,9 +516,12 @@ if (!empty($grouped['currency'])) {
                 list with company column, status / Email Off badges, per-user detail page with
                 login history, and a Re-enable Email action for SES-bounce recoveries.
             </p>
+            <?php /* S-PERM-USERS-SUPERADMIN-ONLY — gate hardcoded /users link to super_admin only. */ ?>
+            <?php if (can('users', 'view')): ?>
             <a href="<?= base_url('users') ?>?tab=portal" class="btn btn-primary">
                 Go to Users &rarr; Portal Users &rarr;
             </a>
+            <?php endif; ?>
         </div>
     </div>
 </div>
