@@ -73,7 +73,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S037-CRONS** — IN-FLIGHT
+  Started: 2026-05-19T02:20 UTC by desktop-1 (Claude Code Opus 4.7 — session header named Sonnet, operator launched on Opus)
+  Touching: cron/accounting_generate_periods.php (NEW), cron/accounting_auto_reverse.php (NEW), cron/accounting_tax_filing_reminders.php (NEW), docs/runbooks/crontab_accounting.md (NEW or extend), FLEETFORGE_PREDEPLOY_CHECKLIST.md (+F-CRONS-ACCT-1..4), docs/{FLEETFORGE_PROGRESS,FLEETFORGE_CURRENT_SESSIONS,FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1}.md
+  Phase: pre-flight schema verification
 
 **S037-REC** — SHIPPED 2026-05-19 (commits 50887dd + d7222ad — see PROGRESS.md SESSION LOG row)
 Outcome: Recurring JE Templates + Cron. **No migration** — tables existed pre-session (29/0/0 sticky). **Part A** lib/Accounting/RecurringEntryService.php with isDueToday (day-of-month end-of-month clamping + monthly/quarterly/annually rules), buildJeReference (idempotency key `[REC-{id}-{YYYY-MM}]`), computeNextPostDate (forward-walk avoiding PHP "Jan 31 + 1 month" pitfall), postTemplate (db_transaction, idempotency check, period validation, JE creation via JournalEntryService::create with entry_type='recurring' source_type='recurring' source_id=template_id, template metadata update, audit). **Part B** cron/accounting_recurring_entries.php — advisory-locked, per-template exception isolation, summary audit_log row. **Part C** 7 API endpoints (index, show, create with full validation, update with D19 optimistic lock, pause toggle, delete (HAS_HISTORY guard), post_now (super_admin/manager only)). **Part D** 3 admin pages (server-rendered list with filter + Alpine create form with real-time balance check + detail view with Post Now/Pause/Delete actions). End-to-end smoke confirmed isDueToday, idempotency (same JE returned on re-post), computeNextPostDate edge cases (day=31 clamps to month-end, quarterly +3 months, annually +12 months). PHP lint clean on all 14 files. D131 6/6 PASS pre-commit.

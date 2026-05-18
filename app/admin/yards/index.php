@@ -16,7 +16,10 @@ declare(strict_types=1);
  *              Create modal and Edit modal.
  *
  * @method      GET
- * @auth        Session required; require_permission('settings','view')
+ * @auth        Session required; require_permission('reservations','view')
+ *              (S-YARDS-PERM-FIX 2026-05-19: realigned from 'settings' to
+ *              match the sidebar's 'reservations' module gate — dispatcher/
+ *              accountant/read_only saw the link but got 403 on click.)
  * @depends     config/app.php, includes/auth.php, includes/header.php,
  *              includes/footer.php, api/v1/yards/index.php,
  *              api/v1/yards/create.php, api/v1/yards/update.php,
@@ -29,7 +32,7 @@ require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
 
 require_auth();
-require_permission('settings', 'view');
+require_permission('reservations', 'view');
 
 $canEdit = can('settings', 'edit') ||
            in_array($_SESSION['ff_user']['role_slug'] ?? '', ['super_admin', 'manager']);
