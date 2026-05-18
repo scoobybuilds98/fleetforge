@@ -414,7 +414,7 @@ Close the gap between what `FLEETFORGE_ACCOUNTING_SPEC.md` v1.2 promised and wha
 | S036 | 📋 PLANNED | XL | 5 reports + Budget module |
 | S037-FX | ✅ DONE | L | FX revaluation operating (shipped 2026-05-19) |
 | S037-YE | ✅ DONE | L | Year-end close end-to-end (shipped 2026-05-19) |
-| S037-REC | 📋 PLANNED | M | Recurring JE templates + cron |
+| S037-REC | ✅ DONE | M | Recurring JE templates + cron (shipped 2026-05-19) |
 | S037-CRONS | 📋 PLANNED | M | 4 missing crons live |
 | S037-CRUD | 📋 PLANNED | M | All spec CRUD complete |
 
@@ -632,7 +632,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 3 | S036 | B | 📋 PLANNED | XL | Opus | DOCS |
 | 4 | S037-FX | B | ✅ DONE | L | Opus | S036 |
 | 5 | S037-YE | B | ✅ DONE | L | Opus | S037-FX |
-| 6 | S037-REC | B | 📋 PLANNED | M | Sonnet | S037-YE |
+| 6 | S037-REC | B | ✅ DONE | M | Sonnet | S037-YE |
 | 7 | S037-CRONS | B | 📋 PLANNED | M | Sonnet | S037-REC |
 | 8 | S037-CRUD | B | 📋 PLANNED | M | Sonnet | S037-CRONS |
 | 9 | S-ACCT-AJE | C | 📋 PLANNED | M | Sonnet | S037-CRUD |

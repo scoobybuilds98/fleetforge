@@ -291,6 +291,15 @@ return [
                 'badge'        => null,
             ],
             [
+                // S037-REC — Phase B Recurring JE templates + cron.
+                'label'        => 'Recurring JEs',
+                'icon'         => 'arrow-path',
+                'url'          => '/accounting/recurring-entries',
+                'match_prefix' => ['/accounting/recurring-entries'],
+                'module'       => 'journal_entries',
+                'badge'        => null,
+            ],
+            [
                 'label'        => 'Receivables',
                 'icon'         => 'inbox-arrow-down',
                 'url'          => '/accounting/ar-aging',

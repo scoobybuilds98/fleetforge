@@ -91,6 +91,11 @@ $_accNavGroups = [
         'icon'  => 'calendar-days',
     ],
     [
+        'label' => 'Recurring JEs',
+        'url'   => '/accounting/recurring-entries',
+        'icon'  => 'arrow-path',
+    ],
+    [
         'label' => 'Receivables',
         'icon'  => 'inbox-arrow-down',
         'children' => [
