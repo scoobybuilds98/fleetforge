@@ -273,6 +273,15 @@ return [
                 'badge'        => null,
             ],
             [
+                // S037-FX — Phase B FX Revaluation engine (ASPE 1651 temporal method).
+                'label'        => 'FX Revaluation',
+                'icon'         => 'currency-dollar',
+                'url'          => '/accounting/fx-revaluations',
+                'match_prefix' => ['/accounting/fx-revaluations'],
+                'module'       => 'journal_entries',
+                'badge'        => null,
+            ],
+            [
                 'label'        => 'Receivables',
                 'icon'         => 'inbox-arrow-down',
                 'url'          => '/accounting/ar-aging',

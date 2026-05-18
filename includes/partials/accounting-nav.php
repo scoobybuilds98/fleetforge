@@ -81,6 +81,11 @@ $_accNavGroups = [
         'icon'  => 'document-text',
     ],
     [
+        'label' => 'FX Revaluation',
+        'url'   => '/accounting/fx-revaluations',
+        'icon'  => 'currency-dollar',
+    ],
+    [
         'label' => 'Receivables',
         'icon'  => 'inbox-arrow-down',
         'children' => [
