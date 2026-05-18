@@ -1,5 +1,5 @@
 # FleetForge — Accounting Module Specification
-**Version:** 1.2 FINAL — Build-readiness fixes applied | **Owner:** Avi | **Business:** Mainland Truck & Trailer Sales
+**Version:** 1.3 FINAL — Build-readiness fixes applied | **Owner:** Avi | **Business:** Mainland Truck & Trailer Sales
 **Status:** LOCKED — Read this file for all accounting module sessions
 **Depends on:** FLEETFORGE_SPEC_FINAL.md (v2.5) must be read first
 
@@ -2085,8 +2085,908 @@ Add to existing crontab:
 
 ---
 
----
+20. KNOWN INTEGRITY ISSUES & REMEDIATION LOG
+This section catalogs known integrity issues identified in the 2026-05-07 accounting audit (FLEETFORGE_ACCOUNTING_AUDIT_2026-05-07.md) and the planned remediation path for each. Updates as remediation sessions ship.
+20.1 AR Subledger ↔ GL Drift ($17,064.62)
+Issue. As of 2026-05-07: GL AR (account 1030) = $26,167.31. Subledger (sum of invoices.balance_due WHERE status NOT IN ('paid','void','draft','written_off') = $43,231.93. Drift = $17,064.62 (subledger > GL).
+Root cause (identified in S-ACCT-FIX-A1 diagnostic, 2026-05-07). Bidirectional drift across two distinct patterns:
 
+H5 — LP Logistics, +$20,764.80 (sub > GL). Five payment AR-CR JEs (JE-2025-00017 through JE-2025-00021, payments PAY-2026-00006 through PAY-2026-00010) credited AR for invoices 32, 43, 44, 45, 46. The underlying invoices have no corresponding DR-AR JE — likely pre-S030 invoices that were paid post-S030.
+H6 — Lepore Enterprise Trucking, −$3,700.18 (GL > sub). Four invoice DR-AR JEs for INV-2026-00016 through INV-2026-00019 have JE DR-AR amounts exactly 1.375× invoice.total_amount. Deterministic ratio (11/8) suggests a code bug, not data accident. Root cause to be investigated during remediation.
+
+Remediation path: DEFERRED TO QBO ARC (S-QBO-27). Per the master-mirror architecture, the QuickBooks historical pull during S-QBO-27 will provide source-of-truth invoice data from QBO. The H5 + H6 invoices are cross-referenced against QBO source data:
+
+H5 resolution: for each of the 5 invoices, the pull either creates/repairs the FF mirror invoice with the proper DR-AR JE matching QBO, or posts a compensating DR-AR JE with idempotency tag [A1-FIX-invoice-N].
+H6 resolution: the pull reveals whether the 1.375× ratio matches a QBO-side tax/markup/surcharge pattern. If yes, FF realigns to QBO; if no, the H6 sub-task escalates to a bug investigation against InvoiceGenerator before any compensating JEs are posted (to avoid masking an active bug).
+
+Decisions locked in S-ACCT-FIX-A1 (preserved for QBO arc reuse):
+
+D-ACCT-A1-1: Drift remediation posts to current open period, not original transaction period.
+D-ACCT-A1-2: Remediation posts compensating JEs only, never modifies source documents (preserves D14 sent-invoice immutability).
+D-ACCT-A1-3: Corrective JE source_type='manual', entry_type='adjustment', description tagged with session-id.
+D-ACCT-A1-4: One corrective JE per orphan source document, no batch JEs.
+D-ACCT-A1-5: Idempotency via unique reference tag in JE description.
+D-ACCT-A1-6: GL accounts from settings, never hardcoded.
+D-ACCT-A1-7: All writes in db_transaction with FOR UPDATE + optimistic locking + bcmath + advisory lock.
+
+Until resolved. arReconciliationCheck() continues to return the drift figure. The drift does not block Phase A or Phase B work but will block Phase QBO §S-QBO-30 cutover (post-cutover AR reconciliation must be ± $1).
+20.2 Orphan AP-Payment Journal Entries
+Issue. Six rows in acc_journal_entries with source_type='ap_payment' (source_id 1, 2, 3, 4, 6, 7) exist, but acc_ap_payments table is empty. AP subledger drill-down is impossible for these 6 JEs.
+Hypothesis. Either (a) the AP payment subledger rows were deleted without reversing the JEs, or (b) AP-payment JEs are being created against a code path that doesn't write to acc_ap_payments. Audit suggests scripts/demo_accounting.php truncation order may be involved; production code path requires verification.
+Remediation path: S-ACCT-FIX-AP (Phase A, next session).
+Phase 1 (read-only diagnostic): trace each of the 6 JEs by description, audit_log row, and reference field to determine whether real AP payment data exists.
+Phase 2 (writes, idempotent):
+
+For reconstructable JEs: INSERT into acc_ap_payments with idempotency tag [FIX-AP-source_id-N] in the notes field.
+For unreconstructable JEs: reverse via JournalEntryService::reverse() with same idempotency tag.
+
+Phase 3: build the dedicated app/admin/accounting/ap-payments/ page (the spec §15 lists "AP → Payments" as a separate sidebar item but the current code folds it into bills).
+Phase 4: investigate code path that allowed JEs to write without subledger rows. Add a unit test or schema check that prevents recurrence.
+Stop condition: if real AP payment data exists with cash settled but no subledger row, STOP and discuss data recovery strategy (out of session scope).
+20.3 Documents Schema Unused
+Issue. The acc_documents table exists since S028 with zero code references anywhere in api/, lib/, or app/. Spec §13 promise (every bill/JE/asset can attach scanned source documents) unfulfilled.
+Remediation path: S-ACCT-FIX-DOCS (Phase A, follows S-ACCT-FIX-AP).
+Wire acc_documents across:
+
+Bills (attach scanned vendor invoice).
+Journal Entries (attach supporting documentation).
+AP Payments (attach cheque image / EFT confirmation).
+Fixed Assets (attach purchase invoice, photos).
+Bank Transactions (attach statement page).
+Tax Filings (attach filed return PDF, remittance proof).
+
+Pattern: every entity show-page gets an Upload button + a Documents list section. New acc_documents.entity_type and acc_documents.entity_id fields drive the link. Uses existing StorageClient (per D9: S3 in production, local file in dev). File-size ceiling: 20MB. Supported MIME types: PDF, JPG, PNG, TIFF, DOCX, XLSX.
+CRA defensibility: prerequisite for CSRS 4200 compilation — every JE that touches the GL should have a source document attachable for the practitioner's review.
+
+21. REPORTS & BUDGETING (PHASE B / S036)
+This section specifies the work originally scoped as S036 in FLEETFORGE_ACCOUNTING_SPEC.md v1.2 §19 BUILD ORDER but never delivered.
+21.1 Profit & Loss
+Endpoint: GET /api/v1/accounting/reports/profit-loss?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD&comparison=prior_period|prior_year|budget|none
+Output structure:
+Revenue
+├── 4100 Rental revenue              $X,XXX.XX
+├── 4110 Mileage overage revenue     $X,XXX.XX
+├── 4120 GPS recharge revenue        $X,XXX.XX  (net or gross per §23.8 toggle)
+├── 4130 Maintenance service revenue $X,XXX.XX
+├── 4140 Damage recovery revenue     $X,XXX.XX
+├── 4150 Used inventory sales        $X,XXX.XX
+├── 4900 Other revenue               $X,XXX.XX
+└── Total Revenue                    $X,XXX.XX
+
+Direct Costs
+├── 5100 Fleet depreciation          $X,XXX.XX
+├── 5110 Insurance                   $X,XXX.XX
+├── 5120 Licensing & registration    $X,XXX.XX
+├── 5130 Maintenance & repairs       $X,XXX.XX
+├── 5140 GPS / telematics            $X,XXX.XX
+└── Total Direct Costs               $X,XXX.XX
+
+Gross Profit                          $X,XXX.XX  (% of revenue)
+
+Operating Expenses
+├── 6xxx series                      $X,XXX.XX
+└── Total Operating Expenses         $X,XXX.XX
+
+Operating Income                      $X,XXX.XX
+
+Other Income / (Expense)
+├── 7100 Interest income             $X,XXX.XX
+├── 7200 FX gain / (loss)            $X,XXX.XX
+├── 7300 Gain / (loss) on disposal   $X,XXX.XX
+└── Total Other                      $X,XXX.XX
+
+Net Income Before Tax                 $X,XXX.XX
+Income Tax (provision)                $X,XXX.XX
+Net Income                            $X,XXX.XX
+Drill-down: clicking any line opens a modal showing the constituent JEs for the period, with click-through to the GL ledger view.
+Comparison columns: when comparison=prior_period|prior_year|budget, render a 4-column report (current / prior / variance $ / variance %).
+Rendering: admin page at app/admin/accounting/reports/profit-loss.php. mPDF export. Default landscape A4.
+21.2 Balance Sheet
+Endpoint: GET /api/v1/accounting/reports/balance-sheet?as_of_date=YYYY-MM-DD&comparison=prior_period|prior_year|none
+ASPE structure (3061-aligned):
+ASSETS
+
+Current Assets
+├── 1010 Cash and equivalents         $X,XXX.XX
+├── 1030 Accounts Receivable          $X,XXX.XX
+│      Less: Allowance for doubtful   ($XXX.XX)
+├── 1040 Net Investment in Lease — current portion   $X,XXX.XX   [§24]
+├── 1050 Prepaid expenses             $X,XXX.XX
+├── 1060 Held-for-sale assets         $X,XXX.XX   [§22.1 + ASPE 3475]
+└── Total Current Assets              $X,XXX.XX
+
+Long-Term Assets
+├── 1500 Property, Plant & Equipment  $X,XXX.XX
+│      Less: Accumulated depreciation ($X,XXX.XX)
+├── 1600 Net Investment in Lease — long-term portion $X,XXX.XX   [§24]
+└── Total Long-Term Assets            $X,XXX.XX
+
+TOTAL ASSETS                          $X,XXX.XX
+
+LIABILITIES
+
+Current Liabilities
+├── 2010 Accounts Payable             $X,XXX.XX
+├── 2030 GST Payable                  $X,XXX.XX
+├── 2040 PST Payable                  $X,XXX.XX
+├── 2050 Customer Deposits            $X,XXX.XX
+├── 2060 Customer Credits Liability   $X,XXX.XX
+├── 2070 Accrued liabilities          $X,XXX.XX
+├── 2080 Income Tax Payable           $X,XXX.XX
+└── Total Current Liabilities         $X,XXX.XX
+
+Long-Term Liabilities
+├── 2500 Long-term debt               $X,XXX.XX
+└── Total Long-Term Liabilities       $X,XXX.XX
+
+TOTAL LIABILITIES                     $X,XXX.XX
+
+EQUITY
+├── 3000 Common Shares                $X,XXX.XX
+├── 3500 Retained Earnings (opening)  $X,XXX.XX
+├── 3510 Net Income (current period)  $X,XXX.XX
+└── Total Equity                      $X,XXX.XX
+
+TOTAL LIABILITIES + EQUITY            $X,XXX.XX
+Balance assertion: TOTAL ASSETS must equal TOTAL LIABILITIES + EQUITY ± $1. If not, render a "Balance sheet unbalanced — drift $X.XX" banner at top with link to the drift-source investigation page.
+Comparison columns: same pattern as P&L.
+Rendering: admin page at app/admin/accounting/reports/balance-sheet.php. mPDF export.
+21.3 Cash Flow Statement (ASPE 1540 Indirect Method)
+Endpoint: GET /api/v1/accounting/reports/cash-flow?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD
+Structure:
+Cash Flow from Operating Activities
+├── Net Income                                      $X,XXX.XX
+├── Adjustments for non-cash items:
+│   ├── Depreciation                                $X,XXX.XX
+│   ├── (Gain) / loss on disposal                   $X,XXX.XX
+│   ├── Bad debt expense                            $X,XXX.XX
+│   └── FX unrealized gain / (loss)                 $X,XXX.XX
+├── Changes in working capital:
+│   ├── (Increase) / decrease in AR                 $X,XXX.XX
+│   ├── (Increase) / decrease in inventory          $X,XXX.XX
+│   ├── (Increase) / decrease in prepaid expenses   $X,XXX.XX
+│   ├── Increase / (decrease) in AP                 $X,XXX.XX
+│   ├── Increase / (decrease) in accrued liabs      $X,XXX.XX
+│   ├── Increase / (decrease) in customer deposits  $X,XXX.XX
+│   └── Increase / (decrease) in tax payable        $X,XXX.XX
+└── Net Cash from Operating Activities              $X,XXX.XX
+
+Cash Flow from Investing Activities
+├── Purchase of fleet equipment                     $X,XXX.XX
+├── Proceeds from disposal of fleet                 $X,XXX.XX
+├── Net investment in lease — additions             $X,XXX.XX
+└── Net Cash from / (used in) Investing Activities  $X,XXX.XX
+
+Cash Flow from Financing Activities
+├── Proceeds from long-term debt                    $X,XXX.XX
+├── Repayments of long-term debt                    $X,XXX.XX
+├── Dividends paid                                  $X,XXX.XX
+└── Net Cash from / (used in) Financing Activities  $X,XXX.XX
+
+Net Increase / (Decrease) in Cash                   $X,XXX.XX
+Cash at beginning of period                          $X,XXX.XX
+Cash at end of period                                $X,XXX.XX
+Tie-out check: "Cash at end of period" must equal GL cash balance (account 1010) as of period_end ± $1.
+21.4 Asset Schedule
+Endpoint: GET /api/v1/accounting/reports/asset-schedule?as_of_date=YYYY-MM-DD&category=all|tractors|trailers|equipment
+Output: PP&E continuity by category — opening cost, additions, disposals, ending cost; opening accumulated depreciation, current-period depreciation, accumulated depreciation on disposals, ending accumulated depreciation; net carrying amount.
+Sub-detail link: click a category to drill into per-unit detail with acquisition date, cost, accumulated depreciation, NBV.
+21.5 Budget Module
+Tables: acc_budgets and acc_budget_lines already exist in v1.2 schema; populate via the new module.
+Budget creation flow:
+
+Operator clicks "New Budget" at app/admin/accounting/budgets/create.php.
+Form fields: name, fiscal year, start date, end date, basis (cash | accrual), optional "copy from prior year" toggle.
+On save: row inserted into acc_budgets; if copy-prior-year, acc_budget_lines populated from prior-year budget with all amounts × 1.0 (operator adjusts).
+Subsequent edit page allows per-account × per-period amount entry (12-month grid).
+
+Endpoints:
+
+POST /api/v1/accounting/budgets/create.php — create budget row.
+GET /api/v1/accounting/budgets/index.php — list all budgets.
+GET /api/v1/accounting/budgets/show.php?id=N — show + line items.
+POST /api/v1/accounting/budgets/update.php — update header + line items.
+POST /api/v1/accounting/budgets/delete.php — soft-delete.
+POST /api/v1/accounting/budgets/copy.php?source_id=N&new_year=YYYY — clone for new year.
+
+21.6 Budget vs Actual Variance Report
+Endpoint: GET /api/v1/accounting/reports/budget-variance?budget_id=N&period_start=YYYY-MM-DD&period_end=YYYY-MM-DD
+Output: per-account 5-column table — Budget / Actual / Variance $ / Variance % / Status (favorable | unfavorable | neutral). Color-coded threshold (configurable per accounting.variance_warning_pct setting, default 10%).
+21.7 Saved Report Configurations
+Use case: operator runs the same custom report (e.g., "P&L for Q3 by department comparison") repeatedly; save the parameter set for one-click re-run.
+Table: new acc_saved_reports — id, name, report_type ENUM(profit_loss, balance_sheet, cash_flow, trial_balance, ar_aging, ap_aging, asset_schedule, budget_variance), parameters JSON, owner_user_id, is_shared (boolean), last_run_at.
+UI: at the top of each report page, a "Saved Configurations" dropdown + "Save Current Configuration" button.
+21.8 mPDF Export
+Every report endpoint supports ?format=pdf for direct mPDF render. Output: branded PDF with FleetForge header, generated-on timestamp, parameters summary, and the report content. Default A4 landscape for wide reports (P&L with comparison columns), portrait for narrow.
+21.9 Settings keys (new in §21)
+KeyDefaultNotesaccounting.report_default_period'current_month'one of: current_month, current_quarter, current_ytd, prior_month, customaccounting.variance_warning_pct'10.00'for §21.6 color codingaccounting.budget_default_basis'accrual'one of: cash, accrual
+
+22. POLISH / FX / YEAR-END / RECURRING (PHASE B / S037)
+Originally scoped as S037 in v1.2 §19 BUILD ORDER, not delivered. This section completes that scope.
+22.1 FX Revaluation Engine (ASPE 1651 Temporal Method)
+Purpose. Mainland holds USD-denominated AR / AP / Cash / lease receivables for some customers and accounts. ASPE 1651 requires monetary items denominated in foreign currency to be revalued at the closing exchange rate at each balance sheet date, with the unrealized FX gain or loss flowing through net income.
+Architecture:
+
+Cron accounting_fx_revaluation.php runs on the 1st of each month at 02:00 server time.
+Pulls Bank of Canada daily exchange rate (NOT the legacy noon rate, discontinued 2017) for CAD-USD as of the last day of the closed month.
+For every monetary GL account flagged acc_accounts.is_fx_monetary = 1, compute revaluation per account:
+
+Sub-account balance per currency (foreign currency unit balance).
+Revalue at month-end rate: revalued CAD = foreign × month-end rate.
+GL CAD balance already on books.
+Delta = revalued − GL = unrealized FX gain/loss.
+
+
+Post a single FX revaluation JE per month: DR (or CR) the affected GL accounts / CR (or DR) account 7200 FX Gain/Loss (Unrealized).
+Insert row into acc_fx_revaluations (existing schema): id, period_id, rate_used, run_at, je_id, total_gain_loss, status (preview | posted | reversed).
+Auto-reverse on the 1st of the following month (the reversing-entry pattern — unrealized FX accruals never sit on the books beyond a single period).
+
+Realized FX gain/loss. When a USD payment settles a USD AR (or USD AP is paid), the difference between the booking rate (frozen at invoice date) and the settlement rate flows through P&L as a realized FX gain/loss to the same account 7200 (or sub-account if needed for disclosure). This is already partially wired in S034 payment FX path; §22.1 completes the JE-side recognition.
+API endpoints:
+
+GET /api/v1/accounting/fx-revaluations/index.php — list runs.
+GET /api/v1/accounting/fx-revaluations/show.php?id=N — detail of a single run.
+POST /api/v1/accounting/fx-revaluations/preview.php?period_id=N — dry-run, no JE posted.
+POST /api/v1/accounting/fx-revaluations/post.php?period_id=N — post the JE.
+
+Settings:
+KeyDefaultNotesaccounting.fx_revaluation_enabled'0'Master toggleaccounting.fx_rate_source'bank_of_canada'one of: bank_of_canada, manualaccounting.fx_revaluation_account_id(account ID for 7200)Unrealized FX gain/loss account
+22.2 Year-End Close Workflow
+Purpose. End-of-fiscal-year procedure: close revenue/expense accounts to retained earnings, lock all periods, create the new fiscal year's periods, and produce a year-end package.
+Endpoint: POST /api/v1/accounting/periods/year_end.php?fiscal_year=YYYY
+Sequence:
+
+Pre-flight checks:
+
+All 12 periods of the closing year must have status open or closed (not pending).
+AR drift must be ≤ $1 (see §20.1; this is the prerequisite gate).
+AP drift must be ≤ $1.
+No unposted journal entries for the closing year.
+All recurring entries due in the closing year must have been posted.
+All bank reconciliations through year-end must be marked complete.
+17-item year-end checklist (in acc_year_end_checklist table, all items for that fiscal year) must be marked done.
+
+
+Compute closing entries:
+
+Sum all revenue accounts (4xxx) for the fiscal year → DR amount.
+Sum all expense accounts (5xxx, 6xxx, 7xxx) for the fiscal year → CR amount.
+Net = DR revenue − CR expense = current-year net income.
+JE: DR each revenue account by its balance / CR each expense account by its balance / DR or CR account 3500 Retained Earnings by the net.
+
+
+Post closing JE with entry_type='closing', source_type='year_end_close', source_id=<fiscal_year_id>.
+Lock all 12 periods (status='closed').
+Create new fiscal year:
+
+Insert 12 periods for fiscal_year + 1 with status='open'.
+Run accounting_generate_periods.php (§22.4 #1) idempotently to confirm.
+
+
+Year-end package generation (ZIP file):
+
+Working Trial Balance for the closing year (Excel + PDF).
+Lead schedules for every balance sheet account (PDF).
+PP&E continuity + CCA Schedule 8 export (CSV + PDF).
+GST/HST + PST reconciliation summary.
+AR + AP aging at year-end (PDF).
+Bank reconciliation summaries.
+FX revaluation summary for the year.
+Lease amortization schedules (any sales-type / direct financing leases).
+Compilation note pack (§23.9 disclosure builder).
+Manifest file with SHA-256 hash of each contents file.
+
+
+Insert row into acc_year_end_closures (new table — see schema additions below): fiscal_year, closed_at, closed_by, closing_je_id, package_path, package_hash.
+
+Admin UI: new page app/admin/accounting/year-end/index.php shows the 17-item checklist with status badges, the pre-flight check status, a "Start Year-End Close" button (disabled until pre-flight passes), and the year-end package download link.
+Idempotency. The endpoint refuses to run twice for the same fiscal year unless the prior acc_year_end_closures row is reversed (separate POST /api/v1/accounting/periods/year_end_reverse.php?fiscal_year=YYYY, super_admin only, logs to audit_log).
+New schema:
+sqlCREATE TABLE acc_year_end_closures (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  fiscal_year INT NOT NULL UNIQUE,
+  closed_at DATETIME NOT NULL,
+  closed_by INT UNSIGNED NOT NULL,
+  closing_je_id INT UNSIGNED NOT NULL,
+  package_path VARCHAR(500),
+  package_hash VARCHAR(64),
+  status ENUM('closed','reversed') NOT NULL DEFAULT 'closed',
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_yec_closing_je FOREIGN KEY (closing_je_id) REFERENCES acc_journal_entries(id),
+  CONSTRAINT fk_yec_closed_by FOREIGN KEY (closed_by) REFERENCES users(id)
+);
+22.3 Recurring JE Templates + Cron
+Use case. Monthly accruals that recur identically: insurance amortization (1/12 of annual premium prepaid), rent expense, depreciation accruals, recurring inter-company allocations.
+Schema: acc_recurring_entries already exists in v1.2 schema; the module wires it up.
+Each template carries: name, frequency (monthly | quarterly | annual), start_date, end_date, day_of_month_to_post, status (active | paused | ended), header JE template (description, entry_type, reference pattern), line item templates (account_id, debit, credit, description pattern).
+Cron: cron/accounting_recurring_entries.php runs daily at 03:00 server time. For each active template whose day_of_month_to_post = today's day and frequency-rules match (e.g., monthly = every month; quarterly = months 1/4/7/10 from start_date; annual = anniversary of start_date), it:
+
+Acquires advisory lock (GET_LOCK('ff_acct_recurring')).
+For each due template, builds the JE and posts it via JournalEntryService::create() + post().
+Logs to audit_log.
+Releases lock.
+
+Idempotency. Each posted JE carries source_type='recurring', source_id=<template_id>, and reference='[REC-{template_id}-{YYYY-MM}]'. The cron checks for existing JEs with that exact reference before posting; skips duplicates.
+Admin UI:
+
+app/admin/accounting/recurring-entries/index.php — list templates.
+app/admin/accounting/recurring-entries/create.php — create template with header + line builder.
+app/admin/accounting/recurring-entries/show.php?id=N — show template + posting history.
+
+22.4 Missing Crons (4)
+Build these four crons; add to crontab; document in §18 of v1.2 (extend the table).
+
+cron/accounting_generate_periods.php — runs monthly on the 1st at 04:00 server time. Ensures acc_periods always has at least 12 months of open periods in the future. If the current open horizon is less than 12 months out, INSERT new period rows with status='open'. Idempotent (skips months that already exist).
+cron/accounting_auto_reverse.php — runs daily at 02:30 server time. Queries acc_journal_entries where auto_reverse_date = today and reversed_by_id IS NULL. For each match, calls JournalEntryService::reverse(je_id, today, system_user_id). Bcmath, audit_log on each reversal.
+cron/accounting_recurring_entries.php — see §22.3.
+cron/accounting_tax_filing_reminders.php — runs daily at 07:30 server time. Queries acc_tax_filing_periods where due_date - today ∈ {30, 14, 7, 1} and status not in (filed, remitted). For each match, dispatches notification via NotificationService::notify('accounting.tax_filing_due', ...) to all users with notification_categories.accounting=1. Severity scales with proximity (warning at 30, warning at 14, critical at 7, critical at 1).
+
+Crontab additions:
+0  4 1 * * php /var/www/fleetforge/cron/accounting_generate_periods.php
+30 2 * * * php /var/www/fleetforge/cron/accounting_auto_reverse.php
+0  3 * * * php /var/www/fleetforge/cron/accounting_recurring_entries.php
+30 7 * * * php /var/www/fleetforge/cron/accounting_tax_filing_reminders.php
+22.5 CRUD Completion (Spec-vs-Code Drift)
+Close remaining drift items between v1.2 spec and code surface:
+
+collection_notes — full CRUD (currently index + create only); add show / update / delete.
+promise_to_pay — add delete (currently no delete).
+vendor_credits — add update + delete (currently create + apply only).
+ap_payments — add show + update (currently create + void only) — coordinated with §20.2's dedicated AP-payments page.
+Tax Remittances — dedicated page at app/admin/accounting/tax/remittances/index.php (currently folded into tax/show.php).
+Accounts CSV import — new endpoint POST /api/v1/accounting/accounts/import.php accepting CSV with columns: account_number, account_name, type, sub_type, normal_balance, parent_account_id (optional). Idempotent by account_number.
+Bank Transactions — dedicated page at app/admin/accounting/bank/transactions/index.php (currently combined with bank-accounts).
+
+Seed-files restoration. Re-create the 3 missing seed files referenced in S028 PROGRESS log:
+
+database/seeds/011_acc_periods.sql — 24 periods (12 prior year + 12 current year).
+database/seeds/012_acc_settings.sql — all 18 spec keys with defaults per §17.
+database/seeds/013_acc_year_end_checklist.sql — 17 items per spec for current fiscal year (extends to 17 from current 15-of-17 in DB).
+
+
+23. ASPE-GRADE EXTENSIONS (PHASE C)
+These extensions take the accounting module beyond v1.2 to the comprehensive CPA-CA feature bar. Built only after Phase A (integrity) and Phase B (§21 + §22) complete.
+23.1 Adjusting Entry Workflow
+Purpose. Distinguish manual JEs that adjust prior balances (year-end accruals, reclassifications, prior-period corrections) from system-posted bridge JEs. Two-eyes review when configured.
+Schema additions to acc_journal_entries:
+sqlALTER TABLE acc_journal_entries
+  ADD COLUMN entry_status ENUM('draft','submitted','approved','posted','reversed')
+    NOT NULL DEFAULT 'posted' AFTER status,
+  ADD COLUMN submitted_by_id INT UNSIGNED NULL AFTER entry_status,
+  ADD COLUMN submitted_at DATETIME NULL,
+  ADD COLUMN approved_by_id INT UNSIGNED NULL,
+  ADD COLUMN approved_at DATETIME NULL,
+  ADD CONSTRAINT fk_je_submitted_by FOREIGN KEY (submitted_by_id) REFERENCES users(id) ON DELETE SET NULL,
+  ADD CONSTRAINT fk_je_approved_by FOREIGN KEY (approved_by_id) REFERENCES users(id) ON DELETE SET NULL;
+Also extend entry_type ENUM with: adjusting, reclassifying, reversing, closing, prior_period (additive, append-at-end per D126).
+Workflow:
+
+Bridge JEs continue to post directly (entry_status='posted' immediately) — no change to S030 flow.
+Manual JEs created via UI default to entry_status='draft'.
+Drafter clicks "Submit for Review" → entry_status='submitted', submitted_by_id + submitted_at populated.
+A different user (drafter ≠ approver, enforced server-side when accounting.aje_review_required = '1') clicks "Approve" → entry_status='approved', approved_by_id + approved_at populated, then immediately entry_status='posted' with audit_log row.
+When accounting.aje_review_required = '0', the draft can be posted directly by the drafter (single-step approval).
+
+Settings:
+KeyDefaultNotesaccounting.aje_review_required'0'When '1', two-eyes review enforcedaccounting.aje_amount_threshold'0.00'If > 0, only JEs ≥ threshold require review
+Admin UI: new tab at app/admin/accounting/journal-entries/?status=draft shows draft + submitted queue with action buttons.
+Surfacing. The new working trial balance (§23.2) surfaces AJEs in a dedicated AJE column distinct from unadjusted activity.
+23.2 Working Trial Balance v2 + Lead Schedules
+Purpose. Practitioner-grade working trial balance with PY comparison, AJE column, variance flags, and CaseWare-aligned lead schedule mapping.
+New TB column layout:
+| GL# | Account | Lead | PY Balance | Unadj CY | AJEs | Adj CY | Var $ | Var % | Ref |
+Lead schedule mapping — new column on acc_accounts:
+sqlALTER TABLE acc_accounts
+  ADD COLUMN lead_schedule_code VARCHAR(10) NULL AFTER account_type;
+Standard mapping (CaseWare-aligned defaults; seeded via database/seeds/014_acc_lead_schedules.sql):
+CodeSectionA-100Cash and equivalentsB-100AR TradeB-110AR Aging detailB-200Allowance for doubtful accountsC-100Inventory / partsC-200Held-for-sale fleetD-100Prepaid expensesE-100PP&E continuityE-200CCA continuityF-100Net investment in leaseG-100Other assetsAA-100AP TradeAA-110AP Aging detailBB-100Accrued liabilitiesCC-100Sales tax (GST/HST/PST) reconciliationDD-100Income tax payableEE-100Long-term debtFF-100Lease obligations (lessee, if any future)LL-100Equity100-LeadRevenue lead200-LeadCOGS / direct costs lead300-LeadOperating expense lead400-LeadOther income / expense lead
+Endpoints:
+
+GET /api/v1/accounting/reports/working-trial-balance?period_id=N&materiality=X.XX — returns the 10-column WTB.
+GET /api/v1/accounting/reports/lead-schedule?code=A-100&period_id=N — returns lead schedule detail.
+
+Lead schedule auto-generator — produces a per-balance-sheet-account schedule with the standard layout: opening balance, activity by source (JE or sub-ledger), ending balance, reconciliation block tying to source documents.
+Tickmark / annotation layer — new schema:
+sqlCREATE TABLE acc_workpaper_annotations (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  workpaper_type ENUM('trial_balance','lead_schedule','report') NOT NULL,
+  workpaper_ref VARCHAR(50) NOT NULL,
+  period_id INT UNSIGNED NOT NULL,
+  account_id INT UNSIGNED NULL,
+  tickmark CHAR(2) NULL,
+  note TEXT,
+  created_by INT UNSIGNED NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_wpa_period FOREIGN KEY (period_id) REFERENCES acc_periods(id),
+  CONSTRAINT fk_wpa_account FOREIGN KEY (account_id) REFERENCES acc_accounts(id) ON DELETE SET NULL,
+  CONSTRAINT fk_wpa_user FOREIGN KEY (created_by) REFERENCES users(id)
+);
+Tickmark legend (standard CPA convention, seeded in settings):
+
+A — Agreed to source document
+B — Balance confirmed
+T — Traced to GL
+V — Vouched to support
+F — Footed (math verified)
+✓ — Reviewed and accepted
+⊥ — Cross-referenced
+
+Materiality flag — when materiality param > 0, any account whose absolute Adj CY balance exceeds materiality is highlighted in red; any account whose variance from PY exceeds materiality is highlighted yellow.
+23.3 CCA Schedule 8 Engine
+Purpose. Compute T2 Schedule 8 (Capital Cost Allowance) continuity for the fiscal year, exportable to CSV/PDF for the T2 preparer (TaxCycle, ProFile, TaxPrep).
+New schema:
+sqlCREATE TABLE acc_cca_classes (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  class_number VARCHAR(10) NOT NULL UNIQUE,
+  description VARCHAR(255) NOT NULL,
+  rate DECIMAL(5,4) NOT NULL,
+  method ENUM('declining_balance','straight_line') NOT NULL DEFAULT 'declining_balance',
+  half_year_rule TINYINT(1) NOT NULL DEFAULT 1,
+  aiip_eligible TINYINT(1) NOT NULL DEFAULT 1,
+  recapture_applies TINYINT(1) NOT NULL DEFAULT 1,
+  terminal_loss_applies TINYINT(1) NOT NULL DEFAULT 1,
+  one_asset_per_class TINYINT(1) NOT NULL DEFAULT 0,
+  notes TEXT
+);
+
+CREATE TABLE acc_cca_continuity (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  fiscal_year INT NOT NULL,
+  cca_class_id INT UNSIGNED NOT NULL,
+  opening_ucc DECIMAL(15,2) NOT NULL DEFAULT 0,
+  cost_of_additions DECIMAL(15,2) NOT NULL DEFAULT 0,
+  adjustments_transfers DECIMAL(15,2) NOT NULL DEFAULT 0,
+  proceeds_of_disposition DECIMAL(15,2) NOT NULL DEFAULT 0,
+  ucc_after_additions_dispositions DECIMAL(15,2) NOT NULL DEFAULT 0,
+  aiip_adjustment DECIMAL(15,2) NOT NULL DEFAULT 0,
+  base_amount_for_cca DECIMAL(15,2) NOT NULL DEFAULT 0,
+  half_year_adjustment DECIMAL(15,2) NOT NULL DEFAULT 0,
+  cca_claimed DECIMAL(15,2) NOT NULL DEFAULT 0,
+  recapture DECIMAL(15,2) NOT NULL DEFAULT 0,
+  terminal_loss DECIMAL(15,2) NOT NULL DEFAULT 0,
+  closing_ucc DECIMAL(15,2) NOT NULL DEFAULT 0,
+  computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_cca_class FOREIGN KEY (cca_class_id) REFERENCES acc_cca_classes(id),
+  UNIQUE KEY uk_year_class (fiscal_year, cca_class_id)
+);
+
+ALTER TABLE acc_fixed_assets
+  ADD COLUMN cca_class_id INT UNSIGNED NULL AFTER asset_category,
+  ADD COLUMN available_for_use_date DATE NULL AFTER acquisition_date,
+  ADD COLUMN is_aiip_eligible TINYINT(1) NOT NULL DEFAULT 1,
+  ADD CONSTRAINT fk_fa_cca_class FOREIGN KEY (cca_class_id) REFERENCES acc_cca_classes(id) ON DELETE SET NULL;
+Seed acc_cca_classes with all classes relevant to a fleet operation:
+ClassRateHalf-yearAIIPDescription820%YesYesOffice furniture, shop tools > $5001030%YesYesMotor vehicles ≤ $30K10.130%Yes (special)YesPassenger vehicles > $38K ceiling (2025+); one asset per class12100%NoYesSmall tools < $5001640%YesYesFreight trucks > 11,788 kg GVWR — Mainland's primary class5055%YesYesComputers + system software5350%YesYesM&P equipment 2016–20255430%YesYesZero-emission passenger (cap $61K)5540%YesYesZero-emission heavy trucks (Class 16 equivalent)
+Class auto-assignment validator: when adding a fixed asset, the create form validates that GVWR > 11,788 kg → Class 16 (with explicit-override flag if operator insists on Class 10).
+Continuity engine (run at fiscal year close, idempotent on re-run):
+For each CCA class with assets:
+
+Opening UCC = prior year closing UCC for this class.
+Cost of additions = sum of acc_fixed_assets.original_cost where cca_class_id = N AND available_for_use_date ∈ fiscal year.
+Adjustments/transfers = manual adjustments via separate form (rare).
+Proceeds of disposition = sum of acc_asset_disposals.proceeds_of_disposition where the disposed asset's class = N, capped at original cost per CRA rule.
+UCC after additions/dispositions = opening + additions − dispositions ± adjustments.
+AIIP adjustment (§23.4): based on available-for-use date, apply 0.5× / 1.0× / 2.0× / 3.0× multiplier.
+Base amount for CCA = UCC after additions/dispositions + AIIP adjustment − half-year adjustment.
+Half-year adjustment: when half_year_rule is in effect AND AIIP isn't suspending it, 0.5 × (net additions).
+CCA claimed = base amount × class rate.
+Recapture: if step 5 result is negative, recapture = absolute value (income).
+Terminal loss: if step 5 result is positive AND class has zero assets at year-end, terminal loss = step 5 (deduction).
+Closing UCC = UCC after − CCA − recapture (or + terminal loss flow).
+
+Endpoint: POST /api/v1/accounting/cca/compute.php?fiscal_year=YYYY — runs the continuity, populates acc_cca_continuity rows.
+Export endpoint: GET /api/v1/accounting/cca/export.php?fiscal_year=YYYY&format=csv — CSV in T2 Schedule 8 column order, ready for TaxCycle / ProFile / TaxPrep ingestion.
+Admin UI: new page app/admin/accounting/cca/index.php shows continuity by class for any fiscal year with drill-down to per-asset detail.
+23.4 AccII / AIIP Phase-Out + Book/Tax Reconciliation
+Purpose. Apply the Accelerated Investment Incentive (AIIP) per available-for-use date with proper phase-out.
+Rules engine:
+Available-for-use dateAIIP treatmentBefore Nov 20, 2018No AIIP; standard half-yearNov 20, 2018 – Dec 31, 2023Half-year suspended + 1.5× addition multiplier = 3× first-year CCAJan 1, 2024 – Dec 31, 2027Half-year suspended; 1.0× (no bump) → 2× standard first-year (phase-out)Jan 1, 2028+Standard half-year, no AIIPProposed reinstatement (2024 FES)Jan 1, 2025 – before 2030: full AIIP reinstated; phase-out 2030–2033; expires 2034
+Setting: accounting.aiip_proposed_reinstatement_enabled (default '0'). When '1', the proposed 2024 FES rule applies for Jan 2025 acquisitions onward, overriding the current phase-out. Operator + accountant toggle this when CRA confirms enactment.
+Book vs tax temporary-difference schedule:
+New report GET /api/v1/accounting/reports/book-tax-differences?fiscal_year=YYYY — produces a reconciliation:
+ItemBook amountTax amountTemporary diffDepreciation (ASPE 3061) vs CCA$X$Y$X − $YAccruals not yet paid$X$0$XReserves$X$0$XEtc.
+Drives ASPE 3465 deferred-tax disclosure when the entity opts for the future-income-taxes method (default for Mainland is taxes-payable method — no deferred tax accrued, but the schedule is still required for disclosure context).
+23.5 PP&E Componentization
+Purpose. ASPE 3061.18 — significant components with different useful lives are depreciated separately. Tractor cab (10–12 yr) ≠ engine (5–7 yr) ≠ reefer unit (8–10 yr).
+Schema:
+sqlALTER TABLE acc_fixed_assets
+  ADD COLUMN parent_asset_id INT UNSIGNED NULL AFTER id,
+  ADD COLUMN is_component TINYINT(1) NOT NULL DEFAULT 0,
+  ADD CONSTRAINT fk_fa_parent FOREIGN KEY (parent_asset_id) REFERENCES acc_fixed_assets(id) ON DELETE CASCADE;
+Componentization rules:
+
+A "parent" asset (tractor unit, trailer unit) can have multiple child components.
+Each component has its own useful_life_months, amortization_method, residual_value, salvage_value.
+Depreciation runs compute parent + children separately; the parent's NBV is the sum of itself + components.
+Componentization is operator-elected at asset creation, not enforced; ASPE 3061 permits non-componentization when impracticable.
+
+Betterment vs repair workflow:
+When posting an expense to a vendor bill linked to a fixed asset, the bill line gets a classification prompt:
+
+Capitalize (betterment) — adds to asset cost, depreciated over remaining life. Use case: reefer retrofit on dry trailer, GVWR upgrade.
+Expense (repair) — hits 5130 maintenance & repairs immediately. Use case: engine rebuild, brake replacement, tire replacement.
+
+Rule definitions per ASPE 3061.14 displayed inline at the prompt:
+
+Betterment increases service potential or extends useful life.
+Repair maintains service potential without extending life.
+
+Classification captured in JE memo + audit_log for CPA defensibility.
+23.6 Place-of-Supply Rule Engine
+Purpose. Derive correct sales tax per transaction based on customer ship-to address, asset registration province, or lease ordinarily-located rule.
+Schema:
+sqlALTER TABLE tax_rates
+  ADD COLUMN effective_from DATE NULL,
+  ADD COLUMN effective_to DATE NULL,
+  ADD INDEX idx_effective (effective_from, effective_to);
+
+CREATE TABLE acc_place_of_supply_rules (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  rule_type ENUM('goods_delivered','short_lease','long_lease','service','specified_motor_vehicle') NOT NULL,
+  province_code VARCHAR(3) NOT NULL,
+  applicable_tax_rate_ids JSON NOT NULL,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+Rule logic (encoded in lib/Accounting/PlaceOfSupplyService.php):
+
+Goods delivered to recipient (used inventory sale, parts sale): place of supply = delivery province.
+Short lease ≤ 3 months (typical Mainland rental): place of supply = delivery province.
+Long lease > 3 months: place of supply = province where asset is ordinarily located (default: delivery province; reassessable per lease interval).
+Service (maintenance, repair): place of supply = customer's address most closely connected to the service.
+Specified motor vehicle sale to registrant: place of supply = registration province.
+
+NS HST rate change (Apr 1, 2025): NS HST 15% pre-Apr-2025; 14% from Apr 1, 2025. Tax-rate engine reads effective_from / effective_to per row to pick the correct rate.
+Endpoint: GET /api/v1/accounting/tax/resolve-rate.php?customer_id=N&transaction_type=lease|sale|service&transaction_date=YYYY-MM-DD — returns the correct tax rate(s) to apply.
+Default behavior preserved: BC operations remain on 5% GST + 7% PST without any out-of-province transactions triggering. When a customer has out-of-province ship-to, the engine auto-derives the right rate and surfaces a confirmation prompt in invoice creation.
+23.7 GST34 Line-by-Line Generator
+Purpose. Produce CRA Form GST34 (GST/HST return) ready for the accountant to file via QBO's existing GST filing workflow (which becomes the NETFILE submission path post-QBO arc).
+Endpoint: GET /api/v1/accounting/tax/gst34.php?period_id=N&format=csv|pdf|xml
+Line mapping:
+LineDescriptionSource101Total revenue (taxable + zero-rated, excl. tax)sum of all sales-tax-coded revenue lines for the period103GST/HST collected and collectiblesum of output-tax GL accounts (GST 5%, HST 13%, HST 14% NS, HST 15%)104Adjustments (bad debt recoveries, etc.)manual adjustment JEs flagged as tax adjustments105Total GST/HST and adjustments (= 103 + 104)computed106Input tax credits (regular method)sum of all input-tax-coded purchase lines107ITC adjustmentsmanual ITC adjustment JEs108Total ITCs and adjustmentscomputed109Net tax (= 105 − 108)computed110Instalments and other paymentspayment sub-ledger111Rebatesrebate filings112Total payments + rebatescomputed113A/B/CRefund / balance duecomputed
+Quick Method engine (optional, disabled by default — Mainland exceeds $400K threshold):
+
+Setting accounting.gst_quick_method_enabled (default '0').
+When enabled, accounting.gst_quick_method_rate (default '3.6' = 3.6% for BC service businesses) drives a different remittance calculation: charge full GST at 5% but remit revenue × 0.036. Capital ITCs (vehicles, equipment) remain claimable.
+
+ITC documentation thresholds enforced:
+
+Invoices < $30: no documentation enforcement beyond basic.
+Invoices $30 – $149.99: supplier name + invoice date + total + GST/HST + BN required.
+Invoices ≥ $150: above + buyer name + terms + description required.
+
+Motor vehicle ITC restrictions:
+
+Passenger vehicles > $38K (2025+): ITC capped at GST/HST on $38K (§201 ETA).
+Freight trucks > 11,788 kg GVWR: full ITC (no §201 cap — Mainland's typical case).
+Meals & entertainment: ITC limited to 50%.
+
+Tax detail reports:
+
+Per-tax-code summary (by period).
+Per-customer detail (for ITC defensibility under audit).
+Place-of-supply audit report (cross-references applied rate vs derived correct rate; surfaces any misapplications).
+
+23.8 GPS Principal/Agent Revenue Toggle
+Purpose. GPS recharge (Samsara pass-through) revenue presentation under ASPE 3400 principal-vs-agent. Default: net presentation (agent — only markup recognized as revenue). Optional: gross presentation if Mainland adds operational value (consolidated billing, dashboard).
+Schema:
+sqlALTER TABLE customers
+  ADD COLUMN gps_revenue_presentation ENUM('net','gross') NOT NULL DEFAULT 'net' AFTER gps_exempt;
+(Or per-contract via a new column on leases if presentation can vary by contract — operator decision at S-ACCT-GPS time.)
+JE pattern under net (default):
+
+Customer billed $50/month for GPS, Samsara cost $40 → Mainland margin $10.
+DR AR $50 / CR GPS recharge revenue $10 / CR Samsara recoverable expense $40.
+Bill from Samsara: DR Samsara recoverable expense $40 / CR AP.
+Net P&L impact: $10 revenue, $0 expense.
+
+JE pattern under gross:
+
+DR AR $50 / CR GPS recharge revenue $50.
+Bill from Samsara: DR Telematics expense $40 / CR AP.
+Net P&L impact: $50 revenue, $40 expense.
+
+Disclosure auto-generated: the §23.9 disclosure builder includes the presentation policy in the revenue recognition note.
+23.9 Disclosure Note Builder
+Purpose. Auto-generate the compilation note pack (or review note pack) attached to year-end financial statements.
+Endpoint: GET /api/v1/accounting/disclosure/note-pack.php?fiscal_year=YYYY&engagement_type=compilation|review&format=pdf|docx
+Notes generated:
+
+Note 1 — Basis of Accounting: ASPE per CPA Canada Handbook Part II; assumptions (going concern, etc.).
+Note 2 — Significant Accounting Policies:
+
+Revenue recognition by stream (operating rentals straight-line; mileage as contingent; GPS net/gross per toggle; maintenance services on completion; used fleet sales at point of sale; sales-type lease selling profit at inception; finance income on leases using effective-interest method).
+PP&E (ASPE 3061): cost model, depreciation methods, componentization elections.
+Lease classification (ASPE 3065): operating vs sales-type vs direct financing criteria.
+FX (ASPE 1651): temporal method.
+Income taxes (ASPE 3465): taxes-payable method (default; alternative if elected).
+
+
+Note 3 — PP&E: cost, accumulated amortization, method, useful life, net carrying amount, by category.
+Note 4 — Lease Commitments: 5-year future minimum payments waterfall, segregated by lease type (operating vs capital-equivalent); per 3065.73 + 3065.74–.77. Includes amount of contingent rentals (mileage overage) included in income for the period.
+Note 5 — Long-Term Debt: maturity, interest rate, security, current portion.
+Note 6 — Related-Party Transactions: any transactions with customers/suppliers flagged is_related_party=1.
+Note 7 — Commitments and Contingencies: any unsettled claims, guarantees, operating commitments.
+Note 8 — Subsequent Events: events between year-end and report date.
+Note 9 — Net Investment in Lease (if applicable): segregation of current vs long-term; gross investment, unearned finance income, net investment; recognition methodology.
+
+Schema:
+sqlALTER TABLE customers ADD COLUMN is_related_party TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE vendors ADD COLUMN is_related_party TINYINT(1) NOT NULL DEFAULT 0;
+
+CREATE TABLE acc_disclosure_notes (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  fiscal_year INT NOT NULL,
+  note_number INT NOT NULL,
+  note_title VARCHAR(255) NOT NULL,
+  note_content TEXT NOT NULL,
+  is_auto_generated TINYINT(1) NOT NULL DEFAULT 1,
+  edited_by INT UNSIGNED NULL,
+  edited_at DATETIME NULL,
+  CONSTRAINT fk_dn_edited_by FOREIGN KEY (edited_by) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY uk_year_note (fiscal_year, note_number)
+);
+Workflow: auto-generate populates acc_disclosure_notes; operator/accountant can override individual notes via the disclosure-pack edit UI before final PDF export.
+23.10 Per-Unit Profitability + Cost Allocation
+Purpose. Surface per-unit and per-customer profitability with proper cost allocation, supporting the operator's unit-economics decision-making and the lease/disposal-strategy review.
+Cost allocation engine:
+
+Direct costs (depreciation per unit, insurance per unit, maintenance per unit) tied to the unit via equipment_unit_id on JE lines.
+Allocated overhead: configurable basis (accounting.overhead_allocation_basis setting — one of: revenue, unit_count, weighted, manual). For "revenue" basis, monthly overhead pool ÷ total monthly revenue × unit revenue.
+
+Endpoint: GET /api/v1/accounting/reports/per-unit-pnl?period_start=YYYY-MM-DD&period_end=YYYY-MM-DD&unit_id=N|all
+Per-unit output:
+Unit: TRK-001 (2024 Volvo VNL)
+Period: 2026-04-01 to 2026-04-30
+
+Revenue:
+  Base rental                     $3,200.00
+  Mileage overage                   $480.00
+  GPS recharge (net)                  $30.00
+  Total Revenue                   $3,710.00
+
+Direct Costs:
+  Depreciation                    $1,200.00
+  Insurance                         $250.00
+  Licensing & registration           $50.00
+  Maintenance & repairs             $180.00
+  GPS / Samsara cost (offset)        $40.00
+  Tires (when applicable)             $0.00
+  Total Direct Costs              $1,720.00
+
+Contribution Margin               $1,990.00  (53.6%)
+
+Allocated Overhead (revenue basis)  $371.00  (10.0% of total OH allocated by revenue share)
+
+EBIT per unit                     $1,619.00
+ROIC per unit                       18.7%  (annualized; based on average NBV $103,750)
+Per-customer rollup: same structure aggregated by customer.
+Fleet KPIs surfaced (financial side):
+
+RevPAU (Revenue per Available Unit) = period revenue / (units in fleet × period days).
+Dollar utilization = annualized revenue / OEC (original equipment cost).
+Maintenance cost ratio = maintenance cost / rental revenue (industry benchmark 15–20%).
+Fleet age weighted average (drives replacement cycle planning).
+
+23.11 Damage Claims Subledger
+Purpose. Wire the existing core damage_claims table (from S017) into the accounting GL via AutoEntryBridge, with a dedicated subledger view in the accounting module.
+New AutoEntryBridge methods:
+phpAutoEntryBridge::onDamageRecoveryBilled(int $claimId, int $invoiceId, ?int $userId = null)
+  // DR AR / CR Damage Recovery Revenue (4140) + GST/HST/PST payable
+  // Called when damage_claims.status → 'billed_to_customer' and an invoice is generated.
+
+AutoEntryBridge::onDamageRepairExpensed(int $claimId, int $billId, ?int $userId = null)
+  // DR Repair Expense (5130) / CR AP
+  // Called when a vendor bill is linked to a damage claim.
+
+AutoEntryBridge::onDamageWrittenOff(int $claimId, ?int $userId = null)
+  // DR Bad Debt Expense (6160) / CR AR
+  // Called when damage_claims.status → 'written_off' and the AR balance must be cleared.
+Subledger view: app/admin/accounting/damage-claims/index.php lists all damage claims with: claim date, unit, customer, repair cost, recovery billed, recovery collected, net P&L impact.
+Net P&L impact per claim: recovery − repair = profit/loss on the claim (often planned to be neutral or modestly positive for full recovery cases; negative when customer disputes and AR is written off).
+
+24. LESSOR CAPITAL-LEASE MODULE (ASPE 3065 — PHASE D)
+This module is staged but inactive until the first lease-to-own contract originates. Mainland offers the program; zero active units as of 2026-05-18.
+24.1 Architecture Overview
+ASPE 3065 classifies lessor leases into three categories with fundamentally different accounting:
+
+Operating lease — Mainland's current 100%. Asset stays on books. Rental income straight-line. Already wired via existing AutoEntryBridge::onInvoiceSent.
+Sales-type lease — Mainland's typical lease-to-own. Asset comes off books at inception (sold to customer effectively). Selling profit recognized immediately. Finance income recognized over term.
+Direct financing lease — Lease-to-own where Mainland purchased the asset specifically to lease it (FV = carrying amount). No selling profit at inception; finance income only.
+
+The module wires the latter two.
+24.2 Classification Wizard (3065.06–.10)
+Trigger: when operator creates a new lease, a "Classification" step is added before the rates step. Wizard walks the operator through ASPE 3065 criteria:
+3065.06 (any one triggers capital-equivalent candidate status):
+
+(a) Reasonable assurance lessee will obtain ownership by end of term (title transfer OR bargain purchase option present).
+(b) Lease term ≥ 75% of economic life of leased property.
+(c) PV of minimum lease payments ≥ 90% of fair value at inception.
+
+3065.07–.08 (both must be met if 3065.06 is triggered):
+
+Credit risk normal vs similar receivables.
+Unreimbursable costs reasonably estimable.
+
+If all met:
+
+Sales-type if fair value ≠ carrying amount (Mainland's typical case — markup on lease-to-own).
+Direct financing if fair value = carrying amount.
+
+Else: Operating (default, no wizard).
+Schema:
+sqlALTER TABLE leases
+  ADD COLUMN classification ENUM('operating','sales_type','direct_financing') NOT NULL DEFAULT 'operating' AFTER status,
+  ADD COLUMN classification_signed_off_by INT UNSIGNED NULL,
+  ADD COLUMN classification_signed_off_at DATETIME NULL,
+  ADD COLUMN bargain_purchase_option_amount DECIMAL(12,2) NULL,
+  ADD COLUMN bargain_purchase_option_date DATE NULL,
+  ADD COLUMN economic_life_months INT NULL,
+  ADD COLUMN initial_fair_value DECIMAL(12,2) NULL,
+  ADD COLUMN initial_direct_costs DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN guaranteed_residual_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN unguaranteed_residual_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN implicit_rate DECIMAL(7,4) NULL,
+  ADD CONSTRAINT fk_lease_classification_signoff FOREIGN KEY (classification_signed_off_by) REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE acc_lease_classifications (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  lease_id INT UNSIGNED NOT NULL,
+  criterion_a_met TINYINT(1) NOT NULL DEFAULT 0,
+  criterion_b_met TINYINT(1) NOT NULL DEFAULT 0,
+  criterion_b_lease_term_months INT NULL,
+  criterion_b_economic_life_months INT NULL,
+  criterion_b_ratio DECIMAL(5,4) NULL,
+  criterion_c_met TINYINT(1) NOT NULL DEFAULT 0,
+  criterion_c_pv_mlp DECIMAL(15,2) NULL,
+  criterion_c_fair_value DECIMAL(15,2) NULL,
+  criterion_c_ratio DECIMAL(5,4) NULL,
+  credit_risk_normal TINYINT(1) NOT NULL DEFAULT 1,
+  costs_estimable TINYINT(1) NOT NULL DEFAULT 1,
+  determined_classification ENUM('operating','sales_type','direct_financing') NOT NULL,
+  wizard_completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  wizard_completed_by INT UNSIGNED NOT NULL,
+  CONSTRAINT fk_lc_lease FOREIGN KEY (lease_id) REFERENCES leases(id),
+  CONSTRAINT fk_lc_user FOREIGN KEY (wizard_completed_by) REFERENCES users(id)
+);
+Wizard outputs: classification decision + signed-off record archived to acc_lease_classifications. Required reading for any future CPA review.
+24.3 Effective-Interest Amortization Engine
+Purpose. For sales-type and direct financing leases, recognize finance income via effective interest method.
+Schema:
+sqlCREATE TABLE acc_lease_amortization_schedules (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  lease_id INT UNSIGNED NOT NULL,
+  period_number INT NOT NULL,
+  period_date DATE NOT NULL,
+  opening_net_investment DECIMAL(15,2) NOT NULL,
+  cash_receipt DECIMAL(12,2) NOT NULL,
+  finance_income DECIMAL(12,2) NOT NULL,
+  principal_reduction DECIMAL(12,2) NOT NULL,
+  closing_net_investment DECIMAL(15,2) NOT NULL,
+  posted_je_id INT UNSIGNED NULL,
+  status ENUM('scheduled','posted','reversed') NOT NULL DEFAULT 'scheduled',
+  CONSTRAINT fk_las_lease FOREIGN KEY (lease_id) REFERENCES leases(id),
+  CONSTRAINT fk_las_je FOREIGN KEY (posted_je_id) REFERENCES acc_journal_entries(id) ON DELETE SET NULL,
+  UNIQUE KEY uk_lease_period (lease_id, period_number)
+);
+Implicit rate solver. Given: MLP payments, BPO (if any), unguaranteed residual, initial fair value, initial direct costs. Solve for r such that PV(payments) + PV(unguaranteed residual) = FV − recoverable IDC.
+Implementation: Newton-Raphson iterative solver in lib/Accounting/LeaseAmortizationService.php. Convergence tolerance 1e-6. Fallback to operator's incremental borrowing rate setting if no convergence in 100 iterations.
+Schedule generation: at lease activation (status → active), LeaseAmortizationService::generate(lease_id) populates acc_lease_amortization_schedules with one row per period.
+Period-end JE posting: cron accounting_recurring_entries.php (§22.3) is extended to handle lease amortization rows — for each schedule row whose period_date = today and status='scheduled', post the JE (patterns in §24.4 / §24.5) and flip status to posted.
+24.4 Sales-Type Lease JE Patterns
+At inception:
+DR Net Investment in Lease (current portion)     $X,XXX
+DR Net Investment in Lease (long-term portion)   $X,XXX
+DR COGS — Fleet                                  $X,XXX  (= carrying amount − PV of unguaranteed residual)
+   CR Truck/Trailer Inventory (carrying amount)  $X,XXX
+   CR Sales Revenue — Lease-to-Own (= PV of MLP) $X,XXX
+   CR Unearned Finance Income                    $X,XXX  (= gross investment − net investment)
+Initial direct costs expensed at inception: DR Selling Expense / CR Cash or AP.
+Each period (effective interest):
+DR Cash (or AR if billed first)                  $X,XXX
+   CR Net Investment in Lease (principal)        $X,XXX
+DR Unearned Finance Income                       $X,XXX  (= opening NI × implicit rate)
+   CR Finance Income                             $X,XXX
+At end of term (BPO exercised or title transfers):
+DR Cash (BPO amount)                             $X,XXX
+   CR Net Investment in Lease (final zero)       $X,XXX
+AutoEntryBridge methods:
+phpAutoEntryBridge::onLeaseInception_SalesType(int $leaseId, ?int $userId = null)
+AutoEntryBridge::onLeasePeriodPosting_Capital(int $leaseId, int $periodNumber, ?int $userId = null)
+AutoEntryBridge::onLeaseTermination(int $leaseId, ?int $userId = null)
+24.5 Direct Financing Lease JE Patterns
+Same shape as sales-type except:
+
+No Sales Revenue line at inception.
+No COGS line at inception.
+FV = carrying amount (no selling profit recognized).
+Initial direct costs are deferred and amortized as a yield adjustment (reduces finance income each period proportionally).
+
+DR Net Investment in Lease (current portion)
+DR Net Investment in Lease (long-term portion)
+DR Deferred Initial Direct Costs                  (if IDC > 0)
+   CR Truck/Trailer (PP&E carrying amount)
+   CR Unearned Finance Income
+AutoEntryBridge::onLeaseInception_DirectFinancing(int $leaseId, ?int $userId = null).
+24.6 Net Investment BS Presentation
+Per ASPE 3065.54, Net Investment in Lease is presented segregated between current and long-term portions on the balance sheet. Implemented via two GL accounts:
+
+1040 Net Investment in Lease — current portion (NI rolling forward in next 12 months).
+1600 Net Investment in Lease — long-term portion (NI beyond 12 months).
+
+Monthly cron accounting_lease_ni_reclass.php reclassifies between the two as the schedule progresses (the principal portion expected in the next 12 months moves from long-term to current).
+24.7 Residual Tracking & Annual Review
+Annual workflow (triggered by year-end close per §22.2):
+For each active sales-type / direct-financing lease:
+
+Operator reviews the current estimate of unguaranteed residual.
+If revised downward: post adjustment JE (DR Impairment of Residual / CR Net Investment in Lease) and recompute the remaining schedule.
+If revised upward: not permitted under ASPE 3065 (asymmetric — write-downs only).
+
+Schema:
+sqlCREATE TABLE acc_lease_residual_reviews (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  lease_id INT UNSIGNED NOT NULL,
+  fiscal_year INT NOT NULL,
+  prior_residual_value DECIMAL(12,2) NOT NULL,
+  revised_residual_value DECIMAL(12,2) NOT NULL,
+  delta DECIMAL(12,2) GENERATED ALWAYS AS (revised_residual_value - prior_residual_value) STORED,
+  impairment_je_id INT UNSIGNED NULL,
+  notes TEXT,
+  reviewed_by INT UNSIGNED NOT NULL,
+  reviewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_lrr_lease FOREIGN KEY (lease_id) REFERENCES leases(id),
+  CONSTRAINT fk_lrr_je FOREIGN KEY (impairment_je_id) REFERENCES acc_journal_entries(id) ON DELETE SET NULL,
+  CONSTRAINT fk_lrr_user FOREIGN KEY (reviewed_by) REFERENCES users(id),
+  UNIQUE KEY uk_year_lease (lease_id, fiscal_year)
+);
+24.8 ASPE 3063 Fleet Impairment Two-Step Test
+Purpose. Annual impairment test on every fleet unit per ASPE 3063, triggered by year-end or by impairment-indicating events (idle unit, severe damage, market value decline).
+Two-step test:
+
+Recoverability: compare carrying amount to undiscounted future cash flows from use and eventual disposition. If carrying amount ≤ undiscounted CF: no impairment, stop.
+Measurement (if step 1 fails): write down to fair value. JE: DR Impairment Loss (6170) / CR Accumulated Depreciation or directly CR the asset.
+
+Asset grouping: at the individual unit level (per ASPE 3063.12 — lowest level for which identifiable cash flows are largely independent; each truck/trailer is a separate CGU because rented separately with identifiable cash flows).
+Reversal: not permitted under ASPE 3063 (different from IFRS).
+Schema:
+sqlCREATE TABLE acc_impairment_tests (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  asset_id INT UNSIGNED NOT NULL,
+  fiscal_year INT NOT NULL,
+  triggering_event ENUM('annual','idle','damage','market_decline','adverse_legal','other') NOT NULL,
+  step_1_carrying_amount DECIMAL(15,2) NOT NULL,
+  step_1_undiscounted_cf DECIMAL(15,2) NOT NULL,
+  step_1_passed TINYINT(1) NOT NULL,
+  step_2_fair_value DECIMAL(15,2) NULL,
+  step_2_impairment_loss DECIMAL(15,2) NULL,
+  impairment_je_id INT UNSIGNED NULL,
+  tested_by INT UNSIGNED NOT NULL,
+  tested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  notes TEXT,
+  CONSTRAINT fk_it_asset FOREIGN KEY (asset_id) REFERENCES acc_fixed_assets(id),
+  CONSTRAINT fk_it_je FOREIGN KEY (impairment_je_id) REFERENCES acc_journal_entries(id) ON DELETE SET NULL,
+  CONSTRAINT fk_it_user FOREIGN KEY (tested_by) REFERENCES users(id)
+);
+Endpoint: POST /api/v1/accounting/impairment/run-annual.php?fiscal_year=YYYY — runs the test on every fleet unit. Produces a workpaper per unit documenting the test outcome.
+Admin UI: app/admin/accounting/impairment/index.php lists all impairment tests per fiscal year with drill-down.
+24.9 Disclosure Requirements
+Disclosures auto-generated by §23.9 disclosure builder include (when sales-type or direct financing leases exist):
+
+Net investment in lease, segregated current / long-term per 3065.54.
+Future minimum lease payments waterfall (next 5 years + thereafter) by lease type.
+Interest rate, maturity date, amount outstanding per major category.
+Contingent rentals (mileage) included in income for the period.
+General description of arrangements.
+
+## CHANGELOG — v1.3
+
+- [§20] Known integrity issues catalog added: AR drift (deferred to QBO arc S-QBO-27), AP-payment orphan JEs (S-ACCT-FIX-AP), acc_documents wiring gap (S-ACCT-FIX-DOCS). D-ACCT-A1-1 through A1-7 preserved as remediation decisions.
+- [§21] Reports & Budgeting (Phase B / S036): P&L with drill-down, Balance Sheet, Cash Flow (ASPE 1540 indirect method), Asset Schedule, Budget module CRUD + variance, Saved Report Configurations, mPDF export. 3 new settings keys.
+- [§22] Polish / FX / Year-End / Recurring (Phase B / S037): FX revaluation engine (ASPE 1651), year-end close workflow + closing JE generator + year-end package ZIP, recurring JE templates + cron, 4 missing crons. New table acc_year_end_closures. New settings keys.
+- [§23] ASPE-grade extensions (Phase C, 11 sub-sections): AJE workflow draft/review/approve/post, working trial balance v2 + lead schedules (CaseWare-aligned), CCA Schedule 8 engine + Class 16 default for trucks > 11,788 kg GVWR, AccII phase-out 2024-2027 + proposed Jan 2025 reinstatement, PP&E componentization, place-of-supply rule engine + NS HST rate change Apr 2025, GST34 line-by-line generator + Quick Method optional, GPS principal/agent revenue toggle (default net), disclosure note builder (9 notes), per-unit profitability + cost allocation, damage claims subledger via AutoEntryBridge.
+- [§24] Lessor capital-lease module (Phase D, ASPE 3065): classification wizard (3065.06-.10), effective-interest amortization engine with Newton-Raphson rate solver, sales-type JE patterns, direct financing JE patterns, current/long-term net investment BS presentation per 3065.54, annual residual review (downward-only per ASPE), ASPE 3063 fleet impairment two-step test (no reversal under ASPE). 5 new tables, 11 new lease columns.
 ## CHANGELOG — v1.2 FINAL
 - [BUILD-READINESS] Depends-on version updated to v2.5
 - [BUILD-READINESS] TOC section 2 heading corrected: 34 tables (was still 38 in TOC)
@@ -2105,7 +3005,7 @@ Add to existing crontab:
 - [PASS-6:G4] Overpayment → account credit JE rules added (2060 Customer Advances)
 - [PASS-6:G5] Deposit forfeited JE rule added (DR 2050 / CR 4110)
 
-*End of FleetForge Accounting Module Specification v1.2 FINAL*
+*End of FleetForge Accounting Module Specification*
 *34 new tables (acc_ prefix, corrected [PASS-1:M1]) | 8 build phases (Sessions 29–38) | QBO sync Phase 26*
 *Total platform tables after accounting module: 94 (59 core + 34 accounting + 1 utility)*
 *Owner: Avi — Mainland Truck & Trailer Sales*
