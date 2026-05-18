@@ -9628,17 +9628,11 @@ body:has(.chat-page-content) #ff-chat-widget {
 }
 
 /* ══ CAROUSEL CARDS — Apple-style redesign (S-CAROUSEL-CARD-REDESIGN)
-       3D depth + mouse-tilt (S-CAROUSEL-CARD-3D) ══════════════════════ */
+       Clean 3D + mouse-tilt (S-CAROUSEL-CARD-3D revised) ═════════════ */
 .carousel-card {
     flex: 0 0 240px;
     scroll-snap-align: start;
-    /* Gradient background — light source from top-left */
-    background: linear-gradient(
-        145deg,
-        color-mix(in srgb, var(--bg-card) 85%, white 15%) 0%,
-        var(--bg-card) 50%,
-        color-mix(in srgb, var(--bg-card) 92%, black 8%) 100%
-    );
+    background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: 18px;
     padding: 18px;
@@ -9648,14 +9642,11 @@ body:has(.chat-page-content) #ff-chat-widget {
     min-height: 200px;
     position: relative;
     overflow: hidden;
-    /* Layered shadows: inner highlight + inner depth + contact + mid + ambient */
+    /* Clean two-layer shadow — elevation without drama */
     box-shadow:
-        0 1px 0  rgba(255, 255, 255, 0.07) inset,   /* top inner highlight */
-        0 -1px 0 rgba(0, 0, 0, 0.35) inset,          /* bottom inner depth  */
-        0 2px  4px  rgba(0, 0, 0, 0.25),             /* contact shadow      */
-        0 8px  20px rgba(0, 0, 0, 0.28),             /* mid lift shadow     */
-        0 24px 48px rgba(0, 0, 0, 0.18);             /* ambient shadow      */
-    /* Required for 3D perspective transforms */
+        0 2px 8px  rgba(0, 0, 0, 0.10),
+        0 1px 2px  rgba(0, 0, 0, 0.08);
+    /* Required for perspective tilt transforms (FF_CardTilt) */
     transform-style: preserve-3d;
     will-change: transform, box-shadow;
     transition:
@@ -9663,22 +9654,21 @@ body:has(.chat-page-content) #ff-chat-widget {
         box-shadow 200ms cubic-bezier(0.23, 1, 0.32, 1),
         border-color 200ms ease;
 }
-/* Top-surface sheen — tracks mouse via --sheen-x / --sheen-y CSS vars (set by FF_CardTilt) */
+/* Very faint surface sheen — barely visible at rest, moves with cursor */
 .carousel-card::before {
     content: '';
     position: absolute;
     inset: 0;
     border-radius: inherit;
     background: radial-gradient(
-        circle at var(--sheen-x, 30%) var(--sheen-y, 20%),
-        rgba(255, 255, 255, 0.09) 0%,
-        rgba(255, 255, 255, 0.03) 40%,
-        transparent 65%
+        circle at var(--sheen-x, 50%) var(--sheen-y, 0%),
+        rgba(255, 255, 255, 0.04) 0%,
+        transparent 70%
     );
     pointer-events: none;
     z-index: 0;
 }
-/* WHY: card children must sit above the ::before sheen layer (z-index:0) */
+/* WHY: card children must sit above the ::before sheen layer */
 .carousel-card > * {
     position: relative;
     z-index: 1;
@@ -9688,27 +9678,22 @@ body:has(.chat-page-content) #ff-chat-widget {
     color: inherit;
     cursor: pointer;
 }
-/* Hover — card lifts off surface; contact shadow stretches; primary glow ring */
+/* Hover — soft lift, clean shadow, primary border accent */
 .carousel-card--link:hover {
     border-color: var(--color-primary);
-    transform: translateY(-8px) scale(1.01);
+    transform: translateY(-6px) scale(1.005);
     box-shadow:
-        0 1px 0  rgba(255, 255, 255, 0.10) inset,
-        0 -1px 0 rgba(0, 0, 0, 0.4) inset,
-        0 4px  8px  rgba(0, 0, 0, 0.20),
-        0 16px 32px rgba(0, 0, 0, 0.32),
-        0 40px 72px rgba(0, 0, 0, 0.22),
-        0 0 0 1px color-mix(in srgb, var(--color-primary) 40%, transparent);
+        0 12px 28px rgba(0, 0, 0, 0.14),
+        0  4px  8px rgba(0, 0, 0, 0.08);
     text-decoration: none;
 }
-/* Press — snaps back slightly before releasing */
+/* Press — snaps back */
 .carousel-card--link:active {
-    transform: translateY(-2px) scale(0.995);
+    transform: translateY(-2px) scale(0.998);
     transition-duration: 80ms;
     box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.06) inset,
-        0 2px 8px  rgba(0, 0, 0, 0.3),
-        0 8px 16px rgba(0, 0, 0, 0.25);
+        0 4px 12px rgba(0, 0, 0, 0.10),
+        0 1px  4px rgba(0, 0, 0, 0.08);
 }
 
 /* ── Top row ─────────────────────────────────────────────────── */
