@@ -282,6 +282,15 @@ return [
                 'badge'        => null,
             ],
             [
+                // S037-YE — Phase B Year-End Close workflow.
+                'label'        => 'Year-End',
+                'icon'         => 'calendar-days',
+                'url'          => '/accounting/year-end',
+                'match_prefix' => ['/accounting/year-end'],
+                'module'       => 'journal_entries',
+                'badge'        => null,
+            ],
+            [
                 'label'        => 'Receivables',
                 'icon'         => 'inbox-arrow-down',
                 'url'          => '/accounting/ar-aging',

@@ -526,6 +526,36 @@ ITEM D13 | 2026-05-16 | D — AWS infrastructure | SNS topic + SES bounce webhoo
     topic for bounce + complaint notifications.
   Owner: Operator
   Status: PENDING (also blocked on SES sandbox approval per B6)
+
+ITEM D-YE-1 | 2026-05-19 | D — AWS infrastructure | Year-end packages to S3 via StorageClient
+  Originating session: S037-YE (Year-End Close Workflow)
+  Surfaced into checklist: S037-YE
+  Detail: YearEndService::generatePackage() currently writes the year-end ZIP package
+    + manifest.json + per-report PDFs to the local filesystem under
+    storage/year_end_packages/{fiscal_year}/. Production storage MUST route through
+    StorageClient::upload() per D9 so packages land in the S3 bucket and survive
+    server replacement. Today: local dev storage works correctly; prod will lose
+    packages on server rebuild. Wiring point: lib/Accounting/YearEndService.php
+    generatePackage() — replace file_put_contents + mPDF::Output(FILE) with
+    StorageClient calls and update acc_year_end_closures.package_path to the S3 key.
+    Cross-check api/v1/accounting/year-end/package_download.php which uses
+    FF_ROOT/storage/... — switch to StorageClient::url() signed-URL serving.
+  Action: Refactor YearEndService::generatePackage() + package_download.php to use
+    StorageClient before first production year-end close.
+  Owner: Operator (refactor) + Code Desktop (implementation)
+  Status: PENDING
+
+ITEM D-YE-2 | 2026-05-19 | D — AWS infrastructure | Verify ZipArchive PHP extension on prod
+  Originating session: S037-YE (Year-End Close Workflow)
+  Surfaced into checklist: S037-YE
+  Detail: YearEndService::generatePackage() requires the ZipArchive PHP extension to
+    build the year-end ZIP. Most stock PHP builds ship with it enabled but verify on
+    the production Lightsail server before first year-end close:
+      php -m | grep -i zip   → should output "zip"
+    If missing: sudo apt-get install php8.2-zip && sudo systemctl reload php8.2-fpm
+  Action: SSH to prod server, run `php -m | grep -i zip`, install if missing.
+  Owner: Operator
+  Status: PENDING
 ```
 
 ### E — Data migrations

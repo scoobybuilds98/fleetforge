@@ -86,6 +86,11 @@ $_accNavGroups = [
         'icon'  => 'currency-dollar',
     ],
     [
+        'label' => 'Year-End',
+        'url'   => '/accounting/year-end',
+        'icon'  => 'calendar-days',
+    ],
+    [
         'label' => 'Receivables',
         'icon'  => 'inbox-arrow-down',
         'children' => [

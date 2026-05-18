@@ -990,6 +990,26 @@ CREATE TABLE `acc_year_end_checklist` (
   KEY `completed_by` (`completed_by`),
   CONSTRAINT `acc_year_end_checklist_ibfk_1` FOREIGN KEY (`completed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_year_end_closures` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `fiscal_year` smallint unsigned NOT NULL,
+  `closed_at` datetime NOT NULL,
+  `closed_by` int unsigned DEFAULT NULL,
+  `closing_je_id` int unsigned DEFAULT NULL,
+  `package_path` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `package_hash` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('closed','reversed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'closed',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_fiscal_year` (`fiscal_year`),
+  KEY `idx_status` (`status`),
+  KEY `closed_by` (`closed_by`),
+  KEY `closing_je_id` (`closing_je_id`),
+  CONSTRAINT `acc_year_end_closures_ibfk_1` FOREIGN KEY (`closed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `acc_year_end_closures_ibfk_2` FOREIGN KEY (`closing_je_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `ai_anomaly_alerts` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `alert_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'payment_anomaly, utilization_drop, revenue_anomaly, compliance_risk, maintenance_spike, customer_risk',
