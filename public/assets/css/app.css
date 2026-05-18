@@ -9564,38 +9564,136 @@ body:has(.chat-page-content) #ff-chat-widget {
     }
 }
 
-/* ── FIX 2: Active Leases card — horizontal scroll on mobile so the
-        7-column table doesn't push the rest of the dashboard down.
-        Cap height + hide rows past 4 so the card is roughly 1 tile
-        tall on phone screens. The "View all →" link in the card
-        header is already visible; no extra footer link needed. ── */
-@media (max-width: 767px) {
-    .dashboard-leases-card .table-wrapper {
-        overflow-x: auto;
-        overflow-y: hidden;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        padding-bottom: 4px;
+/* FIX 2 (mobile table scroll for .dashboard-leases-card) removed —
+   S-DASHBOARD-MOBILE-CAROUSEL replaced the Active Leases table with a
+   carousel, so the .dashboard-leases-card class is no longer present
+   in the dashboard markup and these rules had no targets. */
+/* ════════════════════════════════════════════════════════════════════
+   S-DASHBOARD-MOBILE-LAYOUT END (KPI grid responsive rules above
+   remain in force; only the leases-table-scroll block was dropped.)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════════
+   S-DASHBOARD-MOBILE-CAROUSEL
+   Horizontal scroll carousel for Active Leases + Pending Activations.
+   Each lease/contract becomes one .carousel-card with labelled rows.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Dashboard section header (lighter than .card.card-header) ── */
+.dashboard-section {
+    margin-bottom: 24px;
+    /* WHY min-width:0: Pending Activations lives inside the
+       .dashboard-grid--widgets 2-column grid on desktop. Without this,
+       the carousel's wide flex children would push the grid cell wider
+       than its 1fr allowance, defeating overflow-x:auto. */
+    min-width: 0;
+}
+.dashboard-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding: 0 2px;
+    gap: 12px;
+}
+.dashboard-section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+.dashboard-section-viewall {
+    font-size: 0.8125rem;
+    color: var(--color-primary);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.dashboard-section-viewall:hover {
+    text-decoration: underline;
+}
+
+/* ── Carousel container ───────────────────────────────────────── */
+.dashboard-carousel {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;      /* Firefox */
+    padding-bottom: 4px;
+}
+.dashboard-carousel::-webkit-scrollbar {
+    display: none;              /* Chrome / Safari */
+}
+
+/* ── Individual carousel card ─────────────────────────────────── */
+.carousel-card {
+    flex: 0 0 260px;            /* fixed width on mobile */
+    scroll-snap-align: start;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg, 12px);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 160px;
+}
+.carousel-card-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    /* WHY: min-width:0 lets the inner value/link span shrink so
+       text-overflow:ellipsis can actually kick in for long names. */
+    min-width: 0;
+}
+.carousel-card-label {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+}
+.carousel-card-value {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.carousel-card-link {
+    font-size: 0.875rem;
+    color: var(--color-primary);
+    font-family: 'DM Mono', monospace;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+.carousel-card-link:hover {
+    text-decoration: underline;
+}
+
+/* ── Empty / loading / error state ────────────────────────────── */
+.carousel-empty {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    padding: 24px 4px;
+}
+
+/* ── Desktop: wider cards, more visible at once ───────────────── */
+@media (min-width: 768px) {
+    .carousel-card {
+        flex: 0 0 300px;
     }
-    .dashboard-leases-card .table-wrapper::-webkit-scrollbar {
-        display: none;
-    }
-    .dashboard-leases-card .table {
-        /* Forces horizontal scroll on phones; 560px fits all 7 columns
-           with a comfortable per-column floor. */
-        min-width: 560px;
-        font-size: 0.8125rem;
-    }
-    .dashboard-leases-card {
-        max-height: 340px;
-        overflow: hidden;
-    }
-    /* Show only the first 4 lease rows on mobile. View-all link in
-       the card header gives access to the rest. */
-    .dashboard-leases-card .table tbody tr:nth-child(n+5) {
-        display: none;
+}
+@media (min-width: 1280px) {
+    .carousel-card {
+        flex: 0 0 320px;
     }
 }
 /* ════════════════════════════════════════════════════════════════════
-   S-DASHBOARD-MOBILE-LAYOUT END
+   S-DASHBOARD-MOBILE-CAROUSEL END
    ════════════════════════════════════════════════════════════════════ */

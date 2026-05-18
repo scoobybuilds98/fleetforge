@@ -150,91 +150,70 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /stat-grid -->
 
 
-    <!-- ── ACTIVE LEASES TABLE (full width) ──────────────────────── -->
-    <?php /* S-DASHBOARD-MOBILE-LAYOUT — dashboard-leases-card class scopes the
-             mobile horizontal-scroll + height-cap + nth-row-hide CSS rules to
-             this one card, leaving the other 3 .card.dashboard-widget rows
-             on the dashboard (Pending Activations, Upcoming Returns, Recent
-             Activity) untouched. */ ?>
-    <div class="card dashboard-widget dashboard-leases-card" style="margin-bottom:24px;">
-        <div class="card-header">
-            <span class="card-title">Active Leases</span>
-            <a href="<?= base_url('leases') ?>?status=active" class="btn btn-ghost btn-sm">View all →</a>
+    <!-- ── ACTIVE LEASES — S-DASHBOARD-MOBILE-CAROUSEL ──────────── -->
+    <?php /* Replaces the prior vertical card+table layout (and the
+             dashboard-leases-card mobile-scroll workaround from the
+             S-DASHBOARD-MOBILE-LAYOUT session) with a horizontal scroll
+             carousel of compact cards. Data still comes from
+             FF_Dashboard.tables.active_leases via Alpine x-for; loading,
+             error, and empty states preserved. */ ?>
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Active Leases</h3>
+            <a href="<?= base_url('leases') ?>?status=active"
+               class="dashboard-section-viewall">View all →</a>
         </div>
 
         <template x-if="!tablesLoaded && !tablesError">
-            <div style="padding:32px 0; text-align:center;">
-                <div class="skeleton skeleton-text" style="width:60%;margin:0 auto 10px;"></div>
-                <div class="skeleton skeleton-text" style="width:40%;margin:0 auto;"></div>
-            </div>
+            <div class="carousel-empty">Loading…</div>
         </template>
 
         <template x-if="tablesError">
-            <div class="empty-state" style="padding:24px;">
-                <p class="empty-state-title">Could not load leases</p>
-                <button class="btn btn-secondary btn-sm" @click="fetchTables()">Retry</button>
+            <div class="carousel-empty">
+                Could not load leases.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
             </div>
         </template>
 
         <template x-if="tablesLoaded && tables.active_leases.length === 0">
-            <div class="empty-state" style="padding:32px 24px;">
-                <p class="empty-state-title">No active leases</p>
-                <p class="empty-state-text">Active leases will appear here once units are out on lease.</p>
-            </div>
+            <div class="carousel-empty">No active leases</div>
         </template>
 
         <template x-if="tablesLoaded && tables.active_leases.length > 0">
-            <div class="table-wrapper" style="border:none; border-radius:0; box-shadow:none;">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Contract</th>
-                            <th>Customer</th>
-                            <th>Unit</th>
-                            <th>Rate</th>
-                            <th>Started</th>
-                            <th>End Date</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="row in tables.active_leases" :key="row.id">
-                            <tr>
-                                <td>
-                                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                                       class="font-mono font-medium link"
-                                       x-text="row.contract_number"></a>
-                                </td>
-                                <td class="font-medium" x-text="row.customer_name"></td>
-                                <td>
-                                    <span class="font-mono" x-text="row.unit_number"></span>
-                                    <div class="text-xs text-secondary" x-text="row.template_name_snapshot"></div>
-                                </td>
-                                <td class="font-mono text-sm">
-                                    <template x-if="parseFloat(row.monthly_rate) > 0">
-                                        <span x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0}) + '/mo'"></span>
-                                    </template>
-                                    <template x-if="parseFloat(row.monthly_rate) <= 0 && parseFloat(row.daily_rate) > 0">
-                                        <span x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
-                                    </template>
-                                </td>
-                                <td class="text-sm text-secondary" x-text="fmtDate(row.start_date)"></td>
-                                <td class="text-sm">
-                                    <template x-if="row.end_date">
-                                        <span x-text="fmtDate(row.end_date)"></span>
-                                    </template>
-                                    <template x-if="!row.end_date">
-                                        <span class="text-tertiary">Open-ended</span>
-                                    </template>
-                                </td>
-                                <td style="text-align:right;">
-                                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                                       class="btn btn-ghost btn-sm">View</a>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.active_leases" :key="row.id">
+                    <div class="carousel-card">
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Contract</span>
+                            <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                               class="carousel-card-link"
+                               x-text="row.contract_number"></a>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Customer</span>
+                            <span class="carousel-card-value" x-text="row.customer_name"></span>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Unit</span>
+                            <span class="carousel-card-value" x-text="row.unit_number"></span>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Rate</span>
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span class="carousel-card-value"
+                                      x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
+                            </template>
+                            <template x-if="parseFloat(row.monthly_rate) <= 0 && parseFloat(row.daily_rate) > 0">
+                                <span class="carousel-card-value"
+                                      x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
+                            </template>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Started</span>
+                            <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
+                        </div>
+                    </div>
+                </template>
             </div>
         </template>
     </div>
@@ -345,76 +324,70 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── ROW 4: Pending Activations (1/2) + Upcoming Returns (1/2) ── -->
     <div class="dashboard-grid dashboard-grid--widgets" style="margin-bottom:24px;">
 
-        <!-- Pending Activations table -->
-        <div class="card dashboard-widget">
-            <div class="card-header">
-                <span class="card-title">Pending Activations</span>
+        <!-- Pending Activations — S-DASHBOARD-MOBILE-CAROUSEL -->
+        <?php /* Same carousel pattern as Active Leases above. Lives inside the
+                 existing .dashboard-grid--widgets row so the desktop layout
+                 still places it next to Upcoming Returns (half-width).
+                 .dashboard-section has min-width:0 in CSS so the carousel
+                 scrolls inside the constrained half-width grid cell instead
+                 of growing the cell to its content width. */ ?>
+        <div class="dashboard-section">
+            <div class="dashboard-section-header">
+                <h3 class="dashboard-section-title">Pending Activations</h3>
                 <a href="<?= base_url('leases') ?>?status=pending"
-                   class="btn btn-ghost btn-sm">View all →</a>
+                   class="dashboard-section-viewall">View all →</a>
             </div>
 
             <template x-if="!tablesLoaded && !tablesError">
-                <div style="padding:32px 0; text-align:center;">
-                    <div class="skeleton skeleton-text" style="width:70%;margin:0 auto 10px;"></div>
-                    <div class="skeleton skeleton-text" style="width:50%;margin:0 auto;"></div>
-                </div>
+                <div class="carousel-empty">Loading…</div>
             </template>
 
             <template x-if="tablesError">
-                <div class="empty-state" style="padding:24px;">
-                    <p class="empty-state-title">Could not load data</p>
-                    <button class="btn btn-secondary btn-sm" @click="fetchTables()">Retry</button>
+                <div class="carousel-empty">
+                    Could not load data.
+                    <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
                 </div>
             </template>
 
             <template x-if="tablesLoaded && tables.pending_leases.length === 0">
-                <div class="empty-state" style="padding:24px;">
-                    <p class="empty-state-title">No pending activations</p>
-                    <p class="empty-state-text">All leases are active or completed.</p>
-                </div>
+                <div class="carousel-empty">No pending activations</div>
             </template>
 
             <template x-if="tablesLoaded && tables.pending_leases.length > 0">
-                <div class="table-wrapper" style="border:none; border-radius:0; box-shadow:none;">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Contract</th>
-                                <th>Customer</th>
-                                <th>Unit</th>
-                                <th>Start Date</th>
-                                <th>Overdue</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="row in tables.pending_leases" :key="row.id">
-                                <tr>
-                                    <td>
-                                        <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                                           class="font-mono font-medium link"
-                                           x-text="row.contract_number"></a>
-                                    </td>
-                                    <td class="font-medium text-sm" x-text="row.customer_name"></td>
-                                    <td class="font-mono text-sm" x-text="row.unit_number"></td>
-                                    <td class="text-sm" x-text="fmtDate(row.start_date)"></td>
-                                    <td class="text-sm">
-                                        <template x-if="parseInt(row.days_overdue) > 0">
-                                            <span class="badge badge-no-dot badge-danger"
-                                                  x-text="row.days_overdue + 'd'"></span>
-                                        </template>
-                                        <template x-if="parseInt(row.days_overdue) <= 0">
-                                            <span class="text-secondary">—</span>
-                                        </template>
-                                    </td>
-                                    <td style="text-align:right;">
-                                        <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                                           class="btn btn-ghost btn-sm">View</a>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                <div class="dashboard-carousel">
+                    <template x-for="row in tables.pending_leases" :key="row.id">
+                        <div class="carousel-card">
+                            <div class="carousel-card-row">
+                                <span class="carousel-card-label">Contract</span>
+                                <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                                   class="carousel-card-link"
+                                   x-text="row.contract_number"></a>
+                            </div>
+                            <div class="carousel-card-row">
+                                <span class="carousel-card-label">Customer</span>
+                                <span class="carousel-card-value" x-text="row.customer_name"></span>
+                            </div>
+                            <div class="carousel-card-row">
+                                <span class="carousel-card-label">Unit</span>
+                                <span class="carousel-card-value" x-text="row.unit_number"></span>
+                            </div>
+                            <div class="carousel-card-row">
+                                <span class="carousel-card-label">Start Date</span>
+                                <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
+                            </div>
+                            <div class="carousel-card-row">
+                                <span class="carousel-card-label">Overdue</span>
+                                <template x-if="parseInt(row.days_overdue) > 0">
+                                    <span class="carousel-card-value"
+                                          style="color:var(--color-danger);"
+                                          x-text="row.days_overdue + ' days'"></span>
+                                </template>
+                                <template x-if="parseInt(row.days_overdue) <= 0">
+                                    <span class="carousel-card-value text-secondary">—</span>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </template>
         </div>
