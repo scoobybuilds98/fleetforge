@@ -37,15 +37,35 @@ require_once FF_ROOT . '/includes/auth.php';
 
 require_auth();
 
-// super_admin role only — no exceptions.
+// S-PERM-USERS-ACCESS-WALL — Users module is super_admin only.
+// Replaces the prior generic 403 fallback with the custom developer-only
+// access wall, rendered inside the normal admin shell so non-super_admin
+// viewers see why they can't enter. header.php already opens sidebar/
+// topbar/<main class="page-content">; footer.php closes them.
 if (!is_super_admin()) {
-    http_response_code(403);
-    $errorFile = FF_ROOT . '/app/errors/403.php';
-    if (file_exists($errorFile)) {
-        require $errorFile;
-    } else {
-        echo '<h1>403 Forbidden</h1><p>Only super_admin may manage permission overrides.</p>';
-    }
+    $pageTitle = 'Access Restricted';
+    require_once FF_ROOT . '/includes/header.php';
+    ?>
+    <div class="access-wall">
+        <div class="access-wall-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.5"
+                 xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+        </div>
+        <h2 class="access-wall-title">Developer Access Only</h2>
+        <p class="access-wall-message">
+            The Users &amp; Roles module is restricted to the Developer account.<br>
+            Contact your system administrator for user management assistance.
+        </p>
+        <a href="<?= base_url('dashboard') ?>" class="btn btn-secondary">
+            Back to Dashboard
+        </a>
+    </div>
+    <?php
+    require_once FF_ROOT . '/includes/footer.php';
     exit;
 }
 

@@ -73,7 +73,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S037-REC** — IN-FLIGHT
+  Started: 2026-05-19T01:50 UTC by desktop-1 (Claude Code Opus 4.7 — session header named Sonnet, operator launched on Opus)
+  Touching: lib/Accounting/RecurringEntryService.php (NEW), cron/accounting_recurring_entries.php (NEW), api/v1/accounting/recurring/{index,show,create,update,pause,delete,post_now}.php (NEW), app/admin/accounting/recurring-entries/{index,create,show}.php (NEW), includes/partials/accounting-nav.php (+1 child link), config/navigation.php (+1 child entry), docs/{FLEETFORGE_PROGRESS,FLEETFORGE_CURRENT_SESSIONS,FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1}.md
+  Phase: pre-flight schema verification
 
 **S037-YE** — SHIPPED 2026-05-19 (commit d19a7d0 — see PROGRESS.md SESSION LOG row)
 Outcome: Year-End Close Workflow + Checklist UI + scoped Year-End Package. **Migration** adds acc_year_end_closures table + tops up 2025 checklist from 15→17 items (28→29/0/0). **Part A** lib/Accounting/YearEndService.php — preflightCheck (6 health checks: periods, AR/AP drift, draft JEs, checklist, idempotency); close (advisory-locked, posts closing JE for revenue+expense→retained earnings, locks 12 periods, seeds next year's 12 periods, generates package); generatePackage (8 PDFs + manifest with 4 phase-C placeholders + ZIP, per-report try/catch); reverse (super_admin-only). **Part B** 2 checklist endpoints (auto-seed canonical 17 items, toggle is_complete). **Part C** 4 year-end APIs (preflight, close, reverse, package_download with SHA-256 verification). **Part D** single-page admin console with progress bar, preflight grid, AR override checkbox, prior-closures table. 3 decisions D-S037-YE-1/2/3 locked. 2 PREDEPLOY items added (D-YE-1 StorageClient refactor, D-YE-2 ZipArchive verify). Preflight smoke (2025) confirms AR drift correctly soft-gated for super_admin / hard-blocked for non-super_admin. D131 6/6 PASS pre-commit.

@@ -36,7 +36,38 @@ require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
 
 require_auth();
-require_permission('users', 'view');
+
+// S-PERM-USERS-ACCESS-WALL — Users module is super_admin only.
+// Render the custom developer-only access wall inside the normal
+// admin shell so non-super_admin viewers see why they can't enter,
+// instead of a bare 403. header.php already opens sidebar/topbar/
+// <main class="page-content">; footer.php closes them.
+if (!is_super_admin()) {
+    $pageTitle = 'Access Restricted';
+    require_once FF_ROOT . '/includes/header.php';
+    ?>
+    <div class="access-wall">
+        <div class="access-wall-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.5"
+                 xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+        </div>
+        <h2 class="access-wall-title">Developer Access Only</h2>
+        <p class="access-wall-message">
+            The Users &amp; Roles module is restricted to the Developer account.<br>
+            Contact your system administrator for user management assistance.
+        </p>
+        <a href="<?= base_url('dashboard') ?>" class="btn btn-secondary">
+            Back to Dashboard
+        </a>
+    </div>
+    <?php
+    require_once FF_ROOT . '/includes/footer.php';
+    exit;
+}
 
 // settings:view gate for the Portal Users tab — matches the pre-S-USERS-
 // CONSOLIDATE permission on settings/portal_users.php. If the user has
