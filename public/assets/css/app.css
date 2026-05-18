@@ -9506,3 +9506,96 @@ body:has(.chat-page-content) #ff-chat-widget {
     margin: 0 0 28px;
 }
 /* ────────── S-PERM-USERS-ACCESS-WALL END ────────── */
+
+/* ════════════════════════════════════════════════════════════════════
+   S-DASHBOARD-MOBILE-LAYOUT
+   1. KPI tiles: 3-up tablet / 2-up mobile (dashboard only — scoped via
+      #kpi-grid so other .stat-grid usages keep their auto-fit cadence).
+   2. Active Leases card: horizontal scroll + height cap + only first
+      4 rows visible on mobile so it doesn't dominate the page.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── FIX 1: KPI tile grid at tablet (768-1023px) ── */
+@media (max-width: 1023px) {
+    .stat-grid#kpi-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+}
+
+/* ── FIX 1: KPI tile grid at mobile (≤767px) — and chrome tweaks
+        to fit content cleanly in the 2-up footprint. Class names
+        adapted from the spec to match the codebase (.stat-card not
+        .kpi-card, .stat-value not .kpi-value, .stat-card__icon not
+        .kpi-icon-wrap). ── */
+@media (max-width: 767px) {
+    .stat-grid#kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    #kpi-grid .stat-card {
+        /* Tighter than desktop 14/16/14/22; left padding kept ≥16px
+           so text doesn't collide with the 4px accent bar. */
+        padding: 12px 12px 12px 18px;
+    }
+    #kpi-grid .stat-value {
+        /* Smaller value font so common amounts like $1,234,567.89
+           don't trigger text-overflow:ellipsis in the narrow tile.
+           Spec asked 1.5rem but that's larger than the desktop 1.375rem
+           and would clip on iPhone SE (320px); 1.125rem keeps every
+           realistic KPI value on one line. */
+        font-size: 1.125rem;
+    }
+    #kpi-grid .stat-label {
+        font-size: 0.625rem;       /* 10px — was 11px */
+        padding-right: 32px;       /* room for the icon at right */
+        margin-bottom: 4px;
+    }
+    #kpi-grid .stat-card__icon {
+        width: 28px;
+        height: 28px;
+    }
+    #kpi-grid .stat-card__icon svg {
+        width: 14px;
+        height: 14px;
+    }
+    #kpi-grid .stat-delta {
+        font-size: 0.6875rem;
+    }
+}
+
+/* ── FIX 2: Active Leases card — horizontal scroll on mobile so the
+        7-column table doesn't push the rest of the dashboard down.
+        Cap height + hide rows past 4 so the card is roughly 1 tile
+        tall on phone screens. The "View all →" link in the card
+        header is already visible; no extra footer link needed. ── */
+@media (max-width: 767px) {
+    .dashboard-leases-card .table-wrapper {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 4px;
+    }
+    .dashboard-leases-card .table-wrapper::-webkit-scrollbar {
+        display: none;
+    }
+    .dashboard-leases-card .table {
+        /* Forces horizontal scroll on phones; 560px fits all 7 columns
+           with a comfortable per-column floor. */
+        min-width: 560px;
+        font-size: 0.8125rem;
+    }
+    .dashboard-leases-card {
+        max-height: 340px;
+        overflow: hidden;
+    }
+    /* Show only the first 4 lease rows on mobile. View-all link in
+       the card header gives access to the rest. */
+    .dashboard-leases-card .table tbody tr:nth-child(n+5) {
+        display: none;
+    }
+}
+/* ════════════════════════════════════════════════════════════════════
+   S-DASHBOARD-MOBILE-LAYOUT END
+   ════════════════════════════════════════════════════════════════════ */

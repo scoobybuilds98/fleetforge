@@ -151,7 +151,12 @@ require_once FF_ROOT . '/includes/header.php';
 
 
     <!-- ── ACTIVE LEASES TABLE (full width) ──────────────────────── -->
-    <div class="card dashboard-widget" style="margin-bottom:24px;">
+    <?php /* S-DASHBOARD-MOBILE-LAYOUT — dashboard-leases-card class scopes the
+             mobile horizontal-scroll + height-cap + nth-row-hide CSS rules to
+             this one card, leaving the other 3 .card.dashboard-widget rows
+             on the dashboard (Pending Activations, Upcoming Returns, Recent
+             Activity) untouched. */ ?>
+    <div class="card dashboard-widget dashboard-leases-card" style="margin-bottom:24px;">
         <div class="card-header">
             <span class="card-title">Active Leases</span>
             <a href="<?= base_url('leases') ?>?status=active" class="btn btn-ghost btn-sm">View all →</a>
