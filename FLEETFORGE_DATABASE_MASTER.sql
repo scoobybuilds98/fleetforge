@@ -35,6 +35,7 @@ CREATE TABLE `acc_accounts` (
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `account_type` enum('asset','liability','equity','revenue','cost_of_revenue','operating_expense','other_income','other_expense') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lead_schedule_code` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `account_subtype` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `parent_id` int unsigned DEFAULT NULL,
   `is_header` tinyint(1) NOT NULL DEFAULT '0',
@@ -983,6 +984,25 @@ CREATE TABLE `acc_vendor_credits` (
   CONSTRAINT `acc_vendor_credits_ibfk_2` FOREIGN KEY (`source_bill_id`) REFERENCES `acc_bills` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_vendor_credits_ibfk_3` FOREIGN KEY (`journal_entry_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_vendor_credits_ibfk_4` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_workpaper_annotations` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `workpaper_type` enum('trial_balance','lead_schedule','report') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `workpaper_ref` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `period_id` int unsigned NOT NULL,
+  `account_id` int unsigned DEFAULT NULL,
+  `tickmark` varchar(8) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `note` text COLLATE utf8mb4_unicode_ci,
+  `created_by` int unsigned NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_workpaper` (`workpaper_type`,`workpaper_ref`,`period_id`),
+  KEY `idx_account` (`account_id`),
+  KEY `fk_wpa_period` (`period_id`),
+  KEY `fk_wpa_user` (`created_by`),
+  CONSTRAINT `fk_wpa_account` FOREIGN KEY (`account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_wpa_period` FOREIGN KEY (`period_id`) REFERENCES `acc_periods` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_wpa_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_year_end_checklist` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

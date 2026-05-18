@@ -85,6 +85,76 @@ class ReportPdfRenderer
         self::emit($html, $title, 'A4', 'L');
     }
 
+    /**
+     * Render the Working Trial Balance v2 (10-column landscape A4).
+     * Session: S-ACCT-WTB
+     */
+    public static function workingTrialBalance(array $report): void
+    {
+        $title  = 'Working Trial Balance';
+        $period = $report['period']['name'];
+        if (!empty($report['py_period']['end_date'])) {
+            $period .= ' — PY as of ' . $report['py_period']['end_date'];
+        }
+
+        $html  = self::headerHtml($title, $period);
+
+        if (!$report['is_balanced']) {
+            $diff = bcsub($report['totals']['debits'], $report['totals']['credits'], 2);
+            $html .= '<div class="banner-amber">WTB unbalanced — total debits and credits differ by '
+                   . self::money(ltrim($diff, '-')) . '. This may reflect the known AR drift; '
+                   . 'verify on screen before signing off.</div>';
+        }
+
+        $mat = $report['materiality'] ?? '0.00';
+        if (bccomp($mat, '0', 2) > 0) {
+            $html .= '<div class="banner-amber" style="background:#eef;border-color:#88a;color:#224;">'
+                   . 'Materiality: ' . self::money($mat) . ' — accounts breaching balance/variance flagged.</div>';
+        }
+
+        $html .= '<table class="rpt"><thead><tr>';
+        $html .= '<th>GL#</th><th>Account</th><th>Lead</th>';
+        $html .= '<th style="text-align:right;">PY Balance</th>';
+        $html .= '<th style="text-align:right;">Unadj CY</th>';
+        $html .= '<th style="text-align:right;">AJEs</th>';
+        $html .= '<th style="text-align:right;">Adj CY</th>';
+        $html .= '<th style="text-align:right;">Var $</th>';
+        $html .= '<th style="text-align:right;">Var %</th>';
+        $html .= '<th>Ref</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($report['accounts'] as $r) {
+            $balStyle = $r['balance_flag']  === 'red'    ? ' style="background:#ffe6e6;"' : '';
+            $varStyle = $r['variance_flag'] === 'yellow' ? ' style="background:#fff7d6;"' : '';
+            $pct      = $r['var_pct'] !== null ? $r['var_pct'] . '%' : '—';
+            $lead     = $r['lead_schedule_code'] ?? '';
+            $html    .= '<tr>';
+            $html    .= '<td>' . htmlspecialchars($r['code']) . '</td>';
+            $html    .= '<td>' . htmlspecialchars($r['name']) . '</td>';
+            $html    .= '<td>' . htmlspecialchars($lead) . '</td>';
+            $html    .= '<td class="amt">' . self::money($r['py_balance']) . '</td>';
+            $html    .= '<td class="amt">' . self::money($r['unadj_cy']) . '</td>';
+            $html    .= '<td class="amt">' . self::money($r['ajes']) . '</td>';
+            $html    .= '<td class="amt"' . $balStyle . '>' . self::money($r['adj_cy']) . '</td>';
+            $html    .= '<td class="amt"' . $varStyle . '>' . self::money($r['var_amt']) . '</td>';
+            $html    .= '<td class="amt"' . $varStyle . '>' . htmlspecialchars($pct) . '</td>';
+            $html    .= '<td>' . htmlspecialchars($r['ref'] ?? '') . '</td>';
+            $html    .= '</tr>';
+        }
+
+        $t = $report['totals'];
+        $html .= '<tr class="grand"><td colspan="3"><strong>Totals</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($t['py_balance']) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($t['unadj_cy']) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($t['ajes']) . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money($t['adj_cy']) . '</strong></td>';
+        $html .= '<td colspan="3"></td></tr>';
+
+        $html .= '</tbody></table>';
+
+        self::emit($html, $title, 'A4', 'L');
+    }
+
     public static function balanceSheet(array $report): void
     {
         $title  = 'Balance Sheet';

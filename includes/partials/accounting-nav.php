@@ -73,6 +73,7 @@ $_accNavGroups = [
             ['label' => 'Cash Flow',       'url' => '/accounting/reports/cash-flow',       'icon' => 'banknotes'],
             ['label' => 'Asset Schedule',  'url' => '/accounting/reports/asset-schedule',  'icon' => 'truck'],
             ['label' => 'Trial Balance',   'url' => '/accounting/reports/trial-balance',   'icon' => 'scale'],
+            ['label' => 'Working Trial Balance', 'url' => '/accounting/reports/working-trial-balance', 'icon' => 'clipboard-document-check'],
         ],
     ],
     [
