@@ -194,6 +194,10 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="carousel-card-value" x-text="row.customer_name"></span>
                         </div>
                         <div class="carousel-card-row">
+                            <span class="carousel-card-label">Equipment</span>
+                            <span class="carousel-card-value" x-text="row.template_name_snapshot ?? '—'"></span>
+                        </div>
+                        <div class="carousel-card-row">
                             <span class="carousel-card-label">Unit</span>
                             <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
                         </div>
@@ -211,11 +215,10 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Started</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
-                            <span class="carousel-card-subvalue" x-text="parseInt(row.days_active) + 'd'"></span>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Ends</span>
-                            <span class="carousel-card-value" x-text="row.end_date ? fmtDate(row.end_date) : 'Open term'"></span>
+                            <span class="carousel-card-label">Active For</span>
+                            <span class="carousel-card-subvalue" x-text="row.days_active + ' days'"></span>
                         </div>
                     </div>
                 </template>
@@ -274,36 +277,25 @@ require_once FF_ROOT . '/includes/header.php';
                                 <span class="carousel-card-value"
                                       x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
                             </template>
-                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.weekly_rate) > 0">
-                                <span class="carousel-card-value"
-                                      x-text="'$' + parseFloat(row.weekly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/wk'"></span>
-                            </template>
-                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && !(parseFloat(row.weekly_rate) > 0) && parseFloat(row.daily_rate) > 0">
+                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
                                 <span class="carousel-card-value"
                                       x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
                             </template>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Starts</span>
+                            <span class="carousel-card-label">Scheduled</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.start_date)"></span>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Ends</span>
-                            <span class="carousel-card-value" x-text="row.end_date ? fmtDate(row.end_date) : '—'"></span>
+                            <span class="carousel-card-label">Created</span>
+                            <!-- created_at is datetime; slice to YYYY-MM-DD so fmtDate parses cleanly -->
+                            <span class="carousel-card-subvalue" x-text="fmtDate(row.created_at && row.created_at.slice(0,10))"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Overdue</span>
-                            <template x-if="parseInt(row.days_overdue) > 0">
-                                <span class="badge badge-danger"
-                                      x-text="row.days_overdue + 'd overdue'"></span>
-                            </template>
-                            <template x-if="parseInt(row.days_overdue) === 0">
-                                <span class="badge badge-warning">Due today</span>
-                            </template>
-                            <template x-if="parseInt(row.days_overdue) < 0">
-                                <span class="carousel-card-value"
-                                      x-text="'Starts in ' + Math.abs(parseInt(row.days_overdue)) + 'd'"></span>
-                            </template>
+                            <span class="carousel-card-value"
+                                  :class="{'text-danger': parseInt(row.days_overdue) > 0, 'text-success': parseInt(row.days_overdue) <= 0}"
+                                  x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + ' days' : '—'"></span>
                         </div>
                     </div>
                 </template>
@@ -355,38 +347,22 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="carousel-card-value" x-text="row.customer_name"></span>
                         </div>
                         <div class="carousel-card-row">
+                            <span class="carousel-card-label">Equipment</span>
+                            <span class="carousel-card-value" x-text="row.template_name_snapshot ?? '—'"></span>
+                        </div>
+                        <div class="carousel-card-row">
                             <span class="carousel-card-label">Unit</span>
                             <span class="carousel-card-value" x-text="row.unit_number || '—'"></span>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Rate</span>
-                            <template x-if="parseFloat(row.monthly_rate) > 0">
-                                <span class="carousel-card-value"
-                                      x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0}) + '/mo'"></span>
-                            </template>
-                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
-                                <span class="carousel-card-value"
-                                      x-text="'$' + parseFloat(row.daily_rate).toFixed(2) + '/day'"></span>
-                            </template>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Return</span>
+                            <span class="carousel-card-label">Return Date</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.end_date)"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Days Left</span>
-                            <template x-if="parseInt(row.days_remaining) <= 3">
-                                <span class="badge badge-danger"
-                                      x-text="row.days_remaining + 'd'"></span>
-                            </template>
-                            <template x-if="parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7">
-                                <span class="badge badge-warning"
-                                      x-text="row.days_remaining + 'd'"></span>
-                            </template>
-                            <template x-if="parseInt(row.days_remaining) > 7">
-                                <span class="carousel-card-value"
-                                      x-text="row.days_remaining + ' days'"></span>
-                            </template>
+                            <span class="carousel-card-value"
+                                  :class="parseInt(row.days_remaining) <= 3 ? 'text-danger' : (parseInt(row.days_remaining) <= 7 ? 'text-warning' : 'text-success')"
+                                  x-text="row.days_remaining + ' days'"></span>
                         </div>
                     </div>
                 </template>
@@ -436,41 +412,29 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="carousel-card-value" x-text="row.customer_name"></span>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Amount</span>
-                            <span class="carousel-card-value"
-                                  x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2})"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Balance</span>
-                            <span class="carousel-card-value" style="font-weight:600;"
-                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2})"></span>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Issued</span>
+                            <span class="carousel-card-label">Invoiced</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.invoice_date)"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Due</span>
-                            <!-- days_overdue > 0 means past due; < 0 means days until due -->
+                            <!-- days_overdue > 0 ⇒ past due (red). Spec: red if days_overdue > 0. -->
                             <span class="carousel-card-value"
-                                  :style="parseInt(row.days_overdue) > 0 ? 'color:var(--color-danger);' : (parseInt(row.days_overdue) >= -7 ? 'color:var(--color-warning);' : '')"
+                                  :class="{'text-danger': parseInt(row.days_overdue) > 0}"
                                   x-text="fmtDate(row.due_date)"></span>
-                            <template x-if="parseInt(row.days_overdue) > 0">
-                                <span class="carousel-card-subvalue text-danger"
-                                      x-text="row.days_overdue + 'd overdue'"></span>
-                            </template>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Balance Due</span>
+                            <span class="carousel-card-value"
+                                  :class="{'text-danger': parseFloat(row.balance_due) > 0}"
+                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2})"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Status</span>
-                            <template x-if="row.status === 'overdue'">
-                                <span class="badge badge-danger">Overdue</span>
-                            </template>
-                            <template x-if="row.status === 'partially_paid'">
-                                <span class="badge badge-warning">Partial</span>
-                            </template>
-                            <template x-if="row.status === 'sent'">
-                                <span class="badge badge-info">Sent</span>
-                            </template>
+                            <!-- Spec: overdue→danger, partial→warning, sent→info.
+                                 DB enum uses 'partially_paid' not 'partial'. -->
+                            <span class="badge"
+                                  :class="{'badge-danger': row.status==='overdue', 'badge-warning': row.status==='partially_paid', 'badge-info': row.status==='sent'}"
+                                  x-text="row.status === 'partially_paid' ? 'Partial' : (row.status.charAt(0).toUpperCase() + row.status.slice(1))"></span>
                         </div>
                     </div>
                 </template>
@@ -479,15 +443,16 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
 
-    <!-- ── UPCOMING RESERVATIONS — S-DASHBOARD-CAROUSEL-REORGANIZE ─ -->
-    <?php /* New carousel. Schema deviations from spec template (see
-             FLEETFORGE_DATABASE_MASTER.sql:2740):
-                - reservations has no reservation_number  → use '#' + id
-                - reservations has no equipment_unit_id   → Unit row replaced
-                                                            with Quantity
-                - reservations has no return_date         → Return row dropped
-             Result is a 5-row card: Reservation / Customer / Quantity /
-             Pickup / Status. */ ?>
+    <!-- ── UPCOMING RESERVATIONS — S-DASHBOARD-CAROUSEL-ENRICH ─ -->
+    <?php /* 7-row card per spec. Schema deviations are handled in the API
+             (tables.php) which synthesizes the missing columns:
+                - reservation_number → CONCAT('RES-', id)
+                - unit_number        → NULL (rendered as '—')
+                - equipment_type     → NULL (rendered as '—')
+                - return_date        → NULL (fmtDate returns '—' for falsy)
+             See FLEETFORGE_DATABASE_MASTER.sql:2760 for the bare reservations
+             schema. The card template matches active leases so the layout
+             stays consistent across the dashboard. */ ?>
     <div class="dashboard-section">
         <div class="dashboard-section-header">
             <h3 class="dashboard-section-title">Upcoming Reservations</h3>
@@ -525,39 +490,31 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="carousel-card-value" x-text="row.customer_name"></span>
                         </div>
                         <div class="carousel-card-row">
-                            <span class="carousel-card-label">Qty</span>
-                            <span class="carousel-card-value"
-                                  x-text="row.quantity + ' unit' + (parseInt(row.quantity) !== 1 ? 's' : '')"></span>
+                            <!-- WHY equipment_type / unit_number / return_date are NULL from the API:
+                                 the reservations table has no equipment_template_id FK, no
+                                 equipment_unit_id FK, and no return_date column. The card still
+                                 renders these rows for layout consistency with leases. -->
+                            <span class="carousel-card-label">Equipment</span>
+                            <span class="carousel-card-value" x-text="row.equipment_type ?? '—'"></span>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Unit</span>
+                            <span class="carousel-card-value" x-text="row.unit_number ?? '—'"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">Pickup</span>
                             <span class="carousel-card-value" x-text="fmtDate(row.pickup_date)"></span>
-                            <template x-if="row.pickup_time">
-                                <span class="carousel-card-subvalue" x-text="row.pickup_time.slice(0,5)"></span>
-                            </template>
+                        </div>
+                        <div class="carousel-card-row">
+                            <span class="carousel-card-label">Return</span>
+                            <span class="carousel-card-value" x-text="fmtDate(row.return_date)"></span>
                         </div>
                         <div class="carousel-card-row">
                             <span class="carousel-card-label">In</span>
-                            <template x-if="parseInt(row.days_until_pickup) === 0">
-                                <span class="badge badge-danger">Today</span>
-                            </template>
-                            <template x-if="parseInt(row.days_until_pickup) > 0 && parseInt(row.days_until_pickup) <= 3">
-                                <span class="badge badge-warning"
-                                      x-text="row.days_until_pickup + 'd'"></span>
-                            </template>
-                            <template x-if="parseInt(row.days_until_pickup) > 3">
-                                <span class="carousel-card-value"
-                                      x-text="row.days_until_pickup + ' days'"></span>
-                            </template>
-                        </div>
-                        <div class="carousel-card-row">
-                            <span class="carousel-card-label">Status</span>
-                            <template x-if="row.status === 'confirmed'">
-                                <span class="badge badge-info">Confirmed</span>
-                            </template>
-                            <template x-if="row.status === 'pending'">
-                                <span class="badge badge-warning">Pending</span>
-                            </template>
+                            <!-- Spec: amber if ≤ 2 days until pickup -->
+                            <span class="carousel-card-value"
+                                  :class="{'text-warning': parseInt(row.days_until_pickup) <= 2}"
+                                  x-text="row.days_until_pickup + ' days'"></span>
                         </div>
                     </div>
                 </template>
