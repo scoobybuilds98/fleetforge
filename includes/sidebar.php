@@ -83,44 +83,33 @@ function sidebar_badge_count(string $key): int
 }
 
 // ============================================================
-// Build the visible nav item list — two-pass approach:
-//   Pass 1: flag each item as visible based on permissions.
-//   Pass 2: flag each separator visible if any item in its
-//           section is visible.
+// Build the nav accessibility map.
+//
+// S-SIDEBAR-LOCK-ALL-RESTRICTED — semantic change: $_vis[$_i] now
+// means "is this item accessible to the current user". Inaccessible
+// items still render (as locked greyed-out spans), so the old
+// "hide if false" semantics is gone. Separators always render.
+// Pass 2 (separator visibility from child visibility) deleted —
+// every separator's section now always has visible items below it.
 // ============================================================
 $_nav    = require FF_ROOT . '/config/navigation.php';
 $_vis    = [];
 $_nCount = count($_nav);
 
-// Pass 1: items (including children)
 foreach ($_nav as $_i => $_item) {
     if (isset($_item['separator'])) {
-        $_vis[$_i] = false; // tentative — resolved in pass 2
+        $_vis[$_i] = true; // separators always render (locked items appear below)
     } elseif (($_item['module'] ?? null) === null) {
-        $_vis[$_i] = true;  // module=null → visible to all logged-in users
+        $_vis[$_i] = true;  // module=null → accessible to all logged-in users
     } else {
         $_vis[$_i] = can($_item['module'], 'view');
     }
 
-    // Resolve visibility for children
+    // Per-child accessibility flag (same semantic flip as parent).
     if (!empty($_item['children'])) {
         foreach ($_item['children'] as $_ci => $_child) {
             $_nav[$_i]['children'][$_ci]['_visible'] =
                 (($_child['module'] ?? null) === null) || can($_child['module'], 'view');
-        }
-    }
-}
-
-// Pass 2: separators — visible if at least one following item (before the
-// next separator) is visible.
-foreach ($_nav as $_i => $_item) {
-    if (!isset($_item['separator'])) continue;
-
-    for ($_j = $_i + 1; $_j < $_nCount; $_j++) {
-        if (isset($_nav[$_j]['separator'])) break; // hit next separator
-        if ($_vis[$_j]) {
-            $_vis[$_i] = true;
-            break;
         }
     }
 }
@@ -178,11 +167,36 @@ $_sidebarUser = current_user();
     <nav class="sidebar-nav" aria-label="Main navigation">
 
         <?php foreach ($_nav as $_i => $_item): ?>
-            <?php if (!$_vis[$_i]) continue; ?>
 
             <?php if (isset($_item['separator'])): ?>
-                <!-- Section separator -->
+                <!-- Section separator (S-SIDEBAR-LOCK-ALL-RESTRICTED: always rendered) -->
                 <div class="nav-section-label"><?= e($_item['label']) ?></div>
+
+            <?php elseif (!$_vis[$_i]): ?>
+                <?php /* S-SIDEBAR-LOCK-ALL-RESTRICTED — locked variant.
+                         pointer-events:none in CSS makes it non-clickable;
+                         the .nav-lock-icon span is the small lock badge,
+                         pinned bottom-right of the icon in collapsed mode
+                         and right-aligned via margin-left:auto in expanded
+                         mode. Parent items with children that are locked
+                         only render this top-level span — the children
+                         block is skipped since the user can't expand the
+                         group anyway. */ ?>
+                <span class="nav-item nav-item--locked"
+                      title="You don't have access to <?= e($_item['label']) ?>">
+                    <span class="nav-item-icon nav-icon--locked">
+                        <?= heroicon($_item['icon']) ?>
+                    </span>
+                    <span class="nav-item-label"><?= e($_item['label']) ?></span>
+                    <span class="nav-lock-icon" aria-hidden="true">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2.5"
+                             xmlns="http://www.w3.org/2000/svg">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                    </span>
+                </span>
 
             <?php else: ?>
                 <?php
@@ -253,41 +267,59 @@ $_sidebarUser = current_user();
                         </a>
 
                         <div class="nav-children">
-                            <?php foreach ($_item['children'] as $_child):
-                                if (empty($_child['_visible'])) continue;
-                                // Children also honor match_prefix (see note above)
-                                $_childPrefixes = (array) ($_child['match_prefix'] ?? $_child['url']);
-                                $_childIsActive = false;
-                                if ($_currentPath !== '') {
-                                    foreach ($_childPrefixes as $_cp) {
-                                        if (str_starts_with($_currentPath, FF_BASE_PATH . $_cp)) {
-                                            $_childIsActive = true;
-                                            break;
+                            <?php foreach ($_item['children'] as $_child): ?>
+                                <?php if (empty($_child['_visible'])): ?>
+                                    <?php /* S-SIDEBAR-LOCK-ALL-RESTRICTED — locked child variant. */ ?>
+                                    <span class="nav-item nav-item--child nav-item--locked"
+                                          title="You don't have access to <?= e($_child['label']) ?>">
+                                        <span class="nav-item-icon nav-icon--locked">
+                                            <?= heroicon($_child['icon']) ?>
+                                        </span>
+                                        <span class="nav-item-label"><?= e($_child['label']) ?></span>
+                                        <span class="nav-lock-icon" aria-hidden="true">
+                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                                                 stroke="currentColor" stroke-width="2.5"
+                                                 xmlns="http://www.w3.org/2000/svg">
+                                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                            </svg>
+                                        </span>
+                                    </span>
+                                <?php else:
+                                    // Children also honor match_prefix (see note above)
+                                    $_childPrefixes = (array) ($_child['match_prefix'] ?? $_child['url']);
+                                    $_childIsActive = false;
+                                    if ($_currentPath !== '') {
+                                        foreach ($_childPrefixes as $_cp) {
+                                            if (str_starts_with($_currentPath, FF_BASE_PATH . $_cp)) {
+                                                $_childIsActive = true;
+                                                break;
+                                            }
                                         }
                                     }
-                                }
-                                $_childBadge = 0;
-                                if (!empty($_child['badge'])) {
-                                    $_childBadge = sidebar_badge_count($_child['badge']);
-                                }
-                            ?>
-                                <a href="<?= e(base_url(ltrim($_child['url'], '/'))) ?>"
-                                   class="nav-item nav-item--child<?= $_childIsActive ? ' is-active' : '' ?>"
-                                   aria-label="<?= e($_child['label']) ?>"
-                                   <?= $_childIsActive ? 'aria-current="page"' : '' ?>>
+                                    $_childBadge = 0;
+                                    if (!empty($_child['badge'])) {
+                                        $_childBadge = sidebar_badge_count($_child['badge']);
+                                    }
+                                ?>
+                                    <a href="<?= e(base_url(ltrim($_child['url'], '/'))) ?>"
+                                       class="nav-item nav-item--child<?= $_childIsActive ? ' is-active' : '' ?>"
+                                       aria-label="<?= e($_child['label']) ?>"
+                                       <?= $_childIsActive ? 'aria-current="page"' : '' ?>>
 
-                                    <span class="nav-item-icon">
-                                        <?= heroicon($_child['icon']) ?>
-                                    </span>
-
-                                    <span class="nav-item-label"><?= e($_child['label']) ?></span>
-
-                                    <?php if ($_childBadge > 0): ?>
-                                        <span class="nav-badge" aria-label="<?= e($_childBadge) ?> items">
-                                            <?= e($_childBadge > 99 ? '99+' : (string) $_childBadge) ?>
+                                        <span class="nav-item-icon">
+                                            <?= heroicon($_child['icon']) ?>
                                         </span>
-                                    <?php endif; ?>
-                                </a>
+
+                                        <span class="nav-item-label"><?= e($_child['label']) ?></span>
+
+                                        <?php if ($_childBadge > 0): ?>
+                                            <span class="nav-badge" aria-label="<?= e($_childBadge) ?> items">
+                                                <?= e($_childBadge > 99 ? '99+' : (string) $_childBadge) ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </a>
+                                <?php endif; ?>
                             <?php endforeach; ?>
                         </div>
                     </div>

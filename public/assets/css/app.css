@@ -868,6 +868,37 @@ kbd {
     height: 14px;
 }
 
+/* ────────── S-SIDEBAR-LOCK-ALL-RESTRICTED ──────────
+   Locked nav items render in place of hidden ones so every role sees
+   the full module map. .nav-item base rules still apply (flex layout,
+   gap, padding, border-radius) — the modifier overrides only what
+   needs to change for the locked state. */
+.nav-item--locked {
+    cursor: not-allowed;
+    pointer-events: none;
+    user-select: none;
+    opacity: 0.38;
+    color: var(--text-muted);
+}
+.nav-icon--locked {
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+.nav-lock-icon {
+    margin-left: auto;
+    flex-shrink: 0;
+    opacity: 0.7;
+    display: flex;
+    align-items: center;
+}
+/* Defensive: section separators never wrap a lock icon today, but
+   keep this rule in case the structure changes. */
+.nav-section-label .nav-lock-icon { display: none; }
+/* Collapsed-state rules live alongside the existing
+   .sidebar:not(.is-open) block — see further down in the file
+   for the matching @media (min-width: 1024px) overrides. */
+/* ────────── S-SIDEBAR-LOCK-ALL-RESTRICTED END ────────── */
+
 /* ── User Footer ─────────────────────────── */
 .sidebar-footer {
     border-top: 1px solid var(--sidebar-border);
@@ -1012,6 +1043,23 @@ kbd {
     .sidebar:not(.is-open) .nav-icon {
         margin: 0 auto;
         flex-shrink: 0;
+    }
+
+    /* S-SIDEBAR-LOCK-ALL-RESTRICTED — collapsed-mode locked items.
+       The base .nav-item collapsed rule already centres the icon
+       (justify-content:center, gap:0, padding:8px) and hides the
+       label (opacity:0, max-width:0). The lock icon needs to escape
+       the flex flow and pin to the bottom-right corner of the
+       collapsed rail (next to the centred module icon) as a tiny
+       indicator. */
+    .sidebar:not(.is-open) .nav-lock-icon {
+        position: absolute;
+        bottom: 4px;
+        right: 8px;
+        width: 8px;
+        height: 8px;
+        margin: 0;
+        opacity: 0.8;
     }
 
     .sidebar:not(.is-open) .sidebar-user {
