@@ -8,6 +8,7 @@
 - When a session ships, its entry is marked SHIPPED with the commit refs and date, then archived to PROGRESS.md SESSION LOG. The entry can be removed from this file or kept with SHIPPED tag for a short grace period — operator's call.
 - When a session is descoped or superseded, mark DEFERRED or SUPERSEDED with rationale; do not delete silently.
 - Update this file in lockstep with FLEETFORGE_PROGRESS.md whenever ship-state changes.
+- **Operator commits (D-D136-OPERATOR-COMMIT, locked 2026-05-19):** do not push unrelated changes to main while any session is IN-FLIGHT. Bundling operator work into an IN-FLIGHT session's working tree causes split-commit traceability noise — see D136 operator-commit-rule clause in REFERENCE.md §0 and D-D136-OPERATOR-COMMIT in PROGRESS.md DECISIONS for the canonical workflow (wait, or pause-then-resume with explicit annotation).
 
 ---
 
