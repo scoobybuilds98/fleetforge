@@ -120,6 +120,7 @@ $_accNavGroups = [
         'icon'  => 'building-library',
         'children' => [
             ['label' => 'Bank Accounts',  'url' => '/accounting/bank-accounts',       'icon' => 'building-library'],
+            ['label' => 'Transactions',   'url' => '/accounting/bank-transactions',   'icon' => 'list-bullet'],
             ['label' => 'Reconciliation', 'url' => '/accounting/bank-reconciliation', 'icon' => 'scale'],
         ],
     ],
@@ -134,11 +135,16 @@ $_accNavGroups = [
         ],
     ],
     [
-        // S035 — Tax Management module. Single page covers GST/HST + PST
-        // filing periods, calculation, mark-filed, and remittance posting.
+        // S035 — Tax Management module. GST/HST + PST filing periods,
+        // calculation, mark-filed, and remittance posting on the main
+        // tax page. S037-CRUD added the standalone Remittances list
+        // for audit-trail visibility across all filed periods.
         'label' => 'Tax',
-        'url'   => '/accounting/tax',
         'icon'  => 'receipt-percent',
+        'children' => [
+            ['label' => 'GST/HST Filing', 'url' => '/accounting/tax',              'icon' => 'receipt-percent'],
+            ['label' => 'Remittances',    'url' => '/accounting/tax/remittances',  'icon' => 'banknotes'],
+        ],
     ],
     [
         'label' => 'Periods',

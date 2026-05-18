@@ -416,7 +416,7 @@ Close the gap between what `FLEETFORGE_ACCOUNTING_SPEC.md` v1.2 promised and wha
 | S037-YE | ✅ DONE | L | Year-end close end-to-end (shipped 2026-05-19) |
 | S037-REC | ✅ DONE | M | Recurring JE templates + cron (shipped 2026-05-19) |
 | S037-CRONS | ✅ DONE | M | 3 missing crons live (shipped 2026-05-19) |
-| S037-CRUD | 📋 PLANNED | M | All spec CRUD complete |
+| S037-CRUD | ✅ DONE | M | All spec CRUD complete (shipped 2026-05-19) |
 
 ---
 
@@ -634,7 +634,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 5 | S037-YE | B | ✅ DONE | L | Opus | S037-FX |
 | 6 | S037-REC | B | ✅ DONE | M | Sonnet | S037-YE |
 | 7 | S037-CRONS | B | ✅ DONE | M | Sonnet | S037-REC |
-| 8 | S037-CRUD | B | 📋 PLANNED | M | Sonnet | S037-CRONS |
+| 8 | S037-CRUD | B | ✅ DONE | M | Sonnet | S037-CRONS |
 | 9 | S-ACCT-AJE | C | 📋 PLANNED | M | Sonnet | S037-CRUD |
 | 10 | S-ACCT-WTB | C | 📋 PLANNED | L | Opus | S-ACCT-AJE |
 | 11 | S-ACCT-CCA-1 | C | 📋 PLANNED | L | Opus | S-ACCT-WTB |
