@@ -1344,6 +1344,46 @@ Cross-reference: Trap 38 covers the related `'resolved'/'written_off'` (NOT `'se
 
 ---
 
+### Trap 47: `leases` has NO `term_months` column — derive or supply as input
+The leases table stores `start_date` (NOT NULL) and `end_date` (nullable). It does NOT carry a single integer `term_months` (or `lease_term_months`, `term_length_months`, `duration_months`) column. Any session that needs lease duration in months MUST either (a) derive it via `TIMESTAMPDIFF(MONTH, start_date, end_date)` from the row at query time, or (b) accept it as an operator-supplied wizard / form input. Do NOT add a SELECT against a non-existent `term_months` column — the query will 1054 at runtime; do NOT silently assume it exists in service signatures.
+
+```sql
+-- WRONG (term_months / lease_term_months / duration_months do not exist on disk)
+SELECT term_months FROM leases WHERE id = ?;
+SELECT lease_term_months FROM leases WHERE id = ?;
+
+-- RIGHT — derive from the two date columns that DO exist
+SELECT TIMESTAMPDIFF(MONTH, start_date, end_date) AS term_months
+FROM leases WHERE id = ?;
+
+-- ALSO RIGHT — operator supplies term as a wizard input (preferred for ASPE 3065
+-- classification per D-LESSOR-1-TERM, because end_date may represent intended
+-- return, not contractual term)
+$leaseTermMonths = clean_positive_int($body['lease_term_months'] ?? null);
+```
+
+Practical implication for ASPE 3065 Criterion B (lease term ≥ 75% of economic life): per D-LESSOR-1-TERM (locked 2026-05-19), `LeaseClassificationService::evaluateCriterionB(int $leaseTermMonths, int $economicLifeMonths)` accepts the term as an explicit input — not a derived value — because operator-supplied term avoids the ambiguity of `end_date` (which on some leases is the intended return date, not the contractual end). The `api/v1/accounting/leases/classify.php` endpoint validates `lease_term_months` as a required positive int.
+
+**Source:** K-22 catch surfaced in S-ACCT-LESSOR-1 pre-flight (AskUserQuestion resolved: operator-supplied wizard input over `end_date - start_date` derivation per D-LESSOR-1-TERM). Locked 2026-05-19.
+
+---
+
+### Trap 48: `equipment_units` count ≠ `leases` count — never substitute one for the other
+`equipment_units` (the fleet inventory) and `leases` (the per-contract rental records) are different tables with different lifecycles. At lock time the disk holds **238 equipment_units** but only **42 leases** (32 active + 10 soft-deleted) — a ~5.7× difference. A single unit can have many sequential leases over its lifetime, and many units are idle / on yard / decommissioned at any moment. Substituting one count for the other in session prompts, smoke logs, or migration backfill expectations causes both factual drift and real bugs (e.g. a migration that "backfills 238 rows on leases" only touches 42 rows, leaving 196 phantom expectations downstream).
+
+```sql
+-- The two tables, distinct and unrelated in cardinality:
+SELECT COUNT(*) FROM equipment_units WHERE deleted_at IS NULL;   -- ≈ 238 units
+SELECT COUNT(*) FROM leases          WHERE deleted_at IS NULL;   -- ≈ 32  active leases
+SELECT COUNT(*) FROM leases;                                     -- 42 including soft-deleted
+```
+
+Practical implication for session prompts: a prompt that says "all N existing leases get classification='operating'" must be sanity-checked against `SELECT COUNT(*) FROM leases` at pre-flight, not assumed from a prior session's smoke output (e.g. S-ACCT-UNIT's "238 active units" referred to equipment_units, NOT leases). Per the `feedback_trust_file_over_prompt` rule, when prompt-baseline and disk disagree on row counts, trust the file and surface via AskUserQuestion.
+
+**Source:** Context-bleed K-22 catch surfaced in S-ACCT-LESSOR-1 pre-flight (S-ACCT-UNIT smoke had reported "238 active units" referring to equipment_units; the LESSOR-1 prompt then carried "238 existing leases" into a leases-table claim). Operator chose trust-file (42) via AskUserQuestion. Locked 2026-05-19.
+
+---
+
 ## 12. PERMISSION MATRIX (quick reference)
 
 ```
