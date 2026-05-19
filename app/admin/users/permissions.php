@@ -256,6 +256,25 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-text="group.modules.join(', ')"></span>
                     </div>
                 </div>
+                <!-- S-PERM-MACRO-STATUS: live override count for this group.
+                     Computed from `this.modules` via groupStatus(group); reactive
+                     since Alpine re-evaluates inline calls whenever `this.modules`
+                     changes (single-cell sendUpdate, resetAll, and confirmGroupMacro
+                     all mutate this.modules). -->
+                <div class="perm-group-status">
+                    <template x-if="groupStatus(group).totalOverrides === 0">
+                        <span class="perm-group-status-neutral">
+                            ◯ No overrides — using role defaults
+                        </span>
+                    </template>
+                    <template x-if="groupStatus(group).totalOverrides > 0">
+                        <span>
+                            <strong x-text="groupStatus(group).granted"></strong> granted ·
+                            <strong x-text="groupStatus(group).denied"></strong> denied
+                            (<span x-text="groupStatus(group).totalOverrides"></span> active override<span x-show="groupStatus(group).totalOverrides !== 1">s</span>)
+                        </span>
+                    </template>
+                </div>
                 <div class="perm-group-actions">
                     <button type="button" class="btn btn-sm btn-secondary"
                             @click="openGroupMacro(group, 'grant_view')"
@@ -263,7 +282,12 @@ require_once FF_ROOT . '/includes/header.php';
                     <button type="button" class="btn btn-sm btn-secondary"
                             @click="openGroupMacro(group, 'grant_read_write')"
                             :disabled="saving">Grant Read+Write</button>
-                    <button type="button" class="btn btn-sm btn-danger"
+                    <!-- S-PERM-MACRO-STATUS: btn-outline-danger (canonical
+                         soft-danger outline used elsewhere) replaces filled
+                         btn-danger. Restores visual weight parity at rest;
+                         destructive intent still reads through the reason modal
+                         confirmation flow + hover state. -->
+                    <button type="button" class="btn btn-sm btn-outline-danger"
                             @click="openGroupMacro(group, 'deny_all')"
                             :disabled="saving">Deny All</button>
                     <button type="button" class="btn btn-sm btn-secondary"
@@ -666,14 +690,18 @@ require_once FF_ROOT . '/includes/header.php';
     padding-left: 2px;
 }
 
-/* S-PERM-EXPAND: Group macro card rows ────────────────────── */
+/* S-PERM-EXPAND: Group macro card rows ──────────────────────
+   S-PERM-MACRO-STATUS: layout switched from 2-column grid (info |
+   actions) to vertical flex stack (info → status row → action row).
+   The status row sits between the modules-list line and the macro
+   buttons; macro buttons left-align below it (this matches the
+   pre-existing mobile pattern — now the default on all viewports). */
 .perm-group-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     padding: 14px 16px;
     border-bottom: 1px solid var(--border-color);
-    align-items: center;
 }
 .perm-group-row:last-child { border-bottom: none; }
 
@@ -682,16 +710,23 @@ require_once FF_ROOT . '/includes/header.php';
 .perm-group-desc  { font-size: 0.8125rem; line-height: 1.35; }
 .perm-group-modules { font-size: 0.75rem; font-family: var(--font-mono, monospace); }
 
+/* S-PERM-MACRO-STATUS: live override count row */
+.perm-group-status {
+    padding: 4px 0 2px 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+.perm-group-status-neutral { font-style: italic; }
+.perm-group-status strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
 .perm-group-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    justify-content: flex-end;
-}
-
-@media (max-width: 768px) {
-    .perm-group-row { grid-template-columns: 1fr; }
-    .perm-group-actions { justify-content: flex-start; }
+    justify-content: flex-start;
 }
 </style>
 
@@ -943,6 +978,29 @@ function permissionsMatrix() {
         },
 
         /* ── Group macros (S-PERM-EXPAND) ──────────────────── */
+        /* ── S-PERM-MACRO-STATUS: live group status ───────────
+           Counts the currently-active (user, module, action) overrides
+           within a group, derived from this.modules. Reads `r.slug` to
+           match the API response shape — prompt's helper used `r.module`
+           which doesn't exist; corrected here per file-over-prompt.
+           Returns {granted, denied, totalOverrides} so the template can
+           render either the "No overrides" neutral state or the active
+           counts inline. */
+        groupStatus(group) {
+            let granted = 0;
+            let denied  = 0;
+            for (const moduleName of group.modules) {
+                const row = this.modules.find(r => r.slug === moduleName);
+                if (!row) continue;
+                for (const action of row.actions) {
+                    const cell = row.permissions[action];
+                    if (cell.override === 1) granted++;
+                    else if (cell.override === 0) denied++;
+                }
+            }
+            return { granted, denied, totalOverrides: granted + denied };
+        },
+
         _macroLabel(macro) {
             return {
                 grant_view:       'Grant View',
