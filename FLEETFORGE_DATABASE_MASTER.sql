@@ -888,6 +888,20 @@ CREATE TABLE `acc_promise_to_pay` (
   CONSTRAINT `acc_promise_to_pay_ibfk_2` FOREIGN KEY (`invoice_id`) REFERENCES `invoices` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_promise_to_pay_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_place_of_supply_rules` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `rule_type` enum('goods_delivered','short_lease','long_lease','service','specified_motor_vehicle') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `province_code` varchar(3) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `applicable_tax_rate_ids` json NOT NULL,
+  `priority` tinyint unsigned NOT NULL DEFAULT '10',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_pos_rule` (`rule_type`,`province_code`),
+  KEY `idx_pos_province` (`province_code`),
+  KEY `idx_pos_rule_type` (`rule_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_qbo_sync_log` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `entity_type` enum('customer','invoice','payment','credit_memo','bill','vendor','account') COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2938,7 +2952,8 @@ CREATE TABLE `tax_rates` (
   `effective_to` date DEFAULT NULL,
   `notes` text COLLATE utf8mb4_unicode_ci,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_tr_effective` (`effective_from`,`effective_to`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `user_mfa_backup_codes` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

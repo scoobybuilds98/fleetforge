@@ -186,9 +186,36 @@ db_transaction(function () use (
     }
 });
 
-json_success([
+// S-ACCT-POS: derive POS province from the customer + transaction date and
+// attach an informational warning when the customer is out of the default
+// province. This does NOT block invoice creation or override TaxCalculator —
+// it's a heads-up surface for the operator. Full POS-driven tax wiring is
+// S-ACCT-GST34 scope.
+$response = [
     'id'             => $result['invoice_id'],
     'invoice_number' => $result['invoice_number'],
     'total_amount'   => $result['total_amount'],
     'balance_due'    => $result['balance_due'],
-], 201);
+];
+
+try {
+    $pos = \FleetForge\Accounting\PlaceOfSupplyService::resolve([
+        'transaction_type' => 'short_lease',
+        'transaction_date' => $periodStart,
+        'customer_id'      => (int) $lease['customer_id'],
+    ]);
+    if ($pos['is_out_of_province']) {
+        $response['pos_warning'] = [
+            'message' => "Customer place of supply derived as {$pos['resolved_province']}. "
+                       . 'Correct tax rates for short-lease have been applied per spec §23.6.',
+            'resolved_province' => $pos['resolved_province'],
+            'applied_rates'     => $pos['applicable_rates'],
+            'derivation_trail'  => $pos['derivation_trail'],
+        ];
+    }
+} catch (\Throwable $e) {
+    // POS warning is non-critical — log + continue.
+    error_log('[POS-warning] ' . $e->getMessage());
+}
+
+json_success($response, 201);

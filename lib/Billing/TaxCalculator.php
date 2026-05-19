@@ -49,10 +49,15 @@ class TaxCalculator
         bool $pstExempt,
         string $country = 'CA',
         ?int $customerId = null,
-        string $customerName = ''
+        string $customerName = '',
+        ?string $transactionDate = null
     ): array {
-        // Look up current active tax rate for province (D11: at invoice time)
-        $rates = $this->lookupRates($province, $country, $customerId, $customerName);
+        // Look up current active tax rate for province (D11: at invoice time).
+        // S-ACCT-POS: optional $transactionDate drives effective-window filter
+        // so backdated invoices resolve to the correct historic rate (e.g. NS
+        // HST 15% pre-2025-04-01 vs 14% from 2025-04-01). Default = today
+        // preserves backward compatibility with all existing callers.
+        $rates = $this->lookupRates($province, $country, $customerId, $customerName, $transactionDate);
 
         $gstRate = $rates['gst_rate'] ?? '0.0000';
         $pstRate = $rates['pst_rate'] ?? '0.0000';
@@ -111,15 +116,24 @@ class TaxCalculator
         string $province,
         string $country = 'CA',
         ?int $customerId = null,
-        string $customerName = ''
+        string $customerName = '',
+        ?string $transactionDate = null
     ): array {
+        // S-ACCT-POS: bind transaction_date for backdated-invoice correctness.
+        // Also filter on effective_to so historic rates with a closed window
+        // (NS HST 15% effective_to=2025-03-31) don't bleed into post-window
+        // transactions. BC's row has effective_to=NULL so the IS NULL guard
+        // keeps it eligible.
+        $date = $transactionDate ?: date('Y-m-d');
         $row = db_row(
             "SELECT gst_rate, pst_rate, hst_rate
              FROM tax_rates
-             WHERE province = ? AND is_active = 1 AND effective_from <= CURDATE()
+             WHERE province = ? AND is_active = 1
+               AND (effective_from IS NULL OR effective_from <= ?)
+               AND (effective_to   IS NULL OR effective_to   >= ?)
              ORDER BY effective_from DESC
              LIMIT 1",
-            [$province]
+            [$province, $date, $date]
         );
 
         if (!$row) {

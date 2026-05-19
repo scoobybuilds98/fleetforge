@@ -706,4 +706,260 @@ function FF_TaxPeriods() {
 }
 </script>
 
+<?php
+// ── S-ACCT-POS: Place of Supply section ────────────────────────────────────
+// Server-renders the POS rule table + a Test Resolution form + a POS Audit
+// button. Three SQL queries up front for the static surface; Alpine handles
+// the test + audit live calls. Section is appended after all existing tax-
+// management tabs to avoid disturbing the existing layout.
+$posRules = db_select(
+    "SELECT r.id, r.rule_type, r.province_code, r.applicable_tax_rate_ids,
+            r.priority, r.is_active, r.notes
+       FROM acc_place_of_supply_rules r
+      ORDER BY r.province_code, r.rule_type"
+);
+// Pre-resolve tax_rates referenced by the JSON arrays for display.
+$rateRowsById = [];
+foreach (db_select("SELECT id, name, province, gst_rate, pst_rate, hst_rate, effective_from, effective_to FROM tax_rates ORDER BY id") as $r) {
+    $rateRowsById[(int) $r['id']] = $r;
+}
+$customersForTest = db_select(
+    "SELECT id, company_name AS name, province FROM customers WHERE deleted_at IS NULL ORDER BY company_name LIMIT 200"
+);
+$periodsForAudit = db_select(
+    "SELECT id, name, year, month FROM acc_periods ORDER BY year DESC, month DESC LIMIT 24"
+);
+$reinstatementSummary = db_row(
+    "SELECT COUNT(*) AS n FROM acc_place_of_supply_rules"
+);
+?>
+
+<div class="card" style="margin-top:30px;padding:0;overflow:hidden;">
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border-default);background:var(--bg-subtle);">
+        <h2 style="margin:0;font-size:1.0625rem;font-weight:700;">Place of Supply (S-ACCT-POS — ASPE §23.6)</h2>
+        <p style="margin:6px 0 0;font-size:0.8125rem;color:var(--text-secondary);">
+            Tax-jurisdiction derivation engine — confirms the right province for short-lease, long-lease, service, and goods-delivered transactions.
+            NS HST effective-dated: <strong>15%</strong> to Mar 31 2025 → <strong>14%</strong> from Apr 1 2025 (driven by tax_rates.effective_from / effective_to).
+        </p>
+    </div>
+
+    <!-- Test Resolution form -->
+    <div x-data="posResolver()" style="padding:18px 20px;border-bottom:1px solid var(--border-default);">
+        <h3 style="margin:0 0 12px;font-size:0.95rem;font-weight:600;">Test Resolution</h3>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:end;">
+            <div>
+                <label class="form-label" style="display:block;font-size:0.7rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Customer</label>
+                <select x-model.number="form.customer_id" class="form-input" style="width:100%;padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:0.8125rem;">
+                    <option value="">— Select —</option>
+                    <?php foreach ($customersForTest as $c): ?>
+                        <option value="<?= (int) $c['id'] ?>"><?= e($c['name']) ?> (<?= e($c['province'] ?? 'no prov') ?>)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div>
+                <label class="form-label" style="display:block;font-size:0.7rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Transaction Type</label>
+                <select x-model="form.transaction_type" class="form-input" style="width:100%;padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:0.8125rem;">
+                    <option value="short_lease">Short lease ≤ 3 mo</option>
+                    <option value="long_lease">Long lease > 3 mo</option>
+                    <option value="service">Service</option>
+                    <option value="goods_delivered">Goods delivered</option>
+                    <option value="specified_motor_vehicle">Specified motor vehicle</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label" style="display:block;font-size:0.7rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Transaction Date</label>
+                <input type="date" x-model="form.transaction_date" class="form-input" style="width:100%;padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:0.8125rem;">
+            </div>
+            <div>
+                <label class="form-label" style="display:block;font-size:0.7rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Delivery Override (opt)</label>
+                <input type="text" x-model="form.delivery_province" placeholder="e.g. NS" maxlength="3" class="form-input" style="width:100%;padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:0.8125rem;text-transform:uppercase;">
+            </div>
+        </div>
+        <button @click="run()" :disabled="!form.customer_id || busy" class="btn btn-primary btn-sm" style="margin-top:12px;">
+            <span x-show="!busy">Resolve</span>
+            <span x-show="busy">Resolving...</span>
+        </button>
+
+        <template x-if="result">
+            <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-subtle);">
+                <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:0.875rem;">
+                    <div><strong>Resolved Province:</strong> <span class="font-mono badge badge-blue" style="padding:2px 10px;font-size:0.8125rem;" x-text="result.resolved_province"></span></div>
+                    <div><strong>Method:</strong> <span class="font-mono" x-text="result.resolution_method"></span></div>
+                    <template x-if="result.is_out_of_province">
+                        <span class="badge badge-warning" style="padding:2px 10px;font-size:0.75rem;">Out of province</span>
+                    </template>
+                </div>
+                <div style="margin-top:10px;font-size:0.75rem;color:var(--text-secondary);">
+                    <strong>Derivation trail:</strong> <span x-text="result.derivation_trail"></span>
+                </div>
+                <template x-if="result.applicable_rates && result.applicable_rates.length > 0">
+                    <table style="margin-top:10px;font-size:0.8125rem;width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:rgba(0,0,0,0.04);">
+                            <th style="padding:6px 8px;text-align:left;">Name</th>
+                            <th style="padding:6px 8px;text-align:right;">GST</th>
+                            <th style="padding:6px 8px;text-align:right;">PST</th>
+                            <th style="padding:6px 8px;text-align:right;">HST</th>
+                            <th style="padding:6px 8px;">Effective</th>
+                        </tr></thead>
+                        <tbody>
+                            <template x-for="r in result.applicable_rates" :key="r.id">
+                                <tr style="border-top:1px solid var(--border-default);">
+                                    <td style="padding:6px 8px;" x-text="r.name"></td>
+                                    <td class="font-mono" style="padding:6px 8px;text-align:right;" x-text="(parseFloat(r.gst_rate) * 100).toFixed(2) + '%'"></td>
+                                    <td class="font-mono" style="padding:6px 8px;text-align:right;" x-text="(parseFloat(r.pst_rate) * 100).toFixed(2) + '%'"></td>
+                                    <td class="font-mono" style="padding:6px 8px;text-align:right;" x-text="(parseFloat(r.hst_rate) * 100).toFixed(2) + '%'"></td>
+                                    <td style="padding:6px 8px;font-size:0.75rem;color:var(--text-secondary);" x-text="(r.effective_from || '—') + ' .. ' + (r.effective_to || 'open')"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </template>
+            </div>
+        </template>
+        <p x-show="error" x-cloak style="margin-top:10px;color:var(--color-danger);font-size:0.8125rem;" x-text="error"></p>
+    </div>
+
+    <!-- POS Rules Table (server-rendered) -->
+    <div style="padding:18px 20px;border-bottom:1px solid var(--border-default);">
+        <h3 style="margin:0 0 12px;font-size:0.95rem;font-weight:600;">POS Rules (<?= count($posRules) ?>)</h3>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
+                <thead>
+                    <tr style="background:var(--bg-subtle);border-bottom:1px solid var(--border-default);">
+                        <th style="padding:8px 10px;text-align:left;">Rule Type</th>
+                        <th style="padding:8px 10px;text-align:left;">Province</th>
+                        <th style="padding:8px 10px;text-align:left;">Applicable Rates</th>
+                        <th style="padding:8px 10px;text-align:right;">Priority</th>
+                        <th style="padding:8px 10px;text-align:center;">Active</th>
+                        <th style="padding:8px 10px;text-align:left;">Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($posRules as $rule):
+                        $ids = json_decode((string) $rule['applicable_tax_rate_ids'], true) ?: [];
+                        $labels = [];
+                        foreach ($ids as $rid) {
+                            $rate = $rateRowsById[(int) $rid] ?? null;
+                            if ($rate) {
+                                $bits = [];
+                                if ((float) $rate['gst_rate'] > 0) $bits[] = 'GST ' . number_format(((float) $rate['gst_rate']) * 100, 1) . '%';
+                                if ((float) $rate['pst_rate'] > 0) $bits[] = 'PST ' . number_format(((float) $rate['pst_rate']) * 100, 1) . '%';
+                                if ((float) $rate['hst_rate'] > 0) $bits[] = 'HST ' . number_format(((float) $rate['hst_rate']) * 100, 1) . '%';
+                                $labels[] = '#' . $rid . ' ' . implode(' + ', $bits);
+                            } else {
+                                $labels[] = '#' . $rid . ' (missing)';
+                            }
+                        }
+                    ?>
+                    <tr style="border-bottom:1px solid var(--border-default);">
+                        <td style="padding:7px 10px;font-family:var(--font-mono);font-size:0.75rem;"><?= e(str_replace('_', ' ', $rule['rule_type'])) ?></td>
+                        <td style="padding:7px 10px;font-family:var(--font-mono);font-weight:600;"><?= e($rule['province_code']) ?></td>
+                        <td style="padding:7px 10px;font-size:0.75rem;"><?= e(implode(' / ', $labels)) ?></td>
+                        <td style="padding:7px 10px;text-align:right;font-family:var(--font-mono);"><?= (int) $rule['priority'] ?></td>
+                        <td style="padding:7px 10px;text-align:center;"><?= ((int) $rule['is_active']) === 1 ? '✓' : '—' ?></td>
+                        <td style="padding:7px 10px;font-size:0.75rem;color:var(--text-secondary);"><?= e($rule['notes'] ?? '') ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- POS Audit Report -->
+    <div x-data="posAudit()" style="padding:18px 20px;">
+        <h3 style="margin:0 0 12px;font-size:0.95rem;font-weight:600;">POS Audit Report</h3>
+        <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
+            <div>
+                <label class="form-label" style="display:block;font-size:0.7rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Period</label>
+                <select x-model.number="periodId" class="form-input" style="padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:0.8125rem;">
+                    <?php foreach ($periodsForAudit as $p): ?>
+                        <option value="<?= (int) $p['id'] ?>"><?= e($p['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button @click="run()" :disabled="!periodId || busy" class="btn btn-secondary btn-sm">
+                <span x-show="!busy">Run Audit</span>
+                <span x-show="busy">Auditing...</span>
+            </button>
+        </div>
+
+        <template x-if="report">
+            <div style="margin-top:14px;">
+                <div style="font-size:0.875rem;margin-bottom:8px;">
+                    <strong x-text="report.total_invoices"></strong> invoice(s) in period —
+                    <span :class="report.mismatch_count === 0 ? 'badge badge-success' : 'badge badge-warning'"
+                          style="padding:2px 10px;font-size:0.75rem;margin-left:6px;"
+                          x-text="report.mismatch_count + ' mismatch' + (report.mismatch_count === 1 ? '' : 'es')"></span>
+                </div>
+                <template x-if="report.mismatches.length > 0">
+                    <table style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
+                        <thead><tr style="background:var(--bg-subtle);">
+                            <th style="padding:6px 8px;text-align:left;">Invoice</th>
+                            <th style="padding:6px 8px;text-align:left;">Date</th>
+                            <th style="padding:6px 8px;text-align:left;">Applied</th>
+                            <th style="padding:6px 8px;text-align:left;">Derived</th>
+                            <th style="padding:6px 8px;text-align:right;">Tax Total</th>
+                        </tr></thead>
+                        <tbody>
+                            <template x-for="m in report.mismatches" :key="m.invoice_id">
+                                <tr style="border-top:1px solid var(--border-default);">
+                                    <td class="font-mono" style="padding:6px 8px;" x-text="m.invoice_number"></td>
+                                    <td style="padding:6px 8px;" x-text="m.invoice_date"></td>
+                                    <td class="font-mono" style="padding:6px 8px;" x-text="m.applied_province"></td>
+                                    <td class="font-mono" style="padding:6px 8px;font-weight:600;color:#a30000;" x-text="m.derived_province"></td>
+                                    <td class="font-mono" style="padding:6px 8px;text-align:right;" x-text="'$' + Number(m.tax_total).toLocaleString('en-CA', {minimumFractionDigits:2})"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </template>
+            </div>
+        </template>
+        <p x-show="error" x-cloak style="margin-top:10px;color:var(--color-danger);font-size:0.8125rem;" x-text="error"></p>
+    </div>
+</div>
+
+<script>
+function posResolver() {
+    return {
+        form: {
+            customer_id: '',
+            transaction_type: 'short_lease',
+            transaction_date: new Date().toISOString().slice(0,10),
+            delivery_province: '',
+        },
+        busy: false, error: null, result: null,
+        async run() {
+            this.busy = true; this.error = null; this.result = null;
+            try {
+                const qs = new URLSearchParams();
+                qs.set('customer_id', this.form.customer_id);
+                qs.set('transaction_type', this.form.transaction_type);
+                qs.set('transaction_date', this.form.transaction_date);
+                if (this.form.delivery_province) qs.set('delivery_province', this.form.delivery_province);
+                const r = await FF_Api.get('<?= base_url('api/v1/accounting/tax/resolve-rate') ?>?' + qs.toString());
+                if (r.success) this.result = r.data;
+                else this.error = (r.error && r.error.message) || 'Resolve failed.';
+            } catch (e) { this.error = 'Network error.'; }
+            this.busy = false;
+        },
+    };
+}
+function posAudit() {
+    return {
+        periodId: <?= (int) ($periodsForAudit[0]['id'] ?? 0) ?>,
+        busy: false, error: null, report: null,
+        async run() {
+            this.busy = true; this.error = null; this.report = null;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/accounting/tax/pos-audit-report') ?>?period_id=' + this.periodId);
+                if (r.success) this.report = r.data;
+                else this.error = (r.error && r.error.message) || 'Audit failed.';
+            } catch (e) { this.error = 'Network error.'; }
+            this.busy = false;
+        },
+    };
+}
+</script>
+
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>
