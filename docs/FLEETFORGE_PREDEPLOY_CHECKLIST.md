@@ -851,6 +851,40 @@ ITEM G7 | 2026-05-16 | G — Smoke | Verify nginx config routes all requests thr
   Owner: Operator
   Status: ✅ COMPLETE (2026-05-16 — deployed and verified: health.php 200 db:true,
     auth/login 200, dashboard 302)
+
+ITEM G-MODAL-AUDIT | 2026-05-19 | G — UI/Polish | Run S-MODAL-AUDIT — codebase-wide modal-backdrop migration
+  Originating session: S-PERM-EXPAND D' (2026-05-19) — second incident of the same root-cause bug
+  Surfaced into checklist: S-PERM-EXPAND D' close
+  Detail: Two incidents (COMPLIANCE-FIX-1 compliance grid edit modal 2026-05-19; S-PERM-EXPAND D'
+    permissions admin modals × 3 on 2026-05-19) of the same root-cause bug — using
+    `class="modal-backdrop"` for a modal's outer wrapper. `.modal-backdrop` (public/assets/css/app.css
+    line 2968) provides only the dark backdrop layer (no flex centering); `.modal-overlay`
+    (app.css:2958) is the centered-flex wrapper that has `display:flex; align-items:center;
+    justify-content:center;`. Inline `display:flex` on `.modal-backdrop` gives a flex container with
+    default `align-items:flex-start`, causing the `.modal` child to render top-left clipped against
+    the viewport. Locked as **Trap 49** in `docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md` §11. Both
+    incidents required swapping the class to `class="modal-overlay"` + preserving the dark backdrop
+    via inline `style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);"`.
+    A codebase-wide grep audit is needed to surface ANY remaining `class="modal-backdrop"` usages and
+    migrate them to the canonical pattern BEFORE Phase E (Accountants Portal) lands — the portal is
+    expected to add ~10+ new modals and a baseline of correct centering should be in place first.
+    Scope: grep `class="modal-backdrop"` across `app/`, `includes/`, and any partials/templates; for
+    each hit, either confirm it's a legitimate pure-backdrop usage (no `.modal` child — e.g. a
+    full-page overlay spinner, or paired explicitly with a `.modal-overlay` sibling for proper
+    z-stacking) OR migrate to the canonical `.modal-overlay` pattern. Verify each migration visually
+    at desktop (1440×900) and mobile (<768px) viewport — mobile pattern uses `align-items:flex-end`
+    at app.css:5973 for bottom-sheet behavior, which works correctly on `.modal-overlay`.
+    Original source: docs/FLEETFORGE_PROGRESS.md DECISIONS D-PERM-EXPAND-6 (the D' supplementary
+    scope that bundled the second incident's fix); docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md §11
+    Trap 49 (the canonical lock).
+  Action: Schedule an S-MODAL-AUDIT session before Phase E (Accountants Portal) starts. Output:
+    per-modal report (migrate / leave-as-is rationale per file), commit with all migrations + per-file
+    PHP lint + per-file visual verification via preview_start at desktop + mobile viewports.
+    Update Trap 49 recurrence count in REFERENCE.md if additional in-the-wild incidents surface
+    during the audit. If no further incidents found, lock the audit as complete with a "no further
+    occurrences" footnote so Phase E modals follow the established canonical pattern from day one.
+  Owner: Operator (schedule); Code Desktop (execute)
+  Status: QUEUED
 ```
 
 ### H — Rollback procedures

@@ -1382,6 +1382,37 @@ Practical implication for session prompts: a prompt that says "all N existing le
 
 **Source:** Context-bleed K-22 catch surfaced in S-ACCT-LESSOR-1 pre-flight (S-ACCT-UNIT smoke had reported "238 active units" referring to equipment_units; the LESSOR-1 prompt then carried "238 existing leases" into a leases-table claim). Operator chose trust-file (42) via AskUserQuestion. Locked 2026-05-19.
 
+### Trap 49: `class="modal-backdrop"` ≠ `class="modal-overlay"` — backdrop has no flex centering
+
+The `class="modal-backdrop"` rule (`public/assets/css/app.css:2968`) provides ONLY the dark blurred backdrop layer — `position:fixed; inset:0; background:rgba(0,0,0,0.70); backdrop-filter:blur(4px); z-index:0`. It has **NO** `display:flex; align-items:center; justify-content:center` properties — those live exclusively on `class="modal-overlay"` (`app.css:2958`). Setting `display:flex` inline on a `.modal-backdrop` element gives a flex container but `align-items` and `justify-content` default to `flex-start`, so the `.modal` child renders at the **top-left corner** of the viewport (clipped against the edges) instead of centered.
+
+```html
+<!-- ❌ WRONG — modal renders top-left, clipped against viewport edges -->
+<div class="modal-backdrop"
+     :style="open ? 'display:flex;' : 'display:none;'">
+    <div class="modal">…</div>
+</div>
+
+<!-- ✅ RIGHT — modal centers via .modal-overlay's CSS (canonical pattern) -->
+<div class="modal-overlay"
+     x-show="open"
+     x-cloak
+     @click.self="cancel()"
+     style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);">
+    <div class="modal" @click.stop>…</div>
+</div>
+```
+
+Always use `class="modal-overlay"` for the centering wrapper. Preserve the dark backdrop via inline `style` (the same `rgba` + `backdrop-filter` values `.modal-backdrop` would have applied) when needed. The mobile bottom-sheet pattern at `app.css:5973` (`.modal-overlay { align-items: flex-end; }` inside the `<768px` media query) still works correctly on `.modal-overlay`, so the canonical pattern automatically becomes a bottom-sheet on mobile.
+
+**Recurrence count: 2** —
+  (1) COMPLIANCE-FIX-1 (2026-05-19): compliance grid edit modal in `app/admin/compliance/index.php` snapped to top-left when opened.
+  (2) S-PERM-EXPAND D' (2026-05-19): cell-level reason modal + group macro modal + reset-all confirmation modal in `app/admin/users/permissions.php` — three modals in one file, same root cause.
+
+A future **S-MODAL-AUDIT** session (`G-MODAL-AUDIT` in `docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md`, scheduled before Phase E Accountants Portal) will grep all remaining `class="modal-backdrop"` occurrences across `app/`, `includes/`, and partials, and migrate each to the canonical pattern (or confirm it's a legitimate pure-backdrop usage without a `.modal` child — e.g. a full-page overlay spinner).
+
+**Source:** Pattern surfaced via COMPLIANCE-FIX-1 (2026-05-19, compliance grid edit modal). Locked as Trap 49 in S-PERM-EXPAND D' (2026-05-19) after a second occurrence of the same bug across three modals in the permissions admin page. Recurrence count will be updated as further incidents surface during the S-MODAL-AUDIT session.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
