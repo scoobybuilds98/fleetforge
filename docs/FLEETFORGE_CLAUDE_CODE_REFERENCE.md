@@ -1225,6 +1225,73 @@ Practical implication for Note 6 related-party outstanding balances + statements
 
 **Source:** K-22 catch surfaced in S-ACCT-DISC (Note 6 outstanding-AR aggregate at year-end). Locked 2026-05-19.
 
+### Trap 43: `acc_periods` uses `start_date`/`end_date` — NOT `period_start`/`period_end`
+The fiscal-period table `acc_periods` uses `start_date` and `end_date` (both date NOT NULL). It does NOT use `period_start`/`period_end`. The opposite is true of `acc_tax_filing_periods`: that table DOES use `period_start`/`period_end` (Trap 29). Don't confuse the two — they look like the same shape but the column names are flipped.
+
+```sql
+-- WRONG (those columns don't exist on acc_periods)
+SELECT id FROM acc_periods WHERE period_start <= ? AND period_end >= ?;
+
+-- RIGHT
+SELECT id FROM acc_periods WHERE start_date <= ? AND end_date >= ?;
+
+-- For acc_tax_filing_periods (the OTHER table), the prompt-style
+-- naming IS correct:
+SELECT id FROM acc_tax_filing_periods WHERE period_start <= ? AND period_end >= ?;
+```
+
+Practical implication: any report query that joins through a period (depreciation runs, ledger queries, AJE workflow) must use `acc_periods.start_date`/`end_date`. Mixing up the two tables produces a "Unknown column" error from MySQL — at least it fails loudly, but it's a wasted CI cycle.
+
+Cross-reference: Trap 14 (`acc_periods.year` not `fiscal_year`) covers the year-key naming on the same table; Trap 29 covers the `acc_tax_filing_periods` column naming. The three traps together fully fingerprint the period-table conventions.
+
+**Source:** K-22 catch surfaced in S-ACCT-UNIT (UnitProfitabilityService pre-flight; spec prompt assumed period_start/end which is the tax-filing convention). Locked 2026-05-19.
+
+### Trap 44: `equipment_units.status` ENUM has `'decommissioned'` — NO `'disposed'` value
+The equipment-unit status ENUM is `'available','reserved','on_lease','maintenance','inactive','decommissioned'`. It does NOT contain `'disposed'` — that's the `acc_fixed_assets.status` vocabulary (`'active','fully_depreciated','disposed','impaired'`). The two tables track different lifecycle concerns: equipment_units is operational state, acc_fixed_assets is depreciation/accounting state.
+
+```sql
+-- WRONG (the 'disposed' value never appears on equipment_units)
+SELECT id FROM equipment_units WHERE status = 'disposed';
+SELECT id FROM equipment_units WHERE status != 'disposed';
+
+-- RIGHT — active units (excluding decommissioned + inactive, also
+-- check deleted_at IS NULL for soft-delete safety)
+SELECT id FROM equipment_units
+ WHERE status NOT IN ('decommissioned','inactive')
+   AND deleted_at IS NULL;
+
+-- If you want to filter the accounting-side disposal flag, use the
+-- right table:
+SELECT id FROM acc_fixed_assets WHERE status = 'disposed';
+```
+
+Practical implication for fleet KPI queries, per-unit P&L, and any other "active fleet" report: filter on `equipment_units.status NOT IN ('decommissioned','inactive') AND deleted_at IS NULL`. The companion fixed-asset side uses `acc_fixed_assets.status IN ('active','impaired')` for "in-service" assets (also includes `fully_depreciated` if the asset is still in service but fully amortized).
+
+**Source:** K-22 catch surfaced in S-ACCT-UNIT (active-fleet filter in getFleetTotals + KPI age calculation). Locked 2026-05-19.
+
+### Trap 45: `equipment_units` has NO `make`/`model` columns — they live on `equipment_templates`
+The equipment-unit identity columns on disk are: `id`, `unit_number`, `vin`, `year`, `template_id`, `license_plate`. There is NO `make` or `model` column on `equipment_units` directly. Make and model are template-level attributes — pulled via the FK `equipment_units.template_id → equipment_templates.id` and then `template.brand` (NOT `template.make`) + `template.model`.
+
+```sql
+-- WRONG (no such columns on equipment_units)
+SELECT unit_number, make, model FROM equipment_units;
+
+-- RIGHT — join through template; template uses `brand` not `make`
+SELECT u.unit_number, u.year, t.brand, t.model
+  FROM equipment_units u
+  LEFT JOIN equipment_templates t ON t.id = u.template_id;
+
+-- Display label pattern used by per-unit P&L:
+--   trim("{year} {brand} {model}")  → "2024 Volvo VNL"
+-- Fall back to template.name when brand/model are NULL.
+```
+
+Practical implication for any per-unit display label (admin tables, PDF reports, CSV exports): join `equipment_units → equipment_templates` (LEFT JOIN — template_id is NOT NULL on the units schema, but LEFT JOIN is defensive against orphaned rows). The template also carries `category` (chassis/dry_van/reefer/container/flatbed/step_deck/lowboy/tanker/dump/other) and the default physical specs (length/height/width/weight_capacity/wheels/tires/axles) — most attributes that look like they'd be on the unit row actually live one hop away on the template.
+
+Note the column-name flip: customers uses `company_name`, vendors uses `name`, equipment_templates uses `brand` (not `make`). Three different conventions for three different "identity" columns — always grep before assuming.
+
+**Source:** K-22 catch surfaced in S-ACCT-UNIT (display_label construction in UnitProfitabilityService::getUnitPnl + admin unit-picker labeling). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
