@@ -822,6 +822,128 @@ Practical implication for betterment / componentization / remaining-life math: t
 
 **Source:** K-22 catch surfaced in S-ACCT-COMP (`capitalize()` spec referenced `useful_life_months` for the remaining-life recompute, but the on-disk column is years and the engine already handles month conversion). Locked 2026-05-19.
 
+### Trap 22: `tax_rates` uses `province` NOT `province_code`
+The Canadian-tax lookup table is `tax_rates`. The province column is `province` (varchar(100), NULLABLE — sometimes holds the 2-letter ISO code "BC", sometimes a full name "British Columbia"). It is NOT `province_code`. There is also no `country_code` — the country column is just `country` (ENUM('CA','US')).
+
+```sql
+-- WRONG (column does not exist)
+SELECT * FROM tax_rates WHERE province_code = 'BC';
+
+-- RIGHT — and prefer uppercase matching to be tolerant of full-name values
+SELECT * FROM tax_rates WHERE UPPER(province) = 'BC' AND country = 'CA';
+```
+
+When taking province strings from `customers.province` or other free-text sources, normalize to the 2-letter ISO code before querying — see `PlaceOfSupplyService::normalizeProvince()` for the canonical name-to-code map (NT not NWT; QC accepts both with and without accent; etc.).
+
+**Source:** K-22 catch surfaced in S-ACCT-POS (POS rules + TaxCalculator queries). Locked 2026-05-19.
+
+### Trap 23: `tax_rates.effective_from` + `effective_to` already exist — grep before adding
+Don't add `effective_from` / `effective_to` columns to `tax_rates` — they're already on disk (DATE, with `effective_to` NULL meaning "open / current"). Adding them again breaks the migration. Always grep `FLEETFORGE_DATABASE_MASTER.sql` for the columns you intend to add before writing an ALTER. This applies to any "is this column missing?" assumption — the spec may reference columns that were added in earlier sessions.
+
+```sql
+-- WRONG — duplicate ALTER fails
+ALTER TABLE tax_rates ADD COLUMN effective_from DATE NULL;
+
+-- RIGHT — pre-flight grep first; if present, only add the index (or whatever else is genuinely new)
+ALTER TABLE tax_rates ADD INDEX idx_tr_effective (effective_from, effective_to);
+```
+
+For S-ACCT-POS the entire effective-date column ALTER was skipped — only the composite index was new.
+
+**Source:** K-22 catch surfaced in S-ACCT-POS pre-flight. Locked 2026-05-19.
+
+### Trap 24: `tax_rates` is WIDE-ROW — one row per province, not a normalized rates table
+Each row in `tax_rates` carries SEPARATE columns for the three tax types: `gst_rate`, `pst_rate`, `hst_rate` (all decimal(8,6)). There is NO `tax_type` column and NO `rate` column. BC's row looks like `gst_rate=0.050000, pst_rate=0.070000, hst_rate=0.000000`. ON's row looks like `gst_rate=0.000000, pst_rate=0.000000, hst_rate=0.130000`. NS's current row (id #7) is `hst_rate=0.140000` effective 2025-04-01.
+
+```sql
+-- WRONG — assumes tall-row {tax_type, rate} normalized design
+SELECT rate FROM tax_rates WHERE province = 'BC' AND tax_type = 'GST';
+
+-- RIGHT — read the relevant rate column from the wide row
+SELECT gst_rate, pst_rate, hst_rate FROM tax_rates WHERE province = 'BC';
+```
+
+Implication for new code that links to specific rates (e.g. `acc_place_of_supply_rules.applicable_tax_rate_ids` JSON array): the array stores a single `tax_rates.id` per province (one row holds all three taxes), not multiple ids per tax type. When you load the row, you get all three rate columns at once and apply the ones that are > 0.
+
+**Source:** K-22 catch surfaced in S-ACCT-POS (POS rules seed + service design). Locked 2026-05-19.
+
+### Trap 25: `customers` uses `company_name` NOT `name`
+The customer display column is `customers.company_name` (varchar). It is NOT `customers.name` — that column does not exist. Related fields: `contact_name`, `billing_contact_name`. The `province` column does exist on customers (varchar(100), free text) and is the primary place-of-supply signal.
+
+```sql
+-- WRONG — column does not exist
+SELECT id, name, province FROM customers WHERE id = ?;
+
+-- RIGHT
+SELECT id, company_name, province FROM customers WHERE id = ?;
+
+-- For display lists where calling code expects "name":
+SELECT id, company_name AS name, province FROM customers ORDER BY company_name;
+```
+
+**Source:** K-22 catch surfaced in S-ACCT-POS (PlaceOfSupplyService.resolve() customer lookup + Tax admin dropdown + smoke test). Locked 2026-05-19.
+
+### Trap 26: `leases` has NO `ordinarily_located_province` column
+The leases table does not carry a province column on disk. Place-of-Supply LONG_LEASE rule (per ASPE §23.6 / GST/HST place-of-supply rules) is meant to use the province where the leased asset is "ordinarily located," but with no on-disk column the rule **falls back to `customers.province`** instead. This fallback must be logged in any derivation trail so the auditor knows the data path.
+
+If a future session adds the column, update the POS engine's LONG_LEASE branch to read `leases.ordinarily_located_province` first and only fall back when NULL.
+
+```php
+// CORRECT pattern in PlaceOfSupplyService::resolve()
+case 'long_lease':
+    // K-22: leases table has no ordinarily_located_province column on disk
+    $resolved = self::normalizeProvince($customer['province']);
+    $method = 'customer_province';
+    $trail[] = 'leases table has no ordinarily_located_province column on disk';
+    $trail[] = "fallback: customer billing province = '{$customer['province']}'";
+    break;
+```
+
+**Source:** K-22 catch surfaced in S-ACCT-POS. Locked 2026-05-19.
+
+### Trap 27: `equipment_units` has NO `province_code` column
+The equipment_units table does not carry a registration-province column on disk. The Place-of-Supply SPECIFIED_MOTOR_VEHICLE rule (where the sale of a motor vehicle to a GST registrant follows the registration province) **falls back to `customers.province`** with the same logging pattern as Trap 26. Related columns that DO exist on equipment_units: `registration_expiry`, `registration_interval_days`, `registration_from_date`, `registration_document` (filename) — none of these capture which province issued the registration.
+
+```php
+// CORRECT pattern in PlaceOfSupplyService::resolve()
+case 'specified_motor_vehicle':
+    // K-22: equipment_units has no province_code column on disk
+    $resolved = self::normalizeProvince($customer['province']);
+    $method = 'customer_province';
+    $trail[] = 'equipment_units table has no province_code column on disk';
+    $trail[] = "fallback: customer billing province = '{$customer['province']}'";
+    break;
+```
+
+If a future session adds the column (e.g. as part of a fleet-transfer or inter-provincial sale feature), update the POS engine to read it first and only fall back when NULL.
+
+**Source:** K-22 catch surfaced in S-ACCT-POS. Locked 2026-05-19.
+
+### Trap 28: `invoices` uses `invoice_date` NOT `issue_date`; has NO `bill_province`
+Two related catches on the invoices table:
+
+1. The primary date column is `invoice_date` (DATE). It is NOT `issue_date`. Related dates: `due_date`, `paid_date`, `sent_date`, `voided_date`, `late_fee_date`.
+
+2. There is NO `bill_province` column. The applied tax-jurisdiction is encoded implicitly through `tax_gst_rate` / `tax_pst_rate` / `tax_hst_rate` / `tax_*_amount` columns at invoice time. To compare "applied vs derived province" for POS audits, join `customers.province` as the proxy for the value the TaxCalculator received when the invoice was generated.
+
+```sql
+-- WRONG
+SELECT id, issue_date, bill_province FROM invoices WHERE issue_date BETWEEN ? AND ?;
+
+-- RIGHT — invoice_date for the date, join customers.province for the implicit applied jurisdiction
+SELECT i.id, i.invoice_number, i.invoice_date,
+       i.tax_gst_rate, i.tax_pst_rate, i.tax_hst_rate, i.tax_total,
+       c.province AS customer_province
+  FROM invoices i
+  LEFT JOIN customers c ON c.id = i.customer_id
+ WHERE i.invoice_date BETWEEN ? AND ?
+   AND i.deleted_at IS NULL;
+```
+
+If a future session needs explicit applied-province tracking on each invoice (e.g. for the POS audit to be unambiguous when a customer changes province between invoices), add a `bill_province` snapshot column at invoice generation time — until then, customer.province + the three tax-rate columns are the audit signal.
+
+**Source:** K-22 catch surfaced in S-ACCT-POS (PlaceOfSupplyService::auditReport). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
