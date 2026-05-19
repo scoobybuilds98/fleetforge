@@ -16,6 +16,15 @@ declare(strict_types=1);
 // It maps to 'export' here (the 5th DB column). Only super_admin
 // has export=true in this base config. If specific roles need
 // export access on specific modules, update here and re-seed.
+//
+// S-PERM-EXPAND: extended-action vocabulary lives in
+// config/permission_actions.php. Modules that declare extended
+// actions there must list those actions as explicit keys in every
+// role's matrix entry below (D-PERM-EXPAND-4 — no implicit defaults).
+// The auth.php can() check returns false for any (module, action)
+// pair without a role default and without an override, so missing
+// keys silently lock everyone out except super_admin (who
+// short-circuits to true).
 // ============================================================
 
 // Action key order: view, create, edit, delete, export
@@ -47,6 +56,29 @@ $VE   = $p(false, false, true,  false, false); // dispatcher compliance: VE
 $V    = $p(true,  false, false, false, false);
 $NONE = $p(false, false, false, false, false);
 
+// S-PERM-EXPAND: QBO shorthand for the 7-action 'quickbooks' module.
+// The QBO action vocabulary is NOT CRUD-shaped — it's (view + 6
+// integration controls), so the 5-action $p() helper above doesn't
+// fit. These literal maps keep the per-role lines below tidy.
+$QBO_ALL  = [
+    'view'              => true,
+    'force_resync'      => true,
+    'force_full_resync' => true,
+    'clear_queue'       => true,
+    'disconnect'        => true,
+    'edit_credentials'  => true,
+    'view_raw_payloads' => true,
+];
+$QBO_NONE = [
+    'view'              => false,
+    'force_resync'      => false,
+    'force_full_resync' => false,
+    'clear_queue'       => false,
+    'disconnect'        => false,
+    'edit_credentials'  => false,
+    'view_raw_payloads' => false,
+];
+
 // ============================================================
 // PERMISSION MATRIX
 // Ref: FLEETFORGE_CLAUDE_CODE_REFERENCE.md §12
@@ -57,6 +89,8 @@ return [
 
     // ----------------------------------------------------------
     // super_admin — full access to everything
+    // can() short-circuits to true for this role, so the matrix
+    // here is mostly informational (powers the admin UI display).
     // ----------------------------------------------------------
     'super_admin' => [
         // Core modules
@@ -78,14 +112,16 @@ return [
         'ai'            => $ALL,
         // Accounting modules (Phase 13+)
         'chart_of_accounts'  => $ALL,
-        'journal_entries'    => $ALL,
+        'journal_entries'    => $ALL + ['post' => true, 'approve' => true],
         'accounts_payable'   => $ALL,
         'bank_accounts'      => $ALL,
         'fixed_assets'       => $ALL,
-        'tax_management'     => $ALL,
+        'tax_management'     => $ALL + ['submit' => true],
         'financial_reports'  => $ALL,
         'budgets'            => $ALL,
-        'period_management'  => $ALL,
+        'period_management'  => $ALL + ['lock' => true, 'unlock' => true],
+        // S-PERM-EXPAND: QuickBooks integration (Phase QBO).
+        'quickbooks'         => $QBO_ALL,
     ],
 
     // ----------------------------------------------------------
@@ -112,14 +148,17 @@ return [
         'ai'            => $VCE,
         // Accounting modules
         'chart_of_accounts'  => $V,
-        'journal_entries'    => $V,
+        'journal_entries'    => $V    + ['post' => false, 'approve' => false],
         'accounts_payable'   => $V,
         'bank_accounts'      => $V,
         'fixed_assets'       => $V,
-        'tax_management'     => $V,
+        'tax_management'     => $V    + ['submit' => false],
         'financial_reports'  => $VCE,
         'budgets'            => $VCE,
-        'period_management'  => $V,
+        'period_management'  => $V    + ['lock' => false, 'unlock' => false],
+        // S-PERM-EXPAND: managers do not get QBO access by default — must be
+        // granted per-user via override.
+        'quickbooks'         => $QBO_NONE,
     ],
 
     // ----------------------------------------------------------
@@ -147,14 +186,15 @@ return [
         'ai'            => $V,
         // Accounting modules — no access
         'chart_of_accounts'  => $NONE,
-        'journal_entries'    => $NONE,
+        'journal_entries'    => $NONE + ['post' => false, 'approve' => false],
         'accounts_payable'   => $NONE,
         'bank_accounts'      => $NONE,
         'fixed_assets'       => $NONE,
-        'tax_management'     => $NONE,
+        'tax_management'     => $NONE + ['submit' => false],
         'financial_reports'  => $NONE,
         'budgets'            => $NONE,
-        'period_management'  => $NONE,
+        'period_management'  => $NONE + ['lock' => false, 'unlock' => false],
+        'quickbooks'         => $QBO_NONE,
     ],
 
     // ----------------------------------------------------------
@@ -180,14 +220,20 @@ return [
         'ai'            => $VCE,
         // Accounting modules
         'chart_of_accounts'  => $VCE,
-        'journal_entries'    => $VCED,
+        // S-PERM-EXPAND: accountant gets post + approve on JEs (matches
+        // the existing two-eyes AJE workflow already gated on 'edit').
+        'journal_entries'    => $VCED + ['post' => true, 'approve' => true],
         'accounts_payable'   => $VCED,
         'bank_accounts'      => $VCED,
         'fixed_assets'       => $VCED,
-        'tax_management'     => $VCED,
+        // S-PERM-EXPAND: accountant submits tax filings.
+        'tax_management'     => $VCED + ['submit' => true],
         'financial_reports'  => $VCE,
         'budgets'            => $VCED,
-        'period_management'  => $VCE,
+        // S-PERM-EXPAND: accountant can lock (close) periods but not
+        // unlock — reopening a closed period requires super_admin.
+        'period_management'  => $VCE  + ['lock' => true, 'unlock' => false],
+        'quickbooks'         => $QBO_NONE,
     ],
 
     // ----------------------------------------------------------
@@ -213,13 +259,14 @@ return [
         'ai'            => $V,
         // Accounting modules
         'chart_of_accounts'  => $V,
-        'journal_entries'    => $V,
+        'journal_entries'    => $V + ['post' => false, 'approve' => false],
         'accounts_payable'   => $V,
         'bank_accounts'      => $V,
         'fixed_assets'       => $V,
-        'tax_management'     => $V,
+        'tax_management'     => $V + ['submit' => false],
         'financial_reports'  => $V,
         'budgets'            => $V,
-        'period_management'  => $V,
+        'period_management'  => $V + ['lock' => false, 'unlock' => false],
+        'quickbooks'         => $QBO_NONE,
     ],
 ];

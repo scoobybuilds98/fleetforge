@@ -15,6 +15,12 @@ declare(strict_types=1);
 
 require_once realpath(dirname(__DIR__) . '/config/app.php');
 
+// S-PERM-EXPAND: load the permission registry helpers
+// (get_actions_for_module / get_action_description / get_permission_groups).
+// auth.php is loaded by every authenticated page + api/bootstrap.php, so
+// these free functions are universally available without per-call requires.
+require_once FF_ROOT . '/includes/permission_registry.php';
+
 // ============================================================
 // Session bootstrap — called once per request
 // ============================================================

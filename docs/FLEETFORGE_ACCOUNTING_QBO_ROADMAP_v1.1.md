@@ -663,6 +663,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 23 | S-ACCT-LESSOR-4 | D | ✅ DONE | M | Opus | LESSOR-3 |
 | 24 | S-ACCT-LESSOR-5 | D | ✅ DONE | M | Sonnet | LESSOR-4 |
 | 25 | S-ACCT-LESSOR-6 | D | ✅ DONE | M | Sonnet | LESSOR-5 |
+| — | S-PERM-EXPAND | Pre-QBO Infra | ✅ DONE | S | Sonnet | LESSOR-6 |
 | 26 | S-QBO-1 | QBO-1 | 📋 PLANNED | M | Sonnet | LESSOR-6 |
 | 27 | S-QBO-2 | QBO-1 | 📋 PLANNED | M | Sonnet | S-QBO-1 |
 | 28 | S-QBO-3 | QBO-1 | 📋 PLANNED | L | Opus | S-QBO-2 |

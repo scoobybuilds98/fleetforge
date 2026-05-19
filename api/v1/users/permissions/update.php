@@ -62,10 +62,12 @@ if ($module === null || $module === '') {
     $fields['module'] = 'Module is required.';
 }
 
+// S-PERM-EXPAND: presence-only check here. The per-module action
+// whitelist is applied AFTER we've verified the module is real
+// (and therefore know which verbs it supports) — see below.
 $action = clean_string($body['action'] ?? null, 50);
-$validActions = ['view', 'create', 'edit', 'delete', 'export'];
-if ($action === null || !in_array($action, $validActions, true)) {
-    $fields['action'] = 'Action must be one of: ' . implode(', ', $validActions) . '.';
+if ($action === null || $action === '') {
+    $fields['action'] = 'Action is required.';
 }
 
 // granted: 0, 1, or null. Anything else (string, missing key) is invalid.
@@ -93,6 +95,17 @@ foreach ($permissionsConfig as $rolePerms) {
 }
 if (!isset($validModules[$module])) {
     json_validation_error(['module' => 'Unknown module: ' . $module]);
+}
+
+// S-PERM-EXPAND: validate action against the per-module vocabulary
+// from config/permission_actions.php. Replaces the hardcoded
+// 5-action CRUD whitelist that lived in the first-pass validation.
+$validActions = get_actions_for_module($module);
+if (!in_array($action, $validActions, true)) {
+    json_validation_error([
+        'action' => "Action '{$action}' is not valid for module '{$module}'. "
+                  . 'Valid actions: ' . implode(', ', $validActions) . '.',
+    ]);
 }
 
 // ── Resolve target user ─────────────────────────────────────

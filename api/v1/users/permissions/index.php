@@ -124,25 +124,31 @@ $labels = [
     'financial_reports' => 'Financial Reports',
     'budgets'           => 'Budgets',
     'period_management' => 'Period Management',
+    // S-PERM-EXPAND: QBO module reserved for Phase QBO.
+    'quickbooks'        => 'QuickBooks',
 ];
 
-$actions = ['view', 'create', 'edit', 'delete', 'export'];
-
 // ── Build the matrix ────────────────────────────────────────
+// S-PERM-EXPAND: each module declares its own action vocabulary
+// in config/permission_actions.php (default = 5-action CRUD).
+// `actions` is now a per-module string list; `permissions` is the
+// per-action state map keyed by action name.
 $modules = [];
 foreach ($moduleSlugs as $slug) {
+    $moduleActions = get_actions_for_module($slug);
     $row = [
-        'slug'    => $slug,
-        'label'   => $labels[$slug] ?? ucwords(str_replace('_', ' ', $slug)),
-        'actions' => [],
+        'slug'        => $slug,
+        'label'       => $labels[$slug] ?? ucwords(str_replace('_', ' ', $slug)),
+        'actions'     => $moduleActions,
+        'permissions' => [],
     ];
 
-    foreach ($actions as $action) {
+    foreach ($moduleActions as $action) {
         $roleVal = (bool) ($roleMatrix[$slug][$action] ?? false);
         $ovr     = $overrideMap[$slug][$action] ?? null; // null|0|1
         $eff     = $ovr === null ? $roleVal : (bool) $ovr;
 
-        $row['actions'][$action] = [
+        $row['permissions'][$action] = [
             'role'      => $roleVal,
             'override'  => $ovr,    // null = no override
             'effective' => $eff,
@@ -165,6 +171,21 @@ foreach ($overrideRows as $r) {
     ];
 }
 
+// S-PERM-EXPAND: include group definitions + action descriptions
+// so the admin UI can render the bulk-macro card and tooltips
+// without a second API round-trip.
+$permActionsCfg = _ff_load_permission_actions();
+$groupsRaw      = get_permission_groups();
+$groups         = [];
+foreach ($groupsRaw as $key => $g) {
+    $groups[] = [
+        'key'         => $key,
+        'label'       => $g['label'],
+        'description' => $g['description'],
+        'modules'     => $g['modules'],
+    ];
+}
+
 json_success([
     'user' => [
         'id'        => (int) $user['id'],
@@ -174,8 +195,9 @@ json_success([
         'role_name' => $user['role_name'],
         'role_slug' => $user['role_slug'],
     ],
-    'modules'  => $modules,
-    'actions'  => $actions,
-    'overrides_count' => count($overrideSummary),
-    'overrides' => $overrideSummary,
+    'modules'             => $modules,
+    'groups'              => $groups,
+    'action_descriptions' => $permActionsCfg['action_descriptions'] ?? [],
+    'overrides_count'     => count($overrideSummary),
+    'overrides'           => $overrideSummary,
 ]);
