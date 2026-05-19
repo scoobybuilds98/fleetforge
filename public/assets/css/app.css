@@ -9671,14 +9671,14 @@ body:has(.chat-page-content) #ff-chat-widget {
     color: inherit;
     cursor: pointer;
 }
-/* Hover: highlight border in theme color — only the active card is marked */
+/* Hover: border highlights in theme color. No transform — scale() was
+   pushing the card upward and cropping the top border/content. */
 .carousel-card--link:hover {
     border-color: var(--color-primary);
-    transform: scale(1.02);
     text-decoration: none;
 }
 .carousel-card--link:active {
-    transform: scale(0.988);
+    opacity: 0.85;
     transition-duration: 60ms;
 }
 
