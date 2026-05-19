@@ -9729,15 +9729,18 @@ body:has(.chat-page-content) #ff-chat-widget {
 
 /* ── Customer — dominant editorial text ──────────────────────── */
 .cc-customer {
-    font-size: 1.25rem;
-    font-weight: 500;
+    font-size: 0.9375rem;
+    font-weight: 600;
     color: var(--text-primary);
-    line-height: 1.25;
-    margin-bottom: 5px;
-    white-space: nowrap;
+    line-height: 1.3;
+    margin-bottom: 4px;
+    /* Allow up to 2 lines, then ellipsis */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    letter-spacing: -0.025em;
+    /* Remove white-space:nowrap — let it wrap */
+    word-break: break-word;
 }
 
 /* ── Equipment — catalog reference line ──────────────────────── */
@@ -9820,6 +9823,23 @@ body:has(.chat-page-content) #ff-chat-widget {
 }
 
 /* ── Responsive card widths ──────────────────────────────────── */
+@media (max-width: 767px) {
+    .dashboard-carousel {
+        /* Right padding creates space so last card doesn't
+           bleed to edge, revealing next card peek */
+        padding-right: 20px;
+        /* Scroll padding aligns cards to left edge */
+        scroll-padding-left: 16px;
+    }
+    .carousel-card {
+        /* 78vw = card takes 78% of screen width,
+           leaving ~22% visible for gap + next card peek.
+           Guaranteed regardless of screen size. */
+        flex: 0 0 78vw;
+        max-width: 320px; /* cap on larger phones/tablets */
+        min-width: 220px; /* floor on very small screens */
+    }
+}
 @media (min-width: 768px) {
     .carousel-card {
         flex: 0 0 340px;
