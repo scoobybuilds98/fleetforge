@@ -74,6 +74,42 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
+<!-- S-ACCT-GST34: prominent quick-access cards for the new GST34 + ITC + tax-detail tools. -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:20px;">
+    <a href="<?= base_url('accounting/tax/gst34') ?>" class="card" style="padding:16px;text-decoration:none;color:inherit;border-left:4px solid var(--color-primary);">
+        <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;">CRA Filing</div>
+        <div style="font-size:1.0625rem;font-weight:700;margin-top:4px;">GST34 Generator →</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">13-line return, CSV / XML / PDF export, ITC restrictions</div>
+    </a>
+    <a href="<?= base_url('accounting/tax/gst34') ?>#itc-docs" class="card" style="padding:16px;text-decoration:none;color:inherit;border-left:4px solid var(--color-warning, #b8860b);">
+        <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;">CRA Audit Prep</div>
+        <div style="font-size:1.0625rem;font-weight:700;margin-top:4px;">ITC Documentation →</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">ETA §169(4) compliance per bill (3 tiers)</div>
+    </a>
+    <a href="<?= base_url('accounting/tax/gst34') ?>#tax-detail" class="card" style="padding:16px;text-decoration:none;color:inherit;border-left:4px solid #6366f1;">
+        <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;">Reconciliation</div>
+        <div style="font-size:1.0625rem;font-weight:700;margin-top:4px;">Tax Detail by Province + Customer →</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">Per-jurisdiction sales/tax + POS mismatch flags</div>
+    </a>
+    <div class="card" style="padding:16px;background:var(--bg-subtle);">
+        <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;">CRA Business Number</div>
+        <?php
+        $craBnDisplay = (string) settings_get('accounting.cra_business_number', '');
+        $quickEnabledDisplay = ((string) settings_get('accounting.gst_quick_method_enabled', '0')) === '1';
+        ?>
+        <div class="font-mono" style="font-size:0.9rem;font-weight:700;margin-top:4px;<?= $craBnDisplay === '' ? 'color:var(--color-danger);' : '' ?>">
+            <?= $craBnDisplay === '' ? '(not configured)' : e($craBnDisplay) ?>
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:6px;">
+            Quick Method: <strong><?= $quickEnabledDisplay ? 'ON' : 'OFF' ?></strong>
+            <?php if ($quickEnabledDisplay): ?>
+                <br><span style="color:#b8860b;">⚠ Mainland likely exceeds $400K threshold. Confirm with accountant.</span>
+            <?php endif; ?>
+        </div>
+        <a href="<?= base_url('accounting/settings') ?>" style="font-size:0.75rem;color:var(--color-primary);">Edit in Settings →</a>
+    </div>
+</div>
+
 <!-- TILES-1: KPI tiles dispatch `ff-tax-filter` to toggle filterStatus -->
 <div class="stat-grid" style="margin-bottom:24px;">
     <div class="stat-card stat-card--blue" style="cursor:pointer"

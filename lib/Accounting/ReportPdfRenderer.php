@@ -292,6 +292,73 @@ class ReportPdfRenderer
         self::emit($html, $title, 'A4', 'P');
     }
 
+    /**
+     * Render the GST34 13-line return (landscape A4).
+     * Session: S-ACCT-GST34
+     */
+    public static function gst34(array $data): void
+    {
+        $p = $data['period'];
+        $title  = 'GST34 Return';
+        $period = "{$p['period_start']} to {$p['period_end']} ({$p['tax_type']})";
+
+        $html  = self::headerHtml($title, $period);
+
+        if ($data['quick_method']) {
+            $html .= '<div class="banner-amber">';
+            $html .= '<strong>Quick Method active:</strong> Line 103 = revenue × '
+                   . htmlspecialchars((string) $data['quick_rate'])
+                   . '%. ITCs limited to capital purchases only.';
+            $html .= '</div>';
+        }
+
+        $restrictions = $data['lines']['L106']['restrictions_applied'] ?? [];
+        if (!empty($restrictions)) {
+            $sum = '0.00';
+            foreach ($restrictions as $r) { $sum = bcadd($sum, $r['reduction'], 2); }
+            $html .= '<div class="banner-amber">';
+            $html .= '<strong>ITC restrictions applied:</strong> '
+                   . count($restrictions) . ' restriction(s), '
+                   . self::money($sum) . ' total ITC reduction.';
+            $html .= '</div>';
+        }
+
+        $html .= '<table class="rpt"><thead><tr>';
+        $html .= '<th style="width:60px;">Line</th>';
+        $html .= '<th>Description</th>';
+        $html .= '<th style="text-align:right;">Amount</th>';
+        $html .= '</tr></thead><tbody>';
+
+        $highlightRows = ['L105', 'L108', 'L109', 'L113'];
+        foreach ($data['lines'] as $key => $line) {
+            $num = preg_replace('/^L/', '', $key);
+            $isHighlight = in_array($key, $highlightRows, true);
+            $rowClass = $isHighlight ? ' class="subtotal"' : '';
+            $html .= "<tr{$rowClass}>";
+            $html .= '<td><strong>' . $num . '</strong></td>';
+            $html .= '<td>' . htmlspecialchars($line['description']) . '</td>';
+            $html .= '<td class="amt"><strong>' . self::money($line['amount']) . '</strong></td>';
+            $html .= '</tr>';
+        }
+
+        $l113 = $data['lines']['L113'];
+        $verdict = $l113['status'] === 'balance_due' ? 'BALANCE DUE TO CRA'
+                 : ($l113['status'] === 'refund' ? 'REFUND DUE FROM CRA' : 'NIL FILING');
+        $html .= '<tr class="grand"><td colspan="2"><strong>' . $verdict . '</strong></td>';
+        $html .= '<td class="amt"><strong>' . self::money(ltrim($l113['amount'], '-')) . '</strong></td></tr>';
+        $html .= '</tbody></table>';
+
+        if (!empty($data['warnings'])) {
+            $html .= '<p style="margin-top:14px;font-size:7.5pt;color:#6b4900;">';
+            foreach ($data['warnings'] as $w) {
+                $html .= '⚠ ' . htmlspecialchars($w) . '<br>';
+            }
+            $html .= '</p>';
+        }
+
+        self::emit($html, $title, 'A4', 'L');
+    }
+
     public static function balanceSheet(array $report): void
     {
         $title  = 'Balance Sheet';
