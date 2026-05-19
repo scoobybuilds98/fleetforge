@@ -634,6 +634,23 @@ CREATE TABLE `acc_depreciation_runs` (
   CONSTRAINT `acc_depreciation_runs_ibfk_2` FOREIGN KEY (`journal_entry_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_depreciation_runs_ibfk_3` FOREIGN KEY (`run_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_disclosure_notes` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `fiscal_year` int NOT NULL,
+  `note_number` int NOT NULL,
+  `note_title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `note_content` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_auto_generated` tinyint(1) NOT NULL DEFAULT '1',
+  `edited_by` int unsigned DEFAULT NULL,
+  `edited_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_year_note` (`fiscal_year`,`note_number`),
+  KEY `idx_year` (`fiscal_year`),
+  KEY `idx_edited_by` (`edited_by`),
+  CONSTRAINT `fk_dn_edited_by` FOREIGN KEY (`edited_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_documents` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `entity_type` enum('journal_entry','bill','ap_payment','bank_transaction','asset','tax_filing','reconciliation','other') COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -1509,6 +1526,7 @@ CREATE TABLE `customer_tags` (
 CREATE TABLE `customers` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `company_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_related_party` tinyint(1) NOT NULL DEFAULT '0',
   `contact_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `email_disabled` tinyint(1) NOT NULL DEFAULT '0',
@@ -3055,6 +3073,7 @@ CREATE TABLE `users` (
 CREATE TABLE `vendors` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_related_party` tinyint(1) NOT NULL DEFAULT '0',
   `vendor_type` enum('maintenance','repair','parts','inspection','towing','other') COLLATE utf8mb4_unicode_ci NOT NULL,
   `contact_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,

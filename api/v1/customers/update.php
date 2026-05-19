@@ -132,6 +132,9 @@ $billingAddress     = array_key_exists('billing_address', $body)      ? clean_st
 // Tax exemption fields (D22)
 $gstExempt       = array_key_exists('gst_exempt', $body)       ? (bool) $body['gst_exempt'] : null;
 $pstExempt       = array_key_exists('pst_exempt', $body)       ? (bool) $body['pst_exempt'] : null;
+
+// S-ACCT-DISC: related-party flag for ASPE 3840 Note 6 disclosure.
+$isRelatedParty  = array_key_exists('is_related_party', $body) ? (bool) $body['is_related_party'] : null;
 $gstExemptNumber = array_key_exists('gst_exempt_number', $body)? clean_string($body['gst_exempt_number'], 100) : null;
 $pstExemptNumber = array_key_exists('pst_exempt_number', $body)? clean_string($body['pst_exempt_number'], 100) : null;
 $gstExemptExpiry = array_key_exists('gst_exempt_expiry', $body)? clean_date($body['gst_exempt_expiry']) : null;
@@ -326,6 +329,7 @@ if ($gstExempt !== null)  $data['gst_exempt']  = $gstExempt  ? 1 : 0;
 if ($gpsRevenuePresentation !== null) $data['gps_revenue_presentation'] = $gpsRevenuePresentation;
 if ($pstExempt !== null)  $data['pst_exempt']  = $pstExempt  ? 1 : 0;
 if ($poRequired !== null) $data['po_required'] = $poRequired ? 1 : 0;
+if ($isRelatedParty !== null) $data['is_related_party'] = $isRelatedParty ? 1 : 0;
 
 $userId = current_user_id();
 

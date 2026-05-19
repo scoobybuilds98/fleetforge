@@ -111,6 +111,7 @@ $rows = db_select(
         c.outstanding_balance,
         c.total_revenue,
         c.account_credit_balance,
+        c.is_related_party,
         c.created_at,
         c.updated_at
        FROM customers c
@@ -158,6 +159,7 @@ foreach ($rows as $row) {
         'outstanding_balance'   => $row['outstanding_balance'],
         'total_revenue'         => $row['total_revenue'],
         'account_credit_balance'=> $row['account_credit_balance'],
+        'is_related_party'      => (int) $row['is_related_party'],
         'created_at'            => $row['created_at'],
         'updated_at'            => $row['updated_at'],
         'tags'                  => $tagsByCustomer[$cid] ?? [],

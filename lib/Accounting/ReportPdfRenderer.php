@@ -520,6 +520,61 @@ CSS;
             . '</div>';
     }
 
+    /**
+     * Render the ASPE Disclosure Note Pack (Notes 1-9). Each note becomes
+     * a section with its title bar + plain-text content (whitespace
+     * preserved via white-space:pre-wrap). Cover page lists engagement
+     * type + practitioner contact info.
+     *
+     * Session: S-ACCT-DISC
+     */
+    public static function disclosureNotePack(array $data): void
+    {
+        $title       = 'Notes to Financial Statements';
+        $fy          = (int) $data['fiscal_year'];
+        $entity      = (string) ($data['entity_name'] ?? 'The Company');
+        $engagement  = (string) ($data['engagement_type'] ?? 'compilation');
+        $cpaFirm     = (string) ($data['cpa_firm'] ?? '');
+        $cpaDesig    = (string) ($data['cpa_designation'] ?? '');
+        $cpaCity     = (string) ($data['cpa_city'] ?? '');
+        $notes       = $data['notes'] ?? [];
+
+        $period = "For the year ended December 31, {$fy}";
+        $html   = self::headerHtml($title, $period);
+
+        $engagementLabel = $engagement === 'review' ? 'Review Engagement' : 'Compilation Engagement';
+
+        $html .= '<div style="margin-bottom:14px;padding:8px 12px;background:#f7f9fc;border:1px solid #e1e4e8;font-size:9.5pt;">';
+        $html .= '<strong>' . htmlspecialchars($entity) . '</strong><br>';
+        $html .= htmlspecialchars($engagementLabel) . '<br>';
+        if ($cpaFirm) {
+            $cpaLine = $cpaFirm;
+            if ($cpaDesig) $cpaLine .= ', ' . $cpaDesig;
+            if ($cpaCity)  $cpaLine .= ' — ' . $cpaCity;
+            $html .= '<span style="color:#555;">' . htmlspecialchars($cpaLine) . '</span>';
+        } else {
+            $html .= '<span style="color:#b8860b;">[Practitioner details pending — set in Settings → Engagement.]</span>';
+        }
+        $html .= '</div>';
+
+        foreach ($notes as $note) {
+            $html .= '<div style="page-break-inside:avoid;margin-bottom:14px;">';
+            $html .= '<div style="background:#e8f0fe;border-left:3px solid #1d1d1f;padding:6px 10px;margin-bottom:6px;font-weight:600;font-size:10pt;">';
+            $html .= 'Note ' . htmlspecialchars((string) $note['note_number'])
+                  . ' — ' . htmlspecialchars((string) $note['note_title']);
+            if ((int) ($note['is_auto_generated'] ?? 1) === 0) {
+                $html .= ' <span style="font-weight:400;color:#888;font-size:8pt;">(edited)</span>';
+            }
+            $html .= '</div>';
+            $html .= '<div style="white-space:pre-wrap;font-size:9pt;line-height:1.4;padding:0 4px;">';
+            $html .= htmlspecialchars((string) $note['note_content']);
+            $html .= '</div>';
+            $html .= '</div>';
+        }
+
+        self::emit($html, $title, 'A4', 'P');
+    }
+
     private static function emit(string $html, string $title, string $paper, string $orientation): void
     {
         $tmpDir = FF_ROOT . '/storage/tmp';

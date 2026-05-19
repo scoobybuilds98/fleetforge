@@ -78,7 +78,7 @@ $total = db_count("SELECT COUNT(*) FROM vendors v WHERE $whereSQL", $params);
 $rows = db_select(
     "SELECT
          v.id, v.name, v.vendor_type, v.contact_name, v.email, v.phone,
-         v.city, v.state, v.is_preferred, v.rating, v.hourly_rate,
+         v.city, v.state, v.is_preferred, v.is_related_party, v.rating, v.hourly_rate,
          v.total_spent, v.specializations, v.created_at, v.updated_at,
          (SELECT COUNT(*) FROM maintenance_work_orders mwo
           WHERE mwo.vendor_id = v.id

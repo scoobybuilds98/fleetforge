@@ -95,6 +95,10 @@ $city        = isset($body['city'])         ? clean_string($body['city'], 100)  
 $state       = isset($body['state'])        ? clean_string($body['state'], 100)         : $existing['state'];
 $notes       = isset($body['notes'])        ? clean_string($body['notes'], 5000)        : $existing['notes'];
 $isPreferred = isset($body['is_preferred']) ? (int)(bool)$body['is_preferred']          : (int)$existing['is_preferred'];
+// S-ACCT-DISC: related-party flag for ASPE 3840 Note 6 disclosure.
+$isRelatedParty = isset($body['is_related_party'])
+    ? (int)(bool)$body['is_related_party']
+    : (int)($existing['is_related_party'] ?? 0);
 
 // rating: 1–5 or null
 $rating = $existing['rating'];
@@ -143,19 +147,20 @@ if (array_key_exists('specializations', $body)) {
 // 4. Update inside transaction + audit log
 // -----------------------------------------------------------------------
 $newValues = [
-    'name'            => $name,
-    'vendor_type'     => $vendorType,
-    'contact_name'    => $contactName,
-    'email'           => $email,
-    'phone'           => $phone,
-    'address'         => $address,
-    'city'            => $city,
-    'state'           => $state,
-    'specializations' => $specializations,
-    'hourly_rate'     => $hourlyRate,
-    'rating'          => $rating,
-    'notes'           => $notes,
-    'is_preferred'    => $isPreferred,
+    'name'             => $name,
+    'vendor_type'      => $vendorType,
+    'contact_name'     => $contactName,
+    'email'            => $email,
+    'phone'            => $phone,
+    'address'          => $address,
+    'city'             => $city,
+    'state'            => $state,
+    'specializations'  => $specializations,
+    'hourly_rate'      => $hourlyRate,
+    'rating'           => $rating,
+    'notes'            => $notes,
+    'is_preferred'     => $isPreferred,
+    'is_related_party' => $isRelatedParty,
 ];
 
 db_transaction(function() use ($id, $newValues, $existing) {
