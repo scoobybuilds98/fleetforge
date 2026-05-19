@@ -153,6 +153,18 @@ $_accNavGroups = [
         ],
     ],
     [
+        // S-ACCT-LESSOR-1 — ASPE 3065 lessor capital-lease module.
+        // Capital Leases is the register of sales-type + direct-financing
+        // leases. Classification Wizard deep-links to lease create where
+        // the wizard panel appears.
+        'label' => 'Lessor',
+        'icon'  => 'document-text',
+        'children' => [
+            ['label' => 'Capital Leases',       'url' => '/accounting/leases',       'icon' => 'document-text'],
+            ['label' => 'Classification Wizard','url' => '/leases/create',           'icon' => 'pencil-square'],
+        ],
+    ],
+    [
         'label' => 'Periods',
         'url'   => '/accounting/periods',
         'icon'  => 'calendar-days',

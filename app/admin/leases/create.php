@@ -827,11 +827,170 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+        <!-- ── Section 8: ASPE 3065 Lease Classification ─────────── -->
+        <!-- S-ACCT-LESSOR-1 (Phase D-1) — most leases stay Operating.
+             Operator only expands the wizard for lease-to-own contracts.
+             On submit, if Capital is selected, the new lease_id is fed
+             to /api/v1/accounting/leases/classify and the result is
+             shown in the success overlay before redirect. -->
+        <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+                 @click="lessorPanelOpen = !lessorPanelOpen">
+                <div class="card-title">ASPE 3065 Lease Classification</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <span class="badge"
+                          :class="form.classification_choice === 'capital' ? 'badge-warning' : 'badge-neutral'"
+                          x-text="form.classification_choice === 'capital' ? 'Capital wizard' : 'Operating (default)'"></span>
+                    <span x-text="lessorPanelOpen ? '▾' : '▸'" style="opacity:0.6;"></span>
+                </div>
+            </div>
+            <div class="card-body" x-show="lessorPanelOpen" x-cloak>
+                <div class="form-group">
+                    <label class="form-label">Lease Type</label>
+                    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;">
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                            <input type="radio" name="classification_choice" value="operating"
+                                   x-model="form.classification_choice">
+                            <span>Operating (standard rental)</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                            <input type="radio" name="classification_choice" value="capital"
+                                   x-model="form.classification_choice">
+                            <span>Potential Capital Lease — run wizard</span>
+                        </label>
+                    </div>
+                    <div class="form-hint" style="margin-top:0.5rem;">
+                        ASPE 3065.06 criteria run on submit when "Potential Capital Lease" is selected.
+                        Most rentals stay Operating — pick Capital only for lease-to-own contracts.
+                    </div>
+                </div>
+
+                <div x-show="form.classification_choice === 'capital'" x-cloak
+                     style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-color);">
+                    <div class="row" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;">
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_term_months">Lease Term (months) *</label>
+                            <input type="number" min="1" id="lessor_term_months" class="form-control"
+                                   x-model="form.lessor.lease_term_months" placeholder="e.g. 60">
+                            <div class="form-hint">Operator-provided. Leases table has no term column on disk.</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_econ_life">Economic Life (months) *</label>
+                            <input type="number" min="1" id="lessor_econ_life" class="form-control"
+                                   x-model="form.lessor.economic_life_months" placeholder="e.g. 120">
+                            <div class="form-hint">Remaining useful life of the asset at inception.</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_fair_value">Initial Fair Value ($) *</label>
+                            <input type="number" min="0.01" step="0.01" id="lessor_fair_value" class="form-control"
+                                   x-model="form.lessor.initial_fair_value" placeholder="e.g. 150000.00">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_disc_rate_pct">Discount Rate (%) *</label>
+                            <input type="number" min="0" step="0.01" id="lessor_disc_rate_pct" class="form-control"
+                                   x-model="form.lessor.discount_rate_pct" placeholder="e.g. 6.50">
+                            <div class="form-hint">Annual rate. Stored as decimal (6.5% → 0.0650).</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_guar_resid">Guaranteed Residual Value ($)</label>
+                            <input type="number" min="0" step="0.01" id="lessor_guar_resid" class="form-control"
+                                   x-model="form.lessor.guaranteed_residual_value" placeholder="0.00">
+                            <div class="form-hint">Included in PV of MLP for Criterion C.</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_unguar_resid">Unguaranteed Residual Value ($)</label>
+                            <input type="number" min="0" step="0.01" id="lessor_unguar_resid" class="form-control"
+                                   x-model="form.lessor.unguaranteed_residual_value" placeholder="0.00">
+                            <div class="form-hint">Excluded from MLP; used by amortization engine.</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_idc">Initial Direct Costs ($)</label>
+                            <input type="number" min="0" step="0.01" id="lessor_idc" class="form-control"
+                                   x-model="form.lessor.initial_direct_costs" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_bpo_amount">BPO Amount ($)</label>
+                            <input type="number" min="0" step="0.01" id="lessor_bpo_amount" class="form-control"
+                                   x-model="form.lessor.bpo_amount" placeholder="optional">
+                            <div class="form-hint">Bargain purchase option. Triggers Criterion A.</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="lessor_bpo_date">BPO Date</label>
+                            <input type="date" id="lessor_bpo_date" class="form-control"
+                                   x-model="form.lessor.bpo_date">
+                        </div>
+                        <div class="form-group" style="display:flex;align-items:center;gap:0.5rem;">
+                            <input type="checkbox" id="lessor_title_transfer"
+                                   x-model="form.lessor.title_transfers">
+                            <label class="form-label" for="lessor_title_transfer" style="margin:0;">
+                                Title transfers at end of term
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="row" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-top:0.5rem;">
+                        <div class="form-group" style="display:flex;align-items:center;gap:0.5rem;">
+                            <input type="checkbox" id="lessor_credit_risk"
+                                   x-model="form.lessor.credit_risk_normal">
+                            <label class="form-label" for="lessor_credit_risk" style="margin:0;">
+                                Credit risk normal vs similar receivables (3065.07)
+                            </label>
+                        </div>
+                        <div class="form-group" style="display:flex;align-items:center;gap:0.5rem;">
+                            <input type="checkbox" id="lessor_costs_est"
+                                   x-model="form.lessor.costs_estimable">
+                            <label class="form-label" for="lessor_costs_est" style="margin:0;">
+                                Unreimbursable costs reasonably estimable (3065.08)
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Inline result, populated by submit() after classify.php returns -->
+                    <template x-if="lessorResult">
+                        <div style="margin-top:1rem;padding:1rem;border-radius:6px;"
+                             :class="lessorResult.classification === 'operating'
+                                     ? 'alert alert-success'
+                                     : 'alert alert-warning'">
+                            <div style="font-weight:600;margin-bottom:0.5rem;"
+                                 x-text="lessorResult.classification === 'operating'
+                                     ? '✓ Classified as Operating Lease — no capital lease accounting required.'
+                                     : (lessorResult.classification === 'sales_type'
+                                        ? '⚠ Sales-Type Lease — selling profit recognized at inception.'
+                                        : '⚠ Direct Financing Lease — finance income only, no selling profit.')">
+                            </div>
+                            <div style="font-size:0.875rem;opacity:0.85;" x-text="lessorResult.rationale"></div>
+                            <table style="width:100%;margin-top:0.75rem;font-size:0.85rem;border-collapse:collapse;">
+                                <thead>
+                                    <tr style="border-bottom:1px solid var(--border-color);">
+                                        <th style="text-align:left;padding:0.25rem;">Criterion</th>
+                                        <th style="text-align:left;padding:0.25rem;">Met</th>
+                                        <th style="text-align:left;padding:0.25rem;">Detail</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td style="padding:0.25rem;">A — Title / BPO</td>
+                                        <td x-text="lessorResult.criteria.A.met ? '✓' : '—'"></td>
+                                        <td x-text="lessorResult.criteria.A.evidence"></td></tr>
+                                    <tr><td style="padding:0.25rem;">B — Term ≥ 75% life</td>
+                                        <td x-text="lessorResult.criteria.B.met ? '✓' : '—'"></td>
+                                        <td x-text="'Ratio ' + lessorResult.criteria.B.ratio"></td></tr>
+                                    <tr><td style="padding:0.25rem;">C — PV MLP ≥ 90% FV</td>
+                                        <td x-text="lessorResult.criteria.C.met ? '✓' : '—'"></td>
+                                        <td x-text="'Ratio ' + lessorResult.criteria.C.ratio + ' (PV=$' + lessorResult.criteria.C.pv_mlp + ')'"></td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
         <!-- ── Form actions ─────────────────────────────────────── -->
         <div class="d-flex gap-3" style="justify-content:flex-end;margin-bottom:2rem;">
             <a href="<?= base_url('leases') ?>" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary" :disabled="submitting">
-                <span x-show="!submitting">Create Lease</span>
+                <span x-show="!submitting && form.classification_choice !== 'capital'">Create Lease</span>
+                <span x-show="!submitting && form.classification_choice === 'capital'">Create Lease &amp; Run Classification</span>
                 <span x-show="submitting">Saving…</span>
             </button>
         </div>
@@ -893,7 +1052,27 @@ function FF_CreateLease() {
             // invoices. Off by default — existing leases unaffected.
             precharge_enabled:         false,
             precharge_amount:          '',
+            // S-ACCT-LESSOR-1 Phase D-1: ASPE 3065 classification wizard.
+            // Operating is the default (matches schema DEFAULT 'operating').
+            // Capital expands the wizard panel + runs classify.php on submit.
+            classification_choice:     'operating',
+            lessor: {
+                lease_term_months:           '',
+                economic_life_months:        '',
+                initial_fair_value:          '',
+                discount_rate_pct:           '',
+                guaranteed_residual_value:   '0.00',
+                unguaranteed_residual_value: '0.00',
+                initial_direct_costs:        '0.00',
+                bpo_amount:                  '',
+                bpo_date:                    '',
+                title_transfers:             false,
+                credit_risk_normal:          true,
+                costs_estimable:             true,
+            },
         },
+        lessorPanelOpen: false,
+        lessorResult:    null,
         // ADV-BILL-1: cap from billing.max_advance_periods setting (server-side
         // re-validates regardless). 24 mirrors the seed default.
         advanceBillingCap: <?= (int) settings_get('billing.max_advance_periods', '24') ?>,
@@ -1371,8 +1550,54 @@ function FF_CreateLease() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/create') ?>', payload);
                 if (r.success) {
-                    this.showSuccessOverlay = true;
                     const _newId = r.data.id;
+
+                    // S-ACCT-LESSOR-1: if capital lease was selected, run the
+                    // ASPE 3065 wizard against the freshly created lease_id.
+                    // Non-fatal — if classify.php fails, the lease is still
+                    // created as 'operating' (the safe default) and the error
+                    // is shown inline so the operator can re-run from show.php.
+                    if (this.form.classification_choice === 'capital') {
+                        const lessor = this.form.lessor;
+                        const ratePctNum = Number(lessor.discount_rate_pct || 0);
+                        const wizardPayload = {
+                            lease_id:                    _newId,
+                            lease_term_months:           parseInt(lessor.lease_term_months || 0),
+                            economic_life_months:        parseInt(lessor.economic_life_months || 0),
+                            initial_fair_value:          String(lessor.initial_fair_value || ''),
+                            discount_rate:               (ratePctNum / 100).toFixed(4),
+                            guaranteed_residual_value:   String(lessor.guaranteed_residual_value || '0'),
+                            unguaranteed_residual_value: String(lessor.unguaranteed_residual_value || '0'),
+                            initial_direct_costs:        String(lessor.initial_direct_costs || '0'),
+                            title_transfers:             !!lessor.title_transfers,
+                            credit_risk_normal:          !!lessor.credit_risk_normal,
+                            costs_estimable:             !!lessor.costs_estimable,
+                        };
+                        if (lessor.bpo_amount !== '' && lessor.bpo_amount !== null) {
+                            wizardPayload.bpo_amount = String(lessor.bpo_amount);
+                        }
+                        if (lessor.bpo_date) {
+                            wizardPayload.bpo_date = lessor.bpo_date;
+                        }
+                        try {
+                            const w = await FF_Api.post('<?= base_url('api/v1/accounting/leases/classify') ?>', wizardPayload);
+                            if (w.success) {
+                                this.lessorResult = w.data;
+                                this.lessorPanelOpen = true;
+                            } else {
+                                FF_Validate.banner(form,
+                                    'Lease created, but classification wizard failed: ' +
+                                    (w.error?.message || 'unknown error') +
+                                    '. Open the lease and re-run from its detail page.');
+                            }
+                        } catch(e2) {
+                            FF_Validate.banner(form,
+                                'Lease created, but classification wizard call errored. ' +
+                                'Open the lease and re-run from its detail page.');
+                        }
+                    }
+
+                    this.showSuccessOverlay = true;
                     setTimeout(() => { window.location.href = '<?= base_url('leases/show') ?>?id=' + _newId; }, 3500);
                 } else {
                     // VALID-2: server returned a validation error — show field-level messages
