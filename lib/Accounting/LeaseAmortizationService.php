@@ -648,4 +648,307 @@ class LeaseAmortizationService
             'persisted'      => true,
         ];
     }
+
+    // ============================================================
+    // D1. regeneratePartial — preserve posted rows, rebuild scheduled
+    // ============================================================
+
+    /**
+     * Regenerate the unposted portion of an amortization schedule, used
+     * by LeaseResidualService after a downward residual revision (and
+     * potentially by future flows that need partial regen without
+     * touching posted history).
+     *
+     * Contract (D-LESSOR-5-PARTIAL-REGEN):
+     *   - Posted schedule rows are NEVER touched.
+     *   - Only status='scheduled' rows are deleted and rebuilt.
+     *   - implicit_rate is NOT re-solved — ASPE 3065 locks the rate
+     *     at inception. Residual revisions are a write-down event,
+     *     not a re-pricing event.
+     *   - Opening NI for the regen is the closing_net_investment of
+     *     the last POSTED row (or initial_fair_value if none posted).
+     *     If a residual impairment JE was posted after the last
+     *     period JE, its credit-to-NI-long-term amount is SUBTRACTED
+     *     from that opening — keeps the schedule projection aligned
+     *     with the on-books NI that the period JEs will reduce.
+     *
+     * Per D-LESSOR-4-PERIOD-PRINCIPAL-DERIVATION: the regenerated
+     * rows' principal_reduction column remains a UI projection (last
+     * regular period gets the rounding-tail correction, just like
+     * the initial buildSchedule). Period JE construction continues
+     * to derive principal = cash − finance at JE time.
+     *
+     * @return array { regenerated_periods, new_opening_ni,
+     *                 start_period, last_posted_period }
+     * @throws \RuntimeException when classification is not capital,
+     *                            no schedule exists, or term ≤ posted
+     */
+    public static function regeneratePartial(int $leaseId, int $userId): array
+    {
+        return \db_transaction(function () use ($leaseId, $userId): array {
+            \db_execute("SELECT GET_LOCK(?, 10) AS got", ["ff_lease_amort_{$leaseId}"]);
+
+            try {
+                $lease = \db_row(
+                    "SELECT id, contract_number, classification, start_date,
+                            monthly_rate, initial_fair_value, initial_direct_costs,
+                            guaranteed_residual_value, unguaranteed_residual_value,
+                            implicit_rate, bargain_purchase_option_amount,
+                            bargain_purchase_option_date, deleted_at
+                       FROM leases WHERE id = ? FOR UPDATE",
+                    [$leaseId]
+                );
+                if (!$lease || $lease['deleted_at'] !== null) {
+                    throw new \InvalidArgumentException("Lease #{$leaseId} not found.");
+                }
+                if (!in_array($lease['classification'], ['sales_type', 'direct_financing'], true)) {
+                    throw new \RuntimeException(
+                        'regeneratePartial: lease classification must be capital ('
+                        . "sales_type / direct_financing); got '{$lease['classification']}'."
+                    );
+                }
+                if (!$lease['implicit_rate']) {
+                    throw new \RuntimeException(
+                        "Lease #{$leaseId} has no stored implicit_rate. "
+                        . 'Run full generate() before partial regen.'
+                    );
+                }
+
+                $termMonths = self::loadTermMonths($leaseId);
+
+                // ── Identify last posted period ─────────────────────
+                $postedSummary = \db_row(
+                    "SELECT MAX(period_number) AS last_period,
+                            COUNT(*) AS posted_count
+                       FROM acc_lease_amortization_schedules
+                      WHERE lease_id = ? AND status = 'posted'",
+                    [$leaseId]
+                );
+                $lastPostedPeriod = (int) ($postedSummary['last_period'] ?? 0);
+                $postedCount      = (int) ($postedSummary['posted_count'] ?? 0);
+                $startFromPeriod  = $lastPostedPeriod + 1;
+
+                // ── Compute opening NI for the regen ────────────────
+                if ($lastPostedPeriod > 0) {
+                    $lastPostedRow = \db_row(
+                        "SELECT closing_net_investment, posted_je_id
+                           FROM acc_lease_amortization_schedules
+                          WHERE lease_id = ? AND period_number = ?",
+                        [$leaseId, $lastPostedPeriod]
+                    );
+                    $openingNi = (string) $lastPostedRow['closing_net_investment'];
+                } else {
+                    // No posted rows yet — full regen from inception NI.
+                    // For DF leases: initial NI = FV (already reflects
+                    // FV − IDC per LESSOR-2 solveImplicitRate target).
+                    $openingNi = (string) $lease['initial_fair_value'];
+                }
+
+                // ── Adjust opening for any residual impairment posted
+                //    AFTER the last period JE but BEFORE this regen.
+                //    The impairment JE credits NI Long-Term; the
+                //    schedule's projected opening must drop by the
+                //    same amount to stay aligned with on-books NI.
+                $niLongTermAcct = (int) AccountingService::setting('accounting.lessor_ni_longterm_account_id', 0);
+                if ($niLongTermAcct > 0 && $lastPostedPeriod > 0) {
+                    $impRow = \db_row(
+                        "SELECT COALESCE(SUM(jel.credit), '0.00') AS imp
+                           FROM acc_journal_entry_lines jel
+                           JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+                          WHERE je.source_id   = ?
+                            AND je.source_type = 'lease_residual_impairment'
+                            AND je.status      = 'posted'
+                            AND jel.account_id = ?
+                            AND je.entry_date >= (
+                                SELECT COALESCE(MAX(je2.entry_date), '1970-01-01')
+                                  FROM acc_journal_entries je2
+                                 WHERE je2.source_id   = ?
+                                   AND je2.source_type = 'lease_period'
+                                   AND je2.status      = 'posted'
+                            )",
+                        [$leaseId, $niLongTermAcct, $leaseId]
+                    );
+                    $recentImpairment = (string) ($impRow['imp'] ?? '0.00');
+                    if (bccomp($recentImpairment, '0', 2) > 0) {
+                        $openingNi = bcsub($openingNi, $recentImpairment, 2);
+                    }
+                } elseif ($lastPostedPeriod === 0 && $niLongTermAcct > 0) {
+                    // Pre-activation impairment is unusual but possible
+                    // (operator revises residual before any period posts).
+                    $impRow = \db_row(
+                        "SELECT COALESCE(SUM(jel.credit), '0.00') AS imp
+                           FROM acc_journal_entry_lines jel
+                           JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+                          WHERE je.source_id   = ?
+                            AND je.source_type = 'lease_residual_impairment'
+                            AND je.status      = 'posted'
+                            AND jel.account_id = ?",
+                        [$leaseId, $niLongTermAcct]
+                    );
+                    $recentImpairment = (string) ($impRow['imp'] ?? '0.00');
+                    if (bccomp($recentImpairment, '0', 2) > 0) {
+                        $openingNi = bcsub($openingNi, $recentImpairment, 2);
+                    }
+                }
+
+                // ── Early exit: fully posted, nothing to regenerate ─
+                $bpoPresent = $lease['bargain_purchase_option_amount'] !== null
+                    && bccomp((string) $lease['bargain_purchase_option_amount'], '0', 2) > 0;
+                $maxPeriod = $bpoPresent ? $termMonths + 1 : $termMonths;
+                if ($startFromPeriod > $maxPeriod) {
+                    error_log(sprintf(
+                        '[LeaseAmortizationService::regeneratePartial] lease #%d fully posted (last_period=%d, max=%d) — no regen needed.',
+                        $leaseId, $lastPostedPeriod, $maxPeriod
+                    ));
+                    return [
+                        'regenerated_periods' => 0,
+                        'new_opening_ni'      => $openingNi,
+                        'start_period'        => $startFromPeriod,
+                        'last_posted_period'  => $lastPostedPeriod,
+                    ];
+                }
+
+                // ── Delete existing scheduled rows ─────────────────
+                $deletedRows = \db_execute(
+                    "DELETE FROM acc_lease_amortization_schedules
+                      WHERE lease_id = ? AND status = 'scheduled'",
+                    [$leaseId]
+                );
+
+                // ── Build regenerated rows ─────────────────────────
+                // Walk from startFromPeriod..termMonths using the locked
+                // implicit rate. Same math as buildSchedule but
+                // starting mid-schedule + with the (possibly lower)
+                // opening NI from above.
+                $monthlyRate = bcdiv((string) $lease['implicit_rate'], '12', 10);
+                $payment     = (string) $lease['monthly_rate'];
+                $guarResid   = (string) $lease['guaranteed_residual_value'];
+                $bpoAmount   = $lease['bargain_purchase_option_amount'];
+
+                $startTs = strtotime((string) $lease['start_date']);
+                if ($startTs === false) {
+                    throw new \RuntimeException("Lease #{$leaseId} has invalid start_date.");
+                }
+
+                $rows = [];
+                $opening = $openingNi;
+                for ($t = $startFromPeriod; $t <= $termMonths; $t++) {
+                    $periodDate = date('Y-m-d', strtotime("+{$t} months", $startTs));
+                    // bcmul truncates at scale 2 — matches buildSchedule.
+                    $finance = bcmul($opening, $monthlyRate, 2);
+                    $cash    = bcadd($payment, '0', 2);
+                    $principal = bcsub($cash, $finance, 2);
+                    if (bccomp($principal, $opening, 2) > 0) {
+                        $principal = $opening;
+                    }
+                    $closing = bcsub($opening, $principal, 2);
+
+                    $rows[] = [
+                        'period_number'          => $t,
+                        'period_date'            => $periodDate,
+                        'opening_net_investment' => $opening,
+                        'cash_receipt'           => $cash,
+                        'finance_income'         => $finance,
+                        'principal_reduction'    => $principal,
+                        'closing_net_investment' => $closing,
+                    ];
+                    $opening = $closing;
+                }
+
+                // Rounding-tail correction on the new last regular period.
+                // Same UI-projection logic as buildSchedule (per
+                // D-LESSOR-4-PERIOD-PRINCIPAL-DERIVATION, the GL JE later
+                // derives principal naturally; this is display only).
+                if (!empty($rows)) {
+                    $lastIdx       = count($rows) - 1;
+                    $openingLast   = $rows[$lastIdx]['opening_net_investment'];
+                    $targetClosing = bcadd($guarResid, '0', 2);
+                    $principalLast = bcsub($openingLast, $targetClosing, 2);
+
+                    if (bccomp($principalLast, '0', 2) < 0) {
+                        // Opening already below guaranteed residual after
+                        // impairment write-down — cannot land at original
+                        // target. Set closing to opening (zero principal
+                        // for this period) and leave residual on books.
+                        // Operator should follow up with another residual
+                        // review or use onLeaseTermination's write-off.
+                        error_log(sprintf(
+                            '[regeneratePartial] lease #%d: opening NI (%s) below guaranteed residual (%s) after impairment; flattening last-period principal.',
+                            $leaseId, $openingLast, $targetClosing
+                        ));
+                        $rows[$lastIdx]['principal_reduction']    = '0.00';
+                        $rows[$lastIdx]['closing_net_investment'] = $openingLast;
+                    } else {
+                        $rows[$lastIdx]['principal_reduction']    = $principalLast;
+                        $rows[$lastIdx]['closing_net_investment'] = $targetClosing;
+                    }
+                }
+
+                // BPO row when BPO > 0 and we're regenerating that period too.
+                if ($bpoPresent && $startFromPeriod <= $termMonths + 1) {
+                    $bpoPeriod = $termMonths + 1;
+                    if ($bpoPeriod >= $startFromPeriod) {
+                        $bpoDate = date('Y-m-d', strtotime('+' . $bpoPeriod . ' months', $startTs));
+                        $rows[] = [
+                            'period_number'          => $bpoPeriod,
+                            'period_date'            => $bpoDate,
+                            'opening_net_investment' => $rows ? $rows[count($rows) - 1]['closing_net_investment'] : $openingNi,
+                            'cash_receipt'           => bcadd((string) $bpoAmount, '0', 2),
+                            'finance_income'         => '0.00',
+                            'principal_reduction'    => $rows ? $rows[count($rows) - 1]['closing_net_investment'] : $openingNi,
+                            'closing_net_investment' => '0.00',
+                        ];
+                    }
+                }
+
+                // ── Bulk INSERT new rows ────────────────────────────
+                if (!empty($rows)) {
+                    $placeholders = implode(',', array_fill(0, count($rows), '(?, ?, ?, ?, ?, ?, ?, ?)'));
+                    $params = [];
+                    foreach ($rows as $r) {
+                        $params[] = $leaseId;
+                        $params[] = $r['period_number'];
+                        $params[] = $r['period_date'];
+                        $params[] = $r['opening_net_investment'];
+                        $params[] = $r['cash_receipt'];
+                        $params[] = $r['finance_income'];
+                        $params[] = $r['principal_reduction'];
+                        $params[] = $r['closing_net_investment'];
+                    }
+                    \db_execute(
+                        "INSERT INTO acc_lease_amortization_schedules
+                            (lease_id, period_number, period_date,
+                             opening_net_investment, cash_receipt, finance_income,
+                             principal_reduction, closing_net_investment)
+                         VALUES {$placeholders}",
+                        $params
+                    );
+                }
+
+                \db_insert('audit_log', [
+                    'user_id'     => $userId,
+                    'action'      => 'update',
+                    'module'      => 'accounting',
+                    'entity_type' => 'lease',
+                    'entity_id'   => $leaseId,
+                    'entity_label' => $lease['contract_number'],
+                    'notes'       => sprintf(
+                        'Partial schedule regen: deleted %d scheduled rows, built %d new rows from period %d. Last posted=%d. Opening NI=%s.',
+                        $deletedRows, count($rows), $startFromPeriod, $lastPostedPeriod, $openingNi
+                    ),
+                    'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+
+                return [
+                    'regenerated_periods' => count($rows),
+                    'new_opening_ni'      => $openingNi,
+                    'start_period'        => $startFromPeriod,
+                    'last_posted_period'  => $lastPostedPeriod,
+                    'deleted_scheduled'   => $deletedRows,
+                ];
+            } finally {
+                \db_execute("SELECT RELEASE_LOCK(?)", ["ff_lease_amort_{$leaseId}"]);
+            }
+        });
+    }
 }

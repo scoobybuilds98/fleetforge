@@ -829,6 +829,26 @@ CREATE TABLE `acc_lease_classifications` (
   CONSTRAINT `fk_lc_lease` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_lc_user` FOREIGN KEY (`wizard_completed_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_lease_residual_reviews` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `lease_id` int unsigned NOT NULL,
+  `fiscal_year` int NOT NULL,
+  `prior_residual_value` decimal(12,2) NOT NULL,
+  `revised_residual_value` decimal(12,2) NOT NULL,
+  `delta` decimal(12,2) GENERATED ALWAYS AS ((`revised_residual_value` - `prior_residual_value`)) STORED,
+  `impairment_je_id` int unsigned DEFAULT NULL,
+  `schedule_regenerated` tinyint(1) NOT NULL DEFAULT '0',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `reviewed_by` int unsigned NOT NULL,
+  `reviewed_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_year_lease` (`lease_id`,`fiscal_year`),
+  KEY `idx_lrr_je` (`impairment_je_id`),
+  KEY `idx_lrr_user` (`reviewed_by`),
+  CONSTRAINT `fk_lrr_je` FOREIGN KEY (`impairment_je_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_lrr_lease` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_lrr_user` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_journal_entries` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `entry_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -843,7 +863,7 @@ CREATE TABLE `acc_journal_entries` (
   `approved_at` datetime DEFAULT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `reference` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `source_type` enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_type` enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `source_id` int unsigned DEFAULT NULL,
   `is_reversal` tinyint(1) NOT NULL DEFAULT '0',
   `reversal_of_id` int unsigned DEFAULT NULL,

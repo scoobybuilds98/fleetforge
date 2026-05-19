@@ -17,6 +17,7 @@ each one runs cleanly post-deploy.
 | `accounting_recurring_entries.php`    | `0 3 * * *`  | Post due recurring JE templates              | `ff_acct_recurring`            | S037-REC |
 | `accounting_fx_revaluation.php`       | `0 2 1 * *`  | Monthly FX revaluation engine               | `ff_cron_accounting_fx_revaluation` | S037-FX |
 | `accounting_tax_filing_reminders.php` | `30 7 * * *` | GST/HST filing-deadline notifications        | `ff_acct_tax_reminders`        | S037-CRONS |
+| `accounting_lease_ni_reclass.php`     | `0 5 1 * *`  | Monthly: reclass NI between 1090 (current) and 1600 (long-term) for active capital leases per ASPE 3065.54 | `ff_lease_ni_reclass_cron`     | S-ACCT-LESSOR-5 |
 | `collections_auto_escalate.php`       | `0 8 * * *`  | AR collections status escalation            | (existing; see file)           | S-CRON-3 |
 | `promise_to_pay_check.php`            | `30 7 * * *` | Promise-to-pay follow-up + outcome tagging  | (existing; see file)           | S-CRON-3 |
 
@@ -44,6 +45,7 @@ for `storage/` and the right Sentry DSN from `.env`:
 0  3 * * * php /var/www/fleetforge/cron/accounting_recurring_entries.php    >> /var/log/fleetforge-cron.log 2>&1
 0  2 1 * * php /var/www/fleetforge/cron/accounting_fx_revaluation.php       >> /var/log/fleetforge-cron.log 2>&1
 30 7 * * * php /var/www/fleetforge/cron/accounting_tax_filing_reminders.php >> /var/log/fleetforge-cron.log 2>&1
+0  5 1 * * php /var/www/fleetforge/cron/accounting_lease_ni_reclass.php     >> /var/log/fleetforge-cron.log 2>&1
 
 # Existing (do not duplicate if already installed)
 0  8 * * * php /var/www/fleetforge/cron/collections_auto_escalate.php       >> /var/log/fleetforge-cron.log 2>&1
@@ -168,3 +170,8 @@ php /var/www/fleetforge/cron/accounting_tax_filing_reminders.php
 - **S037-REC** (2026-05-19) — `accounting_recurring_entries.php`.
 - **S037-FX** (2026-05-19) — `accounting_fx_revaluation.php`.
 - **S-CRON-3** — collections + promise-to-pay crons.
+- **S-ACCT-LESSOR-5** (2026-05-19) — `accounting_lease_ni_reclass.php`
+  (monthly NI current/long-term reclass per ASPE 3065.54). Gated on
+  `accounting.lessor_module_enabled='1'` setting — short-circuits with
+  audit log when disabled. Per-lease idempotency via JE reference
+  `LSE-NI-RECLASS-{contract}-YYYY-MM` (D-LESSOR-5-RECLASS-IDEMPOTENT).

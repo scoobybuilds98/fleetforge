@@ -619,6 +619,29 @@ ITEM F-CRONS-ACCT-1 | 2026-05-19 | F — Accounting | Install accounting crontab
   Owner: Operator
   Status: PENDING
 
+ITEM F-LESSOR-NI-CRON | 2026-05-19 | F — Accounting | Install accounting_lease_ni_reclass.php cron on production
+  Originating session: S-ACCT-LESSOR-5 (NI current/long-term reclass cron + annual residual review)
+  Surfaced into checklist: S-ACCT-LESSOR-5
+  Detail: cron/accounting_lease_ni_reclass.php is the monthly cron that reclassifies each
+    active capital lease's net investment between 1090 NI Current and 1600 NI Long-Term
+    per ASPE 3065.54. Schedule: `0 5 1 * *` (1st of month, 5am — runs AFTER the daily
+    recurring-entries cron at 4am so any period JEs posted earlier the same day are
+    reflected in the balance calculation). The cron is gated on
+    `accounting.lessor_module_enabled='1'` and short-circuits with a logged audit row
+    when disabled — safe to install before the operator activates the lessor module.
+    The runbook block at docs/runbooks/crontab_accounting.md already includes this line;
+    F-CRONS-ACCT-1 covers the parent install. This item is for the operator-side
+    verification that the lease NI line is present in `crontab -l` post-install, and
+    for the gate-flip readiness check before the first capital lease ships.
+  Action: After F-CRONS-ACCT-1 install completes, `sudo -u www-data crontab -l | grep lease_ni_reclass`
+    must show the line `0  5 1 * * php /var/www/fleetforge/cron/accounting_lease_ni_reclass.php …`.
+    Pre-first-capital-lease: flip `accounting.lessor_module_enabled='1'` in Settings →
+    Accounting → Lessor Module after the first sales-type / direct-financing lease is
+    classified + ready to activate.
+  Owner: Operator
+  Status: PENDING
+  Depends on: F-CRONS-ACCT-1 (parent install)
+
 ITEM F-CRONS-ACCT-2 | 2026-05-19 | F — Accounting | Provision /var/log/fleetforge-cron.log
   Originating session: S037-CRONS
   Surfaced into checklist: S037-CRONS

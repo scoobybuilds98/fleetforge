@@ -193,6 +193,64 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ── NI Current vs Long-Term Breakdown (S-ACCT-LESSOR-5) ── -->
+    <div class="card" style="margin-bottom:16px;" x-show="niBreakdown" x-cloak>
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <div class="card-title">NI Current vs Long-Term Breakdown (ASPE 3065.54)</div>
+            <button class="btn btn-ghost btn-sm" @click="loadNiBreakdown()" :disabled="niBusy">
+                <span x-show="!niBusy">Refresh Preview</span>
+                <span x-show="niBusy">Loading…</span>
+            </button>
+        </div>
+        <div class="card-body">
+            <template x-if="niBreakdown">
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;font-size:0.9rem;">
+                    <div>
+                        <div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);">On-Books Now (GL trail)</div>
+                        <div style="display:flex;justify-content:space-between;">
+                            <span>NI Current (1090):</span>
+                            <strong>$<span x-text="fmt(niBreakdown.currentBalance1090)"></span></strong>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;">
+                            <span>NI Long-Term (1600):</span>
+                            <strong>$<span x-text="fmt(niBreakdown.currentBalance1600)"></span></strong>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Target After Next Reclass (next 12mo split)</div>
+                        <div style="display:flex;justify-content:space-between;">
+                            <span>Target 1090:</span>
+                            <strong>$<span x-text="fmt(niBreakdown.target1090)"></span></strong>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;">
+                            <span>Target 1600:</span>
+                            <strong>$<span x-text="fmt(niBreakdown.target1600)"></span></strong>
+                        </div>
+                    </div>
+                </div>
+            </template>
+            <template x-if="niBreakdown && niBreakdown.reclass_needed">
+                <div class="alert alert-info" style="margin-top:10px;padding:8px 12px;font-size:0.875rem;">
+                    Next reclass: <strong>$<span x-text="fmt(niBreakdown.delta1090)"></span></strong>
+                    will shift between current and long-term on the 1st of next month
+                    (cron <code>accounting_lease_ni_reclass.php</code>).
+                </div>
+            </template>
+            <template x-if="niBreakdown && !niBreakdown.reclass_needed">
+                <div class="alert alert-success" style="margin-top:10px;padding:8px 12px;font-size:0.875rem;">
+                    No reclass needed — on-books NI matches target split.
+                </div>
+            </template>
+            <template x-if="niBreakdown && Number(niBreakdown.integrity_drift) > 0.02">
+                <div class="alert alert-warning" style="margin-top:10px;padding:8px 12px;font-size:0.875rem;">
+                    ⚠ Integrity drift: $<span x-text="fmt(niBreakdown.integrity_drift)"></span>.
+                    Schedule projection vs on-books NI out of sync. Investigate per
+                    D-LESSOR-4-PERIOD-PRINCIPAL-DERIVATION + residual impairments.
+                </div>
+            </template>
+        </div>
+    </div>
+
     <!-- ── Action bar ─────────────────────────────────────────── -->
     <div class="card" style="padding:14px 18px;margin-bottom:16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
         <template x-if="!hasSchedule && !schedule.preview">
@@ -323,9 +381,24 @@ function capitalLeaseShow(leaseId, hasSchedule) {
         banner: '',
         bannerClass: 'alert alert-success',
         schedule: { preview: false, persisted: false, periods: [], summary: null, annual_rate: null },
+        niBreakdown: null,
+        niBusy: false,
 
         async init() {
             if (this.hasSchedule) await this.loadExisting();
+            // Auto-load NI breakdown on page open — cheap (per-lease GL trail + 2 schedule sums)
+            await this.loadNiBreakdown();
+        },
+
+        async loadNiBreakdown() {
+            this.niBusy = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/accounting/leases/ni-reclass-preview') ?>?lease_id=' + this.leaseId);
+                if (r.success && r.data.leases && r.data.leases[0]) {
+                    this.niBreakdown = r.data.leases[0];
+                }
+            } catch (e) { /* non-fatal */ }
+            this.niBusy = false;
         },
 
         fmt(v) {

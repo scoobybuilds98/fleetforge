@@ -160,8 +160,9 @@ $_accNavGroups = [
         'label' => 'Lessor',
         'icon'  => 'document-text',
         'children' => [
-            ['label' => 'Capital Leases',       'url' => '/accounting/leases',       'icon' => 'document-text'],
-            ['label' => 'Classification Wizard','url' => '/leases/create',           'icon' => 'pencil-square'],
+            ['label' => 'Capital Leases',       'url' => '/accounting/leases',                       'icon' => 'document-text'],
+            ['label' => 'Classification Wizard','url' => '/leases/create',                           'icon' => 'pencil-square'],
+            ['label' => 'Residual Reviews',     'url' => '/accounting/leases/residual-reviews',      'icon' => 'clipboard-document-check'],
         ],
     ],
     [
