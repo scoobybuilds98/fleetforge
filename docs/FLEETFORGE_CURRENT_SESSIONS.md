@@ -76,6 +76,11 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 *(none)*
 
+**S-PHASE-D-INTEGRATION-TEST** — COMPLETED 2026-05-19 (report: [docs/test_reports/S-PHASE-D-INTEGRATION-TEST-2026-05-19.md](test_reports/S-PHASE-D-INTEGRATION-TEST-2026-05-19.md)).
+Verdict: ✅ **READY FOR PHASE QBO**. 36/39 tests PASS, 0 FAIL, 3 non-blocking findings (schema_quick_ref drift = exactly Phase D's 4 new tables, regen-and-commit recommended; AR drift changed from prompt baseline but Phase D confirmed not the cause — 0 capital-lease JE lines on AR account #4; LeaseClassificationService method naming `classify` → actual `runWizard`, semantic equivalent). Live integration tested ImpairmentTestService end-to-end on real fleet asset (C3a/b/e/f all green); ship-time smoke evidence cited for C1/C2 lifecycle flows from LESSOR-1..6 SESSION LOG rows. Full S-PERM-EXPAND HTTP permission audit (E1-E4) passed. D131 6/6 PASS pre- and post-test. Cleanup verification: 10/10 baseline metrics match post-test (zero leftover artifacts). Next session greenlit: **S-QBO-1**.
+
+
+
 **S-PERM-MACRO-STATUS** — SHIPPED 2026-05-19 (closing commit 23aa359 — see PROGRESS.md SESSION LOG row).
 Outcome: UI polish on the bulk operations panel in `app/admin/users/permissions.php` — adds a live `groupStatus(group)` reactive row showing "N granted · N denied (N active overrides)" or "◯ No overrides — using role defaults" per group between the modules-list line and the macro buttons; restyles the Deny All button from filled `btn-danger` to outline `btn-outline-danger` to restore visual weight parity with the other 3 macro buttons at rest (destructive intent preserved via red color + required reason modal). CSS layout shifts from 2-column grid to vertical flex stack so the status row sits cleanly between info and actions. Single-file change. No API, schema, or migration touch. **6/6 browser smoke PASS** at 1440×900 (baseline ✅, grant_view → 9 granted ✅, grant_read_write → 21 granted ✅, deny_all → 49 denied ✅, clear → baseline ✅, button visual consistency ✅). **D131 6/6 PASS**. Prompt's helper code used `m.module` for the status lookup; corrected to `r.slug` per the actual API response shape ([[feedback_trust_file_over_prompt]]). No D-* decision lock — implementation detail, not architecture choice.
 
