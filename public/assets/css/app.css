@@ -9581,35 +9581,50 @@ body:has(.chat-page-content) #ff-chat-widget {
 
 /* ── Dashboard section header (lighter than .card.card-header) ── */
 .dashboard-section {
-    margin-bottom: 24px;
+    margin-bottom: 44px;
     /* WHY min-width:0: Pending Activations lives inside the
        .dashboard-grid--widgets 2-column grid on desktop. Without this,
        the carousel's wide flex children would push the grid cell wider
        than its 1fr allowance, defeating overflow-x:auto. */
     min-width: 0;
 }
+/* Section header: 2px left accent matches the card's 2px top accent —
+   same visual language, horizontal on card / vertical on heading. */
 .dashboard-section-header {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
-    margin-bottom: 12px;
-    padding: 0 2px;
-    gap: 12px;
+    margin-bottom: 18px;
+    padding: 0 0 14px 14px;
+    gap: 16px;
+    border-left: 2px solid var(--color-primary);
+    border-bottom: 1px solid var(--border-color);
 }
+/* Title: tiny all-caps catalog label — the content is the focus, not the heading */
 .dashboard-section-title {
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
     margin: 0;
+    flex: 1;
 }
 .dashboard-section-viewall {
-    font-size: 0.8125rem;
-    color: var(--color-primary);
+    font-size: 0.5625rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
     text-decoration: none;
     white-space: nowrap;
+    opacity: 0.55;
+    transition: opacity 150ms ease, color 150ms ease;
 }
 .dashboard-section-viewall:hover {
-    text-decoration: underline;
+    opacity: 1;
+    color: var(--color-primary);
+    text-decoration: none;
 }
 
 /* ── Carousel container ───────────────────────────────────────── */
