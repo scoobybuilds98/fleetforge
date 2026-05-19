@@ -99,7 +99,23 @@ define('APP_TIMEZONE',     (string) env('APP_TIMEZONE',     'America/Vancouver')
 define('APP_SECRET',       (string) env('APP_SECRET',       ''));
 
 define('FF_VERSION',       (string) env('FF_VERSION',       '1.0.0'));
-define('FF_ASSET_VERSION', (string) env('FF_ASSET_VERSION', '1.0.1'));
+if (!defined('FF_ASSET_VERSION')) {
+    $gitHead = FF_ROOT . '/.git/HEAD';
+    if (is_readable($gitHead)) {
+        $head = trim(file_get_contents($gitHead));
+        if (str_starts_with($head, 'ref: ')) {
+            $refFile = FF_ROOT . '/.git/' . substr($head, 5);
+            $hash = is_readable($refFile)
+                ? substr(trim(file_get_contents($refFile)), 0, 8)
+                : null;
+        } else {
+            $hash = substr($head, 0, 8);
+        }
+        define('FF_ASSET_VERSION', $hash ?? $_ENV['FF_ASSET_VERSION'] ?? '1.0.0');
+    } else {
+        define('FF_ASSET_VERSION', $_ENV['FF_ASSET_VERSION'] ?? '1.0.0');
+    }
+}
 define('FF_DEBUG',         (bool)   env('APP_DEBUG',        false));
 
 // ============================================================
