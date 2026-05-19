@@ -426,4 +426,41 @@ try {
     ];
 }
 
+// ── S-ACCT-LESSOR-3: sales-type inception JE ─────────────────────────
+// Post-commit + post-schedule hook. Fires only for sales_type leases —
+// direct_financing inception is LESSOR-4 scope. The bridge method
+// itself gates on accounting.lessor_module_enabled='1', so operators
+// who haven't enabled the lessor module yet will see this as a no-op
+// in error_log. Non-fatal: JE failure does NOT roll back the activation
+// (consistent with D-LESSOR-2-ACTIVATION).
+try {
+    $leaseRowL3 = db_row(
+        "SELECT id, classification FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$id]
+    );
+    if ($leaseRowL3 && $leaseRowL3['classification'] === 'sales_type') {
+        $inception = \FleetForge\Accounting\AutoEntryBridge::onLeaseInception_SalesType(
+            (int) $id,
+            (int) current_user_id()
+        );
+        if ($inception) {
+            $result['inception_je'] = [
+                'posted'         => true,
+                'je_id'          => $inception['je']['id']           ?? null,
+                'asset_disposed' => $inception['asset_disposed']     ?? null,
+                'idc_je_id'      => $inception['idc_je_id']          ?? null,
+                'selling_profit' => $inception['breakdown']['selling_profit'] ?? null,
+            ];
+        } else {
+            $result['inception_je'] = [
+                'posted' => false,
+                'reason' => 'bridge disabled or lessor module disabled',
+            ];
+        }
+    }
+} catch (\Throwable $e) {
+    error_log('[S-ACCT-LESSOR-3 inception] ' . $e->getMessage());
+    $result['inception_je'] = ['posted' => false, 'error' => $e->getMessage()];
+}
+
 json_success($result);

@@ -656,7 +656,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 19 | S-ACCT-DMG | C | ✅ DONE | M | Sonnet | S-ACCT-UNIT |
 | 20 | S-ACCT-LESSOR-1 | D | ✅ DONE | L | Opus | S-ACCT-DMG |
 | 21 | S-ACCT-LESSOR-2 | D | ✅ DONE | L | Opus | LESSOR-1 |
-| 22 | S-ACCT-LESSOR-3 | D | 📋 PLANNED | M | Opus | LESSOR-2 |
+| 22 | S-ACCT-LESSOR-3 | D | ✅ DONE | M | Opus | LESSOR-2 |
 | 23 | S-ACCT-LESSOR-4 | D | 📋 PLANNED | M | Opus | LESSOR-3 |
 | 24 | S-ACCT-LESSOR-5 | D | 📋 PLANNED | M | Sonnet | LESSOR-4 |
 | 25 | S-ACCT-LESSOR-6 | D | 📋 PLANNED | M | Sonnet | LESSOR-5 |

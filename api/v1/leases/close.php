@@ -1251,4 +1251,40 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
     }
 });
 
+// ── S-ACCT-LESSOR-3: lease termination JE ────────────────────────────
+// Post-commit hook — fires only for capital classifications (sales_type
+// / direct_financing). Most cash flow is already booked by the period
+// JEs (including the BPO settlement row). This handles the unguaranteed-
+// residual write-off edge case. No-op when closing NI is already zero.
+// Bridge gates on accounting.lessor_module_enabled='1'. Non-fatal —
+// close transaction has already committed; JE failure logs only.
+try {
+    $leaseRowL3 = db_row(
+        "SELECT id, classification FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$id]
+    );
+    if ($leaseRowL3 && in_array($leaseRowL3['classification'], ['sales_type', 'direct_financing'], true)) {
+        $term = \FleetForge\Accounting\AutoEntryBridge::onLeaseTermination(
+            (int) $id,
+            (int) current_user_id()
+        );
+        if ($term) {
+            $result['termination_je'] = [
+                'posted'                => $term['je'] !== null,
+                'je_id'                 => $term['je']['id'] ?? null,
+                'residual_written_off'  => $term['residual_written_off'] ?? null,
+                'reason'                => $term['reason'] ?? null,
+            ];
+        } else {
+            $result['termination_je'] = [
+                'posted' => false,
+                'reason' => 'bridge disabled or lessor module disabled',
+            ];
+        }
+    }
+} catch (\Throwable $e) {
+    error_log('[S-ACCT-LESSOR-3 termination] ' . $e->getMessage());
+    $result['termination_je'] = ['posted' => false, 'error' => $e->getMessage()];
+}
+
 json_success($result);

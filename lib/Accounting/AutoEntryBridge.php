@@ -1334,4 +1334,693 @@ class AutoEntryBridge
             'post_immediately' => true,
         ], $jeLines, $userId);
     }
+
+    // ============================================================
+    // ASPE 3065 SALES-TYPE LEASE — Inception / Period / Termination
+    //
+    // Three methods drive the lessor-side capital-lease GL posting:
+    //   onLeaseInception_SalesType  — fires from activate.php on
+    //     pending→active for sales_type leases (LESSOR-4 will add a
+    //     parallel onLeaseInception_DirectFinancing method)
+    //   onLeasePeriodPosting_Capital — fires from the daily cron for
+    //     each amortization schedule row whose period_date ≤ today AND
+    //     status='scheduled' (generic for sales_type + direct_financing
+    //     per D-LESSOR-3-PERIOD-GENERIC; LESSOR-4 reuses without change)
+    //   onLeaseTermination — fires from close.php on active→completed
+    //     for capital leases (no-op when closing NI already zero; posts
+    //     write-off only when an unguaranteed residual remains)
+    //
+    // Hard gates on every method:
+    //   - isEnabled()                                  bridge master switch
+    //   - lessor_module_enabled='1' setting             LESSOR-1 gate
+    // Both return null when disabled — no JE, no error.
+    //
+    // All amounts bcmath. All account ids via requireAccountId(). Every
+    // method asserts Σ DR = Σ CR before posting; the assertion throws
+    // RuntimeException with a full line breakdown so a divergent JE
+    // never lands. See spec §24.4 / §24.6 for the canonical line shape.
+    //
+    // Session: S-ACCT-LESSOR-3
+    // ============================================================
+
+    /**
+     * Gate check shared by the 3 lessor bridge methods. Returns true when
+     * `accounting.lessor_module_enabled` setting is '1' — operator must
+     * explicitly flip the flag before any capital-lease JE posts.
+     * Stays at '0' until the first sales-type lease is classified and
+     * the operator readies the lessor accounting workflow.
+     */
+    private static function isLessorModuleEnabled(): bool
+    {
+        return (string) AccountingService::setting('accounting.lessor_module_enabled', '0') === '1';
+    }
+
+    /**
+     * Sales-type lease inception JE (ASPE 3065 §24.4).
+     *
+     * Posted on transition pending→active when classification='sales_type'.
+     * Derecognizes the underlying asset (cost + accumulated depreciation
+     * — both legs, NOT just NBV — per D-LESSOR-3-INVENTORY) and recognizes
+     * the receivable (split current/long-term per ASPE 3065.54), the
+     * sales revenue (PV of MLP), the COGS (carrying minus PV of
+     * unguaranteed residual), and the unearned finance income (gross
+     * minus net investment).
+     *
+     * Initial direct costs are expensed via a SEPARATE JE per
+     * D-LESSOR-3-IDC-TREATMENT — the main inception JE stays focused.
+     *
+     * Idempotent: returns the existing JE row when source_type=
+     * 'lease_inception' + source_id=$leaseId already exists.
+     *
+     * @return array|null  { je, asset_disposed, idc_je_id } or null when
+     *                     either bridge or lessor module is disabled
+     * @throws \RuntimeException  Σ DR ≠ Σ CR; asset missing/ambiguous;
+     *                             called on non-sales_type lease
+     */
+    public static function onLeaseInception_SalesType(int $leaseId, ?int $userId = null): ?array
+    {
+        if (!self::isEnabled())            return null;
+        if (!self::isLessorModuleEnabled()) {
+            error_log("[AutoEntryBridge::onLeaseInception_SalesType] lessor module disabled — JE skipped for lease #{$leaseId}");
+            return null;
+        }
+
+        // Idempotency guard — already posted?
+        $existing = \db_row(
+            "SELECT * FROM acc_journal_entries
+              WHERE source_type = 'lease_inception' AND source_id = ?
+              LIMIT 1",
+            [$leaseId]
+        );
+        if ($existing) {
+            return ['je' => $existing, 'asset_disposed' => null, 'idc_je_id' => null];
+        }
+
+        return \db_transaction(function () use ($leaseId, $userId): array {
+            \db_execute("SELECT GET_LOCK(?, 10) AS got", ["ff_lease_inception_{$leaseId}"]);
+
+            try {
+                $lease = \db_row(
+                    "SELECT id, contract_number, customer_id, equipment_unit_id, classification,
+                            initial_fair_value, initial_direct_costs,
+                            guaranteed_residual_value, unguaranteed_residual_value,
+                            implicit_rate, start_date, deleted_at
+                       FROM leases WHERE id = ? FOR UPDATE",
+                    [$leaseId]
+                );
+                if (!$lease || $lease['deleted_at'] !== null) {
+                    throw new \RuntimeException("AutoEntryBridge::onLeaseInception_SalesType: lease #{$leaseId} not found.");
+                }
+                if ($lease['classification'] !== 'sales_type') {
+                    throw new \RuntimeException(
+                        "AutoEntryBridge::onLeaseInception_SalesType called on non-sales_type lease #{$leaseId} "
+                        . "(classification='{$lease['classification']}')."
+                    );
+                }
+
+                // Schedule — pulled by the LESSOR-2 service. Used to split
+                // initial NI into current (sum of principal in next 12 periods)
+                // and long-term, and to derive gross investment.
+                $schedule = LeaseAmortizationService::getSchedule($leaseId);
+                if (empty($schedule['periods'])) {
+                    throw new \RuntimeException(
+                        "Lease #{$leaseId} has no amortization schedule. "
+                        . "LESSOR-2 should have generated it at activation — investigate."
+                    );
+                }
+
+                // Linked acc_fixed_assets row.
+                $assets = \db_select(
+                    "SELECT id, asset_account_id, accum_depr_account_id,
+                            acquisition_cost, accumulated_depreciation, net_book_value,
+                            status, notes
+                       FROM acc_fixed_assets
+                      WHERE equipment_unit_id = ? AND status = 'active'",
+                    [(int) $lease['equipment_unit_id']]
+                );
+                if (count($assets) === 0) {
+                    throw new \RuntimeException(
+                        "No active fixed asset linked to equipment unit #{$lease['equipment_unit_id']}. "
+                        . "Asset must exist before sales-type inception JE can post."
+                    );
+                }
+                if (count($assets) > 1) {
+                    throw new \RuntimeException(
+                        "Ambiguous asset linkage for unit #{$lease['equipment_unit_id']} — "
+                        . count($assets) . ' active assets found.'
+                    );
+                }
+                $asset = $assets[0];
+
+                // ── Derive amounts ──────────────────────────────────
+                $acquisitionCost = (string) $asset['acquisition_cost'];
+                $accumulatedDep  = (string) $asset['accumulated_depreciation'];
+                $carryingAmount  = bcsub($acquisitionCost, $accumulatedDep, 2);
+
+                $initialNi = (string) $lease['initial_fair_value'];
+
+                // NI split: current = sum of principal_reduction over the
+                // first 12 schedule rows; long-term = remainder.
+                $niCurrent = '0.00';
+                foreach ($schedule['periods'] as $p) {
+                    if ((int) $p['period_number'] > 12) break;
+                    $niCurrent = bcadd($niCurrent, (string) $p['principal_reduction'], 2);
+                }
+                // Cap at initialNi (defensive — short leases where 12 periods
+                // exceed initial NI by rounding tail of <$0.01).
+                if (bccomp($niCurrent, $initialNi, 2) > 0) {
+                    $niCurrent = $initialNi;
+                }
+                $niLongTerm = bcsub($initialNi, $niCurrent, 2);
+
+                // Gross investment = Σ cash_receipt across the full schedule
+                // (regular periods + BPO row if present).
+                $grossInvestment = '0.00';
+                foreach ($schedule['periods'] as $p) {
+                    $grossInvestment = bcadd($grossInvestment, (string) $p['cash_receipt'], 2);
+                }
+
+                // PV of unguaranteed residual at t=0 using monthly implicit rate.
+                // termMonths = highest non-BPO period_number (BPO row is termMonths+1).
+                $unguarResid = (string) $lease['unguaranteed_residual_value'];
+                $monthlyRate = bccomp((string) $lease['implicit_rate'], '0', 6) === 0
+                    ? '0'
+                    : bcdiv((string) $lease['implicit_rate'], '12', 10);
+
+                // Find the last regular (non-BPO) period number = first period
+                // with finance_income > 0 from the end. BPO row has finance=0.
+                $termMonths = 0;
+                foreach (array_reverse($schedule['periods']) as $p) {
+                    if (bccomp((string) $p['finance_income'], '0', 2) > 0) {
+                        $termMonths = (int) $p['period_number'];
+                        break;
+                    }
+                }
+                if ($termMonths === 0) {
+                    // All-zero-finance schedule (rate=0 edge case) — fall back to
+                    // the highest period_number; treat the BPO row's date alignment.
+                    $termMonths = (int) end($schedule['periods'])['period_number'];
+                }
+
+                if (bccomp($unguarResid, '0', 2) > 0 && bccomp($monthlyRate, '0', 10) > 0) {
+                    $onePlusR = bcadd('1', $monthlyRate, 10);
+                    $df = '1';
+                    for ($t = 1; $t <= $termMonths; $t++) {
+                        $df = bcmul($df, $onePlusR, 10);
+                    }
+                    $pvUnguaranteed = bcdiv($unguarResid, $df, 2);
+                } else {
+                    // rate=0 → nominal sum (no discounting).
+                    $pvUnguaranteed = bcadd($unguarResid, '0', 2);
+                }
+
+                $pvMlp = bcsub($initialNi, $pvUnguaranteed, 2);
+                $cogs  = bcsub($carryingAmount, $pvUnguaranteed, 2);
+
+                // D-LESSOR-3-NET-METHOD: NET method consistently applied
+                // for both inception and period JEs. The spec narrative
+                // §24.4 mixes NET on DR (NI = initial_fair_value) with
+                // GROSS on CR (Unearned = cash-gross − net) — that pair
+                // cannot balance under double-entry. Smoke caught this
+                // as a $72,001 invariant failure. Operator-locked at
+                // S-ACCT-LESSOR-3 pre-flight AskUserQuestion: drop
+                // Unearned Finance Income from inception + period JEs;
+                // leave the Unearned LESSOR-1 setting configured for
+                // future gross-presentation disclosure reports.
+                $unearnedFinanceIncome = '0.00';   // intentionally not posted
+
+                // ── Resolve GL accounts ─────────────────────────────
+                $niCurrentAcc = self::requireAccountId('accounting.lessor_ni_current_account_id',  'NI Lease — Current');
+                $niLongTermAcc = self::requireAccountId('accounting.lessor_ni_longterm_account_id','NI Lease — Long-Term');
+                $salesRevAcc  = self::requireAccountId('accounting.lessor_sales_revenue_account_id','Sales Revenue — Lease-to-Own');
+                $cogsAcc      = self::requireAccountId('accounting.lessor_cogs_account_id',         'COGS — Fleet (Lease-to-Own)');
+                $assetAcc     = (int) $asset['asset_account_id'];
+                $accumDepAcc  = (int) $asset['accum_depr_account_id'];
+
+                // ── Build JE lines (skip $0 lines for clean GL ledger) ─
+                $jeLines = [];
+                if (bccomp($niCurrent, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $niCurrentAcc,  'debit' => $niCurrent,    'credit' => '0.00',
+                        'description' => "Net Investment in Lease (current) — {$lease['contract_number']}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($niLongTerm, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $niLongTermAcc, 'debit' => $niLongTerm,   'credit' => '0.00',
+                        'description' => "Net Investment in Lease (long-term) — {$lease['contract_number']}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($accumulatedDep, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $accumDepAcc,   'debit' => $accumulatedDep, 'credit' => '0.00',
+                        'description' => "Accumulated depreciation cleared — asset disposed via lease {$lease['contract_number']}",
+                    ];
+                }
+                if (bccomp($cogs, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $cogsAcc,       'debit' => $cogs,         'credit' => '0.00',
+                        'description' => "COGS — Fleet (Lease-to-Own) — {$lease['contract_number']}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($acquisitionCost, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $assetAcc,      'debit' => '0.00',         'credit' => $acquisitionCost,
+                        'description' => "Asset cost derecognized — lease {$lease['contract_number']}",
+                    ];
+                }
+                if (bccomp($pvMlp, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $salesRevAcc,   'debit' => '0.00',         'credit' => $pvMlp,
+                        'description' => "Sales revenue (PV of MLP) — {$lease['contract_number']}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                // Unearned Finance Income line intentionally omitted per
+                // D-LESSOR-3-NET-METHOD (see derivation comment above).
+
+                // ── INVARIANT: Σ DR = Σ CR ─────────────────────────
+                $totalDr = '0.00';
+                $totalCr = '0.00';
+                foreach ($jeLines as $l) {
+                    $totalDr = bcadd($totalDr, (string) $l['debit'],  2);
+                    $totalCr = bcadd($totalCr, (string) $l['credit'], 2);
+                }
+                if (bccomp($totalDr, $totalCr, 2) !== 0) {
+                    throw new \RuntimeException(sprintf(
+                        'Sales-type inception JE unbalanced: DR=%s, CR=%s, diff=%s. '
+                        . 'Breakdown: NI_cur=%s NI_lt=%s AccDep=%s COGS=%s Cost=%s SalesRev=%s Unearned=%s.',
+                        $totalDr, $totalCr, bcsub($totalDr, $totalCr, 2),
+                        $niCurrent, $niLongTerm, $accumulatedDep, $cogs,
+                        $acquisitionCost, $pvMlp, $unearnedFinanceIncome
+                    ));
+                }
+
+                // ── Post main inception JE ──────────────────────────
+                $periodInfo = self::resolvePeriod($lease['start_date']);
+                $je = JournalEntryService::create([
+                    'entry_date'       => $periodInfo['entry_date'],
+                    'description'      => "Sales-type lease inception — {$lease['contract_number']}",
+                    'entry_type'       => 'system',
+                    'reference'        => "LSE-INC-{$lease['contract_number']}",
+                    'source_type'      => 'lease_inception',
+                    'source_id'        => $leaseId,
+                    'post_immediately' => true,
+                ], $jeLines, $userId);
+
+                // ── Dispose the underlying asset ────────────────────
+                $disposalNote = ($asset['notes'] ? $asset['notes'] . "\n" : '')
+                    . "Disposed via sales-type lease {$lease['contract_number']} on " . date('Y-m-d')
+                    . ". JE {$je['entry_number']}.";
+                \db_execute(
+                    "UPDATE acc_fixed_assets
+                        SET status                 = 'disposed',
+                            fully_depreciated_date = COALESCE(fully_depreciated_date, ?),
+                            notes                  = ?
+                      WHERE id = ?",
+                    [date('Y-m-d'), $disposalNote, (int) $asset['id']]
+                );
+
+                // ── IDC handling (D-LESSOR-3-IDC-TREATMENT) ─────────
+                $idcJeId = null;
+                $idcAmount = (string) $lease['initial_direct_costs'];
+                if (bccomp($idcAmount, '0', 2) > 0) {
+                    $sellingExpAcc = self::requireAccountId('accounting.lessor_selling_expense_account_id', 'Selling Expense — Lease Origination');
+                    // Default offset = AR (1030). When the broker bill is paid via AP,
+                    // the standard AP-payment flow reverses the AR clear.
+                    $idcOffsetAcc = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+
+                    $idcLines = [
+                        [
+                            'account_id'  => $sellingExpAcc, 'debit' => $idcAmount, 'credit' => '0.00',
+                            'description' => "Initial direct costs — lease {$lease['contract_number']}",
+                            'customer_id' => $lease['customer_id'],
+                        ],
+                        [
+                            'account_id'  => $idcOffsetAcc, 'debit' => '0.00', 'credit' => $idcAmount,
+                            'description' => "IDC accrued pending vendor bill — {$lease['contract_number']}",
+                            'customer_id' => $lease['customer_id'],
+                        ],
+                    ];
+                    $idcJe = JournalEntryService::create([
+                        'entry_date'       => $periodInfo['entry_date'],
+                        'description'      => "Sales-type IDC — {$lease['contract_number']}",
+                        'entry_type'       => 'system',
+                        'reference'        => "LSE-IDC-{$lease['contract_number']}",
+                        'source_type'      => 'lease_inception',
+                        'source_id'        => $leaseId,
+                        'post_immediately' => true,
+                    ], $idcLines, $userId);
+                    $idcJeId = (int) $idcJe['id'];
+                }
+
+                // ── Audit log ───────────────────────────────────────
+                $sellingProfit = bcsub($pvMlp, $cogs, 2);
+                \db_insert('audit_log', [
+                    'user_id'     => $userId,
+                    'action'      => 'create',
+                    'module'      => 'accounting',
+                    'entity_type' => 'lease',
+                    'entity_id'   => $leaseId,
+                    'entity_label' => $lease['contract_number'],
+                    'notes'       => sprintf(
+                        'Sales-type inception JE %s: initial_NI=%s, NI_cur=%s, NI_lt=%s, COGS=%s, sales_rev=%s, selling_profit=%s. Asset #%d disposed. IDC JE: %s.',
+                        $je['entry_number'], $initialNi, $niCurrent, $niLongTerm,
+                        $cogs, $pvMlp, $sellingProfit, (int) $asset['id'],
+                        $idcJeId !== null ? (string) $idcJeId : 'none ($0 IDC)'
+                    ),
+                    'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+
+                return [
+                    'je'             => $je,
+                    'asset_disposed' => (int) $asset['id'],
+                    'idc_je_id'      => $idcJeId,
+                    'breakdown'      => [
+                        'initial_ni'             => $initialNi,
+                        'ni_current'             => $niCurrent,
+                        'ni_long_term'           => $niLongTerm,
+                        'acquisition_cost'       => $acquisitionCost,
+                        'accumulated_dep'        => $accumulatedDep,
+                        'carrying_amount'        => $carryingAmount,
+                        'pv_unguaranteed'        => $pvUnguaranteed,
+                        'pv_mlp'                 => $pvMlp,
+                        'cogs'                   => $cogs,
+                        'unearned_finance'       => $unearnedFinanceIncome,
+                        'gross_investment'       => $grossInvestment,
+                        'selling_profit'         => $sellingProfit,
+                    ],
+                ];
+            } finally {
+                \db_execute("SELECT RELEASE_LOCK(?)", ["ff_lease_inception_{$leaseId}"]);
+            }
+        });
+    }
+
+    /**
+     * Period-end JE for a single amortization schedule row (ASPE 3065
+     * §24.4). Generic for sales_type AND direct_financing per
+     * D-LESSOR-3-PERIOD-GENERIC — LESSOR-4 reuses this method unchanged.
+     *
+     * Two-leg per period:
+     *   DR Accounts Receivable     cash_receipt      (cash is recognized
+     *   CR NI — Current            principal_reduction   when the invoice
+     *   DR Unearned Finance Income finance_income     is paid via the
+     *   CR Finance Income          finance_income     existing AR flow)
+     *
+     * Idempotent: if the schedule row is already status='posted', the
+     * existing JE is returned (no double-post). status='reversed' throws.
+     *
+     * @return array|null  { je, period } or null when gates are off
+     * @throws \RuntimeException  invariant fail, reversed row, etc.
+     */
+    public static function onLeasePeriodPosting_Capital(
+        int $leaseId,
+        int $periodNumber,
+        ?int $userId = null
+    ): ?array {
+        if (!self::isEnabled())             return null;
+        if (!self::isLessorModuleEnabled()) {
+            error_log("[AutoEntryBridge::onLeasePeriodPosting_Capital] lessor module disabled — lease #{$leaseId} period {$periodNumber} skipped");
+            return null;
+        }
+
+        return \db_transaction(function () use ($leaseId, $periodNumber, $userId): array {
+            \db_execute("SELECT GET_LOCK(?, 10) AS got", ["ff_lease_period_{$leaseId}_{$periodNumber}"]);
+
+            try {
+                $lease = \db_row(
+                    "SELECT id, contract_number, customer_id, classification, deleted_at
+                       FROM leases WHERE id = ? FOR UPDATE",
+                    [$leaseId]
+                );
+                if (!$lease || $lease['deleted_at'] !== null) {
+                    throw new \RuntimeException("Lease #{$leaseId} not found.");
+                }
+                if (!in_array($lease['classification'], ['sales_type', 'direct_financing'], true)) {
+                    throw new \RuntimeException(
+                        "onLeasePeriodPosting_Capital called on lease #{$leaseId} with classification "
+                        . "'{$lease['classification']}' — capital classifications only."
+                    );
+                }
+
+                $row = \db_row(
+                    "SELECT id, period_number, period_date,
+                            cash_receipt, finance_income, principal_reduction,
+                            opening_net_investment, closing_net_investment,
+                            status, posted_je_id
+                       FROM acc_lease_amortization_schedules
+                      WHERE lease_id = ? AND period_number = ?
+                      FOR UPDATE",
+                    [$leaseId, $periodNumber]
+                );
+                if (!$row) {
+                    throw new \RuntimeException(
+                        "No schedule row for lease #{$leaseId} period {$periodNumber}."
+                    );
+                }
+                if ($row['status'] === 'posted') {
+                    // Idempotent path — return the existing JE.
+                    $existingJe = \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [(int) $row['posted_je_id']]);
+                    return ['je' => $existingJe, 'period' => $periodNumber];
+                }
+                if ($row['status'] === 'reversed') {
+                    throw new \RuntimeException(
+                        "Cannot re-post period {$periodNumber} for lease #{$leaseId} — schedule row is reversed."
+                    );
+                }
+
+                $cash      = (string) $row['cash_receipt'];
+                $finance   = (string) $row['finance_income'];
+                $principal = (string) $row['principal_reduction'];
+
+                // ── Resolve GL accounts ────────────────────────────
+                $arAcc        = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+                $niCurrentAcc = self::requireAccountId('accounting.lessor_ni_current_account_id', 'NI Lease — Current');
+                $financeIncAcc = self::requireAccountId('accounting.lessor_finance_income_account_id', 'Finance Income');
+
+                // ── Build JE lines (D-LESSOR-3-NET-METHOD) ──────────
+                // NET method period JE:
+                //   DR AR             $cash
+                //      CR NI (current) $principal       (= cash − finance)
+                //      CR Finance Income $finance        (recognized this period)
+                // Sums: DR = cash, CR = principal + finance = cash ✓
+                // BPO row (finance=0): DR AR / CR NI — both sides = cash.
+                $jeLines = [];
+                if (bccomp($cash, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id'  => $arAcc,        'debit' => $cash,      'credit' => '0.00',
+                        'description' => "AR — Lease {$lease['contract_number']} period {$periodNumber}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($principal, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id'  => $niCurrentAcc, 'debit' => '0.00',     'credit' => $principal,
+                        'description' => "NI principal reduction — period {$periodNumber}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($finance, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id'  => $financeIncAcc, 'debit' => '0.00',    'credit' => $finance,
+                        'description' => "Finance income recognized — period {$periodNumber}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+
+                // ── INVARIANT: Σ DR = Σ CR ─────────────────────────
+                $totalDr = '0.00';
+                $totalCr = '0.00';
+                foreach ($jeLines as $l) {
+                    $totalDr = bcadd($totalDr, (string) $l['debit'],  2);
+                    $totalCr = bcadd($totalCr, (string) $l['credit'], 2);
+                }
+                if (bccomp($totalDr, $totalCr, 2) !== 0) {
+                    throw new \RuntimeException(sprintf(
+                        'Lease period JE unbalanced: lease=%d period=%d DR=%s CR=%s diff=%s '
+                        . '(cash=%s, principal=%s, finance=%s).',
+                        $leaseId, $periodNumber, $totalDr, $totalCr,
+                        bcsub($totalDr, $totalCr, 2),
+                        $cash, $principal, $finance
+                    ));
+                }
+
+                // ── Post period JE ──────────────────────────────────
+                $periodInfo = self::resolvePeriod((string) $row['period_date']);
+                $je = JournalEntryService::create([
+                    'entry_date'       => $periodInfo['entry_date'],
+                    'description'      => "Lease period {$periodNumber} — {$lease['contract_number']}",
+                    'entry_type'       => 'system',
+                    'reference'        => "LSE-{$lease['contract_number']}-P{$periodNumber}",
+                    'source_type'      => 'lease_period',
+                    'source_id'        => $leaseId,
+                    'post_immediately' => true,
+                ], $jeLines, $userId);
+
+                \db_execute(
+                    "UPDATE acc_lease_amortization_schedules
+                        SET status = 'posted', posted_je_id = ?
+                      WHERE id = ?",
+                    [(int) $je['id'], (int) $row['id']]
+                );
+
+                \db_insert('audit_log', [
+                    'user_id'     => $userId,
+                    'action'      => 'create',
+                    'module'      => 'accounting',
+                    'entity_type' => 'lease',
+                    'entity_id'   => $leaseId,
+                    'entity_label' => $lease['contract_number'],
+                    'notes'       => sprintf(
+                        'Lease period %d posted: JE %s, cash=%s, principal=%s, finance=%s.',
+                        $periodNumber, $je['entry_number'], $cash, $principal, $finance
+                    ),
+                    'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+
+                return ['je' => $je, 'period' => $periodNumber];
+            } finally {
+                \db_execute("SELECT RELEASE_LOCK(?)", ["ff_lease_period_{$leaseId}_{$periodNumber}"]);
+            }
+        });
+    }
+
+    /**
+     * Lease termination JE — fires from close.php after active→completed.
+     *
+     * Most of the lease's cash flow has already been captured by the
+     * regular period JEs (including the BPO settlement row, if any).
+     * This method handles the residual edge cases:
+     *
+     *   - Final closing_net_investment == 0  → no JE needed; logs only.
+     *   - Final closing_net_investment > 0   → write off the remaining NI
+     *     (the unguaranteed residual the lessor never collected). DR a
+     *     loss account, CR NI Long-Term (where the residual lives at
+     *     term end).
+     *
+     * Idempotent: returns existing JE when source_type='lease_termination'
+     * + source_id=$leaseId already exists.
+     *
+     * @return array|null { je, residual_written_off } or null when gates off
+     */
+    public static function onLeaseTermination(int $leaseId, ?int $userId = null): ?array
+    {
+        if (!self::isEnabled())             return null;
+        if (!self::isLessorModuleEnabled()) {
+            error_log("[AutoEntryBridge::onLeaseTermination] lessor module disabled — lease #{$leaseId} skipped");
+            return null;
+        }
+
+        $existing = \db_row(
+            "SELECT * FROM acc_journal_entries
+              WHERE source_type = 'lease_termination' AND source_id = ?
+              LIMIT 1",
+            [$leaseId]
+        );
+        if ($existing) {
+            return ['je' => $existing, 'residual_written_off' => null];
+        }
+
+        $lease = \db_row(
+            "SELECT id, contract_number, customer_id, classification, status, deleted_at
+               FROM leases WHERE id = ?",
+            [$leaseId]
+        );
+        if (!$lease || $lease['deleted_at'] !== null) {
+            throw new \RuntimeException("Lease #{$leaseId} not found.");
+        }
+        if (!in_array($lease['classification'], ['sales_type', 'direct_financing'], true)) {
+            throw new \RuntimeException(
+                "onLeaseTermination called on non-capital lease #{$leaseId} (classification='{$lease['classification']}')."
+            );
+        }
+        if ($lease['status'] !== 'completed') {
+            throw new \RuntimeException(
+                "Lease #{$leaseId} is not in 'completed' status (current: '{$lease['status']}')."
+            );
+        }
+
+        $lastRow = \db_row(
+            "SELECT closing_net_investment
+               FROM acc_lease_amortization_schedules
+              WHERE lease_id = ?
+              ORDER BY period_number DESC
+              LIMIT 1",
+            [$leaseId]
+        );
+        $closingNi = $lastRow ? (string) $lastRow['closing_net_investment'] : '0.00';
+
+        if (bccomp($closingNi, '0', 2) <= 0) {
+            // Nothing to post — schedule already zeroed out.
+            \db_insert('audit_log', [
+                'user_id'     => $userId,
+                'action'      => 'status_change',
+                'module'      => 'accounting',
+                'entity_type' => 'lease',
+                'entity_id'   => $leaseId,
+                'entity_label' => $lease['contract_number'],
+                'notes'       => "Lease termination — NI already zero, no JE needed.",
+                'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+            return ['je' => null, 'residual_written_off' => '0.00', 'reason' => 'NI already zero'];
+        }
+
+        // Write off the remaining NI. Use a loss account; D-LESSOR-3 falls
+        // back to the bad-debt expense account when no specific loss
+        // account is configured (operator can wire a 6290 'Loss on Lease
+        // Termination' later via a settings key without code change).
+        $lossAccountId = (int) (AccountingService::setting('accounting.lessor_termination_loss_account_id')
+                              ?? AccountingService::setting('accounting.bad_debt_expense_account_id'));
+        if ($lossAccountId <= 0) {
+            $lossAccountId = self::requireAccountId('accounting.bad_debt_expense_account_id', 'Bad Debt Expense');
+        }
+        $niLongTermAcc = self::requireAccountId('accounting.lessor_ni_longterm_account_id', 'NI Lease — Long-Term');
+
+        $jeLines = [
+            [
+                'account_id'  => $lossAccountId, 'debit' => $closingNi, 'credit' => '0.00',
+                'description' => "Unguaranteed residual write-off — lease {$lease['contract_number']}",
+                'customer_id' => $lease['customer_id'],
+            ],
+            [
+                'account_id'  => $niLongTermAcc, 'debit' => '0.00', 'credit' => $closingNi,
+                'description' => "NI Long-Term cleared — lease terminated {$lease['contract_number']}",
+                'customer_id' => $lease['customer_id'],
+            ],
+        ];
+
+        $totalDr = bcadd($jeLines[0]['debit'], $jeLines[1]['debit'], 2);
+        $totalCr = bcadd($jeLines[0]['credit'], $jeLines[1]['credit'], 2);
+        if (bccomp($totalDr, $totalCr, 2) !== 0) {
+            throw new \RuntimeException("Termination JE unbalanced: DR={$totalDr}, CR={$totalCr}.");
+        }
+
+        $periodInfo = self::resolvePeriod(date('Y-m-d'));
+        $je = JournalEntryService::create([
+            'entry_date'       => $periodInfo['entry_date'],
+            'description'      => "Lease termination — {$lease['contract_number']}",
+            'entry_type'       => 'system',
+            'reference'        => "LSE-TERM-{$lease['contract_number']}",
+            'source_type'      => 'lease_termination',
+            'source_id'        => $leaseId,
+            'post_immediately' => true,
+        ], $jeLines, $userId);
+
+        \db_insert('audit_log', [
+            'user_id'     => $userId,
+            'action'      => 'status_change',
+            'module'      => 'accounting',
+            'entity_type' => 'lease',
+            'entity_id'   => $leaseId,
+            'entity_label' => $lease['contract_number'],
+            'notes'       => "Lease termination JE {$je['entry_number']}: unguaranteed residual written off = \${$closingNi}.",
+            'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+
+        return ['je' => $je, 'residual_written_off' => $closingNi];
+    }
 }

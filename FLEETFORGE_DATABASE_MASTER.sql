@@ -843,7 +843,7 @@ CREATE TABLE `acc_journal_entries` (
   `approved_at` datetime DEFAULT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `reference` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `source_type` enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_type` enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `source_id` int unsigned DEFAULT NULL,
   `is_reversal` tinyint(1) NOT NULL DEFAULT '0',
   `reversal_of_id` int unsigned DEFAULT NULL,
