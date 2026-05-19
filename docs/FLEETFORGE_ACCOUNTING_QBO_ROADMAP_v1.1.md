@@ -644,7 +644,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 15 | S-ACCT-GST34 | C | ✅ DONE | L | Opus | S-ACCT-POS |
 | 16 | S-ACCT-GPS | C | ✅ DONE | S | Sonnet | S-ACCT-GST34 |
 | 17 | S-ACCT-DISC | C | ✅ DONE | L | Opus | S-ACCT-GPS |
-| 18 | S-ACCT-UNIT | C | 📋 PLANNED | L | Opus | S-ACCT-DISC |
+| 18 | S-ACCT-UNIT | C | ✅ DONE | L | Opus | S-ACCT-DISC |
 | 19 | S-ACCT-DMG | C | 📋 PLANNED | M | Sonnet | S-ACCT-UNIT |
 | 20 | S-ACCT-LESSOR-1 | D | 📋 PLANNED | L | Opus | S-ACCT-DMG |
 | 21 | S-ACCT-LESSOR-2 | D | 📋 PLANNED | L | Opus | LESSOR-1 |

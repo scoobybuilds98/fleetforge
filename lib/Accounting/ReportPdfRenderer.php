@@ -521,6 +521,65 @@ CSS;
     }
 
     /**
+     * Render the Per-Unit P&L report (spec §23.10). One section per unit
+     * with revenue + direct cost breakdown + EBIT / ROIC. Lands a fleet
+     * summary block at the top. Portrait A4.
+     *
+     * Session: S-ACCT-UNIT
+     */
+    public static function perUnitPnl(array $report): void
+    {
+        $title  = 'Per-Unit Profitability';
+        $period = $report['from'] . ' to ' . $report['to'];
+        $html   = self::headerHtml($title, $period);
+
+        // Fleet summary block
+        $totals = $report['fleet_totals'] ?? [];
+        $html .= '<div style="margin-bottom:12px;padding:8px 12px;background:#e8f0fe;border-left:3px solid #1d1d1f;font-size:9.5pt;">';
+        $html .= '<strong>Fleet Summary:</strong> ' . count($report['units'] ?? []) . ' units &nbsp;|&nbsp; ';
+        $html .= 'Revenue: <strong>' . self::money($totals['fleet_revenue'] ?? '0.00') . '</strong> &nbsp;|&nbsp; ';
+        $html .= 'Direct Costs: ' . self::money($totals['fleet_direct_costs'] ?? '0.00') . ' &nbsp;|&nbsp; ';
+        $html .= 'Contribution: ' . self::money($totals['fleet_contribution_margin'] ?? '0.00') . ' &nbsp;|&nbsp; ';
+        $html .= 'Overhead: ' . self::money($totals['fleet_overhead_allocated'] ?? '0.00') . ' &nbsp;|&nbsp; ';
+        $html .= '<strong>EBIT: ' . self::money($totals['fleet_ebit'] ?? '0.00') . '</strong>';
+        $html .= '</div>';
+
+        // Per-unit rows
+        if (empty($report['units'])) {
+            $html .= '<div style="padding:24px;text-align:center;color:#666;">No active units in this period.</div>';
+        } else {
+            $html .= '<table class="rpt"><thead><tr>';
+            $html .= '<th>Unit</th><th>Make/Model</th>';
+            $html .= '<th class="amt">Revenue</th>';
+            $html .= '<th class="amt">Direct Costs</th>';
+            $html .= '<th class="amt">Contribution</th>';
+            $html .= '<th class="amt">OH Allocated</th>';
+            $html .= '<th class="amt">EBIT</th>';
+            $html .= '<th class="amt">ROIC %</th>';
+            $html .= '</tr></thead><tbody>';
+
+            foreach ($report['units'] as $u) {
+                $ebit = (string) ($u['ebit'] ?? '0.00');
+                $color = bccomp($ebit, '0', 2) > 0 ? '#1e5e1e'
+                       : (bccomp($ebit, '0', 2) < 0 ? '#a30000' : '#666');
+                $html .= '<tr>';
+                $html .= '<td>' . htmlspecialchars((string) ($u['unit_number'] ?? '')) . '</td>';
+                $html .= '<td style="font-size:8.5pt;color:#555;">' . htmlspecialchars((string) ($u['display_label'] ?? '')) . '</td>';
+                $html .= '<td class="amt">' . self::money($u['revenue']['total'] ?? '0.00') . '</td>';
+                $html .= '<td class="amt">' . self::money($u['direct_costs']['total_direct'] ?? '0.00') . '</td>';
+                $html .= '<td class="amt">' . self::money($u['contribution_margin'] ?? '0.00') . '</td>';
+                $html .= '<td class="amt">' . self::money($u['overhead_allocated'] ?? '0.00') . '</td>';
+                $html .= '<td class="amt" style="color:' . $color . ';font-weight:600;">' . self::money($ebit) . '</td>';
+                $html .= '<td class="amt">' . htmlspecialchars($u['roic_pct'] !== null ? $u['roic_pct'] . '%' : '—') . '</td>';
+                $html .= '</tr>';
+            }
+            $html .= '</tbody></table>';
+        }
+
+        self::emit($html, $title, 'A4', 'L');
+    }
+
+    /**
      * Render the ASPE Disclosure Note Pack (Notes 1-9). Each note becomes
      * a section with its title bar + plain-text content (whitespace
      * preserved via white-space:pre-wrap). Cover page lists engagement
