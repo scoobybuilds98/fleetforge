@@ -215,6 +215,16 @@ db_transaction(function () use (
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
         'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
     ]);
+
+    // S-PERM-SESSION-REFRESH: stamp users.permissions_updated_at so the
+    // target user's next authenticated request auto-refreshes their
+    // session's override map via _ff_check_permission_freshness().
+    // INSIDE the same db_transaction so it rolls back atomically if the
+    // audit_log insert above fails — no false-positive "stale" trigger.
+    db_execute(
+        "UPDATE users SET permissions_updated_at = NOW() WHERE id = ?",
+        [$userId]
+    );
 });
 
 // Refresh in-session map if super_admin is editing themselves.

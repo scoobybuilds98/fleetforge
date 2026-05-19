@@ -1,0 +1,58 @@
+-- ============================================================
+-- S-PERM-SESSION-REFRESH — stale-session auto-refresh column
+--
+-- Adds `users.permissions_updated_at` so that authenticated requests
+-- can detect when a user's override map has changed since their
+-- $_SESSION was loaded — and auto-refresh the in-session
+-- permission_overrides map on the very next request instead of
+-- requiring the user to log out + log back in.
+--
+-- Resolves the stale-session UX hazard documented in
+-- `audits/2026-05-20_permission_audit.md` §6 and previously deferred
+-- from S-PERM-EXPAND D' triage.
+--
+-- Hook flow (post-migration):
+--   1. super_admin uses /api/v1/users/permissions/{update|group_apply|reset}.php
+--      to change overrides on target user T.
+--   2. Each endpoint stamps `users.permissions_updated_at = NOW()` for T
+--      INSIDE the same db_transaction as the override write — atomic
+--      with the row mutation; rolls back together if the JE/audit_log
+--      insert fails.
+--   3. T's NEXT authenticated request (page or API) hits
+--      `require_auth()` / `require_auth_api()` which calls
+--      `_ff_check_permission_freshness()`.
+--   4. That function compares the DB timestamp to the
+--      `$_SESSION['ff_user']['permissions_loaded_at']` (set at login).
+--      If DB > session: refresh by re-calling `_ff_load_user_overrides()`
+--      and updating the session's loaded_at to NOW().
+--   5. The current request now sees the fresh overrides — no logout
+--      required.
+--
+-- Column choice:
+--   - TIMESTAMP NULL DEFAULT NULL: existing users get NULL (no prior
+--     change), so their freshness check short-circuits (DB IS NULL → no
+--     refresh needed) until the FIRST override change happens.
+--   - No index: read pattern is single-row PK lookup
+--     (SELECT permissions_updated_at FROM users WHERE id = ?), no range
+--     scans, no joins. Adding an index would be pure overhead.
+--   - Position AFTER mfa_verified_until: groups all the auth-related
+--     timestamp columns together for column-order readability when a
+--     human reads DESCRIBE output.
+--
+-- Decisions locked (in PROGRESS.md DECISIONS table):
+--   D-PERM-REFRESH-1 — timestamp comparison on every authenticated
+--     request, cached in static $checked within the request.
+--   D-PERM-REFRESH-2 — three write endpoints stamp the column;
+--     login does NOT stamp (login reads, doesn't change state).
+--   D-PERM-REFRESH-3 — stale when DB.timestamp > session.timestamp OR
+--     session.timestamp is NULL while DB.timestamp is not.
+--   D-PERM-REFRESH-4 — super_admin sessions skip the freshness check
+--     (can() short-circuits to true regardless of overrides).
+--
+-- @session  S-PERM-SESSION-REFRESH
+-- @date     2026-05-20
+-- ============================================================
+
+ALTER TABLE `users`
+    ADD COLUMN `permissions_updated_at` TIMESTAMP NULL DEFAULT NULL
+    AFTER `mfa_verified_until`;

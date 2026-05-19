@@ -90,6 +90,14 @@ db_transaction(function () use ($userId, $existing, $grantedById, $grantedBy, $u
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
         'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
     ]);
+
+    // S-PERM-SESSION-REFRESH: stamp users.permissions_updated_at so the
+    // target user's next request auto-refreshes their session and sees
+    // the cleared override state. INSIDE the transaction for atomicity.
+    db_execute(
+        "UPDATE users SET permissions_updated_at = NOW() WHERE id = ?",
+        [$userId]
+    );
 });
 
 _ff_refresh_user_permissions($userId);

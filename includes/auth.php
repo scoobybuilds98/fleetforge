@@ -88,6 +88,12 @@ function require_auth(): void
         header('Location: ' . base_url('auth/login'));
         exit;
     }
+    // S-PERM-SESSION-REFRESH: auto-refresh the in-session override map if a
+    // super_admin has changed this user's overrides since their login. The
+    // function early-returns for super_admin (their can() short-circuits)
+    // and caches within the request via a static guard — at most one
+    // extra SELECT per authenticated page request.
+    _ff_check_permission_freshness();
 }
 
 // require_auth_api() — return 401 JSON if no valid admin session
@@ -96,6 +102,11 @@ function require_auth_api(): void
     if (!current_user()) {
         json_error('UNAUTHORIZED', 'Authentication required.', 401);
     }
+    // S-PERM-SESSION-REFRESH: same auto-refresh hook on the API side. The
+    // static guard inside the function ensures only one DB hit per request
+    // even when multiple endpoints chain (rare) or when a page invokes
+    // both require_auth() + an inline API call within one PHP process.
+    _ff_check_permission_freshness();
 }
 
 // require_permission() — 403 if the current user lacks the given permission
@@ -219,6 +230,11 @@ function auth_login(array $user, bool $rememberMe = false): void
         'role_slug'            => $roleSlug,
         'permissions'          => $permissions,
         'permission_overrides' => $overrides,
+        // S-PERM-SESSION-REFRESH: timestamp of when overrides were loaded.
+        // Compared per-request against users.permissions_updated_at by
+        // _ff_check_permission_freshness() to auto-refresh stale sessions.
+        // Stamped at login (here) and on every refresh fire.
+        'permissions_loaded_at' => date('Y-m-d H:i:s'),
         'theme'                => $user['theme_preference'] ?? 'dark',
         // PERM-1 Feature 2: per-user display settings (font size + density).
         // Read by header.php to inject inline <style> + body data-density.
@@ -446,4 +462,78 @@ function _ff_refresh_user_permissions(int $userId): void
 {
     if (current_user_id() !== $userId) return;
     $_SESSION['ff_user']['permission_overrides'] = _ff_load_user_overrides($userId);
+}
+
+/**
+ * S-PERM-SESSION-REFRESH: detect + auto-refresh stale permission snapshots.
+ *
+ * Called from `require_auth()` + `require_auth_api()` at the top of every
+ * authenticated request. Compares `users.permissions_updated_at` (DB) to
+ * `$_SESSION['ff_user']['permissions_loaded_at']` (session, set at login).
+ * If DB is newer, re-loads the override map from DB and stamps the session
+ * with the new load timestamp — the current request then sees the fresh
+ * overrides without requiring the user to log out + log back in.
+ *
+ * Performance: static `$checked` flag ensures at most ONE timestamp SELECT
+ * per request (handles multiple require_auth* calls within a single PHP
+ * process, plus the multiple can() calls inside a single page render).
+ * Single-row primary-key lookup; negligible.
+ *
+ * Skipped paths:
+ *   - No active session (`!isset($_SESSION['ff_user']['id'])`): no-op,
+ *     protects cron files + CLI scripts that include auth.php.
+ *   - super_admin: their can() short-circuits to true regardless of the
+ *     override map (D-PERM-REFRESH-4); no point reloading data they
+ *     don't consult.
+ *
+ * Resolves the stale-session UX hazard documented in
+ * `audits/2026-05-20_permission_audit.md` §6 — the scenario where a
+ * super_admin grants overrides to a user who's already logged in, and the
+ * target user sees no change until they log out + log back in.
+ */
+function _ff_check_permission_freshness(): void
+{
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    // No session → no-op. Protects cron/* and CLI scripts that include
+    // auth.php without going through a web request.
+    if (!isset($_SESSION['ff_user']['id'])) return;
+
+    // super_admin short-circuits can() regardless of overrides (D-PERM-REFRESH-4).
+    if (($_SESSION['ff_user']['role_slug'] ?? null) === 'super_admin') return;
+
+    $userId = (int) $_SESSION['ff_user']['id'];
+    $row = db_row(
+        "SELECT permissions_updated_at FROM users WHERE id = ?",
+        [$userId]
+    );
+    $dbTimestamp = $row['permissions_updated_at'] ?? null;
+
+    // DB never stamped (column NULL) → no override change has happened
+    // since the column was added; nothing to refresh.
+    if ($dbTimestamp === null) return;
+
+    $sessionTimestamp = $_SESSION['ff_user']['permissions_loaded_at'] ?? null;
+
+    // Stale when:
+    //   (a) session has no load timestamp (pre-S-PERM-SESSION-REFRESH login
+    //       that survived across the migration — must refresh on first
+    //       DB-stamped detection), OR
+    //   (b) DB stamp is strictly newer than session stamp.
+    // Per D-PERM-REFRESH-3.
+    $isStale = ($sessionTimestamp === null)
+            || (strtotime($dbTimestamp) > strtotime($sessionTimestamp));
+
+    if (!$isStale) return;
+
+    // Refresh: re-load override map from DB + stamp session loaded_at.
+    // Bypass the `current_user_id() !== $userId` guard inside
+    // _ff_refresh_user_permissions() by writing directly — by definition
+    // we are the target user (we're running under their session) so the
+    // guard would pass anyway, but writing here makes the contract
+    // self-documenting.
+    $_SESSION['ff_user']['permission_overrides'] = _ff_load_user_overrides($userId);
+    $_SESSION['ff_user']['permissions_loaded_at'] = date('Y-m-d H:i:s');
 }

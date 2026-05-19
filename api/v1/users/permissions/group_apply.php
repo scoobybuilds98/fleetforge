@@ -223,6 +223,17 @@ db_transaction(function () use (
             ]);
         }
     }
+
+    // S-PERM-SESSION-REFRESH: stamp users.permissions_updated_at ONCE at the
+    // end of the macro loop, NOT per-cell. From the target user's perspective
+    // a bulk macro is a single "permissions changed" event — N override-row
+    // writes + 1 timestamp update covers the auto-refresh signal cleanly.
+    // INSIDE the db_transaction so it rolls back atomically with the cell
+    // writes + audit_log entries if anything fails.
+    db_execute(
+        "UPDATE users SET permissions_updated_at = NOW() WHERE id = ?",
+        [$userId]
+    );
 });
 
 // QBO-specific safety note for grant macros that only touched 'view'.
