@@ -5,7 +5,7 @@ declare(strict_types=1);
  * FleetForge — Admin Dashboard
  *
  * @file        app/admin/dashboard/index.php
- * @description Main dashboard page. Loads KPI tiles, 8 ApexCharts, activity feed,
+ * @description Main dashboard page. Loads KPI tiles, 12 ApexCharts, activity feed,
  *              compliance alerts widget, and today's pickups widget via Alpine.js.
  *              S018: Today's Pickups tile now links to /reservations (was /leases?start_date=today).
  *              fetch calls to the api/v1/dashboard/* endpoints.
@@ -263,6 +263,118 @@ require_once FF_ROOT . '/includes/header.php';
         </template>
     </div>
 
+    <!-- ── Revenue Forecast (2/3) + Occupancy by Type (1/3) ─ -->
+    <div class="dashboard-grid dashboard-grid--charts" style="margin-bottom:24px;">
+
+        <div class="card chart-card">
+            <div class="card-header">
+                <span class="card-title">Revenue Forecast — Next 6 Months</span>
+            </div>
+            <div class="card-body">
+                <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
+                     style="height:320px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-revenue-forecast" style="min-height:320px;"
+                         aria-label="Projected revenue next 6 months"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card chart-card">
+            <div class="card-header">
+                <span class="card-title">Occupancy by Equipment Type</span>
+            </div>
+            <div class="card-body">
+                <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-occupancy-by-type" style="min-height:300px;"
+                         aria-label="Fleet occupancy by equipment type"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ── HIGH-VALUE LEASES ─────────────────────────────────────── -->
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">High-Value Leases</h3>
+            <a href="<?= base_url('leases') ?>?status=active&sort=rate_desc"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.high_value_leases.length === 0">
+            <div class="carousel-empty">No active leases</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.high_value_leases.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.high_value_leases" :key="row.id">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill cc-pill--active">Active</span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="row.template_name_snapshot || 'Unknown type'"></span>
+                            <span class="cc-dot">·</span>
+                            <span x-text="row.unit_number"></span>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
+                                    <span class="cc-rate-period">/mo</span>
+                                </span>
+                            </template>
+                            <template x-if="parseFloat(row.monthly_rate) <= 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
+                                    <span class="cc-rate-period">/day</span>
+                                </span>
+                            </template>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Started</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Active</span>
+                                <span class="cc-footer-value"
+                                      x-text="row.days_active + ' days'"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
     <!-- ── ROW 2: AR Aging (1/2) + Utilization Trend (1/2) ───── -->
     <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
 
@@ -371,6 +483,165 @@ require_once FF_ROOT . '/includes/header.php';
         </template>
     </div>
 
+    <!-- ── OVERDUE PAYMENTS ──────────────────────────────────────── -->
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Overdue Payments</h3>
+            <a href="<?= base_url('invoices') ?>?status=overdue"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.overdue_payments.length === 0">
+            <div class="carousel-empty">No overdue payments</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.overdue_payments.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.overdue_payments" :key="row.id">
+                    <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.invoice_number"></span>
+                            <span class="cc-pill cc-pill--danger"
+                                  x-text="row.days_overdue + ' days overdue'"></span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate" :class="'text-danger'">
+                            <span class="cc-rate-amount"
+                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2})"></span>
+                            <span class="cc-rate-period"> owing</span>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Due</span>
+                                <span class="cc-footer-value text-danger"
+                                      x-text="fmtDate(row.due_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Invoice total</span>
+                                <span class="cc-footer-value"
+                                      x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2})"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- ── Payment Speed (1/2) + Lease Expiry Calendar (1/2) ── -->
+    <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
+
+        <div class="card chart-card">
+            <div class="card-header">
+                <span class="card-title">Avg Days to Pay — Last 12 Months</span>
+            </div>
+            <div class="card-body">
+                <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-payment-speed" style="min-height:300px;"
+                         aria-label="Average invoice payment speed trend"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card chart-card">
+            <div class="card-header">
+                <span class="card-title">Lease Expiry Calendar — Next 12 Months</span>
+            </div>
+            <div class="card-body">
+                <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"
+                     style="height:300px;"></div>
+                <div x-show="chartsLoaded" class="chart-wrap">
+                    <div id="chart-lease-expiry-calendar" style="min-height:300px;"
+                         aria-label="Leases expiring by month"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ── DRAFT INVOICES ───────────────────────────────────────── -->
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Draft Invoices</h3>
+            <a href="<?= base_url('invoices') ?>?status=draft"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.draft_invoices.length === 0">
+            <div class="carousel-empty">No draft invoices</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.draft_invoices.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.draft_invoices" :key="row.id">
+                    <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.invoice_number"></span>
+                            <span class="cc-pill cc-pill--warning">Draft</span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <span class="cc-rate-amount"
+                                  x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA',{minimumFractionDigits:0, maximumFractionDigits:0})"></span>
+                            <span class="cc-rate-period"> total</span>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Created</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.invoice_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">In draft</span>
+                                <span class="cc-footer-value"
+                                      x-text="row.days_in_draft + ' days'"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
     <!-- ── ROW 3: Top Customers (1/2) + Leases Trend (1/2) ───── -->
     <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
 
@@ -402,6 +673,87 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+    </div>
+
+    <!-- ── EXPIRING THIS MONTH ──────────────────────────────────── -->
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Expiring This Month</h3>
+            <a href="<?= base_url('leases') ?>?filter=expiring_this_month"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.expiring_this_month.length === 0">
+            <div class="carousel-empty">No leases expiring this month</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.expiring_this_month.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.expiring_this_month" :key="row.id">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill"
+                                  :class="parseInt(row.days_remaining) <= 7 ? 'cc-pill--danger' : 'cc-pill--warning'"
+                                  x-text="row.days_remaining + ' days left'"></span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="row.template_name_snapshot || 'Unknown type'"></span>
+                            <span class="cc-dot">·</span>
+                            <span x-text="row.unit_number"></span>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
+                                    <span class="cc-rate-period">/mo</span>
+                                </span>
+                            </template>
+                            <template x-if="parseFloat(row.monthly_rate) <= 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
+                                    <span class="cc-rate-period">/day</span>
+                                </span>
+                            </template>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Expires</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.end_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Days left</span>
+                                <span class="cc-footer-value"
+                                      x-text="row.days_remaining + ' days'"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
     </div>
 
     <!-- ── PENDING ACTIVATIONS ───────────────────────────────────── -->
@@ -629,6 +981,85 @@ require_once FF_ROOT . '/includes/header.php';
 
     </div>
 
+    <!-- ── RECENTLY ACTIVATED ───────────────────────────────────── -->
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Recently Activated</h3>
+            <a href="<?= base_url('leases') ?>?status=active&sort=start_date_desc"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.recently_activated.length === 0">
+            <div class="carousel-empty">No leases activated in the last 7 days</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.recently_activated.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.recently_activated" :key="row.id">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill cc-pill--active"
+                                  x-text="parseInt(row.days_active) === 0 ? 'Today' : row.days_active + ' days ago'"></span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="row.template_name_snapshot || 'Unknown type'"></span>
+                            <span class="cc-dot">·</span>
+                            <span x-text="row.unit_number"></span>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
+                                    <span class="cc-rate-period">/mo</span>
+                                </span>
+                            </template>
+                            <template x-if="parseFloat(row.monthly_rate) <= 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
+                                    <span class="cc-rate-period">/day</span>
+                                </span>
+                            </template>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Activated</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Ends</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.end_date)"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
     <!-- ── UPCOMING RESERVATIONS ─────────────────────────────────── -->
     <?php /* S-DASHBOARD-CAROUSEL-ENRICH — synthesized fields, see tables.php */ ?>
     <div class="dashboard-section">
@@ -765,7 +1196,9 @@ function FF_Dashboard() {
         // bind before fetchTables() resolves (avoids "cannot read length of
         // undefined" during first paint).
         tables:        { active_leases: [], pending_leases: [], upcoming_returns: [],
-                         invoices: [], reservations: [] },
+                         invoices: [], reservations: [],
+                         expiring_this_month: [], draft_invoices: [], high_value_leases: [],
+                         recently_activated: [], overdue_payments: [] },
         tablesLoaded:  false,
         tablesError:   false,
 
@@ -847,7 +1280,7 @@ function FF_Dashboard() {
             }
         },
 
-        // ── Render all 8 charts ────────────────────────────────
+        // ── Render all 12 charts ───────────────────────────────
         renderAllCharts() {
             const d = this.charts;
             const c = this._chartInstances;
@@ -1073,6 +1506,79 @@ function FF_Dashboard() {
                     document.getElementById('chart-revenue-by-type').innerHTML =
                         '<div class="empty-state" style="padding:40px"><p class="empty-state-title">No data yet</p><p class="empty-state-text">Revenue will appear here once invoices are created.</p></div>';
                 }
+            }
+
+            // 9. Revenue forecast — bar
+            if (d.revenue_forecast && document.getElementById('chart-revenue-forecast')) {
+                c.revenue_forecast = new ApexCharts(
+                    document.getElementById('chart-revenue-forecast'),
+                    Object.assign({}, base, {
+                        chart: Object.assign({}, base.chart, { type: 'bar', height: 320 }),
+                        plotOptions: { bar: { columnWidth: '55%', borderRadius: 4 } },
+                        dataLabels: { enabled: false },
+                        xaxis: Object.assign({}, base.xaxis, { categories: d.revenue_forecast.labels }),
+                        yaxis: Object.assign({}, base.yaxis, { labels: { style: { colors: fgMuted }, formatter: moneyFmt } }),
+                        series: d.revenue_forecast.series,
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: moneyFmt } }),
+                    })
+                );
+                c.revenue_forecast.render();
+            }
+
+            // 10. Occupancy by type — 100% stacked horizontal bar
+            if (d.occupancy_by_type && document.getElementById('chart-occupancy-by-type')) {
+                c.occupancy_by_type = new ApexCharts(
+                    document.getElementById('chart-occupancy-by-type'),
+                    Object.assign({}, base, {
+                        chart: Object.assign({}, base.chart, { type: 'bar', height: 300, stacked: true, stackType: '100%' }),
+                        plotOptions: { bar: { horizontal: true, barHeight: '60%', borderRadius: 2 } },
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (v) => Math.round(v) + '%',
+                            style: { fontSize: '11px', fontWeight: 500, colors: ['#fff'] },
+                        },
+                        xaxis: Object.assign({}, base.xaxis, { categories: d.occupancy_by_type.labels, labels: { style: { colors: fgMuted }, formatter: (v) => v + '%' } }),
+                        series: d.occupancy_by_type.series,
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: (v) => Math.round(v) + '%' } }),
+                    })
+                );
+                c.occupancy_by_type.render();
+            }
+
+            // 11. Payment speed — line
+            if (d.payment_speed && document.getElementById('chart-payment-speed')) {
+                c.payment_speed = new ApexCharts(
+                    document.getElementById('chart-payment-speed'),
+                    Object.assign({}, base, {
+                        chart: Object.assign({}, base.chart, { type: 'line', height: 300 }),
+                        stroke: { curve: 'smooth', width: 2 },
+                        dataLabels: { enabled: false },
+                        markers: { size: 3 },
+                        xaxis: Object.assign({}, base.xaxis, { categories: d.payment_speed.labels }),
+                        yaxis: Object.assign({}, base.yaxis, { labels: { style: { colors: fgMuted }, formatter: (v) => v + ' days' } }),
+                        series: d.payment_speed.series,
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: (v) => v !== null ? v + ' days' : 'No data' } }),
+                    })
+                );
+                c.payment_speed.render();
+            }
+
+            // 12. Lease expiry calendar — bar
+            if (d.lease_expiry_calendar && document.getElementById('chart-lease-expiry-calendar')) {
+                c.lease_expiry_calendar = new ApexCharts(
+                    document.getElementById('chart-lease-expiry-calendar'),
+                    Object.assign({}, base, {
+                        chart: Object.assign({}, base.chart, { type: 'bar', height: 300 }),
+                        plotOptions: { bar: { columnWidth: '60%', borderRadius: 3 } },
+                        dataLabels: { enabled: false },
+                        xaxis: Object.assign({}, base.xaxis, { categories: d.lease_expiry_calendar.labels }),
+                        yaxis: Object.assign({}, base.yaxis, { labels: { style: { colors: fgMuted }, formatter: (v) => Math.round(v) + '' } }),
+                        series: d.lease_expiry_calendar.series,
+                        colors: [palette[4]],
+                        tooltip: Object.assign({}, base.tooltip, { y: { formatter: (v) => v + ' lease' + (v !== 1 ? 's' : '') } }),
+                    })
+                );
+                c.lease_expiry_calendar.render();
             }
 
             // 8. Weekly heatmap
