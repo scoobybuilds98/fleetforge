@@ -230,7 +230,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="cc-footer-item cc-footer-item--right">
                                 <span class="cc-footer-label">Active</span>
                                 <span class="cc-footer-value"
-                                      x-text="Math.max(0, parseInt(row.days_active)) + 'd'"></span>
+                                      x-text="Math.max(0, parseInt(row.days_active)) + ' days'"></span>
                             </span>
                         </div>
 
@@ -278,7 +278,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="cc-id" x-text="row.contract_number"></span>
                             <span class="cc-pill"
                                   :class="parseInt(row.days_overdue) > 0 ? 'cc-pill--danger' : 'cc-pill--warning'">
-                                <span x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + 'd overdue' : 'Pending'"></span>
+                                <span x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + ' days overdue' : 'Pending'"></span>
                             </span>
                         </div>
 
@@ -373,7 +373,7 @@ require_once FF_ROOT . '/includes/header.php';
                                       'cc-pill--warning': parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7,
                                       'cc-pill--info':    parseInt(row.days_remaining) > 7
                                   }">
-                                <span x-text="row.days_remaining + 'd left'"></span>
+                                <span x-text="row.days_remaining + ' days left'"></span>
                             </span>
                         </div>
 
@@ -548,7 +548,7 @@ require_once FF_ROOT . '/includes/header.php';
                                       'cc-pill--warning': parseInt(row.days_until_pickup) <= 2,
                                       'cc-pill--info':    parseInt(row.days_until_pickup) > 2
                                   }"
-                                  x-text="row.days_until_pickup + 'd away'">
+                                  x-text="row.days_until_pickup + ' days away'">
                             </span>
                         </div>
 
