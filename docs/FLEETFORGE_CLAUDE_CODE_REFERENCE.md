@@ -944,6 +944,141 @@ If a future session needs explicit applied-province tracking on each invoice (e.
 
 **Source:** K-22 catch surfaced in S-ACCT-POS (PlaceOfSupplyService::auditReport). Locked 2026-05-19.
 
+### Trap 29: `acc_tax_filing_periods` uses `period_start`/`period_end` NOT `start_date`/`end_date`
+The tax-filing-period date columns are `period_start` and `period_end` (DATE, NOT NULL). They are NOT `start_date`/`end_date` — those names are used by `acc_periods` (the accounting periods table), not by `acc_tax_filing_periods`. Two related-but-distinct tables with similar shape; double-check which one you're querying.
+
+```sql
+-- WRONG (columns do not exist on acc_tax_filing_periods)
+SELECT id, start_date, end_date FROM acc_tax_filing_periods WHERE id = ?;
+
+-- RIGHT
+SELECT id, period_start, period_end, filing_due_date, tax_type, frequency, status
+  FROM acc_tax_filing_periods WHERE id = ?;
+```
+
+The `tax_type` ENUM is small: `gst_hst|pst_bc|pst_sk|pst_mb`. The `frequency` ENUM matches the `accounting.gst_filing_frequency` setting: `monthly|quarterly|annually`. The `status` ENUM walks `open → calculated → filed → remitted`.
+
+**Source:** K-22 catch surfaced in S-ACCT-GST34 (Gst34Service::compute date filtering). Locked 2026-05-19.
+
+### Trap 30: `acc_tax_remittances` FK is `filing_period_id` NOT `tax_filing_period_id`
+The link back to `acc_tax_filing_periods` is `acc_tax_remittances.filing_period_id` (int unsigned, NOT NULL). The prompt-implied `tax_filing_period_id` does not exist on disk. Same table also has NO `remittance_type` column — payment intent is implicit via `payment_method` ENUM (`online_banking|check|wire|other`); to sum "instalments + final remittances" against a period, just SUM all rows with `filing_period_id = ?`.
+
+```sql
+-- WRONG (column does not exist)
+SELECT SUM(amount) FROM acc_tax_remittances
+WHERE tax_filing_period_id = ? AND remittance_type = 'instalment';
+
+-- RIGHT
+SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n
+  FROM acc_tax_remittances
+ WHERE filing_period_id = ?;
+```
+
+**Source:** K-22 catch surfaced in S-ACCT-GST34 (GST34 Line 110 query). Locked 2026-05-19.
+
+### Trap 31: invoices store `gst_exempt_snapshot`/`pst_exempt_snapshot` NOT `gst_exempt`/`pst_exempt`
+Tax-exempt status on invoices is SNAPSHOTTED at creation time into `invoices.gst_exempt_snapshot` and `invoices.pst_exempt_snapshot` (both tinyint(1)). The plain `gst_exempt`/`pst_exempt` columns do NOT exist on the invoices table — they exist on `customers` and are SNAPSHOTTED forward when an invoice is generated. This is intentional: an exemption status at invoice time must not retroactively change when a customer's flag flips later (CRA audit integrity).
+
+```sql
+-- WRONG (columns do not exist on invoices)
+SELECT ... FROM invoices WHERE gst_exempt = 0 AND pst_exempt = 0;
+
+-- RIGHT — exclude only fully-exempt invoices (BOTH exemptions set)
+SELECT ...
+  FROM invoices
+ WHERE NOT (gst_exempt_snapshot = 1 AND pst_exempt_snapshot = 1)
+   AND deleted_at IS NULL;
+```
+
+Related snapshot columns on invoices: `tax_exempt_snapshot`, `tax_exempt_number_snapshot`, `customer_name_snapshot`, `customer_email_snapshot` — all captured at invoice time per D5-class immutability rule.
+
+**Source:** K-22 catch surfaced in S-ACCT-GST34 (Gst34Service Line 101 filter). Locked 2026-05-19.
+
+### Trap 32: `vendors` has NO `business_number` column — surface as gap, don't throw
+The CRA ITC documentation rule under ETA §169(4) requires the supplier's business number on invoices for purchases ≥ $30. On disk `vendors` only has `name` + `contact_name` — no `business_number` column. Any ITC documentation report that checks supplier-BN compliance should surface this as a **schema gap** rather than marking every bill as non-compliant for a field that can't exist.
+
+Convention used by S-ACCT-GST34's `itcDocumentationReport()`:
+
+```php
+// Always check for missing fields per CRA tier (<$30, $30-149.99, ≥$150)
+$missing = [];
+if (empty($b['vendor_name']))    $missing[] = 'vendor_name';
+if (empty($b['bill_date']))      $missing[] = 'bill_date';
+// ... other tier-30+ checks ...
+
+// Then add the known gap as a labeled note that is FILTERED OUT of the
+// "non-compliant" count so the gap doesn't drown out real issues.
+$missing[] = '[gap] vendor.business_number column absent on disk';
+
+$realMissing = array_filter($missing, fn($m) => strpos($m, '[gap]') !== 0);
+if (empty($realMissing)) {
+    $compliantCount++;
+} else {
+    $nonCompliant[] = ['bill_id' => $b['id'], 'missing_fields' => $realMissing, 'known_gaps' => /* gaps */];
+}
+
+// Surface the gaps once at the report level:
+return [
+    /* ... */,
+    'schema_gaps' => [
+        'vendors.business_number column missing on disk — add via separate migration to fully enforce ETA §169(4) tier-30+.',
+    ],
+];
+```
+
+Same pattern applies to `acc_bills`'s missing buyer-company snapshot (CRA tier-150+ documentation). When a future session adds these columns, drop the `[gap]` marker and let the real check run.
+
+**Source:** K-22 catch surfaced in S-ACCT-GST34 (Gst34Service::itcDocumentationReport). Locked 2026-05-19.
+
+### Trap 33: MySQL 8: `GROUP_CONCAT(... LIMIT N)` is not portable — use two queries
+The on-disk MySQL build does NOT support an inline `LIMIT N` clause inside `GROUP_CONCAT` (it's an 8.x-specific extension that isn't enabled by default). Queries that depend on this syntax fail at PDO prepare time with "Syntax error or access violation: 1064". Replace with the two-query aggregate-then-fetch pattern:
+
+```sql
+-- WRONG (fails on the on-disk MySQL build)
+SELECT COALESCE(SUM(amount), 0) AS total,
+       COUNT(*) AS n,
+       GROUP_CONCAT(id ORDER BY id SEPARATOR ',' LIMIT 50) AS ids
+  FROM invoices
+ WHERE invoice_date BETWEEN ? AND ?;
+
+-- RIGHT — two queries: aggregate first, then SELECT ... LIMIT for ids
+SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n
+  FROM invoices WHERE invoice_date BETWEEN ? AND ?;
+
+SELECT id FROM invoices
+ WHERE invoice_date BETWEEN ? AND ?
+ ORDER BY id LIMIT 50;
+```
+
+PHP side: combine via `implode(',', array_column($idRows, 'id'))` to produce the same comma-string the original GROUP_CONCAT would have. The cost of two roundtrips is negligible for these report-style queries.
+
+Related: `ONLY_FULL_GROUP_BY` is enabled on the on-disk MySQL build — every non-aggregated column in a `SELECT` that uses `GROUP BY` must be listed in the `GROUP BY` clause. Joins that pull in extra display columns need explicit `GROUP BY a.id, a.col1, a.col2, b.col3` enumeration. Same trap class as Trap 33; same source session.
+
+**Source:** K-22 catch surfaced in S-ACCT-GST34 (Gst34Service::compute Line 101 + applyItcRestrictions). Locked 2026-05-19.
+
+### Trap 34: `invoice_line_items.item_type` ENUM has no `meals_entertainment` or `export` — stub, don't throw
+The on-disk `invoice_line_items.item_type` ENUM values are: `base_rental | mileage_precharge | mileage_adjustment | mileage_credit | insurance | warranty | late_fee | early_return_credit | manual_adjustment | damage | discount | account_credit_applied | other | gps | mileage_usage | mileage_drawdown_credit | base_rental_reconciliation_credit`. There is NO `meals_entertainment` and NO `export` value. Any feature that depends on identifying these line types must **stub** the relevant restriction with a warning in the result, NOT throw or assume the values exist.
+
+S-ACCT-GST34 example (M&E 50% ITC rule under ITA §67.1):
+
+```php
+// CCA-2 / GST34 pattern: surface the stub in the result's warnings array
+public static function applyItcRestrictions(...): array {
+    // Passenger-vehicle cap — supported (works against acc_fixed_assets.cca_class_id).
+    // ... cap logic ...
+
+    // M&E 50% rule: deferred until invoice_line_items.item_type ENUM (or
+    // acc_bill_lines flag) supports identifying meals-and-entertainment.
+    // No throw; the stub is documented in the service docblock + this trap.
+
+    return ['adjusted_itc' => $adjusted, 'restrictions' => $restrictions];
+}
+```
+
+When the ENUM is extended (or a `bill_lines.is_meals_entertainment` flag is added), drop the stub and wire the 50% reduction.
+
+**Source:** K-22 catch surfaced in S-ACCT-GST34 (M&E ITC restriction stub + spec §23.7 zero-rated export gap). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
