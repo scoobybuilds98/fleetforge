@@ -805,6 +805,23 @@ If a genuinely new category is needed, propose it explicitly in the session prom
 
 **Source:** K-22 catch surfaced in S-ACCT-CCA-1 (prompt said "H-CCA-1/2" — actually filed as F-CCA-1/2 on disk). Locked 2026-05-19.
 
+### Trap 21: `acc_fixed_assets` uses `useful_life_years` NOT `useful_life_months`
+The fixed-asset useful-life column is `acc_fixed_assets.useful_life_years` (decimal(5,2), NULL). It is NOT `useful_life_months`. Several specs reference useful life in months (a CRA-friendly granularity for AIIP / mid-year acquisitions); on disk the value is stored in YEARS as a decimal — 8.0, 10.5, 12.0 — and the existing depreciation engine (FixedAssetService::previewRun / calculateForPeriod) converts to a per-period factor at run time.
+
+```sql
+-- WRONG (column does not exist)
+SELECT useful_life_months FROM acc_fixed_assets WHERE id = ?;
+
+-- RIGHT
+SELECT useful_life_years FROM acc_fixed_assets WHERE id = ?;
+-- Convert to months only when the algorithm requires it:
+--   $months = bcmul($asset['useful_life_years'], '12', 0);
+```
+
+Practical implication for betterment / componentization / remaining-life math: the engine already amortizes over the remaining portion of `useful_life_years × 12` via its per-period factor — no per-asset `useful_life_months` field needs to be added, and no manual month-conversion is required when calling `FixedAssetService::capitalize()` (the next depreciation run picks up the new depreciable_cost automatically).
+
+**Source:** K-22 catch surfaced in S-ACCT-COMP (`capitalize()` spec referenced `useful_life_months` for the remaining-life recompute, but the on-disk column is years and the engine already handles month conversion). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
