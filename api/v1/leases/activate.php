@@ -394,4 +394,36 @@ db_transaction(function () use ($id, &$result) {
     }
 });
 
+// ── S-ACCT-LESSOR-2: amortization schedule on capital-lease activation ──
+// Post-commit hook — runs only after the activation transaction (status,
+// equipment_unit, status logs, audit_log) has landed. Sales-type and
+// direct-financing leases get their effective-interest schedule built
+// here so LESSOR-3/4's period-end JE posting has rows to flip to 'posted'.
+// Operating leases skip entirely. Schedule failure is non-fatal — the
+// lease stays activated, the operator can re-run from the lease detail
+// page once the underlying issue (rate input, etc.) is resolved.
+try {
+    $leaseRow = db_row(
+        "SELECT id, classification FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$id]
+    );
+    if ($leaseRow && in_array($leaseRow['classification'], ['sales_type', 'direct_financing'], true)) {
+        $schedule = \FleetForge\Accounting\LeaseAmortizationService::generate(
+            (int) $id,
+            (int) current_user_id()
+        );
+        $result['amortization_schedule'] = [
+            'generated'   => true,
+            'period_count' => $schedule['summary']['period_count'] ?? 0,
+            'annual_rate'  => $schedule['annual_rate'] ?? null,
+        ];
+    }
+} catch (\Throwable $e) {
+    error_log('[S-ACCT-LESSOR-2 schedule] ' . $e->getMessage());
+    $result['amortization_schedule'] = [
+        'generated' => false,
+        'error'     => $e->getMessage(),
+    ];
+}
+
 json_success($result);

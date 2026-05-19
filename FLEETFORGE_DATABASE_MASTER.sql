@@ -782,6 +782,26 @@ CREATE TABLE `acc_fx_revaluations` (
   CONSTRAINT `acc_fx_revaluations_ibfk_2` FOREIGN KEY (`journal_entry_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_fx_revaluations_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_lease_amortization_schedules` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `lease_id` int unsigned NOT NULL,
+  `period_number` int NOT NULL,
+  `period_date` date NOT NULL,
+  `opening_net_investment` decimal(15,2) NOT NULL,
+  `cash_receipt` decimal(12,2) NOT NULL,
+  `finance_income` decimal(12,2) NOT NULL,
+  `principal_reduction` decimal(12,2) NOT NULL,
+  `closing_net_investment` decimal(15,2) NOT NULL,
+  `posted_je_id` int unsigned DEFAULT NULL,
+  `status` enum('scheduled','posted','reversed') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'scheduled',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_lease_period` (`lease_id`,`period_number`),
+  KEY `idx_period_date` (`period_date`,`status`),
+  KEY `idx_posted_je` (`posted_je_id`),
+  CONSTRAINT `fk_las_je` FOREIGN KEY (`posted_je_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_las_lease` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_lease_classifications` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `lease_id` int unsigned NOT NULL,

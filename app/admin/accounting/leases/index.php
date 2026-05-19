@@ -129,7 +129,7 @@ require_once FF_ROOT . '/includes/header.php';
                 $niLongTerm = '<span style="color:var(--text-secondary);">pending LESSOR-2</span>';
             ?>
             <tr>
-                <td><a href="<?= base_url('leases/show') ?>?id=<?= (int) $l['id'] ?>"><?= e($l['contract_number']) ?></a></td>
+                <td><a href="<?= base_url('accounting/leases/show') ?>?id=<?= (int) $l['id'] ?>"><?= e($l['contract_number']) ?></a></td>
                 <td><?= e($l['company_name'] ?? '—') ?></td>
                 <td><?= e($unitDisp) ?></td>
                 <td><span class="badge <?= $classBadge ?>"><?= $classLabel ?></span></td>
