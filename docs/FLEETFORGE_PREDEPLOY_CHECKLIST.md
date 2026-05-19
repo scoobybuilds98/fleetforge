@@ -584,6 +584,69 @@ ITEM E1 | 2026-05-16 | E — Data | Seed Standard 2025 rate cards on prod
   Status: PENDING (blocked on S-RATE-CARDS-PROD-FIX)
 ```
 
+```
+ITEM E-DEPLOY-RUNBOOK | 2026-05-20 | E — Data | Post-push deploy sequence (migrate + php-fpm reload) — RECURRING
+  Originating session: 2026-05-20 — post-S-PERM-SESSION-REFRESH live-prod incident
+  Surfaced into checklist: 2026-05-20 — operator reported HTTP 500 ("An unexpected error occurred") on
+    mainlandrentals.com when trying to grant Bob Manager accounting_settings.view, ~1 hour after the
+    S-PERM-SESSION-REFRESH commit (c3684d4) was pushed to origin/main. Root cause was a deploy gap:
+    git push delivered the new code to the Lightsail filesystem, but the operator never (a) ran
+    `migrate.php --apply` to add the new `users.permissions_updated_at` column AND (b) reloaded
+    php-fpm to clear opcache so the new `_ff_check_permission_freshness()` function in
+    `includes/auth.php` would be visible to the running workers.
+  Detail: Every git push to origin/main that includes EITHER a new migration in db_migrations/ OR
+    code changes to widely-included PHP files (`includes/**.php`, `api/bootstrap.php`,
+    `config/*.php`, `lib/Accounting/*.php`) MUST be followed by a coordinated 3-step sequence on the
+    production server. Skipping any one step produces opaque "An unexpected error occurred"
+    messages in the UI because:
+      - Skipped migrate → SQL errors (column not found, table not found) at the next request that
+        hits the new code path. The api/bootstrap.php exception handler catches the PDOException
+        and returns the generic INTERNAL_ERROR envelope; the actual error message is hidden in
+        production (FF_DEBUG is off).
+      - Skipped php-fpm reload → opcache holds the pre-push bytecode. New top-level function
+        declarations are invisible to workers; calls to them throw "Call to undefined function"
+        which the same exception handler catches and hides behind the same generic message.
+        See Trap 52 in docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md §11 for the full opcache-staleness
+        explanation; production is affected ONLY when deploys skip step 3 below (systemd reload
+        normally clears opcache automatically as a side effect of FPM master restart).
+      - Skipped schema_quick_ref regen (F-SCHEMA-REF-1) → not a runtime failure, but causes K-22
+        drift in future session prompts. Bundle into this same deploy sequence.
+    Both steps must be coordinated within a few minutes of the git push; longer gaps mean every
+    page load from authenticated users hits the same error and they assume the system is down.
+    Original source: 2026-05-20 post-S-PERM-SESSION-REFRESH live-prod incident.
+  Action — REQUIRED post-push deploy sequence on mainlandrentals.com:
+    1. SSH to mainlandrentals.com, cd /var/www/fleetforge, git pull origin main
+    2. Apply migrations:
+         sudo -u www-data php bin/migrate.php --verify       # show pending count
+         sudo -u www-data php bin/migrate.php --apply        # apply them
+         sudo -u www-data php bin/migrate.php --verify       # expect N ok / 0 drift / 0 missing
+       Skip step 2 only if the diff in step 1 had NO new files in db_migrations/.
+    3. Reload php-fpm to clear opcache:
+         sudo systemctl reload php8.2-fpm
+       (Or whichever php-fpm service is installed — `systemctl list-units --type=service | grep php`
+       to confirm the unit name; the deploy runbook should pin this once.) Skip step 3 only if the
+       diff in step 1 had NO PHP file changes anywhere in the repo.
+    4. If step 2 ran, regenerate schema_quick_ref per F-SCHEMA-REF-1:
+         sudo -u www-data php scripts/generate_schema_ref.php
+         git add docs/FLEETFORGE_SCHEMA_QUICK_REF.md
+         git commit -m "docs: regenerate schema quick-ref post-deploy"
+         git push origin main
+    5. Smoke check: open mainlandrentals.com in a browser, log in, exercise one path that touches
+       the newly-deployed code (e.g., if the deploy was S-PERM-SESSION-REFRESH, try the Bob Manager
+       grant). Expect HTTP 200, no "An unexpected error occurred" in the UI.
+    Decision rule for steps 2 + 3:
+      - Migration files added (db_migrations/*.sql) → step 2 IS required.
+      - PHP files touched (anything ending .php) → step 3 IS required.
+      - Both → run them in order 2 → 3 → 4 → 5.
+      - Neither (e.g., docs-only commit) → steps 2 + 3 + 4 skipped, only step 5 if anything is
+        user-facing.
+  Owner: Operator (every git push to origin/main that includes migration or PHP code changes)
+  Status: ONGOING (not a one-shot — runs on every deploy that meets the criteria)
+  Related: F-SCHEMA-REF-1 (step 4 here is the same thing it tracks); F-SCHEMA-REF-2 (one-time
+    catch-up commit, separate from this recurring sequence); Trap 52 in REFERENCE.md §11 (the
+    opcache-staleness explanation that motivates step 3).
+```
+
 ### F — Accounting state
 
 ```
