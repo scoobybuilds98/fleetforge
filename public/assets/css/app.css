@@ -9650,7 +9650,6 @@ body:has(.chat-page-content) #ff-chat-widget {
     scroll-snap-align: start;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-top: 2px solid var(--color-primary);   /* sole decoration */
     border-radius: 14px;
     padding: 28px 28px 24px;
     display: flex;
@@ -9668,9 +9667,10 @@ body:has(.chat-page-content) #ff-chat-widget {
     color: inherit;
     cursor: pointer;
 }
-/* Hover: gentle scale only — no lift, no shadow, no decoration */
+/* Hover: highlight border in theme color — only the active card is marked */
 .carousel-card--link:hover {
     border-color: var(--color-primary);
+    border-top-width: 2px;
     transform: scale(1.02);
     text-decoration: none;
 }
