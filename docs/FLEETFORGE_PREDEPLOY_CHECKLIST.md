@@ -692,6 +692,27 @@ ITEM F-CCA-2 | 2026-05-19 | F — Accounting | Set available_for_use_date on all
     available_for_use_date explicitly. Otherwise the fallback is correct.
   Owner: Operator (with accountant review)
   Status: PENDING
+
+ITEM F-SCHEMA-REF-1 | 2026-05-19 | F — Accounting | Regenerate SCHEMA_QUICK_REF.md after every production migration
+  Originating session: S-SCHEMA-QUICK-REF
+  Surfaced into checklist: S-SCHEMA-QUICK-REF
+  Detail: docs/FLEETFORGE_SCHEMA_QUICK_REF.md is the authoritative quick-reference
+    for actual on-disk column names across all 126 tables. It is regenerated from
+    information_schema by scripts/generate_schema_ref.php. Spec files (SPEC_FINAL,
+    ACCOUNTING_SPEC, etc.) use idealized column names that have repeatedly drifted
+    from reality, producing K-22 catches across Phase B + C sessions. Every time
+    a production migration adds, drops, or renames a column the quick-ref MUST be
+    regenerated so future session prompts trust the right names. Skipping this
+    re-introduces the K-22 risk the quick-ref was created to eliminate.
+  Action: After every production migration is applied (post bin/migrate.php),
+    SSH to mainlandrentals.com → `cd /var/www/fleetforge` →
+    `sudo -u www-data php scripts/generate_schema_ref.php` → verify the
+    "Tables: N (core: X, acc_: Y, other: Z)" line is sane → commit the
+    regenerated docs/FLEETFORGE_SCHEMA_QUICK_REF.md to main on the same deploy.
+    Add this step to the deploy runbook between "apply migrations" and "run
+    smoke tests".
+  Owner: Operator (every deploy that includes a migration)
+  Status: PENDING
 ```
 
 ### G — Smoke + verification procedures

@@ -654,6 +654,25 @@ echo json_encode(['error' => true, 'message' => 'Record modified.']);
 
 `json_error()` lives in `api/bootstrap.php`; pages-side equivalent is the page-level exception handler installed by `_ff_session_start()`.
 
+### ⚑ PRIMARY COLUMN-NAME SOURCE — read this before writing any column reference
+
+Before writing ANY column reference in code or a session prompt, check
+**`docs/FLEETFORGE_SCHEMA_QUICK_REF.md`** first. That file is auto-generated
+from the live database's `information_schema` and lists every column on
+every table in the order they exist on disk.
+
+The spec files (`FLEETFORGE_SPEC_FINAL.md`, `FLEETFORGE_ACCOUNTING_SPEC.md`,
+etc.) use idealized column names that often differ from on-disk reality —
+that drift is the entire source of the K-22 trap catalog below. The
+quick-ref shows what is actually there.
+
+Regenerate after migrations: `php scripts/generate_schema_ref.php`.
+
+The individual trap entries below (Traps 13+) remain because each one
+captures a concrete recurring confusion (column-name *and* the wrong
+spelling that keeps appearing in prompts). Use them as a fast scan; use
+the quick-ref as the source of truth.
+
 ### Trap 13: `acc_accounts` uses `code` NOT `account_number`
 The Chart of Accounts column is `acc_accounts.code` (varchar(20), UNIQUE KEY). It is NOT `account_number`. Multiple session prompts have referenced `account_number` and the resulting code fails at the PDO layer with "Unknown column 'account_number'". When writing seed UPDATEs, CSV import column mappings, or report queries that JOIN on the COA, always use `code`.
 
