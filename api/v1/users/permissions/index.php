@@ -100,32 +100,41 @@ $moduleSlugs = array_keys($allModules);
 sort($moduleSlugs);
 
 $labels = [
-    'customers'         => 'Customers',
-    'equipment'         => 'Equipment',
-    'leases'            => 'Leases',
-    'reservations'      => 'Reservations',
-    'invoices'          => 'Invoices',
-    'payments'          => 'Payments',
-    'rates'             => 'Rates',
-    'maintenance'       => 'Maintenance',
-    'compliance'        => 'Compliance',
-    'reports'           => 'Reports',
-    'analytics'         => 'Analytics',
-    'users'             => 'Users',
-    'settings'          => 'Settings',
-    'audit'             => 'Audit Log',
-    'ai'                => 'AI Tools',
-    'chart_of_accounts' => 'Chart of Accounts',
-    'journal_entries'   => 'Journal Entries',
-    'accounts_payable'  => 'Accounts Payable',
-    'bank_accounts'     => 'Bank Accounts',
-    'fixed_assets'      => 'Fixed Assets',
-    'tax_management'    => 'Tax Management',
-    'financial_reports' => 'Financial Reports',
-    'budgets'           => 'Budgets',
-    'period_management' => 'Period Management',
+    'customers'           => 'Customers',
+    'equipment'           => 'Equipment',
+    'leases'              => 'Leases',
+    'reservations'        => 'Reservations',
+    'invoices'            => 'Invoices',
+    'payments'            => 'Payments',
+    'rates'               => 'Rates',
+    'maintenance'         => 'Maintenance',
+    // S-PERM-CLEANUP (D-PERM-EXPAND-4 cosmetic item): 'inspections' was in
+    // role-default matrix + 22+ require_permission() call sites but missing
+    // from $labels — used to render via ucwords fallback as "Inspections".
+    'inspections'         => 'Inspections',
+    'compliance'          => 'Compliance',
+    'reports'             => 'Reports',
+    'analytics'           => 'Analytics',
+    'users'               => 'Users',
+    'settings'            => 'Settings',
+    'audit'               => 'Audit Log',
+    'ai'                  => 'AI Tools',
+    'chart_of_accounts'   => 'Chart of Accounts',
+    'journal_entries'     => 'Journal Entries',
+    'accounts_payable'    => 'Accounts Payable',
+    'bank_accounts'       => 'Bank Accounts',
+    'fixed_assets'        => 'Fixed Assets',
+    'tax_management'      => 'Tax Management',
+    'financial_reports'   => 'Financial Reports',
+    'budgets'             => 'Budgets',
+    'period_management'   => 'Period Management',
+    // S-PERM-CLEANUP: accounting_settings module added to config + this
+    // labels map. Real key used by 5 require_permission() call sites in
+    // api/v1/accounting/settings/*; was missing from config entirely
+    // pre-cleanup (silent 403 for non-super_admin per D-PERM-EXPAND-4 drift).
+    'accounting_settings' => 'Accounting Settings',
     // S-PERM-EXPAND: QBO module reserved for Phase QBO.
-    'quickbooks'        => 'QuickBooks',
+    'quickbooks'          => 'QuickBooks',
 ];
 
 // ── Build the matrix ────────────────────────────────────────

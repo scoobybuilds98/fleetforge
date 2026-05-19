@@ -120,6 +120,12 @@ return [
         'financial_reports'  => $ALL,
         'budgets'            => $ALL,
         'period_management'  => $ALL + ['lock' => true, 'unlock' => true],
+        // S-PERM-CLEANUP: accounting_settings — manages GL mappings, tax settings,
+        // fiscal year config. Real module key used by code at
+        // api/v1/accounting/settings/{index,update}.php (5 require_permission call
+        // sites total, actions view/edit). Was missing from config pre-cleanup,
+        // causing silent 403 for non-super_admin (D-PERM-CLEANUP-2).
+        'accounting_settings' => $ALL,
         // S-PERM-EXPAND: QuickBooks integration (Phase QBO).
         'quickbooks'         => $QBO_ALL,
     ],
@@ -156,6 +162,9 @@ return [
         'financial_reports'  => $VCE,
         'budgets'            => $VCE,
         'period_management'  => $V    + ['lock' => false, 'unlock' => false],
+        // S-PERM-CLEANUP: managers do not manage accounting settings — settings
+        // are accountant domain (D-PERM-CLEANUP-2). Subject to CPA review.
+        'accounting_settings' => $NONE,
         // S-PERM-EXPAND: managers do not get QBO access by default — must be
         // granted per-user via override.
         'quickbooks'         => $QBO_NONE,
@@ -194,6 +203,8 @@ return [
         'financial_reports'  => $NONE,
         'budgets'            => $NONE,
         'period_management'  => $NONE + ['lock' => false, 'unlock' => false],
+        // S-PERM-CLEANUP: dispatchers do not manage accounting settings (D-PERM-CLEANUP-2).
+        'accounting_settings' => $NONE,
         'quickbooks'         => $QBO_NONE,
     ],
 
@@ -233,6 +244,12 @@ return [
         // S-PERM-EXPAND: accountant can lock (close) periods but not
         // unlock — reopening a closed period requires super_admin.
         'period_management'  => $VCE  + ['lock' => true, 'unlock' => false],
+        // S-PERM-CLEANUP: accountant gets view + edit on accounting_settings —
+        // they manage GL mappings, tax settings, fiscal year config (D-PERM-CLEANUP-2).
+        // Inline $p() pattern matches dispatcher.compliance precedent; the $VE
+        // shortcut at the top of this file is misleadingly named (it's actually
+        // edit-only, no view) so we inline the literal pattern for clarity.
+        'accounting_settings' => $p(true, false, true, false, false), // view + edit
         'quickbooks'         => $QBO_NONE,
     ],
 
@@ -267,6 +284,9 @@ return [
         'financial_reports'  => $V,
         'budgets'            => $V,
         'period_management'  => $V + ['lock' => false, 'unlock' => false],
+        // S-PERM-CLEANUP: read_only sees accounting_settings (consistency with
+        // their accounting-view pattern; D-PERM-CLEANUP-2).
+        'accounting_settings' => $V,
         'quickbooks'         => $QBO_NONE,
     ],
 ];

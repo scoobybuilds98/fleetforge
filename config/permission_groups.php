@@ -31,13 +31,18 @@ declare(strict_types=1);
 return [
 
     // ----------------------------------------------------------
-    // accounting — 9 submodules per FLEETFORGE_ACCOUNTING_SPEC §1.3
+    // accounting — 10 submodules: 9 per FLEETFORGE_ACCOUNTING_SPEC §1.3
+    // plus accounting_settings added in S-PERM-CLEANUP (2026-05-20). The
+    // accounting_settings module was missing from config/permissions.php
+    // entirely until S-PERM-CLEANUP, even though 5 require_permission()
+    // call sites referenced it (the pre-existing drift documented in
+    // D-PERM-EXPAND-4 and addressed in D-PERM-CLEANUP-2).
     // ----------------------------------------------------------
     'accounting' => [
         'label'       => 'Accounting',
         'description' => 'All accounting submodules — Chart of Accounts, '
                        . 'Journal Entries, AP, Bank Accounts, Fixed Assets, '
-                       . 'Tax, Financial Reports, Budgets, Periods.',
+                       . 'Tax, Financial Reports, Budgets, Periods, Settings.',
         'modules'     => [
             'chart_of_accounts',
             'journal_entries',
@@ -48,6 +53,12 @@ return [
             'financial_reports',
             'budgets',
             'period_management',
+            // S-PERM-CLEANUP (2026-05-20): 10th module added — accounting_settings
+            // is the real key used by the 5 require_permission() call sites in
+            // api/v1/accounting/settings/{index,update}.php +
+            // app/admin/accounting/settings/index.php. Bulk macros now affect
+            // 10 modules instead of 9; grant_view applies 10 .view overrides.
+            'accounting_settings',
         ],
     ],
 

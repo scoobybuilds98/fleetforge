@@ -74,7 +74,9 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-*(none)*
+**S-PERM-CLEANUP** — IN-FLIGHT
+  Started: 2026-05-20T04:00 UTC by desktop-1
+  Touching: config/permissions.php (add accounting_settings module to 5 roles), config/permission_actions.php (accounting_settings action vocab), config/permission_groups.php (10th module in accounting group), api/v1/users/permissions/index.php (labels), app/admin/users/permissions.php (labels), user_permission_overrides (DB DELETEs — 7 rows: 5 phantom 'accounting.*' + 2 redundant 'customers.view'). No migration (43/0/0 sticky). Audit reference: audits/2026-05-20_permission_audit.md §5.1 + §5.4.
 
 **S-PHASE-D-INTEGRATION-TEST** — COMPLETED 2026-05-19 (report: [docs/test_reports/S-PHASE-D-INTEGRATION-TEST-2026-05-19.md](test_reports/S-PHASE-D-INTEGRATION-TEST-2026-05-19.md)).
 Verdict: ✅ **READY FOR PHASE QBO**. 36/39 tests PASS, 0 FAIL, 3 non-blocking findings (schema_quick_ref drift = exactly Phase D's 4 new tables, regen-and-commit recommended; AR drift changed from prompt baseline but Phase D confirmed not the cause — 0 capital-lease JE lines on AR account #4; LeaseClassificationService method naming `classify` → actual `runWizard`, semantic equivalent). Live integration tested ImpairmentTestService end-to-end on real fleet asset (C3a/b/e/f all green); ship-time smoke evidence cited for C1/C2 lifecycle flows from LESSOR-1..6 SESSION LOG rows. Full S-PERM-EXPAND HTTP permission audit (E1-E4) passed. D131 6/6 PASS pre- and post-test. Cleanup verification: 10/10 baseline metrics match post-test (zero leftover artifacts). Next session greenlit: **S-QBO-1**.

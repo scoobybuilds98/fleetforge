@@ -78,6 +78,13 @@ return [
             'submit',
         ],
 
+        // Accounting Settings (S-PERM-CLEANUP) — manages GL account mappings,
+        // tax settings, fiscal year config. The 5 require_permission() call
+        // sites in code only use 'view' and 'edit' — explicit minimal vocab
+        // here so the admin UI matrix doesn't render irrelevant create/delete
+        // columns (settings rows are updated, not created/destroyed).
+        'accounting_settings' => ['view', 'edit'],
+
         // QuickBooks — reserved key for Phase QBO. Defines the
         // sensitive integration-control vocabulary in advance so
         // per-user overrides can grant access before any
@@ -116,6 +123,9 @@ return [
         'lock'              => 'Close accounting periods (open → closed)',
         'unlock'            => 'Re-open closed accounting periods',
         'submit'            => 'Submit tax filings (mark as filed)',
+
+        // (action_descriptions for view/edit already covered by the standard
+        // CRUD set above — accounting_settings reuses them.)
 
         // QuickBooks integration controls
         'force_resync'      => 'Manually trigger entity re-sync to QBO',
