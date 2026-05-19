@@ -292,9 +292,54 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- WHY: Depreciation account mapping will be added in the Fixed Assets phase (S032) -->
 
+        <!-- S-ACCT-GPS: GPS presentation cost + GL account mapping display -->
+        <hr style="margin:24px 0;border:none;border-top:1px solid var(--border-default);">
+        <h4 class="h6" style="margin:0 0 8px;">GPS Revenue Presentation (ASPE 3400)</h4>
+        <p class="text-secondary text-sm" style="margin:0 0 14px;">
+            Per-customer toggle on each customer profile (net = agent / gross = principal). Cost setting below
+            drives the NET split between margin revenue + Samsara recoverable on invoice posting.
+        </p>
+        <div class="form-row" style="max-width:600px;">
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">Samsara Daily Unit Cost (CAD)</label>
+                <input type="number" class="form-control" x-model="depreciation.samsara_daily_unit_cost"
+                       step="0.01" min="0" placeholder="e.g. 0.75">
+                <p class="text-secondary text-sm" style="margin:4px 0 0;">
+                    Cost per GPS unit per day. <strong>0.00 = unknown</strong> — GPS revenue posts as gross until configured.
+                </p>
+            </div>
+        </div>
+
+        <div style="margin-top:14px;padding:12px;background:var(--bg-subtle);border-radius:6px;font-size:0.8125rem;">
+            <strong style="display:block;margin-bottom:6px;">Current GL Account Mappings (read-only)</strong>
+            <table style="width:100%;border-collapse:collapse;">
+                <tbody>
+                    <?php
+                    $gpsAcctIds = [
+                        'Net Revenue'  => settings_get('accounting.gps_net_revenue_account_id'),
+                        'Gross Revenue' => settings_get('accounting.gps_gross_revenue_account_id'),
+                        'Samsara Recoverable' => settings_get('accounting.samsara_recoverable_account_id'),
+                    ];
+                    foreach ($gpsAcctIds as $label => $id):
+                        $row = $id ? db_row("SELECT code, name FROM acc_accounts WHERE id = ?", [(int) $id]) : null;
+                    ?>
+                    <tr>
+                        <td style="padding:3px 8px;color:var(--text-secondary);"><?= e($label) ?>:</td>
+                        <td style="padding:3px 8px;" class="font-mono">
+                            <?= $row ? e($row['code'] . ' — ' . $row['name']) : '<span style="color:var(--color-danger);">(not configured)</span>' ?>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <p class="text-secondary text-sm" style="margin:6px 0 0;">
+                <a href="<?= base_url('accounting/chart-of-accounts') ?>">Reconfigure in Chart of Accounts →</a>
+            </p>
+        </div>
+
         <div style="margin-top:20px;">
             <button class="btn btn-primary btn-sm" @click="saveDepreciation()" :disabled="saving.depreciation">
-                <span x-show="!saving.depreciation">Save Depreciation Settings</span>
+                <span x-show="!saving.depreciation">Save Depreciation + GPS Settings</span>
                 <span x-show="saving.depreciation">Saving...</span>
             </button>
         </div>
@@ -407,8 +452,11 @@ function FF_AcctSettings() {
         ) ?>,
 
         // WHY: DB keys are accounting.default_depreciation_method, etc.
-        // Stripped prefix = default_depreciation_method, default_useful_life_years, default_salvage_pct
+        // Stripped prefix = default_depreciation_method, default_useful_life_years, default_salvage_pct.
+        // S-ACCT-GPS: bundled the Samsara cost setting under the same tab (it's
+        // the only other ASPE 3400 / depreciation-adjacent setting).
         depreciation: {
+            samsara_daily_unit_cost: <?= json_encode($settings['samsara_daily_unit_cost'] ?? '0.00') ?>,
             default_depreciation_method: <?= json_encode($settings['default_depreciation_method'] ?? 'straight_line') ?>,
             default_useful_life_years:   <?= json_encode((int)($settings['default_useful_life_years'] ?? 10)) ?>,
             default_salvage_pct:         <?= json_encode($settings['default_salvage_pct'] ?? '10') ?>
@@ -653,7 +701,9 @@ function FF_AcctSettings() {
             this._save('depreciation', {
                 'accounting.default_depreciation_method':  this.depreciation.default_depreciation_method,
                 'accounting.default_useful_life_years':    String(this.depreciation.default_useful_life_years),
-                'accounting.default_salvage_pct':          String(this.depreciation.default_salvage_pct)
+                'accounting.default_salvage_pct':          String(this.depreciation.default_salvage_pct),
+                // S-ACCT-GPS: bundled with depreciation tab save.
+                'accounting.samsara_daily_unit_cost':      String(this.depreciation.samsara_daily_unit_cost)
             });
         },
 

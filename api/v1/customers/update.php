@@ -146,6 +146,13 @@ $currency = array_key_exists('currency', $body)
 $mileageUnit = array_key_exists('mileage_unit', $body)
     ? (in_array($body['mileage_unit'], ['km', 'miles'], true) ? $body['mileage_unit'] : null)
     : null;
+// S-ACCT-GPS: gps_revenue_presentation toggle (ASPE 3400 net/gross).
+// Per-customer policy (D-GPS-1). Validates against the ENUM — invalid
+// values silently become NULL so the field is skipped in the update.
+$gpsRevenuePresentation = array_key_exists('gps_revenue_presentation', $body)
+    ? (in_array($body['gps_revenue_presentation'], ['net', 'gross'], true) ? $body['gps_revenue_presentation'] : null)
+    : null;
+
 $billingCycle = array_key_exists('billing_cycle', $body)
     ? (in_array($body['billing_cycle'], ['monthly', 'on_close_only'], true) ? $body['billing_cycle'] : null)
     : null;
@@ -316,6 +323,7 @@ foreach ($optionals as $col => $val) {
 
 // Bool fields need explicit handling (false is valid)
 if ($gstExempt !== null)  $data['gst_exempt']  = $gstExempt  ? 1 : 0;
+if ($gpsRevenuePresentation !== null) $data['gps_revenue_presentation'] = $gpsRevenuePresentation;
 if ($pstExempt !== null)  $data['pst_exempt']  = $pstExempt  ? 1 : 0;
 if ($poRequired !== null) $data['po_required'] = $poRequired ? 1 : 0;
 

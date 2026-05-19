@@ -326,9 +326,69 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 ? '<span class="badge badge-warning">Yes</span>'
                                 : 'No' ?>
                         </dd>
+                        <!-- S-ACCT-GPS: per-customer presentation policy (ASPE 3400). -->
+                        <dt class="text-secondary text-sm">GPS Revenue Presentation</dt>
+                        <dd style="margin:0;" x-data="gpsPresentationToggle(<?= (int) $customer['id'] ?>, <?= json_encode((string) ($customer['gps_revenue_presentation'] ?? 'net')) ?>)">
+                            <span x-show="!editing" x-cloak>
+                                <span :class="current === 'gross' ? 'badge badge-warning' : 'badge badge-success'"
+                                      style="padding:2px 10px;text-transform:uppercase;font-size:0.6875rem;"
+                                      x-text="current === 'gross' ? 'Gross (Principal)' : 'Net (Agent)'"></span>
+                                <?php if (can('customers','edit')): ?>
+                                <button type="button" class="btn btn-ghost btn-xs" @click="editing = true" style="margin-left:6px;">Edit</button>
+                                <?php endif; ?>
+                            </span>
+                            <span x-show="editing" x-cloak>
+                                <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.8125rem;margin-right:8px;">
+                                    <input type="radio" value="net" x-model="draft"> Net (Agent)
+                                </label>
+                                <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.8125rem;margin-right:8px;">
+                                    <input type="radio" value="gross" x-model="draft"> Gross (Principal)
+                                </label>
+                                <button type="button" class="btn btn-primary btn-xs" :disabled="saving" @click="save()">
+                                    <span x-show="!saving">Save</span><span x-show="saving">Saving...</span>
+                                </button>
+                                <button type="button" class="btn btn-ghost btn-xs" @click="editing = false; draft = current;">Cancel</button>
+                            </span>
+                            <details style="margin-top:6px;font-size:0.7rem;color:var(--text-secondary);">
+                                <summary style="cursor:pointer;">ASPE 3400 rule</summary>
+                                <div style="margin-top:4px;max-width:520px;">
+                                    Present as <strong>agent (net)</strong> when Mainland is primarily arranging GPS access via Samsara —
+                                    only the margin is recognised as revenue. Present as <strong>principal (gross)</strong> if Mainland
+                                    provides significant independent value (e.g. custom telematics services). Default is <strong>net</strong>
+                                    per the standard's agent-favouring guidance.
+                                </div>
+                            </details>
+                        </dd>
                     </dl>
                 </div>
             </div>
+
+            <script>
+            // S-ACCT-GPS: inline toggle. Posts to customers/update.php; reloads on success.
+            function gpsPresentationToggle(customerId, initial) {
+                return {
+                    customerId, current: initial, draft: initial,
+                    editing: false, saving: false,
+                    async save() {
+                        this.saving = true;
+                        try {
+                            const r = await FF_Api.post('<?= base_url('api/v1/customers/update') ?>', {
+                                id: this.customerId,
+                                gps_revenue_presentation: this.draft,
+                            });
+                            if (r.success) {
+                                this.current = this.draft;
+                                this.editing = false;
+                                FF_Toast.success('GPS presentation updated.');
+                            } else {
+                                FF_Toast.error((r.error && r.error.message) || 'Save failed.');
+                            }
+                        } catch (e) { FF_Toast.error('Network error.'); }
+                        this.saving = false;
+                    },
+                };
+            }
+            </script>
 
             <!-- Billing Contact -->
             <div class="card">

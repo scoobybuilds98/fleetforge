@@ -78,9 +78,62 @@ class AutoEntryBridge
             [$invoiceId]
         );
 
+        // S-ACCT-GPS: cache customer + lease + GPS settings once before the
+        // loop (only when GPS lines exist + need NET split). Cheap NULL
+        // initializers means the cache stays disabled if no GPS line surfaces.
+        $gpsCache = null;
+
         // Build revenue lines grouped by GL account
         $revenueByAccount = [];
         foreach ($lineItems as $line) {
+            // GPS PRINCIPAL/AGENT PRESENTATION (ASPE 3400)
+            // Per customer.gps_revenue_presentation toggle (D-GPS-1..D-GPS-4).
+            // NET: splits GPS billing into margin (revenue) + Samsara cost (recoverable asset).
+            // GROSS or net-with-zero-cost: full billing to GPS gross revenue account.
+            // Samsara cost configured via accounting.samsara_daily_unit_cost.
+            // Credit GPS lines (is_credit=1) bypass split — flow through original
+            // path so refunds/adjustments hit the same single account they originally credited.
+            // Locked: S-ACCT-GPS 2026-05-19.
+            if ($line['item_type'] === 'gps' && empty($line['is_credit'])) {
+                if ($gpsCache === null) {
+                    $gpsCache = self::loadGpsContext($invoice);
+                }
+                if ($gpsCache['split_enabled']) {
+                    $gpsAmount = (string) $line['amount'];
+                    $leaseGpsCost = $gpsCache['lease_gps_cost'];
+                    // Derive billing days as integer division of GPS line / lease.gps_cost.
+                    $days = bcdiv($gpsAmount, $leaseGpsCost, 0);
+                    $totalCost = bcmul($gpsCache['daily_cost'], $days, 2);
+                    // Cost can never exceed the billing amount — bcmin equivalent.
+                    if (bccomp($totalCost, $gpsAmount, 2) > 0) {
+                        $totalCost = $gpsAmount;
+                    }
+                    $margin = bcsub($gpsAmount, $totalCost, 2);
+                    if (bccomp($margin, '0', 2) < 0) {
+                        // Cost > billing — guard against negative revenue.
+                        \error_log("AutoEntryBridge GPS NET: margin<0 on invoice {$invoiceId} line — clamping margin=0, cost={$gpsAmount}");
+                        $margin = '0.00';
+                        $totalCost = $gpsAmount;
+                    }
+
+                    $netAccId = (int) $gpsCache['net_acct_id'];
+                    $recAccId = (int) $gpsCache['recoverable_acct_id'];
+                    $revenueByAccount[$netAccId] = bcadd(
+                        $revenueByAccount[$netAccId] ?? '0.00', $margin, 2);
+                    $revenueByAccount[$recAccId] = bcadd(
+                        $revenueByAccount[$recAccId] ?? '0.00', $totalCost, 2);
+                    continue;
+                }
+                // GROSS path (presentation=gross OR net-but-no-cost OR fallback)
+                if (!empty($gpsCache['gross_acct_id'])) {
+                    $grossAccId = (int) $gpsCache['gross_acct_id'];
+                    $revenueByAccount[$grossAccId] = bcadd(
+                        $revenueByAccount[$grossAccId] ?? '0.00', (string) $line['amount'], 2);
+                    continue;
+                }
+                // Final fallback — let original mapping path resolve (legacy 'gps' → mapped account).
+            }
+
             $accountId = self::resolveRevenueAccount($line['item_type']);
             if (!$accountId) {
                 throw new \RuntimeException(
@@ -631,6 +684,77 @@ class AutoEntryBridge
      * @param string $lineType  e.g. 'base_rental', 'late_fee', 'mileage_precharge'
      * @return int|null          Account ID or null if not mapped
      */
+    /**
+     * S-ACCT-GPS: load + cache GPS presentation context for an invoice.
+     * Reads customer.gps_revenue_presentation + lease.gps_cost + the 4 GPS-
+     * related settings exactly once per invoice. Returns a context array
+     * with `split_enabled` true when ALL conditions for NET treatment hold:
+     * presentation='net', samsara_daily_unit_cost > 0, lease.gps_cost > 0,
+     * and both account_id settings configured. STOP CONDITION compliance:
+     * never throws — falls back to GROSS treatment when anything is missing
+     * + logs the fallback reason.
+     */
+    private static function loadGpsContext(array $invoice): array
+    {
+        $ctx = [
+            'split_enabled'       => false,
+            'presentation'        => 'gross',
+            'daily_cost'          => '0.00',
+            'lease_gps_cost'      => '0.00',
+            'net_acct_id'         => null,
+            'recoverable_acct_id' => null,
+            'gross_acct_id'       => null,
+        ];
+
+        // Customer presentation policy. Backward-compat guard: if the column
+        // is missing (impossible post-migration but defensive), treat as gross.
+        try {
+            $cust = \db_row(
+                "SELECT gps_revenue_presentation FROM customers WHERE id = ?",
+                [(int) $invoice['customer_id']]
+            );
+            $ctx['presentation'] = $cust['gps_revenue_presentation'] ?? 'gross';
+        } catch (\Throwable) {
+            \error_log('AutoEntryBridge GPS: customers.gps_revenue_presentation read failed — defaulting to gross.');
+            return $ctx;
+        }
+
+        // Daily cost + account IDs (all four settings must be present for NET).
+        $ctx['daily_cost']          = (string) AccountingService::setting('accounting.samsara_daily_unit_cost', '0.00');
+        $ctx['net_acct_id']         = AccountingService::setting('accounting.gps_net_revenue_account_id');
+        $ctx['recoverable_acct_id'] = AccountingService::setting('accounting.samsara_recoverable_account_id');
+        $ctx['gross_acct_id']       = AccountingService::setting('accounting.gps_gross_revenue_account_id');
+
+        // Lease GPS cost — needed only for NET path day-derivation.
+        if (!empty($invoice['lease_id'])) {
+            $lease = \db_row("SELECT gps_cost FROM leases WHERE id = ?", [(int) $invoice['lease_id']]);
+            $ctx['lease_gps_cost'] = (string) ($lease['gps_cost'] ?? '0.00');
+        }
+
+        // Decide split_enabled (NET treatment) — all five gates must pass.
+        $gates = [
+            $ctx['presentation'] === 'net',
+            bccomp($ctx['daily_cost'], '0.00', 4) > 0,
+            bccomp($ctx['lease_gps_cost'], '0.00', 4) > 0,
+            !empty($ctx['net_acct_id']),
+            !empty($ctx['recoverable_acct_id']),
+        ];
+        $ctx['split_enabled'] = !in_array(false, $gates, true);
+
+        if ($ctx['presentation'] === 'net' && !$ctx['split_enabled']) {
+            \error_log(sprintf(
+                'AutoEntryBridge GPS NET fallback to gross on invoice %d: daily_cost=%s lease_gps_cost=%s net_acct=%s rec_acct=%s',
+                (int) $invoice['id'],
+                $ctx['daily_cost'],
+                $ctx['lease_gps_cost'],
+                $ctx['net_acct_id'] ? 'set' : 'MISSING',
+                $ctx['recoverable_acct_id'] ? 'set' : 'MISSING'
+            ));
+        }
+
+        return $ctx;
+    }
+
     private static function resolveRevenueAccount(string $lineType): ?int
     {
         static $mapCache = null;

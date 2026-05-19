@@ -1546,6 +1546,7 @@ CREATE TABLE `customers` (
   `tax_exempt_document` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `tax_rate_id` int unsigned DEFAULT NULL,
   `billing_cycle` enum('monthly','on_close_only') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'monthly',
+  `gps_revenue_presentation` enum('net','gross') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'net',
   `invoice_delivery` enum('email','mail','portal','none') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'email',
   `invoice_email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `invoice_cc_emails` json DEFAULT NULL,
