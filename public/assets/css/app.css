@@ -9600,29 +9600,27 @@ body:has(.chat-page-content) #ff-chat-widget {
     border-left: 2px solid var(--color-primary);
     border-bottom: 1px solid var(--border-color);
 }
-/* Title: tiny all-caps catalog label — the content is the focus, not the heading */
+/* Title: uppercase, readable size, secondary color */
 .dashboard-section-title {
-    font-size: 0.625rem;
-    font-weight: 700;
-    letter-spacing: 0.16em;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     margin: 0;
     flex: 1;
 }
 .dashboard-section-viewall {
-    font-size: 0.5625rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-muted);
     text-decoration: none;
     white-space: nowrap;
-    opacity: 0.55;
-    transition: opacity 150ms ease, color 150ms ease;
+    transition: color 150ms ease;
 }
 .dashboard-section-viewall:hover {
-    opacity: 1;
     color: var(--color-primary);
     text-decoration: none;
 }
