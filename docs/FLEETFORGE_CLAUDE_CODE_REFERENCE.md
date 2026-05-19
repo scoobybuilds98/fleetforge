@@ -1079,6 +1079,23 @@ When the ENUM is extended (or a `bill_lines.is_meals_entertainment` flag is adde
 
 **Source:** K-22 catch surfaced in S-ACCT-GST34 (M&E ITC restriction stub + spec §23.7 zero-rated export gap). Locked 2026-05-19.
 
+### Trap 35: `customers` has NO `gps_exempt` column — GPS is lease-level
+There is no `customers.gps_exempt` or any per-customer GPS opt-out. GPS is configured on the LEASE row: `leases.gps_opt_in` (tinyint(1)) + `leases.gps_cost` (decimal(10,2)). This means GPS can vary contract-by-contract for the same customer — a customer can have one lease with GPS and one without.
+
+The closest per-customer GPS-adjacent column is `customers.gps_revenue_presentation` (ENUM('net','gross'), added by S-ACCT-GPS) — but that's a PRESENTATION policy (ASPE 3400 agent vs principal), not an opt-out.
+
+```sql
+-- WRONG — column does not exist on customers
+SELECT id FROM customers WHERE gps_exempt = 0;
+
+-- RIGHT — check GPS at the lease level
+SELECT l.id FROM leases l WHERE l.customer_id = ? AND l.gps_opt_in = 1;
+```
+
+ALTER-anchor implication: if you're adding a new per-customer GPS-related column (e.g. for some future per-customer override), don't anchor `AFTER gps_exempt`. The S-ACCT-GPS migration placed `gps_revenue_presentation` AFTER `billing_cycle` — that's the presentation-policy cluster on this table (next to `invoice_delivery`, `invoice_email`, `po_required`).
+
+**Source:** K-22 catch surfaced in S-ACCT-GPS (`gps_revenue_presentation` migration's AFTER anchor). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
