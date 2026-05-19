@@ -1096,6 +1096,135 @@ ALTER-anchor implication: if you're adding a new per-customer GPS-related column
 
 **Source:** K-22 catch surfaced in S-ACCT-GPS (`gps_revenue_presentation` migration's AFTER anchor). Locked 2026-05-19.
 
+### Trap 36: `acc_fixed_assets` uses `depreciation_method` NOT `amortization_method`
+The fixed-asset method column is `acc_fixed_assets.depreciation_method` (ENUM('straight_line','declining_balance','units_of_production','none')). It is NOT `amortization_method`. Some ASPE/CPA literature uses "amortization" generically for both tangible and intangible cost allocation, but on disk the column is named after the tangible-PP&E term. Any service computing per-asset method-driven policy (Note 2 PP&E policy paragraph, depreciation engine selection, asset detail UI) must read `depreciation_method`.
+
+```sql
+-- WRONG (column does not exist)
+SELECT DISTINCT amortization_method FROM acc_fixed_assets;
+
+-- RIGHT
+SELECT DISTINCT depreciation_method FROM acc_fixed_assets;
+```
+
+**Source:** K-22 catch surfaced in S-ACCT-DISC (Note 2 PP&E policy paragraph reading DISTINCT methods from active assets). Locked 2026-05-19.
+
+### Trap 37: `acc_depreciation_run_lines` per-period dep column is `depreciation` (not `amount`)
+The per-asset-per-period depreciation amount on a run line is `acc_depreciation_run_lines.depreciation` (decimal(15,2)). It is NOT `amount` (no such column), NOT `depreciation_amount`, NOT `depr_amount`. Always grep the actual column on disk before any session touching depreciation run lines — sister columns `opening_nbv` and `closing_nbv` use NBV suffix but the dep column itself is unadorned.
+
+```sql
+-- WRONG (column does not exist)
+SELECT SUM(rl.amount) FROM acc_depreciation_run_lines rl ...
+
+-- RIGHT
+SELECT SUM(rl.depreciation) FROM acc_depreciation_run_lines rl
+  JOIN acc_depreciation_runs r ON r.id = rl.run_id
+  JOIN acc_periods p ON p.id = rl.period_id
+ WHERE p.year = ?
+   AND r.status = 'posted'
+ GROUP BY rl.asset_id;
+```
+
+**Source:** K-22 catch surfaced in S-ACCT-DISC (Note 3 PP&E continuity current-year depreciation aggregate). Locked 2026-05-19.
+
+### Trap 38: `damage_claims.status` ENUM has `'resolved'`/`'written_off'` — NO `'settled'` value
+The on-disk ENUM is `damage_claims.status` = `'reported','assessed','repair_ordered','invoiced','resolved','written_off'`. It does NOT contain `'settled'` — that's a different vocabulary (loans / lawsuits / insurance claims). Filters that try to exclude closed claims using `status != 'settled'` silently match every row because the value never appears; filters that try to find closed claims using `status = 'settled'` silently match nothing.
+
+```sql
+-- WRONG (the 'settled' value never appears in this ENUM)
+SELECT * FROM damage_claims WHERE status = 'settled';
+SELECT * FROM damage_claims WHERE status NOT IN ('settled','written_off');
+
+-- RIGHT — closed claims are 'resolved' OR 'written_off'
+SELECT * FROM damage_claims WHERE status IN ('resolved','written_off');
+SELECT * FROM damage_claims WHERE status NOT IN ('resolved','written_off');
+```
+
+Practical implication for Note 7 Commitments & Contingencies (and any other "open claims" report): filter open claims with `status NOT IN ('resolved','written_off')`. The other four states (`reported`, `assessed`, `repair_ordered`, `invoiced`) are all in-flight and should appear in commitments.
+
+**Source:** K-22 catch surfaced in S-ACCT-DISC (Note 7 open damage-claims filter). Locked 2026-05-19.
+
+### Trap 39: `leases` has NO `classification` column — capital-lease classification is Phase D
+The `leases` table has no `classification` column on disk. Lessor capital-lease classification (operating / sales_type / direct_financing per ASPE 3065.06–.10) is Phase D scope (S-ACCT-LESSOR-1 onwards) and the column will be ADDed at that time. As of today every lease in `leases` is implicitly an operating lease, and any disclosure note, balance-sheet presentation, or lessor-side report that asks "are there sales-type or direct-financing leases?" must defensively check for column existence OR hard-code the no-capital-leases answer for the current era.
+
+```sql
+-- WRONG (column does not exist)
+SELECT * FROM leases WHERE classification IN ('sales_type','direct_financing');
+
+-- RIGHT — guard with information_schema or pass through static stub
+SELECT COUNT(*) AS has_col FROM information_schema.columns
+ WHERE table_schema = DATABASE() AND table_name = 'leases' AND column_name = 'classification';
+-- If has_col = 0 → emit "no sales-type or direct financing leases" stub.
+```
+
+Practical implication for §23.9 Note 9 (Net Investment in Lease): the auto-generated note always returns the "no sales-type or direct financing leases as at..." stub language until S-ACCT-LESSOR-1 lands. Any session adding the classification column should also update DisclosureService::generateNote9_NetInvestmentInLease to populate the actual net-investment schedule.
+
+**Source:** K-22 catch surfaced in S-ACCT-DISC (Note 9 stub branch + spec §23.9 capital-lease-aware logic). Locked 2026-05-19.
+
+### Trap 40: `vendors` uses `name` NOT `company_name` — opposite convention to `customers`
+The vendor identity column is `vendors.name` (varchar(255), NOT NULL). It is NOT `company_name`. Customers, by contrast, use `customers.company_name` (see Trap 25) — the two tables have OPPOSITE naming conventions for the same conceptual field, which trips up generic "party" code that templates over both.
+
+```sql
+-- WRONG (column does not exist on vendors)
+SELECT id, company_name FROM vendors WHERE is_related_party = 1;
+
+-- RIGHT
+SELECT id, name FROM vendors WHERE is_related_party = 1;
+```
+
+ALTER-anchor implication: when adding a per-vendor column whose customers counterpart anchors AFTER `company_name` (e.g. `is_related_party`), the vendors version anchors AFTER `name`. S-ACCT-DISC: `customers.is_related_party AFTER company_name` + `vendors.is_related_party AFTER name`.
+
+```sql
+-- vendors-side anchor
+ALTER TABLE vendors ADD COLUMN is_related_party TINYINT(1) NOT NULL DEFAULT 0 AFTER name;
+
+-- customers-side anchor (note the column-name difference)
+ALTER TABLE customers ADD COLUMN is_related_party TINYINT(1) NOT NULL DEFAULT 0 AFTER company_name;
+```
+
+Cross-reference: Trap 25 covers the customers-side rule (`company_name` NOT `name`). Always pair these — if you grep one and assume the other matches, you'll write a broken `JOIN ... USING (name)` or `UNION` query.
+
+**Source:** K-22 catch surfaced in S-ACCT-DISC (Note 6 related-party purchases query + `is_related_party` ALTER anchor). Locked 2026-05-19.
+
+### Trap 41: `invoices.total_amount` NOT `total` — D16 bcmath rule still applies
+The invoice total column is `invoices.total_amount` (decimal(12,2), NOT NULL DEFAULT 0.00). It is NOT `total`. The table has FOUR money columns whose names all START with a noun: `subtotal`, `subtotal_after_discount`, `tax_total`, `total_amount`. The natural-language phrase "the invoice total" maps to `total_amount`, not the (absent) bare `total` column.
+
+```sql
+-- WRONG (column does not exist)
+SELECT SUM(total) FROM invoices WHERE customer_id = ?;
+SELECT SUM(total - amount_paid) AS ar FROM invoices WHERE status = 'sent';
+
+-- RIGHT
+SELECT SUM(total_amount) FROM invoices WHERE customer_id = ?;
+SELECT SUM(total_amount - amount_paid) AS ar FROM invoices WHERE status IN ('sent','partially_paid','overdue');
+```
+
+Per D16, money-arithmetic in PHP must use bcmath strings — even though the DB returns decimal, never cast to float for sums beyond display.
+
+**Source:** K-22 catch surfaced in S-ACCT-DISC (Note 6 related-party revenue + outstanding-AR aggregates). Locked 2026-05-19.
+
+### Trap 42: `invoices.status` for AR queries — include `partially_paid` and `overdue`, not just `'sent'`
+The invoice status ENUM is `'draft','sent','partially_paid','paid','overdue','void','written_off'`. An invoice is OUTSTANDING (has AR exposure) when its status is one of `sent`, `partially_paid`, or `overdue` — not just `'sent'`. Reports that filter `WHERE status = 'sent'` quietly miss every partially-paid and overdue invoice; reports that filter `WHERE status != 'paid'` miss the same OR include drafts and voids depending on framing.
+
+```sql
+-- WRONG (misses partially_paid + overdue)
+SELECT SUM(total_amount - amount_paid) FROM invoices WHERE status = 'sent';
+
+-- WRONG (includes drafts and voids)
+SELECT SUM(total_amount - amount_paid) FROM invoices WHERE status != 'paid';
+
+-- RIGHT — explicit active-AR set
+SELECT SUM(total_amount - amount_paid)
+  FROM invoices
+ WHERE customer_id = ?
+   AND status IN ('sent','partially_paid','overdue')
+   AND invoice_date <= ?;
+```
+
+Practical implication for Note 6 related-party outstanding balances + statements + collections reports + AR aging: always express the active-AR set as the explicit 3-value IN-list `('sent','partially_paid','overdue')`. If you're rolling up to a per-customer balance (Note 6, statements), this is the only filter that reconciles to `customers.outstanding_balance` after the S-FIX-2 counter remediation.
+
+**Source:** K-22 catch surfaced in S-ACCT-DISC (Note 6 outstanding-AR aggregate at year-end). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
