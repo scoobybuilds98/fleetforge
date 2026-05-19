@@ -150,449 +150,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /stat-grid -->
 
 
-    <!-- ── ACTIVE LEASES — S-DASHBOARD-MOBILE-CAROUSEL ──────────── -->
-    <?php /* Replaces the prior vertical card+table layout (and the
-             dashboard-leases-card mobile-scroll workaround from the
-             S-DASHBOARD-MOBILE-LAYOUT session) with a horizontal scroll
-             carousel of compact cards. Data still comes from
-             FF_Dashboard.tables.active_leases via Alpine x-for; loading,
-             error, and empty states preserved. */ ?>
-    <div class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h3 class="dashboard-section-title">Active Leases</h3>
-            <a href="<?= base_url('leases') ?>?status=active"
-               class="dashboard-section-viewall">View all →</a>
-        </div>
-
-        <template x-if="!tablesLoaded && !tablesError">
-            <div class="carousel-empty">Loading…</div>
-        </template>
-
-        <template x-if="tablesError">
-            <div class="carousel-empty">
-                Could not load leases.
-                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
-            </div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.active_leases.length === 0">
-            <div class="carousel-empty">No active leases</div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.active_leases.length > 0">
-            <div class="dashboard-carousel">
-                <template x-for="row in tables.active_leases" :key="row.id">
-                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                       class="carousel-card carousel-card--link">
-
-                        <!-- TOP: contract number + status pill -->
-                        <div class="cc-top">
-                            <span class="cc-id" x-text="row.contract_number"></span>
-                            <span class="cc-pill cc-pill--active">Active</span>
-                        </div>
-
-                        <!-- HERO: customer name -->
-                        <div class="cc-customer" x-text="row.customer_name"></div>
-
-                        <!-- SECONDARY: equipment · unit -->
-                        <div class="cc-equipment">
-                            <span x-text="row.template_name_snapshot || 'Unknown type'"></span>
-                            <span class="cc-dot">·</span>
-                            <span x-text="row.unit_number"></span>
-                        </div>
-
-                        <div class="cc-divider"></div>
-
-                        <!-- RATE: hero number -->
-                        <div class="cc-rate">
-                            <template x-if="parseFloat(row.monthly_rate) > 0">
-                                <span>
-                                    <span class="cc-rate-amount"
-                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
-                                    <span class="cc-rate-period">/mo</span>
-                                </span>
-                            </template>
-                            <template x-if="parseFloat(row.monthly_rate) <= 0">
-                                <span>
-                                    <span class="cc-rate-amount"
-                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
-                                    <span class="cc-rate-period">/day</span>
-                                </span>
-                            </template>
-                        </div>
-
-                        <!-- FOOTER: started + days active -->
-                        <div class="cc-footer">
-                            <span class="cc-footer-item">
-                                <span class="cc-footer-label">Started</span>
-                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
-                            </span>
-                            <span class="cc-footer-item cc-footer-item--right">
-                                <span class="cc-footer-label">Active</span>
-                                <span class="cc-footer-value"
-                                      x-text="Math.max(0, parseInt(row.days_active)) + ' days'"></span>
-                            </span>
-                        </div>
-
-                    </a>
-                </template>
-            </div>
-        </template>
-    </div>
-
-
-    <!-- ── PENDING ACTIVATIONS — S-DASHBOARD-CAROUSEL-REORGANIZE ─ -->
-    <?php /* Promoted to a full-width carousel (previously sat at half-width
-             inside .dashboard-grid--widgets paired with the Upcoming Returns
-             table). Identical Alpine x-if/x-for pattern to Active Leases. */ ?>
-    <div class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h3 class="dashboard-section-title">Pending Activations</h3>
-            <a href="<?= base_url('leases') ?>?status=pending"
-               class="dashboard-section-viewall">View all →</a>
-        </div>
-
-        <template x-if="!tablesLoaded && !tablesError">
-            <div class="carousel-empty">Loading…</div>
-        </template>
-
-        <template x-if="tablesError">
-            <div class="carousel-empty">
-                Could not load data.
-                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
-            </div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.pending_leases.length === 0">
-            <div class="carousel-empty">No pending activations</div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.pending_leases.length > 0">
-            <div class="dashboard-carousel">
-                <template x-for="row in tables.pending_leases" :key="row.id">
-                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                       class="carousel-card carousel-card--link">
-
-                        <!-- TOP: contract number + overdue/pending pill -->
-                        <div class="cc-top">
-                            <span class="cc-id" x-text="row.contract_number"></span>
-                            <span class="cc-pill"
-                                  :class="parseInt(row.days_overdue) > 0 ? 'cc-pill--danger' : 'cc-pill--warning'">
-                                <span x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + ' days overdue' : 'Pending'"></span>
-                            </span>
-                        </div>
-
-                        <!-- HERO: customer name -->
-                        <div class="cc-customer" x-text="row.customer_name"></div>
-
-                        <!-- SECONDARY: unit number -->
-                        <div class="cc-equipment">
-                            <span x-text="row.unit_number || '—'"></span>
-                        </div>
-
-                        <div class="cc-divider"></div>
-
-                        <!-- RATE: hero number -->
-                        <div class="cc-rate">
-                            <template x-if="parseFloat(row.monthly_rate) > 0">
-                                <span>
-                                    <span class="cc-rate-amount"
-                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
-                                    <span class="cc-rate-period">/mo</span>
-                                </span>
-                            </template>
-                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
-                                <span>
-                                    <span class="cc-rate-amount"
-                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
-                                    <span class="cc-rate-period">/day</span>
-                                </span>
-                            </template>
-                        </div>
-
-                        <!-- FOOTER: scheduled start + created date -->
-                        <div class="cc-footer">
-                            <span class="cc-footer-item">
-                                <span class="cc-footer-label">Scheduled</span>
-                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
-                            </span>
-                            <span class="cc-footer-item cc-footer-item--right">
-                                <span class="cc-footer-label">Created</span>
-                                <!-- created_at is datetime; slice to YYYY-MM-DD so fmtDate parses cleanly -->
-                                <span class="cc-footer-value" x-text="fmtDate(row.created_at && row.created_at.slice(0,10))"></span>
-                            </span>
-                        </div>
-
-                    </a>
-                </template>
-            </div>
-        </template>
-    </div>
-
-
-    <!-- ── UPCOMING RETURNS — S-DASHBOARD-CAROUSEL-REORGANIZE ─ -->
-    <?php /* Converted from the old card+table layout. The API returns
-             days_remaining and end_date (spec template used days_left and
-             return_date — those don't exist on the API output; mapped to
-             the actual field names per the "adapt field names" directive).
-             Days Left coloring: red ≤3, amber ≤7, default otherwise. */ ?>
-    <div class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h3 class="dashboard-section-title">Upcoming Returns</h3>
-            <a href="<?= base_url('leases') ?>?filter=returning_soon"
-               class="dashboard-section-viewall">View all →</a>
-        </div>
-
-        <template x-if="!tablesLoaded && !tablesError">
-            <div class="carousel-empty">Loading…</div>
-        </template>
-
-        <template x-if="tablesError">
-            <div class="carousel-empty">
-                Could not load data.
-                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
-            </div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.upcoming_returns.length === 0">
-            <div class="carousel-empty">No upcoming returns</div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.upcoming_returns.length > 0">
-            <div class="dashboard-carousel">
-                <template x-for="row in tables.upcoming_returns" :key="row.id">
-                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
-                       class="carousel-card carousel-card--link">
-
-                        <!-- TOP: contract number + days-remaining pill -->
-                        <div class="cc-top">
-                            <span class="cc-id" x-text="row.contract_number"></span>
-                            <span class="cc-pill"
-                                  :class="{
-                                      'cc-pill--danger':  parseInt(row.days_remaining) <= 3,
-                                      'cc-pill--warning': parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7,
-                                      'cc-pill--info':    parseInt(row.days_remaining) > 7
-                                  }">
-                                <span x-text="row.days_remaining + ' days left'"></span>
-                            </span>
-                        </div>
-
-                        <!-- HERO: customer name -->
-                        <div class="cc-customer" x-text="row.customer_name"></div>
-
-                        <!-- SECONDARY: equipment · unit -->
-                        <div class="cc-equipment">
-                            <span x-text="row.template_name_snapshot || '—'"></span>
-                            <span class="cc-dot">·</span>
-                            <span x-text="row.unit_number"></span>
-                        </div>
-
-                        <div class="cc-divider"></div>
-
-                        <!-- Return date as hero display -->
-                        <div class="cc-rate" style="font-size:1.125rem;">
-                            <span x-text="fmtDate(row.end_date)"></span>
-                        </div>
-
-                        <!-- FOOTER: return date label + days remaining colour-coded -->
-                        <div class="cc-footer">
-                            <span class="cc-footer-item">
-                                <span class="cc-footer-label">Return date</span>
-                            </span>
-                            <span class="cc-footer-item cc-footer-item--right">
-                                <span class="cc-footer-label">Days remaining</span>
-                                <span class="cc-footer-value"
-                                      :class="{
-                                          'text-danger':  parseInt(row.days_remaining) <= 3,
-                                          'text-warning': parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7,
-                                          'text-success': parseInt(row.days_remaining) > 7
-                                      }"
-                                      x-text="row.days_remaining + ' days'"></span>
-                            </span>
-                        </div>
-
-                    </a>
-                </template>
-            </div>
-        </template>
-    </div>
-
-
-    <!-- ── OUTSTANDING INVOICES — S-DASHBOARD-CAROUSEL-REORGANIZE ─ -->
-    <?php /* New carousel. Data: tables.invoices (added to tables.php this
-             session). Due-date coloring: red if status='overdue', amber if
-             due within 7 days from today, default otherwise. */ ?>
-    <div class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h3 class="dashboard-section-title">Outstanding Invoices</h3>
-            <a href="<?= base_url('invoices') ?>?status=outstanding"
-               class="dashboard-section-viewall">View all →</a>
-        </div>
-
-        <template x-if="!tablesLoaded && !tablesError">
-            <div class="carousel-empty">Loading…</div>
-        </template>
-
-        <template x-if="tablesError">
-            <div class="carousel-empty">
-                Could not load data.
-                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
-            </div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.invoices.length === 0">
-            <div class="carousel-empty">No outstanding invoices</div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.invoices.length > 0">
-            <div class="dashboard-carousel">
-                <template x-for="row in tables.invoices" :key="row.id">
-                    <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
-                       class="carousel-card carousel-card--link">
-
-                        <!-- TOP: invoice number + status pill -->
-                        <!-- WHY 'partially_paid' not 'partial': DB enum uses partially_paid -->
-                        <div class="cc-top">
-                            <span class="cc-id" x-text="row.invoice_number"></span>
-                            <span class="cc-pill"
-                                  :class="{
-                                      'cc-pill--danger':  row.status === 'overdue',
-                                      'cc-pill--warning': row.status === 'partially_paid',
-                                      'cc-pill--info':    row.status === 'sent'
-                                  }"
-                                  x-text="row.status === 'partially_paid' ? 'Partial' : (row.status.charAt(0).toUpperCase() + row.status.slice(1))">
-                            </span>
-                        </div>
-
-                        <!-- HERO: customer name -->
-                        <div class="cc-customer" x-text="row.customer_name"></div>
-
-                        <div class="cc-divider"></div>
-
-                        <!-- Balance due as hero number -->
-                        <div class="cc-rate"
-                             :class="parseFloat(row.balance_due) > 0 ? 'text-danger' : ''">
-                            <span class="cc-rate-amount"
-                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2})"></span>
-                            <span class="cc-rate-period"> owing</span>
-                        </div>
-
-                        <!-- FOOTER: due date + invoice total -->
-                        <div class="cc-footer">
-                            <span class="cc-footer-item">
-                                <span class="cc-footer-label">Due</span>
-                                <!-- days_overdue > 0 means past due date -->
-                                <span class="cc-footer-value"
-                                      :class="parseInt(row.days_overdue) > 0 ? 'text-danger' : ''"
-                                      x-text="fmtDate(row.due_date)"></span>
-                            </span>
-                            <span class="cc-footer-item cc-footer-item--right">
-                                <span class="cc-footer-label">Total</span>
-                                <span class="cc-footer-value"
-                                      x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA',{minimumFractionDigits:2})"></span>
-                            </span>
-                        </div>
-
-                    </a>
-                </template>
-            </div>
-        </template>
-    </div>
-
-
-    <!-- ── UPCOMING RESERVATIONS — S-DASHBOARD-CAROUSEL-ENRICH ─ -->
-    <?php /* 7-row card per spec. Schema deviations are handled in the API
-             (tables.php) which synthesizes the missing columns:
-                - reservation_number → CONCAT('RES-', id)
-                - unit_number        → NULL (rendered as '—')
-                - equipment_type     → NULL (rendered as '—')
-                - return_date        → NULL (fmtDate returns '—' for falsy)
-             See FLEETFORGE_DATABASE_MASTER.sql:2760 for the bare reservations
-             schema. The card template matches active leases so the layout
-             stays consistent across the dashboard. */ ?>
-    <div class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h3 class="dashboard-section-title">Upcoming Reservations</h3>
-            <a href="<?= base_url('reservations') ?>"
-               class="dashboard-section-viewall">View all →</a>
-        </div>
-
-        <template x-if="!tablesLoaded && !tablesError">
-            <div class="carousel-empty">Loading…</div>
-        </template>
-
-        <template x-if="tablesError">
-            <div class="carousel-empty">
-                Could not load data.
-                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
-            </div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.reservations.length === 0">
-            <div class="carousel-empty">No upcoming reservations</div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.reservations.length > 0">
-            <div class="dashboard-carousel">
-                <template x-for="row in tables.reservations" :key="row.id">
-                    <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
-                       class="carousel-card carousel-card--link">
-
-                        <!-- TOP: reservation number + days-until pill -->
-                        <!-- WHY reservation_number is synthesized: reservations table has no
-                             natural reservation_number column — CONCAT('RES-', id) from API. -->
-                        <div class="cc-top">
-                            <span class="cc-id" x-text="row.reservation_number"></span>
-                            <span class="cc-pill"
-                                  :class="{
-                                      'cc-pill--warning': parseInt(row.days_until_pickup) <= 2,
-                                      'cc-pill--info':    parseInt(row.days_until_pickup) > 2
-                                  }"
-                                  x-text="row.days_until_pickup + ' days away'">
-                            </span>
-                        </div>
-
-                        <!-- HERO: customer name -->
-                        <div class="cc-customer" x-text="row.customer_name"></div>
-
-                        <!-- SECONDARY: equipment type · unit (both NULL from schema limitation) -->
-                        <div class="cc-equipment">
-                            <span x-text="row.equipment_type || '—'"></span>
-                            <template x-if="row.unit_number && row.unit_number !== '—'">
-                                <span> · <span x-text="row.unit_number"></span></span>
-                            </template>
-                        </div>
-
-                        <div class="cc-divider"></div>
-
-                        <!-- Pickup date as hero display -->
-                        <div class="cc-rate" style="font-size:1.125rem;">
-                            <span x-text="fmtDate(row.pickup_date)"></span>
-                        </div>
-
-                        <!-- FOOTER: pickup label + return date (NULL from schema) -->
-                        <div class="cc-footer">
-                            <span class="cc-footer-item">
-                                <span class="cc-footer-label">Pickup</span>
-                            </span>
-                            <span class="cc-footer-item cc-footer-item--right">
-                                <span class="cc-footer-label">Returns</span>
-                                <!-- return_date is NULL — schema has no return_date column -->
-                                <span class="cc-footer-value" x-text="fmtDate(row.return_date)"></span>
-                            </span>
-                        </div>
-
-                    </a>
-                </template>
-            </div>
-        </template>
-    </div>
-
-
     <!-- ── ROW 1: Revenue trend (2/3) + Fleet status donut (1/3) ─ -->
-    <!-- S-DASHBOARD-CHART-POLISH: card--accent-* removed; uniform .chart-card
-         wraps every chart. .chart-wrap is the flex-shrinking container that
-         lets ApexCharts reflow when the sidebar toggles. -->
     <div class="dashboard-grid dashboard-grid--charts" style="margin-bottom:24px;">
 
         <div class="card chart-card">
@@ -623,6 +181,86 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+    </div>
+
+    <!-- ── ACTIVE LEASES ─────────────────────────────────────────── -->
+    <?php /* S-DASHBOARD-MOBILE-CAROUSEL */ ?>
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Active Leases</h3>
+            <a href="<?= base_url('leases') ?>?status=active"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load leases.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.active_leases.length === 0">
+            <div class="carousel-empty">No active leases</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.active_leases.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.active_leases" :key="row.id">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill cc-pill--active">Active</span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="row.template_name_snapshot || 'Unknown type'"></span>
+                            <span class="cc-dot">·</span>
+                            <span x-text="row.unit_number"></span>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
+                                    <span class="cc-rate-period">/mo</span>
+                                </span>
+                            </template>
+                            <template x-if="parseFloat(row.monthly_rate) <= 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
+                                    <span class="cc-rate-period">/day</span>
+                                </span>
+                            </template>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Started</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Active</span>
+                                <span class="cc-footer-value"
+                                      x-text="Math.max(0, parseInt(row.days_active)) + ' days'"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
     </div>
 
     <!-- ── ROW 2: AR Aging (1/2) + Utilization Trend (1/2) ───── -->
@@ -658,6 +296,81 @@ require_once FF_ROOT . '/includes/header.php';
 
     </div>
 
+    <!-- ── OUTSTANDING INVOICES ──────────────────────────────────── -->
+    <?php /* S-DASHBOARD-CAROUSEL-REORGANIZE */ ?>
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Outstanding Invoices</h3>
+            <a href="<?= base_url('invoices') ?>?status=outstanding"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.invoices.length === 0">
+            <div class="carousel-empty">No outstanding invoices</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.invoices.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.invoices" :key="row.id">
+                    <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <!-- WHY 'partially_paid' not 'partial': DB enum uses partially_paid -->
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.invoice_number"></span>
+                            <span class="cc-pill"
+                                  :class="{
+                                      'cc-pill--danger':  row.status === 'overdue',
+                                      'cc-pill--warning': row.status === 'partially_paid',
+                                      'cc-pill--info':    row.status === 'sent'
+                                  }"
+                                  x-text="row.status === 'partially_paid' ? 'Partial' : (row.status.charAt(0).toUpperCase() + row.status.slice(1))">
+                            </span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate"
+                             :class="parseFloat(row.balance_due) > 0 ? 'text-danger' : ''">
+                            <span class="cc-rate-amount"
+                                  x-text="'$' + parseFloat(row.balance_due).toLocaleString('en-CA',{minimumFractionDigits:2, maximumFractionDigits:2})"></span>
+                            <span class="cc-rate-period"> owing</span>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Due</span>
+                                <!-- days_overdue > 0 means past due date -->
+                                <span class="cc-footer-value"
+                                      :class="parseInt(row.days_overdue) > 0 ? 'text-danger' : ''"
+                                      x-text="fmtDate(row.due_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Total</span>
+                                <span class="cc-footer-value"
+                                      x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA',{minimumFractionDigits:2})"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
     <!-- ── ROW 3: Top Customers (1/2) + Leases Trend (1/2) ───── -->
     <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
 
@@ -691,11 +404,166 @@ require_once FF_ROOT . '/includes/header.php';
 
     </div>
 
-    <!-- ── ROW 4 (former Pending Activations + Upcoming Returns grid) removed —
-            S-DASHBOARD-CAROUSEL-REORGANIZE: both items promoted to full-width
-            carousels at the top of the dashboard, above the chart rows. ─ -->
+    <!-- ── PENDING ACTIVATIONS ───────────────────────────────────── -->
+    <?php /* S-DASHBOARD-CAROUSEL-REORGANIZE */ ?>
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Pending Activations</h3>
+            <a href="<?= base_url('leases') ?>?status=pending"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
 
-    <!-- ── ROW 5: Activity Feed (1/2) + Revenue by Type donut + Weekly Heatmap -->
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.pending_leases.length === 0">
+            <div class="carousel-empty">No pending activations</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.pending_leases.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.pending_leases" :key="row.id">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill"
+                                  :class="parseInt(row.days_overdue) > 0 ? 'cc-pill--danger' : 'cc-pill--warning'">
+                                <span x-text="parseInt(row.days_overdue) > 0 ? row.days_overdue + ' days overdue' : 'Pending'"></span>
+                            </span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="row.unit_number || '—'"></span>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <template x-if="parseFloat(row.monthly_rate) > 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.monthly_rate).toLocaleString('en-CA',{minimumFractionDigits:0})"></span>
+                                    <span class="cc-rate-period">/mo</span>
+                                </span>
+                            </template>
+                            <template x-if="!(parseFloat(row.monthly_rate) > 0) && parseFloat(row.daily_rate) > 0">
+                                <span>
+                                    <span class="cc-rate-amount"
+                                          x-text="'$' + parseFloat(row.daily_rate).toFixed(2)"></span>
+                                    <span class="cc-rate-period">/day</span>
+                                </span>
+                            </template>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Scheduled</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.start_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Created</span>
+                                <!-- created_at is datetime; slice to YYYY-MM-DD so fmtDate parses cleanly -->
+                                <span class="cc-footer-value" x-text="fmtDate(row.created_at && row.created_at.slice(0,10))"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- ── UPCOMING RETURNS ──────────────────────────────────────── -->
+    <?php /* S-DASHBOARD-CAROUSEL-REORGANIZE */ ?>
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Upcoming Returns</h3>
+            <a href="<?= base_url('leases') ?>?filter=returning_soon"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.upcoming_returns.length === 0">
+            <div class="carousel-empty">No upcoming returns</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.upcoming_returns.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.upcoming_returns" :key="row.id">
+                    <a :href="'<?= base_url('leases/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.contract_number"></span>
+                            <span class="cc-pill"
+                                  :class="{
+                                      'cc-pill--danger':  parseInt(row.days_remaining) <= 3,
+                                      'cc-pill--warning': parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7,
+                                      'cc-pill--info':    parseInt(row.days_remaining) > 7
+                                  }">
+                                <span x-text="row.days_remaining + ' days left'"></span>
+                            </span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="row.template_name_snapshot || '—'"></span>
+                            <span class="cc-dot">·</span>
+                            <span x-text="row.unit_number"></span>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate" style="font-size:1.125rem;">
+                            <span x-text="fmtDate(row.end_date)"></span>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Return date</span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Days remaining</span>
+                                <span class="cc-footer-value"
+                                      :class="{
+                                          'text-danger':  parseInt(row.days_remaining) <= 3,
+                                          'text-warning': parseInt(row.days_remaining) > 3 && parseInt(row.days_remaining) <= 7,
+                                          'text-success': parseInt(row.days_remaining) > 7
+                                      }"
+                                      x-text="row.days_remaining + ' days'"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- ── ROW 4: Activity Feed (1/2) + Revenue by Equipment Type (1/2) ── -->
     <div class="dashboard-grid dashboard-grid--equal" style="margin-bottom:24px;">
 
         <!-- Recent Activity Feed -->
@@ -761,7 +629,82 @@ require_once FF_ROOT . '/includes/header.php';
 
     </div>
 
-    <!-- ── ROW 6: Weekly Revenue Heatmap (full width) ─────────── -->
+    <!-- ── UPCOMING RESERVATIONS ─────────────────────────────────── -->
+    <?php /* S-DASHBOARD-CAROUSEL-ENRICH — synthesized fields, see tables.php */ ?>
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Upcoming Reservations</h3>
+            <a href="<?= base_url('reservations') ?>"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.reservations.length === 0">
+            <div class="carousel-empty">No upcoming reservations</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.reservations.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.reservations" :key="row.id">
+                    <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <!-- WHY reservation_number is synthesized: reservations table has no
+                             natural reservation_number column — CONCAT('RES-', id) from API. -->
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.reservation_number"></span>
+                            <span class="cc-pill"
+                                  :class="{
+                                      'cc-pill--warning': parseInt(row.days_until_pickup) <= 2,
+                                      'cc-pill--info':    parseInt(row.days_until_pickup) > 2
+                                  }"
+                                  x-text="row.days_until_pickup + ' days away'">
+                            </span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="row.equipment_type || '—'"></span>
+                            <template x-if="row.unit_number && row.unit_number !== '—'">
+                                <span> · <span x-text="row.unit_number"></span></span>
+                            </template>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate" style="font-size:1.125rem;">
+                            <span x-text="fmtDate(row.pickup_date)"></span>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Pickup</span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">Returns</span>
+                                <!-- return_date is NULL — schema has no return_date column -->
+                                <span class="cc-footer-value" x-text="fmtDate(row.return_date)"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- ── ROW 5: Weekly Revenue Heatmap (full width) ─────────── -->
     <div class="card chart-card" style="margin-bottom:24px;">
         <div class="card-header">
             <span class="card-title">Daily Revenue — Last 12 Weeks</span>
