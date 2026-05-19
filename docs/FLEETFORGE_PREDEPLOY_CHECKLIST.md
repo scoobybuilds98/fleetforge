@@ -736,6 +736,38 @@ ITEM F-SCHEMA-REF-1 | 2026-05-19 | F — Accounting | Regenerate SCHEMA_QUICK_RE
     smoke tests".
   Owner: Operator (every deploy that includes a migration)
   Status: PENDING
+
+ITEM F-SCHEMA-REF-2 | 2026-05-19 | F — Accounting | One-time backfill: regenerate SCHEMA_QUICK_REF.md after Phase D
+  Originating session: S-PHASE-D-INTEGRATION-TEST (2026-05-19)
+  Surfaced into checklist: S-PHASE-D-INTEGRATION-TEST Part A1 finding
+  Detail: The committed docs/FLEETFORGE_SCHEMA_QUICK_REF.md reports 126 tables /
+    1943 columns, but the live DB has 130 tables / 2014 columns. The drift is
+    exactly the 4 Phase D tables shipped 2026-05-19:
+      - acc_lease_classifications (LESSOR-1)
+      - acc_lease_amortization_schedules (LESSOR-2)
+      - acc_lease_residual_reviews (LESSOR-5)
+      - acc_impairment_tests (LESSOR-6)
+    Plus the schema-column adds on `leases` (LESSOR-1 — classification +
+    10 supporting cols) and `acc_journal_entries.source_type` ENUM extensions
+    (LESSOR-3/-4/-5 + S-ACCT-DMG). F-SCHEMA-REF-1 covers the recurring
+    deploy-step rule; F-SCHEMA-REF-2 is the one-time catch-up commit that
+    closes the existing drift. Until this item is complete, future session
+    prompts grep'ing the quick-ref for Phase D table names will get a false
+    "table does not exist" signal and either (a) waste tokens re-deriving
+    via DESCRIBE, or (b) re-introduce K-22 column-name drift.
+    Note: doc_freshness smoke (17/17 PASS) does NOT currently assert
+    table-count freshness — only column-name consistency on a sampled set.
+    A possible follow-up extends _smoke_doc_freshness.php with a table-count
+    line check; out of scope for this item.
+  Action (5-minute commit; can be bundled into any next docs-touch session):
+    1. `php scripts/generate_schema_ref.php` (regenerates the file in-place)
+    2. `git add docs/FLEETFORGE_SCHEMA_QUICK_REF.md`
+    3. `git commit -m "docs: regenerate schema quick-ref post-Phase-D (126→130 tables)"`
+    4. `git push origin main`
+    Verify the "Generated:" line + "Tables: 130 total · Columns: 2014" header
+    in the regenerated file before committing.
+  Owner: Code Desktop or Operator (whoever's next at the keyboard)
+  Status: PENDING
 ```
 
 ### G — Smoke + verification procedures

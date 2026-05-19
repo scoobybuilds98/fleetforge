@@ -1448,6 +1448,45 @@ $row = [
 
 **Source:** Caught in S-PERM-MACRO-STATUS (2026-05-19) when the session prompt's helper code template for the `groupStatus()` computation used `x.module === moduleName`. The actual response shape uses `slug`. Adjusted silently per `feedback_trust_file_over_prompt` (operator pre-authorized "adjust the status computation to match" in the STOP conditions). Locked as Trap 50 here so future client-side consumers of `/api/v1/users/permissions/index.php` don't repeat the same field-name mismatch.
 
+### Trap 51: `LeaseClassificationService::runWizard()` — NOT `classify()` despite the endpoint name + spec language
+
+The Phase D lease classification service exposes its main entry point as `runWizard($leaseId, $input, $userId)`, **NOT** `classify()`. This is easy to misremember because:
+
+- The HTTP endpoint is `api/v1/accounting/leases/classify.php` — so muscle memory expects a `::classify()` method.
+- `FLEETFORGE_ACCOUNTING_SPEC.md` §24.4 calls the workflow the "classification wizard" — natural shorthand "the classify thing."
+- The service IS named `LeaseClassificationService` — reinforcing the `classify` instinct.
+
+But the actual public surface is:
+
+```php
+namespace FleetForge\Accounting;
+
+class LeaseClassificationService
+{
+    // ✅ Entry point — orchestrates criteria A/B/C + writes acc_lease_classifications
+    public static function runWizard(int $leaseId, array $input, int $userId): array;
+
+    // Lower-level evaluators (called by runWizard, also callable directly for preview)
+    public static function evaluateCriterionA(array $input): bool;
+    public static function evaluateCriterionB(int $leaseTermMonths, int $economicLifeMonths): bool;
+    public static function evaluateCriterionC(string $monthlyPayment, int $termMonths,
+                                              string $guaranteedResidual, string $discountRate,
+                                              string $fairValue): bool;
+    public static function determineClassification(array $criteria, bool $creditRiskNormal,
+                                                   bool $costsEstimable, string $initialFairValue,
+                                                   string $assetCarryingAmount): string;
+
+    // Read helper
+    public static function getClassification(int $leaseId): ?array;
+
+    // ❌ NO ::classify() method exists.
+}
+```
+
+When drafting bridge prompts, test scenarios, or follow-up sessions, use **`runWizard`** (the service method name), not "classify" (the workflow / endpoint / spec name). The endpoint file `api/v1/accounting/leases/classify.php` internally calls `LeaseClassificationService::runWizard(...)`.
+
+**Source:** Surfaced in S-PHASE-D-INTEGRATION-TEST (2026-05-19) Part C service-interface audit: prompt expected `::classify` but reflection on the live class returned 6 public methods none of which were named `classify`. The semantic equivalent (`runWizard`) was present so the test continued; locked here as Trap 51 so future LESSOR-touching prompts don't repeat the name confusion.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
