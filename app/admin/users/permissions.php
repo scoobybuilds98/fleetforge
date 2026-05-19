@@ -282,12 +282,20 @@ require_once FF_ROOT . '/includes/header.php';
                     <button type="button" class="btn btn-sm btn-secondary"
                             @click="openGroupMacro(group, 'grant_read_write')"
                             :disabled="saving">Grant Read+Write</button>
-                    <!-- S-PERM-MACRO-STATUS: btn-outline-danger (canonical
-                         soft-danger outline used elsewhere) replaces filled
-                         btn-danger. Restores visual weight parity at rest;
-                         destructive intent still reads through the reason modal
-                         confirmation flow + hover state. -->
-                    <button type="button" class="btn btn-sm btn-outline-danger"
+                    <!-- S-PERM-MACRO-STATUS follow-up (Option B): drop the
+                         outline-red from Deny All. The earlier outline-danger
+                         restyle reduced visual weight vs the filled btn-danger
+                         but still read as "selected state" because it was the
+                         only red button at rest. All 4 macro buttons now share
+                         identical btn-secondary at rest — pure action affordance,
+                         no implicit state. The destructive intent moves entirely
+                         to the point-of-action modal (title "Bulk: Deny All ·
+                         {group}", red Apply button via the existing
+                         `:class="macro === 'deny_all' ? 'btn-danger' : 'btn-primary'"`
+                         binding, and the required reason field). The
+                         `groupStatus(group)` row above the buttons remains the
+                         canonical "current state" indicator. -->
+                    <button type="button" class="btn btn-sm btn-secondary"
                             @click="openGroupMacro(group, 'deny_all')"
                             :disabled="saving">Deny All</button>
                     <button type="button" class="btn btn-sm btn-secondary"
