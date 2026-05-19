@@ -40,4 +40,5 @@ INSERT IGNORE INTO `acc_year_end_checklist` (`year`, `item_key`, `item_label`, `
 (@fy, 'annual_reports',            'Generate annual financial statements',                                         0, 140),
 (@fy, 'archive',                   CONCAT('Archive ', @fy, ' supporting documents'),                               0, 150),
 (@fy, 'fx_revaluation_ye',         'Run FX revaluation for year-end USD balances',                                 0, 160),
-(@fy, 'lease_amortization_review', 'Review lease amortization schedule completeness for fiscal year',              0, 170);
+(@fy, 'lease_amortization_review', 'Review lease amortization schedule completeness for fiscal year',              0, 170),
+(@fy, 'fleet_impairment_tests',    'Run ASPE 3063 fleet impairment two-step tests (per active asset)',             0, 175);

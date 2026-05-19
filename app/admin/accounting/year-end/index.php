@@ -90,7 +90,15 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border-default);font-size:0.8125rem;align-items:flex-start;">
                     <input type="checkbox" :checked="item.is_complete == 1" @change="toggleItem(item)" <?= $canEdit ? '' : 'disabled' ?> style="margin-top:2px;">
                     <div style="flex:1;">
-                        <div :style="(item.is_complete == 1 ? 'text-decoration:line-through;color:var(--text-secondary);' : '')" x-text="item.item_label"></div>
+                        <div :style="(item.is_complete == 1 ? 'text-decoration:line-through;color:var(--text-secondary);' : '')">
+                            <span x-text="item.item_label"></span>
+                            <!-- S-ACCT-LESSOR-6: deep-link the impairment-tests item to its workflow page -->
+                            <template x-if="item.item_key === 'fleet_impairment_tests'">
+                                <a :href="'<?= base_url('accounting/impairment') ?>?fiscal_year=' + fiscalYear"
+                                   style="margin-left:6px;font-size:0.75rem;"
+                                   x-show="item.is_complete != 1">→ Open</a>
+                            </template>
+                        </div>
                         <div x-show="item.is_complete == 1 && item.completed_by_name" x-cloak style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px;">
                             ✓ <span x-text="item.completed_by_name"></span>
                             <span x-text="' · ' + (item.completed_at || '').substring(0, 16)"></span>

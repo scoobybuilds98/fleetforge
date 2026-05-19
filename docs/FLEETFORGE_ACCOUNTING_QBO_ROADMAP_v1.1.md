@@ -452,9 +452,10 @@ Migrations applied during Phase C: 31 → 37 (6 net new migrations covering AJE 
 
 ## 8. PHASE D — LESSOR CAPITAL-LEASE MODULE (6 SESSIONS)
 
-**🔜 NEXT UP — Phase C complete (2026-05-19) → Phase D unblocked.**
+**✅ PHASE D COMPLETE — 6/6 sessions shipped 2026-05-19.**
 
 (Unchanged from v1.0. 6 sessions. See v1.0 §8 for full detail.)
+Sessions shipped: S-ACCT-LESSOR-1 / -2 / -3 / -4 / -5 / -6.
 
 ### 8.1 Phase purpose
 
@@ -467,6 +468,8 @@ Mainland offers lease-to-own programs but has zero active units. Stage the ASPE 
 ---
 
 ## 9. PHASE QBO — QUICKBOOKS INTEGRATION (28 SESSIONS, UPDATED)
+
+**🔜 NEXT UP — Phase D complete (2026-05-19) → Phase QBO unblocked.**
 
 ### 9.1 Phase purpose
 
@@ -659,7 +662,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 22 | S-ACCT-LESSOR-3 | D | ✅ DONE | M | Opus | LESSOR-2 |
 | 23 | S-ACCT-LESSOR-4 | D | ✅ DONE | M | Opus | LESSOR-3 |
 | 24 | S-ACCT-LESSOR-5 | D | ✅ DONE | M | Sonnet | LESSOR-4 |
-| 25 | S-ACCT-LESSOR-6 | D | 📋 PLANNED | M | Sonnet | LESSOR-5 |
+| 25 | S-ACCT-LESSOR-6 | D | ✅ DONE | M | Sonnet | LESSOR-5 |
 | 26 | S-QBO-1 | QBO-1 | 📋 PLANNED | M | Sonnet | LESSOR-6 |
 | 27 | S-QBO-2 | QBO-1 | 📋 PLANNED | M | Sonnet | S-QBO-1 |
 | 28 | S-QBO-3 | QBO-1 | 📋 PLANNED | L | Opus | S-QBO-2 |

@@ -782,6 +782,34 @@ CREATE TABLE `acc_fx_revaluations` (
   CONSTRAINT `acc_fx_revaluations_ibfk_2` FOREIGN KEY (`journal_entry_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_fx_revaluations_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_impairment_tests` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `asset_id` int unsigned NOT NULL,
+  `fiscal_year` int NOT NULL,
+  `triggering_event` enum('annual','idle','damage','market_decline','adverse_legal','other') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `triggering_event_notes` text COLLATE utf8mb4_unicode_ci,
+  `step_1_carrying_amount` decimal(15,2) NOT NULL,
+  `step_1_undiscounted_cf` decimal(15,2) NOT NULL,
+  `step_1_cf_source` enum('estimator','operator_override') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'estimator',
+  `step_1_cf_breakdown_json` json DEFAULT NULL,
+  `step_1_passed` tinyint(1) NOT NULL,
+  `step_2_fair_value` decimal(15,2) DEFAULT NULL,
+  `step_2_impairment_loss` decimal(15,2) DEFAULT NULL,
+  `step_2_fair_value_basis` text COLLATE utf8mb4_unicode_ci,
+  `impairment_je_id` int unsigned DEFAULT NULL,
+  `tested_by` int unsigned NOT NULL,
+  `tested_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_year_asset_event` (`asset_id`,`fiscal_year`,`triggering_event`),
+  KEY `idx_year` (`fiscal_year`),
+  KEY `idx_asset` (`asset_id`),
+  KEY `idx_it_je` (`impairment_je_id`),
+  KEY `idx_it_user` (`tested_by`),
+  CONSTRAINT `fk_it_asset` FOREIGN KEY (`asset_id`) REFERENCES `acc_fixed_assets` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_it_je` FOREIGN KEY (`impairment_je_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_it_user` FOREIGN KEY (`tested_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_lease_amortization_schedules` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `lease_id` int unsigned NOT NULL,

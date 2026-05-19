@@ -133,11 +133,12 @@ $_accNavGroups = [
         'label' => 'Fixed Assets',
         'icon'  => 'truck',
         'children' => [
-            ['label' => 'Asset Register',   'url' => '/accounting/fixed-assets',                'icon' => 'truck'],
-            ['label' => 'Payoff Report',    'url' => '/accounting/fixed-assets/payoff-report',  'icon' => 'calculator'],
-            ['label' => 'Depreciation',     'url' => '/accounting/depreciation',                'icon' => 'calculator'],
-            ['label' => 'CCA Schedule 8',   'url' => '/accounting/cca',                         'icon' => 'document-text'],
-            ['label' => 'CapEx Requests',   'url' => '/accounting/capex',                       'icon' => 'banknotes'],
+            ['label' => 'Asset Register',     'url' => '/accounting/fixed-assets',                'icon' => 'truck'],
+            ['label' => 'Payoff Report',      'url' => '/accounting/fixed-assets/payoff-report',  'icon' => 'calculator'],
+            ['label' => 'Depreciation',       'url' => '/accounting/depreciation',                'icon' => 'calculator'],
+            ['label' => 'CCA Schedule 8',     'url' => '/accounting/cca',                         'icon' => 'document-text'],
+            ['label' => 'CapEx Requests',     'url' => '/accounting/capex',                       'icon' => 'banknotes'],
+            ['label' => 'Impairment Tests',   'url' => '/accounting/impairment',                  'icon' => 'scale'],
         ],
     ],
     [
