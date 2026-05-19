@@ -9627,233 +9627,176 @@ body:has(.chat-page-content) #ff-chat-widget {
     display: none;              /* Chrome / Safari */
 }
 
-/* ══ CAROUSEL CARDS — Luxury redesign ════════════════════════════════
-   S-CAROUSEL-CARD-REDESIGN + S-CAROUSEL-CARD-3D
+/* ══ CAROUSEL CARDS — Maison-level redesign ══════════════════════════
+   Zero shadows. Zero sheens. Zero glows. Typography and white-space
+   carry all the weight — Apple / Louis Vuitton / Chanel restraint.
+   The only ornament: a 2px brand-color top border, like a silk ribbon.
    ═══════════════════════════════════════════════════════════════════ */
 .carousel-card {
     flex: 0 0 300px;
     scroll-snap-align: start;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 20px;
-    padding: 24px;
+    border-top: 2px solid var(--color-primary);   /* sole decoration */
+    border-radius: 14px;
+    padding: 28px 28px 24px;
     display: flex;
     flex-direction: column;
     gap: 0;
-    min-height: 260px;
+    min-height: 290px;
     position: relative;
-    /* overflow:hidden intentionally removed — ::after floor shadow must escape the card boundary */
-    transform-style: preserve-3d;
-    will-change: transform;
     transition:
-        transform    220ms cubic-bezier(0.23, 1, 0.32, 1),
-        border-color 220ms ease;
+        transform    200ms cubic-bezier(0.23, 1, 0.32, 1),
+        border-color 200ms ease;
 }
-/* Sheen: permanent top-edge overhead light + dynamic cursor spotlight */
-.carousel-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background:
-        radial-gradient(
-            circle at var(--sheen-x, 50%) var(--sheen-y, -10%),
-            rgba(255, 255, 255, 0.08) 0%,
-            transparent 58%
-        ),
-        linear-gradient(
-            180deg,
-            rgba(255, 255, 255, 0.05) 0%,
-            rgba(255, 255, 255, 0.01) 30%,
-            transparent 55%
-        );
-    pointer-events: none;
-    z-index: 0;
-}
-/* Floor shadow — blurred ellipse BELOW the card, simulates floating above a surface.
-   Grows and descends on hover as the card rises further from the "floor". */
-.carousel-card::after {
-    content: '';
-    position: absolute;
-    bottom: -22px;
-    left: 10%;
-    right: 10%;
-    height: 40px;
-    background: rgba(0, 0, 0, 0.36);
-    filter: blur(22px);
-    border-radius: 50%;
-    z-index: -1;
-    pointer-events: none;
-    transition:
-        bottom   220ms cubic-bezier(0.23, 1, 0.32, 1),
-        filter   220ms cubic-bezier(0.23, 1, 0.32, 1),
-        opacity  220ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-/* Card children above ::before sheen */
-.carousel-card > * {
-    position: relative;
-    z-index: 1;
-}
+/* No ::before, no ::after — not a single pixel of shadow or glow */
 .carousel-card--link {
     text-decoration: none;
     color: inherit;
     cursor: pointer;
 }
-/* Hover — card floats up, floor shadow descends + expands (further from surface) */
+/* Hover: gentle scale only — no lift, no shadow, no decoration */
 .carousel-card--link:hover {
     border-color: var(--color-primary);
-    transform: translateY(-14px) scale(1.02);
+    transform: scale(1.02);
     text-decoration: none;
 }
-.carousel-card--link:hover::after {
-    bottom: -30px;
-    filter: blur(32px);
-    opacity: 0.8;
-}
-/* Press — card drops back toward surface, shadow tightens */
 .carousel-card--link:active {
-    transform: translateY(-4px) scale(0.99);
-    transition-duration: 80ms;
-}
-.carousel-card--link:active::after {
-    bottom: -14px;
-    filter: blur(14px);
-    opacity: 0.55;
-    transition-duration: 80ms;
+    transform: scale(0.988);
+    transition-duration: 60ms;
 }
 
-/* ── Top row ─────────────────────────────────────────────────── */
+/* ── Top row: ref code + status indicator ────────────────────── */
 .cc-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 16px;
-    gap: 8px;
+    margin-bottom: 22px;
+    gap: 10px;
 }
-/* cc-id: serial-number aesthetic — monospace, primary-tinted, reads like a ref code */
+/* Monospace ref — catalog / serial-number aesthetic */
 .cc-id {
     font-family: 'DM Mono', monospace;
-    font-size: 0.75rem;
-    color: var(--color-primary);
+    font-size: 0.625rem;
+    color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
     flex: 1;
-    letter-spacing: 0.02em;
-    opacity: 0.85;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
-
-/* ── Status pills ─────────────────────────────────────────────── */
+/* Status indicator: dot + uppercase label — no pill background.
+   A 5px color dot is enough; a filled badge is visual noise. */
 .cc-pill {
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
-    padding: 3px 10px;
-    border-radius: 99px;
-    font-size: 0.625rem;
+    gap: 5px;
+    font-size: 0.5625rem;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     white-space: nowrap;
 }
-/* Tailwind 300-shade tints — more readable on dark surfaces */
-.cc-pill--active  { background: rgba(74, 222, 128, .12); color: #4ade80; }
-.cc-pill--danger  { background: rgba(248, 113, 113, .12); color: #f87171; }
-.cc-pill--warning { background: rgba(251, 191, 36,  .12); color: #fbbf24; }
-.cc-pill--info    { background: rgba(125, 211, 252, .12); color: #7dd3fc; }
+.cc-pill::before {
+    content: '';
+    display: block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+.cc-pill--active  { color: #4ade80; }
+.cc-pill--danger  { color: #f87171; }
+.cc-pill--warning { color: #fbbf24; }
+.cc-pill--info    { color: #7dd3fc; }
 
-/* ── Customer name — the dominant text on the card ───────────── */
+/* ── Customer — dominant editorial text ──────────────────────── */
 .cc-customer {
-    font-size: 1.125rem;
-    font-weight: 600;
+    font-size: 1.25rem;
+    font-weight: 500;
     color: var(--text-primary);
-    line-height: 1.3;
-    margin-bottom: 6px;
+    line-height: 1.25;
+    margin-bottom: 5px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.025em;
 }
 
-/* ── Equipment + unit line ───────────────────────────────────── */
+/* ── Equipment — catalog reference line ──────────────────────── */
 .cc-equipment {
-    font-size: 0.75rem;
+    font-size: 0.625rem;
     color: var(--text-muted);
-    margin-bottom: 20px;
+    margin-bottom: 24px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
-.cc-dot {
-    margin: 0 5px;
-    opacity: 0.35;
-}
+.cc-dot { margin: 0 6px; opacity: 0.3; }
 
-/* ── Divider ─────────────────────────────────────────────────── */
-.cc-divider {
-    height: 1px;
-    background: var(--border-color);
-    margin-bottom: 20px;
-    opacity: 0.5;
-}
+/* ── Divider — hairline rule ─────────────────────────────────── */
+.cc-divider { height: 1px; background: var(--border-color); margin-bottom: 22px; }
 
-/* ── Rate / hero number — the price tag moment ───────────────── */
+/* ── Rate — the price-tag moment ─────────────────────────────── */
 .cc-rate {
     flex: 1;
     display: flex;
     align-items: baseline;
-    gap: 3px;
-    margin-bottom: 20px;
+    margin-bottom: 22px;
 }
+/* Light weight at large size = Louis Vuitton price-tag aesthetics */
 .cc-rate-amount {
-    font-size: 1.875rem;
-    font-weight: 700;
+    font-size: 2.625rem;
+    font-weight: 300;
     color: var(--text-primary);
-    letter-spacing: -0.03em;
+    letter-spacing: -0.04em;
     line-height: 1;
 }
+/* Period unit: all-caps label like a spec sheet */
 .cc-rate-period {
-    font-size: 0.875rem;
+    font-size: 0.5625rem;
     color: var(--text-muted);
-    font-weight: 400;
-    margin-left: 2px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-left: 7px;
+    align-self: flex-end;
+    margin-bottom: 5px;
 }
 
-/* ── Footer — metadata ruled off from rate by a hairline ─────── */
+/* ── Footer ──────────────────────────────────────────────────── */
 .cc-footer {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
     gap: 12px;
     margin-top: auto;
-    padding-top: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 18px;
+    border-top: 1px solid var(--border-color);
 }
-.cc-footer-item {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-}
-.cc-footer-item--right {
-    text-align: right;
-    align-items: flex-end;
-}
+.cc-footer-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cc-footer-item--right { text-align: right; align-items: flex-end; }
 .cc-footer-label {
-    font-size: 0.5625rem;
-    font-weight: 600;
+    font-size: 0.5rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.09em;
+    letter-spacing: 0.12em;
     color: var(--text-muted);
-    opacity: 0.6;
 }
 .cc-footer-value {
     font-size: 0.8125rem;
+    font-weight: 500;
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    letter-spacing: -0.01em;
 }
 
 /* ── Empty / loading / error state ────────────────────────────── */
