@@ -440,11 +440,19 @@ Extend the accounting module beyond the v1.2 spec to the CA-comprehensive bar id
 
 ### 7.4 Bucket C summary
 
+**✅ PHASE C COMPLETE — 11/11 sessions shipped (2026-05-19).**
+
+Sessions in ship order: S-ACCT-AJE → S-ACCT-WTB → S-ACCT-CCA-1 → S-ACCT-CCA-2 → S-ACCT-COMP → S-ACCT-POS → S-ACCT-GST34 → S-ACCT-GPS → S-ACCT-DISC → S-ACCT-UNIT → S-ACCT-DMG.
+
+Migrations applied during Phase C: 31 → 37 (6 net new migrations covering AJE workflow, WTB lead-schedule annotations, CCA Schedule 8 + classes, componentization + betterment, place-of-supply rules, GPS presentation toggle, disclosure-note table, damage source_type ENUM extension). No Phase-C schema removals.
+
 (Unchanged from v1.0. 11 sessions, mix of M/L/S/L effort.)
 
 ---
 
 ## 8. PHASE D — LESSOR CAPITAL-LEASE MODULE (6 SESSIONS)
+
+**🔜 NEXT UP — Phase C complete (2026-05-19) → Phase D unblocked.**
 
 (Unchanged from v1.0. 6 sessions. See v1.0 §8 for full detail.)
 
@@ -645,7 +653,7 @@ The complete 59-session plan, refreshed for v1.1. Status as of 2026-05-18.
 | 16 | S-ACCT-GPS | C | ✅ DONE | S | Sonnet | S-ACCT-GST34 |
 | 17 | S-ACCT-DISC | C | ✅ DONE | L | Opus | S-ACCT-GPS |
 | 18 | S-ACCT-UNIT | C | ✅ DONE | L | Opus | S-ACCT-DISC |
-| 19 | S-ACCT-DMG | C | 📋 PLANNED | M | Sonnet | S-ACCT-UNIT |
+| 19 | S-ACCT-DMG | C | ✅ DONE | M | Sonnet | S-ACCT-UNIT |
 | 20 | S-ACCT-LESSOR-1 | D | 📋 PLANNED | L | Opus | S-ACCT-DMG |
 | 21 | S-ACCT-LESSOR-2 | D | 📋 PLANNED | L | Opus | LESSOR-1 |
 | 22 | S-ACCT-LESSOR-3 | D | 📋 PLANNED | M | Opus | LESSOR-2 |

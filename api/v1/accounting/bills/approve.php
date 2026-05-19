@@ -200,4 +200,20 @@ if (!empty($result['uncategorized_count'])) {
                        . "Visit the bill to classify before year-end.";
 }
 
+// S-ACCT-DMG: damage-repair bridge wiring is feature-gated on a future
+// acc_bill_lines.damage_claim_id (or acc_bills.damage_claim_id) FK column
+// that does NOT exist on disk as of S-ACCT-DMG (pre-flight verified).
+// When that column ships, the wiring hook is:
+//   foreach ($lines as $line) {
+//       if (!empty($line['damage_claim_id'])) {
+//           AutoEntryBridge::onDamageRepairExpensed(
+//               (int) $line['damage_claim_id'], $id, current_user_id()
+//           );
+//       }
+//   }
+// Until then, operators link a bill to a damage claim by setting
+// damage_claims.vendor_id manually + filing the bill normally — and
+// the bridge can be invoked from a future damage_claims workflow page
+// (or from the operational damage_claims/show.php "Link Bill" action).
+
 json_success($result);

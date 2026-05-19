@@ -77,6 +77,7 @@ $_accNavGroups = [
             ['label' => 'Per-Unit P&L', 'url' => '/accounting/reports/per-unit-pnl', 'icon' => 'chart-bar'],
             ['label' => 'Book vs Tax Differences', 'url' => '/accounting/reports/book-tax-differences', 'icon' => 'document-text'],
             ['label' => 'Disclosure Notes', 'url' => '/accounting/disclosure', 'icon' => 'document-text'],
+            ['label' => 'Damage Claims Subledger', 'url' => '/accounting/damage-claims', 'icon' => 'document-text'],
         ],
     ],
     [

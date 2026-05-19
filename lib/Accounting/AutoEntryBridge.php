@@ -987,4 +987,351 @@ class AutoEntryBridge
         // hooks (e.g. cash forecasting, compliance alerts).
         return null;
     }
+
+    // ============================================================
+    // DAMAGE CLAIMS HOOKS  (S-ACCT-DMG, spec §23.11)
+    //
+    // Three methods wired into the damage_claims status-transition
+    // pipeline and bills/approve.php. Each is idempotent — calling
+    // twice for the same claim returns the existing JE row instead
+    // of double-posting.
+    //
+    // Pre-flight K-22 catches (locked in REFERENCE.md):
+    //   - damage_claims.status has 'invoiced' NOT 'billed_to_customer'
+    //     → bridge fires on 'invoiced' transition
+    //   - GL accounts:
+    //       damage_recovery_revenue → #47 (code 4100, NOT 4140 — absent)
+    //       damage_repair_expense   → #55 (code 6010 operating_expense
+    //                                 — NOT 5130, which is absent; Mainland's
+    //                                 COA places repair in 6xxx not 5xxx)
+    //       bad_debt_expense        → #70 (code 6160 — existing)
+    //   - acc_bill_lines has NO damage_claim_id FK → repair-bridge
+    //     wiring via bills/approve.php is feature-gated on this column
+    //     existing; current behavior is "log + skip".
+    // ============================================================
+
+    /**
+     * Fire when damage_claims.status transitions to 'invoiced' (recovery
+     * billed to customer). Reclassifies the invoice's existing JE source
+     * from 'invoice' → 'damage_recovery' so the subledger can drill down.
+     *
+     * Idempotent: returns existing JE row when one with source_type=
+     * 'damage_recovery' AND source_id=$claimId already exists. Never
+     * double-posts. Falls back to creating a minimal reference JE only
+     * if no underlying invoice JE exists (defensive — onInvoiceSent
+     * should have posted one already).
+     *
+     * @param int      $claimId   damage_claims.id
+     * @param int      $invoiceId invoices.id of the recovery invoice
+     * @param int|null $userId    actor for audit trail
+     * @return array|null         the JE row (existing or new), or null when
+     *                            bridge is disabled / row missing
+     */
+    public static function onDamageRecoveryBilled(int $claimId, int $invoiceId, ?int $userId = null): ?array
+    {
+        if (!self::isEnabled()) return null;
+
+        // Idempotency guard — already linked?
+        $existing = \db_row(
+            "SELECT * FROM acc_journal_entries
+              WHERE source_type = 'damage_recovery' AND source_id = ?
+              LIMIT 1",
+            [$claimId]
+        );
+        if ($existing) {
+            return $existing;
+        }
+
+        $claim = \db_row(
+            "SELECT id, claim_number, customer_id, customer_liable_amount
+               FROM damage_claims WHERE id = ? AND deleted_at IS NULL",
+            [$claimId]
+        );
+        if (!$claim) return null;
+
+        $invoice = \db_row(
+            "SELECT id, invoice_number, customer_id, company_name_snapshot,
+                    total_amount, customer_name_snapshot
+               FROM invoices WHERE id = ? AND deleted_at IS NULL",
+            [$invoiceId]
+        );
+        if (!$invoice) return null;
+
+        // Preferred path: reclassify the existing invoice JE in place.
+        // The DR AR / CR Revenue / CR Tax lines stay exactly the same —
+        // we just retag the source so subledger queries pick it up.
+        $existingInvoiceJe = \db_row(
+            "SELECT id FROM acc_journal_entries
+              WHERE source_type = 'invoice' AND source_id = ?
+              LIMIT 1",
+            [$invoiceId]
+        );
+
+        if ($existingInvoiceJe) {
+            $jeId = (int) $existingInvoiceJe['id'];
+            \db_execute(
+                "UPDATE acc_journal_entries
+                    SET source_type = 'damage_recovery',
+                        source_id   = ?
+                  WHERE id = ?
+                    AND source_type = 'invoice'",
+                [$claimId, $jeId]
+            );
+
+            \db_insert('audit_log', [
+                'user_id'      => $userId,
+                'action'       => 'update',
+                'module'       => 'accounting',
+                'entity_type'  => 'damage_claim',
+                'entity_id'    => $claimId,
+                'entity_label' => $claim['claim_number'],
+                'notes'        => "Damage recovery JE linked — claim #{$claim['claim_number']}, invoice {$invoice['invoice_number']}, JE #{$jeId}.",
+                'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+
+            return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$jeId]);
+        }
+
+        // Fallback path: no invoice JE exists (defensive — shouldn't
+        // happen in normal flow). Create a minimal reference JE so the
+        // subledger has a drill-down target.
+        $recoveryAmount = (string) ($claim['customer_liable_amount'] ?? '0.00');
+        if (bccomp($recoveryAmount, '0', 2) <= 0) {
+            $recoveryAmount = (string) ($invoice['total_amount'] ?? '0.00');
+        }
+        if (bccomp($recoveryAmount, '0', 2) <= 0) return null;
+
+        $arAccountId       = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+        $revenueAccountId  = self::requireAccountId('accounting.damage_recovery_revenue_account_id', 'Damage Recovery Revenue');
+
+        $jeLines = [
+            [
+                'account_id'  => $arAccountId,
+                'debit'       => $recoveryAmount,
+                'credit'      => '0.00',
+                'description' => "AR — Damage claim {$claim['claim_number']} invoice {$invoice['invoice_number']}",
+                'customer_id' => $claim['customer_id'],
+            ],
+            [
+                'account_id'  => $revenueAccountId,
+                'debit'       => '0.00',
+                'credit'      => $recoveryAmount,
+                'description' => "Damage recovery revenue — claim {$claim['claim_number']}",
+                'customer_id' => $claim['customer_id'],
+            ],
+        ];
+
+        $periodInfo = self::resolvePeriod(date('Y-m-d'));
+
+        return JournalEntryService::create([
+            'entry_date'       => $periodInfo['entry_date'],
+            'description'      => "Damage recovery billed — claim {$claim['claim_number']} — invoice {$invoice['invoice_number']}",
+            'entry_type'       => 'system',
+            'reference'        => $claim['claim_number'],
+            'source_type'      => 'damage_recovery',
+            'source_id'        => $claimId,
+            'post_immediately' => true,
+        ], $jeLines, $userId);
+    }
+
+    /**
+     * Fire when a vendor bill for repair work is approved and a damage
+     * claim is linked. Reclassifies the bill's existing AP/expense JE
+     * source from 'ap_bill' → 'damage_repair'.
+     *
+     * Idempotent: returns existing JE row when source_type='damage_repair'
+     * + source_id=$claimId already exists.
+     *
+     * @param int      $claimId damage_claims.id
+     * @param int      $billId  acc_bills.id of the repair bill
+     * @param int|null $userId  actor for audit trail
+     */
+    public static function onDamageRepairExpensed(int $claimId, int $billId, ?int $userId = null): ?array
+    {
+        if (!self::isEnabled()) return null;
+
+        $existing = \db_row(
+            "SELECT * FROM acc_journal_entries
+              WHERE source_type = 'damage_repair' AND source_id = ?
+              LIMIT 1",
+            [$claimId]
+        );
+        if ($existing) {
+            return $existing;
+        }
+
+        $claim = \db_row(
+            "SELECT id, claim_number FROM damage_claims
+              WHERE id = ? AND deleted_at IS NULL",
+            [$claimId]
+        );
+        if (!$claim) return null;
+
+        $bill = \db_row(
+            "SELECT id, bill_number, vendor_id, total_amount
+               FROM acc_bills WHERE id = ?",
+            [$billId]
+        );
+        if (!$bill) return null;
+
+        // Preferred path: reclassify the existing bill JE.
+        $existingBillJe = \db_row(
+            "SELECT id FROM acc_journal_entries
+              WHERE source_type = 'ap_bill' AND source_id = ?
+              LIMIT 1",
+            [$billId]
+        );
+
+        if ($existingBillJe) {
+            $jeId = (int) $existingBillJe['id'];
+            \db_execute(
+                "UPDATE acc_journal_entries
+                    SET source_type = 'damage_repair',
+                        source_id   = ?
+                  WHERE id = ?
+                    AND source_type = 'ap_bill'",
+                [$claimId, $jeId]
+            );
+
+            \db_insert('audit_log', [
+                'user_id'      => $userId,
+                'action'       => 'update',
+                'module'       => 'accounting',
+                'entity_type'  => 'damage_claim',
+                'entity_id'    => $claimId,
+                'entity_label' => $claim['claim_number'],
+                'notes'        => "Damage repair JE linked — claim #{$claim['claim_number']}, bill {$bill['bill_number']}, JE #{$jeId}.",
+                'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+
+            return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$jeId]);
+        }
+
+        // Fallback path: create new bill-shaped JE
+        $billAmount = (string) ($bill['total_amount'] ?? '0.00');
+        if (bccomp($billAmount, '0', 2) <= 0) return null;
+
+        $expenseAccountId = self::requireAccountId('accounting.damage_repair_expense_account_id', 'Damage Repair Expense');
+        $apAccountId      = self::requireAccountId('accounting.ap_account_id', 'Accounts Payable');
+
+        $jeLines = [
+            [
+                'account_id'  => $expenseAccountId,
+                'debit'       => $billAmount,
+                'credit'      => '0.00',
+                'description' => "Damage repair expense — claim {$claim['claim_number']} bill {$bill['bill_number']}",
+                'vendor_id'   => $bill['vendor_id'],
+            ],
+            [
+                'account_id'  => $apAccountId,
+                'debit'       => '0.00',
+                'credit'      => $billAmount,
+                'description' => "AP — Damage repair bill {$bill['bill_number']}",
+                'vendor_id'   => $bill['vendor_id'],
+            ],
+        ];
+
+        $periodInfo = self::resolvePeriod(date('Y-m-d'));
+
+        return JournalEntryService::create([
+            'entry_date'       => $periodInfo['entry_date'],
+            'description'      => "Damage repair expensed — claim {$claim['claim_number']} — bill {$bill['bill_number']}",
+            'entry_type'       => 'system',
+            'reference'        => $claim['claim_number'],
+            'source_type'      => 'damage_repair',
+            'source_id'        => $claimId,
+            'post_immediately' => true,
+        ], $jeLines, $userId);
+    }
+
+    /**
+     * Fire when damage_claims.status transitions to 'written_off'.
+     * Posts the bad-debt JE: DR Bad Debt Expense / CR AR for the
+     * outstanding balance on the recovery invoice. The invoice itself
+     * is NOT voided here (voiding is a billing-side concern; only the
+     * GL write-off is in scope).
+     *
+     * Idempotent: returns existing JE row when source_type='damage_writeoff'
+     * + source_id=$claimId already exists. Returns null with no error
+     * when invoice balance is $0 (nothing to write off).
+     *
+     * @param int      $claimId damage_claims.id
+     * @param int|null $userId  actor for audit trail
+     */
+    public static function onDamageWrittenOff(int $claimId, ?int $userId = null): ?array
+    {
+        if (!self::isEnabled()) return null;
+
+        $existing = \db_row(
+            "SELECT * FROM acc_journal_entries
+              WHERE source_type = 'damage_writeoff' AND source_id = ?
+              LIMIT 1",
+            [$claimId]
+        );
+        if ($existing) {
+            return $existing;
+        }
+
+        $claim = \db_row(
+            "SELECT id, claim_number, customer_id, invoice_id
+               FROM damage_claims WHERE id = ? AND deleted_at IS NULL",
+            [$claimId]
+        );
+        if (!$claim) return null;
+
+        if (empty($claim['invoice_id'])) {
+            throw new \RuntimeException(
+                "Cannot write off damage claim {$claim['claim_number']} — no recovery invoice on file."
+            );
+        }
+
+        $invoice = \db_row(
+            "SELECT id, invoice_number, customer_id, balance_due
+               FROM invoices WHERE id = ? AND deleted_at IS NULL",
+            [(int) $claim['invoice_id']]
+        );
+        if (!$invoice) {
+            throw new \RuntimeException(
+                "Damage claim {$claim['claim_number']} references invoice #{$claim['invoice_id']} which is missing."
+            );
+        }
+
+        $writeOffAmount = (string) ($invoice['balance_due'] ?? '0.00');
+        if (bccomp($writeOffAmount, '0', 2) <= 0) {
+            error_log("[AutoEntryBridge::onDamageWrittenOff] Claim {$claim['claim_number']} invoice balance is \$0 — no JE needed.");
+            return null;
+        }
+
+        $badDebtAccountId = self::requireAccountId('accounting.bad_debt_expense_account_id', 'Bad Debt Expense');
+        $arAccountId      = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+
+        $jeLines = [
+            [
+                'account_id'  => $badDebtAccountId,
+                'debit'       => $writeOffAmount,
+                'credit'      => '0.00',
+                'description' => "Bad debt — damage claim {$claim['claim_number']} invoice {$invoice['invoice_number']}",
+                'customer_id' => $invoice['customer_id'],
+            ],
+            [
+                'account_id'  => $arAccountId,
+                'debit'       => '0.00',
+                'credit'      => $writeOffAmount,
+                'description' => "AR written off — damage claim {$claim['claim_number']}",
+                'customer_id' => $invoice['customer_id'],
+            ],
+        ];
+
+        $periodInfo = self::resolvePeriod(date('Y-m-d'));
+
+        return JournalEntryService::create([
+            'entry_date'       => $periodInfo['entry_date'],
+            'description'      => "Damage claim write-off — {$claim['claim_number']} (invoice {$invoice['invoice_number']})",
+            'entry_type'       => 'system',
+            'reference'        => $claim['claim_number'],
+            'source_type'      => 'damage_writeoff',
+            'source_id'        => $claimId,
+            'post_immediately' => true,
+        ], $jeLines, $userId);
+    }
 }

@@ -295,4 +295,40 @@ db_transaction(function () use ($claimId, $claim, $updates, $newStatus, &$result
     }
 });
 
+// ── S-ACCT-DMG: fire AutoEntryBridge on status transitions ─────────────
+// Runs OUTSIDE the db_transaction so a bridge failure logs + continues
+// rather than rolling back the operational status change. Only fires on
+// the actual transition (newStatus differs from prior status).
+// Per spec §23.11 + K-22 catch: 'invoiced' is the damage_claims status
+// equivalent of "billed_to_customer" (not present in the ENUM).
+if ($newStatus !== null && $newStatus !== $claim['status']) {
+    if ($newStatus === 'invoiced') {
+        try {
+            // Reload to get the current invoice_id (caller may have just set it).
+            $linked = db_row(
+                "SELECT invoice_id FROM damage_claims WHERE id = ?",
+                [$claimId]
+            );
+            $invId = isset($linked['invoice_id']) ? (int) $linked['invoice_id'] : 0;
+            if ($invId > 0) {
+                \FleetForge\Accounting\AutoEntryBridge::onDamageRecoveryBilled(
+                    $claimId, $invId, current_user_id()
+                );
+            } else {
+                error_log("[S-ACCT-DMG] Claim {$claim['claim_number']} → invoiced but invoice_id is NULL. Bridge call skipped.");
+            }
+        } catch (\Throwable $e) {
+            error_log('[S-ACCT-DMG onDamageRecoveryBilled] ' . $e->getMessage());
+        }
+    } elseif ($newStatus === 'written_off') {
+        try {
+            \FleetForge\Accounting\AutoEntryBridge::onDamageWrittenOff(
+                $claimId, current_user_id()
+            );
+        } catch (\Throwable $e) {
+            error_log('[S-ACCT-DMG onDamageWrittenOff] ' . $e->getMessage());
+        }
+    }
+}
+
 json_success($resultRow);
