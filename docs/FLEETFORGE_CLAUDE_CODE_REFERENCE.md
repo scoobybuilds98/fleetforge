@@ -1311,6 +1311,37 @@ Note the column-name flip: customers uses `company_name`, vendors uses `name`, e
 
 **Source:** K-22 catch surfaced in S-ACCT-UNIT (display_label construction in UnitProfitabilityService::getUnitPnl + admin unit-picker labeling). Locked 2026-05-19.
 
+### Trap 46: `damage_claims.status` uses `'invoiced'` — NO `'billed_to_customer'` value
+The damage-claims status ENUM is `'reported','assessed','repair_ordered','invoiced','resolved','written_off'`. It does NOT contain `'billed_to_customer'` — that's ASPE/CPA terminology that doesn't match the on-disk vocabulary. The operational state where the recovery invoice has been generated and sent to the customer is `'invoiced'`.
+
+```sql
+-- WRONG (the 'billed_to_customer' value never appears in this ENUM)
+SELECT * FROM damage_claims WHERE status = 'billed_to_customer';
+UPDATE damage_claims SET status = 'billed_to_customer' WHERE id = ?;
+
+-- RIGHT — invoiced is the post-billing operational state
+SELECT * FROM damage_claims WHERE status = 'invoiced';
+UPDATE damage_claims SET status = 'invoiced' WHERE id = ?;
+```
+
+Practical implication for AutoEntryBridge wiring: `AutoEntryBridge::onDamageRecoveryBilled()` fires on the `'invoiced'` transition in `api/v1/damage_claims/update.php`. Anywhere else that needs to detect "recovery has been billed" should also match on `'invoiced'`, not on the ASPE-style `'billed_to_customer'` from spec narrative.
+
+Allowed status transitions on disk (from damage_claims/update.php):
+```
+  reported       → assessed | written_off
+  assessed       → repair_ordered | written_off
+  repair_ordered → invoiced | resolved | written_off
+  invoiced       → resolved | written_off
+  resolved       → [TERMINAL]
+  written_off    → [TERMINAL]
+```
+
+The `'invoiced' → 'written_off'` path is what triggers `AutoEntryBridge::onDamageWrittenOff()` (DR Bad Debt / CR AR for the invoice balance).
+
+Cross-reference: Trap 38 covers the related `'resolved'/'written_off'` (NOT `'settled'`) catch on the same ENUM. The two damage-claims traps together fully fingerprint this ENUM's vocabulary.
+
+**Source:** K-22 catch surfaced in S-ACCT-DMG pre-flight (AskUserQuestion resolved: 'invoiced' chosen as bridge trigger operationally equivalent to spec's 'billed_to_customer'). Locked 2026-05-19.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
