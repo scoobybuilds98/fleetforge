@@ -1413,6 +1413,41 @@ A future **S-MODAL-AUDIT** session (`G-MODAL-AUDIT` in `docs/FLEETFORGE_PREDEPLO
 
 **Source:** Pattern surfaced via COMPLIANCE-FIX-1 (2026-05-19, compliance grid edit modal). Locked as Trap 49 in S-PERM-EXPAND D' (2026-05-19) after a second occurrence of the same bug across three modals in the permissions admin page. Recurrence count will be updated as further incidents surface during the S-MODAL-AUDIT session.
 
+### Trap 50: permissions API response uses `slug` not `module` — match against `m.slug` when iterating
+
+`GET /api/v1/users/permissions/index.php` returns `data.modules[]` where each entry has a **`slug`** field (e.g. `'journal_entries'`, `'chart_of_accounts'`, `'quickbooks'`) — NOT `module`. Client-side code that iterates the response and matches against `config/permission_groups.php` group definitions must use `m.slug === moduleName`, never `m.module === moduleName` (which returns `undefined` and silently breaks the lookup with no error).
+
+```js
+// ❌ WRONG — m.module is undefined; .find() returns nothing; status row stays empty
+group.modules.forEach(moduleName => {
+    const m = responseModules.find(x => x.module === moduleName);
+    if (!m) return;
+    ...
+});
+
+// ✅ RIGHT — matches the actual response shape
+group.modules.forEach(moduleName => {
+    const m = responseModules.find(x => x.slug === moduleName);
+    if (!m) return;
+    ...
+});
+```
+
+The confusion source: `config/permission_groups.php` uses the **key name `'modules'`** (plural array of slug strings) for each group's member list, e.g. `['accounting' => ['modules' => ['chart_of_accounts', 'journal_entries', ...]]]`. So `group.modules` is the correct field on the **group** side. But on the per-module **response** side, the field that holds the slug string is `slug`, not `module`. The two fields (`group.modules` array vs `m.slug` scalar) live on different shapes — easy to misremember as "both use `module`".
+
+Server-side reference (`api/v1/users/permissions/index.php`):
+
+```php
+$row = [
+    'slug'        => $slug,                  // ← the field client must match against
+    'label'       => $labels[$slug] ?? …,
+    'actions'     => $moduleActions,         // per-module verb list
+    'permissions' => [],                     // {action: {role, override, effective}}
+];
+```
+
+**Source:** Caught in S-PERM-MACRO-STATUS (2026-05-19) when the session prompt's helper code template for the `groupStatus()` computation used `x.module === moduleName`. The actual response shape uses `slug`. Adjusted silently per `feedback_trust_file_over_prompt` (operator pre-authorized "adjust the status computation to match" in the STOP conditions). Locked as Trap 50 here so future client-side consumers of `/api/v1/users/permissions/index.php` don't repeat the same field-name mismatch.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
