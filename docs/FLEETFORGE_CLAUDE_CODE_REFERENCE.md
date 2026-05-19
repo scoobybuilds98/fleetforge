@@ -1487,6 +1487,47 @@ When drafting bridge prompts, test scenarios, or follow-up sessions, use **`runW
 
 **Source:** Surfaced in S-PHASE-D-INTEGRATION-TEST (2026-05-19) Part C service-interface audit: prompt expected `::classify` but reflection on the live class returned 6 public methods none of which were named `classify`. The semantic equivalent (`runWizard`) was present so the test continued; locked here as Trap 51 so future LESSOR-touching prompts don't repeat the name confusion.
 
+### Trap 52: php-fpm opcache holds stale bytecode in local Herd dev after editing widely-included files
+
+**Symptom**: a CLI smoke test passes (e.g. `php -r "function_exists('...')"` returns `true`, all unit tests green) but the live HTTP endpoint blows up with `Call to undefined function ...` (or similar parse/symbol errors). The error log shows the function being called from a line/file that the disk version clearly contains. Reloading the page doesn't help; restarting only the browser doesn't help. The only fixes are restarting Herd, sending `SIGUSR2` to the php-fpm master, or waiting for opcache's TTL to expire.
+
+**Root cause**: PHP-FPM caches compiled bytecode of every included file via opcache. The Herd dev config typically has `opcache.validate_timestamps=0` (or a long `revalidate_freq`) for performance — so changing a file on disk does NOT invalidate the cached bytecode. The running worker processes keep executing the version they compiled at boot. New top-level function declarations, class definitions, namespace changes, etc. are invisible to live HTTP traffic until you force a reload.
+
+**Most-affected file types** (anything included by many endpoints — the more an endpoint pre-loads it, the bigger the blast radius):
+- `includes/auth.php`, `includes/db.php`, `includes/functions.php`, `includes/permission_registry.php` — universal includes
+- `includes/header.php`, `includes/footer.php`, `includes/sidebar.php`, `includes/topbar.php`, `includes/partials/*.php` — page chrome
+- `api/bootstrap.php` — every API endpoint
+- `config/permissions.php`, `config/permission_actions.php`, `config/permission_groups.php`, `config/app.php`, `config/navigation.php` — config files included on every authenticated request
+
+**Production impact: NONE.** Lightsail (mainlandrentals.com) runs php-fpm under systemd; every deploy that touches PHP runs `sudo systemctl reload php8.2-fpm` (or equivalent) which clears opcache by restarting the FPM master. The trap is local-dev-only on Herd. **DO NOT** add anything to the production deploy runbook for this — `F-CRONS-ACCT-1` and friends already trigger php-fpm restart as part of the standard deploy procedure.
+
+**Fixes** (in order of preference):
+
+1. **Automated (recommended)** — `.claude/settings.local.json` (gitignored) carries a `PostToolUse` hook that fires `SIGUSR2` at the php-fpm master whenever Claude Code edits a file in `includes/`, `api/bootstrap.php`, or `config/*.php`. Silent on success (one-line stderr only), no-op on non-Herd environments (pgrep returns nothing). Operators with their own dev environment can add the same hook to their local settings.
+
+   Example hook command (already installed locally):
+   ```bash
+   FILE=$(jq -r '.tool_input.file_path // empty');
+   case "$FILE" in
+     */includes/*|*/api/bootstrap.php|*/config/*.php)
+       PID=$(pgrep -f 'php-fpm: master' | head -1);
+       [ -n "$PID" ] && kill -USR2 "$PID" 2>/dev/null
+       && echo "[hook] php-fpm opcache reloaded after $FILE" >&2
+       ;;
+   esac
+   ```
+
+2. **Manual** — when the automation hasn't picked up the change (e.g. fresh Claude Code session before `/hooks` reload):
+   ```bash
+   kill -USR2 $(pgrep -f "php-fpm: master" | head -1)
+   ```
+
+3. **Nuclear** — Herd app → Quit → relaunch (or `herd restart` if that command exists in your install).
+
+**Recurrence count: 1 known incident** — S-PERM-SESSION-REFRESH (2026-05-19, commit `c3684d4`) shipped with full CLI smoke green (`function_exists('_ff_check_permission_freshness')` returned YES, full test suite passed), but the user reported HTTP 500 "Call to undefined function" when trying to grant Alice Manager `journal_entries.edit` via the live admin UI. The CLI test path and the php-fpm path are two separate opcache scopes — CLI is fresh on every invocation, FPM is long-lived. The fix that turn was `kill -USR2 <fpm-master-pid>`; the durable fix locked here is the automated `.claude/settings.local.json` hook.
+
+**Source:** Caught 2026-05-19 during S-PERM-SESSION-REFRESH post-ship sanity-check. Locked as Trap 52 + automated via `PostToolUse` hook. Future sessions touching the listed file types should observe the hook firing in stderr (look for `[hook] php-fpm opcache reloaded after ...`).
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
