@@ -1793,22 +1793,132 @@ class AutoEntryBridge
                     );
                 }
 
-                $cash      = (string) $row['cash_receipt'];
-                $finance   = (string) $row['finance_income'];
-                $principal = (string) $row['principal_reduction'];
+                $cash    = (string) $row['cash_receipt'];
+                $finance = (string) $row['finance_income'];
+                // Principal_reduction is DERIVED here (not pulled from the
+                // schedule's stored column) so the per-row identity
+                //   cash = principal + finance
+                // holds for every JE — including the last regular period
+                // where LeaseAmortizationService::buildSchedule applies a
+                // rounding-tail correction that bumps stored principal
+                // above (cash − finance) to land closing_ni on
+                // guaranteed_residual_value. That stored projection is
+                // for UI display only; the GL post must balance per row.
+                // Residual NI remaining at term end (the unguaranteed
+                // residual portion absorbed by the schedule projection)
+                // is written off by onLeaseTermination — already designed
+                // for the closing_net_investment > 0 case.
+                $principal = bcsub($cash, $finance, 2);
+
+                // ── D-LESSOR-4-PERIOD-EXTENDED: DF IDC amortization ─
+                // Sales-type periods keep the 3-line LESSOR-3 shape.
+                // Direct-financing leases with deferred IDC > 0 take one
+                // line of finance income each period and re-route it to
+                // amortize the Deferred IDC asset (capitalized at
+                // inception per D-LESSOR-4-IDC-DEFERRAL). The cash and
+                // principal lines are untouched — the JE still balances
+                // because adjustedFinance + idcAmort = original finance.
+                //
+                // Per-period amort = initial_direct_costs / termMonths
+                // (D-LESSOR-4-IDC-AMORT-STRAIGHT-LINE). Last regular
+                // period absorbs the rounding tail by setting
+                // amort = initial_direct_costs − Σ(prior amortizations).
+                // BPO row (period > termMonths) gets amort = 0 — IDC is
+                // already fully amortized by end of regular term.
+                $idcAmortThisPeriod  = '0.00';
+                $adjustedFinance     = $finance;
+                $deferredIdcAcc      = null;
+                $needsIdcAmort       = false;
+
+                if ($lease['classification'] === 'direct_financing') {
+                    $leaseFull = \db_row(
+                        "SELECT initial_direct_costs FROM leases WHERE id = ?",
+                        [$leaseId]
+                    );
+                    $idcTotal = (string) ($leaseFull['initial_direct_costs'] ?? '0.00');
+                    if (bccomp($idcTotal, '0', 2) > 0) {
+                        $needsIdcAmort = true;
+                        $clsRow = \db_row(
+                            "SELECT criterion_b_lease_term_months
+                               FROM acc_lease_classifications WHERE lease_id = ?",
+                            [$leaseId]
+                        );
+                        $termMonths = (int) ($clsRow['criterion_b_lease_term_months'] ?? 0);
+                        if ($termMonths <= 0) {
+                            throw new \RuntimeException(
+                                "Direct-financing lease #{$leaseId} has no classification row "
+                                . "or zero term_months — cannot compute IDC amortization."
+                            );
+                        }
+
+                        if ($periodNumber > $termMonths) {
+                            // BPO row — IDC already fully amortized at period termMonths.
+                            $idcAmortThisPeriod = '0.00';
+                        } elseif ($periodNumber === $termMonths) {
+                            // Last regular period absorbs the rounding tail.
+                            $deferredIdcAcc = self::requireAccountId(
+                                'accounting.lessor_deferred_idc_account_id',
+                                'Deferred Initial Direct Costs — Lease'
+                            );
+                            $prior = \db_row(
+                                "SELECT COALESCE(SUM(jel.credit), '0.00') AS prior_amort
+                                   FROM acc_journal_entry_lines jel
+                                   JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+                                  WHERE je.source_type = 'lease_period'
+                                    AND je.source_id   = ?
+                                    AND jel.account_id = ?",
+                                [$leaseId, $deferredIdcAcc]
+                            );
+                            $priorAmort = (string) ($prior['prior_amort'] ?? '0.00');
+                            $idcAmortThisPeriod = bcsub($idcTotal, $priorAmort, 2);
+                            // Defensive: never negative (would imply prior over-amortization).
+                            if (bccomp($idcAmortThisPeriod, '0', 2) < 0) {
+                                $idcAmortThisPeriod = '0.00';
+                            }
+                        } else {
+                            // Regular interior period — straight-line slice.
+                            $idcAmortThisPeriod = bcdiv($idcTotal, (string) $termMonths, 2);
+                        }
+
+                        if (bccomp($idcAmortThisPeriod, '0', 2) > 0) {
+                            $deferredIdcAcc = $deferredIdcAcc ?: self::requireAccountId(
+                                'accounting.lessor_deferred_idc_account_id',
+                                'Deferred Initial Direct Costs — Lease'
+                            );
+                            $adjustedFinance = bcsub($finance, $idcAmortThisPeriod, 2);
+                            // STOP CONDITION (warn-only): IDC amort exceeds period's
+                            // finance income — produces negative adjusted finance.
+                            // The JE still balances (CR side: principal +
+                            // negative-finance + idcAmort = principal + finance =
+                            // cash). Log for operator review.
+                            if (bccomp($adjustedFinance, '0', 2) < 0) {
+                                error_log(sprintf(
+                                    '[onLeasePeriodPosting_Capital] lease=%d period=%d: IDC amort (%s) '
+                                    . 'exceeds finance_income (%s); adjusted=%s. JE still balances.',
+                                    $leaseId, $periodNumber, $idcAmortThisPeriod, $finance, $adjustedFinance
+                                ));
+                            }
+                        }
+                    }
+                }
 
                 // ── Resolve GL accounts ────────────────────────────
                 $arAcc        = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
                 $niCurrentAcc = self::requireAccountId('accounting.lessor_ni_current_account_id', 'NI Lease — Current');
                 $financeIncAcc = self::requireAccountId('accounting.lessor_finance_income_account_id', 'Finance Income');
 
-                // ── Build JE lines (D-LESSOR-3-NET-METHOD) ──────────
-                // NET method period JE:
+                // ── Build JE lines (D-LESSOR-3-NET-METHOD + D-LESSOR-4-PERIOD-EXTENDED) ──
+                // Sales-type / DF-without-IDC: 3-line NET-method JE:
                 //   DR AR             $cash
                 //      CR NI (current) $principal       (= cash − finance)
                 //      CR Finance Income $finance        (recognized this period)
-                // Sums: DR = cash, CR = principal + finance = cash ✓
-                // BPO row (finance=0): DR AR / CR NI — both sides = cash.
+                // DF with IDC amort: 4-line variant — finance line is reduced
+                // by $idcAmortThisPeriod, and a 4th line CR Deferred IDC
+                // absorbs the difference. Net effect: same cash + principal,
+                // finance income is "moved" into IDC reduction.
+                // Sums: DR = cash, CR = principal + adjustedFinance + idcAmort
+                //                   = principal + (finance − idcAmort) + idcAmort
+                //                   = principal + finance = cash ✓
                 $jeLines = [];
                 if (bccomp($cash, '0', 2) > 0) {
                     $jeLines[] = [
@@ -1824,10 +1934,30 @@ class AutoEntryBridge
                         'customer_id' => $lease['customer_id'],
                     ];
                 }
-                if (bccomp($finance, '0', 2) > 0) {
+                // Adjusted finance income — may be 0 (BPO row), positive
+                // (regular), or negative (rare: IDC amort > finance income
+                // for that period). bccomp !== 0 catches both positive and
+                // negative; the sign determines whether it lands on debit
+                // or credit side of the JE for proper double-entry.
+                if (bccomp($adjustedFinance, '0', 2) > 0) {
                     $jeLines[] = [
-                        'account_id'  => $financeIncAcc, 'debit' => '0.00',    'credit' => $finance,
-                        'description' => "Finance income recognized — period {$periodNumber}",
+                        'account_id'  => $financeIncAcc, 'debit' => '0.00',    'credit' => $adjustedFinance,
+                        'description' => "Finance income recognized — period {$periodNumber}"
+                            . ($needsIdcAmort ? ' (net of IDC amort)' : ''),
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                } elseif (bccomp($adjustedFinance, '0', 2) < 0) {
+                    // Negative adjusted finance → DR Finance Income (revenue reduction).
+                    $jeLines[] = [
+                        'account_id'  => $financeIncAcc, 'debit' => bcmul($adjustedFinance, '-1', 2), 'credit' => '0.00',
+                        'description' => "Finance income reduced — period {$periodNumber} (IDC amort exceeds period interest)",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($idcAmortThisPeriod, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id'  => $deferredIdcAcc, 'debit' => '0.00', 'credit' => $idcAmortThisPeriod,
+                        'description' => "Deferred IDC amortization (straight-line) — period {$periodNumber}",
                         'customer_id' => $lease['customer_id'],
                     ];
                 }
@@ -1842,10 +1972,10 @@ class AutoEntryBridge
                 if (bccomp($totalDr, $totalCr, 2) !== 0) {
                     throw new \RuntimeException(sprintf(
                         'Lease period JE unbalanced: lease=%d period=%d DR=%s CR=%s diff=%s '
-                        . '(cash=%s, principal=%s, finance=%s).',
+                        . '(cash=%s, principal=%s, finance=%s, idc_amort=%s, adjusted_finance=%s).',
                         $leaseId, $periodNumber, $totalDr, $totalCr,
                         bcsub($totalDr, $totalCr, 2),
-                        $cash, $principal, $finance
+                        $cash, $principal, $finance, $idcAmortThisPeriod, $adjustedFinance
                     ));
                 }
 
@@ -1876,13 +2006,21 @@ class AutoEntryBridge
                     'entity_id'   => $leaseId,
                     'entity_label' => $lease['contract_number'],
                     'notes'       => sprintf(
-                        'Lease period %d posted: JE %s, cash=%s, principal=%s, finance=%s.',
-                        $periodNumber, $je['entry_number'], $cash, $principal, $finance
+                        'Lease period %d posted: JE %s, cash=%s, principal=%s, finance=%s%s.',
+                        $periodNumber, $je['entry_number'], $cash, $principal, $finance,
+                        $needsIdcAmort
+                            ? sprintf(', idc_amort=%s, adjusted_finance=%s', $idcAmortThisPeriod, $adjustedFinance)
+                            : ''
                     ),
                     'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
                 ]);
 
-                return ['je' => $je, 'period' => $periodNumber];
+                return [
+                    'je'                  => $je,
+                    'period'              => $periodNumber,
+                    'idc_amort'           => $idcAmortThisPeriod,
+                    'adjusted_finance'    => $adjustedFinance,
+                ];
             } finally {
                 \db_execute("SELECT RELEASE_LOCK(?)", ["ff_lease_period_{$leaseId}_{$periodNumber}"]);
             }
@@ -2022,5 +2160,286 @@ class AutoEntryBridge
         ]);
 
         return ['je' => $je, 'residual_written_off' => $closingNi];
+    }
+
+    /**
+     * Direct-financing lease inception JE (ASPE 3065 §24.5).
+     *
+     * Posted on transition pending→active when classification=
+     * 'direct_financing'. Mirrors onLeaseInception_SalesType structure
+     * but with three differences locked by D-LESSOR-3 + D-LESSOR-4:
+     *
+     *   - No COGS line (no selling profit at inception; FV = carrying)
+     *   - No Sales Revenue line (no revenue recognized at inception)
+     *   - No separate IDC expense JE (D-LESSOR-4-IDC-DEFERRAL — IDC is
+     *     CAPITALIZED as a deferred asset, then amortized straight-line
+     *     over the lease term as a yield adjustment to finance income;
+     *     handled by onLeasePeriodPosting_Capital's DF branch per
+     *     D-LESSOR-4-PERIOD-EXTENDED)
+     *
+     * Asset derecognition uses the dual-leg pattern (D-LESSOR-3-INVENTORY):
+     * DR accum_dep + CR asset_cost — net PP&E reduction = NBV exactly.
+     * acc_fixed_assets.status flipped to 'disposed'.
+     *
+     * STOP CONDITION: initial_fair_value + IDC must equal carrying_amount
+     * within $0.02. For DF leases, LESSOR-2's solveImplicitRate uses
+     * pvTarget = FV − IDC; the operator's FV input MUST equal carrying
+     * for the implicit rate to amortize the receivable to zero by term
+     * end. A drift > $0.02 means either the rate solver didn't apply
+     * the IDC offset OR the operator entered a non-DF-shaped FV — both
+     * cases require classification re-review.
+     *
+     * Idempotent: returns existing JE row when source_type='lease_inception'
+     * + source_id=$leaseId already exists.
+     *
+     * @return array|null  { je, asset_disposed, idc_deferred, breakdown }
+     *                     or null when bridge / lessor module is disabled
+     * @throws \RuntimeException  Σ DR ≠ Σ CR; asset missing/ambiguous;
+     *                             NI mismatch; called on non-DF lease
+     */
+    public static function onLeaseInception_DirectFinancing(int $leaseId, ?int $userId = null): ?array
+    {
+        if (!self::isEnabled())             return null;
+        if (!self::isLessorModuleEnabled()) {
+            error_log("[AutoEntryBridge::onLeaseInception_DirectFinancing] lessor module disabled — JE skipped for lease #{$leaseId}");
+            return null;
+        }
+
+        // Idempotency guard — already posted?
+        $existing = \db_row(
+            "SELECT * FROM acc_journal_entries
+              WHERE source_type = 'lease_inception' AND source_id = ?
+              LIMIT 1",
+            [$leaseId]
+        );
+        if ($existing) {
+            return ['je' => $existing, 'asset_disposed' => null, 'idc_deferred' => null];
+        }
+
+        return \db_transaction(function () use ($leaseId, $userId): array {
+            \db_execute("SELECT GET_LOCK(?, 10) AS got", ["ff_lease_inception_{$leaseId}"]);
+
+            try {
+                $lease = \db_row(
+                    "SELECT id, contract_number, customer_id, equipment_unit_id, classification,
+                            initial_fair_value, initial_direct_costs,
+                            guaranteed_residual_value, unguaranteed_residual_value,
+                            implicit_rate, start_date, deleted_at
+                       FROM leases WHERE id = ? FOR UPDATE",
+                    [$leaseId]
+                );
+                if (!$lease || $lease['deleted_at'] !== null) {
+                    throw new \RuntimeException("AutoEntryBridge::onLeaseInception_DirectFinancing: lease #{$leaseId} not found.");
+                }
+                if ($lease['classification'] !== 'direct_financing') {
+                    throw new \RuntimeException(
+                        "AutoEntryBridge::onLeaseInception_DirectFinancing called on non-direct_financing lease #{$leaseId} "
+                        . "(classification='{$lease['classification']}')."
+                    );
+                }
+
+                $schedule = LeaseAmortizationService::getSchedule($leaseId);
+                if (empty($schedule['periods'])) {
+                    throw new \RuntimeException(
+                        "Lease #{$leaseId} has no amortization schedule. "
+                        . "LESSOR-2 should have generated it at activation — investigate."
+                    );
+                }
+
+                $assets = \db_select(
+                    "SELECT id, asset_account_id, accum_depr_account_id,
+                            acquisition_cost, accumulated_depreciation, net_book_value,
+                            status, notes
+                       FROM acc_fixed_assets
+                      WHERE equipment_unit_id = ? AND status = 'active'",
+                    [(int) $lease['equipment_unit_id']]
+                );
+                if (count($assets) === 0) {
+                    throw new \RuntimeException(
+                        "No active fixed asset linked to equipment unit #{$lease['equipment_unit_id']}. "
+                        . "Asset must exist before direct-financing inception JE can post."
+                    );
+                }
+                if (count($assets) > 1) {
+                    throw new \RuntimeException(
+                        "Ambiguous asset linkage for unit #{$lease['equipment_unit_id']} — "
+                        . count($assets) . ' active assets found.'
+                    );
+                }
+                $asset = $assets[0];
+
+                // ── Derive amounts ──────────────────────────────────
+                $acquisitionCost = (string) $asset['acquisition_cost'];
+                $accumulatedDep  = (string) $asset['accumulated_depreciation'];
+                $carryingAmount  = bcsub($acquisitionCost, $accumulatedDep, 2);
+                $idc             = (string) $lease['initial_direct_costs'];
+                $initialNi       = (string) $lease['initial_fair_value'];
+
+                // ── STOP CONDITION: NI + IDC must match carrying ────
+                // For DF leases: implicit-rate solver uses pvTarget =
+                // FV − IDC. The economic identity at inception is:
+                //   initial_fair_value + IDC = carrying_amount
+                // i.e. the receivable + capitalized IDC must equal what
+                // we're derecognizing from PP&E. A drift > $0.02 means
+                // either the operator's FV entry was inconsistent with
+                // the DF treatment, or the rate solver didn't apply the
+                // IDC offset — both require classification re-review.
+                $expectedNi = bcsub($carryingAmount, $idc, 2);
+                $drift = bcsub($initialNi, $expectedNi, 2);
+                $absDrift = $drift[0] === '-' ? substr($drift, 1) : $drift;
+                if (bccomp($absDrift, '0.02', 2) > 0) {
+                    throw new \RuntimeException(sprintf(
+                        'Direct financing NI mismatch: initial_fair_value=%s, carrying_amount=%s, '
+                        . 'IDC=%s, expected NI=%s, drift=%s. For DF leases, implicit_rate solver '
+                        . 'target must be carrying_amount − IDC (LESSOR-2 pvTarget = FV − IDC).',
+                        $initialNi, $carryingAmount, $idc, $expectedNi, $drift
+                    ));
+                }
+
+                // NI split via schedule — same logic as sales-type.
+                $niCurrent = '0.00';
+                foreach ($schedule['periods'] as $p) {
+                    if ((int) $p['period_number'] > 12) break;
+                    $niCurrent = bcadd($niCurrent, (string) $p['principal_reduction'], 2);
+                }
+                if (bccomp($niCurrent, $initialNi, 2) > 0) {
+                    $niCurrent = $initialNi;
+                }
+                $niLongTerm = bcsub($initialNi, $niCurrent, 2);
+
+                // ── Resolve GL accounts ─────────────────────────────
+                $niCurrentAcc  = self::requireAccountId('accounting.lessor_ni_current_account_id',  'NI Lease — Current');
+                $niLongTermAcc = self::requireAccountId('accounting.lessor_ni_longterm_account_id', 'NI Lease — Long-Term');
+                $assetAcc      = (int) $asset['asset_account_id'];
+                $accumDepAcc   = (int) $asset['accum_depr_account_id'];
+                $deferredIdcAcc = bccomp($idc, '0', 2) > 0
+                    ? self::requireAccountId('accounting.lessor_deferred_idc_account_id', 'Deferred Initial Direct Costs — Lease')
+                    : null;
+
+                // ── Build JE lines (NET method per D-LESSOR-3-NET-METHOD) ─
+                // DF inception (D-LESSOR-4-IDC-DEFERRAL):
+                //   DR NI_current
+                //   DR NI_long_term
+                //   DR Deferred IDC                  (if IDC > 0)
+                //   DR Accumulated Depreciation
+                //   CR Asset Cost
+                // NO COGS, NO Sales Revenue, NO Unearned Finance Income.
+                // Balance: Σ DR = initialNi + IDC + accumDep
+                //                = (carrying − IDC) + IDC + accumDep    (by STOP-condition identity)
+                //                = carrying + accumDep
+                //                = acquisitionCost − accumDep + accumDep
+                //                = acquisitionCost
+                //                = Σ CR  ✓
+                $jeLines = [];
+                if (bccomp($niCurrent, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $niCurrentAcc,  'debit' => $niCurrent,    'credit' => '0.00',
+                        'description' => "Net Investment in Lease (current) — {$lease['contract_number']}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($niLongTerm, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $niLongTermAcc, 'debit' => $niLongTerm,   'credit' => '0.00',
+                        'description' => "Net Investment in Lease (long-term) — {$lease['contract_number']}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if ($deferredIdcAcc !== null && bccomp($idc, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $deferredIdcAcc, 'debit' => $idc,         'credit' => '0.00',
+                        'description' => "Deferred initial direct costs — lease {$lease['contract_number']}",
+                        'customer_id' => $lease['customer_id'],
+                    ];
+                }
+                if (bccomp($accumulatedDep, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $accumDepAcc,   'debit' => $accumulatedDep, 'credit' => '0.00',
+                        'description' => "Accumulated depreciation cleared — asset disposed via DF lease {$lease['contract_number']}",
+                    ];
+                }
+                if (bccomp($acquisitionCost, '0', 2) > 0) {
+                    $jeLines[] = [
+                        'account_id' => $assetAcc,      'debit' => '0.00',         'credit' => $acquisitionCost,
+                        'description' => "Asset cost derecognized — DF lease {$lease['contract_number']}",
+                    ];
+                }
+
+                // ── INVARIANT: Σ DR = Σ CR ─────────────────────────
+                $totalDr = '0.00';
+                $totalCr = '0.00';
+                foreach ($jeLines as $l) {
+                    $totalDr = bcadd($totalDr, (string) $l['debit'],  2);
+                    $totalCr = bcadd($totalCr, (string) $l['credit'], 2);
+                }
+                if (bccomp($totalDr, $totalCr, 2) !== 0) {
+                    throw new \RuntimeException(sprintf(
+                        'Direct-financing inception JE unbalanced: DR=%s, CR=%s, diff=%s. '
+                        . 'Breakdown: NI_cur=%s NI_lt=%s IDC=%s AccDep=%s Cost=%s carrying=%s.',
+                        $totalDr, $totalCr, bcsub($totalDr, $totalCr, 2),
+                        $niCurrent, $niLongTerm, $idc, $accumulatedDep,
+                        $acquisitionCost, $carryingAmount
+                    ));
+                }
+
+                // ── Post JE ─────────────────────────────────────────
+                $periodInfo = self::resolvePeriod($lease['start_date']);
+                $je = JournalEntryService::create([
+                    'entry_date'       => $periodInfo['entry_date'],
+                    'description'      => "Direct financing lease inception — {$lease['contract_number']}",
+                    'entry_type'       => 'system',
+                    'reference'        => "LSE-DF-INC-{$lease['contract_number']}",
+                    'source_type'      => 'lease_inception',
+                    'source_id'        => $leaseId,
+                    'post_immediately' => true,
+                ], $jeLines, $userId);
+
+                // ── Dispose the underlying asset ────────────────────
+                $disposalNote = ($asset['notes'] ? $asset['notes'] . "\n" : '')
+                    . "Disposed via direct-financing lease {$lease['contract_number']} on " . date('Y-m-d')
+                    . ". JE {$je['entry_number']}.";
+                \db_execute(
+                    "UPDATE acc_fixed_assets
+                        SET status                 = 'disposed',
+                            fully_depreciated_date = COALESCE(fully_depreciated_date, ?),
+                            notes                  = ?
+                      WHERE id = ?",
+                    [date('Y-m-d'), $disposalNote, (int) $asset['id']]
+                );
+
+                // ── Audit log ───────────────────────────────────────
+                \db_insert('audit_log', [
+                    'user_id'     => $userId,
+                    'action'      => 'create',
+                    'module'      => 'accounting',
+                    'entity_type' => 'lease',
+                    'entity_id'   => $leaseId,
+                    'entity_label' => $lease['contract_number'],
+                    'notes'       => sprintf(
+                        'Direct-financing inception JE %s: initial_NI=%s, NI_cur=%s, NI_lt=%s, IDC_deferred=%s, AccDep=%s, AssetCost=%s. Asset #%d disposed.',
+                        $je['entry_number'], $initialNi, $niCurrent, $niLongTerm,
+                        $idc, $accumulatedDep, $acquisitionCost, (int) $asset['id']
+                    ),
+                    'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+
+                return [
+                    'je'             => $je,
+                    'asset_disposed' => (int) $asset['id'],
+                    'idc_deferred'   => $idc,
+                    'breakdown'      => [
+                        'initial_ni'        => $initialNi,
+                        'ni_current'        => $niCurrent,
+                        'ni_long_term'      => $niLongTerm,
+                        'idc_deferred'      => $idc,
+                        'acquisition_cost'  => $acquisitionCost,
+                        'accumulated_dep'   => $accumulatedDep,
+                        'carrying_amount'   => $carryingAmount,
+                    ],
+                ];
+            } finally {
+                \db_execute("SELECT RELEASE_LOCK(?)", ["ff_lease_inception_{$leaseId}"]);
+            }
+        });
     }
 }

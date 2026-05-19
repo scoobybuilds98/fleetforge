@@ -426,13 +426,14 @@ try {
     ];
 }
 
-// ── S-ACCT-LESSOR-3: sales-type inception JE ─────────────────────────
-// Post-commit + post-schedule hook. Fires only for sales_type leases —
-// direct_financing inception is LESSOR-4 scope. The bridge method
-// itself gates on accounting.lessor_module_enabled='1', so operators
-// who haven't enabled the lessor module yet will see this as a no-op
-// in error_log. Non-fatal: JE failure does NOT roll back the activation
-// (consistent with D-LESSOR-2-ACTIVATION).
+// ── S-ACCT-LESSOR-3 + S-ACCT-LESSOR-4: capital lease inception JE ────
+// Post-commit + post-schedule hook. Sales-type fires
+// onLeaseInception_SalesType (LESSOR-3); direct_financing fires
+// onLeaseInception_DirectFinancing (LESSOR-4). Both bridge methods gate
+// on accounting.lessor_module_enabled='1', so operators who haven't
+// enabled the lessor module yet will see this as a no-op in error_log.
+// Non-fatal: JE failure does NOT roll back the activation (consistent
+// with D-LESSOR-2-ACTIVATION).
 try {
     $leaseRowL3 = db_row(
         "SELECT id, classification FROM leases WHERE id = ? AND deleted_at IS NULL",
@@ -446,6 +447,7 @@ try {
         if ($inception) {
             $result['inception_je'] = [
                 'posted'         => true,
+                'classification' => 'sales_type',
                 'je_id'          => $inception['je']['id']           ?? null,
                 'asset_disposed' => $inception['asset_disposed']     ?? null,
                 'idc_je_id'      => $inception['idc_je_id']          ?? null,
@@ -457,9 +459,28 @@ try {
                 'reason' => 'bridge disabled or lessor module disabled',
             ];
         }
+    } elseif ($leaseRowL3 && $leaseRowL3['classification'] === 'direct_financing') {
+        $inception = \FleetForge\Accounting\AutoEntryBridge::onLeaseInception_DirectFinancing(
+            (int) $id,
+            (int) current_user_id()
+        );
+        if ($inception) {
+            $result['inception_je'] = [
+                'posted'         => true,
+                'classification' => 'direct_financing',
+                'je_id'          => $inception['je']['id']           ?? null,
+                'asset_disposed' => $inception['asset_disposed']     ?? null,
+                'idc_deferred'   => $inception['idc_deferred']       ?? null,
+            ];
+        } else {
+            $result['inception_je'] = [
+                'posted' => false,
+                'reason' => 'bridge disabled or lessor module disabled',
+            ];
+        }
     }
 } catch (\Throwable $e) {
-    error_log('[S-ACCT-LESSOR-3 inception] ' . $e->getMessage());
+    error_log('[S-ACCT-LESSOR-3/4 inception] ' . $e->getMessage());
     $result['inception_je'] = ['posted' => false, 'error' => $e->getMessage()];
 }
 
