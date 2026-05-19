@@ -9630,15 +9630,15 @@ body:has(.chat-page-content) #ff-chat-widget {
     display: flex;
     gap: 12px;
     overflow-x: auto;
-    /* WHY overflow-y:visible not hidden: scale(1.02) on hover grows the card
-       ~2% in every direction. overflow-y:hidden was clipping the top few pixels
-       of the hovered card, making it look cropped and hiding the top border. */
+    /* WHY overflow-y:visible not hidden: the micro-tilt perspective transform
+       on hover can push card edges fractionally outside the container bounds;
+       visible lets them breathe without clipping. */
     overflow-y: visible;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;      /* Firefox */
     padding-bottom: 8px;
-    padding-top: 6px;           /* room for scale(1.02) top overflow */
+    padding-top: 6px;           /* breathing room above first card */
 }
 .dashboard-carousel::-webkit-scrollbar {
     display: none;              /* Chrome / Safari */
@@ -9671,8 +9671,8 @@ body:has(.chat-page-content) #ff-chat-widget {
     color: inherit;
     cursor: pointer;
 }
-/* Hover: border highlights in theme color. No transform — scale() was
-   pushing the card upward and cropping the top border/content. */
+/* Hover: border highlights in theme color. JS micro-tilt (rotateX/rotateY
+   ±5°) provides physical depth. No translateY, no scale, no movement. */
 .carousel-card--link:hover {
     border-color: var(--color-primary);
     text-decoration: none;

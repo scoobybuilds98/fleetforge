@@ -1625,14 +1625,13 @@ function FF_Dashboard() {
 }
 </script>
 
-<!-- ── S-CAROUSEL-CARD-3D: Mouse-tilt 3D effect for carousel cards ──────────
-     FF_CardTilt adds a perspective rotateX/rotateY transform on mousemove,
-     simulating a physical card reacting to the light source (cursor position).
-     The sheen (::before pseudo-element) tracks the same position via CSS vars
-     --sheen-x and --sheen-y so the radial-gradient highlight follows the mouse.
-     Touch devices don't fire mousemove so no tilt occurs there — no detection
-     needed. Re-runs after a 900ms delay to wait for Alpine x-if rendering to
-     insert the .carousel-card--link elements into the DOM. ─────────────────── -->
+<!-- ── S-CAROUSEL-CARD-3D: Subtle micro-tilt on hover (Apple/Chanel) ────────
+     FF_CardTilt adds a gentle perspective rotateX/rotateY on mousemove —
+     max ±5° each axis — so the card has physical presence without moving.
+     No translateY, no scale: the card stays exactly in place. The CSS
+     border-color transition (200ms ease) handles the primary hover signal.
+     Touch devices don't fire mousemove so no tilt occurs there.
+     Re-runs after 900ms to wait for Alpine x-if rendering to complete. ─────── -->
 <script>
 function FF_CardTilt() {
     const cards = document.querySelectorAll('.carousel-card--link');
@@ -1644,28 +1643,20 @@ function FF_CardTilt() {
             const x       = (e.clientX - rect.left)  / rect.width  - 0.5;
             const y       = (e.clientY - rect.top)   / rect.height - 0.5;
 
-            // Max ±10° tilt each axis
-            const rotateX = (-y * 10).toFixed(2);
-            const rotateY = ( x * 10).toFixed(2);
+            // WHY ±5°: subtle enough to feel physical, not enough to distort
+            // the card or cause any perceived movement / layout shift.
+            const rotateX = (-y * 5).toFixed(2);
+            const rotateY = ( x * 5).toFixed(2);
 
+            // No translateY, no scale — card stays in place, only tilts.
             card.style.transform =
-                'perspective(800px) ' +
+                'perspective(1200px) ' +
                 'rotateX(' + rotateX + 'deg) ' +
-                'rotateY(' + rotateY + 'deg) ' +
-                'translateY(-8px) ' +
-                'scale(1.01)';
-
-            // Move sheen with mouse for dynamic light-source effect
-            const sheenX = (x * 60 + 50).toFixed(0);
-            const sheenY = (y * 60 + 50).toFixed(0);
-            card.style.setProperty('--sheen-x', sheenX + '%');
-            card.style.setProperty('--sheen-y', sheenY + '%');
+                'rotateY(' + rotateY + 'deg)';
         });
 
         card.addEventListener('mouseleave', function () {
             card.style.transform = '';
-            card.style.removeProperty('--sheen-x');
-            card.style.removeProperty('--sheen-y');
         });
     });
 }
