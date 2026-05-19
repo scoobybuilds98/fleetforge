@@ -9630,11 +9630,15 @@ body:has(.chat-page-content) #ff-chat-widget {
     display: flex;
     gap: 12px;
     overflow-x: auto;
-    overflow-y: hidden;
+    /* WHY overflow-y:visible not hidden: scale(1.02) on hover grows the card
+       ~2% in every direction. overflow-y:hidden was clipping the top few pixels
+       of the hovered card, making it look cropped and hiding the top border. */
+    overflow-y: visible;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;      /* Firefox */
-    padding-bottom: 4px;
+    padding-bottom: 8px;
+    padding-top: 6px;           /* room for scale(1.02) top overflow */
 }
 .dashboard-carousel::-webkit-scrollbar {
     display: none;              /* Chrome / Safari */
@@ -9670,7 +9674,6 @@ body:has(.chat-page-content) #ff-chat-widget {
 /* Hover: highlight border in theme color — only the active card is marked */
 .carousel-card--link:hover {
     border-color: var(--color-primary);
-    border-top-width: 2px;
     transform: scale(1.02);
     text-decoration: none;
 }
