@@ -129,8 +129,18 @@ if ($user['role_slug'] === 'super_admin') {
     );
 }
 
-// Reason is optional but capped to a sensible length.
+// S-PERM-EXPAND-D'2: reason is now REQUIRED for grant/deny override
+// writes (granted = 0 or 1). Clearing an override (granted = null)
+// does NOT require a reason — it's reverting to the role default,
+// not adding new policy. This is a behavior change for the existing
+// PERM-1 single-override workflow: existing grants previously stored
+// reason as nullable; new grants must always have one.
 $reason = isset($body['reason']) ? clean_string($body['reason'], 1000) : null;
+if ($granted !== null && ($reason === null || $reason === '')) {
+    json_validation_error([
+        'reason' => 'A reason is required for grant/deny override changes.',
+    ]);
+}
 
 // ── Capture existing override (for audit log) ───────────────
 $existing = db_row(

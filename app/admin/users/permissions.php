@@ -399,11 +399,15 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ══════════════════════════════════════════════════════════════
      Reason modal — shown when cycling a cell to allow/deny
      ══════════════════════════════════════════════════════════════ -->
+<!-- S-PERM-EXPAND-D'1: use modal-overlay (flex-centered) not modal-backdrop
+     (no centering); preserve dark backdrop via inline styles. Same fix as
+     COMPLIANCE-FIX-1. -->
 <div x-show="reasonModal.open"
-     class="modal-backdrop"
-     style="display:none;"
-     :style="reasonModal.open ? 'display:flex;' : 'display:none;'"
-     @keydown.escape.window="reasonModal.open && cancelReason()">
+     x-cloak
+     class="modal-overlay"
+     @click.self="cancelReason()"
+     @keydown.escape.window="reasonModal.open && cancelReason()"
+     style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);">
     <div class="modal" @click.stop>
         <div class="modal-header">
             <h3 class="modal-title">
@@ -418,12 +422,20 @@ require_once FF_ROOT . '/includes/header.php';
                 <strong x-text="reasonModal.action"></strong>
                 for <strong><?= e($target['name']) ?></strong>.
             </p>
+            <!-- S-PERM-EXPAND-D'2: reason is now REQUIRED for grant/deny
+                 overrides. Existing PERM-1 workflow change — every new
+                 grant/deny now carries an audit reason. Clearing an
+                 override (cycling deny → none) skips this modal entirely
+                 and submits with reason=null since it reverts to defaults. -->
             <div class="form-group">
-                <label class="form-label">Reason <span class="text-muted">(optional)</span></label>
+                <label class="form-label">Reason <span class="text-danger">*</span></label>
                 <textarea class="form-control" rows="3"
                           x-model="reasonModal.reason"
                           maxlength="1000"
-                          placeholder="Why is this override needed?"></textarea>
+                          placeholder="Why is this override needed? (e.g., 'Temporary access for Q1 close')"></textarea>
+                <small class="form-text text-muted">
+                    Required for audit trail.
+                </small>
             </div>
             <div x-show="reasonModal.error"
                  x-text="reasonModal.error"
@@ -435,7 +447,7 @@ require_once FF_ROOT . '/includes/header.php';
                     class="btn btn-primary"
                     :class="reasonModal.intent === 1 ? '' : 'btn-danger'"
                     @click="confirmReason()"
-                    :disabled="saving">
+                    :disabled="saving || !(reasonModal.reason || '').trim()">
                 <span x-show="!saving" x-text="reasonModal.intent === 1 ? 'Grant' : 'Deny'"></span>
                 <span x-show="saving">Saving…</span>
             </button>
@@ -447,10 +459,11 @@ require_once FF_ROOT . '/includes/header.php';
      Group macro reason modal (S-PERM-EXPAND)
      ══════════════════════════════════════════════════════════════ -->
 <div x-show="groupMacroModal.open"
-     class="modal-backdrop"
-     style="display:none;"
-     :style="groupMacroModal.open ? 'display:flex;' : 'display:none;'"
-     @keydown.escape.window="groupMacroModal.open && cancelGroupMacro()">
+     x-cloak
+     class="modal-overlay"
+     @click.self="cancelGroupMacro()"
+     @keydown.escape.window="groupMacroModal.open && cancelGroupMacro()"
+     style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);">
     <div class="modal" @click.stop>
         <div class="modal-header">
             <h3 class="modal-title">
@@ -505,10 +518,11 @@ require_once FF_ROOT . '/includes/header.php';
      Reset confirmation modal
      ══════════════════════════════════════════════════════════════ -->
 <div x-show="resetModalOpen"
-     class="modal-backdrop"
-     style="display:none;"
-     :style="resetModalOpen ? 'display:flex;' : 'display:none;'"
-     @keydown.escape.window="resetModalOpen && (resetModalOpen = false)">
+     x-cloak
+     class="modal-overlay"
+     @click.self="resetModalOpen = false"
+     @keydown.escape.window="resetModalOpen && (resetModalOpen = false)"
+     style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);">
     <div class="modal" @click.stop>
         <div class="modal-header">
             <h3 class="modal-title">Reset all overrides?</h3>
@@ -823,11 +837,20 @@ function permissionsMatrix() {
         },
 
         async confirmReason() {
+            // S-PERM-EXPAND-D'2: client-side validation prevents the API call
+            // when reason is empty. Server enforces the same rule (update.php
+            // returns 422 when granted !== null && reason is empty) as
+            // defense in depth.
+            const reason = (this.reasonModal.reason || '').trim();
+            if (!reason) {
+                this.reasonModal.error = 'A reason is required for grant/deny override changes.';
+                return;
+            }
             await this.sendUpdate(
                 this.reasonModal.module,
                 this.reasonModal.action,
                 this.reasonModal.intent,
-                this.reasonModal.reason.trim() || null
+                reason
             );
         },
 
