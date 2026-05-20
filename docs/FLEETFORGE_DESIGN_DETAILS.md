@@ -712,6 +712,98 @@ Every empty table/list has a styled empty state. Never plain "No records found."
 - Secondary: "Try adjusting your search or filter criteria."
 - Action: "Clear Filters" (btn-secondary)
 
+### 11.1 Empty-state overlay pattern (S-QBO-4)
+
+When a chart, table, or KPI widget has no data to display, the pattern verified clean across the 4 QBO admin pages in S-QBO-4 (Dashboard + Sync Queue + Sync Log + Drift):
+
+**For charts (ApexCharts)** — render the chart normally with zero-data series. ApexCharts handles all-zeros series cleanly (no crash, no weird auto-scaling). Overlay a CSS-positioned div ABOVE the chart canvas:
+
+```html
+<div style="position:relative;">
+    <div id="chart-xyz" style="min-height:280px;"></div>
+    <!-- Empty-state overlay — only shown when 14d total = 0 -->
+    <div x-show="isEmptyChart()" x-cloak
+         style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+        <div class="text-secondary text-sm" style="background:var(--bg-surface);padding:8px 14px;border-radius:6px;border:1px solid var(--border-color);">
+            No activity yet — sync turns on at S-QBO-30
+        </div>
+    </div>
+</div>
+```
+
+Key properties: `position:absolute` + `inset:0` covers the chart canvas; `pointer-events:none` lets clicks pass through to chart interactions; small inner card with surface background + border keeps the message readable over chart gridlines. Use Alpine `x-show` bound to a computed `isEmptyChart()` (returns true when every series.data point is 0).
+
+**For tables** — render a single full-width row with centered text and contextual message:
+
+```html
+<template x-if="!loading && rows.length === 0">
+    <div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:0.875rem;">
+        No {entity} match the filters. {Hint about when this view starts populating.}
+    </div>
+</template>
+```
+
+Or as a `<tr>` with `colspan="N"` when the empty state belongs inside the table body itself.
+
+**For KPI cards** — render numbers as `0` with normal styling (don't hide the card or show "—"); the zero IS the data. Sublabels indicate state: "ready", "awaiting first activity", "queued items", etc.
+
+**For timestamps and "last updated" fields** — render `—` (em dash) when null, NOT "Never" or "N/A" (consistency with existing FF date-format conventions per §10 RESPONSIVE BREAKPOINTS adjacent date formatting). Em dash also widely used in S-QBO-4 admin tables for nullable QBO IDs, error codes, etc.
+
+**Messaging template for in-buildout features:**
+
+> "No {entity} {state}. {Trigger session} ships in {S-XXX-N}; this view will populate then."
+
+Examples used in S-QBO-4:
+- "No sync activity yet. Pushers ship in S-QBO-5+. The sync log will start populating then."
+- "Sync queue is empty. Items will be enqueued when sync turns on at S-QBO-30 and Pushers exist (S-QBO-5+)."
+- "No drift events recorded. Drift detection cron lands in S-QBO-24; push-failure drift events start populating when sync turns on at S-QBO-30."
+
+Future feature work that introduces new empty states should follow this pattern unless there's a specific UX justification for a different treatment.
+
+---
+
+## 11.2 ApexCharts BASE CONFIG — pending refactor (F-APEX-BASE)
+
+Multiple admin pages currently declare their own `fgMuted` local for chart label/axis colors, via two near-identical idioms:
+
+```js
+const fgMuted = cssVar('--text-tertiary') || '#64748b';  // (older pages — uses a cssVar() helper)
+const fgMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#94a3b8';  // (S-QBO-4)
+```
+
+**Locations as of S-QBO-4** (22 occurrences across 4 files):
+- `app/admin/dashboard/index.php` — 12 usages (the original; biggest blast surface)
+- `app/admin/quickbooks/dashboard.php` — 4 usages (S-QBO-4)
+- `app/admin/accounting/fixed-assets/index.php` — 3 usages
+- `app/admin/equipment/show.php` — 3 usages
+
+Note the two pages from S-QBO-4 era diverge from the older pages on the CSS variable choice (`--text-secondary` vs `--text-tertiary`) and on whether to use the `cssVar()` helper. That's drift in itself.
+
+**Opportunity**: lift this into a `window.FF_apexBase` global helper in `public/assets/js/app.js` (or wherever shared client-side config lives — `app.js` already declares `window.FF_Api`, `window.FF_CSRF_TOKEN`, the responsive-1 ApexCharts patch at line 4214, and the dashboard chart reflow handler at line 4374, so it's the natural home).
+
+Proposed shape:
+
+```js
+window.FF_apexBase = {
+  colors: { fgMuted, fgPrimary, accent, success, warning, danger, info, border },
+  defaultChartOptions: {
+    chart:    { toolbar: { show: false }, fontFamily: 'inherit', background: 'transparent' },
+    dataLabels: { enabled: false },
+    grid:     { borderColor: 'rgba(148,163,184,0.2)' },
+    tooltip:  { theme: 'dark' },
+    xaxis:    { labels: { style: { colors: FF_apexBase.colors.fgMuted } } },
+    yaxis:    { labels: { style: { colors: FF_apexBase.colors.fgMuted } } },
+    legend:   { labels: { colors: FF_apexBase.colors.fgMuted } },
+  },
+};
+```
+
+Each chart consumer then deep-merges its specific series + chart type onto `FF_apexBase.defaultChartOptions`. Single source of truth for chart styling across the app. Re-derive colors on theme change via a small reload hook tied to `[data-theme]` mutation observer (the existing S-PERM-MACRO-STATUS / S-DESIGN-SETTINGS-FOOTER-LOGIN theme switcher provides the trigger surface).
+
+**Estimated effort**: 1 small session (Sonnet) — refactor the 4 pages to use the helper + smoke verification (visual regression check that chart rendering still matches across the 4 pages). Tag as **F-APEX-BASE** in the Outstanding Items tracking section in PROGRESS.md (added 2026-05-20 via D-S-QBO-4-DOCS-LOCK).
+
+Recommendation: queue F-APEX-BASE for post-Phase-QBO pickup. During Phase QBO 5-30 the chart surface continues to grow (S-QBO-26 manual sync UI; S-QBO-30 cutover monitoring dashboards) — finishing the QBO arc first lets the refactor capture all consumers in one pass instead of repeatedly chasing new ones.
+
 ---
 
 ## 12. LOCAL DEVELOPMENT WORKFLOW

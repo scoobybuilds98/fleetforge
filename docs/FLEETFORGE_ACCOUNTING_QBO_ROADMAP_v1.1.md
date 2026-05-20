@@ -1066,5 +1066,66 @@ v1.0 was built from chat history without verifying on-disk canonical state. Betw
 
 ---
 
+## 20. CUTOVER SEQUENCE (OPERATOR + SESSION CHOREOGRAPHY)
+
+Phase QBO ships Pushers + infrastructure through S-QBO-29. The cutover from dummy-data-on-FF to live-sync-with-real-QBO is choreographed as the sequence below, treated as a single contiguous operation (~1-2 days operator time depending on fleet size and active-lease count).
+
+Sections §10 (Phase E) and §11-§19 are themed-content sections (sessions, decisions, doc map, conventions, stop conditions, risks, open questions, glossary, changelog) — §20 is the natural home for this operational reference. Added 2026-05-20 via D-S-QBO-4-DOCS-LOCK after the cutover-planning dialog produced D-CUTOVER-TEMPLATES / D-SAMSARA-TAGS-DUAL / D-CUTOVER-CUSTOMER-CONFLICT / D-CUTOVER-ORPHAN-CUSTOMERS.
+
+### 20.1 Pre-cutover preparation (before any wipe action)
+
+1. **Backup current FF database** — full `mysqldump` (or `pg_dump` equivalent); off-host snapshot recommended. Verify backup restorability before any destructive action.
+2. **Verify production QBO is in expected state** — accountant confirms COA, customer master, vendor master, and recent invoice activity match Mainland's books of record.
+3. **Confirm Samsara connection is healthy** — `lib/GPS/SamsaraClient::getTrailers()` returns expected fleet count (~200+ units for Mainland).
+4. **Run S-SAMSARA-LENDER-TAGS-CONFIG** (session TBD): update `settings` table key `samsara.lender_tag_patterns` with current lender list (was hardcoded in SAMSARA-3: Bennington Financial Corp, National Bank, Sonoma Capital Corp). Operator confirms the list against current financing relationships.
+
+### 20.2 Cutover Day 1 — Wipe + Identity Layer
+
+5. **S-QBO-CUTOVER-WIPE** (session TBD): truncate FF transactional + master data tables. **Preserve**: `users`, `user_roles`, `user_permissions`, `user_permission_overrides`, `settings` (most keys — exact preserve-list locked in S-QBO-CUTOVER-WIPE prompt), `schema_migrations`, and base `acc_accounts` structure (post-wipe chart of accounts re-mapped via S-QBO-8 not re-created from scratch). Smoke verifies wipe completeness + preservation rules. **Truncate**: `customers`, `vendors`, `leases`, `equipment_units`, `equipment_templates`, `invoices`, `payments`, `credit_notes`, `acc_journal_entries`, `acc_journal_entry_lines`, `acc_qbo_sync_queue`, `acc_qbo_sync_log`, `acc_qbo_drift_events`, all `acc_qbo_*_map` tables, etc. (exact truncate-list locked in S-QBO-CUTOVER-WIPE).
+6. **S-SAMSARA-FLEET-IMPORT** (session TBD): pulls all Samsara trailers via `SamsaraClient::getTrailers()`; creates `equipment_units` rows with identity layer populated (unit_number, vin, year, license_plate, all 17 `samsara_*` fields including `samsara_vehicle_id`). Tag classification per **D-SAMSARA-TAGS-DUAL**: lender tags populate `owner_company_id` + `ownership_type='leased'`; lessee tags create customer stubs flagged `requires_qbo_review=1` per **D-CUTOVER-ORPHAN-CUSTOMERS**. Idempotent (re-runnable; existing rows match by `samsara_vehicle_id` and update rather than duplicate).
+
+### 20.3 Cutover Day 1-2 — Operator Enrichment
+
+7. **Operator creates real `equipment_templates`** (per **D-CUTOVER-TEMPLATES**) with Mainland's actual rates. 8-15 templates expected (Dry Van, Reefer, Flatbed, Chassis, Step Deck, Lowboy, Tanker, Container, Dump). Daily / weekly / monthly default rates + mileage rates per template.
+8. **Operator assigns `template_id` per `equipment_unit`** — bulk-action UI if needed; 200+ units. Existing `app/admin/equipment/*` surface supports per-row assignment; bulk-assign UI may need a small addition.
+9. **Operator fills in per-unit dimensions, inspection dates** (CVI, registration, MVI, insurance), **and uploads documents** (cvi_document, registration_document, insurance_document). The Samsara identity layer captures vin + plate but not the compliance / inspection fields — those are Mainland's operator records.
+10. **Operator sets `yard_location` per unit** (Main Yard / other future yards per S018-EXT vintage).
+
+### 20.4 Cutover Day 2 — QBO Pull + Reconciliation
+
+11. **S-QBO-CUTOVER-IMPORT** (session TBD): pulls customers + vendors + COA from production QBO via `QuickBooksClient::query()`. Reconciles Samsara-derived customer stubs against QBO customer master per **D-CUTOVER-CUSTOMER-CONFLICT** (QBO wins; FF stub data discarded; Samsara tag association preserved on merged customer record). Surfaces orphan stubs on the **Customer Reconciliation Review** page per **D-CUTOVER-ORPHAN-CUSTOMERS**. Operator clears the review queue (create-in-QBO / merge / write-off per stub).
+12. **S-QBO-8 mapping UI**: operator manually maps each FF chart-of-accounts row → QBO account. The bridge-account validator (S-QBO-8) enforces that every account referenced by FF JE-posting logic has a QBO mapping before sync turns on.
+13. **S-QBO-9**: review / confirm tax-code mappings (BC GST/PST/HST per province; NS HST effective-date handling). Identify the `NON` override target code (per D-QBO-CORE-6).
+14. **S-QBO-10**: confirm item-type mappings (17 FF `invoice_line_items.item_type` ENUM values → QBO Items, including the dedicated "Rental Reconciliation Credit" item per D-QBO-10-1).
+
+### 20.5 Cutover Day 2 — Lease Re-creation
+
+15. **Operator re-creates active leases** via the existing FF lease wizard (`app/admin/leases/create.php`), using Samsara lessee tags as the unit↔customer signal. Operator supplies lease metadata (start_date, end_date, daily/weekly/monthly rates, mileage rates, term) from real Mainland records. **Estimated 30-60 minutes per lease × N active leases.** Per **D-SAMSARA-TAGS-DUAL**: lessee tag tells operator WHO and WHICH UNIT; operator supplies WHEN and HOW MUCH. No auto-creation — the lessee tag is identity-only.
+
+### 20.6 Cutover Day 2 — Final Smoke + Kill-Switch Flip
+
+16. **Run full D131 gate** — all smokes including any cutover-specific ones added by S-QBO-CUTOVER-WIPE / S-SAMSARA-FLEET-IMPORT / S-QBO-CUTOVER-IMPORT. As of S-QBO-4 the gate has 8 smokes + 1 migrate verify = 9 checks total; cutover sessions are expected to add 2-3 more.
+17. **Operator dry-run** — set `quickbooks.dry_run_mode='1'`; create a test invoice through the normal FF flow; verify the dry-run path through `cron/qbo_sync_worker.php` logs the would-be push (queue row marked `completed` with `error_message='[DRY RUN] would push'`) without hitting Intuit. Restore `dry_run_mode='0'` after verification.
+18. **S-QBO-30**: operator flips `quickbooks.sync_enabled='1'`. Install `qbo_sync_worker.php` in production crontab (1 min cadence). Install `qbo_token_refresh.php` (daily 02:00) if not already installed. Install `qbo_drift_check.php` (daily 03:30 — assuming S-QBO-24 has shipped) if not already installed. Sync begins; first real-traffic Pusher invocation hits Intuit production within ≤60s.
+
+### 20.7 Post-cutover (first 72 hours)
+
+- Monitor sync log + drift dashboard hourly via `app/admin/quickbooks/dashboard.php`.
+- Verify first 5-10 invoice pushes land in QBO with correct line items, customer mapping, tax codes, totals.
+- Run drift cron manually (`php cron/qbo_drift_check.php`) after 24 hours; resolve any unexpected drift events via the Drift admin page.
+- Confirm accountant can see expected FF-originated invoices in QBO (independent verification — not relying on FF's drift_check alone).
+- Watch for `qbo.push_failed` notifications dispatched to super_admin (and accountant once S-PERM-QBO-SEED unlocks that audience per D-QBO-3-PERM-GAP).
+
+### 20.8 Sessions referenced but not yet drafted
+
+Queue closer to S-QBO-29:
+- **S-SAMSARA-LENDER-TAGS-CONFIG** — pre-cutover lender list refresh
+- **S-QBO-CUTOVER-WIPE** — destructive truncate + preserve-list
+- **S-SAMSARA-FLEET-IMPORT** — identity-layer re-population with tag classification
+- **S-QBO-CUTOVER-IMPORT** — customer/vendor/COA pull + reconciliation UI
+- **S-QBO-30** — the trigger session itself (kill-switch flip + verification + 72-hour monitoring)
+
+---
+
 *End of FleetForge — Accounting + QuickBooks + Accountants Portal Master Roadmap v1.1.*
 *Next update trigger: S-ACCT-FIX-AP completion → status flip + any new D-ACCT-AP-* decisions added to §12.*
