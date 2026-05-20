@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-20
-**Tables:** 132 total · **Columns:** 2058
+**Tables:** 133 total · **Columns:** 2067
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -531,7 +531,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_50 tables._
+_51 tables._
 
 ## `acc_accounts`
 
@@ -1249,6 +1249,20 @@ _50 tables._
 | `notes` | text |  | YES |
 | `reviewed_by` | int unsigned | MUL | NO |
 | `reviewed_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `acc_oauth_states`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `state_token` | varchar(128) | UNI | NO |
+| `provider` | enum('quickbooks') | MUL | NO |
+| `initiated_by_user_id` | int unsigned | MUL | YES |
+| `initiated_ip` | varchar(45) |  | YES |
+| `initiated_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `expires_at` | datetime | MUL | NO |
+| `used_at` | datetime |  | YES |
+| `consumed_ip` | varchar(45) |  | YES |
 
 ## `acc_periods`
 

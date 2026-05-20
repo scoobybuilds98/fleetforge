@@ -954,6 +954,23 @@ CREATE TABLE `acc_journal_entry_lines` (
   CONSTRAINT `acc_journal_entry_lines_ibfk_4` FOREIGN KEY (`vendor_id`) REFERENCES `vendors` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_journal_entry_lines_ibfk_5` FOREIGN KEY (`equipment_unit_id`) REFERENCES `equipment_units` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_oauth_states` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `state_token` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `provider` enum('quickbooks') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'quickbooks',
+  `initiated_by_user_id` int unsigned DEFAULT NULL,
+  `initiated_ip` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `initiated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` datetime NOT NULL,
+  `used_at` datetime DEFAULT NULL,
+  `consumed_ip` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_state_token` (`state_token`),
+  KEY `idx_expires` (`expires_at`),
+  KEY `idx_provider_used` (`provider`,`used_at`),
+  KEY `idx_user` (`initiated_by_user_id`),
+  CONSTRAINT `fk_oauth_states_user` FOREIGN KEY (`initiated_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_periods` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `year` smallint unsigned NOT NULL,

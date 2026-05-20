@@ -4,9 +4,10 @@ declare(strict_types=1);
 /**
  * app/admin/oauth/qbo/init.php
  *
- * Step 1 of the Intuit OAuth 2.0 authorization-code grant. Generates
- * a per-request CSRF state token, stashes it in $_SESSION, then
- * 302-redirects the operator to the Intuit authorize URL.
+ * Step 1 of the Intuit OAuth 2.0 authorization-code grant. Mints a
+ * per-request OAuth state token via StateManager (DB-backed,
+ * 10-min TTL, single-use), then 302-redirects the operator to the
+ * Intuit authorize URL.
  *
  * Operator lands back on app/admin/oauth/qbo/callback.php with
  * ?code=...&state=...&realmId=... once Intuit's UI completes.
@@ -14,14 +15,18 @@ declare(strict_types=1);
  * URL: /fleetforge/oauth/qbo/init.php (routed via public/index.php
  * catchall → this file). Authenticated operators only; the
  * edit_credentials check blocks anyone who can view but not write
- * the QBO settings.
+ * the QBO settings. (init is user-initiated, so require_auth is
+ * appropriate here; the callback is auth-context-free — see
+ * callback.php docblock + D-QBO-OAUTH-FIX-2.)
  *
  * Spec ref: FLEETFORGE_QUICKBOOKS_SPEC.md §5.1 step 1-2.
- * Session:  S-QBO-1
+ * Session:  S-QBO-1 (initial), S-QBO-OAUTH-FIX (DB-backed state)
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
+
+use FleetForge\OAuth\StateManager;
 
 require_auth();
 require_permission('quickbooks', 'edit_credentials');
@@ -51,12 +56,20 @@ if ($environment === 'production') {
     }
 }
 
-// ── CSRF state token ───────────────────────────────────────────
-// 32 bytes of entropy is overkill for CSRF but cheap. Stored in
-// $_SESSION so the callback can hash_equals() it against the
-// returned state without a DB round-trip.
-$state = bin2hex(random_bytes(32));
-$_SESSION['qbo_oauth_state'] = $state;
+// ── OAuth state token (DB-backed, K-22 Trap #59) ───────────────
+// Persisted to acc_oauth_states with 10-min TTL + single-use
+// enforcement. Replaces the S-QBO-1 $_SESSION pattern which fails
+// under ngrok: the callback arrives on a different origin than
+// init, so the session cookie isn't present at callback time and
+// state verification always failed. The DB row also captures the
+// initiating user_id so callback can attribute the audit_log row
+// without needing an active session (D-QBO-OAUTH-FIX-4).
+$state = StateManager::generate(
+    'quickbooks',
+    StateManager::DEFAULT_TTL_SECONDS,
+    current_user_id(),
+    $_SERVER['REMOTE_ADDR'] ?? null
+);
 
 // ── Build the authorize URL ────────────────────────────────────
 // Scopes per spec §5.1: accounting (mandatory) + payment (for the

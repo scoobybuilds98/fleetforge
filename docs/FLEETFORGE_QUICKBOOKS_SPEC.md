@@ -321,15 +321,16 @@ Intuit's OAuth uses the standard authorization-code grant.
    - Redirect URI (production): `https://mainlandrentals.com/fleetforge/oauth/qbo/callback.php`
    - Production Client ID and Client Secret.
 
-**The flow (S-QBO-1 implements):**
+**The flow (S-QBO-1 implements, S-QBO-OAUTH-FIX hardens):**
 
-1. Operator navigates to Settings → QuickBooks → Connect.
-2. FF redirects to Intuit authorize URL with `client_id`, `response_type=code`, `scope`, `redirect_uri`, `state` (CSRF token).
-3. Operator logs into Intuit and authorizes the app.
-4. Intuit redirects back to `/oauth/qbo/callback.php?code={AUTH_CODE}&state={CSRF_TOKEN}&realmId={REALM_ID}`.
-5. FF verifies the CSRF state matches.
-6. FF exchanges the auth code for access + refresh tokens via `POST https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer`.
-7. Response contains:
+1. Operator navigates to Settings → QuickBooks → Connect. `init.php` runs behind `require_auth() + require_permission('quickbooks', 'edit_credentials')`.
+2. `init.php` calls `StateManager::generate('quickbooks', 600, current_user_id(), $remoteIp)` which INSERTs a row into `acc_oauth_states` with a 10-minute TTL and captures the initiating user_id for downstream audit attribution. Returns a 64-hex-char token.
+3. FF redirects to Intuit authorize URL with `client_id`, `response_type=code`, `scope`, `redirect_uri`, `state=<token>`.
+4. Operator logs into Intuit and authorizes the app.
+5. Intuit redirects back to `/oauth/qbo/callback.php?code={AUTH_CODE}&state={TOKEN}&realmId={REALM_ID}`.
+6. `callback.php` runs **auth-context-free** (no `require_auth`, no `require_permission` — see §5.1.1 below) and calls `StateManager::verifyAndConsume($token, 'quickbooks', $remoteIp)`. The call atomically validates + marks the row used via `UPDATE … SET used_at=NOW() WHERE state_token=? AND provider=? AND expires_at>NOW() AND used_at IS NULL` — single-use enforcement enforced by `affected_rows`. Any failure (missing / expired / replayed / tampered / wrong provider) returns `null`; callback bounces with a 400 + flash_error. On success, the returned `initiated_by_user_id` is used for audit attribution.
+7. FF exchanges the auth code for access + refresh tokens via `POST https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer`.
+8. Response contains:
    ```json
    {
      "access_token": "...",
@@ -339,7 +340,24 @@ Intuit's OAuth uses the standard authorization-code grant.
      "x_refresh_token_expires_in": 8726400
    }
    ```
-8. FF stores tokens + realm ID + expiry timestamps in `settings` with `is_sensitive=1`.
+9. FF stores tokens + realm ID + expiry timestamps in `settings` with `is_sensitive=1`. audit_log row written with `user_id = $initiatedUserId` (resolved from acc_oauth_states), `user_name = ff_qbo_lookup_user_name($initiatedUserId)`.
+
+#### 5.1.1 Why the callback is auth-context-free (D-QBO-OAUTH-FIX-2)
+
+The OAuth callback **must not** be gated on `require_auth()` / `require_permission()`. Two reasons:
+
+1. **OAuth 2.0 architecture**: the `state` parameter IS the authentication proof for the redirect — that's its job in the authorization-code grant. The provider can only deliver the redirect to the registered `redirect_uri`, and only with a state we minted. Layering session auth on top is architecturally redundant.
+2. **Practical: cross-origin redirect (K-22 Trap #59)**: in local dev under ngrok, the callback arrives on the ngrok origin (`*.ngrok-free.dev`) while the session was established on the local origin (`fleetforge.test`). The session cookie is not sent — `$_SESSION` is empty at callback time — so `require_auth()` redirects to the login page and the OAuth code is lost. The same class of failure applies to any cross-origin redirect path Intuit may use in future.
+
+Storage model (D-QBO-OAUTH-FIX-3):
+
+- `acc_oauth_states.state_token` — 64-hex-char (32 random bytes via `bin2hex(random_bytes(32))`) — UNIQUE.
+- `acc_oauth_states.provider` — ENUM('quickbooks'). Verified at consume time to prevent cross-provider token use once additional providers ship.
+- `acc_oauth_states.initiated_by_user_id` — FK→users with `ON DELETE SET NULL`. Drives audit attribution at consume time (D-QBO-OAUTH-FIX-4).
+- `acc_oauth_states.initiated_ip` / `consumed_ip` — captured for forensic audit. Not compared (operator may hop networks between init and callback — e.g., laptop → phone for MFA).
+- `acc_oauth_states.expires_at` — 600s (10 min) default TTL; generous for slow MFA flows but narrows leak window.
+- `acc_oauth_states.used_at` — NULL until consumed; set on the atomic `UPDATE` that wins the race. Single-use enforcement is the `WHERE used_at IS NULL` clause — `affected_rows = 0` means another consumer (or a replay attempt) already won.
+- **Cleanup discipline**: `StateManager::generate()` opportunistically deletes rows where `expires_at < NOW() - 24h` on every call. The 24h forensic buffer lets operators audit recent abandoned/failed attempts ("did user X actually start this?"). No dedicated cron needed.
 
 **Token characteristics:**
 

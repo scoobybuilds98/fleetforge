@@ -18,24 +18,25 @@ declare(strict_types=1);
  * connection_error captures the message, flash_error redirect.
  *
  * Spec ref: FLEETFORGE_QUICKBOOKS_SPEC.md §5.1 steps 4-8, §5.2.
- * Session:  S-QBO-1 (initial), hotfix 2026-05-20 (K-22 Trap #55:
- *           current_user_name() → current_user()['name']).
+ * Session:  S-QBO-1 (initial), S-QBO-OAUTH-FIX (2026-05-20: DB-backed
+ *           state + auth-context-free per D-QBO-OAUTH-FIX-2; resolves
+ *           K-22 Trap #59 — session cookie absent at callback under
+ *           ngrok cross-origin redirect).
  *
- * Known constraint: during local dev with ngrok, the OAuth callback
- * arrives on a different origin (ngrok-free.dev) than the browser
- * session origin (fleetforge.test), so session-based state and auth
- * fail. Proper fix tracked as S-QBO-OAUTH-FIX (DB-backed state +
- * auth-context-free callback). Until that ships, sandbox OAuth setup
- * via ngrok requires temporary auth bypass (see commit history).
+ * Auth model (D-QBO-OAUTH-FIX-2): this endpoint is intentionally
+ * public — no require_auth, no require_permission. The state token
+ * IS the authentication proof per OAuth 2.0; gating the callback on
+ * an active session is architecturally wrong AND practically broken
+ * under cross-origin redirects (the session cookie isn't set). The
+ * initiating user_id was captured at init time and is recovered from
+ * acc_oauth_states for audit_log attribution (D-QBO-OAUTH-FIX-4).
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
 require_once FF_ROOT . '/includes/auth.php';
 
-require_auth();
-require_permission('quickbooks', 'edit_credentials');
-
 use FleetForge\QuickBooksClient;
+use FleetForge\OAuth\StateManager;
 
 /**
  * ff_qbo_redirect_to_settings — emit a Location header to the
@@ -49,18 +50,48 @@ function ff_qbo_redirect_to_settings(string $flashType, string $message): never
     exit;
 }
 
-// ── CSRF state check ───────────────────────────────────────────
-// hash_equals() to defeat timing-attack snooping. A missing or
-// mismatched state means either a forged redirect or a stale tab —
-// either way: 400 + bounce to settings.
-$state         = (string) ($_GET['state'] ?? '');
-$expectedState = (string) ($_SESSION['qbo_oauth_state'] ?? '');
-unset($_SESSION['qbo_oauth_state']); // single-use
-
-if ($state === '' || $expectedState === '' || !hash_equals($expectedState, $state)) {
-    http_response_code(400);
-    ff_qbo_redirect_to_settings('error', 'OAuth state mismatch — please retry the connect flow.');
+/**
+ * ff_qbo_lookup_user_name — resolve a user id to a display name for
+ * audit attribution. Used because this callback runs without an
+ * active session (D-QBO-OAUTH-FIX-2), so current_user()['name'] is
+ * unavailable. The user_id was captured at init time and threaded
+ * through acc_oauth_states.initiated_by_user_id.
+ *
+ * Returns 'system' when the id is null (no initiating user recorded)
+ * or when the user has since been deleted — keeps audit_log inserts
+ * intact rather than failing on a NOT NULL user_name column.
+ */
+function ff_qbo_lookup_user_name(?int $userId): string
+{
+    if ($userId === null) {
+        return 'system';
+    }
+    $row = db_row('SELECT name FROM users WHERE id = ?', [$userId]);
+    return $row['name'] ?? 'system';
 }
+
+// ── State verification (DB-backed, single-use; K-22 Trap #59) ──
+// StateManager::verifyAndConsume atomically validates + marks the
+// token used. Returns the initiated_by_user_id captured at init
+// time so we can attribute the audit_log row without an active
+// session. Any failure (missing / expired / replayed / tampered /
+// wrong provider) returns null and is treated identically — we
+// don't differentiate the reason to avoid leaking info to an
+// attacker probing for valid tokens.
+$state = (string) ($_GET['state'] ?? '');
+$stateContext = StateManager::verifyAndConsume(
+    $state,
+    'quickbooks',
+    $_SERVER['REMOTE_ADDR'] ?? null
+);
+
+if ($stateContext === null) {
+    http_response_code(400);
+    ff_qbo_redirect_to_settings('error', 'OAuth state invalid or expired — please retry the connect flow.');
+}
+
+$initiatedUserId   = $stateContext['initiated_by_user_id'] ?? null;
+$initiatedUserName = ff_qbo_lookup_user_name($initiatedUserId);
 
 // Intuit can hand us back an explicit error param if the operator
 // cancels or the app config is wrong. Treat as a hard fail.
@@ -125,9 +156,12 @@ if ($body === false || $httpCode >= 400) {
 
     // Audit: action='update' because audit_log.action ENUM does
     // not include 'edit' — 'update' is the closest semantic match.
+    // user_id/user_name resolved from acc_oauth_states (the operator
+    // who initiated the flow); current_user_*() is unavailable here
+    // because the callback runs without an active session.
     db_insert('audit_log', [
-        'user_id'     => current_user_id(),
-        'user_name'   => current_user()['name'] ?? 'system',
+        'user_id'     => $initiatedUserId,
+        'user_name'   => $initiatedUserName,
         'action'      => 'update',
         'module'      => 'quickbooks',
         'entity_type' => 'qbo_oauth_connection',
@@ -159,9 +193,11 @@ QuickBooksClient::settings_write_qbo('last_connected_at',        date('Y-m-d H:i
 QuickBooksClient::settings_write_qbo('connection_status',        'connected');
 QuickBooksClient::settings_write_qbo('connection_error',         '');
 
+// user_id/user_name resolved from acc_oauth_states (D-QBO-OAUTH-FIX-4);
+// callback runs without an active session so current_user_*() is unusable.
 db_insert('audit_log', [
-    'user_id'      => current_user_id(),
-    'user_name'    => current_user()['name'] ?? 'system',
+    'user_id'      => $initiatedUserId,
+    'user_name'    => $initiatedUserName,
     'action'       => 'create',
     'module'       => 'quickbooks',
     'entity_type'  => 'qbo_oauth_connection',
