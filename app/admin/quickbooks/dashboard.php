@@ -97,7 +97,7 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ============================================================
          KPI ROW (4 cards)
          ============================================================ -->
-    <div class="dashboard-grid" style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:14px;margin-bottom:14px;">
+    <div class="kpi-grid kpi-grid--qbo">
 
         <!-- Card 1: Sync Queue -->
         <a href="<?= base_url('quickbooks/sync_queue') ?>" class="stat-card" style="text-decoration:none;color:inherit;padding:18px;">

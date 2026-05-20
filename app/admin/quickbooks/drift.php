@@ -51,7 +51,7 @@ require_once FF_ROOT . '/includes/header.php';
          x-text="flash.message"></div>
 
     <!-- ── Summary cards ───────────────────────────────────── -->
-    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:14px;">
+    <div class="kpi-grid kpi-grid--qbo">
         <div class="stat-card" style="padding:18px;">
             <div class="text-secondary text-sm">Unresolved</div>
             <div style="font-size:2rem;font-weight:600;margin:4px 0;" x-text="summary ? summary.unresolved : '—'"></div>

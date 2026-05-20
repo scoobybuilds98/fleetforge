@@ -4004,6 +4004,7 @@ html.is-mac .non-mac-only { display: none; }
 .dashboard-grid--equal   { grid-template-columns: 1fr 1fr; gap: 20px; }
 .dashboard-grid--widgets { grid-template-columns: 1fr 1fr; gap: 20px; }
 
+
 /* Chart card — the uniform wrapper around every chart panel.
    Flex column so card-body can fill remaining height and the chart
    inside it (.chart-wrap) can shrink past content height via min-height:0. */
@@ -5940,6 +5941,16 @@ dl.detail-grid dd {
     .stat-grid--3,
     .stat-grid--2 {
         grid-template-columns: 1fr;
+    }
+
+    /* QBO Dashboard / Customers / Drift KPI rows opt INTO a 2x2 mobile
+       layout (instead of the system default 1x4 stacked column). The
+       4 cards on these pages are compact enough — short numeric values
+       + 1-2 lines of supporting text — that a 2x2 layout reads better
+       than a 1x4 tall stack at mobile widths. Other modules can opt in
+       by adding the same modifier; operator surfaced 2026-05-21. */
+    .kpi-grid--qbo {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     /* Invoice address cards stack vertically on mobile */
