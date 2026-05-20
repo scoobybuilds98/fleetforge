@@ -2014,7 +2014,7 @@ The drift detection system is the safety net that ensures FF and QBO stay aligne
 
 ### 15.1 The drift dashboard
 
-UI at `app/admin/quickbooks/drift/index.php`. Per-entity drift report:
+UI at `app/admin/quickbooks/drift.php`. Per-entity drift report:
 
 | Section | Drift type | Display |
 |---|---|---|
@@ -2480,17 +2480,17 @@ The Settings UI gets a new tab at the top level: `Settings → QuickBooks`. Layo
 
 ### 19.3 Drift Detection dashboard
 
-`app/admin/quickbooks/drift/index.php`:
+`app/admin/quickbooks/drift.php` (S-QBO-4):
 
-- **Summary tiles** at top: Open drift events count, accepted divergences count, suppressed count.
-- **Filter controls**: entity type, drift category, status, date range.
-- **Drift events table**: detected_at, entity_type, drift_category, FF value, QBO value, drift_amount, status, actions.
-- **Action buttons per row**: Resolve via FF (re-sync), Resolve via QBO (notes), Accept divergence, Suppress.
-- **Bulk actions**: select multiple, bulk resolve/accept/suppress.
+- **Summary tiles** at top: Open drift events count, resolved-30d count, top-3 categories with counts, last-detected timestamp.
+- **Filter controls**: status (unresolved/resolved/all), category, entity type, detection source, date range.
+- **Drift events table**: detected_at, category, entity, qbo_entity_id, ff_value/qbo_value, drift_amount, description, status, actions.
+- **Action button per row**: Resolve (modal with required resolution_note ≥ 5 chars; optimistic-lock UPDATE … WHERE resolved_at IS NULL).
+- **Bulk actions**: deferred to S-QBO-25 (S-QBO-4 ships single-row resolve only; bulk resolve/accept/suppress arrive with the full drift workflow session).
 
 ### 19.4 Sync Log viewer
 
-`app/admin/quickbooks/sync-log/index.php`:
+`app/admin/quickbooks/sync_log.php` (S-QBO-4; underscored filename, NOT subdirectory):
 
 - **Search**: entity type, entity ID, QBO entity ID, error code, error message.
 - **Filters**: direction (push/pull), date range, success/failure.

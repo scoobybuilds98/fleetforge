@@ -1559,10 +1559,11 @@ php tests/_smoke_model_b_lifecycle.php            php bin/smoke/model_b_lifecycl
 php tests/_smoke_doc_freshness.php                php bin/smoke/doc_freshness.php
 php tests/_smoke_qbo_client.php                   php bin/smoke/qbo_client.php
 php tests/_smoke_qbo_queue.php                    php bin/smoke/qbo_queue.php
+php tests/_smoke_qbo_admin_ui.php                 php bin/smoke/qbo_admin_ui.php
 php bin/migrate.php --verify                      (this one IS in bin/ — the only exception)
 ```
 
-As of S-QBO-3 (2026-05-20) the gate is **7 smokes + 1 migrate verify = 8 checks total**. The 7th smoke `_smoke_qbo_queue.php` was added by S-QBO-3 to cover the sync infrastructure (acc_qbo_sync_queue + acc_qbo_drift_events shape, 13 sync_mode settings, QboPusherDispatcher + QuickBooksSync class surfaces, PusherNotImplementedException hierarchy, worker `pusher_not_implemented` pathway + notification suppression — self-cleaning, leaves zero artifacts). Expected growth: S-QBO-N sessions will likely add `_smoke_qbo_drift_invariants.php` and similar as the integration matures.
+As of S-QBO-4 (2026-05-20) the gate is **8 smokes + 1 migrate verify = 9 checks total**. The 8th smoke `_smoke_qbo_admin_ui.php` was added by S-QBO-4 to cover the QBO admin UI surface (4 admin pages + 9 backing API endpoints lint clean + permission gates + nav structure + empty-state reachability + synthetic-data reachability with self-cleaning + mutation-endpoint POST/CSRF + dashboard_metrics JSON shape). Expected growth: S-QBO-N sessions will likely add `_smoke_qbo_drift_invariants.php` and similar as the integration matures.
 
 The leading underscore on the filenames (`_smoke_*`) is intentional — it sorts these test files together at the top of `tests/` directory listings without colliding with the other `tests/_integration/`, `tests/_interaction/`, `tests/_regression/` subdirectories.
 
@@ -2258,7 +2259,7 @@ Drift detected by the smoke test:
 - `tests/_smoke_master_schema_parity.php` — the parity check
 - D87 in `FLEETFORGE_PROGRESS.md` — original same-session-update rule
 - D126–D127 in `FLEETFORGE_PROGRESS.md` — locked discipline updates (S-DATABASE-MASTER-RECONCILE-2)
-- D131 — extension: parity + invariants + doc freshness + qbo client + qbo queue smokes all run pre-commit (S-BILLING-RATE-FIX 2026-05-06 added the parity + invariants pair; S-DOC-FRESHNESS-DISCIPLINE 2026-05-13 added `tests/_smoke_doc_freshness.php` for canonical-doc existence + SESSION LOG cross-consistency + tool-call markup leak scan + IN-FLIGHT D136 discipline; S-QBO-2 2026-05-20 added `tests/_smoke_qbo_client.php` for QuickBooksClient class surface + exception hierarchy + classifyError categorisation + acc_qbo_sync_log §6.5 shape verification; S-QBO-3 2026-05-20 added `tests/_smoke_qbo_queue.php` for sync_queue + drift_events shape + 13 sync_mode settings + QboPusherDispatcher + QuickBooksSync + worker `pusher_not_implemented` pathway with notification + drift suppression — self-cleaning)
+- D131 — extension: parity + invariants + doc freshness + qbo client + qbo queue + qbo admin UI smokes all run pre-commit (S-BILLING-RATE-FIX 2026-05-06 added the parity + invariants pair; S-DOC-FRESHNESS-DISCIPLINE 2026-05-13 added `tests/_smoke_doc_freshness.php`; S-QBO-2 2026-05-20 added `tests/_smoke_qbo_client.php`; S-QBO-3 2026-05-20 added `tests/_smoke_qbo_queue.php`; S-QBO-4 2026-05-20 added `tests/_smoke_qbo_admin_ui.php` for the QBO admin UI surface — 4 pages + 9 API endpoints lint + permission gates + nav structure + empty/synthetic reachability + CSRF/POST verification + dashboard_metrics JSON shape, self-cleaning)
 - KNOWN ISSUE #100 — `lease_billing_periods` precharge cleanup (still open; next discipline target)
 - Original Phase 2 reconcile: commit `a54ad7f` for the full-regen procedure
 

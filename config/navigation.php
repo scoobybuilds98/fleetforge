@@ -241,6 +241,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Sync Queue',
+                'icon'   => 'inbox-arrow-down',
+                'url'    => '/quickbooks/sync_queue',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Sync Log',
                 'icon'   => 'clipboard-document-list',
                 'url'    => '/quickbooks/sync_log',
