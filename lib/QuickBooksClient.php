@@ -279,12 +279,60 @@ class QuickBooksClient
      *
      * Important: $sql is sent verbatim — caller is responsible for
      * any escaping needed by the QBO query language.
+     *
+     * Response normalization (S-QBO-5-FIX-1, K-22 Trap #60):
+     * QBO returns entity collections under QueryResponse as: missing
+     * (0 rows), bare object (1 row), array of objects (N>1 rows).
+     * This method normalizes the 1-row case in-place — every
+     * uppercase-keyed field under QueryResponse is guaranteed to be
+     * an array after the call returns. Pusher / Puller authors can
+     * iterate every entity collection without defensive wrapping.
      */
     public function query(string $sql, array $opts = []): array
     {
         $opts['operation']   = $opts['operation']   ?? 'query';
         $opts['entity_type'] = $opts['entity_type'] ?? 'query';
-        return $this->dispatch('GET', 'query', ['query' => ['query' => $sql]] + $opts);
+        $response = $this->dispatch('GET', 'query', ['query' => ['query' => $sql]] + $opts);
+        return self::normalizeQueryResponse($response);
+    }
+
+    /**
+     * Coerce single-object entity collections under QueryResponse
+     * to single-element arrays. Public-static so the offline smoke
+     * (tests/_smoke_qbo_client.php) can exercise it without going
+     * through the cURL boundary — pattern mirrors the existing
+     * _testClassify accessor used by the classifyError smoke.
+     *
+     * Heuristic: entity collections are uppercase-PascalCase
+     * (Customer, Vendor, Invoice, CreditMemo, …). Metadata fields
+     * are camelCase (startPosition, maxResults, totalCount) — keyed
+     * with a lowercase first character. We walk QueryResponse,
+     * skip metadata, and wrap any uppercase-keyed bare-object value
+     * into a [value]-shaped array. Empty + already-arrayed values
+     * pass through untouched. Top-level envelope keys (`time`, etc.)
+     * are likewise untouched.
+     *
+     * @see K-22 Trap #60 in docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md
+     */
+    public static function normalizeQueryResponse(array $response): array
+    {
+        if (!isset($response['QueryResponse']) || !is_array($response['QueryResponse'])) {
+            return $response;
+        }
+        foreach ($response['QueryResponse'] as $key => $value) {
+            // Entity collections are uppercase-PascalCase. Metadata
+            // fields (startPosition, maxResults, totalCount) start
+            // lowercase — skip those without inspecting them.
+            if ($key === '' || !ctype_upper($key[0])) {
+                continue;
+            }
+            // Bare object (1 row): assoc array with no integer 0 key.
+            // Empty arrays + already-indexed arrays pass through.
+            if (is_array($value) && !array_key_exists(0, $value) && !empty($value)) {
+                $response['QueryResponse'][$key] = [$value];
+            }
+        }
+        return $response;
     }
 
     /**

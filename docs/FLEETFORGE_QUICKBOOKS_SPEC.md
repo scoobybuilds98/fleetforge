@@ -653,6 +653,8 @@ class QuickBooksClient
 }
 ```
 
+**Normalization contract (added 2026-05-21 via S-QBO-5-FIX-1).** QBO's REST API serializes entity collections under `QueryResponse` as: missing (0 rows), bare object (1 row), or array of objects (N > 1 rows). `QuickBooksClient::query()` normalizes the 1-row case in-place — every uppercase-keyed field under `QueryResponse` is guaranteed to be an array after the method returns. Camelcase metadata fields (`startPosition`, `maxResults`, `totalCount`) and the envelope itself are passed through untouched. Pusher and Puller authors can iterate every entity collection without defensive single-row wrapping. The coercion is exposed as `QuickBooksClient::normalizeQueryResponse(array $response): array` (public static) so offline smokes can exercise it without going through the cURL boundary. See K-22 Trap #60 in `FLEETFORGE_CLAUDE_CODE_REFERENCE.md` §11.
+
 ### 6.7 Worker / cron
 
 `cron/qbo_sync_worker.php` runs every 1 minute. Logic (post-S-QBO-3 implementation — supersedes the original sketch per D-QBO-3-1):
@@ -3054,6 +3056,12 @@ Q-CPA-1 through Q-CPA-7 from the master roadmap §17.2:
 ---
 
 ## 29. CHANGELOG
+
+### v1.0.1 (2026-05-21) — S-QBO-5-FIX-1 normalization contract
+
+- **§6.6 amended**: documents `QuickBooksClient::query()` response normalization. After the call returns, every uppercase-keyed field under `QueryResponse` is guaranteed to be an array (the 1-row bare-object case is wrapped in-place). Coercion is exposed as `QuickBooksClient::normalizeQueryResponse(array $response): array` (public static) so offline smokes can unit-test it without HTTP. See K-22 Trap #60 in `FLEETFORGE_CLAUDE_CODE_REFERENCE.md` §11.
+- **CustomerPuller** defensive single-row wrap deleted — normalization is now centralized at the HTTP boundary; per-Pusher defensive wraps are redundant and slightly wrong (would re-wrap already-arrayed data).
+- **tests/_smoke_qbo_client.php** gained sub-check C7 covering normalize across empty / 1-object / N-array / metadata-preserved cases. D131 `qbo_client` smoke advances 6/6 → 7/7.
 
 ### v1.0 (2026-05-18) — Initial canonical spec
 

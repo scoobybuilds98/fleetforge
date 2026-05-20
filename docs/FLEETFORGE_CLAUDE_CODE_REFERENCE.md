@@ -1717,6 +1717,35 @@ db_execute("UPDATE acc_oauth_states SET used_at = NOW() WHERE id = ?", [$row['id
 
 **Source**: Hotfix commit `a0a4a7a` (2026-05-20) + S-QBO-OAUTH-FIX queue entry + D-S-QBO-1-CALLBACK-HOTFIX in PROGRESS.md DECISIONS. Locked here as the architectural lesson so the next OAuth integration starts with DB-backed state instead of re-discovering the trap.
 
+### Trap 60: QBO `QueryResponse` returns object-not-array for 1-row collections
+
+The Intuit QBO REST API serializes `QueryResponse.<EntityType>` as a bare object when exactly ONE entity matches, and as an array of objects when two or more match. Zero matches: the key is absent entirely.
+
+This is asymmetric and undocumented in Intuit's own docs. Code that does `foreach ($response['QueryResponse']['Customer'] as $c)` works fine on pages with multiple customers but iterates over OBJECT KEYS (`DisplayName`, `Id`, `SyncToken`, …) on a page with exactly one — silently producing nonsense results.
+
+```php
+❌ Wrong (works for N≥2, breaks for N=1)
+foreach ($response['QueryResponse']['Customer'] as $customer) {
+    $name = $customer['DisplayName']; // breaks at N=1: $customer is a string
+}
+
+✅ Right (since S-QBO-5-FIX-1)
+// QuickBooksClient::query() normalizes the 1-row case in-place.
+// Every uppercase-keyed field under QueryResponse is guaranteed to be
+// an array after query() returns.
+foreach ($response['QueryResponse']['Customer'] ?? [] as $customer) {
+    $name = $customer['DisplayName']; // always works
+}
+```
+
+Applies to every QBO entity type: Customer, Vendor, Invoice, Payment, CreditMemo, Bill, JournalEntry, BankAccount, Item, TaxCode, etc. The normalization is centralized in `QuickBooksClient::query()` so Pusher / Puller authors never need to defensively wrap; in fact, doing so post-normalization is **incorrect** (it would re-wrap already-arrayed data into a single-element wrapper around the array — turning N customers into 1 "customer" that's actually a list).
+
+The coercion is exposed as `QuickBooksClient::normalizeQueryResponse(array $response): array` (public static) so offline smokes (`tests/_smoke_qbo_client.php` C7) can exercise it without going through the cURL boundary — same pattern as the existing `_testClassify` accessor used by the classifyError smoke.
+
+**Heuristic**: entity collections are uppercase-PascalCase (Customer, Vendor, …); metadata fields are camelCase (startPosition, maxResults, totalCount). The normalizer walks `QueryResponse`, skips keys whose first character is not uppercase, and wraps any qualifying bare-object value into a single-element array.
+
+**Source**: K-22 catch surfaced during S-QBO-5 live sandbox verification — CustomerPuller initially had a per-call defensive wrap (`if (!empty($batch) && !isset($batch[0])) $batch = [$batch];`). Recognized as a pattern that would replicate across every future Pusher (Vendor, Invoice, Payment, Bill, …) if left per-call instead of centralized at the HTTP boundary. Locked 2026-05-21 via S-QBO-5-FIX-1 + D-QBO-5-FIX-1-1/-2/-3 in PROGRESS.md DECISIONS.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)

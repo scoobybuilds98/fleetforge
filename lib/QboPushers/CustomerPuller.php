@@ -75,15 +75,8 @@ class CustomerPuller
             );
             $response = $client->query($sql, ['entity_type' => 'customer']);
 
-            // QBO returns Customer as an ARRAY when ≥2 rows, OBJECT
-            // when exactly 1, and ABSENT when 0. Normalize all three
-            // shapes into an array of records.
+            // Normalization handled by QuickBooksClient::query() — see K-22 Trap #60.
             $batch = $response['QueryResponse']['Customer'] ?? [];
-            if (!empty($batch) && !isset($batch[0])) {
-                // Single-row response — QBO returned an object,
-                // not a list. Wrap into a 1-element array.
-                $batch = [$batch];
-            }
 
             if (empty($batch)) {
                 break;

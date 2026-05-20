@@ -42,7 +42,7 @@ use FleetForge\Exceptions\QuickBooksRateLimitException;
 
 $failures = [];
 $pass     = 0;
-$total    = 6;
+$total    = 7;
 
 // ── C1: class exists + 10 expected public methods ─────────────
 $expectedMethods = [
@@ -274,6 +274,63 @@ if (empty($c6Errors)) {
 } else {
     echo "FAIL C6  " . implode('; ', $c6Errors) . "\n";
     $failures[] = 'C6';
+}
+
+// ── C7: query() response normalization (S-QBO-5-FIX-1 / K-22 Trap #60) ──
+// Exercises QuickBooksClient::normalizeQueryResponse() against four
+// mock response shapes — no real HTTP. The helper is the offline-
+// testable seam for the in-place 1-row-object → array coercion that
+// query() applies before returning. Mirror of the classifyError C3
+// pattern: one structural sub-check, multiple cases internally.
+$c7Errors = [];
+$cases = [
+    // Case 1 — empty QueryResponse passes through unchanged.
+    [
+        'label'    => 'empty QueryResponse',
+        'input'    => ['QueryResponse' => []],
+        'expected' => ['QueryResponse' => []],
+    ],
+    // Case 2 — single Customer object wrapped to single-element array.
+    [
+        'label'    => 'single object wrapped to array',
+        'input'    => ['QueryResponse' => ['Customer' => ['DisplayName' => 'X']]],
+        'expected' => ['QueryResponse' => ['Customer' => [['DisplayName' => 'X']]]],
+    ],
+    // Case 3 — array of customers passes through unchanged.
+    [
+        'label'    => 'array of objects unchanged',
+        'input'    => ['QueryResponse' => ['Customer' => [['DisplayName' => 'X'], ['DisplayName' => 'Y']]]],
+        'expected' => ['QueryResponse' => ['Customer' => [['DisplayName' => 'X'], ['DisplayName' => 'Y']]]],
+    ],
+    // Case 4 — metadata fields preserved AND single Customer wrapped.
+    [
+        'label'    => 'metadata preserved + single Customer wrapped',
+        'input'    => ['QueryResponse' => ['startPosition' => 1, 'maxResults' => 25, 'Customer' => ['DisplayName' => 'X']]],
+        'expected' => ['QueryResponse' => ['startPosition' => 1, 'maxResults' => 25, 'Customer' => [['DisplayName' => 'X']]]],
+    ],
+];
+try {
+    foreach ($cases as $i => $case) {
+        $got = QuickBooksClient::normalizeQueryResponse($case['input']);
+        if ($got !== $case['expected']) {
+            $c7Errors[] = sprintf(
+                "case %d (%s) mismatch — got %s, want %s",
+                $i + 1,
+                $case['label'],
+                json_encode($got),
+                json_encode($case['expected'])
+            );
+        }
+    }
+} catch (Throwable $e) {
+    $c7Errors[] = 'normalizeQueryResponse threw: ' . $e->getMessage();
+}
+if (empty($c7Errors)) {
+    echo "PASS C7  normalizeQueryResponse handles empty / 1-object / N-array / metadata-preserved cases\n";
+    $pass++;
+} else {
+    echo "FAIL C7  " . implode('; ', $c7Errors) . "\n";
+    $failures[] = 'C7';
 }
 
 // ── Summary ───────────────────────────────────────────────────
