@@ -966,13 +966,22 @@ kbd {
     .sidebar:not(.is-open) .sidebar-brand-name,
     .sidebar:not(.is-open) .nav-item-label,
     .sidebar:not(.is-open) .nav-badge,
-    .sidebar:not(.is-open) .nav-section-label,
     .sidebar:not(.is-open) .nav-group-arrow,
     .sidebar:not(.is-open) .nav-children,
     .sidebar:not(.is-open) .sidebar-user-info {
         opacity: 0;
         pointer-events: none;
         max-width: 0;
+    }
+
+    /* Section separators must fully collapse in icons-only mode.
+       opacity:0 + max-width:0 alone leaves the 12+4px vertical padding
+       behind — multiple separators accumulate into 60-100px of empty
+       vertical space between groups (operator surfaced 2026-05-20).
+       The label text isn't useful in collapsed mode anyway, so
+       display:none is the cleanest fix. */
+    .sidebar:not(.is-open) .nav-section-label {
+        display: none;
     }
 
     /* S-SIDEBAR-COLLAPSED-BADGE-DOT — keep notification badges visible
