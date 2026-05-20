@@ -1,0 +1,49 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * api/v1/quickbooks/test_connection.php
+ *
+ * GET endpoint. Validates the active QBO connection by calling
+ * QuickBooksClient::getCompanyInfo() — in S-QBO-1 the method is a
+ * stub that exercises only ensureValidToken(). Once S-QBO-2 lands
+ * it will hit /v3/company/{realmId}/companyinfo for real.
+ *
+ * Reflects the result back to the UI so the operator gets a green
+ * "Connected as <Company Name>" inline message; also updates
+ * connection_status if the token is found to be expired.
+ *
+ * @method  GET
+ * @auth    Session required; require_permission('quickbooks', 'view')
+ * @returns 200 { success: true, company_name: string, realm_id: string }
+ *        | 200 { success: false, error: string }
+ *
+ * Spec ref: FLEETFORGE_QUICKBOOKS_SPEC.md §5 (connection diagnostics)
+ * Session:  S-QBO-1
+ */
+
+require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
+
+use FleetForge\QuickBooksClient;
+
+require_method('GET');
+require_auth_api();
+require_permission('quickbooks', 'view');
+
+try {
+    $client = new QuickBooksClient();
+    $info   = $client->getCompanyInfo();
+    json_success($info);
+} catch (\RuntimeException $e) {
+    // ensureValidToken() throws RuntimeException when the token is
+    // missing or unrefreshable — bubble the message back to UI.
+    // Do NOT call json_error() — the front-end interprets HTTP 4xx
+    // as transport failures; we want a {success:false} payload so
+    // the Alpine handler can render an inline error panel.
+    http_response_code(200);
+    echo json_encode([
+        'success' => false,
+        'error'   => $e->getMessage(),
+    ]);
+    exit;
+}

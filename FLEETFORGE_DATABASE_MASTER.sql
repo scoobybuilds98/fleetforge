@@ -3057,6 +3057,7 @@ CREATE TABLE `settings` (
   `label` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `is_public` tinyint(1) NOT NULL DEFAULT '0',
+  `is_sensitive` tinyint(1) NOT NULL DEFAULT '0',
   `updated_by` int unsigned DEFAULT NULL,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

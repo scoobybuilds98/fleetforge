@@ -4,11 +4,11 @@
 **Companion docs:** `FLEETFORGE_QUICKBOOKS_SPEC.md` (canonical reference), `FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md` §9 (session-by-session plan), `FLEETFORGE_PROGRESS.md` (master FF progress log).
 **Purpose:** Single living tracker for the QuickBooks integration arc. Every S-QBO-N session appends its row here when it ships. Decision locks land in the D-QBO-* table. Schema additions, crons, and settings tracked separately for quick lookup.
 
-**Current arc status (as of 2026-05-18):**
+**Current arc status (as of 2026-05-20):**
 
-🟡 **PRE-IMPLEMENTATION.** Phase QBO not started. Blocked by Phase A → B → C → D completion per dependency chain (D-ARCH-9). Specs locked, decisions locked, nothing built yet.
+🟢 **PHASE QBO-1 STARTED.** S-QBO-1 SHIPPED 2026-05-20 — OAuth scaffolding + Settings → QuickBooks page + QuickBooksClient skeleton + token pinger cron. 1 of 30 sessions complete. Phase A/B/C/D all shipped prior (Phase D complete 2026-05-19 via S-ACCT-LESSOR-1..6). Master sync kill-switch `quickbooks.sync_enabled='0'` remains OFF until S-QBO-30 production cutover per D-CPA-5.
 
-**Next session up:** S-ACCT-FIX-AP (Phase A — NOT QBO). S-QBO-1 will be queued after Phase A, B, C, D ship.
+**Next session up:** S-QBO-2 — QuickBooksClient HTTP boundary completion: GET/POST/PUT, query SQL, getEntity/createEntity/updateEntity, error classification, Sentry instrumentation.
 
 ---
 
@@ -20,8 +20,8 @@ Legend: 📋 PLANNED | 🟡 QUEUED | 🔄 IN-PROGRESS | ✅ DONE | ⛔ BLOCKED |
 
 | ID | Status | Date shipped | Description |
 |---|---|---|---|
-| S-QBO-1 | 📋 PLANNED | — | OAuth scaffolding, Settings → QuickBooks tab (Connection Card), token storage in settings, QuickBooksClient class skeleton, sandbox connection verification, refresh-token pinger cron |
-| S-QBO-2 | 📋 PLANNED | — | QuickBooksClient HTTP boundary completion: GET/POST/PUT, query SQL, getEntity/createEntity/updateEntity, error classification, Sentry instrumentation |
+| S-QBO-1 | ✅ DONE | 2026-05-20 | OAuth scaffolding, Settings → QuickBooks tab (Connection Card), token storage in settings (with NEW is_sensitive column), QuickBooksClient class skeleton (token management implemented; HTTP boundary stubs for S-QBO-2), sandbox connection verification, refresh-token pinger cron |
+| S-QBO-2 | 🟡 QUEUED | — | QuickBooksClient HTTP boundary completion: GET/POST/PUT, query SQL, getEntity/createEntity/updateEntity, error classification, Sentry instrumentation |
 | S-QBO-3 | 📋 PLANNED | — | Sync infrastructure tables: acc_qbo_sync_queue + acc_qbo_sync_log + acc_qbo_drift_events. Worker cron skeleton |
 | S-QBO-4 | 📋 PLANNED | — | Sync infrastructure UI: Sync Log page, Drift Detection page (basic), QuickBooks Dashboard page (basic) |
 
@@ -124,7 +124,7 @@ Format: `| SESSION-ID | DATE | One-line description | Files changed | SC results
 
 | Session | Date | Description | Files | SC results | Decisions |
 |---|---|---|---|---|---|
-| _(empty — first row appends when S-QBO-1 ships)_ | | | | | |
+| S-QBO-1 | 2026-05-20 | OAuth scaffolding, QBO settings tab, QuickBooksClient skeleton, token pinger cron (Phase QBO-1 / 1 of 4) | db_migrations/202605200500_S-QBO-1.sql, FLEETFORGE_DATABASE_MASTER.sql, docs/FLEETFORGE_SCHEMA_QUICK_REF.md, config/navigation.php, app/admin/quickbooks/{settings,dashboard,sync_log,drift,index}.php, app/admin/oauth/qbo/{init,callback}.php, api/v1/quickbooks/{disconnect,test_connection,save_credentials,save_master_controls}.php, lib/QuickBooksClient.php, cron/qbo_token_refresh.php, docs/runbooks/qbo_realm_change.md | D131 6/6 PASS (PARITY OK + I1-I10 + samsara 16/16 + model_b 20/20 + doc_freshness 17/17 + migrate 45/0/0) | D-QBO-1-1 (settings.is_sensitive column added — separate from is_public, controls UI masking + audit redaction), D-QBO-1-2 (sidebar nav in config/navigation.php — array-driven, K-22 file-over-prompt resolution) |
 
 ---
 
@@ -148,13 +148,13 @@ Format: `| SESSION-ID | DATE | One-line description | Files changed | SC results
 | D-QBO-CORE-12 | Both engine versions (period_independent + holistic) push invoices to QBO; engine-version dispatch in S-QBO-11 | QBO spec §4.1 |
 | D-QBO-CORE-13 | Production live at https://mainlandrentals.com/fleetforge since 2026-05-16; nginx (D202); SSL Let's Encrypt; D8 unlocked | QBO spec §4.1 |
 
-### D-QBO-N-* (per-session, anticipated)
+### D-QBO-N-* (per-session, locked / anticipated)
 
-To be locked as each session ships. Anticipated locks:
+Per-session decisions locked when each session ships (✅) or anticipated for sessions still pending (📋).
 
-| Session | Anticipated decisions |
-|---|---|
-| S-QBO-1 | OAuth callback URL format, token storage encryption approach, refresh-token pinger schedule, realm change runbook |
+| Session | Status | Decisions |
+|---|---|---|
+| S-QBO-1 | ✅ LOCKED 2026-05-20 | **D-QBO-1-1** settings.is_sensitive column added (TINYINT(1) NOT NULL DEFAULT 0 AFTER is_public; backfilled 6 existing credential rows; semantically distinct from is_public per [[feedback_trust_file_over_prompt]] resolution of pre-flight STOP). **D-QBO-1-2** sidebar nav in config/navigation.php — array-driven, rendered by includes/sidebar.php (NOT app/views/layout/sidebar.php as the prompt incorrectly referenced); QuickBooks group placed as SEPARATE top-level above Accounting per D-QBO-CORE-3 parallel-running invariant. |
 | S-QBO-5 | Customer name collision resolution, fuzzy-match threshold during initial mapping, deactivated-customer handling |
 | S-QBO-8 | Bridge-account validator strictness, unmapped-account fallback, custom account creation |
 | S-QBO-9 | NON code identification approach, NS HST date-effective handling, ITC tax code differentiation |
@@ -208,7 +208,7 @@ To be locked as each session ships. Anticipated locks:
 
 | Cron | Schedule | Added in | Status | Purpose |
 |---|---|---|---|---|
-| qbo_token_refresh.php | Daily 02:00 | S-QBO-1 | 📋 PLANNED | Refresh OAuth tokens; alert if < 14 days to expiry |
+| qbo_token_refresh.php | Daily 02:00 | S-QBO-1 | ✅ CODE SHIPPED 2026-05-20 (crontab install deferred to S-QBO-29 production cutover) | Refresh OAuth tokens; alert if < 14 days to expiry |
 | qbo_sync_worker.php | Every 1 min | S-QBO-3 | 📋 PLANNED | Process queued push jobs |
 | qbo_bank_cdc.php | Daily 02:30 | S-QBO-20 | 📋 PLANNED | Pull bank transactions from QBO (Exception #2) |
 | qbo_drift_check.php | Daily 03:30 | S-QBO-24 | 📋 PLANNED | Detect and surface drift |
@@ -219,13 +219,17 @@ To be locked as each session ships. Anticipated locks:
 
 ## 6. SETTINGS KEYS LOG
 
-Added in S-QBO-1 unless noted otherwise. All `is_sensitive=1` flagged in spec §24.
+Added in S-QBO-1 unless noted otherwise. `is_sensitive=1` flag added to settings table by S-QBO-1 migration (D-QBO-1-1) and applied to the 5 OAuth credential rows per spec §24.1.
 
-**Connection / OAuth (S-QBO-1):**
-- quickbooks.environment, quickbooks.client_id, quickbooks.client_secret, quickbooks.realm_id, quickbooks.access_token, quickbooks.refresh_token, quickbooks.access_token_expires_at, quickbooks.refresh_token_expires_at, quickbooks.last_connected_at, quickbooks.last_token_refresh_at, quickbooks.connection_status, quickbooks.connection_error, quickbooks.webhook_verifier_token, quickbooks.tax_override_code_id
+**Connection / OAuth (S-QBO-1 ✅ SHIPPED 2026-05-20 — 15 keys):**
+- quickbooks.environment (is_sensitive=0), quickbooks.client_id (=1), quickbooks.client_secret (=1), quickbooks.realm_id (=0), quickbooks.access_token (=1), quickbooks.refresh_token (=1), quickbooks.access_token_expires_at (=0), quickbooks.refresh_token_expires_at (=0), quickbooks.last_connected_at (=0), quickbooks.last_token_refresh_at (=0), quickbooks.connection_status (=0), quickbooks.connection_error (=0), quickbooks.webhook_verifier_token (=1), quickbooks.tax_override_code_id (=0), quickbooks.sandbox_redirect_uri (=0)
 
-**Master controls (S-QBO-1, default kill-switch off until S-QBO-30):**
-- quickbooks.sync_enabled, quickbooks.payments_enabled, quickbooks.dry_run_mode
+**Master controls (S-QBO-1 ✅ SHIPPED 2026-05-20 — default kill-switch off until S-QBO-30; 3 keys):**
+- quickbooks.sync_enabled (D-CPA-5), quickbooks.payments_enabled, quickbooks.dry_run_mode
+
+**Settings table schema change (S-QBO-1 ✅ SHIPPED 2026-05-20, D-QBO-1-1):**
+- ALTER TABLE settings ADD COLUMN is_sensitive TINYINT(1) NOT NULL DEFAULT 0 AFTER is_public
+- 6 existing rows backfilled to is_sensitive=1 in same migration: ai.anthropic_api_key, aws.secret_access_key, email.smtp_pass, gps.geotab_password, gps.samsara_api_key, notifications.smtp_pass
 
 **Per-entity sync mode (S-QBO-3):**
 - quickbooks.sync_mode.{customer, vendor, invoice, payment, credit_memo, refund_receipt, bill, bill_payment, journal_entry, depreciation_je, recurring_je, tax_remittance_je, year_end_closing_je}

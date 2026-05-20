@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-19
-**Tables:** 126 total · **Columns:** 1943
+**Tables:** 130 total · **Columns:** 2016
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -254,6 +254,17 @@ _12 tables._
 | `end_date` | date |  | YES |
 | `actual_return_date` | date |  | YES |
 | `status` | enum('pending','active','completed','cancelled') | MUL | NO |
+| `classification` | enum('operating','sales_type','direct_financing') |  | NO |
+| `classification_signed_off_by` | int unsigned | MUL | YES |
+| `classification_signed_off_at` | datetime |  | YES |
+| `bargain_purchase_option_amount` | decimal(12,2) |  | YES |
+| `bargain_purchase_option_date` | date |  | YES |
+| `economic_life_months` | int |  | YES |
+| `initial_fair_value` | decimal(12,2) |  | YES |
+| `initial_direct_costs` | decimal(12,2) |  | NO |
+| `guaranteed_residual_value` | decimal(12,2) |  | NO |
+| `unguaranteed_residual_value` | decimal(12,2) |  | NO |
+| `implicit_rate` | decimal(7,4) |  | YES |
 | `daily_rate` | decimal(10,2) |  | NO |
 | `weekly_rate` | decimal(10,2) |  | NO |
 | `monthly_rate` | decimal(10,2) |  | NO |
@@ -430,6 +441,7 @@ _12 tables._
 | `label` | varchar(255) |  | YES |
 | `description` | text |  | YES |
 | `is_public` | tinyint(1) |  | NO |
+| `is_sensitive` | tinyint(1) |  | NO |
 | `updated_by` | int unsigned | MUL | YES |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
@@ -465,6 +477,7 @@ _12 tables._
 | `password_reset_expiry` | datetime |  | YES |
 | `remember_token` | varchar(100) |  | YES |
 | `mfa_verified_until` | datetime |  | YES |
+| `permissions_updated_at` | timestamp |  | YES |
 | `created_by` | int unsigned | MUL | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
@@ -518,7 +531,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_44 tables._
+_48 tables._
 
 ## `acc_accounts`
 
@@ -1105,6 +1118,28 @@ _44 tables._
 | `created_by` | int unsigned | MUL | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 
+## `acc_impairment_tests`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `asset_id` | int unsigned | MUL | NO |
+| `fiscal_year` | int | MUL | NO |
+| `triggering_event` | enum('annual','idle','damage','market_decline','adverse_legal','other') |  | NO |
+| `triggering_event_notes` | text |  | YES |
+| `step_1_carrying_amount` | decimal(15,2) |  | NO |
+| `step_1_undiscounted_cf` | decimal(15,2) |  | NO |
+| `step_1_cf_source` | enum('estimator','operator_override') |  | NO |
+| `step_1_cf_breakdown_json` | json |  | YES |
+| `step_1_passed` | tinyint(1) |  | NO |
+| `step_2_fair_value` | decimal(15,2) |  | YES |
+| `step_2_impairment_loss` | decimal(15,2) |  | YES |
+| `step_2_fair_value_basis` | text |  | YES |
+| `impairment_je_id` | int unsigned | MUL | YES |
+| `tested_by` | int unsigned | MUL | NO |
+| `tested_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `notes` | text |  | YES |
+
 ## `acc_journal_entries`
 
 | Column | Type | Key | Nullable |
@@ -1122,7 +1157,7 @@ _44 tables._
 | `approved_at` | datetime |  | YES |
 | `description` | varchar(500) |  | NO |
 | `reference` | varchar(255) |  | YES |
-| `source_type` | enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring') | MUL | YES |
+| `source_type` | enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment') | MUL | YES |
 | `source_id` | int unsigned |  | YES |
 | `is_reversal` | tinyint(1) |  | NO |
 | `reversal_of_id` | int unsigned | MUL | YES |
@@ -1156,6 +1191,64 @@ _44 tables._
 | `vendor_id` | int unsigned | MUL | YES |
 | `equipment_unit_id` | int unsigned | MUL | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `acc_lease_amortization_schedules`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `lease_id` | int unsigned | MUL | NO |
+| `period_number` | int |  | NO |
+| `period_date` | date | MUL | NO |
+| `opening_net_investment` | decimal(15,2) |  | NO |
+| `cash_receipt` | decimal(12,2) |  | NO |
+| `finance_income` | decimal(12,2) |  | NO |
+| `principal_reduction` | decimal(12,2) |  | NO |
+| `closing_net_investment` | decimal(15,2) |  | NO |
+| `posted_je_id` | int unsigned | MUL | YES |
+| `status` | enum('scheduled','posted','reversed') |  | NO |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `acc_lease_classifications`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `lease_id` | int unsigned | UNI | NO |
+| `criterion_a_met` | tinyint(1) |  | NO |
+| `criterion_a_notes` | text |  | YES |
+| `criterion_b_met` | tinyint(1) |  | NO |
+| `criterion_b_lease_term_months` | int |  | YES |
+| `criterion_b_economic_life_months` | int |  | YES |
+| `criterion_b_ratio` | decimal(5,4) |  | YES |
+| `criterion_c_met` | tinyint(1) |  | NO |
+| `criterion_c_pv_mlp` | decimal(15,2) |  | YES |
+| `criterion_c_fair_value` | decimal(15,2) |  | YES |
+| `criterion_c_ratio` | decimal(5,4) |  | YES |
+| `credit_risk_normal` | tinyint(1) |  | NO |
+| `costs_estimable` | tinyint(1) |  | NO |
+| `any_criterion_met` | tinyint(1) |  | NO |
+| `all_conditions_met` | tinyint(1) |  | NO |
+| `determined_classification` | enum('operating','sales_type','direct_financing') |  | NO |
+| `classification_rationale` | text |  | YES |
+| `wizard_completed_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `wizard_completed_by` | int unsigned | MUL | NO |
+
+## `acc_lease_residual_reviews`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `lease_id` | int unsigned | MUL | NO |
+| `fiscal_year` | int |  | NO |
+| `prior_residual_value` | decimal(12,2) |  | NO |
+| `revised_residual_value` | decimal(12,2) |  | NO |
+| `delta` | decimal(12,2) _(STORED GENERATED)_ |  | YES |
+| `impairment_je_id` | int unsigned | MUL | YES |
+| `schedule_regenerated` | tinyint(1) |  | NO |
+| `notes` | text |  | YES |
+| `reviewed_by` | int unsigned | MUL | NO |
+| `reviewed_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 
 ## `acc_periods`
 

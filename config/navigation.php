@@ -199,6 +199,72 @@ return [
     ],
 
     // ----------------------------------------------------------
+    // QuickBooks section — accountant role + super_admin (Phase QBO)
+    //
+    // STRUCTURE: SEPARATE top-level nav parent placed ABOVE the
+    // Accounting group, NOT nested inside it. QBO and the FF
+    // accounting module run permanently in parallel (D-QBO-CORE-3);
+    // grouping QBO under Accounting would imply the wrong mental
+    // model (it is not a sub-feature of FF accounting).
+    //
+    // Module slug = 'quickbooks' (declared in config/permissions.php
+    // by S-PERM-EXPAND; 7-action vocabulary in
+    // config/permission_actions.php). super_admin + accountant both
+    // get view; manager + dispatcher + operator + read_only do not.
+    //
+    // Settings child is gated more tightly: the parent visibility
+    // check uses 'view' (per sidebar.php standard behaviour), but
+    // the Settings child page itself enforces edit_credentials
+    // server-side at require_permission(). The child still renders
+    // in the sidebar for users with 'view' only — clicking it
+    // triggers a 403 instead of hiding the link (matches the
+    // S-SIDEBAR-LOCK-ALL-RESTRICTED render-locked-items semantic).
+    // ----------------------------------------------------------
+    [
+        'separator' => true,
+        'label'     => 'QuickBooks',
+        'module'    => 'quickbooks',
+    ],
+    [
+        'label'        => 'QuickBooks',
+        'icon'         => 'arrow-path',
+        'url'          => '/quickbooks/dashboard',
+        'match_prefix' => '/quickbooks',
+        'module'       => 'quickbooks',
+        'badge'        => null,
+        'children' => [
+            [
+                'label'  => 'Dashboard',
+                'icon'   => 'home',
+                'url'    => '/quickbooks/dashboard',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
+                'label'  => 'Sync Log',
+                'icon'   => 'clipboard-document-list',
+                'url'    => '/quickbooks/sync_log',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
+                'label'  => 'Drift',
+                'icon'   => 'exclamation-triangle',
+                'url'    => '/quickbooks/drift',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
+                'label'  => 'Settings',
+                'icon'   => 'cog-6-tooth',
+                'url'    => '/quickbooks/settings',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+        ],
+    ],
+
+    // ----------------------------------------------------------
     // Accounting section — accountant role and above (Phase 13+)
     //
     // STRUCTURE: This mirrors the grouped accounting topnav bar
