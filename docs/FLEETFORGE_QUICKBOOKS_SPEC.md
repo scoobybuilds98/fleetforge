@@ -680,6 +680,115 @@ class QuickBooksClient
 
 **Worker behavior extensions vs original §6.7 sketch** (locked as D-QBO-3-1 in S-QBO-3 SESSION LOG row): kill-switch + dry-run + `sync_mode.off` skip path + `drift_events` insertion on permanent failure + `pusher_not_implemented` notification suppression. The original sketch listed only the happy + retry + permanent paths; the live implementation adds the four guard rails above without changing the core dispatch contract.
 
+### 6.8 Pusher Integration Contract
+
+Every Pusher class follows the same shape, locked via S-QBO-3 (dispatcher) + S-QBO-6 (first reference implementation: `CustomerPusher`). Future Pushers — vendor (S-QBO-7), item (S-QBO-8), account (S-QBO-9), invoice (S-QBO-11), invoice void (S-QBO-12), payment (S-QBO-13), bill (S-QBO-15+), journal entry (S-QBO-21), etc. — MUST conform to this contract.
+
+**Namespace + path:** `FleetForge\QboPushers\<Entity>Pusher` at `lib/QboPushers/<Entity>Pusher.php` (per D-QBO-5-1 — Pushers + Pullers share the same namespace).
+
+**Required public static methods** — these are the OPERATION_METHODS targets the dispatcher resolves (see K-22 Trap #64):
+
+```php
+public static function pushCreate(int $ffEntityId, ?array $payloadSnapshot = null): array
+public static function pushUpdate(int $ffEntityId, ?array $payloadSnapshot = null): array
+// optional, per-entity:
+public static function pushVoid(int $ffEntityId, ?array $payloadSnapshot = null): array     // invoices, journal entries
+public static function pushDelete(int $ffEntityId, ?array $payloadSnapshot = null): array   // rarely used — customers/vendors do NOT delete-enqueue per D-QBO-6-1
+```
+
+**Return shape** (every method, every status):
+
+```php
+[
+    'success'    => bool,            // true unless an exception path was hit
+    'status'     => string,          // enum below
+    'qbo_id'     => ?string,         // the QBO entity Id on success; null on skip/error
+    'sync_token' => ?string,         // QBO SyncToken on success
+    'error'      => ?string,         // human-readable error on failure paths
+]
+```
+
+**Status enum:**
+
+| Value | Meaning |
+|---|---|
+| `'created'` | Fresh POST to QBO succeeded; mapping row inserted |
+| `'updated'` | PUT (or POST?operation=update) to QBO succeeded; mapping row refreshed |
+| `'created_from_update'` | `pushUpdate` invoked but mapping had no qbo_id; demoted to create (see Demotion Rule below) |
+| `'already_mapped'` | `pushCreate` invoked but mapping already has qbo_id; no HTTP call (idempotency, D-QBO-6-2) |
+| `'skipped_by_mode'` | `quickbooks.sync_mode.<entity>` was `'qbo_to_ff'` or `'disabled'` |
+| `'skipped_soft_deleted'` | FF entity has `deleted_at` set; QBO not touched per D-QBO-6-1 |
+| `'ff_not_found'` | FF entity row missing (caller passed bogus id) |
+| `'qbo_error'` | QBO returned a typed error (`QuickBooksException` subclass caught) |
+| `'qbo_malformed_response'` | QBO returned 2xx but the response body didn't carry the expected entity envelope |
+
+**Internal pattern** — both public methods delegate to a private static `pushImpl(int $id, string $operation, ?array $payload): array` that owns:
+
+1. Sync mode gate — re-read `quickbooks.sync_mode.<entity>` at top of `pushImpl` (per-call check, so an operator flipping mode mid-queue gets the new behavior on the next dispatch without restarting the worker).
+2. FF entity load — selects only the columns mapped to QBO + the soft-delete flag.
+3. Soft-delete check — returns `'skipped_soft_deleted'` before any HTTP.
+4. Mapping lookup — `db_row()` against `acc_qbo_<entity>_map` by `ff_<entity>_id`.
+5. Idempotency check — on `'create'` operation, if mapping has `qbo_<entity>_id`, return `'already_mapped'` without HTTP.
+6. Demotion rule (see below) — `update` with no prior qbo_id demotes to `create`.
+7. Payload build — delegated to `buildQboPayload($ff)`, a `public static` helper so offline smokes can exercise it without HTTP (matches the `QuickBooksClient::normalizeQueryResponse` accessor pattern).
+8. HTTP call — `createEntity` or `updateEntity` per K-22 Trap #63 (NEVER per-entity wrappers).
+9. Mapping upsert — snapshot QBO-side fields for future drift detection (S-QBO-24); INSERT on first push, UPDATE in place thereafter.
+10. Shaped return per the table above.
+
+**Demotion rule** (D-PUSHER-DEMOTION-RULE — extends D-QBO-6-2): if `pushUpdate` is invoked for an FF entity whose mapping row has no `qbo_<entity>_id` (e.g., an `ff_only` row from a prior pull's auto-match that was never pushed, or a mapping created from scratch via the admin UI's link action before any push), `pushImpl` MUST detect this and demote the operation to `create`. Rationale: from FF's perspective the entity was updated; from QBO's perspective it doesn't yet exist. The first push for that entity has to be a POST, not a PUT. Return status `'created_from_update'` so the worker's audit log distinguishes the demoted case from a clean create.
+
+**HTTP integration** — strictly:
+
+```php
+$client = new QuickBooksClient();
+// Create:
+$response = $client->createEntity('<entity>', $qboPayload);
+// Update (sparse via $opts, NOT inside $data — see Trap #63):
+$response = $client->updateEntity('<entity>', $qboId, $syncToken, $qboPayload, ['sparse' => true]);
+```
+
+The shipped `CustomerPusher` uses non-sparse updates (sends the full payload on every update); sparse is opt-in for Pushers that need it (e.g., a future `LightweightUpdatePusher` for status-only changes). QBO's `QueryResponse` normalization is handled at `QuickBooksClient::query()` boundary per S-QBO-5-FIX-1 + K-22 Trap #60 — Pushers never need defensive single-row wrapping.
+
+**Idempotency** — every `pushCreate` MUST check the mapping table for an existing `qbo_<entity>_id` before any HTTP call. Defense against (a) worker crash/retry cycles where a successful POST + crashed-before-mapping-INSERT would otherwise duplicate the QBO entity on retry, and (b) accidental requeues from misbehaving callers (operator-triggered manual re-enqueue, future bulk-resync admin action). Return `'already_mapped'` + the existing qbo_id without HTTP.
+
+**Sync mode gating** — `pushImpl` reads `settings.quickbooks.sync_mode.<entity>` at top. Semantics per D-QBO-6-4:
+
+| Value | Behavior |
+|---|---|
+| `'sync'` (default per S-QBO-3 seed) | Bidirectional sync; FF→QBO pushes + QBO→FF pulls both fire |
+| `'ff_to_qbo'` | Only FF→QBO; pulls skip this entity type |
+| `'qbo_to_ff'` | Only QBO→FF; pushes return `'skipped_by_mode'` |
+| `'disabled'` | Both directions refuse |
+
+**Master kill switch** — `settings.quickbooks.sync_enabled='0'` blocks the worker from invoking ANY Pusher (the worker exits silently on step 2 of §6.7). Pusher classes don't need to re-check this themselves; defense in depth lives at the Enqueuer layer instead (see §6.9).
+
+**Reference implementation:** [`lib/QboPushers/CustomerPusher.php`](../lib/QboPushers/CustomerPusher.php) (S-QBO-6 ship). Future Pushers should mirror its structure beat-for-beat; the only per-entity divergence is `buildQboPayload()` field mapping (D-QBO-6-5 locked the customer map; future Pushers lock similar `D-QBO-N-K` decisions per entity).
+
+### 6.9 Enqueuer Integration Contract
+
+Every entity type with FF→QBO push needs a paired Enqueuer class that inserts jobs into `acc_qbo_sync_queue`. Triggered from the FF API endpoints that mutate the entity (e.g. `api/v1/customers/create.php` + `update.php`) — NOT from DB triggers, NOT from model-class hooks (FF has no model layer for these entities). See D-QBO-6-3 for the rationale.
+
+**Namespace + path:** `FleetForge\QboPushers\<Entity>Enqueuer` at `lib/QboPushers/<Entity>Enqueuer.php` (same namespace as the Pusher).
+
+**Required public static method:**
+
+```php
+public static function enqueue(int $ffEntityId, string $operation): bool
+```
+
+Returns `true` on successful INSERT into `acc_qbo_sync_queue`. Returns `false` on any gate refusal OR DB write error (best-effort; never throws).
+
+**Gating (in order — first refusal returns `false`):**
+
+1. **Master kill switch**: `settings.quickbooks.sync_enabled === '1'`. Else `return false` silently.
+2. **Mode kill**: `settings.quickbooks.sync_mode.<entity>` NOT IN `('qbo_to_ff', 'disabled')`. Else `return false`.
+3. **Operation allowlist**: `operation IN ['create', 'update']`. No `'delete'` ever enqueued (D-QBO-6-1 — accountant-friendly default; FF soft-delete leaves the QBO entity Active=true).
+4. **INSERT** into `acc_qbo_sync_queue` per the verified schema (K-22 Trap #62) — `status` defaults to `'queued'`; `priority=100` (room for future high-urgency operations to use `<100`); `retry_count=0`; `max_retries=3`. Do NOT pass `next_retry_at` on initial enqueue (column is nullable; the worker computes it on retry per §6.7).
+
+**Best-effort discipline:** the entire INSERT is wrapped in `try/catch (\Throwable $e)`. On failure (DB down, FK violation, ENUM mismatch, etc.) the Enqueuer logs to `error_log` and returns `false` — it MUST NOT throw, MUST NOT block the parent FF flow. Sync is recoverable via the drift cron (S-QBO-24) + bulk resync admin actions; FF customer/vendor/invoice creation is NOT recoverable if the API endpoint 500s mid-transaction.
+
+**Reference implementation:** [`lib/QboPushers/CustomerEnqueuer.php`](../lib/QboPushers/CustomerEnqueuer.php) (S-QBO-6 ship). Future Enqueuers mirror its structure; the only per-entity divergence is the entity name string passed into the INSERT and the settings key (`quickbooks.sync_mode.<entity>`).
+
 ---
 
 ## 7. MAPPING TABLES

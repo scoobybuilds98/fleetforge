@@ -171,6 +171,13 @@ Quick-reference index of file-location and helper-naming rules. Detailed treatme
 - **NotificationService routing — when permission seeding is incomplete:** `NotificationService::notify()` with `$specificUserIds=null` routes via `TYPE_TO_MODULE` → `user_permissions` JOIN. If `user_permissions` rows are missing for the relevant module (common during Phase QBO buildout before `S-PERM-QBO-SEED` ships — see D-QBO-3-PERM-GAP), pass `$specificUserIds` explicitly with resolved super_admin + role-specific user IDs. Precedent: `cron/qbo_token_refresh.php` (S-QBO-1), `cron/qbo_sync_worker.php` (S-QBO-3). Pattern documented in D-QBO-3-3.
 - **OAuth callbacks (D-S-QBO-1-OAUTH-DOCS-LOCK):** must be auth-context-free, state verification via DB-backed token (NOT PHP session). Reason: cross-origin redirects (e.g. ngrok during local dev, or any redirect that lands on a different domain than the one that issued the session cookie) lose the session between init and callback — `$_SESSION` is empty, `require_auth()` fails, state lookup returns null. The state token IS the authentication proof, not the user session. See §11 Trap 59 + S-QBO-OAUTH-FIX (queued).
 - **K-22 trap catalog discipline (D-TRAP-CATALOG-SWEEP):** when a new K-22 trap describes a wrong CODE pattern (function calls, column refs, ENUM values, type-name conventions), the docs commit cataloguing the trap MUST also `grep -rn '<wrong-pattern>' app/ lib/ api/ cron/ includes/ public/` and either patch the hits inline OR queue a remediation session OR document the deferral. Trap-without-remediation lets the bug stay in production code (cf. K-22 Trap #55 sat docs-only for 4 hours before re-biting during sandbox OAuth setup). Documentation-only traps (UI conventions, naming rules for future code, design-system patterns) are exempt — they have no "wrong code" surface to grep for. See §11 Trap 59 source + D-TRAP-CATALOG-SWEEP in PROGRESS.md DECISIONS.
+- **DB helpers — single-row vs multi-row vs write:** `db_row($sql, $params)` for single-row fetch, `db_select($sql, $params)` for multi-row list, `db_execute($sql, $params)` for INSERT/UPDATE/DELETE returning affected rows, `db_insert($table, $data)` for named-column INSERT, `db_count($sql, $params)` for COUNT(*) aggregates, `db_transaction($closure)` for transactional blocks. **NEVER** `db_query_one` or `db_query` — those names don't exist in the project. See §11 Trap 61.
+- **`acc_qbo_sync_queue` schema:** `status` default is `'queued'` (NOT `'pending'`); column is `next_retry_at` (NOT `next_attempt_at`); error fields are `error_message` (text) + `error_code` (varchar 50, categorical); the row-history columns are `enqueued_at` / `picked_up_at` / `completed_at` (NOT `last_attempted_at`). Full verified column list in §11 Trap 62.
+- **`QuickBooksClient` entity ops (D-PUSHER-CONTRACT):** `createEntity('<entity>', $payload)` + `updateEntity('<entity>', $qboId, $syncToken, $payload, $opts)` — single typed entry points with entity-name string as first argument. **NEVER** invent per-entity wrappers (`createCustomer`/`updateVendor`/etc.) — they don't exist. Pass `sparse` via `$opts`, NOT inside `$data` (footgun: `$opts['sparse'] ?? false` overwrites a `$data['sparse']` key on the array merge). See §11 Trap 63.
+- **Pusher class contract (D-PUSHER-CONTRACT, QUICKBOOKS_SPEC §6.8):** `pushCreate(int $entityId, ?array $payloadSnapshot = null): array` + `pushUpdate(int $entityId, ?array $payloadSnapshot = null): array` — separate public-static methods per operation, NOT a combined `::push($id, $op, $payload)`. Dispatcher `QboPusherDispatcher::OPERATION_METHODS` maps `'create'→'pushCreate'`, `'update'→'pushUpdate'`, etc. Shared logic via private `pushImpl()`. Reference impl: `lib/QboPushers/CustomerPusher.php` (S-QBO-6). See §11 Trap 64 + QUICKBOOKS_SPEC §6.8.
+- **Enqueuer pattern (D-ENQUEUER-CONTRACT, QUICKBOOKS_SPEC §6.9):** `FleetForge\QboPushers\<Entity>Enqueuer::enqueue(int $ffId, string $operation): bool` — 4-step gate (master switch → sync_mode → operation allowlist → INSERT). Best-effort: `try/catch (\Throwable)` swallowed, NEVER throws into the parent FF API endpoint. Triggered from `api/v1/<entity>/create.php` + `update.php` AFTER the FF DB write succeeds, BEFORE the JSON success response. See QUICKBOOKS_SPEC §6.9. Reference impl: `lib/QboPushers/CustomerEnqueuer.php` (S-QBO-6).
+- **Pusher demotion rule (D-PUSHER-DEMOTION-RULE):** if `pushUpdate` is called for an FF entity whose mapping has no `qbo_<entity>_id` (e.g. ff_only row from auto-match, never pushed), `pushImpl` demotes the operation to create — returns status `'created_from_update'`. From FF's perspective the entity was updated; from QBO's the entity doesn't yet exist. First push has to be a POST not a PUT. See QUICKBOOKS_SPEC §6.8 demotion rule paragraph.
+- **QBO `QueryResponse` normalization (S-QBO-5-FIX-1):** `QuickBooksClient::query()` normalizes the 1-row-object case in-place before returning. Every uppercase-keyed field under `QueryResponse` is guaranteed to be an array after the call returns. Pusher and Puller authors should iterate `$response['QueryResponse']['Customer'] ?? []` directly — NO defensive single-row wrap. Re-wrapping post-normalization is INCORRECT (would re-wrap an already-arrayed payload of N>1 entities into a single-element wrapper around the array). See §11 Trap 60.
 
 ---
 
@@ -1745,6 +1752,166 @@ The coercion is exposed as `QuickBooksClient::normalizeQueryResponse(array $resp
 **Heuristic**: entity collections are uppercase-PascalCase (Customer, Vendor, …); metadata fields are camelCase (startPosition, maxResults, totalCount). The normalizer walks `QueryResponse`, skips keys whose first character is not uppercase, and wraps any qualifying bare-object value into a single-element array.
 
 **Source**: K-22 catch surfaced during S-QBO-5 live sandbox verification — CustomerPuller initially had a per-call defensive wrap (`if (!empty($batch) && !isset($batch[0])) $batch = [$batch];`). Recognized as a pattern that would replicate across every future Pusher (Vendor, Invoice, Payment, Bill, …) if left per-call instead of centralized at the HTTP boundary. Locked 2026-05-21 via S-QBO-5-FIX-1 + D-QBO-5-FIX-1-1/-2/-3 in PROGRESS.md DECISIONS.
+
+### Trap 61: DB helper nomenclature — single-row vs multi-row vs write
+
+**Wrong**: `db_query_one($sql, $params)` for single-row fetch (or `db_query($sql)` as a generic helper).
+
+**Right**: the project exports three distinct helpers from `includes/db.php`, each scoped to one kind of operation:
+
+```php
+db_row($sql, $params)     // single-row fetch, returns assoc array or null
+db_select($sql, $params)  // multi-row fetch, returns array of assoc arrays (empty array on no rows)
+db_execute($sql, $params) // INSERT/UPDATE/DELETE, returns int affected row count
+db_insert($table, $data)  // INSERT helper with named columns
+db_count($sql, $params)   // single-int aggregate (e.g. COUNT(*))
+db_transaction($closure)  // transactional wrapper
+```
+
+```php
+❌ Wrong (function doesn't exist; PHP raises Error: Call to undefined function)
+$row = db_query_one("SELECT * FROM customers WHERE id = ?", [$id]);
+
+✅ Right (project-canonical helpers, exported by includes/db.php)
+$row = db_row("SELECT * FROM customers WHERE id = ?", [$id]);
+```
+
+Applies to every prompt that constructs SQL for FleetForge code. The `db_query_one` name does not exist in the project — referencing it in a prompt produces silent K-22 errors that surface as fatal undefined-function errors at runtime.
+
+**Source**: Same trap hit twice in consecutive sessions — S-QBO-5 (`CustomerMatcher::matchAll` used `db_query` in the prompt pseudocode) + S-QBO-6 (`CustomerPusher::pushImpl` used `db_query_one`). Resolved silently both times per [[feedback_trust_file_over_prompt]] but the pattern is durable enough to catalogue. Locked 2026-05-21 via D-PUSHER-PATTERNS-DOCS-LOCK. See also §1B Key Conventions.
+
+### Trap 62: `acc_qbo_sync_queue` schema — column names + status default
+
+**Wrong** assumptions from prior prompts: `status` default = `'pending'`; column `next_attempt_at`; column `last_attempted_at`; column `last_error`.
+
+**Right** (verified against `db_migrations/202605202100_S-QBO-3.sql` and `FLEETFORGE_DATABASE_MASTER.sql`):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `int unsigned AUTO_INCREMENT` | PK |
+| `entity_type` | `ENUM('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code')` | NOT NULL |
+| `entity_id` | `int unsigned` | NOT NULL |
+| `operation` | `ENUM('create','update','void','delete')` | NOT NULL |
+| `status` | `ENUM('queued','processing','completed','failed','skipped')` | NOT NULL DEFAULT **`'queued'`** (not `'pending'`) |
+| `priority` | `tinyint` | NOT NULL DEFAULT 5 |
+| `retry_count` | `tinyint` | NOT NULL DEFAULT 0 |
+| `max_retries` | `tinyint` | NOT NULL DEFAULT 5 |
+| `next_retry_at` | `datetime` | NULL — name is `next_retry_at`, NOT `next_attempt_at` |
+| `error_message` | `text` | NULL — full error string |
+| `error_code` | `varchar(50)` | NULL — categorical (e.g. `'pusher_not_implemented'`, `'qbo_stale_object'`) |
+| `enqueued_at` | `datetime` | NOT NULL DEFAULT CURRENT_TIMESTAMP — the column that's effectively the "created_at" |
+| `picked_up_at` | `datetime` | NULL — worker sets when claiming the row |
+| `completed_at` | `datetime` | NULL — worker sets when status transitions to completed/failed/skipped |
+| `worker_id` | `varchar(50)` | NULL — identifies which worker process picked up the row |
+| `payload_snapshot` | `json` | NULL — optional snapshot of FF entity state at enqueue time |
+
+```php
+❌ Wrong (would produce silent SQL errors on default-value handling + missing columns)
+db_insert('acc_qbo_sync_queue', [
+    'entity_type'      => 'customer',
+    'entity_id'        => $id,
+    'operation'        => 'create',
+    'status'           => 'pending',          // ENUM doesn't include 'pending'
+    'next_attempt_at'  => date('Y-m-d H:i:s'), // column doesn't exist
+    'last_error'       => null,                // column doesn't exist
+]);
+
+✅ Right (matches verified schema)
+db_insert('acc_qbo_sync_queue', [
+    'entity_type'  => 'customer',
+    'entity_id'    => $id,
+    'operation'    => 'create',
+    'status'       => 'queued',     // ENUM default — can also omit to let DB default fire
+    'priority'     => 100,
+    'retry_count'  => 0,
+    'max_retries'  => 3,
+    // enqueued_at fires from DB CURRENT_TIMESTAMP — don't pass
+    // next_retry_at stays NULL on initial enqueue; worker computes on retry
+]);
+```
+
+Applies to every Enqueuer + Pusher session (S-QBO-7 vendors, S-QBO-8 items, S-QBO-9 accounts, S-QBO-11 invoices, S-QBO-13 payments, etc.) AND to the queue-management UI endpoints (S-QBO-4 sync_queue_list/retry/clear). Reference the canonical column list above before writing any new INSERT/UPDATE against this table.
+
+**Source**: K-22 catch during S-QBO-6 build — prompt's CustomerEnqueuer pseudocode used `status='pending'` + `next_attempt_at`; verified against actuals + corrected silently before commit. Locked 2026-05-21 via D-PUSHER-PATTERNS-DOCS-LOCK.
+
+### Trap 63: `QuickBooksClient` entity operations — `createEntity/updateEntity`, not per-entity wrappers
+
+**Wrong**: `$client->createCustomer($payload)` / `$client->updateCustomer($payload)` / `$client->createVendor(...)` / per-entity-named methods.
+
+**Right**: single typed entry points with entity-name string as first argument — same shape for every QBO entity type.
+
+```php
+public function createEntity(string $type, array $data, array $opts = []): array
+public function updateEntity(string $type, string $id, string $syncToken, array $data, array $opts = []): array
+public function getEntity(string $type, string $id, array $opts = []): array
+```
+
+`$type` accepts the QBO entity name (case-insensitive — `'customer'`, `'Customer'`, `'CUSTOMER'` all work; client lowercases for the URL path). Per-entity wrappers do NOT exist on the client and must not be invented by future Pushers — the typed API stays compact + the entity-type stays explicit at every call site, which the sync_log writer (per spec §6.5) needs for the `entity_type` column.
+
+```php
+❌ Wrong (function doesn't exist on QuickBooksClient — PHP raises Error)
+$response = $client->createCustomer($qboPayload);
+$response = $client->updateCustomer($qboPayload);
+
+✅ Right (canonical surface, S-QBO-2 shipped)
+$response = $client->createEntity('customer', $qboPayload);
+$response = $client->updateEntity('customer', $qboId, $syncToken, $qboPayload);
+// For sparse updates, pass ['sparse' => true] via $opts, NOT inside $data —
+// the implementation merges Id+SyncToken+sparse from $opts on top of $data.
+$response = $client->updateEntity('customer', $qboId, $syncToken, ['Active' => false], ['sparse' => true]);
+```
+
+Applies to every Pusher session + any one-off entity-lifecycle script (e.g. deactivation, bulk-resync). The `sparse` parameter has its own footgun — see Trap #63a-equivalent in `lib/QuickBooksClient.php::updateEntity` source comments; passing `sparse=true` inside `$data` gets overwritten by the `$opts['sparse'] ?? false` merge and the resulting `sparse=false` triggers QBO "No name provided" errors on minimal payloads.
+
+**Source**: S-QBO-6 CustomerPusher initial draft used `createCustomer`/`updateCustomer`; verified against actual `lib/QuickBooksClient.php` shipped in S-QBO-2 (methods at lines 357 + 374). Same `sparse-via-$opts` footgun bit the S-QBO-6 live verification cleanup script. Locked 2026-05-21 via D-PUSHER-PATTERNS-DOCS-LOCK.
+
+### Trap 64: `QboPusherDispatcher` contract — `pushCreate` + `pushUpdate`, not combined `::push($id, $op, …)`
+
+**Wrong**: a single combined method `public static function push(int $id, string $operation, ?array $payload = null): array` that switches on `$operation` internally.
+
+**Right**: separate public-static methods per operation, with the dispatcher's `OPERATION_METHODS` map routing each operation to its dedicated method:
+
+```php
+// lib/QboPusherDispatcher.php (S-QBO-3, line 69)
+private const OPERATION_METHODS = [
+    'create' => 'pushCreate',
+    'update' => 'pushUpdate',
+    'void'   => 'pushVoid',
+    'delete' => 'pushDelete',
+];
+```
+
+Every Pusher class MUST implement at least `pushCreate` + `pushUpdate` as separate public static methods. Optional `pushVoid` / `pushDelete` for entity types that support them (customers do NOT delete-enqueue per D-QBO-6-1; invoices DO void-enqueue per spec §8.4).
+
+```php
+❌ Wrong (dispatcher throws PusherNotImplementedException at runtime — method doesn't exist)
+class CustomerPusher {
+    public static function push(int $id, string $operation, ?array $payload = null): array {
+        if ($operation === 'create') { /* ... */ }
+        if ($operation === 'update') { /* ... */ }
+    }
+}
+
+✅ Right (matches dispatcher OPERATION_METHODS contract)
+class CustomerPusher {
+    public static function pushCreate(int $id, ?array $payload = null): array {
+        return self::pushImpl($id, 'create', $payload);
+    }
+    public static function pushUpdate(int $id, ?array $payload = null): array {
+        return self::pushImpl($id, 'update', $payload);
+    }
+    private static function pushImpl(int $id, string $operation, ?array $payload): array {
+        // shared logic: sync_mode gate, FF entity load, mapping lookup,
+        // idempotency check, payload build, HTTP call, mapping upsert.
+    }
+}
+```
+
+Method signature: `(int $entityId, ?array $payloadSnapshot = null): array`. The `?array` second parameter is the optional `payload_snapshot` from `acc_qbo_sync_queue` — the worker passes it along; CustomerPusher (the reference impl) ignores it because it loads fresh state from the FF DB, but future Pushers may use it for at-enqueue-time payload preservation.
+
+Applies to every Pusher session — vendors (S-QBO-7), items (S-QBO-8), accounts (S-QBO-9), invoices (S-QBO-11 + S-QBO-12 for void), payments (S-QBO-13), bills (S-QBO-15+), journal entries (S-QBO-21), etc.
+
+**Source**: S-QBO-6 CustomerPusher initial draft used a combined `::push($id, $op, $payload)` signature; verified against `lib/QboPusherDispatcher.php` `OPERATION_METHODS` constant + the dispatch invocation `$className::$methodName($entityId, $payloadSnapshot)` (line 127). Refactored to `pushCreate` + `pushUpdate` + shared private `pushImpl()` per D-QBO-3-2 + D-PUSHER-CONTRACT (new). Locked 2026-05-21 via D-PUSHER-PATTERNS-DOCS-LOCK. See also `FLEETFORGE_QUICKBOOKS_SPEC.md` §6.8 Pusher Integration Contract.
 
 ---
 
