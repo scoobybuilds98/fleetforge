@@ -16,7 +16,10 @@ declare(strict_types=1);
  *   C5: QuickBooksSync class exists with public methods enqueue + syncDispatch + isEnabled + syncMode
  *   C6: PusherNotImplementedException class exists, extends QuickBooksException
  *   C7: cron/qbo_sync_worker.php exists and lints clean (php -l)
- *   C8: hasImplementation('customer','create') === false (no Pushers yet — expected pre-S-QBO-5)
+ *   C8: hasImplementation returns false for entity_types whose Pusher class
+ *       hasn't shipped yet (invoice/vendor/journal_entry). 'customer' was
+ *       in this list at S-QBO-3 ship but moved to "shipped" at S-QBO-6 —
+ *       expect hasImplementation('customer','create') === true now.
  *   C9: Worker pusher_not_implemented pathway — insert fake queue row, flip sync_enabled=1, run worker,
  *       confirm row marked 'failed' with error_code='pusher_not_implemented' AND no notification dispatched
  *       (verified by counting notifications rows pre + post). Restore sync_enabled=0, delete all artifacts.
@@ -186,13 +189,22 @@ if (!is_file($workerSrc)) {
 $check('C7  cron/qbo_sync_worker.php exists and lints clean', $c7Errs);
 
 // ── C8: hasImplementation false for unbuilt Pushers ───────────
+// 'customer' was on this list at S-QBO-3 ship but moved to "shipped"
+// at S-QBO-6 — CustomerPusher exists now. Test the inverse for
+// customer (must return true) + the remaining unbuilt entities.
 $c8Errs = [];
-foreach ([['customer','create'], ['invoice','update'], ['journal_entry','void']] as $pair) {
+if (QboPusherDispatcher::hasImplementation('customer', 'create') !== true) {
+    $c8Errs[] = "hasImplementation('customer','create') should be true post-S-QBO-6";
+}
+if (QboPusherDispatcher::hasImplementation('customer', 'update') !== true) {
+    $c8Errs[] = "hasImplementation('customer','update') should be true post-S-QBO-6";
+}
+foreach ([['invoice','update'], ['journal_entry','void'], ['vendor','create']] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== false) {
-        $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-S-QBO-5";
+        $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-Pusher-session";
     }
 }
-$check('C8  hasImplementation returns false for unbuilt Pushers', $c8Errs);
+$check('C8  hasImplementation true for customer (S-QBO-6 shipped), false for unbuilt Pushers', $c8Errs);
 
 // ── C9: worker pusher_not_implemented pathway (SELF-CLEANING) ──
 // CRITICAL: every artifact created in this check MUST be reverted
@@ -211,7 +223,11 @@ try {
 
     // Insert a fake queue row for an entity type with NO Pusher yet
     $createdQueue = db_insert('acc_qbo_sync_queue', [
-        'entity_type' => 'customer',
+        // 'invoice' has no Pusher class yet (S-QBO-11 future) so the
+        // worker hits the pusher_not_implemented branch this test
+        // covers. Was 'customer' at S-QBO-3 ship; moved away from
+        // 'customer' at S-QBO-6 when CustomerPusher shipped.
+        'entity_type' => 'invoice',
         'entity_id'   => 999999, // sentinel ID — no real entity
         'operation'   => 'create',
         'status'      => 'queued',

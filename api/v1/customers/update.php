@@ -395,6 +395,11 @@ db_transaction(function () use (&$data, $id, $replaceTags, $newTags, $userId, $e
 // Re-fetch updated_at after the update
 $updated = db_row("SELECT id, company_name, updated_at FROM customers WHERE id = ?", [$id]);
 
+// QBO sync enqueue (S-QBO-6). No-op when sync_enabled='0' (D-CPA-5
+// default) or mode rejects pushes. Never throws — sync is best-effort
+// and must not break customer-update flows.
+\FleetForge\QboPushers\CustomerEnqueuer::enqueue($id, 'update');
+
 json_success([
     'id'           => $id,
     'company_name' => $updated['company_name'] ?? $existing['company_name'],

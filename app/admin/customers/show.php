@@ -47,6 +47,20 @@ if (!$customer) {
     exit;
 }
 
+// ── QBO mapping (S-QBO-6) ─────────────────────────────────────
+// Drives the QuickBooks badge in the page header. Only renders
+// when the connection is established (no point teasing the feature
+// pre-setup). Separate query to keep the customer SELECT untouched.
+$qboMapping = null;
+if ((string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected') {
+    $qboMapping = db_row(
+        "SELECT id, qbo_customer_id, mapping_status, last_synced_at, last_push_at
+           FROM acc_qbo_customer_map
+          WHERE ff_customer_id = ?",
+        [$customerId]
+    );
+}
+
 // Load tags
 $tagRows = db_select(
     "SELECT tag FROM customer_tags WHERE customer_id = ? ORDER BY tag",
@@ -104,6 +118,40 @@ require_once FF_ROOT . '/includes/header.php';
             <?php foreach ($tags as $tag): ?>
             <span class="badge badge-neutral"><?= e($tag) ?></span>
             <?php endforeach; ?>
+            <?php /* QBO mapping badge — S-QBO-6. Only shown when the
+                     connection is established AND a mapping row exists.
+                     Status drives the color: mapped=success (linked both
+                     sides), ff_only=warning (not pushed yet), qbo_only=
+                     info (QBO has but FF doesn't link — operator should
+                     resolve via /quickbooks/customers), ignored=neutral. */ ?>
+            <?php if ($qboMapping !== null):
+                $qm_status = (string) ($qboMapping['mapping_status'] ?? 'qbo_only');
+                $qm_class  = match ($qm_status) {
+                    'mapped'   => 'badge-success',
+                    'ff_only'  => 'badge-warning',
+                    'qbo_only' => 'badge-info',
+                    'ignored'  => 'badge-neutral',
+                    default    => 'badge-neutral',
+                };
+                $qm_label  = match ($qm_status) {
+                    'mapped'   => 'QuickBooks: Synced',
+                    'ff_only'  => 'QuickBooks: Not synced',
+                    'qbo_only' => 'QuickBooks: Linked from QBO side',
+                    'ignored'  => 'QuickBooks: Excluded',
+                    default    => 'QuickBooks',
+                };
+                $qm_title = $qboMapping['qbo_customer_id'] ? 'qbo#' . $qboMapping['qbo_customer_id'] : '';
+                if (!empty($qboMapping['last_synced_at'])) {
+                    $qm_title .= ($qm_title !== '' ? ' · ' : '') . 'last synced ' . $qboMapping['last_synced_at'];
+                }
+            ?>
+            <a href="<?= base_url('quickbooks/customers') ?>?q=<?= e(rawurlencode($customer['company_name'])) ?>"
+               class="badge <?= $qm_class ?>"
+               title="<?= e($qm_title) ?>"
+               style="text-decoration:none;">
+                <?= e($qm_label) ?>
+            </a>
+            <?php endif; ?>
         </div>
     </div>
     <div class="page-header-actions">

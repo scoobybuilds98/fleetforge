@@ -310,4 +310,9 @@ db_transaction(function () use (
     }
 });
 
+// QBO sync enqueue (S-QBO-6). No-op when sync_enabled='0' (D-CPA-5
+// default) or mode rejects pushes. Never throws — sync is best-effort
+// and must not break customer-create flows.
+\FleetForge\QboPushers\CustomerEnqueuer::enqueue($newId, 'create');
+
 json_success(['id' => $newId, 'company_name' => $companyName], 201);
