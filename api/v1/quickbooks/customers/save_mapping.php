@@ -93,30 +93,35 @@ try {
     $result = db_transaction(function () use ($action, $ffCustId, $qboCustId, $mappingId, $notes, $userId, $now): array {
 
         if ($action === 'link') {
-            // Avoid UNIQUE(ff_customer_id) and UNIQUE(qbo_customer_id)
-            // collisions by deleting any single-sided rows on either
-            // side before promoting/inserting the mapped row.
+            // Find the qbo_only row created by a prior pull. It carries
+            // the QBO snapshot (display_name / email / phone / balance)
+            // that powers the Customers Sync table's QBO Customer column.
+            // We MUST find it BEFORE deleting anything — earlier versions
+            // deleted both single-sided rows then looked up qbo_customer_id
+            // (which by then was gone), so the lookup always returned null,
+            // the code fell into the INSERT branch, and the new mapped row
+            // shipped with NO snapshot fields → UI rendered "(no name)".
+            $qboOnly = db_row(
+                "SELECT id FROM acc_qbo_customer_map
+                  WHERE qbo_customer_id = ? AND ff_customer_id IS NULL",
+                [$qboCustId]
+            );
+
+            // Avoid UNIQUE(ff_customer_id) collision: drop any pre-existing
+            // ff_only row for this FF customer. (No snapshot to preserve
+            // on the ff_only side — it has no QBO fields populated.)
             db_execute(
                 "DELETE FROM acc_qbo_customer_map
                   WHERE ff_customer_id = ? AND qbo_customer_id IS NULL",
                 [$ffCustId]
             );
-            db_execute(
-                "DELETE FROM acc_qbo_customer_map
-                  WHERE qbo_customer_id = ? AND ff_customer_id IS NULL",
-                [$qboCustId]
-            );
 
-            // If a qbo_customer row exists from a prior pull, promote
-            // it (preserves its QBO-side snapshot fields). Otherwise
-            // insert fresh.
-            $existing = db_row(
-                "SELECT id FROM acc_qbo_customer_map WHERE qbo_customer_id = ?",
-                [$qboCustId]
-            );
-
-            if ($existing !== null) {
-                $id = (int) $existing['id'];
+            if ($qboOnly !== null) {
+                // Promote the qbo_only row by attaching ff_customer_id.
+                // Snapshot fields (qbo_display_name / qbo_email / qbo_phone /
+                // qbo_active / qbo_balance / qbo_sync_token / qbo_company_name /
+                // last_pull_at) survive the UPDATE since we don't touch them.
+                $id = (int) $qboOnly['id'];
                 db_execute(
                     "UPDATE acc_qbo_customer_map SET
                         ff_customer_id   = ?,
@@ -128,6 +133,13 @@ try {
                     [$ffCustId, $notes, $now, $id]
                 );
             } else {
+                // No prior qbo_only row for this QBO customer (operator
+                // is linking to a QBO id that wasn't pulled — uncommon,
+                // since the link modal's dropdown is populated from
+                // qbo_only rows, but the API still accepts arbitrary
+                // qbo_customer_id strings). Insert fresh; snapshot will
+                // populate on the next Pull from QuickBooks. UI shows
+                // "(no name)" until then.
                 $id = db_insert('acc_qbo_customer_map', [
                     'ff_customer_id'     => $ffCustId,
                     'qbo_customer_id'    => $qboCustId,
