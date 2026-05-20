@@ -37,6 +37,8 @@ require_once FF_ROOT . '/includes/header.php';
     <span class="breadcrumb-current">Drift</span>
 </nav>
 
+<?php require_once FF_ROOT . '/includes/partials/quickbooks-nav.php'; ?>
+
 <div class="page-header">
     <h1 class="page-header-title h4">QuickBooks — Drift Detection</h1>
 </div>

@@ -46,6 +46,8 @@ require_once FF_ROOT . '/includes/header.php';
     <span class="breadcrumb-current">Customers</span>
 </nav>
 
+<?php require_once FF_ROOT . '/includes/partials/quickbooks-nav.php'; ?>
+
 <div class="page-header">
     <h1 class="page-header-title h4">QuickBooks — Customer Mapping</h1>
     <div class="text-secondary text-sm" style="margin-top:4px;">
