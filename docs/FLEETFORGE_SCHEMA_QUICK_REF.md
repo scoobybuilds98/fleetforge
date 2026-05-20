@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-19
-**Tables:** 130 total · **Columns:** 2025
+**Generated:** 2026-05-20
+**Tables:** 132 total · **Columns:** 2058
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -531,7 +531,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_48 tables._
+_50 tables._
 
 ## `acc_accounts`
 
@@ -1299,6 +1299,28 @@ _48 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `acc_qbo_drift_events`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `detected_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `detection_source` | enum('drift_cron','push_failure','pull_failure','manual') |  | NO |
+| `category` | enum('count_mismatch','field_mismatch','missing_in_qbo','missing_in_ff','amount_drift','balance_drift','push_failed','pull_failed','stale_object_unresolved') | MUL | NO |
+| `entity_type` | varchar(50) | MUL | NO |
+| `entity_id` | int unsigned |  | YES |
+| `qbo_entity_id` | varchar(50) |  | YES |
+| `ff_value` | text |  | YES |
+| `qbo_value` | text |  | YES |
+| `drift_amount` | decimal(15,2) |  | YES |
+| `description` | text |  | YES |
+| `queue_id` | int unsigned | MUL | YES |
+| `resolved_at` | datetime | MUL | YES |
+| `resolved_by_user_id` | int unsigned | MUL | YES |
+| `resolution_note` | text |  | YES |
+| `realm_id` | varchar(50) |  | NO |
+| `environment` | enum('sandbox','production') |  | NO |
+
 ## `acc_qbo_sync_log`
 
 | Column | Type | Key | Nullable |
@@ -1322,6 +1344,27 @@ _48 tables._
 | `realm_id` | varchar(50) |  | NO |
 | `environment` | enum('sandbox','production') |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
+
+## `acc_qbo_sync_queue`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `entity_type` | enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code') | MUL | NO |
+| `entity_id` | int unsigned |  | NO |
+| `operation` | enum('create','update','void','delete') |  | NO |
+| `status` | enum('queued','processing','completed','failed','skipped') | MUL | NO |
+| `priority` | tinyint |  | NO |
+| `retry_count` | tinyint |  | NO |
+| `max_retries` | tinyint |  | NO |
+| `next_retry_at` | datetime |  | YES |
+| `error_message` | text |  | YES |
+| `error_code` | varchar(50) |  | YES |
+| `enqueued_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `picked_up_at` | datetime |  | YES |
+| `completed_at` | datetime |  | YES |
+| `worker_id` | varchar(50) |  | YES |
+| `payload_snapshot` | json |  | YES |
 
 ## `acc_recurring_entries`
 

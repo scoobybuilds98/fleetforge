@@ -1014,6 +1014,33 @@ CREATE TABLE `acc_place_of_supply_rules` (
   KEY `idx_pos_province` (`province_code`),
   KEY `idx_pos_rule_type` (`rule_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_qbo_drift_events` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `detected_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `detection_source` enum('drift_cron','push_failure','pull_failure','manual') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category` enum('count_mismatch','field_mismatch','missing_in_qbo','missing_in_ff','amount_drift','balance_drift','push_failed','pull_failed','stale_object_unresolved') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `entity_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `entity_id` int unsigned DEFAULT NULL,
+  `qbo_entity_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ff_value` text COLLATE utf8mb4_unicode_ci,
+  `qbo_value` text COLLATE utf8mb4_unicode_ci,
+  `drift_amount` decimal(15,2) DEFAULT NULL,
+  `description` text COLLATE utf8mb4_unicode_ci,
+  `queue_id` int unsigned DEFAULT NULL,
+  `resolved_at` datetime DEFAULT NULL,
+  `resolved_by_user_id` int unsigned DEFAULT NULL,
+  `resolution_note` text COLLATE utf8mb4_unicode_ci,
+  `realm_id` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `environment` enum('sandbox','production') COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_category_detected` (`category`,`detected_at`),
+  KEY `idx_entity` (`entity_type`,`entity_id`),
+  KEY `idx_unresolved` (`resolved_at`,`category`,`detected_at`),
+  KEY `idx_queue` (`queue_id`),
+  KEY `idx_resolver` (`resolved_by_user_id`),
+  CONSTRAINT `fk_qbo_drift_events_queue` FOREIGN KEY (`queue_id`) REFERENCES `acc_qbo_sync_queue` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_qbo_drift_events_resolver` FOREIGN KEY (`resolved_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_qbo_sync_log` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `direction` enum('push','pull') NOT NULL,
@@ -1041,6 +1068,28 @@ CREATE TABLE `acc_qbo_sync_log` (
   KEY `idx_created` (`created_at`),
   KEY `idx_queue` (`queue_id`),
   CONSTRAINT `fk_qbo_sync_log_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_qbo_sync_queue` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `entity_type` enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `entity_id` int unsigned NOT NULL,
+  `operation` enum('create','update','void','delete') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status` enum('queued','processing','completed','failed','skipped') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'queued',
+  `priority` tinyint NOT NULL DEFAULT '5',
+  `retry_count` tinyint NOT NULL DEFAULT '0',
+  `max_retries` tinyint NOT NULL DEFAULT '5',
+  `next_retry_at` datetime DEFAULT NULL,
+  `error_message` text COLLATE utf8mb4_unicode_ci,
+  `error_code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `enqueued_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `picked_up_at` datetime DEFAULT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `worker_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `payload_snapshot` json DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_status_priority` (`status`,`priority`,`enqueued_at`),
+  KEY `idx_entity` (`entity_type`,`entity_id`),
+  KEY `idx_retry` (`status`,`next_retry_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_recurring_entries` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

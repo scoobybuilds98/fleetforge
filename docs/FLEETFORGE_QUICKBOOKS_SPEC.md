@@ -637,20 +637,28 @@ class QuickBooksClient
 
 ### 6.7 Worker / cron
 
-`cron/qbo_sync_worker.php` runs every 1 minute. Logic:
+`cron/qbo_sync_worker.php` runs every 1 minute. Logic (post-S-QBO-3 implementation — supersedes the original sketch per D-QBO-3-1):
 
-1. Acquire advisory lock `GET_LOCK('ff_qbo_sync_worker')`.
-2. SELECT up to 10 queue items: `WHERE status='queued' AND (next_retry_at IS NULL OR next_retry_at <= NOW()) ORDER BY priority ASC, enqueued_at ASC LIMIT 10 FOR UPDATE`.
-3. For each item:
-   - Mark `status='processing'`, set `picked_up_at`, `worker_id`.
-   - Build payload from current FF entity state (re-read; don't trust queue payload_snapshot for create/update — only for void/delete which may have lost the entity).
-   - Call QBO API via QuickBooksClient.
-   - On success: update mapping table, mark queue `status='completed'`.
-   - On retryable failure: increment retry_count, set `next_retry_at = NOW() + 2^retry_count minutes`.
-   - On permanent failure or retries exhausted: `status='failed'`, dispatch notification.
-4. Release lock.
+1. Acquire advisory lock `GET_LOCK('ff_qbo_sync_worker', 0)`. If held by another instance, exit 0 silently.
+2. **Master kill-switch check** (D-CPA-5): if `quickbooks.sync_enabled !== '1'`, log "QBO sync disabled" + exit 0. Stays off until S-QBO-30 production cutover.
+3. **Dry-run flag**: read `quickbooks.dry_run_mode`. When '1', every dispatch becomes a no-op log line + queue row marked `'completed'` with `error_message='[DRY RUN] would push'`. Used during S-QBO-30 cutover validation.
+4. **Pre-resolve notification audience**: `SELECT u.id FROM users u JOIN user_roles r ON r.id = u.role_id WHERE r.slug IN ('super_admin','accountant') AND u.status='active' AND u.deleted_at IS NULL`. Worker passes this list to `NotificationService::notify()` as `$specificUserIds` because `user_permissions` has no `'quickbooks'` rows yet — see D-QBO-3-3 (audience-routing follow-up).
+5. **Batch claim** under `db_transaction(FOR UPDATE)`: `SELECT … FROM acc_qbo_sync_queue WHERE status='queued' AND (next_retry_at IS NULL OR next_retry_at <= NOW()) ORDER BY priority ASC, enqueued_at ASC LIMIT 10 FOR UPDATE`. For each row picked, UPDATE in-transaction to `status='processing', picked_up_at=NOW(), worker_id=?`. Commit.
+6. **Process picked rows OUTSIDE the claim transaction** (don't hold row locks during QBO HTTP):
+   - **`sync_mode.<entity_type>` check**: if mode is `'off'`, UPDATE `status='skipped', completed_at=NOW(), error_code='sync_mode_off'`; continue. (D-QBO-3-1 extension — original sketch lacked this skip path.)
+   - **Pusher availability check** via `QboPusherDispatcher::hasImplementation()`: if false, UPDATE `status='failed', error_code='pusher_not_implemented'`; **DO NOT dispatch notification** (D-QBO-3-1 — expected pre-S-QBO-5+ state); continue.
+   - **Dry-run short-circuit**: if `$dryRun`, UPDATE `status='completed', error_message='[DRY RUN] would push'`; continue.
+   - **Real dispatch** via `QboPusherDispatcher::dispatch($entity_type, $operation, $entity_id, $payload_snapshot)`. Worker catches:
+     - `QuickBooksTransientException`: if retry budget remains, UPDATE `status='queued', retry_count=retry_count+1, next_retry_at=NOW()+2^retry_count minutes`, clear `picked_up_at`/`worker_id`; else UPDATE `status='failed'` + dispatch notification + **insert drift event** (D-QBO-3-1 extension — drift_events row with `detection_source='push_failure', category='push_failed'` so the Drift Dashboard surfaces it alongside the per-entity comparison cron's findings in S-QBO-24).
+     - `QuickBooksException` (other categories): UPDATE `status='failed'` + dispatch notification + insert drift event.
+     - `Throwable` (unexpected): UPDATE `status='failed'` + capture to Sentry + dispatch notification (no drift event for unexpected errors — they're code bugs not QBO drift).
+   - **Audit-log row** on every `'completed'` transition: `action='update'`, `module='quickbooks'`, `entity_type='qbo_sync_queue'`, `entity_id=$qid`, `entity_label='{type}#{id} {op}'`, `notes='QBO push completed by worker.'`.
+7. Release lock in `finally{}` block (covers exit-paths from kill-switch + no-due-items + processing).
+8. Final stdout summary: `processed=N completed=X skipped=Y failed=Z deferred=W`.
 
 **Concurrency:** only one worker per host. Multi-host deployment would need distributed lock (Redis); Mainland's single-host setup uses MySQL advisory locks.
+
+**Worker behavior extensions vs original §6.7 sketch** (locked as D-QBO-3-1 in S-QBO-3 SESSION LOG row): kill-switch + dry-run + `sync_mode.off` skip path + `drift_events` insertion on permanent failure + `pusher_not_implemented` notification suppression. The original sketch listed only the happy + retry + permanent paths; the live implementation adds the four guard rails above without changing the core dispatch contract.
 
 ---
 

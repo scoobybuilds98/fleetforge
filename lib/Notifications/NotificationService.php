@@ -48,6 +48,13 @@ class NotificationService
         'reservation' => 'reservations',
         'samsara'     => 'equipment',    // GPS is part of equipment
         'accounting'  => 'reports',      // accounting module not in user_permissions seed → accountant has reports view
+        'quickbooks'  => 'quickbooks',   // S-QBO-3: quickbooks module declared in config/permissions.php (S-PERM-EXPAND)
+                                         // but NOT in user_permissions DB table — until that's seeded, only super_admin
+                                         // is reached via the r.slug='super_admin' short-circuit in resolveUsersForType.
+                                         // Per spec §13.6 the audience should also include accountant — QBO crons + the
+                                         // sync worker pass an explicit $specificUserIds (super_admin + accountant)
+                                         // to bypass this gap. Once user_permissions is seeded the explicit list can
+                                         // be dropped. See D-QBO-3-3 in PROGRESS.md DECISIONS for the resolution plan.
         'system'      => null,           // null = all active users
         'chat'        => null,           // CHAT-1: always targeted via $specificUserIds
     ];
@@ -67,6 +74,7 @@ class NotificationService
         'reservation' => 'reservations',
         'samsara'     => 'samsara',
         'accounting'  => 'accounting',
+        'quickbooks'  => 'quickbooks',   // S-QBO-3: dedicated UI category for QBO sync notifications (push_failed, etc.)
         'system'      => 'system',
         'chat'        => 'system',       // CHAT-1: chat notifications use system icon
     ];

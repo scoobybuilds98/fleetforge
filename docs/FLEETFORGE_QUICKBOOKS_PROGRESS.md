@@ -6,9 +6,9 @@
 
 **Current arc status (as of 2026-05-20):**
 
-🟢 **PHASE QBO-1 50% COMPLETE.** S-QBO-1 + S-QBO-2 both SHIPPED 2026-05-20. **2 of 30 sessions complete.** S-QBO-1 delivered OAuth scaffolding + Settings → QuickBooks page + QuickBooksClient skeleton + token pinger cron. S-QBO-2 delivered the HTTP boundary: get/post/put/query/getEntity/createEntity/updateEntity + getCompanyInfo (real call), 9 typed exceptions (`FleetForge\Exceptions\QuickBooks*`), retry orchestration (spec §13.2 exponential backoff), rate-limit awareness (spec §14.2 throttle), Sentry instrumentation (structured tags + extra per spec §13.5), and the canonical `acc_qbo_sync_log` table (spec §6.5 shape replacing a legacy mapping-style placeholder — D-QBO-2-1). Master sync kill-switch `quickbooks.sync_enabled='0'` remains OFF until S-QBO-30 production cutover per D-CPA-5.
+🟢 **PHASE QBO-1 75% COMPLETE.** S-QBO-1 + S-QBO-2 + S-QBO-3 all SHIPPED 2026-05-20. **3 of 30 sessions complete.** S-QBO-1 delivered OAuth scaffolding + Settings → QuickBooks page + QuickBooksClient skeleton + token pinger cron. S-QBO-2 delivered the HTTP boundary: get/post/put/query/getEntity/createEntity/updateEntity + getCompanyInfo (real call), 9 typed exceptions (`FleetForge\Exceptions\QuickBooks*`), retry orchestration (spec §13.2 exponential backoff), rate-limit awareness (spec §14.2 throttle), Sentry instrumentation (structured tags + extra per spec §13.5), and the canonical `acc_qbo_sync_log` table (spec §6.5 shape replacing a legacy mapping-style placeholder — D-QBO-2-1). Master sync kill-switch `quickbooks.sync_enabled='0'` remains OFF until S-QBO-30 production cutover per D-CPA-5.
 
-**Next session up:** S-QBO-3 — Sync infrastructure tables (acc_qbo_sync_queue + acc_qbo_drift_events) + worker cron skeleton (`cron/qbo_sync_worker.php` using QuickBooksClient with $opts['no_retry']=true and next_retry_at scheduling).
+**Next session up:** S-QBO-4 — Sync infrastructure UI: Sync Log page (acc_qbo_sync_log query interface with filters), Drift Detection page (acc_qbo_drift_events list + resolve/suppress actions), QuickBooks Dashboard page (connection state + today's queue counts + recent errors + drift summary).
 
 ---
 
@@ -22,8 +22,8 @@ Legend: 📋 PLANNED | 🟡 QUEUED | 🔄 IN-PROGRESS | ✅ DONE | ⛔ BLOCKED |
 |---|---|---|---|
 | S-QBO-1 | ✅ DONE | 2026-05-20 | OAuth scaffolding, Settings → QuickBooks tab (Connection Card), token storage in settings (with NEW is_sensitive column), QuickBooksClient class skeleton (token management implemented; HTTP boundary stubs for S-QBO-2), sandbox connection verification, refresh-token pinger cron |
 | S-QBO-2 | ✅ DONE | 2026-05-20 | QuickBooksClient HTTP boundary completion: GET/POST/PUT, query SQL, getEntity/createEntity/updateEntity, error classification (9 typed exceptions), retry orchestration + rate-limit throttling, Sentry instrumentation (structured), canonical §6.5 acc_qbo_sync_log shape (D-QBO-2-1 drop+recreate), minorversion '70' locked (D-QBO-2-2) |
-| S-QBO-3 | 📋 PLANNED | — | Sync infrastructure tables: acc_qbo_sync_queue + acc_qbo_sync_log + acc_qbo_drift_events. Worker cron skeleton |
-| S-QBO-4 | 📋 PLANNED | — | Sync infrastructure UI: Sync Log page, Drift Detection page (basic), QuickBooks Dashboard page (basic) |
+| S-QBO-3 | ✅ DONE | 2026-05-20 | Sync infrastructure foundation: acc_qbo_sync_queue + acc_qbo_drift_events tables (sync_log already created S-QBO-2 D-QBO-2-1), 13 sync_mode settings, QboPusherDispatcher (convention-based registry-less), QuickBooksSync facade, worker cron skeleton with kill-switch + dry-run + retry + drift event + pusher_not_implemented suppression. D-QBO-3-1 / 3-2 / 3-3 locked. |
+| S-QBO-4 | 🟡 QUEUED | — | Sync infrastructure UI: Sync Log page, Drift Detection page (basic), QuickBooks Dashboard page (basic) |
 
 ### Phase QBO-2: Customers (2 sessions)
 
@@ -126,6 +126,7 @@ Format: `| SESSION-ID | DATE | One-line description | Files changed | SC results
 |---|---|---|---|---|---|
 | S-QBO-1 | 2026-05-20 | OAuth scaffolding, QBO settings tab, QuickBooksClient skeleton, token pinger cron (Phase QBO-1 / 1 of 4) | db_migrations/202605200500_S-QBO-1.sql, FLEETFORGE_DATABASE_MASTER.sql, docs/FLEETFORGE_SCHEMA_QUICK_REF.md, config/navigation.php, app/admin/quickbooks/{settings,dashboard,sync_log,drift,index}.php, app/admin/oauth/qbo/{init,callback}.php, api/v1/quickbooks/{disconnect,test_connection,save_credentials,save_master_controls}.php, lib/QuickBooksClient.php, cron/qbo_token_refresh.php, docs/runbooks/qbo_realm_change.md | D131 6/6 PASS (PARITY OK + I1-I10 + samsara 16/16 + model_b 20/20 + doc_freshness 17/17 + migrate 45/0/0) | D-QBO-1-1 (settings.is_sensitive column added — separate from is_public, controls UI masking + audit redaction), D-QBO-1-2 (sidebar nav in config/navigation.php — array-driven, K-22 file-over-prompt resolution) |
 | S-QBO-2 | 2026-05-20 | QuickBooksClient HTTP boundary completion: methods + 9 typed exceptions + retry orchestration + rate-limit throttling + Sentry instrumentation + canonical §6.5 acc_qbo_sync_log (Phase QBO-1 / 2 of 4) | db_migrations/202605201900_S-QBO-2.sql, FLEETFORGE_DATABASE_MASTER.sql, docs/FLEETFORGE_SCHEMA_QUICK_REF.md, lib/QuickBooksClient.php, lib/Exceptions/QuickBooks{,AuthExpired,StaleObject,DuplicateName,Validation,Forbidden,NotFound,Transient,RateLimit}Exception.php, tests/_smoke_qbo_client.php, api/v1/quickbooks/test_connection.php (docblock only), docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md | D131 7/7 PASS (PARITY OK + I1-I10 + samsara 16/16 + model_b 20/20 + doc_freshness 17/17 + qbo_client 6/6 NEW + migrate 46/0/0) | D-QBO-2-1 (legacy acc_qbo_sync_log dropped + recreated with canonical §6.5 shape this session rather than deferring to S-QBO-3), D-QBO-2-2 (QBO minorversion '70' locked + auto-appended to every request) |
+| S-QBO-3 | 2026-05-20 | Sync infrastructure foundation: 2 tables + 13 sync_mode settings + dispatcher + facade + worker cron with kill-switch + dry-run + retry + drift + pusher_not_implemented suppression (Phase QBO-1 / 3 of 4) | db_migrations/202605202100_S-QBO-3.sql, FLEETFORGE_DATABASE_MASTER.sql, docs/FLEETFORGE_SCHEMA_QUICK_REF.md, lib/QboPusherDispatcher.php, lib/QuickBooksSync.php, lib/Exceptions/PusherNotImplementedException.php, cron/qbo_sync_worker.php, tests/_smoke_qbo_queue.php, lib/Notifications/NotificationService.php (TYPE map only), docs/FLEETFORGE_QUICKBOOKS_SPEC.md (§6.7 rewrite), docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md | D131 8/8 PASS (PARITY OK + I1-I10 + samsara 16/16 + model_b 20/20 + doc_freshness 17/17 + qbo_client 6/6 + qbo_queue 9/9 NEW + migrate 47/0/0) | D-QBO-3-1 (worker behavior extensions: kill-switch + dry-run + sync_mode.off + drift_events + pusher_not_implemented suppression — supersedes original §6.7 sketch), D-QBO-3-2 (Pusher convention: {EntityType}Pusher + pushCreate/Update/Void/Delete; dispatcher checks FleetForge\\QboPushers\\<Name> first then FleetForge\\<Name> fallback), D-QBO-3-3 (notification audience via explicit specificUserIds workaround until user_permissions seeded for 'quickbooks' module) |
 
 ---
 
@@ -157,6 +158,7 @@ Per-session decisions locked when each session ships (✅) or anticipated for se
 |---|---|---|
 | S-QBO-1 | ✅ LOCKED 2026-05-20 | **D-QBO-1-1** settings.is_sensitive column added (TINYINT(1) NOT NULL DEFAULT 0 AFTER is_public; backfilled 6 existing credential rows; semantically distinct from is_public per [[feedback_trust_file_over_prompt]] resolution of pre-flight STOP). **D-QBO-1-2** sidebar nav in config/navigation.php — array-driven, rendered by includes/sidebar.php (NOT app/views/layout/sidebar.php as the prompt incorrectly referenced); QuickBooks group placed as SEPARATE top-level above Accounting per D-QBO-CORE-3 parallel-running invariant. |
 | S-QBO-2 | ✅ LOCKED 2026-05-20 | **D-QBO-2-1** legacy `acc_qbo_sync_log` table dropped + recreated with canonical spec §6.5 shape in S-QBO-2 migration rather than deferring to S-QBO-3 (the pre-existing placeholder was a mapping-style table with wrong shape, 0 rows, 0 consumers per pre-flight). **D-QBO-2-2** QBO Online minorversion locked at '70' — auto-appended to every API request URL when caller doesn't override. |
+| S-QBO-3 | ✅ LOCKED 2026-05-20 | **D-QBO-3-1** spec §6.7 worker pseudocode supersession — live cron extends original 4-step sketch with kill-switch + dry-run + sync_mode.off skip + drift_events insertion on permanent failure + pusher_not_implemented notification + drift suppression. **D-QBO-3-2** Pusher convention — `{EntityType}Pusher` class (snake→PascalCase) with static `pushCreate`/`pushUpdate`/`pushVoid`/`pushDelete` methods; dispatcher checks `FleetForge\QboPushers\<Name>` first then `FleetForge\<Name>` fallback; registry-less convention-based lookup. **D-QBO-3-3** QBO failure notifications use explicit `$specificUserIds` (super_admin + accountant resolved from `users JOIN user_roles`) — temporary workaround until `user_permissions` table is seeded with 'quickbooks' module rows; TYPE_TO_MODULE/CATEGORY entries added for future-proofing. |
 | S-QBO-5 | Customer name collision resolution, fuzzy-match threshold during initial mapping, deactivated-customer handling |
 | S-QBO-8 | Bridge-account validator strictness, unmapped-account fallback, custom account creation |
 | S-QBO-9 | NON code identification approach, NS HST date-effective handling, ITC tax code differentiation |
@@ -174,9 +176,9 @@ Per-session decisions locked when each session ships (✅) or anticipated for se
 
 | Table | Created in | Status | Notes |
 |---|---|---|---|
-| acc_qbo_sync_queue | S-QBO-3 | 📋 PLANNED | Push queue |
+| acc_qbo_sync_queue | S-QBO-3 | ✅ DONE 2026-05-20 | Push queue per spec §6.4 verbatim. 16 cols + 3 indexes (idx_status_priority, idx_entity, idx_retry). Worker batch-claims 10 items/run under FOR UPDATE. |
 | acc_qbo_sync_log | S-QBO-2 | ✅ DONE 2026-05-20 | API call audit log; 365-day retention. Created in S-QBO-2 (not S-QBO-3 as originally planned) — D-QBO-2-1: pre-flight surfaced a legacy mapping-style placeholder already in live DB with wrong shape; dropped + recreated with canonical §6.5 shape in same migration. |
-| acc_qbo_drift_events | S-QBO-4 | 📋 PLANNED | Drift detection events |
+| acc_qbo_drift_events | S-QBO-3 | ✅ DONE 2026-05-20 | Drift detection events. Created in S-QBO-3 (not S-QBO-4 as originally planned) — moved up alongside sync_queue so the worker can insert push_failed rows on permanent failure (D-QBO-3-1). 17 cols + 4 indexes + 2 FKs (queue_id→sync_queue SET NULL, resolved_by_user_id→users SET NULL). Categories: count_mismatch / field_mismatch / missing_in_qbo / missing_in_ff / amount_drift / balance_drift / push_failed / pull_failed / stale_object_unresolved. S-QBO-24 will add the drift-check cron that performs per-entity comparison. |
 | acc_qbo_account_map | S-QBO-8 | 📋 PLANNED | COA mapping |
 | acc_qbo_tax_code_map | S-QBO-9 | 📋 PLANNED | Tax code mapping |
 | acc_qbo_item_map | S-QBO-10 | 📋 PLANNED | Line item type mapping |
@@ -211,7 +213,7 @@ Per-session decisions locked when each session ships (✅) or anticipated for se
 | Cron | Schedule | Added in | Status | Purpose |
 |---|---|---|---|---|
 | qbo_token_refresh.php | Daily 02:00 | S-QBO-1 | ✅ CODE SHIPPED 2026-05-20 (crontab install deferred to S-QBO-29 production cutover) | Refresh OAuth tokens; alert if < 14 days to expiry |
-| qbo_sync_worker.php | Every 1 min | S-QBO-3 | 📋 PLANNED | Process queued push jobs |
+| qbo_sync_worker.php | Every 1 min | S-QBO-3 | ✅ CODE SHIPPED 2026-05-20 (crontab install deferred to S-QBO-30 production cutover) | Process queued push jobs. Kill-switch at top (sync_enabled='0' → exit silently); dry-run mode; per-entity sync_mode.off skip; FOR UPDATE batch claim (10/run); QboPusherDispatcher dispatch with try/catch on PusherNotImplementedException + QuickBooksTransientException (exponential backoff retry) + QuickBooksException (permanent) + Throwable (Sentry capture); drift_events insert on permanent; pusher_not_implemented notification + drift suppressed. |
 | qbo_bank_cdc.php | Daily 02:30 | S-QBO-20 | 📋 PLANNED | Pull bank transactions from QBO (Exception #2) |
 | qbo_drift_check.php | Daily 03:30 | S-QBO-24 | 📋 PLANNED | Detect and surface drift |
 | qbo_webhook_replay.php | Every 15 min | S-QBO-15 | 📋 PLANNED | Reprocess stuck webhook events |
@@ -233,8 +235,11 @@ Added in S-QBO-1 unless noted otherwise. `is_sensitive=1` flag added to settings
 - ALTER TABLE settings ADD COLUMN is_sensitive TINYINT(1) NOT NULL DEFAULT 0 AFTER is_public
 - 6 existing rows backfilled to is_sensitive=1 in same migration: ai.anthropic_api_key, aws.secret_access_key, email.smtp_pass, gps.geotab_password, gps.samsara_api_key, notifications.smtp_pass
 
-**Per-entity sync mode (S-QBO-3):**
-- quickbooks.sync_mode.{customer, vendor, invoice, payment, credit_memo, refund_receipt, bill, bill_payment, journal_entry, depreciation_je, recurring_je, tax_remittance_je, year_end_closing_je}
+**Per-entity sync mode (S-QBO-3 ✅ SHIPPED 2026-05-20 — 13 keys):**
+- 6 default `sync`: quickbooks.sync_mode.{customer, vendor, invoice, payment, credit_memo, refund_receipt}
+- 5 default `queue`: quickbooks.sync_mode.{bill, bill_payment, depreciation_je, recurring_je}
+- 4 sync_mode lookups on JEs: quickbooks.sync_mode.{journal_entry (sync), tax_remittance_je (sync), year_end_closing_je (sync), depreciation_je (queue), recurring_je (queue)}
+- Live count: 35 quickbooks.* rows (18 from S-QBO-1 + 4 from S-QBO-2 + 13 from S-QBO-3).
 
 **Drift tolerance (S-QBO-4):**
 - quickbooks.drift_tolerance.{customer, vendor, invoice, payment, credit_memo, bill, gl_account}
