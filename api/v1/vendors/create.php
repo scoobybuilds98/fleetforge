@@ -173,4 +173,9 @@ $newId = db_transaction(function() use (
     return $id;
 });
 
+// QBO sync enqueue (S-QBO-7). No-op when sync_enabled='0' (D-CPA-5
+// default) or mode rejects pushes. Never throws — sync is best-effort
+// and must not break vendor-create flows.
+\FleetForge\QboPushers\VendorEnqueuer::enqueue($newId, 'create');
+
 json_success(['id' => $newId, 'name' => $name, 'vendor_type' => $vendorType], 201);

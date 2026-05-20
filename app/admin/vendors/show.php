@@ -51,6 +51,20 @@ $specializations = $vendor['specializations']
     ? json_decode($vendor['specializations'], true)
     : [];
 
+// ── QBO mapping (S-QBO-7) ─────────────────────────────────────
+// Drives the QuickBooks badge in the page header. Only renders when
+// the connection is established (no point teasing the feature pre-
+// setup). Separate query to keep the vendor SELECT untouched.
+$qboMapping = null;
+if ((string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected') {
+    $qboMapping = db_row(
+        "SELECT id, qbo_vendor_id, mapping_status, last_synced_at, last_push_at
+           FROM acc_qbo_vendor_map
+          WHERE ff_vendor_id = ?",
+        [$vendorId]
+    );
+}
+
 // Work order counts for KPI tiles
 $woOpen      = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE vendor_id = ? AND status IN ('open','in_progress','waiting_parts') AND deleted_at IS NULL", [$vendorId]);
 $woCompleted = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE vendor_id = ? AND status = 'completed' AND deleted_at IS NULL", [$vendorId]);
@@ -117,7 +131,41 @@ require_once FF_ROOT . '/includes/header.php';
 
 <div class="page-header">
     <a href="<?= base_url('vendors') ?>" class="btn btn-secondary btn-sm">← Vendors</a>
-    <h1 class="page-header-title"><?= e($vendor['name']) ?></h1>
+    <h1 class="page-header-title" style="margin:0 12px 0 8px;"><?= e($vendor['name']) ?></h1>
+    <?php /* QBO mapping badge — S-QBO-7. Only shown when the
+             connection is established AND a mapping row exists.
+             Status drives the color: mapped=success (linked both
+             sides), ff_only=warning (not pushed yet), qbo_only=
+             info (QBO has but FF doesn't link — operator resolves
+             via /quickbooks/vendors), ignored=neutral. */ ?>
+    <?php if ($qboMapping !== null):
+        $qm_status = (string) ($qboMapping['mapping_status'] ?? 'qbo_only');
+        $qm_class  = match ($qm_status) {
+            'mapped'   => 'badge-success',
+            'ff_only'  => 'badge-warning',
+            'qbo_only' => 'badge-info',
+            'ignored'  => 'badge-neutral',
+            default    => 'badge-neutral',
+        };
+        $qm_label  = match ($qm_status) {
+            'mapped'   => 'QuickBooks: Synced',
+            'ff_only'  => 'QuickBooks: Not synced',
+            'qbo_only' => 'QuickBooks: Linked from QBO side',
+            'ignored'  => 'QuickBooks: Excluded',
+            default    => 'QuickBooks',
+        };
+        $qm_title = $qboMapping['qbo_vendor_id'] ? 'qbo#' . $qboMapping['qbo_vendor_id'] : '';
+        if (!empty($qboMapping['last_synced_at'])) {
+            $qm_title .= ($qm_title !== '' ? ' · ' : '') . 'last synced ' . $qboMapping['last_synced_at'];
+        }
+    ?>
+    <a href="<?= base_url('quickbooks/vendors') ?>?q=<?= e(rawurlencode($vendor['name'])) ?>"
+       class="badge <?= $qm_class ?>"
+       title="<?= e($qm_title) ?>"
+       style="text-decoration:none;">
+        <?= e($qm_label) ?>
+    </a>
+    <?php endif; ?>
     <div style="display:flex;gap:8px;margin-left:auto;">
         <?php if (can('maintenance', 'edit')): ?>
         <button id="btn-edit" class="btn btn-secondary btn-sm"

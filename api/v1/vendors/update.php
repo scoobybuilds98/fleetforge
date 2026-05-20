@@ -191,6 +191,11 @@ db_transaction(function() use ($id, $newValues, $existing) {
 // Fetch fresh updated_at to return to client for next D19 lock cycle
 $fresh = db_row("SELECT updated_at FROM vendors WHERE id = ?", [$id]);
 
+// QBO sync enqueue (S-QBO-7). No-op when sync_enabled='0' (D-CPA-5
+// default) or mode rejects pushes. Never throws — sync is best-effort
+// and must not break vendor-update flows.
+\FleetForge\QboPushers\VendorEnqueuer::enqueue($id, 'update');
+
 json_success([
     'id'         => $id,
     'name'       => $name,

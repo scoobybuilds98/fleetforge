@@ -1060,6 +1060,37 @@ CREATE TABLE `acc_qbo_customer_map` (
   CONSTRAINT `fk_qbo_cust_map_ff` FOREIGN KEY (`ff_customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_qbo_cust_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_qbo_vendor_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_vendor_id` int unsigned DEFAULT NULL COMMENT 'NULL = qbo_only state (QBO vendor with no FF link)',
+  `qbo_vendor_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit Vendor.Id; NULL = ff_only state (FF vendor not yet pushed)',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token; refreshed on every pull/push round-trip',
+  `qbo_display_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Snapshot at last pull; drives drift detection in S-QBO-24',
+  `qbo_company_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `qbo_given_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'D-QBO-7-3: from vendors.contact_name pre-space split',
+  `qbo_family_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'D-QBO-7-3: from vendors.contact_name post-space split',
+  `qbo_email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `qbo_phone` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `qbo_active` tinyint(1) DEFAULT NULL COMMENT 'Mirror of QBO Vendor.Active flag',
+  `qbo_v4v_status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'D-QBO-7-1: QBO Vendor.V4VStatus (1099 status) — informational only, not used for routing',
+  `mapping_status` enum('mapped','ff_only','qbo_only','ignored') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'qbo_only',
+  `match_confidence` enum('exact','high','medium','low','manual') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'How the link was determined (exact=normalized name, high=Levenshtein≤3, medium=email, low=phone, manual=operator override)',
+  `match_notes` text COLLATE utf8mb4_unicode_ci,
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent successful round-trip with QBO',
+  `last_pull_at` datetime DEFAULT NULL,
+  `last_push_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `created_by_user_id` int unsigned DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_vendor` (`ff_vendor_id`),
+  UNIQUE KEY `uq_qbo_vendor` (`qbo_vendor_id`),
+  KEY `idx_status` (`mapping_status`),
+  KEY `idx_last_synced` (`last_synced_at`),
+  KEY `fk_qbo_vend_map_user` (`created_by_user_id`),
+  CONSTRAINT `fk_qbo_vend_map_ff` FOREIGN KEY (`ff_vendor_id`) REFERENCES `vendors` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_qbo_vend_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_qbo_drift_events` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `detected_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,

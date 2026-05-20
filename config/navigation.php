@@ -269,6 +269,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Vendors',
+                'icon'   => 'building-storefront',
+                'url'    => '/quickbooks/vendors',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',

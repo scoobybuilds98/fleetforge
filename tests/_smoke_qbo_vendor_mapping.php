@@ -2,21 +2,21 @@
 declare(strict_types=1);
 
 /**
- * tests/_smoke_qbo_customer_mapping.php
+ * tests/_smoke_qbo_vendor_mapping.php
  *
- * S-QBO-5 — Structural + behavioural smoke for the customer mapping
+ * S-QBO-7 — Structural + behavioural smoke for the vendor mapping
  * flow. Runs OFFLINE: no Intuit HTTP traffic (the Puller's pullAll()
  * is exercised by feeding sample JSON through normalize(), not by
  * hitting QBO). Live verification is operator-side post-commit.
  *
  * Self-cleaning: any synthetic rows the smoke creates use sentinel
- * ids (FF customer id=999990+, qbo_customer_id='TEST-SMOKE-*') so
- * the finally block can scrub them on either pass or fail.
+ * ids (FF vendor id=999990+, qbo_vendor_id='TEST-SMOKE-V-*') so the
+ * finally block can scrub them on either pass or fail.
  *
- * 12 sub-checks:
- *   C1: acc_qbo_customer_map table shape — expected columns + indexes + FK
- *   C2: CustomerPuller class exists with public static pullAll + normalize
- *   C3: CustomerMatcher class exists with public static normalizeName /
+ * 12 sub-checks (mirror of _smoke_qbo_customer_mapping.php):
+ *   C1: acc_qbo_vendor_map table shape — expected columns + indexes + FK
+ *   C2: VendorPuller class exists with public static pullAll + normalize
+ *   C3: VendorMatcher class exists with public static normalizeName /
  *       findBestMatch / matchAll
  *   C4: normalizeName behavior — three corporate-suffix variants all
  *       normalize to the same string
@@ -24,26 +24,26 @@ declare(strict_types=1);
  *   C6: findBestMatch returns null when there is no match
  *   C7: findBestMatch returns 'high' confidence for a Levenshtein hit
  *       (single-character typo within distance 3)
- *   C8: UNIQUE(ff_customer_id) allows multiple NULL but rejects
- *       duplicate non-null values; same for UNIQUE(qbo_customer_id)
+ *   C8: UNIQUE(ff_vendor_id) + UNIQUE(qbo_vendor_id) allow multiple NULL
+ *       but reject duplicate non-null values
  *   C9: 4 API endpoint files exist + php -l clean
- *  C10: customers.php page exists + php -l clean
- *  C11: Nav config has 6 QuickBooks children including Customers in
- *       expected position (between Drift and Settings)
- *  C12: CustomerPuller::normalize maps a representative QBO JSON
+ *  C10: vendors.php page exists + php -l clean
+ *  C11: Nav config has 7 QuickBooks children including Vendors in
+ *       expected position (between Customers and Settings)
+ *  C12: VendorPuller::normalize maps a representative QBO Vendor JSON
  *       fragment to the documented flat-record shape (offline — no
  *       live HTTP call)
  *
  * Exit 0 on all PASS; exit 1 with a diagnostic list on any FAIL.
  *
- * @session S-QBO-5
- * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §7.4
+ * @session S-QBO-7
+ * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §7.5
  */
 
 require_once __DIR__ . '/../config/app.php';
 
-use FleetForge\QboPushers\CustomerPuller;
-use FleetForge\QboPushers\CustomerMatcher;
+use FleetForge\QboPushers\VendorPuller;
+use FleetForge\QboPushers\VendorMatcher;
 
 $failures = [];
 $pass     = 0;
@@ -57,26 +57,34 @@ $sentinelMappingIds  = [];
 try {
 
 // ── C1: table shape ─────────────────────────────────────────
+// Expected columns per S-QBO-7 migration. Note vendor_map differs
+// from customer_map: qbo_balance REMOVED, qbo_given_name +
+// qbo_family_name + qbo_v4v_status ADDED.
 $expectedCols = [
-    'id', 'ff_customer_id', 'qbo_customer_id', 'qbo_sync_token',
-    'qbo_display_name', 'qbo_company_name', 'qbo_email', 'qbo_phone',
-    'qbo_active', 'qbo_balance', 'mapping_status', 'match_confidence',
+    'id', 'ff_vendor_id', 'qbo_vendor_id', 'qbo_sync_token',
+    'qbo_display_name', 'qbo_company_name', 'qbo_given_name',
+    'qbo_family_name', 'qbo_email', 'qbo_phone', 'qbo_active',
+    'qbo_v4v_status', 'mapping_status', 'match_confidence',
     'match_notes', 'last_synced_at', 'last_pull_at', 'last_push_at',
     'created_at', 'updated_at', 'created_by_user_id',
 ];
 $c1Errors = [];
 try {
-    $rows = db_select("SHOW COLUMNS FROM acc_qbo_customer_map");
+    $rows = db_select("SHOW COLUMNS FROM acc_qbo_vendor_map");
     $present = array_map(fn($r) => $r['Field'], $rows);
     foreach ($expectedCols as $col) {
         if (!in_array($col, $present, true)) {
             $c1Errors[] = "missing column: {$col}";
         }
     }
+    // qbo_balance must NOT exist (intentional D-QBO-7 removal).
+    if (in_array('qbo_balance', $present, true)) {
+        $c1Errors[] = 'qbo_balance column should NOT exist on vendor map (S-QBO-18 territory)';
+    }
     // Check the two UNIQUE indexes and the FK.
-    $idx = db_select("SHOW INDEX FROM acc_qbo_customer_map");
+    $idx = db_select("SHOW INDEX FROM acc_qbo_vendor_map");
     $idxNames = array_unique(array_map(fn($r) => $r['Key_name'], $idx));
-    foreach (['uq_ff_customer', 'uq_qbo_customer'] as $i) {
+    foreach (['uq_ff_vendor', 'uq_qbo_vendor'] as $i) {
         if (!in_array($i, $idxNames, true)) {
             $c1Errors[] = "missing index: {$i}";
         }
@@ -85,19 +93,19 @@ try {
     $c1Errors[] = 'SHOW COLUMNS/INDEX threw: ' . $e->getMessage();
 }
 if (empty($c1Errors)) {
-    echo "PASS C1  acc_qbo_customer_map has all 19 columns + 2 UNIQUE indexes\n";
+    echo "PASS C1  acc_qbo_vendor_map has all 21 columns + 2 UNIQUE indexes + qbo_balance absent\n";
     $pass++;
 } else {
     echo "FAIL C1  " . implode('; ', $c1Errors) . "\n";
     $failures[] = 'C1';
 }
 
-// ── C2: CustomerPuller surface ─────────────────────────────
+// ── C2: VendorPuller surface ───────────────────────────────
 $c2Errors = [];
-if (!class_exists(CustomerPuller::class)) {
-    $c2Errors[] = 'CustomerPuller class not autoloaded under FleetForge\QboPushers';
+if (!class_exists(VendorPuller::class)) {
+    $c2Errors[] = 'VendorPuller class not autoloaded under FleetForge\\QboPushers';
 } else {
-    $ref = new ReflectionClass(CustomerPuller::class);
+    $ref = new ReflectionClass(VendorPuller::class);
     foreach (['pullAll', 'normalize'] as $m) {
         if (!$ref->hasMethod($m)) {
             $c2Errors[] = "missing method: {$m}";
@@ -110,19 +118,19 @@ if (!class_exists(CustomerPuller::class)) {
     }
 }
 if (empty($c2Errors)) {
-    echo "PASS C2  CustomerPuller class surface (pullAll + normalize static)\n";
+    echo "PASS C2  VendorPuller class surface (pullAll + normalize static)\n";
     $pass++;
 } else {
     echo "FAIL C2  " . implode('; ', $c2Errors) . "\n";
     $failures[] = 'C2';
 }
 
-// ── C3: CustomerMatcher surface ────────────────────────────
+// ── C3: VendorMatcher surface ──────────────────────────────
 $c3Errors = [];
-if (!class_exists(CustomerMatcher::class)) {
-    $c3Errors[] = 'CustomerMatcher class not autoloaded under FleetForge\QboPushers';
+if (!class_exists(VendorMatcher::class)) {
+    $c3Errors[] = 'VendorMatcher class not autoloaded under FleetForge\\QboPushers';
 } else {
-    $ref = new ReflectionClass(CustomerMatcher::class);
+    $ref = new ReflectionClass(VendorMatcher::class);
     foreach (['normalizeName', 'findBestMatch', 'matchAll'] as $m) {
         if (!$ref->hasMethod($m)) {
             $c3Errors[] = "missing method: {$m}";
@@ -135,7 +143,7 @@ if (!class_exists(CustomerMatcher::class)) {
     }
 }
 if (empty($c3Errors)) {
-    echo "PASS C3  CustomerMatcher class surface (normalizeName + findBestMatch + matchAll public static)\n";
+    echo "PASS C3  VendorMatcher class surface (normalizeName + findBestMatch + matchAll public static)\n";
     $pass++;
 } else {
     echo "FAIL C3  " . implode('; ', $c3Errors) . "\n";
@@ -145,9 +153,9 @@ if (empty($c3Errors)) {
 // ── C4: normalizeName collapses corporate suffixes ─────────
 $c4Errors = [];
 try {
-    $n1 = CustomerMatcher::normalizeName('Acme Corp Ltd.');
-    $n2 = CustomerMatcher::normalizeName('Acme Inc');
-    $n3 = CustomerMatcher::normalizeName('ACME, LLC');
+    $n1 = VendorMatcher::normalizeName('Acme Corp Ltd.');
+    $n2 = VendorMatcher::normalizeName('Acme Inc');
+    $n3 = VendorMatcher::normalizeName('ACME, LLC');
     if ($n1 !== $n2 || $n2 !== $n3) {
         $c4Errors[] = "normalizations diverged: '{$n1}' / '{$n2}' / '{$n3}' (all should equal 'acme')";
     }
@@ -166,14 +174,15 @@ if (empty($c4Errors)) {
 }
 
 // ── C5: findBestMatch — exact normalized name ──────────────
+// VendorMatcher uses `name` as the FF field (NOT company_name).
 $c5Errors = [];
 try {
     $qbo = [
         ['qbo_id' => '1', 'display_name' => 'Acme Inc',  'company_name' => 'Acme Inc',  'email' => '', 'phone' => ''],
         ['qbo_id' => '2', 'display_name' => 'Different', 'company_name' => 'Different', 'email' => '', 'phone' => ''],
     ];
-    $m = CustomerMatcher::findBestMatch(
-        ['company_name' => 'Acme Corp', 'email' => '', 'phone' => ''],
+    $m = VendorMatcher::findBestMatch(
+        ['name' => 'Acme Corp', 'email' => '', 'phone' => ''],
         $qbo
     );
     if ($m === null) {
@@ -185,7 +194,7 @@ try {
     $c5Errors[] = 'findBestMatch threw: ' . $e->getMessage();
 }
 if (empty($c5Errors)) {
-    echo "PASS C5  findBestMatch returns 'exact' on normalized name equality\n";
+    echo "PASS C5  findBestMatch returns 'exact' on normalized name equality (uses vendors.name)\n";
     $pass++;
 } else {
     echo "FAIL C5  " . implode('; ', $c5Errors) . "\n";
@@ -199,8 +208,8 @@ try {
         ['qbo_id' => '1', 'display_name' => 'Acme Inc',  'company_name' => 'Acme Inc',  'email' => '', 'phone' => ''],
         ['qbo_id' => '2', 'display_name' => 'Different', 'company_name' => 'Different', 'email' => '', 'phone' => ''],
     ];
-    $m = CustomerMatcher::findBestMatch(
-        ['company_name' => 'Zaphod Industries', 'email' => '', 'phone' => ''],
+    $m = VendorMatcher::findBestMatch(
+        ['name' => 'Zaphod Industries', 'email' => '', 'phone' => ''],
         $qbo
     );
     if ($m !== null) {
@@ -224,8 +233,8 @@ try {
         ['qbo_id' => '1', 'display_name' => 'Acme Corp', 'company_name' => 'Acme Corp', 'email' => '', 'phone' => ''],
     ];
     // 'Acmee Corp' vs 'Acme Corp' — one extra char → distance 1 → 'high'.
-    $m = CustomerMatcher::findBestMatch(
-        ['company_name' => 'Acmee Corp', 'email' => '', 'phone' => ''],
+    $m = VendorMatcher::findBestMatch(
+        ['name' => 'Acmee Corp', 'email' => '', 'phone' => ''],
         $qbo
     );
     if ($m === null) {
@@ -247,41 +256,41 @@ if (empty($c7Errors)) {
 // ── C8: UNIQUE behavior under NULL + non-NULL ──────────────
 $c8Errors = [];
 try {
-    // Two NULL-FF rows should both succeed. Use sentinel qbo IDs.
-    $qboA = 'TEST-SMOKE-UNIQ-' . bin2hex(random_bytes(8));
-    $qboB = 'TEST-SMOKE-UNIQ-' . bin2hex(random_bytes(8));
+    // Two NULL-FF rows should both succeed.
+    $qboA = 'TEST-SMOKE-V-UNIQ-' . bin2hex(random_bytes(8));
+    $qboB = 'TEST-SMOKE-V-UNIQ-' . bin2hex(random_bytes(8));
     $sentinelQboIds[] = $qboA;
     $sentinelQboIds[] = $qboB;
 
-    $idA = db_insert('acc_qbo_customer_map', [
-        'qbo_customer_id' => $qboA,
-        'mapping_status'  => 'qbo_only',
+    $idA = db_insert('acc_qbo_vendor_map', [
+        'qbo_vendor_id'  => $qboA,
+        'mapping_status' => 'qbo_only',
     ]);
     $sentinelMappingIds[] = $idA;
-    $idB = db_insert('acc_qbo_customer_map', [
-        'qbo_customer_id' => $qboB,
-        'mapping_status'  => 'qbo_only',
+    $idB = db_insert('acc_qbo_vendor_map', [
+        'qbo_vendor_id'  => $qboB,
+        'mapping_status' => 'qbo_only',
     ]);
     $sentinelMappingIds[] = $idB;
 
-    // Now insert a duplicate qbo_customer_id — should fail.
+    // Now insert a duplicate qbo_vendor_id — should fail.
     $duplicateRejected = false;
     try {
-        db_insert('acc_qbo_customer_map', [
-            'qbo_customer_id' => $qboA,
-            'mapping_status'  => 'qbo_only',
+        db_insert('acc_qbo_vendor_map', [
+            'qbo_vendor_id'  => $qboA,
+            'mapping_status' => 'qbo_only',
         ]);
     } catch (Throwable $e) {
         $duplicateRejected = true;
     }
     if (!$duplicateRejected) {
-        $c8Errors[] = 'duplicate qbo_customer_id INSERT was accepted (UNIQUE constraint broken)';
+        $c8Errors[] = 'duplicate qbo_vendor_id INSERT was accepted (UNIQUE constraint broken)';
     }
 } catch (Throwable $e) {
     $c8Errors[] = 'C8 test setup threw: ' . $e->getMessage();
 }
 if (empty($c8Errors)) {
-    echo "PASS C8  UNIQUE allows multiple NULL but rejects duplicate non-NULL qbo_customer_id\n";
+    echo "PASS C8  UNIQUE allows multiple NULL but rejects duplicate non-NULL qbo_vendor_id\n";
     $pass++;
 } else {
     echo "FAIL C8  " . implode('; ', $c8Errors) . "\n";
@@ -291,10 +300,10 @@ if (empty($c8Errors)) {
 // ── C9: 4 API endpoint files exist + lint clean ────────────
 $c9Errors = [];
 $endpoints = [
-    'api/v1/quickbooks/customers/pull.php',
-    'api/v1/quickbooks/customers/auto_match.php',
-    'api/v1/quickbooks/customers/save_mapping.php',
-    'api/v1/quickbooks/customers/list.php',
+    'api/v1/quickbooks/vendors/pull.php',
+    'api/v1/quickbooks/vendors/auto_match.php',
+    'api/v1/quickbooks/vendors/save_mapping.php',
+    'api/v1/quickbooks/vendors/list.php',
 ];
 foreach ($endpoints as $rel) {
     $abs = realpath(__DIR__ . '/../' . $rel);
@@ -317,44 +326,40 @@ if (empty($c9Errors)) {
     $failures[] = 'C9';
 }
 
-// ── C10: customers.php page exists + lints ─────────────────
+// ── C10: vendors.php page exists + lints ───────────────────
 $c10Errors = [];
-$pagePath = realpath(__DIR__ . '/../app/admin/quickbooks/customers.php');
+$pagePath = realpath(__DIR__ . '/../app/admin/quickbooks/vendors.php');
 if ($pagePath === false || !is_readable($pagePath)) {
-    $c10Errors[] = 'app/admin/quickbooks/customers.php missing or unreadable';
+    $c10Errors[] = 'app/admin/quickbooks/vendors.php missing or unreadable';
 } else {
     $out = [];
     $code = 0;
     exec('php -l ' . escapeshellarg($pagePath) . ' 2>&1', $out, $code);
     if ($code !== 0) {
-        $c10Errors[] = 'customers.php lint failed: ' . implode('; ', $out);
+        $c10Errors[] = 'vendors.php lint failed: ' . implode('; ', $out);
     }
-    // Also verify the page uses the expected Alpine factory and
-    // the page-level permission gate.
+    // Verify Alpine factory + page-level gate.
     $src = file_get_contents($pagePath);
-    if (!str_contains($src, "qboCustomerMapping()")) {
-        $c10Errors[] = 'customers.php does not define qboCustomerMapping() Alpine factory';
+    if (!str_contains($src, "qboVendorMapping()")) {
+        $c10Errors[] = 'vendors.php does not define qboVendorMapping() Alpine factory';
     }
     if (!preg_match("/require_permission\(\s*'quickbooks'\s*,\s*'view'\s*\)/", $src)) {
-        $c10Errors[] = "customers.php missing require_permission('quickbooks','view') gate";
+        $c10Errors[] = "vendors.php missing require_permission('quickbooks','view') gate";
     }
 }
 if (empty($c10Errors)) {
-    echo "PASS C10 customers.php page exists, lints, declares Alpine factory + view gate\n";
+    echo "PASS C10 vendors.php page exists, lints, declares Alpine factory + view gate\n";
     $pass++;
 } else {
     echo "FAIL C10 " . implode('; ', $c10Errors) . "\n";
     $failures[] = 'C10';
 }
 
-// ── C11: nav has 7 QuickBooks children incl. Customers ─────
-// Grew 6→7 in S-QBO-7 with the addition of Vendors (between
-// Customers and Settings).
+// ── C11: nav has 7 QuickBooks children incl. Vendors ───────
 $c11Errors = [];
 $nav = require __DIR__ . '/../config/navigation.php';
-// Two entries carry label='QuickBooks': the separator and the actual
-// group with `children`. Skip the separator by requiring non-empty
-// children list.
+// Skip the separator (also labeled 'QuickBooks'); pick the entry
+// with non-empty children.
 $qbo = null;
 foreach ($nav as $group) {
     if (($group['label'] ?? '') === 'QuickBooks' && !empty($group['children'] ?? [])) {
@@ -370,53 +375,53 @@ if ($qbo === null) {
     if (count($children) !== 7) {
         $c11Errors[] = 'expected 7 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
     }
-    if (!in_array('Customers', $labels, true)) {
-        $c11Errors[] = "no 'Customers' child in QuickBooks nav";
+    if (!in_array('Vendors', $labels, true)) {
+        $c11Errors[] = "no 'Vendors' child in QuickBooks nav";
     }
-    // Confirm position — Customers + Vendors between Drift and Settings.
     $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Settings'];
     if ($labels !== $expectedOrder) {
         $c11Errors[] = 'nav order mismatch — got [' . implode(', ', $labels) . '], expected [' . implode(', ', $expectedOrder) . ']';
     }
 }
 if (empty($c11Errors)) {
-    echo "PASS C11 nav has 7 QuickBooks children with Customers in expected position\n";
+    echo "PASS C11 nav has 7 QuickBooks children with Vendors in expected position\n";
     $pass++;
 } else {
     echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";
     $failures[] = 'C11';
 }
 
-// ── C12: Puller::normalize maps representative QBO JSON ───
+// ── C12: Puller::normalize maps representative QBO Vendor JSON
 $c12Errors = [];
 try {
-    // Representative QBO Customer JSON fragment — uses all fields
-    // we care about + at least one missing field to exercise the
+    // Representative QBO Vendor JSON fragment — exercises all
+    // mapped fields plus at least one missing field to hit the
     // defensive `?? ''` accessors.
     $sample = [
         'Id'               => '42',
         'SyncToken'        => '3',
-        'DisplayName'      => 'Mainland Truck & Trailer Sales',
-        'CompanyName'      => 'Mainland Truck & Trailer Sales',
-        // No GivenName/FamilyName — most B2B customers have only company.
-        'PrimaryEmailAddr' => ['Address' => 'ops@mainlandrentals.com'],
-        'PrimaryPhone'     => ['FreeFormNumber' => '+1-604-555-0100'],
+        'DisplayName'      => 'Pacific Diesel Repair',
+        'CompanyName'      => 'Pacific Diesel Repair Ltd.',
+        'GivenName'        => 'Maria',
+        'FamilyName'       => 'Gonzalez',
+        'PrimaryEmailAddr' => ['Address' => 'service@pacdiesel.test'],
+        'PrimaryPhone'     => ['FreeFormNumber' => '+1-604-555-0142'],
         'Active'           => true,
-        'Balance'          => 1250.50,
+        'V4VStatus'        => 'NotEligible',
         'MetaData'         => ['LastUpdatedTime' => '2026-05-20T14:00:00-07:00'],
     ];
-    $n = CustomerPuller::normalize($sample);
+    $n = VendorPuller::normalize($sample);
     $expected = [
         'qbo_id'           => '42',
         'sync_token'       => '3',
-        'display_name'     => 'Mainland Truck & Trailer Sales',
-        'company_name'     => 'Mainland Truck & Trailer Sales',
-        'given_name'       => '',
-        'family_name'      => '',
-        'email'            => 'ops@mainlandrentals.com',
-        'phone'            => '+1-604-555-0100',
+        'display_name'     => 'Pacific Diesel Repair',
+        'company_name'     => 'Pacific Diesel Repair Ltd.',
+        'given_name'       => 'Maria',
+        'family_name'      => 'Gonzalez',
+        'email'            => 'service@pacdiesel.test',
+        'phone'            => '+1-604-555-0142',
         'active'           => true,
-        'balance'          => 1250.50,
+        'v4v_status'       => 'NotEligible',
         'last_updated_qbo' => '2026-05-20T14:00:00-07:00',
     ];
     foreach ($expected as $k => $v) {
@@ -432,7 +437,7 @@ try {
     $c12Errors[] = 'normalize threw: ' . $e->getMessage();
 }
 if (empty($c12Errors)) {
-    echo "PASS C12 CustomerPuller::normalize maps representative QBO JSON to expected flat shape\n";
+    echo "PASS C12 VendorPuller::normalize maps representative QBO JSON to expected flat shape\n";
     $pass++;
 } else {
     echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";
@@ -444,7 +449,7 @@ if (empty($c12Errors)) {
     if (!empty($sentinelMappingIds)) {
         try {
             $ph = implode(',', array_fill(0, count($sentinelMappingIds), '?'));
-            db_execute("DELETE FROM acc_qbo_customer_map WHERE id IN ({$ph})", $sentinelMappingIds);
+            db_execute("DELETE FROM acc_qbo_vendor_map WHERE id IN ({$ph})", $sentinelMappingIds);
         } catch (Throwable $e) {
             echo "WARN  cleanup of sentinel mapping rows failed: " . $e->getMessage() . "\n";
         }
@@ -452,14 +457,14 @@ if (empty($c12Errors)) {
     if (!empty($sentinelQboIds)) {
         try {
             $ph = implode(',', array_fill(0, count($sentinelQboIds), '?'));
-            db_execute("DELETE FROM acc_qbo_customer_map WHERE qbo_customer_id IN ({$ph})", $sentinelQboIds);
+            db_execute("DELETE FROM acc_qbo_vendor_map WHERE qbo_vendor_id IN ({$ph})", $sentinelQboIds);
         } catch (Throwable $e) {
             echo "WARN  cleanup of sentinel qbo rows failed: " . $e->getMessage() . "\n";
         }
     }
 }
 
-echo "\nqbo_customer_mapping_smoke: {$pass}/{$total} PASS";
+echo "\nqbo_vendor_mapping_smoke: {$pass}/{$total} PASS";
 if (!empty($failures)) {
     echo " — failing: " . implode(', ', $failures) . "\n";
     exit(1);

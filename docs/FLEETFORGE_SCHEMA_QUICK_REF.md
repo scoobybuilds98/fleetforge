@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-20
-**Tables:** 134 total · **Columns:** 2086
+**Tables:** 135 total · **Columns:** 2107
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -531,7 +531,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_52 tables._
+_53 tables._
 
 ## `acc_accounts`
 
@@ -1403,6 +1403,32 @@ _52 tables._
 | `completed_at` | datetime |  | YES |
 | `worker_id` | varchar(50) |  | YES |
 | `payload_snapshot` | json |  | YES |
+
+## `acc_qbo_vendor_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_vendor_id` | int unsigned | UNI | YES |
+| `qbo_vendor_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_display_name` | varchar(255) |  | YES |
+| `qbo_company_name` | varchar(255) |  | YES |
+| `qbo_given_name` | varchar(100) |  | YES |
+| `qbo_family_name` | varchar(100) |  | YES |
+| `qbo_email` | varchar(255) |  | YES |
+| `qbo_phone` | varchar(50) |  | YES |
+| `qbo_active` | tinyint(1) |  | YES |
+| `qbo_v4v_status` | varchar(20) |  | YES |
+| `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
+| `match_confidence` | enum('exact','high','medium','low','manual') |  | YES |
+| `match_notes` | text |  | YES |
+| `last_synced_at` | datetime | MUL | YES |
+| `last_pull_at` | datetime |  | YES |
+| `last_push_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `created_by_user_id` | int unsigned | MUL | YES |
 
 ## `acc_recurring_entries`
 

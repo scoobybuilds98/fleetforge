@@ -188,10 +188,11 @@ if (!is_file($workerSrc)) {
 }
 $check('C7  cron/qbo_sync_worker.php exists and lints clean', $c7Errs);
 
-// ── C8: hasImplementation false for unbuilt Pushers ───────────
-// 'customer' was on this list at S-QBO-3 ship but moved to "shipped"
-// at S-QBO-6 — CustomerPusher exists now. Test the inverse for
-// customer (must return true) + the remaining unbuilt entities.
+// ── C8: hasImplementation true for shipped Pushers + false for unbuilt
+// 'customer' moved to "shipped" at S-QBO-6 — CustomerPusher exists.
+// 'vendor' moved to "shipped" at S-QBO-7 — VendorPusher exists.
+// Remaining entity types in the dispatcher's convention map are still
+// pre-implementation as of S-QBO-7.
 $c8Errs = [];
 if (QboPusherDispatcher::hasImplementation('customer', 'create') !== true) {
     $c8Errs[] = "hasImplementation('customer','create') should be true post-S-QBO-6";
@@ -199,12 +200,18 @@ if (QboPusherDispatcher::hasImplementation('customer', 'create') !== true) {
 if (QboPusherDispatcher::hasImplementation('customer', 'update') !== true) {
     $c8Errs[] = "hasImplementation('customer','update') should be true post-S-QBO-6";
 }
-foreach ([['invoice','update'], ['journal_entry','void'], ['vendor','create']] as $pair) {
+if (QboPusherDispatcher::hasImplementation('vendor', 'create') !== true) {
+    $c8Errs[] = "hasImplementation('vendor','create') should be true post-S-QBO-7";
+}
+if (QboPusherDispatcher::hasImplementation('vendor', 'update') !== true) {
+    $c8Errs[] = "hasImplementation('vendor','update') should be true post-S-QBO-7";
+}
+foreach ([['invoice','update'], ['journal_entry','void'], ['item','create']] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== false) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-Pusher-session";
     }
 }
-$check('C8  hasImplementation true for customer (S-QBO-6 shipped), false for unbuilt Pushers', $c8Errs);
+$check('C8  hasImplementation true for customer+vendor (S-QBO-6 + S-QBO-7 shipped), false for unbuilt Pushers', $c8Errs);
 
 // ── C9: worker pusher_not_implemented pathway (SELF-CLEANING) ──
 // CRITICAL: every artifact created in this check MUST be reverted
