@@ -109,7 +109,9 @@ foreach ($apiEndpoints as $endpoint => $spec) {
 }
 $check('C3  endpoints gate with require_permission(quickbooks, <action>)', $c3Errs);
 
-// ── C4: navigation has 5 QuickBooks children ──────────────────
+// ── C4: navigation has 6 QuickBooks children ──────────────────
+// Grew 5→6 in S-QBO-5 with the addition of Customers (between Drift
+// and Settings) for the QBO↔FF customer mapping UI.
 $c4Errs = [];
 $navConfig = require FF_ROOT . '/config/navigation.php';
 $qboParent = null;
@@ -123,12 +125,12 @@ if ($qboParent === null) {
     $c4Errs[] = 'QuickBooks parent entry with children not found in config/navigation.php';
 } else {
     $childLabels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Settings'];
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Settings'];
     if ($childLabels !== $expected) {
         $c4Errs[] = 'expected children ' . json_encode($expected) . ' got ' . json_encode($childLabels);
     }
 }
-$check('C4  config/navigation.php has 5 QuickBooks children (incl. Sync Queue)', $c4Errs);
+$check('C4  config/navigation.php has 6 QuickBooks children (incl. Customers between Drift and Settings)', $c4Errs);
 
 // ── C5 + C6: empty + synthetic render (combined for cleanup symmetry)
 // We don't actually render pages over HTTP — that requires the test

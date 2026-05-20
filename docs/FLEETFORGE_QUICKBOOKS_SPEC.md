@@ -780,21 +780,55 @@ Options:
 
 ### 7.4 acc_qbo_customer_map
 
+**Updated 2026-05-20 in S-QBO-5 — extends the original "mapped-only" schema with state-machine support (mapped / ff_only / qbo_only / ignored) so the Customers Sync UI can persist rows on either side before a link is confirmed.** The columns are nullable on both sides via InnoDB's "multiple-NULL-in-UNIQUE" behavior, so the table can hold many qbo_only rows (post-pull) AND many ff_only rows (FF customers without a QBO counterpart) concurrently without violating either UNIQUE constraint.
+
 ```sql
 CREATE TABLE acc_qbo_customer_map (
-  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  customer_id INT UNSIGNED NOT NULL UNIQUE,
-  qbo_customer_id VARCHAR(50) NOT NULL,
-  qbo_display_name VARCHAR(255) NOT NULL,
-  qbo_sync_token VARCHAR(20) NULL,
-  mapped_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  mapped_by INT UNSIGNED NULL,
-  last_synced_at DATETIME NULL,
-  realm_id VARCHAR(50) NOT NULL,
-  CONSTRAINT fk_qbo_cust FOREIGN KEY (customer_id) REFERENCES customers(id),
-  INDEX idx_qbo (qbo_customer_id, realm_id)
+  id                   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  ff_customer_id       INT UNSIGNED NULL,        -- NULL = qbo_only state
+  qbo_customer_id      VARCHAR(50)  NULL,        -- NULL = ff_only state
+  qbo_sync_token       VARCHAR(20)  NULL,        -- optimistic-lock token refreshed each round-trip
+  qbo_display_name     VARCHAR(255) NULL,        -- snapshot for drift detection (S-QBO-24)
+  qbo_company_name     VARCHAR(255) NULL,
+  qbo_email            VARCHAR(255) NULL,
+  qbo_phone            VARCHAR(50)  NULL,
+  qbo_active           TINYINT(1)   NULL,
+  qbo_balance          DECIMAL(15,2) NULL,
+  mapping_status       ENUM('mapped','ff_only','qbo_only','ignored') NOT NULL DEFAULT 'qbo_only',
+  match_confidence     ENUM('exact','high','medium','low','manual') NULL,
+  match_notes          TEXT NULL,
+  last_synced_at       DATETIME NULL,
+  last_pull_at         DATETIME NULL,
+  last_push_at         DATETIME NULL,
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  created_by_user_id   INT UNSIGNED NULL,
+  UNIQUE KEY uq_ff_customer  (ff_customer_id),
+  UNIQUE KEY uq_qbo_customer (qbo_customer_id),
+  INDEX idx_status      (mapping_status),
+  INDEX idx_last_synced (last_synced_at),
+  CONSTRAINT fk_qbo_cust_map_ff   FOREIGN KEY (ff_customer_id)     REFERENCES customers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_qbo_cust_map_user FOREIGN KEY (created_by_user_id) REFERENCES users(id)     ON DELETE SET NULL
 );
 ```
+
+**State lifecycle** (D-QBO-5):
+
+| Status     | Meaning                                                                       | Reachable from / to |
+|------------|-------------------------------------------------------------------------------|---------------------|
+| `qbo_only` | Pull found this QBO customer; no FF link yet.                                 | post-pull → mapped / ignored |
+| `ff_only`  | FF customer exists with no QBO counterpart.                                   | auto-match → mapped (when QBO side is found) / push to QBO (S-QBO-6) |
+| `mapped`   | Both sides linked. `match_confidence` indicates how (exact / high / medium / low / manual). | unlink → ff_only + qbo_only split |
+| `ignored`  | Operator marked the row as intentionally unmapped. All other fields preserved for audit. | un-ignore → natural state by populated sides |
+
+**Auto-match cascade** (D-QBO-5-2) lives in `lib/QboPushers/CustomerMatcher.php`:
+1. Normalized exact name (`exact`) — `normalizeName()` strips case, punctuation, corporate suffixes (Inc / Ltd / LLC / Corp / Limited / Co)
+2. Levenshtein ≤ 3 on normalized names (`high`) — gated on max-side length ≥ 5 to avoid trivial-distance false positives on short names
+3. Email match, case-insensitive (`medium`)
+4. Phone last-7-digits match (`low`) — handles country-code variations
+5. No match → `ff_only` or `qbo_only` row preserved separately for operator review
+
+**Realm scoping note:** the original schema carried `realm_id`. Phase QBO-1 + 2 are single-realm (one Intuit company per FF install per spec §0); `realm_id` is implicit via `quickbooks.realm_id` in settings. Multi-realm support is out of scope until a future Phase QBO-N adds tenant-style multi-company. The S-QBO-5 schema intentionally omits `realm_id` to avoid premature complexity; if/when multi-realm lands the column can be added via migration.
 
 ### 7.5 acc_qbo_vendor_map
 
