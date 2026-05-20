@@ -169,6 +169,8 @@ Quick-reference index of file-location and helper-naming rules. Detailed treatme
 - **QBO Pusher convention (S-QBO-3, D-QBO-3-2):** Pusher classes follow `{EntityType}Pusher` naming (snake_case entity_type → PascalCase + 'Pusher' suffix; e.g. `credit_memo` → `CreditMemoPusher`). Operations map to methods: `create` → `pushCreate`, `update` → `pushUpdate`, `void` → `pushVoid`, `delete` → `pushDelete`. Signature: `public static function pushCreate(int $entityId, ?array $payloadSnapshot = null): array`. Dispatcher (`lib/QboPusherDispatcher.php`) checks two namespace candidates per lookup: `FleetForge\QboPushers\<Name>` (preferred) then `FleetForge\<Name>` (fallback). The first Pusher session (S-QBO-5 customers) picks the actual on-disk location; both work without dispatcher changes. Convention-based — no registry array to maintain.
 - **QBO Pusher namespace (deferred until S-QBO-5/6):** `QboPusherDispatcher::dispatch()` tries `FleetForge\QboPushers\<Name>` first, then falls back to `FleetForge\<Name>`. The first Pusher session (S-QBO-5 or S-QBO-6) picks one of these two paths and the choice locks the convention for all subsequent Pushers. **Recommendation: use `FleetForge\QboPushers\<Name>`** (domain-grouped, matches `FleetForge\Accounting\*` / `FleetForge\GPS\*` / `FleetForge\Notifications\*` etc.); reserve top-level `FleetForge\<Name>` for facade/client classes only (`QuickBooksClient`, `QuickBooksSync` are the existing top-level outliers per D-QBO-CLIENT-LOCATION).
 - **NotificationService routing — when permission seeding is incomplete:** `NotificationService::notify()` with `$specificUserIds=null` routes via `TYPE_TO_MODULE` → `user_permissions` JOIN. If `user_permissions` rows are missing for the relevant module (common during Phase QBO buildout before `S-PERM-QBO-SEED` ships — see D-QBO-3-PERM-GAP), pass `$specificUserIds` explicitly with resolved super_admin + role-specific user IDs. Precedent: `cron/qbo_token_refresh.php` (S-QBO-1), `cron/qbo_sync_worker.php` (S-QBO-3). Pattern documented in D-QBO-3-3.
+- **OAuth callbacks (D-S-QBO-1-OAUTH-DOCS-LOCK):** must be auth-context-free, state verification via DB-backed token (NOT PHP session). Reason: cross-origin redirects (e.g. ngrok during local dev, or any redirect that lands on a different domain than the one that issued the session cookie) lose the session between init and callback — `$_SESSION` is empty, `require_auth()` fails, state lookup returns null. The state token IS the authentication proof, not the user session. See §11 Trap 59 + S-QBO-OAUTH-FIX (queued).
+- **K-22 trap catalog discipline (D-TRAP-CATALOG-SWEEP):** when a new K-22 trap describes a wrong CODE pattern (function calls, column refs, ENUM values, type-name conventions), the docs commit cataloguing the trap MUST also `grep -rn '<wrong-pattern>' app/ lib/ api/ cron/ includes/ public/` and either patch the hits inline OR queue a remediation session OR document the deferral. Trap-without-remediation lets the bug stay in production code (cf. K-22 Trap #55 sat docs-only for 4 hours before re-biting during sandbox OAuth setup). Documentation-only traps (UI conventions, naming rules for future code, design-system patterns) are exempt — they have no "wrong code" surface to grep for. See §11 Trap 59 source + D-TRAP-CATALOG-SWEEP in PROGRESS.md DECISIONS.
 
 ---
 
@@ -1673,6 +1675,47 @@ if (class_exists('\Sentry\Sentry') && function_exists('\Sentry\captureException'
 2. **Optional structured** — if you need to attach spec-§13.5-style tags/extra (specific to QBO integration so far, may grow), call `\Sentry\withScope(...)` directly. Guard on `function_exists('\Sentry\withScope')` since the raw SDK API surface may shift between major versions.
 
 **Source:** Caught silently in S-QBO-2 (2026-05-20) — the session prompt assumed Sentry was pending and instructed wrapping calls in `class_exists` guards. Verified Sentry already installed via composer.json grep + `lib/Observability/Sentry.php` existence + 10+ production cron consumers. Resolved per [[feedback_trust_file_over_prompt]]. Locked here so future S-QBO-N prompts (and any module that catches exceptions) skip the defensive guards and call the wrapper directly.
+
+### Trap 59: OAuth callback under ngrok — cross-origin session cookies break `$_SESSION` and `require_auth()`
+
+**Wrong**: assuming session-based OAuth state (`$_SESSION['qbo_oauth_state']`) and `require_auth()` session checks will work when the OAuth callback arrives via a DIFFERENT ORIGIN than the browser session was established on.
+
+**Right**: for OAuth flows tested locally with ngrok (or any cross-origin redirect scenario), the entire callback handler must be **auth-context-free** and state verification must use **DB-backed tokens**, NOT PHP session storage. Browser session cookies are per-origin. If the user is logged in on `fleetforge.test` but the callback URL points at `ngrok-free.dev`, no session cookie is sent on the callback request → `$_SESSION` is empty → both state verification AND `require_auth()` fail. Worse: `base_url()` in flash-redirect helpers may generate `fleetforge.test` URLs even when responding to a request that came in via `ngrok-free.dev`, causing the post-callback redirect to switch origins entirely (browser sees a 302 to a different domain, lands on whatever it's authenticated to there — usually `/dashboard`).
+
+```php
+❌ Wrong (per-origin session cookie + session-backed state):
+session_start();
+$_SESSION['qbo_oauth_state'] = bin2hex(random_bytes(32));   // init.php
+// ... user redirected to Intuit, then back to callback.php via ngrok ...
+$expected = $_SESSION['qbo_oauth_state'] ?? '';             // EMPTY — different origin
+require_auth();                                              // FAILS — empty session
+
+✅ Right (DB-backed state token, auth-context-free callback):
+// init.php — STILL requires auth (operator initiating the flow)
+$stateToken = bin2hex(random_bytes(32));
+db_insert('acc_oauth_states', [
+    'state_token' => $stateToken,
+    'provider'    => 'quickbooks',
+    'expires_at'  => date('Y-m-d H:i:s', time() + 600),  // 10-min TTL
+]);
+// redirect with $stateToken in the URL
+
+// callback.php — NO require_auth(), NO require_permission()
+// State token IS the auth proof
+$row = db_row("SELECT id, expires_at, used_at FROM acc_oauth_states
+                WHERE state_token = ? AND provider = 'quickbooks'", [$state]);
+if (!$row || $row['used_at'] || strtotime($row['expires_at']) < time()) {
+    /* reject */
+}
+db_execute("UPDATE acc_oauth_states SET used_at = NOW() WHERE id = ?", [$row['id']]);
+// proceed with token exchange — current_user_id() may be null; that's fine
+```
+
+**Detected**: 2026-05-20 during S-QBO-1 sandbox OAuth setup. Resolved by **temporary bypass** of `require_auth()` + `require_permission()` + state check in `callback.php` to complete OAuth (the only way to bridge the cross-origin gap with session-backed state). Tokens stored successfully; bypass reverted post-setup via the hotfix commit `a0a4a7a`. **Proper fix tracked as S-QBO-OAUTH-FIX** (DB-backed state via new `acc_oauth_states` table + auth-context-free callback). Until that ships, sandbox OAuth setup via ngrok requires the same temporary-bypass dance.
+
+**Constitutive principle (lock this — applies to every OAuth flow, not just QBO)**: **OAuth callbacks are public endpoints; the state token IS the authentication proof, NOT the user session.** Companion patterns to watch for: future OAuth-flavored integrations (Stripe webhooks, Auth0 callbacks, Plaid, etc.) must avoid the session-backed-state pattern from day one. If you write `$_SESSION['x_oauth_state']` anywhere, you have just inherited this trap.
+
+**Source**: Hotfix commit `a0a4a7a` (2026-05-20) + S-QBO-OAUTH-FIX queue entry + D-S-QBO-1-CALLBACK-HOTFIX in PROGRESS.md DECISIONS. Locked here as the architectural lesson so the next OAuth integration starts with DB-backed state instead of re-discovering the trap.
 
 ---
 
