@@ -351,7 +351,7 @@ Intuit's OAuth uses the standard authorization-code grant.
 
 ### 5.2 Token storage
 
-All keys with `is_sensitive=1`:
+OAuth and credential storage keys (per-key sensitivity flags — see §24.1 for the authoritative is_sensitive=0/1 map):
 
 | Key | Value type |
 |---|---|
@@ -369,6 +369,8 @@ All keys with `is_sensitive=1`:
 | `quickbooks.connection_error` | last error message if status='error' |
 | `quickbooks.webhook_verifier_token` | from Intuit webhook config (masked) |
 | `quickbooks.sync_enabled` | master kill-switch; defaults '0' until S-QBO-30 |
+
+> **Note:** this table lists all OAuth-related settings keys for visibility, not just sensitive ones. The `is_sensitive` flag is set per-key per §24.1. Keys flagged `is_sensitive=1` at write time: `client_id`, `client_secret`, `access_token`, `refresh_token`, `webhook_verifier_token`. All others in this table are `is_sensitive=0`.
 
 **Sensitive value display rule:** UI shows `••••••••XXXX` where XXXX is last 4 chars. Full value never rendered to user, never logged, never in API audit log.
 

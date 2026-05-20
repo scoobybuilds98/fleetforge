@@ -380,6 +380,27 @@ Used at [app/admin/leases/edit.php:215-233](app/admin/leases/edit.php:215). Visi
 
 ## 3. SIDEBAR NAVIGATION — Exact items, icons, badges
 
+### Sidebar Navigation — Where to Edit
+
+The sidebar navigation is array-driven. To add, modify, or reorder nav items:
+
+- **Edit `config/navigation.php`** — the array source of truth.
+- **Do NOT edit `includes/sidebar.php`** — this is the generic renderer that walks the array (handles separators, parent-with-children, leaves, permission gating, active-state highlighting, and badge rendering automatically).
+- **Do NOT search for nav items in `app/views/layout/`** — that path is not used by FleetForge. Any reference to it in older planning prompts is incorrect (S-QBO-1 surfaced this — see Trap 53/54/55/56/57 family + D-QBO-1-2 in PROGRESS.md DECISIONS).
+
+**Array structure:** top-level array of entries. Each entry is one of:
+- A **separator** — `['separator' => true, 'label' => 'Admin', 'module' => 'optional_gate']`. Section heading; always renders. Optional `module` key gates visibility on whether the user can view at least one item in the section.
+- A **leaf** — `['label' => '...', 'icon' => '...', 'url' => '/...', 'module' => '...', 'badge' => null]`. Single nav item with no children.
+- A **parent with children** — same fields as a leaf PLUS `'children' => [...]` (an array of leaves). Renders as an expandable group. See the Accounting group at `config/navigation.php:218-377` for the canonical pattern (separator + parent entry + nested children with `match_prefix` arrays for active-state).
+
+**Permission gates** are declared per-entry as `'module' => 'module_slug'` — the renderer calls `can($module, 'view')` to determine accessibility. `'module' => null` means visible to all logged-in users. Modules must exist as keys in `config/permissions.php` (or the entry will render as locked for everyone except super_admin).
+
+**Adding a new top-level group:** insert the new group's separator+parent entries immediately ABOVE the desired sibling group's preceding separator. Match the existing array shape field-for-field — every key in the existing parent (label, icon, url, match_prefix, module, badge, children) should also appear in the new parent. The renderer in `includes/sidebar.php` walks the array generically — no rendering changes needed.
+
+**Icon naming:** `'icon' => 'name'` resolves to `public/assets/icons/{name}.svg`. Always verify the file exists before using the name (see Trap 55 — missing icons silently render an `icon-missing` placeholder instead of failing).
+
+### Inventory (current canonical nav as of 2026-05-20)
+
 ```php
 // config/navigation.php
 return [

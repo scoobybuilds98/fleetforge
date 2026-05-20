@@ -154,6 +154,20 @@ php /Users/avi/Documents/fleetforge/cron/invoice_generate_monthly.php
 
 ---
 
+## 1B. KEY CONVENTIONS — one-line rules
+
+Quick-reference index of file-location and helper-naming rules. Detailed treatments live in §11 COMMON TRAPS where indicated.
+
+- **Sidebar nav:** edit `config/navigation.php` (array source of truth), NOT `app/views/layout/sidebar.php` (path doesn't exist) or `includes/sidebar.php` (renderer only). See `FLEETFORGE_DESIGN_DETAILS.md` §3 for the array structure + §11 Trap 53/54/55/56/57 for the K-22 family this rule resolves.
+- **Settings read:** `settings_get($key, $default)` — NOT `setting()` or `get_setting()`. See §11 Trap 54.
+- **Settings write:** no global helper — use the `INSERT … ON DUPLICATE KEY UPDATE` idiom (reference: `api/v1/settings/brand.php::ff_settings_write` or `lib/QuickBooksClient::settings_write_qbo`).
+- **D131 smoke paths:** `tests/_smoke_*.php` (NOT `bin/smoke/*.php` — that directory doesn't exist; only `bin/migrate.php` and `bin/deploy.sh` live in `bin/`). See §11 Trap 53.
+- **Icons:** `'icon' => 'name'` resolves to `public/assets/icons/{name}.svg` — verify the file exists before using; missing icons silently placeholder, do not throw. See §11 Trap 55.
+- **Current user name:** `current_user()['name'] ?? 'system'` — NOT `current_user_name()` (doesn't exist). Only `current_user_id()` has a dedicated shorthand. See §11 Trap 56.
+- **audit_log.action ENUM:** use `'update'` for edits, NOT `'edit'` (not in ENUM); use `'bulk_action'` for imports, NOT `'import'`. See §11 Trap 10 + Trap 57.
+
+---
+
 ## 2. FILE TEMPLATES — Copy-paste these exactly
 
 ### API endpoint template
@@ -1527,6 +1541,98 @@ When drafting bridge prompts, test scenarios, or follow-up sessions, use **`runW
 **Recurrence count: 1 known incident** — S-PERM-SESSION-REFRESH (2026-05-19, commit `c3684d4`) shipped with full CLI smoke green (`function_exists('_ff_check_permission_freshness')` returned YES, full test suite passed), but the user reported HTTP 500 "Call to undefined function" when trying to grant Alice Manager `journal_entries.edit` via the live admin UI. The CLI test path and the php-fpm path are two separate opcache scopes — CLI is fresh on every invocation, FPM is long-lived. The fix that turn was `kill -USR2 <fpm-master-pid>`; the durable fix locked here is the automated `.claude/settings.local.json` hook.
 
 **Source:** Caught 2026-05-19 during S-PERM-SESSION-REFRESH post-ship sanity-check. Locked as Trap 52 + automated via `PostToolUse` hook. Future sessions touching the listed file types should observe the hook firing in stderr (look for `[hook] php-fpm opcache reloaded after ...`).
+
+### Trap 53: smoke test location — `tests/_smoke_*.php`, NOT `bin/smoke/*.php`
+
+The D131 pre-commit gate's six smoke scripts live under `tests/` with the `_smoke_` filename prefix, NOT under `bin/smoke/`. There is no `bin/smoke/` directory in the repository — `bin/` contains only `migrate.php` and `deploy.sh`.
+
+```
+✅ Right                                          ❌ Wrong
+php tests/_smoke_master_schema_parity.php         php bin/smoke/master_schema_parity.php
+php tests/_smoke_billing_invariants.php           php bin/smoke/billing_invariants.php
+php tests/_smoke_samsara_distance.php             php bin/smoke/samsara_distance.php
+php tests/_smoke_model_b_lifecycle.php            php bin/smoke/model_b_lifecycle.php
+php tests/_smoke_doc_freshness.php                php bin/smoke/doc_freshness.php
+php bin/migrate.php --verify                      (this one IS in bin/ — the only exception)
+```
+
+The leading underscore on the filenames (`_smoke_*`) is intentional — it sorts these test files together at the top of `tests/` directory listings without colliding with the other `tests/_integration/`, `tests/_interaction/`, `tests/_regression/` subdirectories.
+
+**Source:** Caught silently in S-QBO-1 (2026-05-20) pre-commit gate when the session prompt's D131 command list pointed at the non-existent `bin/smoke/` paths. Resolved per `feedback_trust_file_over_prompt` by running the smokes from `tests/_smoke_*.php` instead. Locked here so future D131-touching prompts use the correct paths from the start.
+
+### Trap 54: settings helper — `settings_get()`, NOT `setting()` / `get_setting()`
+
+The settings table read helper is named `settings_get(string $key, mixed $default = null): mixed`, defined in `includes/functions.php` (~line 295). There is NO `setting()` function and NO `get_setting()` function — using either produces a fatal `Call to undefined function` at runtime.
+
+```php
+✅ Right                                  ❌ Wrong
+$env = settings_get('quickbooks.environment', 'sandbox');
+$env = setting('quickbooks.environment');        // undefined function
+$env = get_setting('quickbooks.environment');    // undefined function
+```
+
+For writes, the canonical pattern is the `INSERT … ON DUPLICATE KEY UPDATE` idiom (see `api/v1/settings/brand.php::ff_settings_write` for the reference implementation, or `lib/QuickBooksClient::settings_write_qbo` for the QBO-namespaced helper). There is no global `settings_set()` function — every consumer either inlines the upsert SQL or wraps it in a module-local helper. Verify the helper name at the use site before invoking; grep for `INSERT INTO.*settings` to find existing write idioms.
+
+**Source:** Caught silently in S-QBO-1 (2026-05-20) when the session prompt's reference grep used `function setting\b\|function get_setting`. Actual helper is `settings_get`. Resolved per `feedback_trust_file_over_prompt`. Locked here so future settings-touching prompts use the correct name from the start. Companion: `legal_config('dot.path')` is the analogous read helper for the legal-config blob (see `includes/functions.php` ~line 326).
+
+### Trap 55: icon name — `clipboard-document-list`, NOT bare `clipboard-document`
+
+The icon library at `public/assets/icons/` does NOT contain a file named `clipboard-document.svg` — the closest existing icons are `clipboard-document-check.svg`, `clipboard-document-list.svg`, and the unrelated `document-text.svg` / `list-bullet.svg`. Referencing `'clipboard-document'` in `config/navigation.php` (or any other consumer of `heroicon()`) silently renders an `icon-missing` placeholder span instead of the actual SVG.
+
+```
+✅ Right                            ❌ Wrong
+'icon' => 'clipboard-document-list' 'icon' => 'clipboard-document'
+'icon' => 'clipboard-document-check'
+```
+
+**General rule, applies to every icon reference** (not just clipboard variants): before using an icon name in code, verify the file exists with `ls public/assets/icons/{name}.svg`. The `heroicon()` helper in `includes/sidebar.php` ~line 16 deliberately renders a placeholder rather than throwing so a missing icon doesn't 500 the page — which means missing icons are easy to ship by accident if not caught at write time.
+
+**Source:** Caught silently in S-QBO-1 (2026-05-20) when the session prompt referenced `clipboard-document` for the Sync Log nav item. PHP lint passed, page rendered, but the icon slot would have been an empty placeholder. Fixed to `clipboard-document-list` before commit. Locked here.
+
+### Trap 56: current-user name access — `current_user()['name']`, NOT `current_user_name()`
+
+There is NO `current_user_name()` helper function. The canonical pattern is to call `current_user()` (returns the in-session user array or `null` if not authenticated) and then index for the field:
+
+```php
+✅ Right                                          ❌ Wrong
+$name = current_user()['name'] ?? 'system';      $name = current_user_name();   // undefined fn
+```
+
+The `?? 'system'` fallback handles the unauthenticated / cron-context case where `current_user()` returns `null`. Other commonly accessed fields use the same pattern:
+
+```php
+$userId    = current_user_id();              // there IS a current_user_id() shorthand for this one specifically
+$userEmail = current_user()['email'] ?? null;
+$userRole  = current_user()['role_slug'] ?? null;
+```
+
+Only `current_user_id()` has a dedicated shorthand (see `includes/auth.php` ~line 188) — every other field goes through the array indexer. The shorthand exists because user_id is by far the most common field consumed by audit_log inserts.
+
+**Source:** Caught silently in S-QBO-1 (2026-05-20) when the OAuth callback file initially tried `current_user_name()`. Fixed to `current_user()['name'] ?? 'system'` before commit. Locked here so future audit_log-writing prompts don't repeat the name confusion.
+
+### Trap 57: audit_log.action ENUM — `'update'`, NOT `'edit'`
+
+`audit_log.action` is a strict ENUM with no `'edit'` value. The full list of allowed values (from the DESCRIBE on the live schema):
+
+```
+'create' | 'update' | 'delete' | 'restore' | 'login' | 'logout' | 'export' |
+'status_change' | 'view' | 'bulk_action' | 'payment_recorded' | 'invoice_sent' |
+'invoice_voided' | 'lease_closed' | 'cron'
+```
+
+```php
+✅ Right                                  ❌ Wrong
+db_insert('audit_log', [                  db_insert('audit_log', [
+    'action' => 'update',                     'action' => 'edit',     // silently truncates
+    ...                                       ...
+]);                                       ]);
+```
+
+MySQL silently truncates invalid ENUM values to empty string (in strict mode it throws — but the default mode is permissive on this install per Trap 10). Either way the audit row ends up unqueryable by action. **Always verify the action you intend to log is in the list above before INSERT** — companion confirmed: `'bulk_action'` (not `'import'`) per the existing convention locked by D-IMPORT-AUDIT.
+
+For modification operations (updating an entity, changing a credential, flipping a setting), the canonical value is `'update'`. The semantic "edit" exists in user-facing language and permission-vocabulary contexts (`can('module', 'edit')`) — but it does NOT exist in the audit_log ENUM.
+
+**Source:** Caught silently in S-QBO-1 (2026-05-20) — the session prompt's OAuth callback spec said "action='edit'" for failure-branch audit rows, but `audit_log.action` ENUM does not contain that value. Fixed to `'update'` before commit. Locked here as the companion-trap to Trap 10 (which already covered the general "ENUM truncates invented values" rule + the `'bulk_action'` / `'import'` convention). Always run `DESCRIBE audit_log` (or check the master file) before any new audit insert that uses a non-standard action value.
 
 ---
 
