@@ -5,21 +5,24 @@ declare(strict_types=1);
  * api/v1/quickbooks/test_connection.php
  *
  * GET endpoint. Validates the active QBO connection by calling
- * QuickBooksClient::getCompanyInfo() — in S-QBO-1 the method is a
- * stub that exercises only ensureValidToken(). Once S-QBO-2 lands
- * it will hit /v3/company/{realmId}/companyinfo for real.
+ * QuickBooksClient::getCompanyInfo(), which (as of S-QBO-2) hits
+ * /v3/company/{realmId}/companyinfo/{realmId} for real. Reflects
+ * the result back to the UI so the operator gets a green
+ * "Connected as <Company Name>" inline message.
  *
- * Reflects the result back to the UI so the operator gets a green
- * "Connected as <Company Name>" inline message; also updates
- * connection_status if the token is found to be expired.
+ * connection_status side-effects are handled implicitly by the
+ * client — refreshAccessToken() sets 'connected' on success and
+ * 'expired'/'error' on failure, so by the time this endpoint
+ * surfaces success the status row is already correct.
  *
  * @method  GET
  * @auth    Session required; require_permission('quickbooks', 'view')
  * @returns 200 { success: true, company_name: string, realm_id: string }
  *        | 200 { success: false, error: string }
  *
- * Spec ref: FLEETFORGE_QUICKBOOKS_SPEC.md §5 (connection diagnostics)
- * Session:  S-QBO-1
+ * Spec ref: FLEETFORGE_QUICKBOOKS_SPEC.md §5 (connection diagnostics),
+ *           §6.6 (QuickBooksClient surface)
+ * Session:  S-QBO-1 (stub) → S-QBO-2 (real call)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';

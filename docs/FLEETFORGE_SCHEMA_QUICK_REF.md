@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-19
-**Tables:** 130 total · **Columns:** 2016
+**Tables:** 130 total · **Columns:** 2025
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -1304,15 +1304,24 @@ _48 tables._
 | Column | Type | Key | Nullable |
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `entity_type` | enum('customer','invoice','payment','credit_memo','bill','vendor','account') | MUL | NO |
-| `ff_entity_id` | int unsigned |  | NO |
-| `qbo_entity_id` | varchar(100) |  | NO |
-| `qbo_sync_token` | varchar(20) |  | YES |
-| `last_synced_at` | datetime |  | NO |
-| `status` | enum('synced','failed','pending') | MUL | NO |
+| `direction` | enum('push','pull') |  | NO |
+| `entity_type` | varchar(50) | MUL | NO |
+| `entity_id` | int unsigned |  | YES |
+| `qbo_entity_id` | varchar(50) |  | YES |
+| `operation` | varchar(20) |  | NO |
+| `http_method` | varchar(10) |  | NO |
+| `endpoint` | varchar(255) |  | NO |
+| `request_payload` | json |  | YES |
+| `response_status` | int |  | YES |
+| `response_payload` | json |  | YES |
+| `duration_ms` | int |  | YES |
+| `error_code` | varchar(50) | MUL | YES |
 | `error_message` | text |  | YES |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `user_id` | int unsigned | MUL | YES |
+| `queue_id` | int unsigned | MUL | YES |
+| `realm_id` | varchar(50) |  | NO |
+| `environment` | enum('sandbox','production') |  | NO |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
 
 ## `acc_recurring_entries`
 

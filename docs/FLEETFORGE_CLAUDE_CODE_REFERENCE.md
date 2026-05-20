@@ -1544,7 +1544,7 @@ When drafting bridge prompts, test scenarios, or follow-up sessions, use **`runW
 
 ### Trap 53: smoke test location — `tests/_smoke_*.php`, NOT `bin/smoke/*.php`
 
-The D131 pre-commit gate's six smoke scripts live under `tests/` with the `_smoke_` filename prefix, NOT under `bin/smoke/`. There is no `bin/smoke/` directory in the repository — `bin/` contains only `migrate.php` and `deploy.sh`.
+The D131 pre-commit gate's smoke scripts live under `tests/` with the `_smoke_` filename prefix, NOT under `bin/smoke/`. There is no `bin/smoke/` directory in the repository — `bin/` contains only `migrate.php` and `deploy.sh`.
 
 ```
 ✅ Right                                          ❌ Wrong
@@ -1553,8 +1553,11 @@ php tests/_smoke_billing_invariants.php           php bin/smoke/billing_invarian
 php tests/_smoke_samsara_distance.php             php bin/smoke/samsara_distance.php
 php tests/_smoke_model_b_lifecycle.php            php bin/smoke/model_b_lifecycle.php
 php tests/_smoke_doc_freshness.php                php bin/smoke/doc_freshness.php
+php tests/_smoke_qbo_client.php                   php bin/smoke/qbo_client.php
 php bin/migrate.php --verify                      (this one IS in bin/ — the only exception)
 ```
+
+As of S-QBO-2 (2026-05-20) the gate is **6 smokes + 1 migrate verify = 7 checks total**. The 6th smoke `_smoke_qbo_client.php` was added by S-QBO-2 to cover the new QuickBooksClient HTTP boundary (class surface, exception hierarchy, classifyError categorisation, settings keys, sync_log §6.5 shape verification). Expected growth: S-QBO-N sessions will likely add `_smoke_qbo_sync_invariants.php` and similar as the integration matures.
 
 The leading underscore on the filenames (`_smoke_*`) is intentional — it sorts these test files together at the top of `tests/` directory listings without colliding with the other `tests/_integration/`, `tests/_interaction/`, `tests/_regression/` subdirectories.
 
@@ -2219,7 +2222,7 @@ Drift detected by the smoke test:
 - `tests/_smoke_master_schema_parity.php` — the parity check
 - D87 in `FLEETFORGE_PROGRESS.md` — original same-session-update rule
 - D126–D127 in `FLEETFORGE_PROGRESS.md` — locked discipline updates (S-DATABASE-MASTER-RECONCILE-2)
-- D131 — extension: parity + invariants + doc freshness smokes all run pre-commit (S-BILLING-RATE-FIX 2026-05-06 added the parity + invariants pair; S-DOC-FRESHNESS-DISCIPLINE 2026-05-13 added the third smoke `tests/_smoke_doc_freshness.php` for canonical-doc existence + SESSION LOG cross-consistency + tool-call markup leak scan + IN-FLIGHT D136 discipline)
+- D131 — extension: parity + invariants + doc freshness + qbo client smokes all run pre-commit (S-BILLING-RATE-FIX 2026-05-06 added the parity + invariants pair; S-DOC-FRESHNESS-DISCIPLINE 2026-05-13 added `tests/_smoke_doc_freshness.php` for canonical-doc existence + SESSION LOG cross-consistency + tool-call markup leak scan + IN-FLIGHT D136 discipline; S-QBO-2 2026-05-20 added `tests/_smoke_qbo_client.php` for QuickBooksClient class surface + exception hierarchy + classifyError categorisation + acc_qbo_sync_log §6.5 shape verification)
 - KNOWN ISSUE #100 — `lease_billing_periods` precharge cleanup (still open; next discipline target)
 - Original Phase 2 reconcile: commit `a54ad7f` for the full-regen procedure
 
