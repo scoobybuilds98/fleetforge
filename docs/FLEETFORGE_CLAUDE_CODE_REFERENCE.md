@@ -165,6 +165,7 @@ Quick-reference index of file-location and helper-naming rules. Detailed treatme
 - **Icons:** `'icon' => 'name'` resolves to `public/assets/icons/{name}.svg` — verify the file exists before using; missing icons silently placeholder, do not throw. See §11 Trap 55.
 - **Current user name:** `current_user()['name'] ?? 'system'` — NOT `current_user_name()` (doesn't exist). Only `current_user_id()` has a dedicated shorthand. See §11 Trap 56.
 - **audit_log.action ENUM:** use `'update'` for edits, NOT `'edit'` (not in ENUM); use `'bulk_action'` for imports, NOT `'import'`. See §11 Trap 10 + Trap 57.
+- **Sentry:** IS installed (since S-PROD-2 2026-05-02). Call `\FleetForge\Observability\Sentry::captureException($e)` directly — no `class_exists` guard needed. For structured tags+extra per spec §13.5 use `\Sentry\withScope()` on top of the wrapper. See §11 Trap 58.
 
 ---
 
@@ -1636,6 +1637,37 @@ MySQL silently truncates invalid ENUM values to empty string (in strict mode it 
 For modification operations (updating an entity, changing a credential, flipping a setting), the canonical value is `'update'`. The semantic "edit" exists in user-facing language and permission-vocabulary contexts (`can('module', 'edit')`) — but it does NOT exist in the audit_log ENUM.
 
 **Source:** Caught silently in S-QBO-1 (2026-05-20) — the session prompt's OAuth callback spec said "action='edit'" for failure-branch audit rows, but `audit_log.action` ENUM does not contain that value. Fixed to `'update'` before commit. Locked here as the companion-trap to Trap 10 (which already covered the general "ENUM truncates invented values" rule + the `'bulk_action'` / `'import'` convention). Always run `DESCRIBE audit_log` (or check the master file) before any new audit insert that uses a non-standard action value.
+
+### Trap 58: Sentry IS installed — use `\FleetForge\Observability\Sentry::captureException()`, NOT class_exists guards
+
+The project Sentry wrapper at `lib/Observability/Sentry.php` (NAMESPACE `FleetForge\Observability`) is fully installed and used in production. Composer declares `sentry/sentry: ^4.25`, locked at `4.25.0` in `composer.lock`. The wrapper is a 195-line surface with three methods (`init()`, `captureException()`, `captureMessage()`) plus a `before_send` PII scrubber redacting bcrypt hashes (`$2y$` / `$2b$` prefix), FleetForge AES ciphertext (`ENC:` prefix), and 12 sensitive key patterns (password, mfa_secret, Authorization, csrf_token, etc.). Used by 10+ crons (`backup_db.php`, `gps_mileage_sync.php`, `health_scores.php`, `samsara_sync.php`, `risk_scores.php`, `ai_anomaly_scan.php`, `ai_fleet_brief.php`, `archive_old_data.php`, `late_fee_apply.php`, `promise_to_pay_check.php`) and by `lib/QuickBooksClient::captureSentry()` for structured §13.5 reporting.
+
+```php
+✅ Right
+\FleetForge\Observability\Sentry::captureException($e);
+
+// For structured tags + extra per spec §13.5 (QBO integration pattern):
+\Sentry\withScope(function ($scope) use ($tags, $extra, $e) {
+    foreach ($tags as $k => $v) { $scope->setTag((string) $k, (string) $v); }
+    foreach ($extra as $k => $v) { $scope->setExtra((string) $k, $v); }
+    \Sentry\captureException($e);
+});
+
+❌ Wrong
+if (class_exists('\Sentry\Sentry') && function_exists('\Sentry\captureException')) {
+    // defensive guard against pending Sentry — but Sentry is NOT pending,
+    // it's been installed since S-PROD-2 (2026-05-02).
+    \Sentry\captureException($e);
+}
+```
+
+**Note on DSN configuration**: the local dev environment has no `SENTRY_DSN` configured, so `Sentry::init()` short-circuits to no-op on every entry-point's `init()` call (verified at `lib/Observability/Sentry.php:55-60`). This is intentional and lets smokes pass without an external dependency. Production DSN setup is a separate operator task tracked in FLEETFORGE_PREDEPLOY_CHECKLIST.md. Code that calls `captureException` does NOT need to check whether init succeeded — the wrapper's own static `$initialized` flag short-circuits subsequent calls when DSN was blank.
+
+**Layering pattern** (both layers are advisory — failures must never propagate):
+1. **Primary** — call `\FleetForge\Observability\Sentry::captureException($e)`. Handles init guard + DSN check + PII scrub. Wrap in try/catch + `error_log()` on failure so a Sentry SDK crash never breaks the request.
+2. **Optional structured** — if you need to attach spec-§13.5-style tags/extra (specific to QBO integration so far, may grow), call `\Sentry\withScope(...)` directly. Guard on `function_exists('\Sentry\withScope')` since the raw SDK API surface may shift between major versions.
+
+**Source:** Caught silently in S-QBO-2 (2026-05-20) — the session prompt assumed Sentry was pending and instructed wrapping calls in `class_exists` guards. Verified Sentry already installed via composer.json grep + `lib/Observability/Sentry.php` existence + 10+ production cron consumers. Resolved per [[feedback_trust_file_over_prompt]]. Locked here so future S-QBO-N prompts (and any module that catches exceptions) skip the defensive guards and call the wrapper directly.
 
 ---
 

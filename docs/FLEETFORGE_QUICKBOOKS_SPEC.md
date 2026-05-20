@@ -594,7 +594,7 @@ CREATE TABLE acc_qbo_sync_log (
 
 ### 6.6 The QuickBooksClient class
 
-`lib/Integrations/QuickBooksClient.php` is the single HTTP boundary. Every QBO call goes through it.
+`lib/QuickBooksClient.php` is the single HTTP boundary. Every QBO call goes through it. (S-QBO-1 placed the class at the top-level `lib/` rather than `lib/Integrations/` — no `Integrations/` subdirectory exists in the project, and the top-level pattern matches existing FF service classes like `BillingEngine`, `FixedAssetService`, `SamsaraClient`. See `D-QBO-CLIENT-LOCATION` in `FLEETFORGE_PROGRESS.md` DECISIONS for the full lock + the open question on where future Pusher classes land.)
 
 Responsibilities:
 - Bearer token management (auto-refresh middleware).
