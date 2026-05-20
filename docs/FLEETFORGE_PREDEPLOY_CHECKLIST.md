@@ -615,36 +615,51 @@ ITEM E-DEPLOY-RUNBOOK | 2026-05-20 | E — Data | Post-push deploy sequence (mig
     page load from authenticated users hits the same error and they assume the system is down.
     Original source: 2026-05-20 post-S-PERM-SESSION-REFRESH live-prod incident.
   Action — REQUIRED post-push deploy sequence on mainlandrentals.com:
-    1. SSH to mainlandrentals.com, cd /var/www/fleetforge, git pull origin main
-    2. Apply migrations:
-         sudo -u www-data php bin/migrate.php --verify       # show pending count
-         sudo -u www-data php bin/migrate.php --apply        # apply them
-         sudo -u www-data php bin/migrate.php --verify       # expect N ok / 0 drift / 0 missing
-       Skip step 2 only if the diff in step 1 had NO new files in db_migrations/.
-    3. Reload php-fpm to clear opcache:
+    SSH to mainlandrentals.com, then ALWAYS run these 3 commands in order, every push
+    (no decision-tree — see "Why always 3" below):
+
+         cd /var/www/fleetforge
+         sudo -u www-data git pull origin main
+         sudo -u www-data php bin/migrate.php --apply
          sudo systemctl reload php8.2-fpm
-       (Or whichever php-fpm service is installed — `systemctl list-units --type=service | grep php`
-       to confirm the unit name; the deploy runbook should pin this once.) Skip step 3 only if the
-       diff in step 1 had NO PHP file changes anywhere in the repo.
-    4. If step 2 ran, regenerate schema_quick_ref per F-SCHEMA-REF-1:
-         sudo -u www-data php scripts/generate_schema_ref.php
-         git add docs/FLEETFORGE_SCHEMA_QUICK_REF.md
-         git commit -m "docs: regenerate schema quick-ref post-deploy"
-         git push origin main
-    5. Smoke check: open mainlandrentals.com in a browser, log in, exercise one path that touches
-       the newly-deployed code (e.g., if the deploy was S-PERM-SESSION-REFRESH, try the Bob Manager
-       grant). Expect HTTP 200, no "An unexpected error occurred" in the UI.
-    Decision rule for steps 2 + 3:
-      - Migration files added (db_migrations/*.sql) → step 2 IS required.
-      - PHP files touched (anything ending .php) → step 3 IS required.
-      - Both → run them in order 2 → 3 → 4 → 5.
-      - Neither (e.g., docs-only commit) → steps 2 + 3 + 4 skipped, only step 5 if anything is
-        user-facing.
-  Owner: Operator (every git push to origin/main that includes migration or PHP code changes)
-  Status: ONGOING (not a one-shot — runs on every deploy that meets the criteria)
-  Related: F-SCHEMA-REF-1 (step 4 here is the same thing it tracks); F-SCHEMA-REF-2 (one-time
-    catch-up commit, separate from this recurring sequence); Trap 52 in REFERENCE.md §11 (the
-    opcache-staleness explanation that motivates step 3).
+
+    Then smoke-check in a browser: open https://mainlandrentals.com/fleetforge/dashboard,
+    log in, exercise one path that touches the newly-deployed code (or any authenticated
+    page). Expect HTTP 200, no "An unexpected error occurred" in the UI.
+
+    Why always 3 (no decision-tree): each command is safe + cheap to run when "not strictly
+    needed", and the cost of always running them (≈1.5 seconds total overhead per deploy)
+    is far less than the cost of forgetting one. The 2026-05-19 S-PERM-SESSION-REFRESH
+    incident happened because the operator skipped migrate + reload thinking the commit
+    "looked small" — but it added a schema column AND a top-level function in
+    includes/auth.php. With this "always 3" rule, the decision point that caused the
+    incident is removed entirely.
+
+      - `git pull` when already up to date → "Already up to date." no-op
+      - `migrate.php --apply` when no pending migrations → verifies against ledger, exits
+        in ~50ms. Idempotent.
+      - `systemctl reload php8.2-fpm` → graceful reload (< 1 second, NOT a restart — no
+        in-flight requests dropped). Worker processes recycled with new bytecode. Safe to
+        run when nothing changed.
+
+    Schema quick-ref regeneration is a SEPARATE step done on a workstation after the
+    deploy (per F-SCHEMA-REF-1), NOT on the production server. Production deploy.sh
+    intentionally does not touch the quick-ref file to avoid drift between prod's
+    auto-regenerated copy and what's committed in the repo.
+
+    Alternative — automated runner (optional): bin/deploy.sh is a one-command wrapper for
+    the above sequence + a few safety checks. Requires sudo access on the Lightsail
+    ubuntu user (currently has a password set; deploy.sh assumes you'll type it or have
+    NOPASSWD configured). If you're typing commands manually anyway, the 3-line sequence
+    above is fine.
+
+  Owner: Operator (every git push to origin/main — no exceptions, no skipping)
+  Status: ONGOING (recurring on every deploy)
+  Related: F-SCHEMA-REF-1 (workstation-side schema quick-ref regen after migrations);
+    F-SCHEMA-REF-2 (one-time catch-up commit, separate from this recurring sequence);
+    Trap 52 in REFERENCE.md §11 (the opcache-staleness explanation that motivates the
+    systemctl reload step); bin/deploy.sh (the automated wrapper for the same 3
+    commands, optional alternative).
 ```
 
 ### F — Accounting state
