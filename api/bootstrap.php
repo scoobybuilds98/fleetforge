@@ -64,8 +64,18 @@ set_exception_handler(function (Throwable $e): void {
 
     \FleetForge\Observability\Sentry::captureException($e);
 
-    // Never expose internal details in production
-    $message = (defined('FF_DEBUG') && FF_DEBUG)
+    // S-DEPLOY-OBSERVABILITY (2026-05-20): surface the real error message
+    // to super_admin sessions even in production. They already have full DB
+    // access via the UI, and they're the ones who need to diagnose live
+    // issues — hiding `column not found` / `undefined function` errors from
+    // them creates the same opaque "something is broken but I can't tell
+    // what" UX that bit the S-PERM-SESSION-REFRESH live-prod incident.
+    // Non-super_admin users still get the safe generic message. The
+    // function_exists() guard protects against early-boot throws where
+    // is_super_admin() may not yet be defined.
+    $isSuperAdmin = function_exists('is_super_admin') && is_super_admin();
+    $verboseAllowed = (defined('FF_DEBUG') && FF_DEBUG) || $isSuperAdmin;
+    $message = $verboseAllowed
         ? $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')'
         : 'An unexpected error occurred. Please try again.';
 
