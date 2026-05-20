@@ -18,7 +18,15 @@ declare(strict_types=1);
  * connection_error captures the message, flash_error redirect.
  *
  * Spec ref: FLEETFORGE_QUICKBOOKS_SPEC.md §5.1 steps 4-8, §5.2.
- * Session:  S-QBO-1
+ * Session:  S-QBO-1 (initial), hotfix 2026-05-20 (K-22 Trap #55:
+ *           current_user_name() → current_user()['name']).
+ *
+ * Known constraint: during local dev with ngrok, the OAuth callback
+ * arrives on a different origin (ngrok-free.dev) than the browser
+ * session origin (fleetforge.test), so session-based state and auth
+ * fail. Proper fix tracked as S-QBO-OAUTH-FIX (DB-backed state +
+ * auth-context-free callback). Until that ships, sandbox OAuth setup
+ * via ngrok requires temporary auth bypass (see commit history).
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
@@ -153,7 +161,7 @@ QuickBooksClient::settings_write_qbo('connection_error',         '');
 
 db_insert('audit_log', [
     'user_id'      => current_user_id(),
-    'user_name'    => current_user_name(),
+    'user_name'    => current_user()['name'] ?? 'system',
     'action'       => 'create',
     'module'       => 'quickbooks',
     'entity_type'  => 'qbo_oauth_connection',
