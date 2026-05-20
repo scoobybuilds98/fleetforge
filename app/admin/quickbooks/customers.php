@@ -148,8 +148,11 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- ── Main table ──────────────────────────────────────────── -->
+    <!-- .table-wrapper provides overflow-x:auto so the table scrolls
+         horizontally on narrow viewports instead of overflowing the
+         page and clipping the right-most columns. -->
     <template x-if="rows.length > 0">
-        <div class="card" style="padding:0;overflow:hidden;">
+        <div class="table-wrapper">
             <table class="table table-sm" style="margin:0;">
                 <thead>
                     <tr>
@@ -230,30 +233,43 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- ── Link modal ──────────────────────────────────────────── -->
+    <!-- Uses canonical .modal-overlay / .modal / .modal-md classes
+         (defined in public/assets/css/app.css). Inline position:fixed
+         centering was unreliable here — likely an ancestor with
+         `transform`/`filter` was creating a new containing block, so
+         `inset:0` collapsed and the dialog rendered at the top-left.
+         The shared modal classes already account for FF's stacking
+         context (--z-modal + backdrop sibling). Pattern lifted from
+         drift.php's resolveModal. -->
     <div x-show="linkModal.open" x-cloak
-         style="position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:50;"
+         class="modal-overlay"
+         style="background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);"
          @click.self="closeLinkModal()">
-        <div class="card" style="width:520px;max-width:90vw;padding:18px;">
-            <div class="h5" style="margin-bottom:12px;" x-text="linkModal.mode === 'pick_qbo' ? 'Link FF customer to QBO' : 'Link QBO customer to FF'"></div>
-            <div class="text-sm text-secondary" style="margin-bottom:12px;">
-                <strong>FF:</strong> <span x-text="linkModal.row && linkModal.row.ff_company_name ? linkModal.row.ff_company_name : '—'"></span><br>
-                <strong>QBO:</strong> <span x-text="linkModal.row && linkModal.row.qbo_display_name ? linkModal.row.qbo_display_name : '—'"></span>
+        <div class="modal modal-md">
+            <div class="modal-header">
+                <h3 class="h5" style="margin:0;" x-text="linkModal.mode === 'pick_qbo' ? 'Link FF customer to QBO' : 'Link QBO customer to FF'"></h3>
+                <button class="modal-close-btn" @click="closeLinkModal()" aria-label="Close">&times;</button>
             </div>
+            <div class="modal-body">
+                <div class="text-sm text-secondary" style="margin-bottom:14px;">
+                    <strong>FF:</strong> <span x-text="linkModal.row && linkModal.row.ff_company_name ? linkModal.row.ff_company_name : '—'"></span><br>
+                    <strong>QBO:</strong> <span x-text="linkModal.row && linkModal.row.qbo_display_name ? linkModal.row.qbo_display_name : '—'"></span>
+                </div>
 
-            <label class="form-label" x-text="linkModal.mode === 'pick_qbo' ? 'Pick QBO customer' : 'Pick FF customer'"></label>
-            <select class="form-select" x-model="linkModal.selectedId">
-                <option value="">— select —</option>
-                <template x-for="opt in linkModal.options" :key="opt.id">
-                    <option :value="opt.id" x-text="opt.label"></option>
-                </template>
-            </select>
+                <label class="form-label" x-text="linkModal.mode === 'pick_qbo' ? 'Pick QBO customer' : 'Pick FF customer'"></label>
+                <select class="form-select" x-model="linkModal.selectedId">
+                    <option value="">— select —</option>
+                    <template x-for="opt in linkModal.options" :key="opt.id">
+                        <option :value="opt.id" x-text="opt.label"></option>
+                    </template>
+                </select>
 
-            <label class="form-label" style="margin-top:10px;">Notes (optional)</label>
-            <textarea class="form-control" rows="2" x-model="linkModal.notes" placeholder="Why this link…"></textarea>
+                <label class="form-label" style="margin-top:14px;">Notes (optional)</label>
+                <textarea class="form-control" rows="2" x-model="linkModal.notes" placeholder="Why this link…"></textarea>
 
-            <div x-show="linkModal.error" x-cloak class="text-sm" style="color:#dc2626;margin-top:6px;" x-text="linkModal.error"></div>
-
-            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+                <div x-show="linkModal.error" x-cloak class="text-sm" style="color:var(--color-danger,#dc2626);margin-top:8px;" x-text="linkModal.error"></div>
+            </div>
+            <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--border-color);">
                 <button class="btn btn-outline" @click="closeLinkModal()">Cancel</button>
                 <button class="btn btn-primary" :disabled="!linkModal.selectedId || linkModal.saving" @click="saveLink()">
                     <span x-show="!linkModal.saving">Save link</span>
