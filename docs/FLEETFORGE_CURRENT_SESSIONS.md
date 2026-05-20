@@ -74,6 +74,11 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-5** — IN-FLIGHT
+  Started: 2026-05-20T14:20 UTC by desktop-1
+  Touching: db_migrations/, FLEETFORGE_DATABASE_MASTER.sql, docs/FLEETFORGE_SCHEMA_QUICK_REF.md, lib/QboPushers/CustomerPuller.php (NEW), lib/QboPushers/CustomerMatcher.php (NEW), api/v1/quickbooks/customers/{pull,auto_match,save_mapping,list}.php (NEW), app/admin/quickbooks/customers.php (NEW), config/navigation.php (+1 child), tests/_smoke_qbo_customer_mapping.php (NEW), docs/FLEETFORGE_QUICKBOOKS_SPEC.md (§7/§8 cross-ref), docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md (D131 10→11 smokes)
+  Scope: First real Pusher session — acc_qbo_customer_map + CustomerPuller (paginated /query pull) + CustomerMatcher (name-normalization + Levenshtein cascade) + Customers Sync UI (3-column mapping page) + 4 API endpoints + auto-match algorithm + nav update (+1 child)
+
 **S-QBO-OAUTH-FIX** — SHIPPED 2026-05-20 (see PROGRESS.md SESSION LOG row). Closes K-22 Trap #59 architecturally — `acc_oauth_states` + `FleetForge\OAuth\StateManager` replace the broken `$_SESSION['qbo_oauth_state']` pattern; `callback.php` runs auth-context-free per D-QBO-OAUTH-FIX-2; audit attribution preserved via `initiated_by_user_id` (D-QBO-OAUTH-FIX-4). **4 decisions locked** (D-QBO-OAUTH-FIX-1/-2/-3/-4). NEW smoke `tests/_smoke_oauth_state.php` (9/9 PASS self-cleaning). **D131 10/10 PASS** (gate grew 9→10). **K-22 silent catch during smoke run**: PHP `date('Y-m-d H:i:s', time()+$ttl)` formatted in php.ini timezone (America/Chicago = UTC-6) while MySQL `NOW()` runs in UTC → `expires_at > NOW()` rejected every fresh token. Fixed by switching to raw INSERT with `DATE_ADD(NOW(), INTERVAL ? SECOND)` — both clocks now MySQL-side. Worth a future K-22 catalog entry (#60) in the next docs-lock pass.
 
 **S-QBO-4** — SHIPPED 2026-05-20 (see PROGRESS.md SESSION LOG row). **PHASE QBO-1 COMPLETE — 4/4 sessions shipped 2026-05-20.**
