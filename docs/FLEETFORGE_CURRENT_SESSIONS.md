@@ -74,6 +74,11 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-6** — IN-FLIGHT
+  Started: 2026-05-21T19:55 UTC by desktop-1
+  Touching: lib/QboPushers/ (CustomerPusher.php NEW + CustomerEnqueuer.php NEW), api/v1/customers/ (create.php + update.php — minimal post-success integration), app/admin/customers/show.php (UI mapping badge), tests/_smoke_qbo_customer_push.php (NEW), docs/FLEETFORGE_QUICKBOOKS_SPEC.md, docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md (D131 11→12), docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_QUICKBOOKS_PROGRESS.md
+  Scope: First session that pushes data INTO QBO. CustomerPusher class + CustomerEnqueuer + customer API integration + UI mapping indicators. sync_enabled stays '0' per D-CPA-5 — operator flips temporarily for Part I live verification only.
+
 **S-QBO-5-FIX-1** — SHIPPED 2026-05-21 (see PROGRESS.md SESSION LOG row). Foundation cleanup before S-QBO-6 — centralizes QBO `QueryResponse` 1-row-object → array normalization at `QuickBooksClient::query()` boundary; new `normalizeQueryResponse()` public static helper; CustomerPuller defensive wrap DELETED. **K-22 Trap #60 locked** in REFERENCE.md §11. **3 decisions locked**: D-QBO-5-FIX-1-1 (boundary-not-per-Pusher), D-QBO-5-FIX-1-2 (preserve full envelope; uppercase-keyed-only coercion), D-QBO-5-FIX-1-3 (delete-not-comment per D-TRAP-CATALOG-SWEEP). **D131 11/11 PASS** (qbo_client gate advanced 6/6 → 7/7 with new C7 sub-check). No schema changes, no settings, no crons. Debt-paydown — does not advance Phase QBO count.
 
 **S-QBO-5** — SHIPPED 2026-05-20 (see PROGRESS.md SESSION LOG row). **PHASE QBO-2 BEGUN — first Pusher session.**
