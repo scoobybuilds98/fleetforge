@@ -19,16 +19,16 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 -- ----------------------------------------------------------------
 -- Company
 -- ----------------------------------------------------------------
-('company.name',        'Mainland Truck & Trailer Sales', 'string',  'company', 'Company Name',        'Displayed in topbar, PDFs, and the portal.',                                    1),
-('company.address',     '9045 King George Blvd',          'string',  'company', 'Street Address',      'Used in invoice PDF headers.',                                                  0),
+('company.name',        'Mainland Truck & Trailer Sales & Leasing', 'string',  'company', 'Company Name',        'Displayed in topbar, PDFs, and the portal.',                                    1),
+('company.address',     '9616 188 Street, Surrey, BC Canada V4N 3M2', 'string',  'company', 'Street Address',      'Used in invoice PDF headers and email footers.',                                0),
 ('company.city',        'Surrey',                          'string',  'company', 'City',                NULL,                                                                            0),
 ('company.province',    'BC',                              'string',  'company', 'Province / State',    NULL,                                                                            0),
-('company.postal_code', 'V3W 3X2',                        'string',  'company', 'Postal Code',         NULL,                                                                            0),
+('company.postal_code', 'V4N 3M2',                         'string',  'company', 'Postal Code',         NULL,                                                                            0),
 ('company.country',     'CA',                              'string',  'company', 'Country',             NULL,                                                                            0),
-('company.phone',       '',                                'string',  'company', 'Phone',               NULL,                                                                            1),
-('company.email',       '',                                'string',  'company', 'Email',               'Reply-to address on outbound emails.',                                          1),
-('company.website',     '',                                'string',  'company', 'Website',             NULL,                                                                            1),
-('company.logo_url',    '',                                'string',  'company', 'Logo URL',            'File path or URL for the logo shown in the topbar and PDFs.',                  1),
+('company.phone',       '+1 866-888-6887',                 'string',  'company', 'Phone',               NULL,                                                                            1),
+('company.email',       'info@mainlandtts.ca',             'string',  'company', 'Email',               'Reply-to address on outbound emails.',                                          1),
+('company.website',     'mainlandrentals.com',             'string',  'company', 'Website',             NULL,                                                                            1),
+('company.logo_url',    'https://mainlandrentals.com/fleetforge/assets/img/logo-email.png', 'string',  'company', 'Logo URL', 'Public URL of the brand logo shown in email headers and PDFs.',  1),
 ('company.timezone',    'America/Vancouver',               'string',  'company', 'Timezone',            'All dates are displayed in this timezone.',                                     0),
 ('company.currency',    'CAD',                             'string',  'company', 'Currency Code',       'ISO 4217 currency code (e.g. CAD, USD).',                                      0),
 ('company.currency_symbol', '$',                           'string',  'company', 'Currency Symbol',     'Symbol prepended to all monetary values.',                                     1),

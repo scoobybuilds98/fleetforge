@@ -666,45 +666,154 @@ class EmailService
     // renderEmailHtml() — wrap raw body in the company shell
     //
     // Mirrors FLEETFORGE_DESIGN_DETAILS §8 — outer wrapper with
-    // a 600px centered card, brand header, and footer block.
-    // Inline styles only — email clients ignore <style> blocks.
+    // a 600px centered card, brand header, orange accent bar,
+    // and full contact footer.
+    //
+    // Design (locked S-EMAIL-TEMPLATES-REDESIGN):
+    //   - Single-column centered 600px card on #f4f4f5 page bg
+    //   - HEADER: dark #1a1a1a, logo image (180px wide) OR
+    //     stylized company-name text fallback when logo_url unset
+    //   - Orange #F97316 accent bar (4px) between header and body
+    //   - BODY: 40px 40px 32px padding, system fonts
+    //   - FOOTER: full company contact info (name + address +
+    //     phone + email + website + copyright + disclaimer),
+    //     centered, with orange contact-line links
+    //
+    // Body content uses the helper-pattern documented in the
+    // session prompt — H1, H2, P, CTA buttons, info boxes,
+    // key-value rows, alert boxes — all inline-styled tables
+    // for email-client compatibility (Gmail, Apple Mail, Outlook).
+    //
+    // Inline styles only — email clients (Outlook, Gmail) strip
+    // or ignore <style> blocks, so no external CSS.
     // =========================================================
     public static function renderEmailHtml(string $body): string
     {
-        $companyName    = (string) settings_get('company.name', 'FleetForge');
+        $companyName    = (string) settings_get('company.name',    'FleetForge');
         $companyAddress = (string) settings_get('company.address', '');
-        $companyPhone   = (string) settings_get('company.phone', '');
-        $companyEmail   = (string) settings_get('company.email', '');
+        $companyPhone   = (string) settings_get('company.phone',   '');
+        $companyEmail   = (string) settings_get('company.email',   '');
+        $companyWebsite = (string) settings_get('company.website', '');
+        $companyLogoUrl = (string) settings_get('company.logo_url','');
 
-        $headerHtml = '<tr><td style="background:#1c1c1a;padding:20px 24px;border-radius:6px 6px 0 0;">'
-            . '<div style="font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:600;color:#ffffff;">'
-            . htmlspecialchars($companyName, ENT_QUOTES, 'UTF-8')
-            . '</div></td></tr>';
+        // ── HEADER: logo image OR stylized company name ─────────
+        // WHY: branded image is preferred for recognizability, but
+        // text fallback keeps the email professional when the logo
+        // setting is empty or the URL is unreachable.
+        $companyNameEsc = htmlspecialchars($companyName, ENT_QUOTES, 'UTF-8');
+        if ($companyLogoUrl !== '') {
+            $logoUrlEsc = htmlspecialchars($companyLogoUrl, ENT_QUOTES, 'UTF-8');
+            $headerInner = '<img src="' . $logoUrlEsc . '" alt="' . $companyNameEsc . '" '
+                . 'width="180" style="display:block;margin:0 auto;max-width:180px;height:auto;border:0;outline:none;text-decoration:none;">';
+        } else {
+            $headerInner = '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+                . 'font-size:22px;font-weight:700;color:#ffffff;letter-spacing:0.02em;text-align:center;">'
+                . $companyNameEsc
+                . '</div>';
+        }
 
-        $footerLines = [];
-        if ($companyAddress !== '') $footerLines[] = htmlspecialchars($companyAddress, ENT_QUOTES, 'UTF-8');
+        // ── FOOTER: contact line (phone · email · website) ──────
+        // Build only with values that exist — silent skip if a
+        // setting is blank, so we never render "·  ·  ·".
         $contactBits = [];
-        if ($companyPhone !== '') $contactBits[] = htmlspecialchars($companyPhone, ENT_QUOTES, 'UTF-8');
-        if ($companyEmail !== '') $contactBits[] = htmlspecialchars($companyEmail, ENT_QUOTES, 'UTF-8');
-        if ($contactBits) $footerLines[] = implode(' &middot; ', $contactBits);
-        $footerLines[] = 'Powered by FleetForge';
-        $footerHtml = '<tr><td style="background:#f5f5f4;padding:16px 24px;border-top:1px solid #e5e5e2;border-radius:0 0 6px 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b6b66;text-align:center;line-height:1.6;">'
-            . implode('<br/>', $footerLines)
-            . '</td></tr>';
+        if ($companyPhone !== '') {
+            // strip non-digit chars for tel: link target — humans see
+            // the original formatted phone, dialers get the digits
+            $telDigits = preg_replace('/[^0-9+]/', '', $companyPhone) ?: $companyPhone;
+            $contactBits[] = '<a href="tel:' . htmlspecialchars($telDigits, ENT_QUOTES, 'UTF-8') . '" '
+                . 'style="color:#F97316;text-decoration:none;">'
+                . htmlspecialchars($companyPhone, ENT_QUOTES, 'UTF-8')
+                . '</a>';
+        }
+        if ($companyEmail !== '') {
+            $emailEsc = htmlspecialchars($companyEmail, ENT_QUOTES, 'UTF-8');
+            $contactBits[] = '<a href="mailto:' . $emailEsc . '" '
+                . 'style="color:#F97316;text-decoration:none;">' . $emailEsc . '</a>';
+        }
+        if ($companyWebsite !== '') {
+            // Normalize the website URL for the href: prepend https://
+            // only if no protocol is already present. The display label
+            // keeps whatever the operator stored (often without scheme).
+            $webDisplay = $companyWebsite;
+            $webHref    = $companyWebsite;
+            if (!preg_match('#^https?://#i', $webHref)) {
+                $webHref = 'https://' . ltrim($webHref, '/');
+            }
+            $contactBits[] = '<a href="' . htmlspecialchars($webHref, ENT_QUOTES, 'UTF-8') . '" '
+                . 'style="color:#F97316;text-decoration:none;">'
+                . htmlspecialchars($webDisplay, ENT_QUOTES, 'UTF-8')
+                . '</a>';
+        }
+        $contactLine = $contactBits
+            ? '<p style="margin:0 0 12px;font-size:12px;color:#6b7280;">'
+                . implode(' &nbsp;·&nbsp; ', $contactBits)
+                . '</p>'
+            : '';
 
-        return '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-            . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-            . '<title>' . htmlspecialchars($companyName, ENT_QUOTES, 'UTF-8') . '</title></head>'
-            . '<body style="margin:0;padding:0;background:#f5f5f4;font-family:Arial,Helvetica,sans-serif;color:#1c1c1a;">'
-            . '<table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f5f5f4;padding:24px 0;">'
-            . '<tr><td align="center">'
-            . '<table cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border:1px solid #e5e5e2;border-radius:6px;">'
-            . $headerHtml
-            . '<tr><td style="padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1c1c1a;">'
-            . $body
-            . '</td></tr>'
-            . $footerHtml
-            . '</table></td></tr></table></body></html>';
+        $addressLine = $companyAddress !== ''
+            ? '<p style="margin:0 0 4px;font-size:12px;color:#6b7280;">'
+                . htmlspecialchars($companyAddress, ENT_QUOTES, 'UTF-8') . '</p>'
+            : '';
+
+        $year = date('Y');
+
+        // ── Assemble shell ──────────────────────────────────────
+        // Heredoc-style assembly keeps the structure readable. All
+        // styles are inline (email clients strip <style>). All
+        // dimensions are in fixed px — fluid units break Outlook.
+        $html  = '<!DOCTYPE html><html lang="en"><head>';
+        $html .= '<meta charset="UTF-8">';
+        $html .= '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+        $html .= '<meta name="x-apple-disable-message-reformatting">';
+        $html .= '<title>' . $companyNameEsc . '</title>';
+        $html .= '</head>';
+        $html .= '<body style="margin:0;padding:0;background-color:#f4f4f5;'
+              .  'font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+              .  '-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">';
+
+        // Outer wrapper — page-level grey background
+        $html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+              .  'style="background-color:#f4f4f5;padding:40px 20px;">';
+        $html .= '<tr><td align="center">';
+
+        // Email card — 600px max
+        $html .= '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" '
+              .  'style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;'
+              .  'overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">';
+
+        // HEADER — logo or stylized brand text on dark bg
+        $html .= '<tr><td style="background-color:#1a1a1a;padding:32px 40px;text-align:center;">'
+              .  $headerInner . '</td></tr>';
+
+        // ORANGE ACCENT BAR — 4px brand stripe
+        $html .= '<tr><td style="background-color:#F97316;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>';
+
+        // BODY content slot — caller-provided HTML
+        $html .= '<tr><td style="padding:40px 40px 32px;font-size:15px;line-height:1.6;color:#374151;">'
+              .  $body . '</td></tr>';
+
+        // DIVIDER — hairline between body and footer
+        $html .= '<tr><td style="padding:0 40px;">'
+              .  '<div style="border-top:1px solid #e5e7eb;font-size:0;line-height:0;">&nbsp;</div>'
+              .  '</td></tr>';
+
+        // FOOTER — company name + address + contact line + copyright
+        $html .= '<tr><td style="padding:24px 40px 32px;text-align:center;">';
+        $html .=   '<p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#374151;">'
+              .    $companyNameEsc . '</p>';
+        $html .=   $addressLine;
+        $html .=   $contactLine;
+        $html .=   '<p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.5;">'
+              .    'This email was sent by FleetForge on behalf of ' . $companyNameEsc . '.<br>'
+              .    '&copy; ' . $year . ' ' . $companyNameEsc . '. All rights reserved.'
+              .    '</p>';
+        $html .= '</td></tr>';
+
+        $html .= '</table>'; // /Email card
+        $html .= '</td></tr></table>'; // /Outer wrapper
+        $html .= '</body></html>';
+
+        return $html;
     }
 
     // =========================================================
