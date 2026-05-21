@@ -90,6 +90,11 @@ $_qboNavGroups = [
         'icon'  => 'receipt-percent',
     ],
     [
+        'label' => 'Items',
+        'url'   => '/quickbooks/items',
+        'icon'  => 'cube',
+    ],
+    [
         'label' => 'Settings',
         'url'   => '/quickbooks/settings',
         'icon'  => 'cog-6-tooth',

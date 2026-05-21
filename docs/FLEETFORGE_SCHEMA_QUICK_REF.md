@@ -1431,6 +1431,35 @@ _55 tables._
 | `worker_id` | varchar(50) |  | YES |
 | `payload_snapshot` | json |  | YES |
 
+## `acc_qbo_item_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_item_type` | varchar(60) | MUL | YES |
+| `ff_item_type_variant` | varchar(60) |  | YES |
+| `qbo_item_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_name` | varchar(255) |  | YES |
+| `qbo_fully_qualified_name` | varchar(500) |  | YES |
+| `qbo_description` | varchar(500) |  | YES |
+| `qbo_type` | varchar(50) |  | YES |
+| `qbo_active` | tinyint(1) |  | YES |
+| `qbo_income_account_id` | varchar(50) |  | YES |
+| `qbo_income_account_name` | varchar(255) |  | YES |
+| `qbo_expense_account_id` | varchar(50) |  | YES |
+| `qbo_expense_account_name` | varchar(255) |  | YES |
+| `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
+| `match_confidence` | enum('exact_name','high','medium','manual','auto_created') |  | YES |
+| `is_credit_variant` | tinyint(1) |  | NO |
+| `presentation_variant` | enum('default','net','gross') |  | YES |
+| `match_notes` | text |  | YES |
+| `last_synced_at` | datetime | MUL | YES |
+| `last_pull_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `created_by_user_id` | int unsigned | MUL | YES |
+
 ## `acc_qbo_tax_code_map`
 
 | Column | Type | Key | Nullable |

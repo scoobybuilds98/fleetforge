@@ -463,19 +463,19 @@ if ($qbo === null) {
 } else {
     $children = $qbo['children'] ?? [];
     $labels = array_map(fn($c) => $c['label'] ?? '', $children);
-    if (count($children) !== 9) {
-        $c13Errors[] = 'expected 9 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
+    if (count($children) !== 10) {
+        $c13Errors[] = 'expected 10 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
     }
     if (!in_array('Tax Codes', $labels, true)) {
         $c13Errors[] = "no 'Tax Codes' child in QuickBooks nav";
     }
-    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Settings'];
+    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Settings'];
     if ($labels !== $expectedOrder) {
         $c13Errors[] = 'nav order mismatch — got [' . implode(', ', $labels) . '], expected [' . implode(', ', $expectedOrder) . ']';
     }
 }
 if (empty($c13Errors)) {
-    echo "PASS C13 nav has 9 QuickBooks children with Tax Codes in expected position\n";
+    echo "PASS C13 nav has 10 QuickBooks children with Tax Codes in expected position\n";
     $pass++;
 } else {
     echo "FAIL C13 " . implode('; ', $c13Errors) . "\n";

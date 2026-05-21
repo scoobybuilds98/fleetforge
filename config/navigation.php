@@ -290,6 +290,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Items',
+                'icon'   => 'cube',
+                'url'    => '/quickbooks/items',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',
