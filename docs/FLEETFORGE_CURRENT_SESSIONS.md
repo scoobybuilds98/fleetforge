@@ -74,6 +74,24 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-EMAIL-TEMPLATES-REDESIGN** — IN-FLIGHT
+Start: 2026-05-21T11:19 UTC
+Agent: Claude Code Desktop
+Touching:
+  - lib/Email/EmailService.php (renderEmailHtml() rewrite — new shell)
+  - database/seeds/008_email_templates.sql (all 10 templates redesigned)
+  - public/assets/img/logo-email.png (copied from storage/branding)
+  - [local DB email_templates rows — direct UPDATE for 10 slugs]
+  - [local DB settings rows — company.name/address/phone/email/website/logo_url]
+  - docs/FLEETFORGE_CURRENT_SESSIONS.md
+  - docs/FLEETFORGE_PROGRESS.md
+Scope: redesign all 10 customer-facing email templates to professional
+  Google/Apple standard. Body-only templates wrapped by elaborate shell
+  in renderEmailHtml() — logo header, orange (#F97316) accent bar, full
+  contact footer (9616 188 St Surrey BC, +1 866-888-6887, info@mainlandtts.ca,
+  mainlandrentals.com). Placeholder format stays `{single-brace}` (matches
+  EmailService::substitute). Production deploy handled by operator post-ship.
+
 **S-QBO-8** — SHIPPED 2026-05-21 (see PROGRESS.md SESSION LOG row). **Phase QBO-4 / 1 of 3 — chart of accounts mapping (Puller-only per D-QBO-8-1).** First mapping-table arc that does NOT have a paired Pusher — the accountant owns COA structure in QBO, FF mirrors via the mapping table. Migration `db_migrations/202605210757_S-QBO-8.sql` (50→51/0/0): CREATE acc_qbo_account_map (22 cols + is_critical/critical_reason + idx_critical composite index + 2 UNIQUE on nullable ff/qbo ids + 2 FKs). **4 decisions locked**: D-QBO-8-1 (Puller-only — no AccountPusher/Enqueuer/sync_mode.account; accountant owns COA), D-QBO-8-2 (bridge-account validator + `assertReadyForInvoicePush` gate via new `ChartOfAccountsIncompleteException`), D-QBO-8-3 (cascade respects type compatibility per FF→QBO TYPE_COMPATIBILITY map; no cross-type matches), D-QBO-8-4 (state-machine schema parity with customer/vendor maps + is_critical/critical_reason add-ons). New `lib/QboPushers/{AccountPuller, AccountMatcher, AccountValidator}.php` (3 NEW) + `lib/Exceptions/ChartOfAccountsIncompleteException.php` (NEW). 4 API endpoints + type-grouped Alpine UI with red bridge-account banner. **1 new smoke** (account_mapping 17/17; D131 grows 14→15 PASS). 7 live FF bridge accounts identified (codes 1030 AR / 1050+1060 tax receivable / 2010 AP / 2030+2040 tax payable / 4122 sales revenue). **6 K-22 silent resolutions** per [[feedback_trust_file_over_prompt]]: table is `acc_accounts` (not chart_of_accounts), column `code` (not account_code), column `account_type` (not acct_type), column `account_subtype` (not acct_subtype), no `deleted_at` (uses `is_active`), 8-value lowercase account_type ENUM (not 5-value TitleCase). All resolved silently. `quickbooks.sync_enabled='0'` per D-CPA-5 — Puller-only direction; no live QBO writes this session. **Live sandbox verification owed by operator post-commit** (Puller-only chain: Pull → markCriticalAccounts → Auto-Match → manual link of 7 critical accounts → assertReadyForInvoicePush passes). Phase QBO: 8/30 (4 Phase QBO-1 + 2 Phase QBO-2 + 1 Phase QBO-3 + 1 Phase QBO-4; +2 debt-paydowns).
 
 **S-QBO-7** — SHIPPED 2026-05-21 (see PROGRESS.md SESSION LOG row). **Phase QBO-3 / 1 of 1 — combined vendor mapping + push session per the locked §6.8 + §6.9 contracts.** First session to land an entity-mapping arc start-to-finish in one ship: pull (`VendorPuller`) + match (`VendorMatcher`) + push (`VendorPusher`) + enqueue (`VendorEnqueuer`) + 4 API endpoints + 3-pane mapping UI + vendor detail badge + nav child. Migration `db_migrations/202605210233_S-QBO-7.sql` (49→50/0/0): CREATE acc_qbo_vendor_map mirroring customer_map with vendor-specific deltas (qbo_balance REMOVED, qbo_given_name + qbo_family_name + qbo_v4v_status ADDED). **4 decisions locked**: D-QBO-7-1 (1099/V4V out of scope v1; qbo_v4v_status captures snapshot only; revisit S-QBO-18 Bills), D-QBO-7-2 (vendor_type ENUM NOT mapped — no clean Vendor analog), D-QBO-7-3 (vendors.contact_name → GivenName + FamilyName split on FIRST space; single names → GivenName only), D-QBO-7-4 (state-machine schema mirrors customer_map per D-QBO-5). 2 NEW smokes (mapping 12/12 + push 10/10; **D131 12→14 PASS**). K-22 silent resolutions: vendors uses `name` (NOT company_name) + `state` (NOT province) + no postal_code/country columns — buildQboPayload BillAddr drops PostalCode + literal-defaults Country='CA'; qbo_queue smoke C8 hasImplementation list updated for vendor shipped (next frontier: invoice/journal_entry/item); both nav-children smokes (admin_ui C4 + customer_mapping C11) bumped 6→7 in same session. `quickbooks.sync_enabled='0'` per D-CPA-5 — operator-side live verification owed (same chain as S-QBO-6 with 'customer' → 'vendor' substitution). Phase QBO: 7/30 (4 Phase QBO-1 + 2 Phase QBO-2 + 1 Phase QBO-3; +2 debt-paydowns).
