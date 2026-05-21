@@ -570,7 +570,8 @@ if (empty($c16Errors)) {
     $failures[] = 'C16';
 }
 
-// ── C17: nav has 8 QuickBooks children incl. Accounts ──────
+// ── C17: nav has 9 QuickBooks children incl. Accounts ──────
+// Bumped 8→9 in S-QBO-9 (Tax Codes between Accounts and Settings).
 $c17Errors = [];
 $nav = require __DIR__ . '/../config/navigation.php';
 $qbo = null;
@@ -585,19 +586,19 @@ if ($qbo === null) {
 } else {
     $children = $qbo['children'] ?? [];
     $labels = array_map(fn($c) => $c['label'] ?? '', $children);
-    if (count($children) !== 8) {
-        $c17Errors[] = 'expected 8 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
+    if (count($children) !== 9) {
+        $c17Errors[] = 'expected 9 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
     }
     if (!in_array('Accounts', $labels, true)) {
         $c17Errors[] = "no 'Accounts' child in QuickBooks nav";
     }
-    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Settings'];
+    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Settings'];
     if ($labels !== $expectedOrder) {
         $c17Errors[] = 'nav order mismatch — got [' . implode(', ', $labels) . '], expected [' . implode(', ', $expectedOrder) . ']';
     }
 }
 if (empty($c17Errors)) {
-    echo "PASS C17 nav has 8 QuickBooks children with Accounts in expected position\n";
+    echo "PASS C17 nav has 9 QuickBooks children with Accounts in expected position\n";
     $pass++;
 } else {
     echo "FAIL C17 " . implode('; ', $c17Errors) . "\n";

@@ -12,7 +12,7 @@
  * Six destinations, all flat leaf links (no dropdowns since the QBO sub-
  * surface is small enough to fit on one row):
  *
- *   [Dashboard] [Sync Queue] [Sync Log] [Drift] [Customers] [Vendors] [Accounts]      [Settings]
+ *   [Dashboard] [Sync Queue] [Sync Log] [Drift] [Customers] [Vendors] [Accounts] [Tax Codes]      [Settings]
  *
  * Settings is pinned right (matches the accounting-nav convention for
  * high-traffic admin destinations).
@@ -45,8 +45,9 @@ if (str_ends_with($_qboNavCurrent, '/index.php')) {
 
 // ── Nav structure ──────────────────────────────────────────────
 // Order matches the sidebar children order (Dashboard / Sync Queue /
-// Sync Log / Drift / Customers / Vendors / Accounts / Settings) so
-// operators have a single mental model across both navigation surfaces.
+// Sync Log / Drift / Customers / Vendors / Accounts / Tax Codes /
+// Settings) so operators have a single mental model across both
+// navigation surfaces.
 $_qboNavGroups = [
     [
         'label' => 'Dashboard',
@@ -82,6 +83,11 @@ $_qboNavGroups = [
         'label' => 'Accounts',
         'url'   => '/quickbooks/accounts',
         'icon'  => 'book-open',
+    ],
+    [
+        'label' => 'Tax Codes',
+        'url'   => '/quickbooks/tax_codes',
+        'icon'  => 'receipt-percent',
     ],
     [
         'label' => 'Settings',

@@ -347,14 +347,11 @@ if (empty($c10Errors)) {
     $failures[] = 'C10';
 }
 
-// ── C11: nav has 8 QuickBooks children incl. Customers ─────
-// Grew 6→7 in S-QBO-7 (Vendors), then 7→8 in S-QBO-8 (Accounts
-// between Vendors and Settings).
+// ── C11: nav has 9 QuickBooks children incl. Customers ─────
+// Grew 6→7 in S-QBO-7 (Vendors), 7→8 in S-QBO-8 (Accounts), then
+// 8→9 in S-QBO-9 (Tax Codes between Accounts and Settings).
 $c11Errors = [];
 $nav = require __DIR__ . '/../config/navigation.php';
-// Two entries carry label='QuickBooks': the separator and the actual
-// group with `children`. Skip the separator by requiring non-empty
-// children list.
 $qbo = null;
 foreach ($nav as $group) {
     if (($group['label'] ?? '') === 'QuickBooks' && !empty($group['children'] ?? [])) {
@@ -367,19 +364,19 @@ if ($qbo === null) {
 } else {
     $children = $qbo['children'] ?? [];
     $labels = array_map(fn($c) => $c['label'] ?? '', $children);
-    if (count($children) !== 8) {
-        $c11Errors[] = 'expected 8 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
+    if (count($children) !== 9) {
+        $c11Errors[] = 'expected 9 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
     }
     if (!in_array('Customers', $labels, true)) {
         $c11Errors[] = "no 'Customers' child in QuickBooks nav";
     }
-    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Settings'];
+    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Settings'];
     if ($labels !== $expectedOrder) {
         $c11Errors[] = 'nav order mismatch — got [' . implode(', ', $labels) . '], expected [' . implode(', ', $expectedOrder) . ']';
     }
 }
 if (empty($c11Errors)) {
-    echo "PASS C11 nav has 8 QuickBooks children with Customers in expected position\n";
+    echo "PASS C11 nav has 9 QuickBooks children with Customers in expected position\n";
     $pass++;
 } else {
     echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";

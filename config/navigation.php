@@ -283,6 +283,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Tax Codes',
+                'icon'   => 'receipt-percent',
+                'url'    => '/quickbooks/tax_codes',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',

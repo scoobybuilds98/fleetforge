@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-20
-**Tables:** 136 total · **Columns:** 2129
+**Generated:** 2026-05-21
+**Tables:** 137 total · **Columns:** 2151
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -531,7 +531,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_54 tables._
+_55 tables._
 
 ## `acc_accounts`
 
@@ -1430,6 +1430,33 @@ _54 tables._
 | `completed_at` | datetime |  | YES |
 | `worker_id` | varchar(50) |  | YES |
 | `payload_snapshot` | json |  | YES |
+
+## `acc_qbo_tax_code_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_tax_rate_id` | int unsigned | UNI | YES |
+| `qbo_tax_code_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_name` | varchar(255) |  | YES |
+| `qbo_description` | varchar(500) |  | YES |
+| `qbo_taxable` | tinyint(1) |  | YES |
+| `qbo_hidden` | tinyint(1) |  | YES |
+| `qbo_active` | tinyint(1) |  | YES |
+| `qbo_tax_group` | tinyint(1) |  | YES |
+| `qbo_sales_rate_refs` | json |  | YES |
+| `ff_rate_snapshot` | decimal(8,6) |  | YES |
+| `ff_province` | varchar(100) |  | YES |
+| `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
+| `match_confidence` | enum('exact_name','exact_rate','high','medium','manual') |  | YES |
+| `is_override_target` | tinyint(1) | UNI | YES |
+| `match_notes` | text |  | YES |
+| `last_synced_at` | datetime | MUL | YES |
+| `last_pull_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `created_by_user_id` | int unsigned | MUL | YES |
 
 ## `acc_qbo_vendor_map`
 
