@@ -87,6 +87,20 @@ try {
     ): array {
 
         if ($action === 'link') {
+            // S-QBO-8 live-verify Finding F1: capture is_critical +
+            // critical_reason from the source ff_only row BEFORE it
+            // gets DELETEd, so the promoted/inserted mapped row
+            // inherits the bridge-account flag (D-QBO-8-2).
+            // Without this, a manual link would silently zero is_critical
+            // until the next Pull re-runs markCriticalAccounts.
+            $ffOnly = db_row(
+                "SELECT is_critical, critical_reason FROM acc_qbo_account_map
+                  WHERE ff_account_id = ? AND qbo_account_id IS NULL",
+                [$ffAcctId]
+            );
+            $inheritCritical = $ffOnly !== null ? (int) $ffOnly['is_critical']    : 0;
+            $inheritReason   = $ffOnly !== null ? $ffOnly['critical_reason']      : null;
+
             // Find the qbo_only row carrying the QBO snapshot first
             // (mirror of customer/vendor save_mapping discipline).
             $qboOnly = db_row(
@@ -107,9 +121,11 @@ try {
                         mapping_status   = 'mapped',
                         match_confidence = 'manual',
                         match_notes      = ?,
-                        last_synced_at   = ?
+                        last_synced_at   = ?,
+                        is_critical      = ?,
+                        critical_reason  = ?
                       WHERE id = ?",
-                    [$ffAcctId, $notes, $now, $id]
+                    [$ffAcctId, $notes, $now, $inheritCritical, $inheritReason, $id]
                 );
             } else {
                 $id = db_insert('acc_qbo_account_map', [
@@ -119,6 +135,8 @@ try {
                     'match_confidence'   => 'manual',
                     'match_notes'        => $notes,
                     'last_synced_at'     => $now,
+                    'is_critical'        => $inheritCritical,
+                    'critical_reason'    => $inheritReason,
                     'created_by_user_id' => $userId,
                 ]);
             }
@@ -138,16 +156,25 @@ try {
             $hadFf  = $row['ff_account_id']  !== null;
             $hadQbo = $row['qbo_account_id'] !== null;
             if ($hadFf && $hadQbo) {
+                // S-QBO-8 live-verify cleanup: is_critical is an FF-side
+                // flag (it describes the FF account's role, not the QBO
+                // account). When we split a mapped row, the flag MOVES
+                // to the new ff_only row and is CLEARED from the demoted
+                // qbo_only row — otherwise validator queries see a
+                // semantically-orphaned qbo_only with is_critical=1.
                 db_execute(
                     "UPDATE acc_qbo_account_map SET
                         ff_account_id    = NULL,
                         mapping_status   = 'qbo_only',
                         match_confidence = NULL,
-                        match_notes      = ?
+                        match_notes      = ?,
+                        is_critical      = 0,
+                        critical_reason  = NULL
                       WHERE id = ?",
                     [$notes, $id]
                 );
-                // Re-create FF side as fresh ff_only row.
+                // Re-create FF side as fresh ff_only row, preserving
+                // the bridge-account flag (D-QBO-8-2).
                 db_insert('acc_qbo_account_map', [
                     'ff_account_id'      => (int) $row['ff_account_id'],
                     'mapping_status'     => 'ff_only',
