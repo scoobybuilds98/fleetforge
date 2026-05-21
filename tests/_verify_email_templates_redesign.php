@@ -142,8 +142,8 @@ check('shell_website_link',
     str_contains($wrapped, 'href="https://mainlandrentals.com"'),
     'website link with https:// prefix added');
 check('shell_logo_img',
-    str_contains($wrapped, '<img src="https://mainlandrentals.com/fleetforge/assets/img/logo-email.png"'),
-    'logo img tag with public URL');
+    str_contains($wrapped, '<img src="https://mainlandrentals.com/assets/img/logo-email.png"'),
+    'logo img tag with public URL (no /fleetforge prefix — asset_url() convention per includes/functions.php:54)');
 check('shell_logo_alt',
     str_contains($wrapped, 'alt="Mainland Truck &amp; Trailer Sales &amp; Leasing"'),
     'logo alt text uses company name');

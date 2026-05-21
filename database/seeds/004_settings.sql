@@ -28,7 +28,7 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 ('company.phone',       '+1 866-888-6887',                 'string',  'company', 'Phone',               NULL,                                                                            1),
 ('company.email',       'info@mainlandtts.ca',             'string',  'company', 'Email',               'Reply-to address on outbound emails.',                                          1),
 ('company.website',     'mainlandrentals.com',             'string',  'company', 'Website',             NULL,                                                                            1),
-('company.logo_url',    'https://mainlandrentals.com/fleetforge/assets/img/logo-email.png', 'string',  'company', 'Logo URL', 'Public URL of the brand logo shown in email headers and PDFs.',  1),
+('company.logo_url',    'https://mainlandrentals.com/assets/img/logo-email.png', 'string',  'company', 'Logo URL', 'Public URL of the brand logo shown in email headers and PDFs. NOTE: assets served at docroot, no /fleetforge prefix (asset_url() pattern; see includes/functions.php:54).',  1),
 ('company.timezone',    'America/Vancouver',               'string',  'company', 'Timezone',            'All dates are displayed in this timezone.',                                     0),
 ('company.currency',    'CAD',                             'string',  'company', 'Currency Code',       'ISO 4217 currency code (e.g. CAD, USD).',                                      0),
 ('company.currency_symbol', '$',                           'string',  'company', 'Currency Symbol',     'Symbol prepended to all monetary values.',                                     1),
