@@ -227,7 +227,7 @@ return [
     ],
     [
         'label'        => 'QuickBooks',
-        'icon'         => 'arrow-path',
+        'icon'         => 'quickbooks',
         'url'          => '/quickbooks/dashboard',
         'match_prefix' => '/quickbooks',
         'module'       => 'quickbooks',
