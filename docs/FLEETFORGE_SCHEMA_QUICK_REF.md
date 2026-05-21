@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-20
-**Tables:** 135 total · **Columns:** 2107
+**Tables:** 136 total · **Columns:** 2129
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -531,7 +531,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_53 tables._
+_54 tables._
 
 ## `acc_accounts`
 
@@ -1312,6 +1312,33 @@ _53 tables._
 | `created_by` | int unsigned | MUL | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_account_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_account_id` | int unsigned | UNI | YES |
+| `qbo_account_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_name` | varchar(255) |  | YES |
+| `qbo_fully_qualified_name` | varchar(500) |  | YES |
+| `qbo_account_type` | varchar(50) | MUL | YES |
+| `qbo_account_subtype` | varchar(100) |  | YES |
+| `qbo_classification` | varchar(50) |  | YES |
+| `qbo_account_number` | varchar(50) |  | YES |
+| `qbo_active` | tinyint(1) |  | YES |
+| `qbo_current_balance` | decimal(15,2) |  | YES |
+| `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
+| `match_confidence` | enum('exact_code','exact_name','high','medium','low','manual') |  | YES |
+| `is_critical` | tinyint(1) | MUL | NO |
+| `critical_reason` | varchar(255) |  | YES |
+| `match_notes` | text |  | YES |
+| `last_synced_at` | datetime | MUL | YES |
+| `last_pull_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `created_by_user_id` | int unsigned | MUL | YES |
 
 ## `acc_qbo_customer_map`
 

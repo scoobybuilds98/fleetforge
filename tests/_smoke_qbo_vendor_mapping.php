@@ -355,11 +355,10 @@ if (empty($c10Errors)) {
     $failures[] = 'C10';
 }
 
-// ── C11: nav has 7 QuickBooks children incl. Vendors ───────
+// ── C11: nav has 8 QuickBooks children incl. Vendors ───────
+// Grew 7→8 in S-QBO-8 (Accounts between Vendors and Settings).
 $c11Errors = [];
 $nav = require __DIR__ . '/../config/navigation.php';
-// Skip the separator (also labeled 'QuickBooks'); pick the entry
-// with non-empty children.
 $qbo = null;
 foreach ($nav as $group) {
     if (($group['label'] ?? '') === 'QuickBooks' && !empty($group['children'] ?? [])) {
@@ -372,19 +371,19 @@ if ($qbo === null) {
 } else {
     $children = $qbo['children'] ?? [];
     $labels = array_map(fn($c) => $c['label'] ?? '', $children);
-    if (count($children) !== 7) {
-        $c11Errors[] = 'expected 7 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
+    if (count($children) !== 8) {
+        $c11Errors[] = 'expected 8 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
     }
     if (!in_array('Vendors', $labels, true)) {
         $c11Errors[] = "no 'Vendors' child in QuickBooks nav";
     }
-    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Settings'];
+    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Settings'];
     if ($labels !== $expectedOrder) {
         $c11Errors[] = 'nav order mismatch — got [' . implode(', ', $labels) . '], expected [' . implode(', ', $expectedOrder) . ']';
     }
 }
 if (empty($c11Errors)) {
-    echo "PASS C11 nav has 7 QuickBooks children with Vendors in expected position\n";
+    echo "PASS C11 nav has 8 QuickBooks children with Vendors in expected position\n";
     $pass++;
 } else {
     echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";

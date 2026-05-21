@@ -276,6 +276,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Accounts',
+                'icon'   => 'book-open',
+                'url'    => '/quickbooks/accounts',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',
