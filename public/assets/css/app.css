@@ -5752,14 +5752,27 @@ dl.detail-grid dd {
     }
     .sidebar .sidebar-brand-name,
     .sidebar .nav-item-label,
-    .sidebar .nav-section-label,
     .sidebar .nav-group-arrow,
-    .sidebar .sidebar-user-info,
-    .sidebar .nav-children {
+    .sidebar .sidebar-user-info {
         opacity: 0;
         pointer-events: none;
         max-width: 0;
         visibility: hidden;
+    }
+
+    /* Section separators + nav-children must fully collapse out of flow
+       in tablet icon-rail mode. opacity/visibility/max-width alone leaves
+       block-level height behind: ~34px per .nav-section-label, plus the
+       full natural height of any .nav-group.is-open > .nav-children
+       (~40px × N children) since base CSS forces display:flex on the
+       open group. Mirrors the desktop collapsed rule at line ~988.
+       Specificity note: `.nav-group .nav-children` (0,3,0) is needed to
+       match `.nav-group.is-open > .nav-children` (0,3,0) so source order
+       wins — `.sidebar .nav-children` alone (0,2,0) loses to the open
+       rule defined earlier in the file. */
+    .sidebar .nav-section-label,
+    .sidebar .nav-group .nav-children {
+        display: none;
     }
     /* S-SIDEBAR-COLLAPSED-BADGE-DOT — pin notification badges to the
        top-right of the nav item as a small iOS-style dot. Mirrors the
