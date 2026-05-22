@@ -213,7 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -229,8 +229,12 @@ $primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'n
 // S-INTEL-TAB: 'ai' removed from Integrations — it now renders in the
 // dedicated Intelligence tab. Integrations keeps the credential-management
 // surfaces (GPS, SMTP, S3/SES, MFA).
-$sensitiveGroups   = ['gps', 'email', 'storage', 'aws', 'security'];
-$intelligenceGroups = ['ai'];
+// S-INTEL-V2 follow-up: 'slack' + 'twilio' added to $intelligenceGroups
+// because they're delivery infrastructure for the briefing's multi-
+// channel fan-out (D-INTEL-V2-6). Rendered in the Intelligence tab's
+// new "Delivery Channels" card.
+$sensitiveGroups    = ['gps', 'email', 'storage', 'aws', 'security'];
+$intelligenceGroups = ['ai', 'slack', 'twilio'];
 
 // INT-1: secret keys are rendered as masked password fields.
 // Save handler skips writes when the masked placeholder comes back.
@@ -242,6 +246,10 @@ $secretKeys = [
     'email.smtp_pass',
     'aws.access_key_id',
     'aws.secret_access_key',
+    // S-INTEL-V2 Phase D: webhook URLs + Twilio creds rendered masked.
+    'slack.webhook_url',
+    'twilio.account_sid',
+    'twilio.auth_token',
 ];
 
 $groupLabels = [
@@ -259,6 +267,8 @@ $groupLabels = [
     'storage'       => 'Storage Driver',
     'aws'           => 'AWS Credentials (S3 + SES)',
     'security'      => 'Security / MFA',
+    'slack'         => 'Slack Delivery',
+    'twilio'        => 'Twilio SMS Delivery',
 ];
 
 // INT-1: helper to mask a secret value, showing only the last 4 chars.
@@ -671,7 +681,17 @@ if (!empty($grouped['currency'])) {
 </div>
 <?php endforeach; ?>
 
-<?php if (empty($grouped['gps']) && empty($grouped['ai'])): ?>
+<?php
+// S-INTEL-V2 follow-up: empty-state check now spans the actual
+// $sensitiveGroups list (AI moved to Intelligence tab; slack/twilio
+// also live there as delivery infrastructure). The empty-state card
+// shows only when ALL configured Integrations groups are empty.
+$intHasAny = false;
+foreach ($sensitiveGroups as $_ig) {
+    if (!empty($grouped[$_ig] ?? [])) { $intHasAny = true; break; }
+}
+?>
+<?php if (!$intHasAny): ?>
 <div class="card">
     <div class="card-body" style="text-align:center;padding:40px;color:var(--text-muted);">
         No integration settings configured.
@@ -1292,6 +1312,78 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
     </div>
 </div>
 <?php endif; ?>
+
+<!-- ── 4b. Delivery Channels (S-INTEL-V2 Phase D follow-up) ────────── -->
+<?php
+// Render slack + twilio settings via the same typed render loop as
+// AI Core. Each group becomes its own card. Operator can wire up
+// Slack webhook + Twilio creds here; users opt into channels via the
+// Recipient Management table below.
+$deliveryGroups = ['slack', 'twilio'];
+foreach ($deliveryGroups as $delGrp):
+    if (empty($grouped[$delGrp] ?? [])) continue;
+?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        <?= e($groupLabels[$delGrp] ?? ucfirst($delGrp)) ?>
+        <span class="badge badge-warning" style="font-size:0.7rem;">Sensitive</span>
+        <span class="badge badge-info" style="font-size:0.7rem;">Multi-channel briefing</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+            <?= $delGrp === 'slack'
+                ? 'Configure Slack incoming webhook for briefing delivery. When enabled, users with <code>slack</code> in their channel list receive a digest summary in your workspace.'
+                : 'Configure Twilio for SMS briefing delivery. Each user needs a valid E.164 phone (set via the recipient table) and <code>sms</code> in their channel list.' ?>
+        </p>
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="<?= e($delGrp) ?>">
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
+            <?php foreach ($grouped[$delGrp] as $setting):
+                $key      = $setting['key'];
+                $val      = $setting['value'] ?? '';
+                $vtype    = $setting['value_type'];
+                $label    = $setting['label'] ?? $key;
+                $desc     = $setting['description'] ?? null;
+                $isSecret = in_array($key, $secretKeys, true);
+                $display  = $isSecret ? $maskSecret((string) $val) : (string) $val;
+            ?>
+            <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
+                <?php if ($vtype === 'boolean'): ?>
+                <div class="form-check">
+                    <input type="checkbox" id="<?= e($key) ?>" name="<?= e($key) ?>" value="1"
+                           <?= $val === '1' ? 'checked' : '' ?> <?= !$canEdit ? 'disabled' : '' ?>>
+                    <label for="<?= e($key) ?>" style="margin-left:6px;font-size:0.875rem;">Enabled</label>
+                </div>
+                <?php elseif ($isSecret): ?>
+                <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control font-mono"
+                       value="<?= e($display) ?>" maxlength="500"
+                       autocomplete="off" spellcheck="false"
+                       placeholder="Paste new value to replace stored"
+                       <?= !$canEdit ? 'readonly' : '' ?>
+                       onfocus="if(this.value.startsWith('•')) this.select();">
+                <?php else: ?>
+                <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                       value="<?= e($val) ?>" maxlength="500" autocomplete="off" <?= !$canEdit ? 'readonly' : '' ?>>
+                <?php endif; ?>
+                <?php if ($desc): ?>
+                <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;"><?= e($desc) ?></p>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+            </div>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save <?= e($groupLabels[$delGrp] ?? ucfirst($delGrp)) ?> Settings</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+<?php endforeach; ?>
 
 <!-- ── 5. Anomaly Scan ─────────────────────────────────────────────── -->
 <div class="card" style="margin-bottom:20px;">
