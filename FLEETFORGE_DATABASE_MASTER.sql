@@ -3406,6 +3406,7 @@ CREATE TABLE `users` (
   `mfa_verified_until` datetime DEFAULT NULL,
   `permissions_updated_at` timestamp NULL DEFAULT NULL,
   `morning_briefing_opt_in` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'D-INTEL-1: user-level subscription to the AI morning briefing email (cron/notification_digest.php). Cron gates on this column AFTER the role-level allow list. Default 0 means new users opt-in explicitly; existing super_admin/manager/accountant users backfilled to 1 in the same migration to preserve current behavior.',
+  `briefing_snoozed_until` datetime DEFAULT NULL COMMENT 'D-INTEL-V2-5: vacation-style temporary unsubscribe from morning briefing. NULL = no snooze. snoozed_until > NOW() means cron skips this user. Once snoozed_until <= NOW(), cron treats as NULL (auto-resume).',
   `created_by` int unsigned DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

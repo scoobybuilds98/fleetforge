@@ -183,12 +183,18 @@ function run_morning_digest_emails(): array
     // morning_briefing_opt_in column added by S-INTEL-TAB migration;
     // existing super_admin/manager/accountant users were backfilled
     // to 1 in the same migration.
+    //
+    // ── Gate 3b (S-INTEL-V2 / D-INTEL-V2-5): snooze. ─────────────
+    // Users with briefing_snoozed_until > NOW() are temporarily
+    // unsubscribed (vacation mode). Expired snooze auto-resumes
+    // (treated as if NULL by the comparison).
     $recipients = db_select(
         "SELECT u.id, u.name, u.email, ur.slug
          FROM users u
          JOIN user_roles ur ON ur.id = u.role_id
          WHERE u.deleted_at IS NULL AND u.status = 'active'
            AND u.morning_briefing_opt_in = 1
+           AND (u.briefing_snoozed_until IS NULL OR u.briefing_snoozed_until <= NOW())
            AND ur.slug IN ({$placeholders})",
         $roles
     );

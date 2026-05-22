@@ -479,6 +479,7 @@ _12 tables._
 | `mfa_verified_until` | datetime |  | YES |
 | `permissions_updated_at` | timestamp |  | YES |
 | `morning_briefing_opt_in` | tinyint(1) |  | NO |
+| `briefing_snoozed_until` | datetime |  | YES |
 | `created_by` | int unsigned | MUL | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |

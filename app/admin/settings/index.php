@@ -151,6 +151,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                         // the rollout).
                         $rolesArr = is_array($raw) ? array_values(array_filter(array_map('strval', $raw))) : [];
                         $val = json_encode($rolesArr, JSON_UNESCAPED_SLASHES);
+                    } elseif ($key === 'ai.budget_alert_recipients') {
+                        // S-INTEL-V2 F12: same shape as briefing recipient roles.
+                        $rolesArr = is_array($raw) ? array_values(array_filter(array_map('strval', $raw))) : [];
+                        $val = json_encode($rolesArr, JSON_UNESCAPED_SLASHES);
+                    } elseif ($key === 'ai.budget_alert_thresholds') {
+                        // S-INTEL-V2 F12: JSON array of fractions. Parse the
+                        // text input, validate each entry is numeric 0..1,
+                        // re-encode canonically. Bad input falls back to the
+                        // default to avoid silently saving an unparseable
+                        // value that would break the cron.
+                        $parsed = is_string($raw) ? json_decode($raw, true) : null;
+                        if (is_array($parsed)) {
+                            $clean = [];
+                            foreach ($parsed as $t) {
+                                if (is_numeric($t)) {
+                                    $f = (float) $t;
+                                    if ($f > 0 && $f <= 2.0) $clean[] = $f;
+                                }
+                            }
+                            sort($clean);
+                            $val = json_encode($clean, JSON_UNESCAPED_SLASHES);
+                        } else {
+                            $val = '[0.5,0.8,1.0]';
+                        }
                     } else {
                         $val = $raw !== null ? (string)$raw : '';
                     }
@@ -786,9 +810,9 @@ if (is_array($intelRolesDecoded)) {
 }
 
 // Recipients table — every active user, with their current opt_in state +
-// role for super_admin's row-level management.
+// snooze state (S-INTEL-V2 F8) + role for super_admin's row-level management.
 $intelRecipients = db_select(
-    "SELECT u.id, u.name, u.email, u.morning_briefing_opt_in, ur.slug AS role_slug
+    "SELECT u.id, u.name, u.email, u.morning_briefing_opt_in, u.briefing_snoozed_until, ur.slug AS role_slug
        FROM users u
        JOIN user_roles ur ON ur.id = u.role_id
       WHERE u.deleted_at IS NULL AND u.status = 'active'
@@ -1035,24 +1059,34 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;padding-top:16px;border-top:1px solid var(--border-default);">
 
             <div>
-                <h3 class="h6" style="margin:0 0 8px;">Test send</h3>
+                <h3 class="h6" style="margin:0 0 8px;">Test send + manual generation</h3>
                 <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">
-                    Sends today's cached briefing to your email (<?= e((string) (current_user()['email'] ?? '?')) ?>).
-                    Does NOT call Claude — uses the brief already in <code>report_cache</code>
-                    (D-INTEL-3). If no cache exists yet, you'll get a clear error.
+                    <strong>Test send</strong> uses today's cached brief (free). <strong>Generate now</strong> calls Claude (~3000 tokens) and refreshes the cache.
                 </p>
-                <button class="btn btn-secondary btn-sm" @click="sendTest()" :disabled="testSending || !history.cache_active">
-                    <span x-show="!testSending">Send me a test briefing now</span>
-                    <span x-show="testSending" x-cloak>Sending&hellip;</span>
-                </button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-secondary btn-sm" @click="sendTest()" :disabled="testSending || !history.cache_active">
+                        <span x-show="!testSending">Test send (cached)</span>
+                        <span x-show="testSending" x-cloak>Sending&hellip;</span>
+                    </button>
+                    <button class="btn btn-primary btn-sm" @click="generateNow()" :disabled="generating"
+                            title="Calls Claude API now — costs ~3000 tokens">
+                        <span x-show="!generating">Generate brief now</span>
+                        <span x-show="generating" x-cloak>Generating (calling Claude)&hellip;</span>
+                    </button>
+                </div>
                 <div x-show="testFlash.message" x-cloak
                      :class="testFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
                      style="margin-top:10px;font-size:0.8125rem;"
                      x-text="testFlash.message"></div>
+                <div x-show="genFlash.message" x-cloak
+                     :class="genFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
+                     style="margin-top:10px;font-size:0.8125rem;"
+                     x-html="genFlash.message"></div>
             </div>
 
             <div>
                 <h3 class="h6" style="margin:0 0 8px;">Recent runs (last 10)</h3>
+                <p style="font-size:0.72rem;color:var(--text-muted);margin:0 0 6px;">Click a row to see what was sent.</p>
                 <template x-if="history.runs && history.runs.length === 0">
                     <p style="font-size:0.8125rem;color:var(--text-muted);margin:0;">No dispatches yet.</p>
                 </template>
@@ -1063,8 +1097,8 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                         </thead>
                         <tbody>
                             <template x-for="r in history.runs" :key="r.run_date">
-                                <tr>
-                                    <td x-text="r.run_date"></td>
+                                <tr style="cursor:pointer;" @click="openContentModal(r.run_date)">
+                                    <td x-text="r.run_date" style="color:#7c3aed;text-decoration:underline;"></td>
                                     <td align="right" x-text="r.sent"></td>
                                     <td align="right" :style="r.failed > 0 ? 'color:#dc2626;' : ''" x-text="r.failed"></td>
                                     <td align="right" x-text="r.total"></td>
@@ -1073,6 +1107,63 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                         </tbody>
                     </table>
                 </template>
+            </div>
+        </div>
+
+        <!-- Content viewer modal (F3) -->
+        <div x-show="contentModal.open" x-cloak class="modal-overlay"
+             style="background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);"
+             @click.self="contentModal.open = false">
+            <div class="modal" style="max-width:720px;width:90%;">
+                <div class="modal-header">
+                    <h3 class="h5" style="margin:0;">Brief content — <span x-text="contentModal.date"></span></h3>
+                    <button class="modal-close-btn" @click="contentModal.open = false" aria-label="Close">&times;</button>
+                </div>
+                <div class="modal-body" style="max-height:60vh;overflow-y:auto;">
+                    <template x-if="contentModal.loading">
+                        <p style="font-size:0.8125rem;color:var(--text-muted);">Loading&hellip;</p>
+                    </template>
+                    <template x-if="!contentModal.loading && contentModal.error">
+                        <div class="alert alert-danger" x-text="contentModal.error"></div>
+                    </template>
+                    <template x-if="!contentModal.loading && contentModal.data">
+                        <div>
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;">
+                                Generated: <span x-text="contentModal.data.generated_at"></span>
+                                <template x-if="contentModal.data.manual">
+                                    <span class="badge badge-warning" style="margin-left:6px;">manual</span>
+                                </template>
+                                <template x-if="contentModal.data.model">
+                                    <span style="margin-left:8px;">Model: <code x-text="contentModal.data.model"></code></span>
+                                </template>
+                            </div>
+                            <h4 class="h6" style="margin:0 0 6px;">AI brief text</h4>
+                            <div style="background:#f7f7f6;padding:14px;border-radius:6px;font-size:0.8125rem;line-height:1.6;white-space:pre-wrap;" x-text="contentModal.data.brief"></div>
+
+                            <h4 class="h6" style="margin:14px 0 6px;">Recipients (<span x-text="contentModal.data.recipient_count"></span>)</h4>
+                            <template x-if="contentModal.data.recipients.length === 0">
+                                <p style="font-size:0.78rem;color:var(--text-muted);">No dispatch log on this date.</p>
+                            </template>
+                            <template x-if="contentModal.data.recipients.length > 0">
+                                <table class="table table-sm" style="font-size:0.78rem;margin:0;">
+                                    <thead><tr><th align="left">Email</th><th align="left">Status</th><th align="left">Sent at</th></tr></thead>
+                                    <tbody>
+                                        <template x-for="rcp in contentModal.data.recipients" :key="rcp.recipient + (rcp.sent_at||'')">
+                                            <tr>
+                                                <td x-text="rcp.recipient"></td>
+                                                <td :style="rcp.status === 'sent' ? 'color:#16a34a;' : 'color:#dc2626;'" x-text="rcp.status"></td>
+                                                <td x-text="rcp.sent_at || '—'"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+                <div class="modal-footer" style="display:flex;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--border-color);">
+                    <button class="btn btn-outline" @click="contentModal.open = false">Close</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1099,14 +1190,17 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                         <th align="left">User</th>
                         <th align="left">Email</th>
                         <th align="left">Role</th>
-                        <th align="center" style="width:120px;">Opt-in</th>
+                        <th align="center" style="width:80px;">Opt-in</th>
+                        <th align="left" style="width:220px;">Snooze</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($intelRecipients as $u):
                         $inAllowList = isset($intelRolesSet[$u['role_slug']]);
+                        $snoozeRaw = $u['briefing_snoozed_until'];
+                        $snoozeActive = $snoozeRaw !== null && strtotime((string) $snoozeRaw) > time();
                     ?>
-                    <tr :class="(<?= (int) $u['morning_briefing_opt_in'] ?> === 1 && <?= $inAllowList ? '1' : '0' ?> === 1) ? '' : ''">
+                    <tr>
                         <td><?= e((string) $u['name']) ?></td>
                         <td class="text-muted" style="font-size:0.78rem;"><?= e((string) $u['email']) ?></td>
                         <td>
@@ -1120,6 +1214,16 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                                        <?= (int) $u['morning_briefing_opt_in'] === 1 ? 'checked' : '' ?>
                                        @change="toggleOptIn(<?= (int) $u['id'] ?>, $event.target.checked ? 1 : 0)">
                             </label>
+                        </td>
+                        <td>
+                            <?php if ($snoozeActive): ?>
+                                <span class="badge badge-warning" style="font-size:0.7rem;">until <?= e((string) $snoozeRaw) ?></span>
+                                <button class="btn btn-sm btn-outline" style="margin-left:4px;padding:2px 6px;font-size:0.7rem;" @click="setSnooze(<?= (int) $u['id'] ?>, null)">Clear</button>
+                            <?php else: ?>
+                                <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;" @click="setSnooze(<?= (int) $u['id'] ?>, '1d')">Snooze 1d</button>
+                                <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;margin-left:2px;" @click="setSnooze(<?= (int) $u['id'] ?>, '1w')">1w</button>
+                                <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;margin-left:2px;" @click="setSnoozeCustom(<?= (int) $u['id'] ?>)">Custom…</button>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -1187,7 +1291,10 @@ function FF_BriefingControl() {
     return {
         history: { runs: [], current_recipient_count: 0, briefing_enabled: false, cache_active: false, last_brief_generated_at: null },
         testSending: false,
+        generating: false,
         testFlash: { message: '', type: '' },
+        genFlash: { message: '', type: '' },
+        contentModal: { open: false, loading: false, date: '', data: null, error: '' },
 
         async loadHistory() {
             try {
@@ -1218,6 +1325,51 @@ function FF_BriefingControl() {
             }
         },
 
+        async generateNow() {
+            if (!confirm('Generate a fresh brief now? This calls Claude (~3000 tokens, ~$0.05). The new brief replaces today\'s cache.')) return;
+            this.generating = true;
+            this.genFlash = { message: '', type: '' };
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/generate_brief_now.php'), { force: 1 });
+                if (j.success) {
+                    const d = j.data;
+                    if (d.cache_hit) {
+                        this.genFlash = { message: 'Cache hit (used recent brief). ' + d.message, type: 'success' };
+                    } else {
+                        this.genFlash = {
+                            message: '<strong>Brief generated</strong> — tokens=' + d.tokens_used.toLocaleString() + ', cost=$' + d.cost_usd.toFixed(4) + ', latency=' + d.latency_ms + 'ms.<br><div style="background:#f7f7f6;padding:10px;border-radius:4px;margin-top:6px;font-size:0.78rem;white-space:pre-wrap;">' + this.escapeHtml(d.brief_preview) + '&hellip;</div>',
+                            type: 'success'
+                        };
+                    }
+                    await this.loadHistory();
+                } else {
+                    this.genFlash = { message: (j.error && j.error.message) || 'Generation failed', type: 'error' };
+                }
+            } catch (e) {
+                this.genFlash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.generating = false;
+            }
+        },
+
+        async openContentModal(runDate) {
+            this.contentModal = { open: true, loading: true, date: runDate, data: null, error: '' };
+            try {
+                const j = await FF_Api.get(FF_Api.url('/api/v1/admin/intelligence/brief_content.php?date=' + encodeURIComponent(runDate)));
+                if (j.success) {
+                    this.contentModal.data = j.data;
+                } else {
+                    this.contentModal.error = (j.error && j.error.message) || 'Failed to load';
+                }
+            } catch (e) {
+                this.contentModal.error = e.message || 'Network error';
+            } finally {
+                this.contentModal.loading = false;
+            }
+        },
+
+        escapeHtml(s) { return String(s||'').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); },
+
         formatTs(ts) {
             if (!ts) return '—';
             try { return new Date(String(ts).replace(' ', 'T')).toLocaleString(); } catch { return ts; }
@@ -1242,6 +1394,338 @@ function FF_RecipientManager() {
                 this.optFlash = { message: e.message || 'Network error', type: 'error' };
             }
         },
+
+        async setSnooze(userId, snoozeValue) {
+            this.optFlash = { message: '', type: '' };
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/set_snooze.php'), { user_id: userId, snoozed_until: snoozeValue });
+                if (j.success) {
+                    this.optFlash = { message: j.data.cleared ? 'Snooze cleared. Reloading…' : 'Snoozed until ' + j.data.snoozed_until + '. Reloading…', type: 'success' };
+                    setTimeout(() => window.location.reload(), 800);
+                } else {
+                    this.optFlash = { message: (j.error && j.error.message) || 'Snooze failed', type: 'error' };
+                }
+            } catch (e) {
+                this.optFlash = { message: e.message || 'Network error', type: 'error' };
+            }
+        },
+
+        async setSnoozeCustom(userId) {
+            const input = prompt('Snooze until (YYYY-MM-DD, or "until_monday", or "1d"/"1w"):');
+            if (!input) return;
+            await this.setSnooze(userId, input);
+        },
+    };
+}
+</script>
+
+<!-- ── 6. Token Analytics (S-INTEL-V2 F1) ──────────────────────────── -->
+<div class="card" style="margin-bottom:20px;" x-data="FF_TokenAnalytics()" x-init="load()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Token Analytics
+        <span class="badge badge-info" style="font-size:0.7rem;">Cost &amp; usage</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+            Real-time Claude API token consumption + cost. Budget threshold alerts (configured below)
+            email super_admins when usage crosses configured fractions of <code>ai.daily_token_limit</code>.
+        </p>
+
+        <!-- Today's usage bar -->
+        <div style="margin-bottom:18px;">
+            <div style="display:flex;justify-content:space-between;font-size:0.8125rem;margin-bottom:4px;">
+                <span><strong>Today's usage</strong></span>
+                <span class="font-mono">
+                    <span x-text="(snap.today.tokens || 0).toLocaleString()"></span>
+                    <span style="color:var(--text-muted);"> / <span x-text="(snap.limit_tokens || 0).toLocaleString()"></span> tokens</span>
+                    <span style="margin-left:8px;font-weight:600;"
+                          :style="(snap.percent_used_today * 100) >= 100 ? 'color:#dc2626;' : (snap.percent_used_today * 100) >= 80 ? 'color:#d97706;' : 'color:#16a34a;'"
+                          x-text="(snap.percent_used_today * 100).toFixed(1) + '%'"></span>
+                </span>
+            </div>
+            <div style="height:8px;background:#eee;border-radius:4px;overflow:hidden;">
+                <div :style="'width:' + Math.min(100, snap.percent_used_today * 100) + '%;height:100%;background:' + ((snap.percent_used_today*100)>=100?'#dc2626':(snap.percent_used_today*100)>=80?'#d97706':'#16a34a') + ';transition:width 0.3s;'"></div>
+            </div>
+        </div>
+
+        <!-- 4-tile rollups -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-bottom:18px;">
+            <template x-for="row in [
+                {label:'Today',     d:snap.today},
+                {label:'Month',     d:snap.mtd},
+                {label:'Last 7d',   d:snap.last_7d},
+                {label:'Last 30d',  d:snap.last_30d}
+            ]" :key="row.label">
+                <div style="padding:12px;border:1px solid var(--border-default);border-radius:6px;">
+                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;" x-text="row.label"></div>
+                    <div class="font-mono" style="font-size:1.1rem;font-weight:600;margin:4px 0;" x-text="(row.d.tokens||0).toLocaleString()"></div>
+                    <div style="font-size:0.72rem;color:var(--text-muted);">
+                        <span x-text="row.d.requests + ' req'"></span> · <span x-text="'$' + (row.d.cost_usd||0).toFixed(4)"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Per-feature today -->
+        <template x-if="snap.by_feature_today && snap.by_feature_today.length > 0">
+            <div style="margin-bottom:18px;">
+                <h3 class="h6" style="margin:0 0 8px;">Today by feature</h3>
+                <table class="table table-sm" style="font-size:0.8125rem;margin:0;">
+                    <thead><tr><th align="left">Feature</th><th align="right">Tokens</th><th align="right">Requests</th></tr></thead>
+                    <tbody>
+                        <template x-for="f in snap.by_feature_today" :key="f.query_type">
+                            <tr>
+                                <td><code x-text="f.query_type"></code></td>
+                                <td align="right" class="font-mono" x-text="f.tokens.toLocaleString()"></td>
+                                <td align="right" class="font-mono" x-text="f.requests"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+        <template x-if="snap.by_feature_today && snap.by_feature_today.length === 0">
+            <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">No AI activity today yet.</p>
+        </template>
+
+        <!-- 7d chart (CSS bar chart, no external library) -->
+        <template x-if="snap.daily_7d_chart && snap.daily_7d_chart.length > 0">
+            <div>
+                <h3 class="h6" style="margin:0 0 8px;">Last 7 days</h3>
+                <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;align-items:end;height:120px;">
+                    <template x-for="d in snap.daily_7d_chart" :key="d.date">
+                        <div style="display:flex;flex-direction:column;align-items:center;justify-content:end;">
+                            <div :title="d.date + ': ' + d.tokens.toLocaleString() + ' tokens'"
+                                 :style="'width:100%;background:#7c3aed;border-radius:4px 4px 0 0;height:' + (maxDailyTokens > 0 ? Math.max(2, (d.tokens / maxDailyTokens) * 100) : 0) + '%;'"></div>
+                            <div style="font-size:0.65rem;color:var(--text-muted);margin-top:4px;text-align:center;" x-text="d.date.slice(5)"></div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+
+<!-- ── 7. AI Request Log (S-INTEL-V2 F10) ──────────────────────────── -->
+<div class="card" style="margin-bottom:20px;" x-data="FF_RequestLog()" x-init="load()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        AI Request Log
+        <span class="badge badge-info" style="font-size:0.7rem;">ai_query_log</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">
+            Every Claude API call FleetForge made. Filter by feature or user; useful for debugging
+            cost spikes or slow responses.
+        </p>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:12px;">
+            <div>
+                <label class="form-label">Query type</label>
+                <select class="form-select form-select-sm" x-model="filters.query_type" @change="page=1; load()">
+                    <option value="">All</option>
+                    <template x-for="t in queryTypes" :key="t"><option :value="t" x-text="t"></option></template>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Since</label>
+                <input type="date" class="form-control form-control-sm" x-model="filters.since" @change="page=1; load()">
+            </div>
+            <div style="display:flex;align-items:flex-end;">
+                <button class="btn btn-secondary btn-sm" @click="filters = {query_type:'', since:''}; page=1; load()">Reset</button>
+            </div>
+        </div>
+
+        <template x-if="rows.length === 0">
+            <p style="font-size:0.8125rem;color:var(--text-muted);">No requests match the filter.</p>
+        </template>
+
+        <template x-if="rows.length > 0">
+            <div class="table-wrapper">
+                <table class="table table-sm" style="font-size:0.8125rem;margin:0;">
+                    <thead><tr>
+                        <th align="left">When</th>
+                        <th align="left">Type</th>
+                        <th align="left">User</th>
+                        <th align="right">Prompt</th>
+                        <th align="right">Completion</th>
+                        <th align="right">Total</th>
+                        <th align="right">Cost</th>
+                        <th align="right">Latency</th>
+                        <th align="center">Cached</th>
+                    </tr></thead>
+                    <tbody>
+                        <template x-for="r in rows" :key="r.id">
+                            <tr>
+                                <td x-text="formatTs(r.created_at)"></td>
+                                <td><code x-text="r.query_type"></code></td>
+                                <td x-text="r.user_name || (r.user_id ? '#' + r.user_id : 'system')"></td>
+                                <td align="right" class="font-mono" x-text="(r.prompt_tokens||0).toLocaleString()"></td>
+                                <td align="right" class="font-mono" x-text="(r.completion_tokens||0).toLocaleString()"></td>
+                                <td align="right" class="font-mono" x-text="(r.total_tokens||0).toLocaleString()"></td>
+                                <td align="right" class="font-mono" x-text="'$' + parseFloat(r.cost_usd || 0).toFixed(4)"></td>
+                                <td align="right" class="font-mono" x-text="(r.latency_ms||0) + 'ms'"></td>
+                                <td align="center" x-text="r.was_cached == 1 ? '✓' : ''"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+
+        <template x-if="totalPages > 1">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:0.8125rem;">
+                <button class="btn btn-sm btn-outline" :disabled="page <= 1" @click="page--; load()">Prev</button>
+                <span>Page <span x-text="page"></span> of <span x-text="totalPages"></span> · <span x-text="total + ' rows'"></span></span>
+                <button class="btn btn-sm btn-outline" :disabled="page >= totalPages" @click="page++; load()">Next</button>
+            </div>
+        </template>
+    </div>
+</div>
+
+<!-- ── 8. Recent Activity (S-INTEL-V2 F11) ─────────────────────────── -->
+<div class="card" style="margin-bottom:20px;" x-data="FF_AuditFeed()" x-init="load()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Recent Intelligence Activity
+        <span class="badge badge-info" style="font-size:0.7rem;">audit_log</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">
+            Recent settings changes, test sends, opt-in toggles, and cron run summaries scoped to AI / briefing infrastructure.
+        </p>
+        <template x-if="rows.length === 0">
+            <p style="font-size:0.8125rem;color:var(--text-muted);">No recent activity.</p>
+        </template>
+        <template x-if="rows.length > 0">
+            <div class="table-wrapper">
+                <table class="table table-sm" style="font-size:0.8125rem;margin:0;">
+                    <thead><tr>
+                        <th align="left">When</th>
+                        <th align="left">User</th>
+                        <th align="left">Action</th>
+                        <th align="left">Entity</th>
+                        <th align="left">Notes</th>
+                    </tr></thead>
+                    <tbody>
+                        <template x-for="r in rows" :key="r.id">
+                            <tr>
+                                <td x-text="formatTs(r.created_at)"></td>
+                                <td x-text="r.user_name"></td>
+                                <td><code x-text="r.action"></code></td>
+                                <td><span class="text-muted" x-text="r.entity_type"></span> · <span x-text="r.entity_label"></span></td>
+                                <td style="color:var(--text-muted);" x-text="r.notes ? (r.notes.length > 80 ? r.notes.slice(0,77)+'…' : r.notes) : ''"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+    </div>
+</div>
+
+<!-- ── 9. Budget Alert Settings (S-INTEL-V2 F12) ───────────────────── -->
+<?php if ($canEdit): ?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Budget Alert Configuration
+        <span class="badge badge-warning" style="font-size:0.7rem;">Email alerts</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+            Configure when the system emails super_admins about daily token consumption. Defaults to alert at 50%, 80%, and 100% of <code>ai.daily_token_limit</code>.
+            Alerts dedup per threshold per day.
+        </p>
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="ai">
+
+            <?php
+            $thresholdsJson = (string) settings_get('ai.budget_alert_thresholds', '[0.5,0.8,1.0]');
+            $alertRolesJson = (string) settings_get('ai.budget_alert_recipients', '["super_admin"]');
+            $alertRolesDecoded = json_decode($alertRolesJson, true);
+            $alertRolesSet = is_array($alertRolesDecoded) ? array_flip($alertRolesDecoded) : [];
+            ?>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label" for="ai.budget_alert_thresholds">Alert thresholds (JSON array of 0..1 fractions)</label>
+                    <input type="text" id="ai.budget_alert_thresholds" name="ai.budget_alert_thresholds" class="form-control font-mono"
+                           value="<?= e($thresholdsJson) ?>" <?= !$canEdit ? 'readonly' : '' ?>>
+                    <p class="text-muted" style="font-size:0.72rem;margin:4px 0 0;">
+                        e.g. <code>[0.5,0.8,1.0]</code> alerts at 50%, 80%, 100%. <code>[]</code> disables alerts entirely.
+                    </p>
+                </div>
+
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label">Alert recipient roles</label>
+                    <div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--border-default);border-radius:6px;">
+                        <?php foreach ($intelRoles as $role): ?>
+                        <label class="form-check" style="margin:0;">
+                            <input type="checkbox"
+                                   name="ai.budget_alert_recipients[]"
+                                   value="<?= e($role['slug']) ?>"
+                                   <?= isset($alertRolesSet[$role['slug']]) ? 'checked' : '' ?>
+                                   <?= !$canEdit ? 'disabled' : '' ?>>
+                            <span style="margin-left:6px;font-size:0.875rem;"><?= e($role['name']) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:14px;margin-top:14px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save Alert Config</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<script>
+function FF_TokenAnalytics() {
+    return {
+        snap: { today:{tokens:0,requests:0,cost_usd:0}, mtd:{tokens:0,requests:0,cost_usd:0}, last_7d:{tokens:0,requests:0,cost_usd:0}, last_30d:{tokens:0,requests:0,cost_usd:0}, by_feature_today:[], daily_7d_chart:[], limit_tokens:0, percent_used_today:0 },
+        get maxDailyTokens() { return Math.max(1, ...(this.snap.daily_7d_chart || []).map(d => d.tokens)); },
+        async load() {
+            try {
+                const j = await FF_Api.get(FF_Api.url('/api/v1/admin/intelligence/token_analytics.php'));
+                if (j.success) this.snap = j.data;
+            } catch (e) { console.error('Token analytics load failed', e); }
+        },
+    };
+}
+function FF_RequestLog() {
+    return {
+        rows: [], queryTypes: [], total: 0, totalPages: 1, page: 1, pageSize: 25,
+        filters: { query_type: '', since: '' },
+        async load() {
+            try {
+                const params = new URLSearchParams({ page: String(this.page), page_size: String(this.pageSize) });
+                if (this.filters.query_type) params.set('query_type', this.filters.query_type);
+                if (this.filters.since)       params.set('since', this.filters.since);
+                const j = await FF_Api.get(FF_Api.url('/api/v1/admin/intelligence/ai_request_log.php?' + params.toString()));
+                if (j.success) {
+                    this.rows = j.data.rows;
+                    this.queryTypes = j.data.query_types;
+                    this.total = j.data.pagination.total;
+                    this.totalPages = j.data.pagination.total_pages;
+                }
+            } catch (e) { console.error('Request log load failed', e); }
+        },
+        formatTs(s) { if (!s) return '—'; try { return new Date(String(s).replace(' ','T')).toLocaleString(); } catch { return s; } },
+    };
+}
+function FF_AuditFeed() {
+    return {
+        rows: [],
+        async load() {
+            try {
+                const j = await FF_Api.get(FF_Api.url('/api/v1/admin/intelligence/briefing_audit_log.php?limit=25'));
+                if (j.success) this.rows = j.data.rows;
+            } catch (e) { console.error('Audit feed load failed', e); }
+        },
+        formatTs(s) { if (!s) return '—'; try { return new Date(String(s).replace(' ','T')).toLocaleString(); } catch { return s; } },
     };
 }
 </script>
