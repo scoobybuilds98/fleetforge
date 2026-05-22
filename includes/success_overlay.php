@@ -27,6 +27,39 @@ $overlaySubtitle = htmlspecialchars($overlaySubtitle ?? 'Redirecting…',  ENT_Q
 ?>
 
 <!-- ================================================================
+     SUBMITTING OVERLAY — Immediate "Saving…" feedback (S-CREATE-FEEDBACK)
+     Fires the instant submit() is called, before the API responds.
+     Shown when the host component's `submitting` is true AND
+     `showSuccessOverlay` is false (i.e. mid-flight, not yet succeeded).
+     Operator wanted clear visual feedback during the API wait so the
+     click doesn't feel like it did nothing.
+
+     Disappears the moment either:
+       (a) showSuccessOverlay = true → the truck animation below takes
+           over (success path)
+       (b) submitting = false (failure path; form re-enables for retry)
+     ================================================================ -->
+<template x-if="submitting && !showSuccessOverlay">
+    <div class="ff-saving-overlay"
+         style="position:fixed;inset:0;z-index:9998;background:rgba(10,15,28,0.55);
+                backdrop-filter:blur(2px);display:flex;align-items:center;
+                justify-content:center;animation:ff-fade-in 0.18s ease;">
+        <div style="background:white;padding:32px 56px;border-radius:14px;
+                    box-shadow:0 20px 60px rgba(0,0,0,0.45);text-align:center;
+                    min-width:280px;animation:ff-pop-in 0.22s ease-out;">
+            <!-- Spinner -->
+            <div class="ff-saving-spinner" style="margin:0 auto 18px;width:48px;height:48px;
+                        border:4px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;
+                        animation:ff-spin 0.85s linear infinite;"></div>
+            <div style="font-size:1.1rem;font-weight:600;color:#1c1c1a;">Saving…</div>
+            <div style="color:#64748b;font-size:0.875rem;margin-top:6px;">
+                <?= $overlaySubtitle ?: 'One moment please' ?>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- ================================================================
      SUCCESS OVERLAY — Full-screen truck animation
      Shared across all create pages. Triggered via Alpine
      showSuccessOverlay = true on the host component.
@@ -171,8 +204,22 @@ $overlaySubtitle = htmlspecialchars($overlaySubtitle ?? 'Redirecting…',  ENT_Q
     </div>
 </template>
 
-<!-- ── Success Overlay CSS (injected once per page) ─────────────── -->
+<!-- ── Success + Saving Overlay CSS (injected once per page) ────── -->
 <style>
+/* Saving overlay (S-CREATE-FEEDBACK) — instant feedback on submit. */
+@keyframes ff-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+@keyframes ff-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+@keyframes ff-pop-in {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
 /* Overlay fade-in */
 @keyframes ff-overlay-in {
     from { opacity: 0; }
