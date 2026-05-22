@@ -201,6 +201,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             $saveFlash = 'Settings saved successfully.';
         }
     }
+
+    // ── POST-redirect-GET (PRG) — preserve the active tab. ─────────
+    //
+    // Without a redirect, the form POSTs to /settings (Alpine tab
+    // state is client-only — the URL bar has no tab marker), and the
+    // page reloads on the default "general" tab even when the
+    // operator was editing Integrations / Intelligence. Operator
+    // reported this as confusing — submitting from any non-General
+    // tab snaps back to General.
+    //
+    // Fix: after the save handler runs, map the submitted
+    // $_POST['_group'] back to the tab that hosts it, then 303-redirect
+    // with ?tab=<tab>. The browser GETs the new URL, $defaultTab
+    // honors it, Alpine starts on the right tab. Flash messages move
+    // into $_SESSION so they survive the redirect. Standard PRG.
+    //
+    // Errors before form processing (CSRF fail, no _group) still fall
+    // through to the page render so the operator sees the message.
+    $postedGroup = isset($_POST['_group']) ? (string) $_POST['_group'] : '';
+    if ($postedGroup !== '') {
+        $groupToTab = [
+            // General tab (primary groups + currency)
+            'company'       => 'general',
+            'invoices'      => 'general',
+            'leases'        => 'general',
+            'maintenance'   => 'general',
+            'alerts'        => 'general',
+            'notifications' => 'general',
+            'yards'         => 'general',
+            'currency'      => 'general',
+            // Integrations tab (sensitive credential groups)
+            'gps'           => 'integrations',
+            'email'         => 'integrations',
+            'storage'       => 'integrations',
+            'aws'           => 'integrations',
+            'security'      => 'integrations',
+            // Intelligence tab (S-INTEL-V2 + delivery infra)
+            'ai'            => 'intelligence',
+            'slack'         => 'intelligence',
+            'twilio'        => 'intelligence',
+        ];
+        $redirectTab = $groupToTab[$postedGroup] ?? 'general';
+        if (!empty($saveFlash)) {
+            $_SESSION['settings_flash'] = $saveFlash;
+        }
+        if (!empty($saveError)) {
+            $_SESSION['settings_error'] = $saveError;
+        }
+        header('Location: ' . base_url('settings?tab=' . urlencode($redirectTab)), true, 303);
+        exit;
+    }
 }
 
 // ── Load all settings, grouped ───────────────────────────────────────────────
