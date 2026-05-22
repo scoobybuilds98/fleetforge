@@ -183,6 +183,9 @@
 <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
 <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
 
+<!-- S-ANIMATIONS-PACK: FF_CountUp + FF_Confetti + FF_StatusPulse + FF_ShakeForm helpers -->
+<script src="<?= asset_url('assets/js/ff-animations.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+
 <!-- Alpine.js v3.15.12 — self-hosted (S-PROD-1A-FIX-5); defer ensures it initialises after DOM is ready -->
 <script defer src="<?= asset_url('assets/vendor/alpinejs/cdn.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
 

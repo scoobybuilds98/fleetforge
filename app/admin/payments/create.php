@@ -486,6 +486,11 @@ function FF_CreatePayment() {
             try {
                 const res = await FF_Api.post('<?= base_url('api/v1/payments/create.php') ?>', payload);
                 if (res.success) {
+                    // S-ANIMATIONS-PACK Bundle B: celebrate payment received.
+                    // Confetti fires AS WELL AS the truck overlay so the moment
+                    // feels distinct from a generic "saved" — money in the
+                    // door deserves a little party.
+                    if (window.FF_Confetti) window.FF_Confetti.burst({ count: 130, duration: 2600 });
                     this.showSuccessOverlay = true;
                     const _newId = res.data.id;
                     setTimeout(() => {

@@ -107,6 +107,8 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
     <!-- Application stylesheet -->
     <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-ANIMATIONS-PACK: supplemental animation utilities (skeleton, status pulse, step indicator, confetti host, etc.) -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/animations.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
     <?php
     // ============================================================

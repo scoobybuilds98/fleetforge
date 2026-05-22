@@ -1221,6 +1221,12 @@ function FF_Dashboard() {
                 if (res.success) {
                     this.kpis       = res.data;
                     this.kpisLoaded = true;
+                    // S-ANIMATIONS-PACK Bundle A: count-up KPI numbers
+                    // once values are bound. Alpine renders the
+                    // textContent synchronously via x-text during the
+                    // next tick — run after $nextTick so we override
+                    // the rendered value with an animated count-up.
+                    this.$nextTick(() => this._animateKpiTiles());
                 } else {
                     this.kpiError = true;
                 }
@@ -1228,6 +1234,38 @@ function FF_Dashboard() {
                 this.kpiError = true;
                 console.error('[Dashboard] KPI fetch failed', e);
             }
+        },
+
+        /**
+         * S-ANIMATIONS-PACK Bundle A — animate KPI stat-value text
+         * from 0 to the loaded value. Reads each tile's final text,
+         * parses out the numeric portion + prefix + suffix, and uses
+         * FF_CountUp to tick from 0 to the value over ~900ms.
+         * Falls back gracefully if FF_CountUp isn't loaded.
+         */
+        _animateKpiTiles() {
+            if (typeof window.FF_CountUp === 'undefined') return;
+            document.querySelectorAll('#kpi-grid .stat-value').forEach(el => {
+                const txt = el.textContent.trim();
+                if (!txt || txt === '—') return;
+                // Parse: optional prefix ($), digits w/ commas + optional decimals, optional suffix (%, ' units', etc.)
+                const m = txt.match(/^(\D*)([\d,]+(?:\.\d+)?)(.*)$/);
+                if (!m) return;
+                const prefix = m[1];
+                const numStr = m[2];
+                const suffix = m[3];
+                const numeric = parseFloat(numStr.replace(/,/g, ''));
+                if (isNaN(numeric)) return;
+                const decimals = (numStr.split('.')[1] || '').length;
+                window.FF_CountUp.run(el, {
+                    to:       numeric,
+                    from:     0,
+                    duration: 900,
+                    prefix:   prefix,
+                    suffix:   suffix,
+                    decimals: decimals,
+                });
+            });
         },
 
         // ── Charts fetch ───────────────────────────────────────

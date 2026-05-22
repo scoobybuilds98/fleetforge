@@ -1,0 +1,363 @@
+/* ============================================================
+ * public/assets/css/animations.css
+ *
+ * S-ANIMATIONS-PACK — supplemental animation utilities for
+ * FleetForge. Imports automatically via header.php.
+ *
+ * Bundles:
+ *   A — Dashboard polish (skeleton loaders, hover-lift, chart entry)
+ *   B — Celebration (confetti particles use canvas, no CSS needed)
+ *   C — Lifecycle feedback (status badge pulse, sidebar slide,
+ *       notification bell pulse)
+ *   D — Form polish (step indicator, field success check, slide-in
+ *       errors, submit-button shake)
+ *
+ * Keep this file SCOPED — only animation-specific classes, prefixed
+ * `ff-anim-` so they never collide with app.css component classes.
+ * ============================================================ */
+
+/* -------------------------------------------------------------
+ * KEYFRAMES
+ * ------------------------------------------------------------- */
+
+/* Skeleton shimmer (Bundle A) */
+@keyframes ff-anim-shimmer {
+    0%   { background-position: -1200px 0; }
+    100% { background-position:  1200px 0; }
+}
+
+/* Card hover lift (Bundle A) */
+@keyframes ff-anim-fade-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Chart entry — bars + lines draw in (Bundle A) */
+@keyframes ff-anim-grow-y {
+    from { transform: scaleY(0); }
+    to   { transform: scaleY(1); }
+}
+
+/* Status badge pulse — one cycle of soft glow (Bundle C) */
+@keyframes ff-anim-status-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+    65%  { box-shadow: 0 0 0 14px rgba(34, 197, 94, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+@keyframes ff-anim-status-pulse-amber {
+    0%   { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.55); }
+    65%  { box-shadow: 0 0 0 14px rgba(217, 119, 6, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
+}
+@keyframes ff-anim-status-pulse-red {
+    0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
+    65%  { box-shadow: 0 0 0 14px rgba(220, 38, 38, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+
+/* Notification bell pulse (Bundle C) */
+@keyframes ff-anim-bell-shake {
+    0%, 100% { transform: rotate(0); }
+    20%      { transform: rotate(-12deg); }
+    40%      { transform: rotate(10deg); }
+    60%      { transform: rotate(-8deg); }
+    80%      { transform: rotate(5deg); }
+}
+
+/* Confetti fall (Bundle B) — used by FF_Confetti DOM particles */
+@keyframes ff-anim-confetti-fall {
+    0%   { transform: translate3d(0, 0, 0) rotate(0); opacity: 1; }
+    100% { transform: translate3d(var(--ff-x, 0), 100vh, 0) rotate(720deg); opacity: 0; }
+}
+
+/* Step indicator fill (Bundle D) */
+@keyframes ff-anim-step-fill {
+    from { width: 0; }
+    to   { width: var(--ff-step-target, 100%); }
+}
+
+/* Submit button shake on validation fail (Bundle D) */
+@keyframes ff-anim-shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-8px); }
+    40%, 80% { transform: translateX(8px); }
+}
+
+/* Field success checkmark pop (Bundle D) */
+@keyframes ff-anim-check-pop {
+    0%   { transform: scale(0) rotate(-180deg); opacity: 0; }
+    60%  { transform: scale(1.18) rotate(8deg); opacity: 1; }
+    100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* Inline error slide-in (Bundle D) */
+@keyframes ff-anim-slide-down {
+    from { opacity: 0; transform: translateY(-6px); max-height: 0; }
+    to   { opacity: 1; transform: translateY(0); max-height: 64px; }
+}
+
+/* -------------------------------------------------------------
+ * UTILITY CLASSES
+ * ------------------------------------------------------------- */
+
+/* ── Bundle A: Dashboard polish ─────────────────────────────── */
+
+/* Skeleton shimmer — drop on any element to show a loading placeholder.
+   Suggested markup:
+     <div class="ff-anim-skeleton" style="width:120px;height:20px;border-radius:4px;"></div>
+*/
+.ff-anim-skeleton {
+    display: inline-block;
+    background-color: #e2e8f0;
+    background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0,
+        rgba(255, 255, 255, 0.65) 20%,
+        rgba(255, 255, 255, 0.85) 50%,
+        rgba(255, 255, 255, 0) 80%
+    );
+    background-repeat: no-repeat;
+    background-size: 1200px 100%;
+    animation: ff-anim-shimmer 1.6s ease-in-out infinite;
+    border-radius: 4px;
+}
+
+/* Hover-lift utility — apply to .stat-card, .kpi-tile, etc. */
+.ff-anim-hover-lift {
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.ff-anim-hover-lift:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.18);
+}
+
+/* Auto-apply hover-lift to standard stat-card components — no
+   per-page change needed. Dashboard KPI tiles + any future
+   .stat-card usage gets the lift behavior free. */
+.stat-card {
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.18);
+}
+/* Skip hover-lift on the loading state to avoid jitter. */
+.stat-card--error:hover,
+.stat-card[aria-busy="true"]:hover {
+    transform: none;
+}
+
+/* Card fade-up entry — staggered children animate in. */
+.ff-anim-fade-up {
+    animation: ff-anim-fade-up 0.35s ease-out both;
+}
+.ff-anim-stagger > * {
+    animation: ff-anim-fade-up 0.35s ease-out both;
+}
+.ff-anim-stagger > *:nth-child(1) { animation-delay: 0.00s; }
+.ff-anim-stagger > *:nth-child(2) { animation-delay: 0.05s; }
+.ff-anim-stagger > *:nth-child(3) { animation-delay: 0.10s; }
+.ff-anim-stagger > *:nth-child(4) { animation-delay: 0.15s; }
+.ff-anim-stagger > *:nth-child(5) { animation-delay: 0.20s; }
+.ff-anim-stagger > *:nth-child(6) { animation-delay: 0.25s; }
+.ff-anim-stagger > *:nth-child(7) { animation-delay: 0.30s; }
+.ff-anim-stagger > *:nth-child(8) { animation-delay: 0.35s; }
+
+/* Chart bar grow-in (Bundle A) */
+.ff-anim-grow-y {
+    transform-origin: bottom;
+    animation: ff-anim-grow-y 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ── Bundle B: Confetti container (created/destroyed by FF_Confetti) ─ */
+.ff-anim-confetti-host {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 9990;
+}
+.ff-anim-confetti-piece {
+    position: absolute;
+    width: 10px;
+    height: 14px;
+    top: -20px;
+    animation: ff-anim-confetti-fall 2.4s cubic-bezier(0.2, 0.6, 0.6, 1) forwards;
+    border-radius: 2px;
+}
+
+/* ── Bundle C: Lifecycle feedback ───────────────────────────── */
+
+/* Status badge pulse — apply for a single cycle after a status transition.
+   Combine with badge-success / badge-warning / badge-danger.
+   Add and remove the class via JS: `el.classList.add('ff-anim-pulse-green');
+   setTimeout(()=>el.classList.remove('ff-anim-pulse-green'), 1400);` */
+.ff-anim-pulse-green {
+    animation: ff-anim-status-pulse 1.4s ease-out 1;
+    border-radius: 999px;
+}
+.ff-anim-pulse-amber {
+    animation: ff-anim-status-pulse-amber 1.4s ease-out 1;
+    border-radius: 999px;
+}
+.ff-anim-pulse-red {
+    animation: ff-anim-status-pulse-red 1.4s ease-out 1;
+    border-radius: 999px;
+}
+
+/* Notification bell ringing — add for a short burst when count increases */
+.ff-anim-bell-ringing {
+    animation: ff-anim-bell-shake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
+    transform-origin: top center;
+}
+
+/* Bell badge bounce-in */
+.ff-anim-badge-pop {
+    animation: ff-anim-check-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ── Bundle D: Form polish ──────────────────────────────────── */
+
+/* Step indicator — used at top of multi-step create forms.
+   Markup:
+     <div class="ff-anim-steps">
+       <div class="ff-anim-steps-bar"><div class="ff-anim-steps-fill" style="--ff-step-target:42%"></div></div>
+       <div class="ff-anim-step is-complete"><span>1</span><label>Customer</label></div>
+       <div class="ff-anim-step is-current"><span>2</span><label>Equipment</label></div>
+       <div class="ff-anim-step"><span>3</span><label>Rates</label></div>
+       ...
+     </div>
+*/
+.ff-anim-steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    position: relative;
+    padding: 12px 0;
+}
+.ff-anim-steps-bar {
+    position: absolute;
+    top: 50%;
+    left: 28px;
+    right: 28px;
+    height: 3px;
+    background: #e2e8f0;
+    border-radius: 1.5px;
+    transform: translateY(-50%);
+    overflow: hidden;
+}
+.ff-anim-steps-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2563eb 0%, #7c3aed 100%);
+    border-radius: 1.5px;
+    animation: ff-anim-step-fill 0.6s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+.ff-anim-step {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+    z-index: 1;
+}
+.ff-anim-step > span {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #64748b;
+    transition: all 0.25s ease;
+}
+.ff-anim-step > label {
+    font-size: 0.72rem;
+    color: #64748b;
+    text-align: center;
+    transition: color 0.25s ease;
+}
+.ff-anim-step.is-current > span {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: white;
+    transform: scale(1.08);
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
+}
+.ff-anim-step.is-current > label {
+    color: #1c1c1a;
+    font-weight: 600;
+}
+.ff-anim-step.is-complete > span {
+    background: #16a34a;
+    border-color: #16a34a;
+    color: white;
+}
+.ff-anim-step.is-complete > span::after {
+    content: '✓';
+    font-size: 1rem;
+}
+.ff-anim-step.is-complete > span > * {
+    display: none; /* hide the number once complete */
+}
+
+/* Field success checkmark — appears beside an input once value
+   passes validation. */
+.ff-anim-field-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: #16a34a;
+    border-radius: 50%;
+    color: white;
+    font-size: 12px;
+    animation: ff-anim-check-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+.ff-anim-field-check::after { content: '✓'; }
+
+/* Slide-in inline error */
+.ff-anim-error-slide {
+    overflow: hidden;
+    animation: ff-anim-slide-down 0.22s ease-out both;
+}
+
+/* Submit button shake on validation fail */
+.ff-anim-shake {
+    animation: ff-anim-shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* -------------------------------------------------------------
+ * REDUCED MOTION
+ * Respect user's prefers-reduced-motion — disable all decorative
+ * animations but keep functional ones (sidebar slide, modal open).
+ * ------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    .ff-anim-skeleton,
+    .ff-anim-hover-lift,
+    .ff-anim-fade-up,
+    .ff-anim-stagger > *,
+    .ff-anim-grow-y,
+    .ff-anim-pulse-green,
+    .ff-anim-pulse-amber,
+    .ff-anim-pulse-red,
+    .ff-anim-bell-ringing,
+    .ff-anim-badge-pop,
+    .ff-anim-steps-fill,
+    .ff-anim-step > span,
+    .ff-anim-step > label,
+    .ff-anim-field-check,
+    .ff-anim-error-slide,
+    .ff-anim-shake,
+    .ff-anim-confetti-piece {
+        animation: none !important;
+        transition: none !important;
+    }
+}

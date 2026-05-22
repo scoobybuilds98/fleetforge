@@ -932,6 +932,9 @@ const FF_Validate = {
 
     /**
      * Scroll the first invalid field into view + focus it.
+     * S-ANIMATIONS-PACK Bundle D: also shakes the submit button so
+     * the user gets a tactile cue that something failed. Respects
+     * prefers-reduced-motion via FF_ShakeForm.
      */
     scrollToFirst(form) {
         const root = typeof form === 'string'
@@ -947,6 +950,13 @@ const FF_Validate = {
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         if (firstBad && typeof firstBad.focus === 'function') {
             setTimeout(() => firstBad.focus({ preventScroll: true }), 250);
+        }
+
+        // Shake the submit button(s) of the form so the user sees the
+        // form rejected their submit. Uses FF_ShakeForm if loaded.
+        if (window.FF_ShakeForm && root.querySelectorAll) {
+            const submitBtns = root.querySelectorAll('button[type="submit"], input[type="submit"]');
+            submitBtns.forEach(btn => window.FF_ShakeForm.shake(btn));
         }
     },
 
@@ -1037,6 +1047,26 @@ function FF_Notifications() {
                     // _initialized. First-load is always silent.
                     if (this._initialized && newCount > this.unreadCount) {
                         if (window.FF_Sound) FF_Sound.play();
+                        // S-ANIMATIONS-PACK Bundle C: ring the bell visually.
+                        // Adds .ff-anim-bell-ringing to the SVG icon for one
+                        // shake cycle, and .ff-anim-badge-pop to the count
+                        // badge so it bounces in when the new total appears.
+                        try {
+                            const bellSvg = this.$el?.querySelector?.('.notif-bell-btn .nav-icon');
+                            const badge   = this.$el?.querySelector?.('.notif-badge');
+                            if (bellSvg) {
+                                bellSvg.classList.remove('ff-anim-bell-ringing');
+                                void bellSvg.offsetWidth;
+                                bellSvg.classList.add('ff-anim-bell-ringing');
+                                setTimeout(() => bellSvg.classList.remove('ff-anim-bell-ringing'), 600);
+                            }
+                            if (badge) {
+                                badge.classList.remove('ff-anim-badge-pop');
+                                void badge.offsetWidth;
+                                badge.classList.add('ff-anim-badge-pop');
+                                setTimeout(() => badge.classList.remove('ff-anim-badge-pop'), 500);
+                            }
+                        } catch { /* never block the bell on animation errors */ }
                     }
                     this.unreadCount = newCount;
                     this._initialized = true;

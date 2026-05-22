@@ -2289,7 +2289,12 @@ function FF_LeaseDetail() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/activate') ?>', { id: <?= $leaseId ?> });
                 if (r.success) {
-                    window.location.reload();
+                    // S-ANIMATIONS-PACK Bundle B: celebrate the activation.
+                    if (window.FF_Confetti) window.FF_Confetti.burst({ count: 120, duration: 2600 });
+                    if (window.FF_Toast)    window.FF_Toast.success('Lease activated', 'Unit is now On Lease.');
+                    // Brief delay so the user can see the confetti + toast
+                    // before the reload wipes the page.
+                    setTimeout(() => window.location.reload(), 1400);
                 } else {
                     this.actionError = r.message || 'Failed to activate lease.';
                 }
