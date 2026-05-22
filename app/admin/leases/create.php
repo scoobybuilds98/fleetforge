@@ -999,6 +999,16 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="form-error-banner" data-form-error></div>
 
     </form>
+
+    <?php
+    // S-CREATE-FEEDBACK: include INSIDE the x-data scope so Alpine
+    // can bind `submitting` + `showSuccessOverlay` from FF_CreateLease.
+    // Previously included AFTER </div> (outside scope) — overlay
+    // bindings had no parent x-data to reach.
+    $overlayTitle    = 'Lease Created!';
+    $overlaySubtitle = 'Redirecting to lease details…';
+    require_once FF_ROOT . '/includes/success_overlay.php';
+    ?>
 </div>
 
 <script>
@@ -1619,9 +1629,8 @@ function FF_CreateLease() {
 </script>
 
 <?php
-$overlayTitle    = 'Lease Created!';
-$overlaySubtitle = 'Redirecting to lease details…';
-require_once FF_ROOT . '/includes/success_overlay.php';
+// S-CREATE-FEEDBACK: overlay include moved INSIDE the x-data div
+// above so Alpine can bind submitting + showSuccessOverlay.
 ?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

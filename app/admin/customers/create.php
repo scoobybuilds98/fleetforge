@@ -447,6 +447,17 @@ require_once FF_ROOT . '/includes/header.php';
 
     </form>
 
+    <?php
+    // S-CREATE-FEEDBACK: include INSIDE the x-data scope so Alpine
+    // can bind `submitting` + `showSuccessOverlay` from the host
+    // component (FF_CustomerForm). Previously included AFTER </div>
+    // (outside scope) — the overlay never rendered because the
+    // template bindings had no parent x-data to reach into.
+    $overlayTitle    = 'Customer Created!';
+    $overlaySubtitle = 'Redirecting to customer profile…';
+    require_once FF_ROOT . '/includes/success_overlay.php';
+    ?>
+
 </div>
 
 <script>
@@ -602,9 +613,9 @@ function FF_CustomerForm() {
 </script>
 
 <?php
-$overlayTitle    = 'Customer Created!';
-$overlaySubtitle = 'Redirecting to customer profile…';
-require_once FF_ROOT . '/includes/success_overlay.php';
+// S-CREATE-FEEDBACK: overlay include moved INSIDE the x-data div
+// above so Alpine can bind submitting + showSuccessOverlay. Kept this
+// trailing block as a comment so future editors don't re-add it.
 ?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

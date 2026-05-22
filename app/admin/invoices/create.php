@@ -338,6 +338,16 @@ require_once FF_ROOT . '/includes/header.php';
             <span class="text-sm" style="color:var(--color-success);" x-text="'✓ Created ' + result.invoice_number"></span>
         </template>
     </div>
+
+    <?php
+    // S-CREATE-FEEDBACK: include INSIDE the x-data (form) scope so
+    // Alpine can bind `submitting` + `showSuccessOverlay` from
+    // FF_InvoiceCreate. Previously included AFTER </form> (outside
+    // scope) — overlay bindings had no parent x-data to reach.
+    $overlayTitle    = 'Invoice Created!';
+    $overlaySubtitle = 'Redirecting to invoice details…';
+    require_once FF_ROOT . '/includes/success_overlay.php';
+    ?>
 </form>
 
 <script>
@@ -806,9 +816,8 @@ function FF_InvoiceCreate() {
 </script>
 
 <?php
-$overlayTitle    = 'Invoice Created!';
-$overlaySubtitle = 'Redirecting to invoice details…';
-require_once FF_ROOT . '/includes/success_overlay.php';
+// S-CREATE-FEEDBACK: overlay include moved INSIDE the x-data form
+// above so Alpine can bind submitting + showSuccessOverlay.
 ?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>
