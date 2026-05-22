@@ -3228,16 +3228,30 @@ textarea.form-input {
    context.
    ============================================================ */
 
+/* ── Container — frosted-pill shelf housing the buttons ────────────
+   Apple-style depth: 1px inset highlight on top edge + soft drop
+   shadow underneath gives the bar a sense of physical lift, while a
+   subtle vertical gradient suggests light raking across the surface.
+   Wrap behaviour kept (flex-wrap) so dropdowns can still escape
+   vertically — but visual rhythm is restored by uniform button
+   sizing and consistent row-gap. */
 .acc-topnav {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 2px;
-    padding: 6px 8px;
+    gap: 4px;
+    row-gap: 6px;
+    padding: 6px;
     margin-bottom: 20px;
-    background: var(--bg-card);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0) 60%),
+        var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
+    border-radius: 14px;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.03),
+        0 1px 2px rgba(0,0,0,0.18),
+        0 6px 18px -10px rgba(0,0,0,0.35);
     /* overflow MUST remain visible so absolute-positioned dropdowns can escape */
     overflow: visible;
 }
@@ -3248,53 +3262,103 @@ textarea.form-input {
     flex-shrink: 0;
 }
 
-/* The leaf link OR the dropdown trigger button — same visual treatment */
+/* The leaf link OR the dropdown trigger button — same luxe button skin.
+   Apple-ish key-cap aesthetic: rounded squircle, subtle border that only
+   reveals on hover, gentle inset top highlight on active to read as
+   "depressed" rather than "tinted". Spring easing keeps interactions
+   feeling tactile without being bouncy. */
 .acc-topnav-link {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 7px 14px;
-    border-radius: var(--radius-md);
+    gap: 7px;
+    padding: 8px 14px;
+    border-radius: 10px;
     font-size: 0.8125rem;
     font-weight: 500;
+    letter-spacing: -0.005em;
     white-space: nowrap;
     text-decoration: none;
     color: var(--text-secondary);
-    background: transparent;
-    border: 0;
+    /* Soft "key cap" tint so inactive tabs read as physical buttons sitting
+       on the shelf — not as plain text links. The gradient is barely visible
+       on top of bg-card; just enough to suggest a beveled surface. */
+    background: linear-gradient(180deg,
+        rgba(255,255,255,0.045),
+        rgba(255,255,255,0) 65%
+    );
+    border: 1px solid rgba(255,255,255,0.04);
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition:
+        background 220ms cubic-bezier(0.23, 1, 0.32, 1),
+        color     180ms ease,
+        border-color 180ms ease,
+        box-shadow 220ms cubic-bezier(0.23, 1, 0.32, 1),
+        transform 120ms ease;
     flex-shrink: 0;
     font-family: inherit;
     line-height: 1.2;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
 }
 .acc-topnav-link:hover {
-    background: var(--bg-surface-2);
+    background: linear-gradient(180deg,
+        rgba(255,255,255,0.085),
+        rgba(255,255,255,0.015) 65%
+    );
+    border-color: rgba(255,255,255,0.09);
     color: var(--text-primary);
     text-decoration: none;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        0 1px 2px rgba(0,0,0,0.2);
+}
+.acc-topnav-link:active {
+    transform: scale(0.97);
+    transition-duration: 80ms;
 }
 .acc-topnav-link svg {
     flex-shrink: 0;
     color: currentColor;
+    opacity: 0.9;
 }
 
-/* Active state — applies to both leaf links and group triggers */
+/* Active state — applies to both leaf links and group triggers.
+   The "lit key" treatment: brand fill, top-edge inset highlight that
+   reads as a glass dome, and a soft outer shadow that lifts the button
+   off the shelf. */
 .acc-topnav-link.acc-topnav-active {
-    background: var(--color-primary);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0) 55%),
+        var(--color-primary);
     color: #fff;
+    border-color: transparent;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.22),
+        inset 0 -1px 0 rgba(0,0,0,0.08),
+        0 1px 2px rgba(0,0,0,0.20),
+        0 4px 10px -4px var(--color-primary);
+    font-weight: 600;
 }
 .acc-topnav-link.acc-topnav-active:hover {
-    background: var(--color-primary-hover, var(--color-primary));
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0) 55%),
+        var(--color-primary-hover, var(--color-primary));
     color: #fff;
 }
+.acc-topnav-link.acc-topnav-active svg { opacity: 1; }
 
 /* Dropdown trigger — button is open but page is NOT the active section */
 .acc-topnav-link.acc-topnav-open:not(.acc-topnav-active) {
     background: var(--bg-surface-2);
+    border-color: var(--border-color);
     color: var(--text-primary);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
-/* Right-pinned items (Periods, Settings) */
+/* Right-pinned items (Periods, Settings).
+   pin-right only when the bar is wide enough to fit on a single row.
+   On wrapped layouts the auto-margin creates an awkward gap that the
+   user reads as "items thrown about" — drop it under the wrap
+   threshold so wrapped buttons flow with consistent rhythm. */
 .acc-topnav-pin-right {
     margin-left: auto;
 }
@@ -3302,15 +3366,84 @@ textarea.form-input {
 .acc-topnav-pin-right ~ .acc-topnav-pin-right {
     margin-left: 0;
 }
+@media (max-width: 1100px) {
+    .acc-topnav-pin-right,
+    .acc-topnav-pin-right ~ .acc-topnav-pin-right {
+        margin-left: 0;
+    }
+}
+
+/* ── Mobile layout: a uniform 2-column grid of equal buttons ───────
+   On narrow viewports flex-wrap creates uneven columns because button
+   widths vary (Dashboard is short, "General Ledger ▾" is long). The
+   result is a ragged grid that reads as "thrown together." Switching
+   to CSS Grid with 2 equal columns gives every button the same width
+   and a clean rhythm — the bar reads as a deliberate control panel.
+
+   .acc-topnav-group wraps button+dropdown, so it must stretch its
+   button to 100% width to fill the grid cell.  */
+@media (max-width: 767px) {
+    .acc-topnav {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding: 8px;
+    }
+    .acc-topnav-group { width: 100%; min-width: 0; }
+    .acc-topnav-link {
+        width: 100%;
+        justify-content: flex-start;
+        padding: 10px 10px;
+        gap: 6px;
+        min-width: 0;
+        font-size: 0.75rem;
+    }
+    /* Icon stays present but slightly smaller — preserves visual rhythm
+       (every cell has icon + label + optional chevron) without eating
+       label width when labels are long like "General Ledger". */
+    .acc-topnav-link > svg {
+        width: 14px;
+        height: 14px;
+    }
+    /* Hide the chevron caret on mobile so the label always has room.
+       The dropdown still opens on tap; users discover it by tapping
+       the button itself (matches the iOS pattern of icon+label tabs
+       without secondary affordances). */
+    .acc-topnav-chevron { display: none !important; }
+    /* Truncate long labels with ellipsis instead of clipping the chevron */
+    .acc-topnav-link > span:not(.acc-topnav-chevron) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+    /* Drop pin-right entirely on mobile — every cell is the same. */
+    .acc-topnav-pin-right { margin-left: 0; }
+    /* Dropdown panels stretch to viewport width on mobile so labels
+       are readable even with long item names. */
+    .acc-topnav-dropdown {
+        min-width: 75vw;
+        max-width: calc(100vw - 24px);
+    }
+    /* Chevron sits flush right inside the wide button. */
+    .acc-topnav-chevron {
+        margin-left: auto;
+        padding-left: 4px;
+        flex-shrink: 0;
+    }
+}
 
 /* Chevron caret next to dropdown trigger labels */
 .acc-topnav-chevron {
     display: inline-flex;
     align-items: center;
-    margin-left: 2px;
-    transition: transform var(--transition-fast);
-    opacity: 0.7;
+    margin-left: 1px;
+    transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1);
+    opacity: 0.55;
 }
+.acc-topnav-link:hover .acc-topnav-chevron { opacity: 0.85; }
+.acc-topnav-link.acc-topnav-active .acc-topnav-chevron { opacity: 0.9; }
 .acc-topnav-chevron-open {
     transform: rotate(180deg);
 }
@@ -4233,50 +4366,87 @@ html.is-mac .non-mac-only { display: none; }
    rather have a long tab list flow onto a second row inside the
    same pill frame than make the user scroll a hidden region.
    row-gap gives a small breathing space between wrapped rows. */
+/* ── Tab Bar — same luxe "key-cap shelf" treatment as accounting nav.
+   The container is a frosted shelf; each .tab-btn renders like a
+   physical button with subtle border-on-hover, inset highlight on
+   active, and spring transitions for tactile feel. */
 .tab-bar {
     display: flex;
     flex-wrap: wrap;
     width: 100%;
     gap: 4px;
     row-gap: 6px;
-    padding: 4px;
-    background: var(--bg-surface-2);
+    padding: 6px;
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0) 60%),
+        var(--bg-surface-2);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
+    border-radius: 14px;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.03),
+        0 1px 2px rgba(0,0,0,0.18),
+        0 6px 18px -10px rgba(0,0,0,0.35);
     margin-bottom: 1.5rem;
 }
 
 .tab-btn {
-    padding: 8px 18px;
-    background: transparent;
-    border: none;
-    border-radius: calc(var(--radius-lg) - 3px);
+    padding: 8px 16px;
+    background: linear-gradient(180deg,
+        rgba(255,255,255,0.045),
+        rgba(255,255,255,0) 65%
+    );
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 10px;
     cursor: pointer;
     font-size: 0.8125rem;
     font-weight: 500;
+    letter-spacing: -0.005em;
     white-space: nowrap;
     color: var(--text-secondary);
-    transition: color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+    transition:
+        color 180ms ease,
+        background 220ms cubic-bezier(0.23, 1, 0.32, 1),
+        border-color 180ms ease,
+        box-shadow 220ms cubic-bezier(0.23, 1, 0.32, 1),
+        transform 120ms ease;
     font-family: inherit;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     position: relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
 }
 .tab-btn:hover {
     color: var(--text-primary);
-    background: var(--bg-surface-hover);
+    background: linear-gradient(180deg,
+        rgba(255,255,255,0.085),
+        rgba(255,255,255,0.015) 65%
+    );
+    border-color: rgba(255,255,255,0.09);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        0 1px 2px rgba(0,0,0,0.2);
 }
+.tab-btn:active { transform: scale(0.97); transition-duration: 80ms; }
 .tab-btn.is-active,
 .tab-btn[aria-selected="true"] {
-    background: var(--color-primary);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0) 55%),
+        var(--color-primary);
     color: #fff;
     font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+    border-color: transparent;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.22),
+        inset 0 -1px 0 rgba(0,0,0,0.08),
+        0 1px 2px rgba(0,0,0,0.20),
+        0 4px 10px -4px var(--color-primary);
 }
 .tab-btn.is-active:hover,
 .tab-btn[aria-selected="true"]:hover {
-    background: var(--color-primary);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0) 55%),
+        var(--color-primary-hover, var(--color-primary));
     color: #fff;
 }
 .tab-badge {
@@ -4285,17 +4455,19 @@ html.is-mac .non-mac-only { display: none; }
     justify-content: center;
     min-width: 18px;
     height: 18px;
-    padding: 0 5px;
+    padding: 0 6px;
     background: var(--bg-surface);
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-full);
     font-size: 0.6875rem;
     font-weight: 600;
     color: var(--text-tertiary);
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .tab-btn.is-active .tab-badge,
 .tab-btn[aria-selected="true"] .tab-badge {
-    background: rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.22);
+    border-color: rgba(255,255,255,0.1);
     color: #fff;
 }
 
@@ -6111,37 +6283,87 @@ dl.detail-grid dd {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TABLE-STACK — responsive stacked table view, label-above-value.
-   app.js auto-applies .table-stack + reads data-label from <th>.
+   TABLE-STACK — responsive horizontal CAROUSEL of card-rows.
+   app.js auto-applies .table-stack + reads data-label from <th>, so
+   every table in the app picks up this treatment automatically on
+   narrow viewports.
 
-   WHY block layout (label above value) instead of flex (label left,
-   value right): the flex approach broke for any <td> with multiple
-   children — anchors with secondary <div>s, badges wrapped in
-   <template x-if>, <span>s with conditional x-text. WebKit/Safari
-   also keeps the table-cell formatting context active and silently
-   ignores display:flex unless every ancestor (table, tbody, tr) is
-   explicitly forced to display:block. The stacked label/value layout
-   sidesteps both problems — it works regardless of cell structure
-   and never relies on display:flex.
+   The mobile experience matches the .carousel-card pattern on the
+   main dashboard (Active Leases / Pending Activations): each <tr>
+   becomes a swipeable card with label-above-value rows, and the
+   tbody becomes the horizontal scroll track with scroll-snap so
+   each card lands flush at the start.
+
+   Cells stay block-stacked inside the card (label eyebrow + value
+   beneath) because that pattern survives the widest variety of <td>
+   children — anchors with secondary <div>s, conditional badges in
+   <template x-if>, <span>s with x-text — and avoids Safari/iOS
+   formatting-context quirks where a flexbox child of <table> is
+   silently ignored.
    ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
-    /* Break the table-layout formatting context completely so subsequent
-       block/inline rules on tr/td actually take effect (Safari / iOS). */
-    .table-stack         { display: block !important; width: 100%; }
-    .table-stack tbody   { display: block !important; }
-    .table-stack thead   { display: none  !important; }
-
-    .table-stack tr {
-        display: block !important;
-        margin: 0 0 12px 0 !important;
-        padding: 14px 16px !important;
-        border: 1px solid var(--border-color) !important;
-        border-radius: var(--radius-md) !important;
-        background: var(--bg-surface) !important;
+    /* Make the TABLE itself the horizontal carousel container.
+       WHY not tbody: iOS Safari's UA stylesheet enforces
+       `tbody { display: table-row-group }` and ignores author
+       `display:flex !important` in many contexts. The reliable
+       workaround is to flex the <table> directly and collapse
+       <tbody> via `display:contents` so its <tr> children become
+       direct flex children of the table. */
+    .table-stack {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 12px !important;
+        width: 100% !important;
+        overflow-x: auto !important;
+        overflow-y: visible !important;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+        padding: 4px 20px 8px 0 !important;
+        scroll-padding-left: 4px;
+        margin: 0 !important;
+        border-collapse: separate !important;
+        border-spacing: 0 !important;
     }
-    .table-stack tr:last-child { margin-bottom: 0 !important; }
+    .table-stack::-webkit-scrollbar { display: none; }
+    .table-stack thead  { display: none !important; }
+    .table-stack tbody  { display: contents !important; }
+    .table-stack tfoot  { display: contents !important; }
 
-    /* Each cell becomes a stacked label-above-value row.
+    /* Each row is a carousel card flex-item, directly under the
+       <table> flex container thanks to tbody/tfoot display:contents.
+       Dimensions and border mirror .carousel-card on the main
+       dashboard so the visual language is consistent. */
+    .table-stack tr {
+        display: flex !important;
+        flex-direction: column !important;
+        flex: 0 0 78vw !important;
+        max-width: 320px !important;
+        min-width: 220px !important;
+        scroll-snap-align: start;
+        margin: 0 !important;
+        padding: 18px 20px !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 14px !important;
+        background: var(--bg-card) !important;
+        box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.025),
+            0 1px 2px rgba(0,0,0,0.18);
+        transition: border-color 200ms ease, box-shadow 200ms ease;
+        box-sizing: border-box;
+    }
+    .table-stack tr:hover {
+        border-color: var(--color-primary);
+    }
+
+    /* tfoot row visually marked as a summary card with brand-tinted
+       top border. tfoot itself is display:contents above. */
+    .table-stack tfoot tr {
+        border-top: 2px solid var(--color-primary) !important;
+    }
+
+    /* Each cell becomes a stacked label-above-value row inside the card.
        !important is required because .table tbody td (specificity
        0,1,2) beats .table-stack td (0,1,1) and would otherwise hold
        the desktop padding + table-cell display. */
@@ -6155,32 +6377,51 @@ dl.detail-grid dd {
         white-space: normal !important;
         overflow-wrap: anywhere;
         word-break: break-word;
+        min-width: 0;
     }
     .table-stack td:first-child { padding-top: 0 !important; }
     .table-stack td:last-child  { padding-bottom: 0 !important; }
 
     /* Skip cells that have no label — typically the trailing actions <td>
-       which has an empty <th>. Prevents an empty bullet line above the
-       View/Edit buttons. */
+       which has an empty <th>. Render with a hairline divider so action
+       buttons sit visually separated from the card data. */
     .table-stack td:not([data-label]),
-    .table-stack td[data-label=""] { padding-top: 8px !important; }
+    .table-stack td[data-label=""] {
+        padding-top: 12px !important;
+        margin-top: 4px;
+        border-top: 1px solid var(--border-color) !important;
+    }
+    .table-stack td:not([data-label]):first-child,
+    .table-stack td[data-label=""]:first-child {
+        border-top: 0 !important;
+        margin-top: 0;
+    }
 
-    /* The label sits above the value as a small uppercase eyebrow. */
+    /* The label sits above the value as a small uppercase eyebrow —
+       same typography as .cc-footer-label on the dashboard carousel. */
     .table-stack td[data-label]:not([data-label=""])::before {
         content: attr(data-label);
         display: block;
-        margin-bottom: 2px;
-        font-size: 0.6875rem;
-        font-weight: 600;
+        margin-bottom: 3px;
+        font-size: 0.625rem;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-tertiary);
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
     }
 
     /* Reset any text-right/text-center alignment that desktop tables use —
        on mobile every cell reads top-down, left-aligned. */
     .table-stack td.text-right,
     .table-stack td.text-center { text-align: left !important; }
+
+    /* Empty-state row (single <td colspan="N">No results</td>) gets
+       full carousel-card width so the "no data" message doesn't look
+       like a misaligned narrow card. */
+    .table-stack tbody tr:only-child td[colspan] {
+        text-align: center !important;
+        padding: 12px 0 !important;
+    }
 
     /* ── SPEC TABLES (key/value, no <thead>) ─────────────────────────
        Show pages render two-column key/value layouts as `<table class="table">`
