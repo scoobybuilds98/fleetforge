@@ -27,6 +27,24 @@ $logPrefix = '[' . date('Y-m-d H:i:s') . '] [AI_ANOMALY_SCAN]';
 
 echo "{$logPrefix} Starting anomaly scan...\n";
 
+// S-INTEL-TAB / D-INTEL-2: gate on ai.anomaly_scan_enabled. Independent
+// from ai.enabled so operator can pause anomaly scan without touching
+// AI chat or morning briefing. Silent exit when 0 — same pattern as
+// other AI feature gates.
+if ((string) settings_get('ai.anomaly_scan_enabled', '1') !== '1') {
+    echo "{$logPrefix} Anomaly scan disabled (ai.anomaly_scan_enabled=0). Skipping.\n";
+    exit(0);
+}
+
+// Master AI kill switch (consistent with ai_fleet_brief.php). Anomaly
+// scan does most of its work via SQL statistical checks, but the
+// AnomalyDetector::runAll path can optionally enrich with Claude;
+// gating up front keeps the whole pipeline disabled cleanly.
+if ((string) settings_get('ai.enabled', '1') !== '1') {
+    echo "{$logPrefix} AI disabled (ai.enabled=0). Skipping.\n";
+    exit(0);
+}
+
 try {
     $alertCount = \FleetForge\AI\AnomalyDetector::runAll(null);
     $elapsed    = round((microtime(true) - $startTime) * 1000);

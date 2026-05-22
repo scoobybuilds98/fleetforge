@@ -48,6 +48,16 @@ try {
     }
 
     // -----------------------------------------------------------------------
+    // Gate 1b (S-INTEL-TAB / D-INTEL-2): ai.briefing_enabled. Separate
+    // toggle so operator can pause the morning briefing without disabling
+    // AI chat or anomaly scan. If 0, we don't even touch the Claude API.
+    // -----------------------------------------------------------------------
+    if ((string) settings_get('ai.briefing_enabled', '1') !== '1') {
+        log_brief_audit('Briefing disabled (ai.briefing_enabled=0), brief not generated.');
+        exit(0);
+    }
+
+    // -----------------------------------------------------------------------
     // Gate 2: daily token budget. ClaudeClient enforces this per-user, but
     // userId=null bypasses the check inside sendMessage — so we re-check here.
     //

@@ -3405,6 +3405,7 @@ CREATE TABLE `users` (
   `remember_token` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `mfa_verified_until` datetime DEFAULT NULL,
   `permissions_updated_at` timestamp NULL DEFAULT NULL,
+  `morning_briefing_opt_in` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'D-INTEL-1: user-level subscription to the AI morning briefing email (cron/notification_digest.php). Cron gates on this column AFTER the role-level allow list. Default 0 means new users opt-in explicitly; existing super_admin/manager/accountant users backfilled to 1 in the same migration to preserve current behavior.',
   `created_by` int unsigned DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

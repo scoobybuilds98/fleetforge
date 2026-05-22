@@ -142,6 +142,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                         // requirement entirely.
                         $rolesArr = is_array($raw) ? array_values(array_filter(array_map('strval', $raw))) : [];
                         $val = json_encode($rolesArr, JSON_UNESCAPED_SLASHES);
+                    } elseif ($key === 'ai.briefing_recipient_roles') {
+                        // S-INTEL-TAB: multi-checkbox UI for Intelligence tab.
+                        // JSON array of user_roles.slug values per D-INTEL-2;
+                        // empty selection => '[]' which means no role passes
+                        // the gate (effectively disables the briefing without
+                        // touching ai.briefing_enabled — useful for staging
+                        // the rollout).
+                        $rolesArr = is_array($raw) ? array_values(array_filter(array_map('strval', $raw))) : [];
+                        $val = json_encode($rolesArr, JSON_UNESCAPED_SLASHES);
                     } else {
                         $val = $raw !== null ? (string)$raw : '';
                     }
@@ -193,7 +202,11 @@ foreach ($allSettings as $s) {
 $primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
 // S-SETTINGS-CLEANUP: 'security' added so the MFA card renders alongside
 // gps/ai/email/storage/aws in the Integrations tab via the existing render loop.
-$sensitiveGroups = ['gps', 'ai', 'email', 'storage', 'aws', 'security'];
+// S-INTEL-TAB: 'ai' removed from Integrations — it now renders in the
+// dedicated Intelligence tab. Integrations keeps the credential-management
+// surfaces (GPS, SMTP, S3/SES, MFA).
+$sensitiveGroups   = ['gps', 'email', 'storage', 'aws', 'security'];
+$intelligenceGroups = ['ai'];
 
 // INT-1: secret keys are rendered as masked password fields.
 // Save handler skips writes when the masked placeholder comes back.
@@ -264,7 +277,7 @@ $defaultTab = clean_string($_GET['tab'] ?? 'general');
 // S-DESIGN-SETTINGS-FOOTER-LOGIN: 'design' (super_admin only) added between
 // general and users. Validation list includes it regardless so a deep-link
 // like ?tab=design from a non-super-admin still resolves to general gracefully.
-$validTabs = ['general', 'design', 'users', 'portal_users', 'audit', 'system', 'integrations'];
+$validTabs = ['general', 'design', 'users', 'portal_users', 'audit', 'system', 'integrations', 'intelligence'];
 if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
 if ($defaultTab === 'design' && !$isSuperAdmin) $defaultTab = 'general';
 ?>
@@ -339,6 +352,10 @@ if ($defaultTab === 'design' && !$isSuperAdmin) $defaultTab = 'general';
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'integrations' }"
             @click="activeTab = 'integrations'" role="tab">
         Integrations
+    </button>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'intelligence' }"
+            @click="activeTab = 'intelligence'" role="tab">
+        Intelligence
     </button>
 </div>
 
@@ -746,21 +763,128 @@ function FF_SamsaraTest() {
 }
 </script>
 
-<!-- ── Anthropic AI Connection Status ────────────────────────────────────── -->
+<?php endif; ?>
+
+</div><!-- /integrations tab -->
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 7: INTELLIGENCE (S-INTEL-TAB)                                       -->
+<!-- AI core + Morning Briefing config + Anomaly Scan + recipient management -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div x-show="activeTab === 'intelligence'" x-transition:enter class="ff-tab-enter">
+
+<?php
+// ── Pre-compute Intelligence-tab data: roles, current recipients, history ──
+$intelRoles = db_select("SELECT slug, name FROM user_roles ORDER BY id ASC");
+$intelRolesJson = (string) settings_get('ai.briefing_recipient_roles', '["super_admin","manager","accountant"]');
+$intelRolesDecoded = json_decode($intelRolesJson, true);
+$intelRolesSet = [];
+if (is_array($intelRolesDecoded)) {
+    foreach ($intelRolesDecoded as $slug) {
+        if (is_string($slug)) $intelRolesSet[$slug] = true;
+    }
+}
+
+// Recipients table — every active user, with their current opt_in state +
+// role for super_admin's row-level management.
+$intelRecipients = db_select(
+    "SELECT u.id, u.name, u.email, u.morning_briefing_opt_in, ur.slug AS role_slug
+       FROM users u
+       JOIN user_roles ur ON ur.id = u.role_id
+      WHERE u.deleted_at IS NULL AND u.status = 'active'
+      ORDER BY ur.id, u.name"
+);
+
+// Last anomaly scan timestamp.
+$lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
+?>
+
+<!-- ── 1. AI Core ──────────────────────────────────────────────────── -->
+<?php if (!empty($grouped['ai'])): ?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        AI Core
+        <span class="badge badge-info" style="font-size:0.7rem;">Claude</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+            Master AI configuration shared by morning briefing, anomaly scan, AI chat,
+            and any future AI-powered feature. The <code>ai.enabled</code> toggle is the
+            kill switch — set to 0 to disable ALL AI features at once.
+        </p>
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="ai">
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
+            <?php foreach ($grouped['ai'] as $setting):
+                $key      = $setting['key'];
+                $val      = $setting['value'] ?? '';
+                $vtype    = $setting['value_type'];
+                $label    = $setting['label'] ?? $key;
+                $desc     = $setting['description'] ?? null;
+                $isSecret = in_array($key, $secretKeys, true);
+                $display  = $isSecret ? $maskSecret((string) $val) : (string) $val;
+
+                // S-INTEL-TAB: ai.briefing_recipient_roles renders as a
+                // multi-checkbox over user_roles (mirrors the MFA pattern).
+                // Render it OUTSIDE this generic loop — see "Morning Briefing"
+                // section below.
+                if ($key === 'ai.briefing_recipient_roles') continue;
+            ?>
+            <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
+                <?php if ($vtype === 'boolean'): ?>
+                <div class="form-check">
+                    <input type="checkbox" id="<?= e($key) ?>" name="<?= e($key) ?>" value="1"
+                           <?= $val === '1' ? 'checked' : '' ?> <?= !$canEdit ? 'disabled' : '' ?>>
+                    <label for="<?= e($key) ?>" style="margin-left:6px;font-size:0.875rem;">Enabled</label>
+                </div>
+                <?php elseif (in_array($vtype, ['integer', 'decimal'], true)): ?>
+                <input type="number" min="0" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                       value="<?= e($val) ?>" step="<?= $vtype === 'decimal' ? '0.01' : '1' ?>"
+                       <?= !$canEdit ? 'readonly' : '' ?>>
+                <?php elseif ($isSecret): ?>
+                <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control font-mono"
+                       value="<?= e($display) ?>" maxlength="500"
+                       autocomplete="off" spellcheck="false"
+                       placeholder="Paste new key to replace stored value"
+                       <?= !$canEdit ? 'readonly' : '' ?>
+                       onfocus="if(this.value.startsWith('•')) this.select();">
+                <?php else: ?>
+                <input type="text" id="<?= e($key) ?>" name="<?= e($key) ?>" class="form-control"
+                       value="<?= e($val) ?>" maxlength="500" autocomplete="off" <?= !$canEdit ? 'readonly' : '' ?>>
+                <?php endif; ?>
+                <?php if ($desc): ?>
+                <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;"><?= e($desc) ?></p>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+            </div>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save AI Settings</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- ── 2. Anthropic Connection + Usage (moved from Integrations) ──── -->
+<?php if ($isSuperAdmin): ?>
 <div class="card" style="margin-bottom:20px;" x-data="FF_AiTest()">
     <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
-        Anthropic AI Connection
-        <span class="badge badge-info" style="font-size:0.7rem;">Claude</span>
+        Anthropic Connection
+        <span class="badge badge-info" style="font-size:0.7rem;">Claude API</span>
     </div>
     <div class="card-body">
         <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start;">
             <div>
                 <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 12px;">
-                    Test your Anthropic API connection to verify credentials are working.
-                    The test sends a minimal request to the Claude API.
+                    Test the API connection to verify credentials are working. Sends a minimal request to Claude.
                 </p>
-
-                <!-- Connection status display -->
                 <template x-if="tested">
                     <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:6px;font-size:0.875rem;"
                          :style="connected
@@ -771,7 +895,6 @@ function FF_SamsaraTest() {
                         <span x-text="message" :style="connected ? 'color:var(--color-success);' : 'color:var(--color-danger);'"></span>
                     </div>
                 </template>
-
                 <template x-if="tested && connected && details.model">
                     <div style="margin-top:8px;font-size:0.8125rem;color:var(--text-muted);">
                         Model: <span class="font-mono" x-text="details.model"></span>
@@ -781,14 +904,12 @@ function FF_SamsaraTest() {
                     </div>
                 </template>
             </div>
-
             <button class="btn btn-secondary btn-sm" @click="test()" :disabled="testing" style="white-space:nowrap;">
                 <span x-show="!testing">Test Connection</span>
                 <span x-show="testing" x-cloak>Testing&hellip;</span>
             </button>
         </div>
 
-        <!-- AI Usage Overview -->
         <?php
         $aiUsageToday = db_row(
             "SELECT COALESCE(SUM(total_tokens), 0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd), 0) AS cost
@@ -799,7 +920,7 @@ function FF_SamsaraTest() {
         ?>
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default);display:flex;gap:20px;flex-wrap:wrap;">
             <div>
-                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Today's Usage</div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Today's Token Usage</div>
                 <div class="font-mono" style="font-size:1rem;font-weight:600;">
                     <?= e(number_format((int) ($aiUsageToday['tokens'] ?? 0))) ?>
                     <span style="font-weight:400;color:var(--text-muted);font-size:0.8125rem;">/ <?= e(number_format($aiDailyLimit)) ?></span>
@@ -807,15 +928,11 @@ function FF_SamsaraTest() {
             </div>
             <div>
                 <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Requests Today</div>
-                <div class="font-mono" style="font-size:1rem;font-weight:600;">
-                    <?= e((string) ($aiUsageToday['requests'] ?? 0)) ?>
-                </div>
+                <div class="font-mono" style="font-size:1rem;font-weight:600;"><?= e((string) ($aiUsageToday['requests'] ?? 0)) ?></div>
             </div>
             <div>
                 <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">Model</div>
-                <div style="font-size:0.875rem;" class="font-mono">
-                    <?= e((string) $aiModel) ?>
-                </div>
+                <div style="font-size:0.875rem;" class="font-mono"><?= e((string) $aiModel) ?></div>
             </div>
             <div>
                 <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;">AI Chat</div>
@@ -824,39 +941,312 @@ function FF_SamsaraTest() {
         </div>
     </div>
 </div>
+<?php endif; ?>
+
+<!-- ── 3. Morning Briefing ─────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:20px;" x-data="FF_BriefingControl()" x-init="loadHistory()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Morning Briefing
+        <span class="badge badge-info" style="font-size:0.7rem;">Cron 04:00 → email at digest_hour</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+            AI-generated daily fleet briefing emailed to recipients matching all three gates (D-INTEL-2):
+            briefing master toggle, role-level allow list, and per-user opt-in.
+        </p>
+
+        <!-- Status mini-strip -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px 24px;margin-bottom:18px;padding:14px;background:var(--bg-subtle,#f7f7f6);border-radius:6px;">
+            <div>
+                <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Last brief generated</div>
+                <div style="font-size:0.85rem;margin-top:2px;" x-text="history.last_brief_generated_at ? formatTs(history.last_brief_generated_at) : '—'"></div>
+            </div>
+            <div>
+                <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Cache active</div>
+                <div style="font-size:0.85rem;margin-top:2px;" x-text="history.cache_active ? 'YES' : 'NO'"
+                     :style="history.cache_active ? 'color:#16a34a;' : 'color:#dc2626;'"></div>
+            </div>
+            <div>
+                <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Current recipients</div>
+                <div style="font-size:0.85rem;margin-top:2px;" x-text="history.current_recipient_count + ' user(s)'"></div>
+            </div>
+            <div>
+                <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Briefing enabled</div>
+                <div style="font-size:0.85rem;margin-top:2px;" x-text="history.briefing_enabled ? 'YES' : 'NO'"
+                     :style="history.briefing_enabled ? 'color:#16a34a;' : 'color:#dc2626;'"></div>
+            </div>
+        </div>
+
+        <!-- Settings form: digest_hour + recipient_roles multi-checkbox -->
+        <form method="POST" action="" style="margin-bottom:18px;">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="ai">
+
+            <div style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:24px;align-items:start;">
+
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label">Recipient roles (D-INTEL-2 gate 2)</label>
+                    <div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--border-default);border-radius:6px;">
+                        <?php foreach ($intelRoles as $role): ?>
+                        <label class="form-check" style="margin:0;">
+                            <input type="checkbox"
+                                   name="ai.briefing_recipient_roles[]"
+                                   value="<?= e($role['slug']) ?>"
+                                   <?= isset($intelRolesSet[$role['slug']]) ? 'checked' : '' ?>
+                                   <?= !$canEdit ? 'disabled' : '' ?>>
+                            <span style="margin-left:6px;font-size:0.875rem;"><?= e($role['name']) ?>
+                                <span class="text-muted" style="font-size:0.75rem;">(<?= e($role['slug']) ?>)</span>
+                            </span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <p class="text-muted" style="font-size:0.72rem;margin:4px 0 0;">
+                        Users whose role is in this list AND who have opt_in=1 receive the daily briefing.
+                    </p>
+                </div>
+
+                <div>
+                    <?php
+                    $digestHourSetting = db_row("SELECT `key`, `value`, value_type, label, description FROM settings WHERE `key` = 'notifications.digest_hour'");
+                    if ($digestHourSetting):
+                    ?>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label class="form-label" for="notifications.digest_hour">Digest send hour (local timezone)</label>
+                        <input type="number" id="notifications.digest_hour" name="notifications.digest_hour" class="form-control"
+                               value="<?= e((string) $digestHourSetting['value']) ?>" min="0" max="23" style="max-width:120px;"
+                               <?= !$canEdit ? 'readonly' : '' ?>>
+                        <p class="text-muted" style="font-size:0.72rem;margin:4px 0 0;">
+                            Hour (0–23) when notification_digest cron dispatches the morning email. Reads <code>company.timezone</code> for the local clock.
+                            (Note: changing this requires saving the Notifications group, NOT AI — separate form below.)
+                        </p>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:14px;margin-top:14px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save Recipient Roles</button>
+            </div>
+            <?php endif; ?>
+        </form>
+
+        <!-- Test send + history -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;padding-top:16px;border-top:1px solid var(--border-default);">
+
+            <div>
+                <h3 class="h6" style="margin:0 0 8px;">Test send</h3>
+                <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">
+                    Sends today's cached briefing to your email (<?= e((string) (current_user()['email'] ?? '?')) ?>).
+                    Does NOT call Claude — uses the brief already in <code>report_cache</code>
+                    (D-INTEL-3). If no cache exists yet, you'll get a clear error.
+                </p>
+                <button class="btn btn-secondary btn-sm" @click="sendTest()" :disabled="testSending || !history.cache_active">
+                    <span x-show="!testSending">Send me a test briefing now</span>
+                    <span x-show="testSending" x-cloak>Sending&hellip;</span>
+                </button>
+                <div x-show="testFlash.message" x-cloak
+                     :class="testFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
+                     style="margin-top:10px;font-size:0.8125rem;"
+                     x-text="testFlash.message"></div>
+            </div>
+
+            <div>
+                <h3 class="h6" style="margin:0 0 8px;">Recent runs (last 10)</h3>
+                <template x-if="history.runs && history.runs.length === 0">
+                    <p style="font-size:0.8125rem;color:var(--text-muted);margin:0;">No dispatches yet.</p>
+                </template>
+                <template x-if="history.runs && history.runs.length > 0">
+                    <table class="table table-sm" style="font-size:0.8125rem;margin:0;">
+                        <thead>
+                            <tr><th align="left">Date</th><th align="right">Sent</th><th align="right">Failed</th><th align="right">Total</th></tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="r in history.runs" :key="r.run_date">
+                                <tr>
+                                    <td x-text="r.run_date"></td>
+                                    <td align="right" x-text="r.sent"></td>
+                                    <td align="right" :style="r.failed > 0 ? 'color:#dc2626;' : ''" x-text="r.failed"></td>
+                                    <td align="right" x-text="r.total"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </template>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── 4. Recipient Management ─────────────────────────────────────── -->
+<?php if ($canEdit): ?>
+<div class="card" style="margin-bottom:20px;" x-data="FF_RecipientManager()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Recipient Management
+        <span class="badge badge-warning" style="font-size:0.7rem;">D-INTEL-2 gate 3</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">
+            Per-user opt-in for the morning briefing. A user must (a) have a role in the allow list above
+            AND (b) have opt_in=1 below to receive a daily email. Filter shows only users whose role currently
+            qualifies; flip the switch above to broaden visibility.
+        </p>
+
+        <div class="table-wrapper">
+            <table class="table table-sm" style="margin:0;">
+                <thead>
+                    <tr>
+                        <th align="left">User</th>
+                        <th align="left">Email</th>
+                        <th align="left">Role</th>
+                        <th align="center" style="width:120px;">Opt-in</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($intelRecipients as $u):
+                        $inAllowList = isset($intelRolesSet[$u['role_slug']]);
+                    ?>
+                    <tr :class="(<?= (int) $u['morning_briefing_opt_in'] ?> === 1 && <?= $inAllowList ? '1' : '0' ?> === 1) ? '' : ''">
+                        <td><?= e((string) $u['name']) ?></td>
+                        <td class="text-muted" style="font-size:0.78rem;"><?= e((string) $u['email']) ?></td>
+                        <td>
+                            <span class="badge <?= $inAllowList ? 'badge-info' : 'badge-secondary' ?>" style="font-size:0.7rem;">
+                                <?= e((string) $u['role_slug']) ?>
+                            </span>
+                        </td>
+                        <td align="center">
+                            <label class="form-check" style="margin:0;display:inline-flex;align-items:center;">
+                                <input type="checkbox"
+                                       <?= (int) $u['morning_briefing_opt_in'] === 1 ? 'checked' : '' ?>
+                                       @change="toggleOptIn(<?= (int) $u['id'] ?>, $event.target.checked ? 1 : 0)">
+                            </label>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div x-show="optFlash.message" x-cloak
+             :class="optFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
+             style="margin-top:10px;font-size:0.8125rem;"
+             x-text="optFlash.message"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- ── 5. Anomaly Scan ─────────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Anomaly Scan
+        <span class="badge badge-info" style="font-size:0.7rem;">Cron 02:00</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+            Nightly statistical scan for unusual patterns in invoices, equipment, and lease data.
+            SQL-based; AI enrichment optional. Toggled via <code>ai.anomaly_scan_enabled</code> above in AI Core.
+        </p>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:0.8125rem;">
+            <div>
+                <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Status</div>
+                <div style="margin-top:2px;" :style="<?= (string) settings_get('ai.anomaly_scan_enabled', '1') === '1' ? "'color:#16a34a;'" : "'color:#dc2626;'" ?>">
+                    <?= (string) settings_get('ai.anomaly_scan_enabled', '1') === '1' ? 'Enabled' : 'Disabled' ?>
+                </div>
+            </div>
+            <div>
+                <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Last scan</div>
+                <div style="margin-top:2px;"><?= $lastAnomalyScan ? e((string) $lastAnomalyScan) : '<span class="text-muted">never</span>' ?></div>
+            </div>
+            <div>
+                <a href="<?= base_url('ai/anomalies') ?>" style="font-size:0.875rem;">View anomalies dashboard &rarr;</a>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script>
 function FF_AiTest() {
     return {
-        testing:   false,
-        tested:    false,
-        connected: false,
-        message:   '',
-        details:   {},
-
+        testing: false, tested: false, connected: false, message: '', details: {},
         async test() {
-            this.testing = true;
-            this.tested = false;
+            this.testing = true; this.tested = false;
             try {
-                // WHY: FF_Api.post() returns raw JSON — no wrapper envelope.
-                // The test-connection endpoint echoes {success, message, details} directly.
                 const r = await FF_Api.post('<?= base_url('api/v1/ai/test-connection') ?>');
                 this.connected = r.success === true;
-                this.message   = r.message || (r.success ? 'Connected.' : 'Test failed.');
-                this.details   = r.details || {};
+                this.message = r.message || (r.success ? 'Connected.' : 'Test failed.');
+                this.details = r.details || {};
             } catch(e) {
-                this.connected = false;
-                this.message   = 'Network error. Could not reach the server.';
+                this.connected = false; this.message = 'Network error.';
             }
-            this.tested = true;
-            this.testing = false;
+            this.tested = true; this.testing = false;
+        },
+    };
+}
+
+function FF_BriefingControl() {
+    return {
+        history: { runs: [], current_recipient_count: 0, briefing_enabled: false, cache_active: false, last_brief_generated_at: null },
+        testSending: false,
+        testFlash: { message: '', type: '' },
+
+        async loadHistory() {
+            try {
+                const j = await FF_Api.get(FF_Api.url('/api/v1/admin/intelligence/briefing_history.php'));
+                if (j.success) {
+                    this.history = j.data;
+                }
+            } catch (e) {
+                console.error('Failed to load briefing history', e);
+            }
+        },
+
+        async sendTest() {
+            this.testSending = true;
+            this.testFlash = { message: '', type: '' };
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/test_briefing.php'), {});
+                if (j.success) {
+                    this.testFlash = { message: 'Test briefing sent to ' + j.data.recipient + '. Check your inbox.', type: 'success' };
+                    await this.loadHistory();
+                } else {
+                    this.testFlash = { message: (j.error && j.error.message) || 'Test send failed', type: 'error' };
+                }
+            } catch (e) {
+                this.testFlash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.testSending = false;
+            }
+        },
+
+        formatTs(ts) {
+            if (!ts) return '—';
+            try { return new Date(String(ts).replace(' ', 'T')).toLocaleString(); } catch { return ts; }
+        },
+    };
+}
+
+function FF_RecipientManager() {
+    return {
+        optFlash: { message: '', type: '' },
+
+        async toggleOptIn(userId, optIn) {
+            this.optFlash = { message: '', type: '' };
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/set_opt_in.php'), { user_id: userId, opt_in: optIn });
+                if (j.success) {
+                    this.optFlash = { message: 'Updated.', type: 'success' };
+                } else {
+                    this.optFlash = { message: (j.error && j.error.message) || 'Toggle failed', type: 'error' };
+                }
+            } catch (e) {
+                this.optFlash = { message: e.message || 'Network error', type: 'error' };
+            }
         },
     };
 }
 </script>
-<?php endif; ?>
 
-</div><!-- /integrations tab -->
+</div><!-- /intelligence tab -->
 
 </div><!-- /x-data root -->
 
