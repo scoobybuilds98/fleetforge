@@ -34,22 +34,36 @@ require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
 // -----------------------------------------------------------------------
-// Timezone gate. Set FF_CRON_FORCE=1 to bypass for local testing.
+// Timezone gate. S-INTEL-V2 / D-INTEL-V2-2: per-user briefing_hour means
+// the cron now runs every hour and dispatches only to users matching
+// THIS hour. Set FF_CRON_FORCE=1 to bypass for local testing.
+//
+// Computation: localHour = NOW() in company.timezone, expressed as 0..23.
+// Sub-section 4a uses $GLOBALS['ff_current_local_hour'] to filter users.
+// Other sub-sections (4c dunning, 4e scheduled reports) gate themselves
+// on the global digest_hour (no per-user concept).
 // -----------------------------------------------------------------------
 $forced = (string)(getenv('FF_CRON_FORCE') ?: '') === '1';
-if (!$forced) {
-    $companyTz = (string) settings_get('company.timezone', 'America/Vancouver');
-    try {
-        $localNow = new DateTime('now', new DateTimeZone($companyTz));
-    } catch (\Throwable $e) {
-        error_log("[CRON notification_digest] invalid timezone '{$companyTz}', falling back to UTC");
-        $localNow = new DateTime('now', new DateTimeZone('UTC'));
-    }
-    $digestHour = (int) settings_get('notifications.digest_hour', 7);
-    if ((int) $localNow->format('G') !== $digestHour) {
-        // Silent exit — 23 hours/day this is a noop.
-        exit(0);
-    }
+$companyTz = (string) settings_get('company.timezone', 'America/Vancouver');
+try {
+    $localNow = new DateTime('now', new DateTimeZone($companyTz));
+} catch (\Throwable $e) {
+    error_log("[CRON notification_digest] invalid timezone '{$companyTz}', falling back to UTC");
+    $localNow = new DateTime('now', new DateTimeZone('UTC'));
+}
+$digestHour = (int) settings_get('notifications.digest_hour', 7);
+$localHour  = (int) $localNow->format('G');
+$GLOBALS['ff_current_local_hour']  = $localHour;
+$GLOBALS['ff_global_digest_hour']  = $digestHour;
+$GLOBALS['ff_force']               = $forced;
+
+// 4c + 4e still gate on the global digest_hour — keep parity.
+if (!$forced && $localHour !== $digestHour) {
+    // For 4a (briefing) we still proceed to filter per-user hour
+    // matches; for 4c + 4e exit early if not the global hour.
+    // Implementation note: rather than splitting the cron file, we
+    // proceed to 4a unconditionally and the run_dunning_letters /
+    // run_scheduled_reports functions self-gate.
 }
 
 // -----------------------------------------------------------------------
@@ -186,17 +200,44 @@ function run_morning_digest_emails(): array
     //
     // ── Gate 3b (S-INTEL-V2 / D-INTEL-V2-5): snooze. ─────────────
     // Users with briefing_snoozed_until > NOW() are temporarily
-    // unsubscribed (vacation mode). Expired snooze auto-resumes
-    // (treated as if NULL by the comparison).
+    // unsubscribed (vacation mode). Expired snooze auto-resumes.
+    //
+    // ── Gate 3c (S-INTEL-V2 / D-INTEL-V2-2): per-user hour. ──────
+    // Each user's preferred hour: briefing_hour column, or NULL
+    // meaning "use the global digest_hour". The cron runs every
+    // hour now — only users whose effective hour matches THIS run
+    // get included. $GLOBALS['ff_force']==true bypasses the hour
+    // gate for local testing.
+    $force      = (bool) ($GLOBALS['ff_force'] ?? false);
+    $localHour  = (int)  ($GLOBALS['ff_current_local_hour'] ?? 0);
+    $globalHour = (int)  ($GLOBALS['ff_global_digest_hour'] ?? 7);
+
+    $hourGate = $force
+        ? '1=1'
+        : "(u.briefing_hour = ? OR (u.briefing_hour IS NULL AND ? = ?))";
+
+    $sqlParams = $roles;
+    if (!$force) {
+        // Append the 3 hour params (briefing_hour=?, ?, ?=?) → (localHour, localHour, globalHour).
+        // SQL: (u.briefing_hour = ? OR (u.briefing_hour IS NULL AND ? = ?))
+        //                          ↑ localHour              ↑ localHour ↑ globalHour
+        $sqlParams[] = $localHour;
+        $sqlParams[] = $localHour;
+        $sqlParams[] = $globalHour;
+    }
+
+    // S-INTEL-V2 Phase D: pull per-user channels + slack/sms identifiers.
     $recipients = db_select(
-        "SELECT u.id, u.name, u.email, ur.slug
+        "SELECT u.id, u.name, u.email, u.briefing_sections,
+                u.briefing_channels, u.slack_user_id, u.phone_e164, ur.slug
          FROM users u
          JOIN user_roles ur ON ur.id = u.role_id
          WHERE u.deleted_at IS NULL AND u.status = 'active'
            AND u.morning_briefing_opt_in = 1
            AND (u.briefing_snoozed_until IS NULL OR u.briefing_snoozed_until <= NOW())
+           AND {$hourGate}
            AND ur.slug IN ({$placeholders})",
-        $roles
+        $sqlParams
     );
 
     if (empty($recipients)) {
@@ -231,33 +272,92 @@ function run_morning_digest_emails(): array
                 continue;
             }
 
-            $bodyHtml    = \FleetForge\Notifications\MorningBriefingRenderer::renderBody($user['name'] ?? 'Team', $payload);
-            $wrappedHtml = \FleetForge\Email\EmailService::renderEmailHtml($bodyHtml);
-            $subject     = 'Morning Briefing — ' . date('M j, Y');
+            // S-INTEL-V2 / D-INTEL-V2-4: honor per-user briefing_sections.
+            $userSections = null;
+            if (!empty($user['briefing_sections'])) {
+                $decoded = json_decode((string) $user['briefing_sections'], true);
+                if (is_array($decoded)) { $userSections = $decoded; }
+            }
+            $subject  = 'Morning Briefing — ' . date('M j, Y');
+            $name     = (string) ($user['name'] ?? '');
+            $bodyHtml = \FleetForge\Notifications\MorningBriefingRenderer::renderBody($user['name'] ?? 'Team', $payload, $userSections);
 
-            $ok = \FleetForge\Notifications\Mailer::send(
-                toEmail:  $email,
-                toName:   (string)($user['name'] ?? ''),
-                subject:  $subject,
-                htmlBody: $wrappedHtml,
-            );
+            // S-INTEL-V2 / D-INTEL-V2-6: parse per-user channel list.
+            $channels = ['email']; // default — matches the column DEFAULT
+            if (!empty($user['briefing_channels'])) {
+                $decoded = json_decode((string) $user['briefing_channels'], true);
+                if (is_array($decoded) && !empty($decoded)) {
+                    $channels = array_values(array_filter($decoded, 'is_string'));
+                }
+            }
 
-            db_insert('notification_log', [
-                'rule_id'           => null,
-                'channel'           => 'email',
-                'recipient'         => $email,
-                'subject'           => $subject,
-                'body'              => mb_substr(strip_tags($bodyHtml), 0, 2000),
-                'entity_type'       => 'user',
-                'entity_id'         => $userId,
-                'notification_type' => 'morning_digest',
-                'status'            => $ok ? 'sent' : 'failed',
-                'error_message'     => $ok ? null : 'Mailer::send returned false',
-                'sent_at'           => $ok ? date('Y-m-d H:i:s') : null,
-            ]);
+            $anySent = false;
+            foreach ($channels as $channel) {
+                if ($channel === 'email') {
+                    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) continue;
+                    $wrappedHtml = \FleetForge\Email\EmailService::renderEmailHtml($bodyHtml);
+                    $okCh = \FleetForge\Notifications\Mailer::send(
+                        toEmail:  $email,
+                        toName:   $name,
+                        subject:  $subject,
+                        htmlBody: $wrappedHtml,
+                    );
+                    db_insert('notification_log', [
+                        'channel'           => 'email',
+                        'recipient'         => $email,
+                        'subject'           => $subject,
+                        'body'              => mb_substr(strip_tags($bodyHtml), 0, 2000),
+                        'entity_type'       => 'user',
+                        'entity_id'         => $userId,
+                        'notification_type' => 'morning_digest',
+                        'status'            => $okCh ? 'sent' : 'failed',
+                        'error_message'     => $okCh ? null : 'Mailer::send returned false',
+                        'sent_at'           => $okCh ? date('Y-m-d H:i:s') : null,
+                    ]);
+                    if ($okCh) $anySent = true;
+                } elseif ($channel === 'slack') {
+                    $slackText = \FleetForge\Notifications\SlackPoster::summarizePayload($payload);
+                    $result = \FleetForge\Notifications\SlackPoster::post(
+                        $slackText,
+                        $user['slack_user_id'] ?? null,
+                        $subject
+                    );
+                    $statusStr = $result['ok'] ? 'sent' : ($result['skipped'] ?? false ? 'skipped' : 'failed');
+                    db_insert('notification_log', [
+                        'channel'           => 'slack',
+                        'recipient'         => (string) ($user['slack_user_id'] ?? 'channel-webhook'),
+                        'subject'           => $subject,
+                        'body'              => mb_substr($slackText, 0, 2000),
+                        'entity_type'       => 'user',
+                        'entity_id'         => $userId,
+                        'notification_type' => 'morning_digest',
+                        'status'            => $statusStr,
+                        'error_message'     => $result['ok'] ? null : (string) ($result['reason'] ?? 'slack_failed'),
+                        'sent_at'           => $result['ok'] ? date('Y-m-d H:i:s') : null,
+                    ]);
+                    if ($result['ok']) $anySent = true;
+                } elseif ($channel === 'sms') {
+                    $smsBody = \FleetForge\Notifications\SmsClient::summarizePayload($payload);
+                    $result  = \FleetForge\Notifications\SmsClient::send((string) ($user['phone_e164'] ?? ''), $smsBody);
+                    $statusStr = $result['ok'] ? 'sent' : ($result['skipped'] ?? false ? 'skipped' : 'failed');
+                    db_insert('notification_log', [
+                        'channel'           => 'sms',
+                        'recipient'         => (string) ($user['phone_e164'] ?? '(no phone)'),
+                        'subject'           => $subject,
+                        'body'              => mb_substr($smsBody, 0, 2000),
+                        'entity_type'       => 'user',
+                        'entity_id'         => $userId,
+                        'notification_type' => 'morning_digest',
+                        'status'            => $statusStr,
+                        'error_message'     => $result['ok'] ? null : (string) ($result['reason'] ?? 'sms_failed'),
+                        'sent_at'           => $result['ok'] ? date('Y-m-d H:i:s') : null,
+                    ]);
+                    if ($result['ok']) $anySent = true;
+                }
+            }
 
-            if ($ok) $sent++;
-            else     $errors++;
+            if ($anySent) $sent++;
+            else          $errors++;
 
         } catch (\Throwable $e) {
             $errors++;

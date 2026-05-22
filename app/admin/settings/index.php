@@ -812,12 +812,14 @@ if (is_array($intelRolesDecoded)) {
 // Recipients table — every active user, with their current opt_in state +
 // snooze state (S-INTEL-V2 F8) + role for super_admin's row-level management.
 $intelRecipients = db_select(
-    "SELECT u.id, u.name, u.email, u.morning_briefing_opt_in, u.briefing_snoozed_until, ur.slug AS role_slug
+    "SELECT u.id, u.name, u.email, u.morning_briefing_opt_in, u.briefing_snoozed_until,
+            u.briefing_hour, u.briefing_sections, ur.slug AS role_slug
        FROM users u
        JOIN user_roles ur ON ur.id = u.role_id
       WHERE u.deleted_at IS NULL AND u.status = 'active'
       ORDER BY ur.id, u.name"
 );
+$intelGlobalDigestHour = (int) settings_get('notifications.digest_hour', 7);
 
 // Last anomaly scan timestamp.
 $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
@@ -1188,21 +1190,30 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                 <thead>
                     <tr>
                         <th align="left">User</th>
-                        <th align="left">Email</th>
                         <th align="left">Role</th>
-                        <th align="center" style="width:80px;">Opt-in</th>
+                        <th align="center" style="width:70px;">Opt-in</th>
+                        <th align="center" style="width:110px;">Hour</th>
+                        <th align="center" style="width:140px;">Sections</th>
                         <th align="left" style="width:220px;">Snooze</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($intelRecipients as $u):
-                        $inAllowList = isset($intelRolesSet[$u['role_slug']]);
-                        $snoozeRaw = $u['briefing_snoozed_until'];
-                        $snoozeActive = $snoozeRaw !== null && strtotime((string) $snoozeRaw) > time();
+                        $inAllowList   = isset($intelRolesSet[$u['role_slug']]);
+                        $snoozeRaw     = $u['briefing_snoozed_until'];
+                        $snoozeActive  = $snoozeRaw !== null && strtotime((string) $snoozeRaw) > time();
+                        $userHour      = $u['briefing_hour'];
+                        $sectionsRaw   = $u['briefing_sections'];
+                        $sectionsArr   = $sectionsRaw !== null ? (json_decode((string) $sectionsRaw, true) ?: []) : null;
+                        $sectionsLabel = $sectionsArr === null
+                            ? 'all'
+                            : (count($sectionsArr) === 0 ? '(none)' : count($sectionsArr) . ' of 6');
                     ?>
                     <tr>
-                        <td><?= e((string) $u['name']) ?></td>
-                        <td class="text-muted" style="font-size:0.78rem;"><?= e((string) $u['email']) ?></td>
+                        <td>
+                            <?= e((string) $u['name']) ?>
+                            <div class="text-muted" style="font-size:0.72rem;"><?= e((string) $u['email']) ?></div>
+                        </td>
                         <td>
                             <span class="badge <?= $inAllowList ? 'badge-info' : 'badge-secondary' ?>" style="font-size:0.7rem;">
                                 <?= e((string) $u['role_slug']) ?>
@@ -1215,20 +1226,63 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                                        @change="toggleOptIn(<?= (int) $u['id'] ?>, $event.target.checked ? 1 : 0)">
                             </label>
                         </td>
+                        <td align="center">
+                            <input type="number" min="0" max="23" placeholder="<?= $intelGlobalDigestHour ?>"
+                                   value="<?= $userHour !== null ? e((string) (int) $userHour) : '' ?>"
+                                   style="width:60px;font-size:0.78rem;text-align:center;"
+                                   class="form-control form-control-sm"
+                                   @change="setHour(<?= (int) $u['id'] ?>, $event.target.value)"
+                                   title="0..23 local, or blank to use global (<?= $intelGlobalDigestHour ?>)">
+                        </td>
+                        <td align="center">
+                            <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.72rem;"
+                                    @click="openSections(<?= (int) $u['id'] ?>, <?= htmlspecialchars(json_encode($sectionsArr), ENT_QUOTES) ?>)">
+                                <?= e($sectionsLabel) ?>
+                            </button>
+                        </td>
                         <td>
                             <?php if ($snoozeActive): ?>
                                 <span class="badge badge-warning" style="font-size:0.7rem;">until <?= e((string) $snoozeRaw) ?></span>
                                 <button class="btn btn-sm btn-outline" style="margin-left:4px;padding:2px 6px;font-size:0.7rem;" @click="setSnooze(<?= (int) $u['id'] ?>, null)">Clear</button>
                             <?php else: ?>
-                                <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;" @click="setSnooze(<?= (int) $u['id'] ?>, '1d')">Snooze 1d</button>
+                                <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;" @click="setSnooze(<?= (int) $u['id'] ?>, '1d')">1d</button>
                                 <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;margin-left:2px;" @click="setSnooze(<?= (int) $u['id'] ?>, '1w')">1w</button>
-                                <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;margin-left:2px;" @click="setSnoozeCustom(<?= (int) $u['id'] ?>)">Custom…</button>
+                                <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;margin-left:2px;" @click="setSnoozeCustom(<?= (int) $u['id'] ?>)">…</button>
                             <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+        </div>
+
+        <!-- Sections-picker modal (F5) -->
+        <div x-show="sectionsModal.open" x-cloak class="modal-overlay"
+             style="background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);"
+             @click.self="sectionsModal.open = false">
+            <div class="modal" style="max-width:480px;width:90%;">
+                <div class="modal-header">
+                    <h3 class="h5" style="margin:0;">Briefing sections for this user</h3>
+                    <button class="modal-close-btn" @click="sectionsModal.open = false" aria-label="Close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">
+                        Pick which sections appear in this user's daily email. Default (all checked → save with all selected, or none = "use all").
+                    </p>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        <template x-for="key in ['overdue','compliance','damage','risk_high','health_drops','brief']" :key="key">
+                            <label class="form-check" style="margin:0;">
+                                <input type="checkbox" :value="key" x-model="sectionsModal.selected">
+                                <span style="margin-left:6px;font-size:0.875rem;" x-text="sectionLabel(key)"></span>
+                            </label>
+                        </template>
+                    </div>
+                </div>
+                <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--border-color);">
+                    <button class="btn btn-outline" @click="resetSections()">Reset to all</button>
+                    <button class="btn btn-primary" @click="saveSections()">Save</button>
+                </div>
+            </div>
         </div>
 
         <div x-show="optFlash.message" x-cloak
@@ -1380,6 +1434,72 @@ function FF_BriefingControl() {
 function FF_RecipientManager() {
     return {
         optFlash: { message: '', type: '' },
+        sectionsModal: { open: false, userId: null, selected: [] },
+
+        sectionLabel(key) {
+            return ({
+                overdue: 'Overdue Invoices',
+                compliance: 'Compliance Expiring',
+                damage: 'Open Damage Claims',
+                risk_high: 'Customer Risk Changes',
+                health_drops: 'Equipment Health Drops',
+                brief: 'AI Fleet Brief',
+            })[key] || key;
+        },
+
+        openSections(userId, currentArrayOrNull) {
+            this.sectionsModal = {
+                open: true,
+                userId: userId,
+                // null on server = all; we represent as "all checked" in the UI
+                selected: currentArrayOrNull === null
+                    ? ['overdue','compliance','damage','risk_high','health_drops','brief']
+                    : currentArrayOrNull.slice(),
+            };
+        },
+
+        resetSections() {
+            this.sectionsModal.selected = ['overdue','compliance','damage','risk_high','health_drops','brief'];
+        },
+
+        async saveSections() {
+            const all = ['overdue','compliance','damage','risk_high','health_drops','brief'];
+            const selected = this.sectionsModal.selected;
+            // If user kept all 6 checked → save null (use all default).
+            const value = (selected.length === all.length && all.every(k => selected.includes(k))) ? null : selected;
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/set_user_preferences.php'), {
+                    user_id: this.sectionsModal.userId,
+                    briefing_sections: value,
+                });
+                if (j.success) {
+                    this.optFlash = { message: 'Sections updated. Reloading…', type: 'success' };
+                    this.sectionsModal.open = false;
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    this.optFlash = { message: (j.error && j.error.message) || 'Save failed', type: 'error' };
+                }
+            } catch (e) {
+                this.optFlash = { message: e.message || 'Network error', type: 'error' };
+            }
+        },
+
+        async setHour(userId, hourStr) {
+            const hour = hourStr === '' || hourStr === null ? null : parseInt(hourStr, 10);
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/set_user_preferences.php'), {
+                    user_id: userId,
+                    briefing_hour: hour,
+                });
+                if (j.success) {
+                    this.optFlash = { message: 'Hour updated.', type: 'success' };
+                } else {
+                    this.optFlash = { message: (j.error && j.error.message) || 'Save failed', type: 'error' };
+                }
+            } catch (e) {
+                this.optFlash = { message: e.message || 'Network error', type: 'error' };
+            }
+        },
 
         async toggleOptIn(userId, optIn) {
             this.optFlash = { message: '', type: '' };

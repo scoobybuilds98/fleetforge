@@ -156,13 +156,34 @@ class MorningBriefingRenderer
         ];
     }
 
+    /** All section keys, in canonical rendering order. */
+    public const ALL_SECTIONS = ['overdue', 'compliance', 'damage', 'risk_high', 'health_drops', 'brief'];
+
     /**
      * Render the inline-styled HTML body for one digest email. Wrapped
      * by EmailService::renderEmailHtml() at send time (logo + footer
      * shell). Output is per-recipient (greeting carries the user's name).
+     *
+     * @param string        $userName  Recipient display name
+     * @param array         $p         Payload from buildPayload()
+     * @param list<string>|null $sections  S-INTEL-V2 F5: section keys to
+     *   include. NULL/missing = render all. Empty array = greeting only
+     *   (edge case; not exposed via UI). Unknown section keys ignored.
      */
-    public static function renderBody(string $userName, array $p): string
+    public static function renderBody(string $userName, array $p, ?array $sections = null): string
     {
+        // Normalize the include-list. NULL → all sections.
+        if ($sections === null) {
+            $include = array_flip(self::ALL_SECTIONS);
+        } else {
+            $include = [];
+            foreach ($sections as $k) {
+                if (is_string($k) && in_array($k, self::ALL_SECTIONS, true)) {
+                    $include[$k] = true;
+                }
+            }
+        }
+        $show = static fn(string $section) => isset($include[$section]);
         $sym    = (string) settings_get('company.currency_symbol', '$');
         $fmt    = fn(string $v) => $sym . number_format((float) $v, 2);
         $appUrl = rtrim((string) settings_get('app.url', ''), '/');
@@ -174,82 +195,217 @@ class MorningBriefingRenderer
         $html .= '<p style="font-size:13px;color:#555;margin:0 0 24px;">Here is your fleet briefing for ' . e(date('l, F j, Y')) . '.</p>';
 
         // Section 1 — overdue invoices.
-        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
-               . 'Overdue Invoices</h2>';
-        $html .= '<p style="font-size:13px;margin:0 0 8px;">'
-               . '<strong>' . $p['overdue']['count'] . '</strong> invoice(s) past due totalling <strong>' . e($fmt($p['overdue']['total'])) . '</strong>.</p>';
-        if (!empty($p['overdue']['top'])) {
-            $html .= '<table cellpadding="6" cellspacing="0" border="0" style="font-size:12px;border-collapse:collapse;margin-bottom:20px;">';
-            $html .= '<tr style="background:#f5f5f4;"><th align="left">Customer</th><th align="right">Owed</th><th align="right">Max Days</th></tr>';
-            foreach ($p['overdue']['top'] as $row) {
-                $html .= '<tr><td>' . e($row['company_name']) . '</td>'
-                      .  '<td align="right">' . e($fmt((string) $row['total'])) . '</td>'
-                      .  '<td align="right">' . (int) $row['max_days'] . '</td></tr>';
+        if ($show('overdue')) {
+            $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
+                   . 'Overdue Invoices</h2>';
+            $html .= '<p style="font-size:13px;margin:0 0 8px;">'
+                   . '<strong>' . $p['overdue']['count'] . '</strong> invoice(s) past due totalling <strong>' . e($fmt($p['overdue']['total'])) . '</strong>.</p>';
+            if (!empty($p['overdue']['top'])) {
+                $html .= '<table cellpadding="6" cellspacing="0" border="0" style="font-size:12px;border-collapse:collapse;margin-bottom:20px;">';
+                $html .= '<tr style="background:#f5f5f4;"><th align="left">Customer</th><th align="right">Owed</th><th align="right">Max Days</th></tr>';
+                foreach ($p['overdue']['top'] as $row) {
+                    $html .= '<tr><td>' . e($row['company_name']) . '</td>'
+                          .  '<td align="right">' . e($fmt((string) $row['total'])) . '</td>'
+                          .  '<td align="right">' . (int) $row['max_days'] . '</td></tr>';
+                }
+                $html .= '</table>';
             }
-            $html .= '</table>';
         }
 
         // Section 2 — compliance expiring this week.
-        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
-               . 'Compliance Expiring This Week</h2>';
-        if (!empty($p['compliance'])) {
-            $count = count($p['compliance']);
-            $html .= '<p style="font-size:13px;margin:0 0 8px;"><strong>' . $count . '</strong> unit(s) with documents expiring within 7 days:</p>';
-            $html .= '<ul style="font-size:12px;margin:0 0 20px;padding-left:18px;">';
-            foreach ($p['compliance'] as $u) {
-                $html .= '<li>Unit ' . e($u['unit_number']) . ' — earliest expiry ' . e($u['earliest']) . '</li>';
+        if ($show('compliance')) {
+            $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
+                   . 'Compliance Expiring This Week</h2>';
+            if (!empty($p['compliance'])) {
+                $count = count($p['compliance']);
+                $html .= '<p style="font-size:13px;margin:0 0 8px;"><strong>' . $count . '</strong> unit(s) with documents expiring within 7 days:</p>';
+                $html .= '<ul style="font-size:12px;margin:0 0 20px;padding-left:18px;">';
+                foreach ($p['compliance'] as $u) {
+                    $html .= '<li>Unit ' . e($u['unit_number']) . ' — earliest expiry ' . e($u['earliest']) . '</li>';
+                }
+                $html .= '</ul>';
+            } else {
+                $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No compliance documents expiring this week.</p>';
             }
-            $html .= '</ul>';
-        } else {
-            $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No compliance documents expiring this week.</p>';
         }
 
         // Section 3 — open damage claims.
-        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
-               . 'Open Damage Claims</h2>';
-        $html .= '<p style="font-size:13px;margin:0 0 20px;">'
-               . '<strong>' . $p['damage']['count'] . '</strong> open claim(s), estimated repair cost <strong>' . e($fmt($p['damage']['total_cost'])) . '</strong>.</p>';
+        if ($show('damage')) {
+            $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
+                   . 'Open Damage Claims</h2>';
+            $html .= '<p style="font-size:13px;margin:0 0 20px;">'
+                   . '<strong>' . $p['damage']['count'] . '</strong> open claim(s), estimated repair cost <strong>' . e($fmt($p['damage']['total_cost'])) . '</strong>.</p>';
+        }
 
         // Section 4 — customer risk to HIGH overnight.
-        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
-               . 'Customer Risk Changes Overnight</h2>';
-        if (!empty($p['risk_high'])) {
-            $html .= '<ul style="font-size:12px;margin:0 0 20px;padding-left:18px;">';
-            foreach ($p['risk_high'] as $r) {
-                $html .= '<li>' . e($r['entity_label'] ?: ('Customer #' . (int) $r['entity_id'])) . ' — promoted to HIGH risk</li>';
+        if ($show('risk_high')) {
+            $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
+                   . 'Customer Risk Changes Overnight</h2>';
+            if (!empty($p['risk_high'])) {
+                $html .= '<ul style="font-size:12px;margin:0 0 20px;padding-left:18px;">';
+                foreach ($p['risk_high'] as $r) {
+                    $html .= '<li>' . e($r['entity_label'] ?: ('Customer #' . (int) $r['entity_id'])) . ' — promoted to HIGH risk</li>';
+                }
+                $html .= '</ul>';
+            } else {
+                $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No customers transitioned to HIGH risk overnight.</p>';
             }
-            $html .= '</ul>';
-        } else {
-            $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No customers transitioned to HIGH risk overnight.</p>';
         }
 
         // Section 5 — equipment health drops.
-        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
-               . 'Equipment Health Drops Overnight</h2>';
-        if (!empty($p['health_drops'])) {
-            $html .= '<ul style="font-size:12px;margin:0 0 20px;padding-left:18px;">';
-            foreach ($p['health_drops'] as $d) {
-                $html .= '<li>Unit ' . e($d['entity_label'] ?: ('#' . (int) $d['entity_id']))
-                      .  ' — dropped to ' . e($d['new_color']) . ' (score ' . (int) $d['new_score'] . ')</li>';
+        if ($show('health_drops')) {
+            $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
+                   . 'Equipment Health Drops Overnight</h2>';
+            if (!empty($p['health_drops'])) {
+                $html .= '<ul style="font-size:12px;margin:0 0 20px;padding-left:18px;">';
+                foreach ($p['health_drops'] as $d) {
+                    $html .= '<li>Unit ' . e($d['entity_label'] ?: ('#' . (int) $d['entity_id']))
+                          .  ' — dropped to ' . e($d['new_color']) . ' (score ' . (int) $d['new_score'] . ')</li>';
+                }
+                $html .= '</ul>';
+            } else {
+                $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No units dropped to orange/red overnight.</p>';
             }
-            $html .= '</ul>';
-        } else {
-            $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No units dropped to orange/red overnight.</p>';
         }
 
         // Section 6 — AI fleet brief excerpt.
-        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
-               . 'AI Fleet Brief</h2>';
-        if (!empty($p['brief']['paragraph'])) {
-            $html .= '<p style="font-size:13px;margin:0 0 8px;">' . e($p['brief']['paragraph']) . '</p>';
-            if ($p['brief']['stale']) {
-                $html .= '<p style="font-size:11px;color:#999;font-style:italic;margin:0 0 12px;">Brief is from a prior day and may be outdated.</p>';
+        if ($show('brief')) {
+            $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">'
+                   . 'AI Fleet Brief</h2>';
+            if (!empty($p['brief']['paragraph'])) {
+                $html .= '<p style="font-size:13px;margin:0 0 8px;">' . e($p['brief']['paragraph']) . '</p>';
+                if ($p['brief']['stale']) {
+                    $html .= '<p style="font-size:11px;color:#999;font-style:italic;margin:0 0 12px;">Brief is from a prior day and may be outdated.</p>';
+                }
+                if ($appUrl !== '') {
+                    $html .= '<p style="font-size:12px;margin:0 0 20px;"><a href="' . e($appUrl) . '/admin/dashboard" style="color:#1c1c1a;">View full briefing on the dashboard →</a></p>';
+                }
+            } else {
+                $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No AI brief available yet today.</p>';
             }
-            if ($appUrl !== '') {
-                $html .= '<p style="font-size:12px;margin:0 0 20px;"><a href="' . e($appUrl) . '/admin/dashboard" style="color:#1c1c1a;">View full briefing on the dashboard →</a></p>';
+        }
+
+        $html .= '</td></tr></table>';
+        return $html;
+    }
+
+    /**
+     * S-INTEL-V2 Phase E: build the WEEKLY payload — 7-day aggregates
+     * vs. the morning's 24-hour deltas. Used by cron/ai_weekly_brief.php
+     * and the weekly digest body renderer.
+     *
+     * @return array<string,mixed>
+     */
+    public static function buildWeeklyPayload(): array
+    {
+        $weekStart = date('Y-m-d 00:00:00', strtotime('-7 days'));
+
+        // Invoices generated in last 7 days
+        $invoices7d = db_row(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(total_amount), 0) AS total
+               FROM invoices
+              WHERE deleted_at IS NULL AND created_at >= ?
+                AND status IN ('sent', 'paid', 'partially_paid')",
+            [$weekStart]
+        );
+
+        // Payments received in last 7 days
+        $payments7d = db_row(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total
+               FROM payments
+              WHERE deleted_at IS NULL AND payment_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)"
+        );
+
+        // Active lease count + leases opened in last 7 days
+        $activeLeases = db_count(
+            "SELECT COUNT(*) FROM leases WHERE deleted_at IS NULL AND status = 'active'"
+        );
+        $newLeases7d = db_count(
+            "SELECT COUNT(*) FROM leases
+              WHERE deleted_at IS NULL AND created_at >= ?",
+            [$weekStart]
+        );
+
+        // Overdue snapshot (current — same as morning)
+        $overdueNow = db_row(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(balance_due), 0) AS total
+               FROM invoices
+              WHERE deleted_at IS NULL AND status IN ('sent','overdue','partially_paid')
+                AND balance_due > 0 AND due_date < CURDATE()"
+        );
+
+        // Top 5 overdue customers (current snapshot)
+        $topOverdue = db_select(
+            "SELECT c.company_name,
+                    COALESCE(SUM(i.balance_due), 0) AS total
+               FROM customers c
+               JOIN invoices i ON i.customer_id = c.id
+              WHERE c.deleted_at IS NULL AND i.deleted_at IS NULL
+                AND i.status IN ('sent','overdue','partially_paid')
+                AND i.balance_due > 0 AND i.due_date < CURDATE()
+              GROUP BY c.id, c.company_name
+              ORDER BY total DESC
+              LIMIT 5"
+        );
+
+        // Total open damage claims
+        $damageOpen = db_row(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(estimated_repair_cost), 0) AS total_cost
+               FROM damage_claims
+              WHERE deleted_at IS NULL AND status NOT IN ('resolved','written_off')"
+        );
+
+        return [
+            'week_start' => date('M j', strtotime($weekStart)),
+            'week_end'   => date('M j', strtotime('-1 day')),
+            'invoices'   => ['count' => (int) ($invoices7d['n'] ?? 0), 'total' => (string) ($invoices7d['total'] ?? '0.00')],
+            'payments'   => ['count' => (int) ($payments7d['n'] ?? 0), 'total' => (string) ($payments7d['total'] ?? '0.00')],
+            'leases'     => ['active' => (int) $activeLeases, 'new_7d' => (int) $newLeases7d],
+            'overdue'    => ['count' => (int) ($overdueNow['n'] ?? 0), 'total' => (string) ($overdueNow['total'] ?? '0.00'), 'top' => $topOverdue],
+            'damage'     => ['count' => (int) ($damageOpen['n'] ?? 0), 'total_cost' => (string) ($damageOpen['total_cost'] ?? '0.00')],
+        ];
+    }
+
+    /**
+     * Render the weekly digest email body.
+     */
+    public static function renderWeeklyBody(string $userName, array $p): string
+    {
+        $sym = (string) settings_get('company.currency_symbol', '$');
+        $fmt = fn(string $v) => $sym . number_format((float) $v, 2);
+        $appUrl = rtrim((string) settings_get('app.url', ''), '/');
+
+        $html  = '<table cellpadding="0" cellspacing="0" border="0" width="100%" style="padding:24px;background:#ffffff;">';
+        $html .= '<tr><td style="font-family:Arial,sans-serif;color:#1c1c1a;">';
+        $html .= '<h1 style="margin:0 0 16px;font-size:18px;">Weekly fleet digest, ' . e($userName) . '</h1>';
+        $html .= '<p style="font-size:13px;color:#555;margin:0 0 16px;">For the week of ' . e($p['week_start']) . ' – ' . e($p['week_end']) . '.</p>';
+
+        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">Revenue & invoicing</h2>';
+        $html .= '<table cellpadding="6" cellspacing="0" border="0" style="font-size:12px;border-collapse:collapse;margin-bottom:20px;">';
+        $html .= '<tr><td><strong>Invoices generated</strong></td><td align="right">' . $p['invoices']['count'] . '</td><td align="right">' . e($fmt($p['invoices']['total'])) . '</td></tr>';
+        $html .= '<tr><td><strong>Payments received</strong></td><td align="right">' . $p['payments']['count'] . '</td><td align="right">' . e($fmt($p['payments']['total'])) . '</td></tr>';
+        $html .= '</table>';
+
+        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">Leases</h2>';
+        $html .= '<p style="font-size:13px;margin:0 0 20px;">';
+        $html .= '<strong>' . $p['leases']['active'] . '</strong> active lease(s). <strong>' . $p['leases']['new_7d'] . '</strong> opened this week.';
+        $html .= '</p>';
+
+        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">Outstanding receivables</h2>';
+        $html .= '<p style="font-size:13px;margin:0 0 8px;"><strong>' . $p['overdue']['count'] . '</strong> overdue invoice(s) totalling <strong>' . e($fmt($p['overdue']['total'])) . '</strong>.</p>';
+        if (!empty($p['overdue']['top'])) {
+            $html .= '<ul style="font-size:12px;margin:0 0 20px;padding-left:18px;">';
+            foreach ($p['overdue']['top'] as $row) {
+                $html .= '<li>' . e($row['company_name']) . ' — ' . e($fmt((string) $row['total'])) . '</li>';
             }
-        } else {
-            $html .= '<p style="font-size:13px;margin:0 0 20px;color:#666;">No AI brief available yet today.</p>';
+            $html .= '</ul>';
+        }
+
+        $html .= '<h2 style="font-size:14px;color:#1c1c1a;border-bottom:1px solid #e5e5e2;padding-bottom:6px;margin:0 0 8px;">Damage claims</h2>';
+        $html .= '<p style="font-size:13px;margin:0 0 20px;"><strong>' . $p['damage']['count'] . '</strong> open claim(s) at <strong>' . e($fmt($p['damage']['total_cost'])) . '</strong> est. repair cost.</p>';
+
+        if ($appUrl !== '') {
+            $html .= '<p style="font-size:12px;color:#666;margin:0;">Open the full <a href="' . e($appUrl) . '/admin/dashboard" style="color:#1c1c1a;">dashboard</a> for live metrics.</p>';
         }
 
         $html .= '</td></tr></table>';

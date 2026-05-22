@@ -480,10 +480,16 @@ _12 tables._
 | `permissions_updated_at` | timestamp |  | YES |
 | `morning_briefing_opt_in` | tinyint(1) |  | NO |
 | `briefing_snoozed_until` | datetime |  | YES |
+| `briefing_hour` | tinyint unsigned |  | YES |
 | `created_by` | int unsigned | MUL | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `deleted_at` | datetime | MUL | YES |
+| `briefing_sections` | json |  | YES |
+| `briefing_channels` | json |  | NO |
+| `slack_user_id` | varchar(50) |  | YES |
+| `phone_e164` | varchar(32) |  | YES |
+| `weekly_brief_opt_in` | tinyint(1) |  | NO |
 
 ## `vendors`
 
