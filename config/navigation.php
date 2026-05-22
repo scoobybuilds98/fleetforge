@@ -169,36 +169,6 @@ return [
     ],
 
     // ----------------------------------------------------------
-    // Admin section — super_admin and manager only
-    // ----------------------------------------------------------
-    [
-        'separator' => true,
-        'label'     => 'Admin',
-        'module'    => 'users',      // section shown if user can view 'users'
-    ],
-    [
-        'label'  => 'Users',
-        'icon'   => 'users',
-        'url'    => '/users',
-        'module' => 'users',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Audit Log',
-        'icon'   => 'clipboard-document-list',
-        'url'    => '/audit',
-        'module' => 'audit',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Settings',
-        'icon'   => 'cog-6-tooth',
-        'url'    => '/settings',
-        'module' => 'settings',
-        'badge'  => null,
-    ],
-
-    // ----------------------------------------------------------
     // QuickBooks section — accountant role + super_admin (Phase QBO)
     //
     // STRUCTURE: SEPARATE top-level nav parent placed ABOVE the
@@ -482,5 +452,39 @@ return [
                 'badge'  => null,
             ],
         ],
+    ],
+
+    // ----------------------------------------------------------
+    // Admin section — super_admin and manager only.
+    // Moved to bottom of sidebar (operator request 2026-05-21) so the
+    // primary app modules (Accounting + QuickBooks + Fleet ops) sit
+    // higher and Admin/Users/Audit/Settings sit at the natural
+    // "infrastructure-y" position at the foot of the rail.
+    // ----------------------------------------------------------
+    [
+        'separator' => true,
+        'label'     => 'Admin',
+        'module'    => 'users',      // section shown if user can view 'users'
+    ],
+    [
+        'label'  => 'Users',
+        'icon'   => 'users',
+        'url'    => '/users',
+        'module' => 'users',
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'Audit Log',
+        'icon'   => 'clipboard-document-list',
+        'url'    => '/audit',
+        'module' => 'audit',
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'Settings',
+        'icon'   => 'cog-6-tooth',
+        'url'    => '/settings',
+        'module' => 'settings',
+        'badge'  => null,
     ],
 ];
