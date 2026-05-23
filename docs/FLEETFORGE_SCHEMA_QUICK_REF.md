@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-21
-**Tables:** 137 total · **Columns:** 2151
+**Generated:** 2026-05-24
+**Tables:** 137 total · **Columns:** 2152
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -1341,6 +1341,7 @@ _55 tables._
 | `match_confidence` | enum('exact_code','exact_name','high','medium','low','manual') |  | YES |
 | `is_critical` | tinyint(1) | MUL | NO |
 | `critical_reason` | varchar(255) |  | YES |
+| `critical_category` | varchar(50) | MUL | YES |
 | `match_notes` | text |  | YES |
 | `last_synced_at` | datetime | MUL | YES |
 | `last_pull_at` | datetime |  | YES |

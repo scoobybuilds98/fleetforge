@@ -65,11 +65,29 @@ declare(strict_types=1);
  *       unknown (D-QBO-MATCHER-2)
  *  C23: SUBTYPE_EQUIVALENCE constant exists with 8 baseline FF subtype
  *       keys (D-QBO-MATCHER-2)
+ *  C24: assertReadyForInvoicePush passes with only ar_clearing +
+ *       sales_revenue mapped (new narrowed semantics per
+ *       D-QBO-VALIDATOR-4 — does NOT require tax_receivable/
+ *       tax_payable/ap_clearing)
+ *  C25: assertReadyForInvoicePush throws when sales_revenue category
+ *       unmapped; exception message mentions 'sales_revenue'
+ *  C26: assertReadyForFullCompliance throws when any category unmapped
+ *       (preserves legacy all-categories semantics for cutover gating)
+ *  C27: assertReadyForPaymentPush requires ar_clearing +
+ *       undeposited_funds; undeposited_funds with zero FF accounts
+ *       produces actionable error per D-QBO-VALIDATOR-3 operator
+ *       resolution
+ *  C28: markCriticalAccounts populates critical_category column on
+ *       acc_qbo_account_map rows it flags
+ *  C29: Migration backfill verification — every is_critical=1 row in
+ *       acc_qbo_account_map has non-null critical_category in the
+ *       expected category whitelist
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
- * @session S-QBO-8, S-QBO-MATCHER-GREEDY-FIX (C20-C23 added)
- * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §7.1
+ * @session S-QBO-8, S-QBO-MATCHER-GREEDY-FIX (C20-C23 added),
+ *          S-QBO-VALIDATOR-SCOPE-SPLIT (C24-C29 added)
+ * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §7.1, §6.8 (Pusher pre-flight gates)
  */
 
 require_once __DIR__ . '/../config/app.php';
@@ -82,7 +100,7 @@ use FleetForge\Exceptions\QuickBooksException;
 
 $failures = [];
 $pass     = 0;
-$total    = 23;
+$total    = 29;
 
 /** Sentinel ids we'll clean up. */
 $sentinelFfIds       = [];
@@ -174,14 +192,26 @@ if (!class_exists(AccountValidator::class)) {
     $c4Errors[] = 'AccountValidator class not autoloaded';
 } else {
     $ref = new ReflectionClass(AccountValidator::class);
-    foreach (['markCriticalAccounts', 'unmappedCritical', 'assertReadyForInvoicePush', 'identifyCriticalFfAccounts'] as $m) {
+    // Per-session assert methods + helpers — D-QBO-VALIDATOR-3.
+    $expectedMethods = [
+        'markCriticalAccounts', 'unmappedCritical', 'unmappedByCategory',
+        'blockingCategories', 'identifyCriticalFfAccounts',
+        'assertReadyForInvoicePush', 'assertReadyForPaymentPush',
+        'assertReadyForBillPush', 'assertReadyForBillPaymentPush',
+        'assertReadyForJournalEntryPush', 'assertReadyForFullCompliance',
+    ];
+    foreach ($expectedMethods as $m) {
         if (!$ref->hasMethod($m)) { $c4Errors[] = "missing method: {$m}"; continue; }
         $rm = $ref->getMethod($m);
         if (!$rm->isStatic() || !$rm->isPublic()) { $c4Errors[] = "{$m} must be public static"; }
     }
+    // Constants per D-QBO-VALIDATOR-2.
+    foreach (['CATEGORIES', 'SESSION_REQUIREMENTS'] as $c) {
+        if (!$ref->hasConstant($c)) { $c4Errors[] = "missing constant: {$c}"; }
+    }
 }
 if (empty($c4Errors)) {
-    echo "PASS C4  AccountValidator class surface (markCriticalAccounts + unmappedCritical + assertReadyForInvoicePush + identifyCriticalFfAccounts public static)\n";
+    echo "PASS C4  AccountValidator class surface (11 public static + CATEGORIES + SESSION_REQUIREMENTS)\n";
     $pass++;
 } else {
     echo "FAIL C4  " . implode('; ', $c4Errors) . "\n";
@@ -952,6 +982,386 @@ if (empty($c23Errors)) {
 } else {
     echo "FAIL C23 " . implode('; ', $c23Errors) . "\n";
     $failures[] = 'C23';
+}
+
+// ── C24: invoice push passes with ar_clearing + sales_revenue only ──
+// New narrowed semantics per D-QBO-VALIDATOR-4. Setup: temp-map AR
+// (1030) + Sales Revenue (4122) to synthetic QBO ids; leave tax /
+// undeposited_funds / AP unmapped. assertReadyForInvoicePush must
+// pass silently.
+$c24Errors = [];
+$c24TempMappedFfIds = [];
+try {
+    AccountValidator::markCriticalAccounts(); // ensure baseline
+    $arFf    = db_row("SELECT id FROM acc_accounts WHERE code='1030' AND is_active=1");
+    $salesFf = db_row("SELECT id FROM acc_accounts WHERE code='4122' AND is_active=1 LIMIT 1");
+    if ($arFf === null || $salesFf === null) {
+        $c24Errors[] = 'pre-condition: AR (1030) or Sales Revenue (4122) absent from live chart';
+    } else {
+        foreach ([$arFf, $salesFf] as $ff) {
+            $sentinelQbo = 'TEST-SMOKE-A-' . bin2hex(random_bytes(6));
+            $sentinelQboIds[] = $sentinelQbo;
+            db_execute(
+                "UPDATE acc_qbo_account_map SET
+                    qbo_account_id   = ?,
+                    qbo_sync_token   = '0',
+                    qbo_name         = 'SMOKE C24 mirror',
+                    mapping_status   = 'mapped',
+                    match_confidence = 'manual'
+                  WHERE ff_account_id = ? AND is_critical = 1",
+                [$sentinelQbo, (int) $ff['id']]
+            );
+            $c24TempMappedFfIds[] = (int) $ff['id'];
+        }
+        try {
+            AccountValidator::assertReadyForInvoicePush();
+            // PASS — no exception.
+        } catch (\Throwable $e) {
+            $c24Errors[] = 'expected no exception, got ' . get_class($e) . ': ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c24Errors[] = 'C24 setup threw: ' . $e->getMessage();
+} finally {
+    foreach ($c24TempMappedFfIds as $ffId) {
+        try {
+            db_execute(
+                "UPDATE acc_qbo_account_map SET
+                    qbo_account_id   = NULL,
+                    qbo_sync_token   = NULL,
+                    qbo_name         = NULL,
+                    mapping_status   = 'ff_only',
+                    match_confidence = NULL
+                  WHERE ff_account_id = ?",
+                [$ffId]
+            );
+        } catch (\Throwable $e) { /* best-effort */ }
+    }
+}
+if (empty($c24Errors)) {
+    echo "PASS C24 assertReadyForInvoicePush passes with only ar_clearing + sales_revenue mapped (D-QBO-VALIDATOR-4 narrowed semantics)\n";
+    $pass++;
+} else {
+    echo "FAIL C24 " . implode('; ', $c24Errors) . "\n";
+    $failures[] = 'C24';
+}
+
+// ── C25: invoice push throws when sales_revenue unmapped ──
+// Setup: map only AR (ar_clearing satisfied); leave sales_revenue
+// unmapped. Gate must throw with message mentioning 'sales_revenue'.
+$c25Errors = [];
+$c25TempFfId = null;
+try {
+    AccountValidator::markCriticalAccounts();
+    $arFf = db_row("SELECT id FROM acc_accounts WHERE code='1030' AND is_active=1");
+    if ($arFf === null) {
+        $c25Errors[] = 'pre-condition: AR (1030) absent';
+    } else {
+        $sentinelQbo = 'TEST-SMOKE-A-' . bin2hex(random_bytes(6));
+        $sentinelQboIds[] = $sentinelQbo;
+        db_execute(
+            "UPDATE acc_qbo_account_map SET
+                qbo_account_id   = ?,
+                qbo_sync_token   = '0',
+                qbo_name         = 'SMOKE C25 mirror',
+                mapping_status   = 'mapped',
+                match_confidence = 'manual'
+              WHERE ff_account_id = ? AND is_critical = 1",
+            [$sentinelQbo, (int) $arFf['id']]
+        );
+        $c25TempFfId = (int) $arFf['id'];
+
+        try {
+            AccountValidator::assertReadyForInvoicePush();
+            $c25Errors[] = 'expected exception, none thrown';
+        } catch (ChartOfAccountsIncompleteException $e) {
+            if (!str_contains($e->getMessage(), 'sales_revenue')) {
+                $c25Errors[] = "expected message to mention 'sales_revenue', got: " . $e->getMessage();
+            }
+            if (empty($e->unmappedAccounts)) {
+                $c25Errors[] = 'exception thrown but unmappedAccounts is empty';
+            }
+        } catch (\Throwable $e) {
+            $c25Errors[] = 'unexpected exception type: ' . get_class($e) . ' — ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c25Errors[] = 'C25 setup threw: ' . $e->getMessage();
+} finally {
+    if ($c25TempFfId !== null) {
+        try {
+            db_execute(
+                "UPDATE acc_qbo_account_map SET
+                    qbo_account_id   = NULL,
+                    qbo_sync_token   = NULL,
+                    qbo_name         = NULL,
+                    mapping_status   = 'ff_only',
+                    match_confidence = NULL
+                  WHERE ff_account_id = ?",
+                [$c25TempFfId]
+            );
+        } catch (\Throwable $e) { /* best-effort */ }
+    }
+}
+if (empty($c25Errors)) {
+    echo "PASS C25 assertReadyForInvoicePush throws naming 'sales_revenue' when that category unmapped\n";
+    $pass++;
+} else {
+    echo "FAIL C25 " . implode('; ', $c25Errors) . "\n";
+    $failures[] = 'C25';
+}
+
+// ── C26: full compliance throws when any category unmapped ──
+// Setup: same as C24 (ar_clearing + sales_revenue mapped). Invoice
+// push gate passes (C24) but FullCompliance gate must throw because
+// ap_clearing / tax_receivable / tax_payable / undeposited_funds
+// remain unmapped.
+$c26Errors = [];
+$c26TempMappedFfIds = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    $arFf    = db_row("SELECT id FROM acc_accounts WHERE code='1030' AND is_active=1");
+    $salesFf = db_row("SELECT id FROM acc_accounts WHERE code='4122' AND is_active=1 LIMIT 1");
+    if ($arFf === null || $salesFf === null) {
+        $c26Errors[] = 'pre-condition: AR or Sales Revenue absent';
+    } else {
+        foreach ([$arFf, $salesFf] as $ff) {
+            $sentinelQbo = 'TEST-SMOKE-A-' . bin2hex(random_bytes(6));
+            $sentinelQboIds[] = $sentinelQbo;
+            db_execute(
+                "UPDATE acc_qbo_account_map SET
+                    qbo_account_id   = ?,
+                    qbo_sync_token   = '0',
+                    qbo_name         = 'SMOKE C26 mirror',
+                    mapping_status   = 'mapped',
+                    match_confidence = 'manual'
+                  WHERE ff_account_id = ? AND is_critical = 1",
+                [$sentinelQbo, (int) $ff['id']]
+            );
+            $c26TempMappedFfIds[] = (int) $ff['id'];
+        }
+        try {
+            AccountValidator::assertReadyForFullCompliance();
+            $c26Errors[] = 'expected exception, none thrown';
+        } catch (ChartOfAccountsIncompleteException $e) {
+            // At least 3 categories should be blocking (ap_clearing,
+            // tax_receivable, tax_payable, undeposited_funds — exact
+            // count depends on chart state but must be > 1).
+            $blockingMentioned = 0;
+            foreach (['ap_clearing', 'tax_receivable', 'tax_payable', 'undeposited_funds'] as $cat) {
+                if (str_contains($e->getMessage(), $cat)) { $blockingMentioned++; }
+            }
+            if ($blockingMentioned < 3) {
+                $c26Errors[] = "expected ≥3 blocking categories named in message, got {$blockingMentioned}: " . $e->getMessage();
+            }
+        } catch (\Throwable $e) {
+            $c26Errors[] = 'unexpected exception type: ' . get_class($e) . ' — ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c26Errors[] = 'C26 setup threw: ' . $e->getMessage();
+} finally {
+    foreach ($c26TempMappedFfIds as $ffId) {
+        try {
+            db_execute(
+                "UPDATE acc_qbo_account_map SET
+                    qbo_account_id   = NULL,
+                    qbo_sync_token   = NULL,
+                    qbo_name         = NULL,
+                    mapping_status   = 'ff_only',
+                    match_confidence = NULL
+                  WHERE ff_account_id = ?",
+                [$ffId]
+            );
+        } catch (\Throwable $e) { /* best-effort */ }
+    }
+}
+if (empty($c26Errors)) {
+    echo "PASS C26 assertReadyForFullCompliance throws naming multiple missing categories when only invoice-push categories mapped\n";
+    $pass++;
+} else {
+    echo "FAIL C26 " . implode('; ', $c26Errors) . "\n";
+    $failures[] = 'C26';
+}
+
+// ── C27: payment push requires ar_clearing + undeposited_funds ──
+// Setup: map AR only. Gate must throw, naming 'undeposited_funds'
+// AND noting that no FF account is tagged with that category (per
+// D-QBO-VALIDATOR-3 operator resolution — UF has no FF account in
+// v1 chart). This is the actionable error path.
+$c27Errors = [];
+$c27TempFfId = null;
+try {
+    AccountValidator::markCriticalAccounts();
+    $arFf = db_row("SELECT id FROM acc_accounts WHERE code='1030' AND is_active=1");
+    if ($arFf === null) {
+        $c27Errors[] = 'pre-condition: AR absent';
+    } else {
+        $sentinelQbo = 'TEST-SMOKE-A-' . bin2hex(random_bytes(6));
+        $sentinelQboIds[] = $sentinelQbo;
+        db_execute(
+            "UPDATE acc_qbo_account_map SET
+                qbo_account_id   = ?,
+                qbo_sync_token   = '0',
+                qbo_name         = 'SMOKE C27 mirror',
+                mapping_status   = 'mapped',
+                match_confidence = 'manual'
+              WHERE ff_account_id = ? AND is_critical = 1",
+            [$sentinelQbo, (int) $arFf['id']]
+        );
+        $c27TempFfId = (int) $arFf['id'];
+
+        try {
+            AccountValidator::assertReadyForPaymentPush();
+            $c27Errors[] = 'expected exception, none thrown';
+        } catch (ChartOfAccountsIncompleteException $e) {
+            // Message should NAME undeposited_funds + indicate no FF
+            // account is tagged (the operator-actionable variant).
+            if (!str_contains($e->getMessage(), 'undeposited_funds')) {
+                $c27Errors[] = "expected message to mention 'undeposited_funds', got: " . $e->getMessage();
+            }
+            if (!str_contains($e->getMessage(), 'no FF account tagged')) {
+                $c27Errors[] = "expected message to note 'no FF account tagged' for empty-category state, got: " . $e->getMessage();
+            }
+            // ar_clearing should NOT be named (it IS mapped); message
+            // should only name the blocking category.
+            if (str_contains($e->getMessage(), 'ar_clearing:')) {
+                $c27Errors[] = "ar_clearing is mapped — should NOT be in error message: " . $e->getMessage();
+            }
+        } catch (\Throwable $e) {
+            $c27Errors[] = 'unexpected exception type: ' . get_class($e) . ' — ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c27Errors[] = 'C27 setup threw: ' . $e->getMessage();
+} finally {
+    if ($c27TempFfId !== null) {
+        try {
+            db_execute(
+                "UPDATE acc_qbo_account_map SET
+                    qbo_account_id   = NULL,
+                    qbo_sync_token   = NULL,
+                    qbo_name         = NULL,
+                    mapping_status   = 'ff_only',
+                    match_confidence = NULL
+                  WHERE ff_account_id = ?",
+                [$c27TempFfId]
+            );
+        } catch (\Throwable $e) { /* best-effort */ }
+    }
+}
+if (empty($c27Errors)) {
+    echo "PASS C27 assertReadyForPaymentPush throws with 'undeposited_funds no FF account tagged' when only ar_clearing mapped\n";
+    $pass++;
+} else {
+    echo "FAIL C27 " . implode('; ', $c27Errors) . "\n";
+    $failures[] = 'C27';
+}
+
+// ── C28: markCriticalAccounts populates critical_category ──
+// Confirm that running markCriticalAccounts() against live chart
+// produces critical_category values matching the FF code-pattern
+// heuristic. Idempotent — safe to re-run.
+$c28Errors = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    $rows = db_select(
+        "SELECT a.code, m.critical_category
+           FROM acc_qbo_account_map m
+           JOIN acc_accounts a ON a.id = m.ff_account_id
+          WHERE m.is_critical = 1
+            AND a.is_active = 1"
+    );
+    $expectedMap = [
+        '1030' => 'ar_clearing',
+        '2010' => 'ap_clearing',
+        '1050' => 'tax_receivable',
+        '1060' => 'tax_receivable',
+        '2030' => 'tax_payable',
+        '2040' => 'tax_payable',
+        // 4xxx is_system → sales_revenue (current chart has 4122)
+    ];
+    foreach ($rows as $r) {
+        $code = (string) $r['code'];
+        $cat  = (string) ($r['critical_category'] ?? '');
+        if ($cat === '') {
+            $c28Errors[] = "FF code {$code} has is_critical=1 but critical_category empty";
+            continue;
+        }
+        if (isset($expectedMap[$code]) && $expectedMap[$code] !== $cat) {
+            $c28Errors[] = "FF code {$code} expected category '{$expectedMap[$code]}', got '{$cat}'";
+        } elseif (!isset($expectedMap[$code]) && str_starts_with($code, '4')) {
+            // 4xxx accounts should be sales_revenue per heuristic.
+            if ($cat !== 'sales_revenue') {
+                $c28Errors[] = "FF 4xxx code {$code} expected category 'sales_revenue', got '{$cat}'";
+            }
+        }
+    }
+    if (count($rows) < 6) {
+        $c28Errors[] = "expected ≥6 critical rows, got " . count($rows);
+    }
+} catch (Throwable $e) {
+    $c28Errors[] = 'C28 threw: ' . $e->getMessage();
+}
+if (empty($c28Errors)) {
+    echo "PASS C28 markCriticalAccounts populates critical_category matching FF code heuristic (idempotent)\n";
+    $pass++;
+} else {
+    echo "FAIL C28 " . implode('; ', $c28Errors) . "\n";
+    $failures[] = 'C28';
+}
+
+// ── C29: backfill invariant — no NULL category among critical rows ──
+// Migration backfill should have populated critical_category for every
+// existing is_critical=1 row. Any post-migration insert via
+// markCriticalAccounts() also sets it. NULL category among is_critical=1
+// rows indicates a heuristic gap.
+$c29Errors = [];
+try {
+    $nullCount = (int) db_count(
+        "SELECT COUNT(*) FROM acc_qbo_account_map m
+           JOIN acc_accounts a ON a.id = m.ff_account_id
+          WHERE m.is_critical = 1
+            AND m.critical_category IS NULL
+            AND a.is_active = 1",
+        []
+    );
+    if ($nullCount > 0) {
+        // Surface which codes were affected so the operator can
+        // diagnose the heuristic gap quickly.
+        $nullRows = db_select(
+            "SELECT a.code FROM acc_qbo_account_map m
+               JOIN acc_accounts a ON a.id = m.ff_account_id
+              WHERE m.is_critical = 1
+                AND m.critical_category IS NULL
+                AND a.is_active = 1
+              ORDER BY a.code"
+        );
+        $codes = implode(',', array_map(fn($r) => $r['code'], $nullRows));
+        $c29Errors[] = "{$nullCount} is_critical=1 rows have NULL critical_category (codes: {$codes}) — heuristic gap or backfill skipped";
+    }
+
+    // Sanity-check the column whitelist: every NON-NULL category is in
+    // AccountValidator::CATEGORIES.
+    $cats = db_select(
+        "SELECT DISTINCT critical_category FROM acc_qbo_account_map
+          WHERE critical_category IS NOT NULL"
+    );
+    foreach ($cats as $row) {
+        $cat = (string) $row['critical_category'];
+        if (!in_array($cat, AccountValidator::CATEGORIES, true)) {
+            $c29Errors[] = "critical_category '{$cat}' not in AccountValidator::CATEGORIES whitelist";
+        }
+    }
+} catch (Throwable $e) {
+    $c29Errors[] = 'C29 threw: ' . $e->getMessage();
+}
+if (empty($c29Errors)) {
+    echo "PASS C29 No is_critical=1 rows with NULL critical_category; all categories in CATEGORIES whitelist\n";
+    $pass++;
+} else {
+    echo "FAIL C29 " . implode('; ', $c29Errors) . "\n";
+    $failures[] = 'C29';
 }
 
 } finally {

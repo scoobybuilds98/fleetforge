@@ -816,7 +816,7 @@ CREATE TABLE acc_qbo_account_map (
 );
 ```
 
-Populated in S-QBO-8. Every FF account touched by AutoEntryBridge MUST have a QBO mapping; S-QBO-8 includes a validator that refuses completion until all bridge-touching accounts are mapped.
+Populated in S-QBO-8. Every FF account touched by AutoEntryBridge MUST have a QBO mapping; S-QBO-8 includes a validator (`lib/QboPushers/AccountValidator.php`) that refuses completion until all bridge-touching accounts are mapped. **Per-session gates (S-QBO-VALIDATOR-SCOPE-SPLIT 2026-05-24, D-QBO-VALIDATOR-1/3):** each Pusher session calls its own `assertReadyFor*Push()` method instead of the original all-7-critical gate. `assertReadyForInvoicePush()` requires only `ar_clearing` + `sales_revenue` categories mapped; `assertReadyForPaymentPush()` requires `ar_clearing` + `undeposited_funds`; `assertReadyForBillPush()` requires `ap_clearing`; `assertReadyForBillPaymentPush()` requires `ap_clearing` + `undeposited_funds`; `assertReadyForJournalEntryPush()` requires `tax_receivable` + `tax_payable`; `assertReadyForFullCompliance()` requires all 6 (cutover-time gate). The `critical_category` column on `acc_qbo_account_map` tags each is_critical=1 row with one of these category values (D-QBO-VALIDATOR-2). Throws `ChartOfAccountsIncompleteException` with actionable message naming both blocking categories AND contributing FF accounts (D-QBO-VALIDATOR-5).
 
 ### 7.2 acc_qbo_tax_code_map
 

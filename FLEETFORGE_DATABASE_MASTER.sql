@@ -1048,6 +1048,7 @@ CREATE TABLE `acc_qbo_account_map` (
   `match_confidence` enum('exact_code','exact_name','high','medium','low','manual') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'D-QBO-8-3: exact_code=AcctNum match (highest signal); exact_name=normalized name+type match; high=Levenshtein+type; medium=subtype+token; low=singleton; manual=operator override',
   `is_critical` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'D-QBO-8-2: bridge-account flag — set by AccountValidator::markCriticalAccounts based on FF heuristics (is_system + code pattern + account_type)',
   `critical_reason` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Human-readable why this account is critical (e.g. "Accounts Receivable", "GST/HST Payable")',
+  `critical_category` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'D-QBO-VALIDATOR-2: per-session-category tag for is_critical=1 rows. Values: ar_clearing / ap_clearing / undeposited_funds / tax_receivable / tax_payable / sales_revenue. NULL for non-critical rows. Populated by AccountValidator::markCriticalAccounts() via FF code-pattern heuristic.',
   `match_notes` text COLLATE utf8mb4_unicode_ci,
   `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent successful round-trip with QBO',
   `last_pull_at` datetime DEFAULT NULL,
@@ -1062,6 +1063,7 @@ CREATE TABLE `acc_qbo_account_map` (
   KEY `idx_acct_type` (`qbo_account_type`),
   KEY `idx_last_synced` (`last_synced_at`),
   KEY `fk_qbo_acct_map_user` (`created_by_user_id`),
+  KEY `idx_critical_category` (`critical_category`,`mapping_status`) COMMENT 'Per-session validator gate lookup (assertReadyForInvoicePush etc.)',
   CONSTRAINT `fk_qbo_acct_map_ff` FOREIGN KEY (`ff_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_qbo_acct_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
