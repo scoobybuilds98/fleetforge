@@ -178,6 +178,10 @@ Quick-reference index of file-location and helper-naming rules. Detailed treatme
 - **Enqueuer pattern (D-ENQUEUER-CONTRACT, QUICKBOOKS_SPEC §6.9):** `FleetForge\QboPushers\<Entity>Enqueuer::enqueue(int $ffId, string $operation): bool` — 4-step gate (master switch → sync_mode → operation allowlist → INSERT). Best-effort: `try/catch (\Throwable)` swallowed, NEVER throws into the parent FF API endpoint. Triggered from `api/v1/<entity>/create.php` + `update.php` AFTER the FF DB write succeeds, BEFORE the JSON success response. See QUICKBOOKS_SPEC §6.9. Reference impl: `lib/QboPushers/CustomerEnqueuer.php` (S-QBO-6).
 - **Pusher demotion rule (D-PUSHER-DEMOTION-RULE):** if `pushUpdate` is called for an FF entity whose mapping has no `qbo_<entity>_id` (e.g. ff_only row from auto-match, never pushed), `pushImpl` demotes the operation to create — returns status `'created_from_update'`. From FF's perspective the entity was updated; from QBO's the entity doesn't yet exist. First push has to be a POST not a PUT. See QUICKBOOKS_SPEC §6.8 demotion rule paragraph.
 - **QBO `QueryResponse` normalization (S-QBO-5-FIX-1):** `QuickBooksClient::query()` normalizes the 1-row-object case in-place before returning. Every uppercase-keyed field under `QueryResponse` is guaranteed to be an array after the call returns. Pusher and Puller authors should iterate `$response['QueryResponse']['Customer'] ?? []` directly — NO defensive single-row wrap. Re-wrapping post-normalization is INCORRECT (would re-wrap an already-arrayed payload of N>1 entities into a single-element wrapper around the array). See §11 Trap 60.
+- **FF↔QBO naming-convention divergence:** FF schema is lowercase snake_case (`'current_asset'`, `'operating_expense'`, `'net'`, `'gross'`); QBO API is PascalCase, often plural (`'AccountsReceivable'`, `'OtherCurrentAssets'`, `'OtherCurrentLiabilities'`, `'Service'`). **Never assume parity** — every cross-system reference table maintains an EXPLICIT equivalence map (e.g. `AccountMatcher::SUBTYPE_EQUIVALENCE`). Any session-prompt SQL CASE or PHP conditional that literally compares an FF column value against a PascalCase string is an instant K-22 candidate — surface via AskUserQuestion per [[feedback_trust_file_over_prompt]] before writing code. See §11 Trap 65 + memory [[project_qbo_subtype_taxonomy]].
+- **`ALTER TABLE ADD INDEX` ordering in DATABASE_MASTER:** MySQL appends new indexes at the END of the index/FK/CONSTRAINT block regardless of logical grouping. When a migration adds an index via ALTER, the matching edit to `FLEETFORGE_DATABASE_MASTER.sql` goes at the END of the indexes block (before CONSTRAINT lines), NOT inline with conceptually-related indexes. Run `php tests/_smoke_master_schema_parity.php` BEFORE committing the migration to catch ordering bugs deterministically — parity failure means the master ordering is wrong, not the migration. See §11 Trap 66.
+- **ENUM introspection — always live, never roadmap/spec:** when iterating an ENUM domain in a Matcher/mapper, pull values from `INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE` at runtime; never trust roadmap or spec hypothetical lists. Roadmap docs are aspirational and may diverge substantially from live schema (S-QBO-10 found 7 of 17 `invoice_line_items.item_type` values different from `FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md` §9.4). Reference pattern: `ItemMatcher::ffItemTypes()` parses `INFORMATION_SCHEMA` ENUM definition. See §11 Trap 67.
+- **Validator empty-category branches MUST throw (D-VALIDATOR-PER-SESSION):** per-session validator gates (`AccountValidator::assertReadyFor*Push()`) that find zero FF accounts tagged with a required category MUST throw `ChartOfAccountsIncompleteException` with an actionable add-and-tag message — NEVER silent-pass. Silent-pass tells the operator "you're ready" when in fact the category is unconfigured; downstream push fails later with a confusing QBO API error. Throw-at-validator surfaces the gap at the right layer with the right remediation. Reference: `AccountValidator::assertCategoriesReady` handles the empty-`$allRows` branch by formatting `"{cat} (no FF account tagged with this category — operator must add + tag one before push)"`. See §11 Trap 68.
 
 ---
 
@@ -1912,6 +1916,139 @@ Method signature: `(int $entityId, ?array $payloadSnapshot = null): array`. The 
 Applies to every Pusher session — vendors (S-QBO-7), items (S-QBO-8), accounts (S-QBO-9), invoices (S-QBO-11 + S-QBO-12 for void), payments (S-QBO-13), bills (S-QBO-15+), journal entries (S-QBO-21), etc.
 
 **Source**: S-QBO-6 CustomerPusher initial draft used a combined `::push($id, $op, $payload)` signature; verified against `lib/QboPusherDispatcher.php` `OPERATION_METHODS` constant + the dispatch invocation `$className::$methodName($entityId, $payloadSnapshot)` (line 127). Refactored to `pushCreate` + `pushUpdate` + shared private `pushImpl()` per D-QBO-3-2 + D-PUSHER-CONTRACT (new). Locked 2026-05-21 via D-PUSHER-PATTERNS-DOCS-LOCK. See also `FLEETFORGE_QUICKBOOKS_SPEC.md` §6.8 Pusher Integration Contract.
+
+### Trap 65: FF lowercase snake_case vs QBO PascalCase plural — never assume naming parity
+
+**Wrong**: assuming a single naming convention spans FF schema and QBO API responses. Comparing FF.acct_subtype string against literal `'AccountsReceivable'` / `'AccountsPayable'` / `'UndepositedFunds'` (PascalCase) in an `IF`-condition — that branch never fires because FF stores `'current_asset'` / `'current_liability'` (lowercase snake_case).
+
+**Right**: every cross-system reference table maintains an EXPLICIT equivalence map translating FF values (lowercase snake_case) → QBO values (PascalCase, plural-when-applicable). Conditional logic looks up via the map; never compares literals across the boundary.
+
+```php
+❌ Wrong (FF subtype literally never equals 'AccountsReceivable')
+if ($ffAccount['account_subtype'] === 'AccountsReceivable') {
+    $category = 'ar_clearing';
+}
+
+✅ Right (explicit map; FF key → QBO compat list)
+// lib/QboPushers/AccountMatcher.php::SUBTYPE_EQUIVALENCE
+public const SUBTYPE_EQUIVALENCE = [
+    'current_asset'       => ['AccountsReceivable', 'OtherCurrentAssets', 'PrepaidExpenses', 'Inventory', 'UndepositedFunds', ...],
+    'current_liability'   => ['AccountsPayable', 'CreditCard', 'OtherCurrentLiabilities', ...],
+    'long_term_liability' => ['OtherLongTermLiabilities', 'NotesPayable', 'LongTermDebt', ...],
+    ...
+];
+```
+
+**Specific concrete divergences observed:**
+- `acc_accounts.account_subtype` values: `'current_asset'`, `'fixed_asset'`, `'current_liability'`, `'long_term_liability'`, `'operating_expense'`, `'cost_of_revenue'`, `'equity'`, `'revenue'`, `'other'` (all lowercase snake_case, 9 distinct).
+- `acc_qbo_account_map.qbo_account_subtype` values (QBO API responses): `'AccountsReceivable'`, `'AccountsPayable'`, `'OtherCurrentAssets'` (PLURAL), `'OtherCurrentLiabilities'` (PLURAL), `'OtherLongTermLiabilities'` (PLURAL), `'CreditCard'`, `'PrepaidExpenses'`, `'AccumulatedDepreciation'`, etc. — PascalCase, plural for the `OtherCurrent*`/`OtherLongTerm*` family.
+- `customers.gps_revenue_presentation`: `'net'`, `'gross'` (lowercase).
+- QBO `Item.Type`: `'Service'`, `'Inventory'`, `'NonInventory'` (PascalCase, no plural).
+- `tax_rates.province`: `'BC'`, `'ON'`, `'QC'` (uppercase 2-char codes); QBO TaxCode names: `'NON'`, `'GST/HST ON'`, etc. (free-form strings — no structural relation to FF province codes).
+
+**Heuristic for spotting the bug at session-prompt time**: any session-prompt SQL CASE WHEN or PHP conditional that literally compares an FF column value against a PascalCase string is an instant K-22 candidate. Resolve via AskUserQuestion before writing code per [[feedback_trust_file_over_prompt]].
+
+**Detected**: S-QBO-8 (account subtypes), S-QBO-9 (tax code naming), S-QBO-10 (Item Type field), S-QBO-MATCHER-GREEDY-FIX (SUBTYPE_EQUIVALENCE constant), S-QBO-VALIDATOR-SCOPE-SPLIT (critical_category heuristic) — same pattern surfaced 5 sessions in a row. Every future cross-system reference data session MUST state explicitly: "FF uses snake_case; QBO uses PascalCase plural; maintain explicit equivalence map; never assume parity." Locked 2026-05-24 via D-PHASE-QBO-4-DOCS-LOCK + memory [[project_qbo_subtype_taxonomy]].
+
+### Trap 66: MySQL ALTER appends new indexes at END of definition; DATABASE_MASTER inline ordering breaks parity
+
+**Wrong**: when a migration adds a new index via `ALTER TABLE ADD INDEX`, editing `FLEETFORGE_DATABASE_MASTER.sql` to insert the new index inline with logically-related indexes (e.g. placing `idx_critical_category` next to the existing `idx_critical`).
+
+**Right**: MySQL's `ALTER TABLE ADD INDEX` deterministically appends the new index at the END of the index/FK/CONSTRAINT block in the live table definition, regardless of logical grouping. `DATABASE_MASTER.sql` must mirror this append order or `tests/_smoke_master_schema_parity.php` fails.
+
+```sql
+-- Migration: ALTER TABLE acc_qbo_account_map ADD INDEX idx_critical_category (critical_category, mapping_status);
+-- Live MySQL position (post-ALTER):
+
+PRIMARY KEY (`id`),
+UNIQUE KEY `uq_ff_account` (`ff_account_id`),
+UNIQUE KEY `uq_qbo_account` (`qbo_account_id`),
+KEY `idx_status` (`mapping_status`),
+KEY `idx_critical` (`is_critical`, `mapping_status`),
+KEY `idx_acct_type` (`qbo_account_type`),
+KEY `idx_last_synced` (`last_synced_at`),
+KEY `fk_qbo_acct_map_user` (`created_by_user_id`),
+KEY `idx_critical_category` (`critical_category`, `mapping_status`),   -- ← APPENDED AT END
+CONSTRAINT `fk_qbo_acct_map_ff` FOREIGN KEY (`ff_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE CASCADE,
+CONSTRAINT `fk_qbo_acct_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+```
+
+**Wrong vs right in DATABASE_MASTER**:
+
+```sql
+❌ Wrong (inline-with-related grouping — parity smoke fails)
+KEY `idx_critical` (`is_critical`, `mapping_status`),
+KEY `idx_critical_category` (`critical_category`, `mapping_status`),  ← inline next to idx_critical
+KEY `idx_acct_type` (`qbo_account_type`),
+
+✅ Right (append-at-end matching ALTER behavior)
+KEY `idx_critical` (`is_critical`, `mapping_status`),
+KEY `idx_acct_type` (`qbo_account_type`),
+KEY `idx_last_synced` (`last_synced_at`),
+KEY `fk_qbo_acct_map_user` (`created_by_user_id`),
+KEY `idx_critical_category` (`critical_category`, `mapping_status`),  ← end of indexes, before CONSTRAINTs
+CONSTRAINT `fk_qbo_acct_map_ff` FOREIGN KEY ...
+```
+
+**Pre-commit verification discipline**: run `php tests/_smoke_master_schema_parity.php` BEFORE committing the migration. If it fails, the master ordering is wrong (not the migration). Note this only applies to ALTER-added indexes — for fresh `CREATE TABLE` migrations the index ordering in DATABASE_MASTER can be whatever the migration declares (live DB and master will both follow the migration's order).
+
+**Detected**: S-QBO-VALIDATOR-SCOPE-SPLIT live verification — first parity-smoke run failed with `+ KEY idx_critical_category` / `- KEY idx_critical_category` (same line, different positions). Resolved by moving DATABASE_MASTER's `idx_critical_category` to end-of-indexes. Locked 2026-05-24 via D-PHASE-QBO-4-DOCS-LOCK.
+
+### Trap 67: ENUM values may not match roadmap/spec hypothetical lists — always introspect
+
+**Wrong**: trusting roadmap-document or spec-document hypothetical lists of ENUM values when writing matcher/mapper code. Roadmap drafts are aspirational; the spec may carry hypothetical values that were never implemented or were renamed during build-out.
+
+**Right**: schema introspection BEFORE any code that iterates over an ENUM domain. Source of truth is `INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE` at runtime (or a `SHOW COLUMNS` query — both return the live ENUM definition).
+
+```php
+✅ Right — ItemMatcher::ffItemTypes() pattern, replicate for any ENUM-iterating Matcher
+public static function ffItemTypes(): array
+{
+    $col = db_row(
+        "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME   = 'invoice_line_items'
+            AND COLUMN_NAME  = 'item_type'"
+    );
+    // COLUMN_TYPE looks like: enum('base_rental','mileage_precharge', ...)
+    preg_match("/^enum\((.+)\)$/i", $col['COLUMN_TYPE'], $m);
+    preg_match_all("/'((?:[^'\\\\]|\\\\.)*)'/", $m[1], $vm);
+    return $vm[1] ?? [];  // live ENUM values, never hardcoded
+}
+```
+
+**Concrete divergence observed**: `FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md` §9.4 listed hypothetical `invoice_line_items.item_type` values including `'mileage_overage'`, `'damage_recovery'`, `'early_termination_fee'`, `'setup_fee'`, `'delivery_fee'`, `'tax_adjustment'`, `'prepayment'`. Live ENUM had **none** of these — actual 17 values: `base_rental`, `base_rental_reconciliation_credit`, `gps`, `mileage_precharge`, `mileage_adjustment`, `mileage_credit`, `mileage_usage`, `mileage_drawdown_credit`, `damage`, `late_fee`, `early_return_credit`, `insurance`, `warranty`, `manual_adjustment`, `discount`, `account_credit_applied`, `other`. **7 of 17 values different** from the roadmap.
+
+**Remediation pattern**: every Matcher that iterates an ENUM domain MUST pull from `INFORMATION_SCHEMA` at runtime (matches the `ItemMatcher::ffItemTypes()` pattern from S-QBO-10). Hardcoded lists go stale silently — the next ENUM addition (likely via a future S-* session) won't surface in UI unless someone manually bumps the constant. INFORMATION_SCHEMA introspection automatically picks up additions.
+
+**Detected**: S-QBO-10 ship — roadmap divergence forced rewriting `ItemMatcher::DISPLAY_NAMES` from the prompt's hypothetical list to the live ENUM. The 7-of-17-mismatch ratio is high enough that any future "iterate this ENUM" prompt MUST introspect rather than trust the prompt's literal list. Locked 2026-05-24 via D-PHASE-QBO-4-DOCS-LOCK.
+
+### Trap 68: Validator empty-category branches MUST throw, never silent-pass
+
+**Wrong**: a per-session validator method that finds zero FF accounts tagged with a required category and silently returns "ok" (no throw). Example: `AccountValidator::assertReadyForPaymentPush()` requires `undeposited_funds` category; no FF account is tagged with that category in v1 chart; method returns silently and downstream payment push code uses the unsatisfied category → fails later with an unrelated error in QBO API call.
+
+**Right**: throw `ChartOfAccountsIncompleteException` with an actionable add-and-tag message. The exception message MUST name (a) the missing category, (b) the specific remediation action ("add an FF account, tag with `critical_category=X`, then re-run").
+
+```php
+✅ Right (see lib/QboPushers/AccountValidator.php::assertCategoriesReady)
+foreach ($blocking as $cat) {
+    $rows = $unmappedByCat[$cat] ?? [];
+    $allRows = $allCriticalByCat[$cat] ?? [];
+    if (empty($allRows)) {
+        // ZERO FF accounts tagged with this category — throw with actionable
+        // message instead of silent-passing.
+        $parts[] = "{$cat} (no FF account tagged with this category — operator must add + tag one before push)";
+        continue;
+    }
+    // ... normal-path message with mapped-vs-unmapped breakdown
+}
+```
+
+**Why silent-pass is dangerous**: a category with zero tagged FF accounts is an UNCONFIGURED state, not a SATISFIED one. Silent-pass tells the operator "you're ready" when in fact they're not — the push will fail later (often at runtime in an unrelated code path, with a confusing QBO API error). Throw-at-validator surfaces the gap at the right layer, with the right remediation.
+
+**Specific case**: S-QBO-VALIDATOR-SCOPE-SPLIT's `undeposited_funds` category. FF v1 chart has no account fitting QBO's Undeposited Funds concept (QBO has it as a built-in; FF doesn't replicate). `assertReadyForPaymentPush()` requires `['ar_clearing', 'undeposited_funds']`. With no FF UF account, the gate correctly throws — the operator's pre-payment-push checklist surfaces the gap. AskUserQuestion at session pre-flight resolved this between three options (throw / silent-skip / defer-method-stub); operator chose throw per [[feedback_trust_file_over_prompt]].
+
+**Detected**: S-QBO-VALIDATOR-SCOPE-SPLIT decision point (resolved via AskUserQuestion 2). Locked 2026-05-24 via D-PHASE-QBO-4-DOCS-LOCK. Applies to every future per-session validator gate: empty-category state must throw, never pass.
 
 ---
 
