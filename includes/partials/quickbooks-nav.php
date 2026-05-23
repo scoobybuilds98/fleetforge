@@ -95,6 +95,11 @@ $_qboNavGroups = [
         'icon'  => 'cube',
     ],
     [
+        'label' => 'Invoices',
+        'url'   => '/quickbooks/invoices',
+        'icon'  => 'document-text',
+    ],
+    [
         'label' => 'Settings',
         'url'   => '/quickbooks/settings',
         'icon'  => 'cog-6-tooth',

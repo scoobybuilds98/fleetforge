@@ -267,6 +267,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Invoices',
+                'icon'   => 'document-text',
+                'url'    => '/quickbooks/invoices',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',

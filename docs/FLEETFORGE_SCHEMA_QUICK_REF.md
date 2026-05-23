@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-24
-**Tables:** 137 total · **Columns:** 2152
+**Generated:** 2026-05-23
+**Tables:** 139 total · **Columns:** 2202
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -486,7 +486,7 @@ _12 tables._
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `deleted_at` | datetime | MUL | YES |
 | `briefing_sections` | json |  | YES |
-| `briefing_channels` | json |  | NO |
+| `briefing_channels` | json _(DEFAULT_GENERATED)_ |  | NO |
 | `slack_user_id` | varchar(50) |  | YES |
 | `phone_e164` | varchar(32) |  | YES |
 | `weekly_brief_opt_in` | tinyint(1) |  | NO |
@@ -539,7 +539,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_55 tables._
+_57 tables._
 
 ## `acc_accounts`
 
@@ -1395,6 +1395,58 @@ _55 tables._
 | `realm_id` | varchar(50) |  | NO |
 | `environment` | enum('sandbox','production') |  | NO |
 
+## `acc_qbo_invoice_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_invoice_id` | int unsigned | UNI | NO |
+| `qbo_invoice_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_doc_number` | varchar(100) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_balance` | decimal(15,2) |  | YES |
+| `qbo_status` | varchar(30) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_exchange_rate` | decimal(10,6) |  | YES |
+| `ff_invoice_snapshot_total` | decimal(15,2) |  | YES |
+| `ff_engine_version` | varchar(30) | MUL | YES |
+| `push_status` | enum('pending','pushed','failed','skipped_voided','skipped_by_mode','failed_preflight') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_item_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_item_type` | varchar(60) | MUL | YES |
+| `ff_item_type_variant` | varchar(60) |  | YES |
+| `qbo_item_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_name` | varchar(255) |  | YES |
+| `qbo_fully_qualified_name` | varchar(500) |  | YES |
+| `qbo_description` | varchar(500) |  | YES |
+| `qbo_type` | varchar(50) |  | YES |
+| `qbo_active` | tinyint(1) |  | YES |
+| `qbo_income_account_id` | varchar(50) |  | YES |
+| `qbo_income_account_name` | varchar(255) |  | YES |
+| `qbo_expense_account_id` | varchar(50) |  | YES |
+| `qbo_expense_account_name` | varchar(255) |  | YES |
+| `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
+| `match_confidence` | enum('exact_name','high','medium','manual','auto_created') |  | YES |
+| `is_credit_variant` | tinyint(1) |  | NO |
+| `presentation_variant` | enum('default','net','gross') |  | YES |
+| `match_notes` | text |  | YES |
+| `last_synced_at` | datetime | MUL | YES |
+| `last_pull_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `created_by_user_id` | int unsigned | MUL | YES |
+
 ## `acc_qbo_sync_log`
 
 | Column | Type | Key | Nullable |
@@ -1439,35 +1491,6 @@ _55 tables._
 | `completed_at` | datetime |  | YES |
 | `worker_id` | varchar(50) |  | YES |
 | `payload_snapshot` | json |  | YES |
-
-## `acc_qbo_item_map`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `ff_item_type` | varchar(60) | MUL | YES |
-| `ff_item_type_variant` | varchar(60) |  | YES |
-| `qbo_item_id` | varchar(50) | UNI | YES |
-| `qbo_sync_token` | varchar(20) |  | YES |
-| `qbo_name` | varchar(255) |  | YES |
-| `qbo_fully_qualified_name` | varchar(500) |  | YES |
-| `qbo_description` | varchar(500) |  | YES |
-| `qbo_type` | varchar(50) |  | YES |
-| `qbo_active` | tinyint(1) |  | YES |
-| `qbo_income_account_id` | varchar(50) |  | YES |
-| `qbo_income_account_name` | varchar(255) |  | YES |
-| `qbo_expense_account_id` | varchar(50) |  | YES |
-| `qbo_expense_account_name` | varchar(255) |  | YES |
-| `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
-| `match_confidence` | enum('exact_name','high','medium','manual','auto_created') |  | YES |
-| `is_credit_variant` | tinyint(1) |  | NO |
-| `presentation_variant` | enum('default','net','gross') |  | YES |
-| `match_notes` | text |  | YES |
-| `last_synced_at` | datetime | MUL | YES |
-| `last_pull_at` | datetime |  | YES |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-| `created_by_user_id` | int unsigned | MUL | YES |
 
 ## `acc_qbo_tax_code_map`
 

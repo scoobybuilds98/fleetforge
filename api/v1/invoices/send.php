@@ -250,4 +250,17 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
     }
 });
 
+// ── S-QBO-11 D-QBO-11-1 / G.1: enqueue invoice sync job ───────
+// Fires AFTER the FF transaction commits — the invoice is now in 'sent'
+// state (D12 immutability active). Best-effort: any gate failure
+// (sync_enabled=0, sync_mode wrong, queue table missing, FK error)
+// returns false silently without affecting the send response.
+//
+// Why here and not in InvoiceGenerator: FF invoices are CREATED as
+// drafts; QBO should only see sent invoices. send.php is the canonical
+// draft→sent transition. Resolved via AskUserQuestion at S-QBO-11
+// pre-flight per [[feedback_trust_file_over_prompt]] — see PART G.1
+// rationale in S-QBO-11 SESSION LOG row.
+\FleetForge\QboPushers\InvoiceEnqueuer::enqueue((int) $id, 'create');
+
 json_success(['id' => $id, 'status' => 'sent']);

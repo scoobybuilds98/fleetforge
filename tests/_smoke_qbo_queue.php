@@ -189,29 +189,33 @@ if (!is_file($workerSrc)) {
 $check('C7  cron/qbo_sync_worker.php exists and lints clean', $c7Errs);
 
 // ── C8: hasImplementation true for shipped Pushers + false for unbuilt
-// 'customer' moved to "shipped" at S-QBO-6 — CustomerPusher exists.
-// 'vendor' moved to "shipped" at S-QBO-7 — VendorPusher exists.
+// 'customer' shipped at S-QBO-6 (CustomerPusher exists).
+// 'vendor'   shipped at S-QBO-7 (VendorPusher exists).
+// 'invoice'  shipped at S-QBO-11 (InvoicePusher exists; pushUpdate is
+//            a stub returning 'unsupported_in_session' per D-QBO-11-4
+//            but method_exists() returns true — dispatcher considers it
+//            "implemented"; the stub dead-letters the queue row cleanly).
 // Remaining entity types in the dispatcher's convention map are still
-// pre-implementation as of S-QBO-7.
+// pre-implementation as of S-QBO-11.
 $c8Errs = [];
-if (QboPusherDispatcher::hasImplementation('customer', 'create') !== true) {
-    $c8Errs[] = "hasImplementation('customer','create') should be true post-S-QBO-6";
+foreach ([
+    ['customer', 'create'],
+    ['customer', 'update'],
+    ['vendor',   'create'],
+    ['vendor',   'update'],
+    ['invoice',  'create'],
+    ['invoice',  'update'],
+] as $pair) {
+    if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== true) {
+        $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be true post-shipped";
+    }
 }
-if (QboPusherDispatcher::hasImplementation('customer', 'update') !== true) {
-    $c8Errs[] = "hasImplementation('customer','update') should be true post-S-QBO-6";
-}
-if (QboPusherDispatcher::hasImplementation('vendor', 'create') !== true) {
-    $c8Errs[] = "hasImplementation('vendor','create') should be true post-S-QBO-7";
-}
-if (QboPusherDispatcher::hasImplementation('vendor', 'update') !== true) {
-    $c8Errs[] = "hasImplementation('vendor','update') should be true post-S-QBO-7";
-}
-foreach ([['invoice','update'], ['journal_entry','void'], ['item','create']] as $pair) {
+foreach ([['payment','create'], ['journal_entry','void'], ['item','create']] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== false) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-Pusher-session";
     }
 }
-$check('C8  hasImplementation true for customer+vendor (S-QBO-6 + S-QBO-7 shipped), false for unbuilt Pushers', $c8Errs);
+$check('C8  hasImplementation true for customer+vendor+invoice (S-QBO-6/7/11 shipped), false for unbuilt Pushers', $c8Errs);
 
 // ── C9: worker pusher_not_implemented pathway (SELF-CLEANING) ──
 // CRITICAL: every artifact created in this check MUST be reverted
@@ -228,13 +232,12 @@ try {
     // Snapshot notifications row count before — to verify suppression
     $notifBefore = (int) db_count("SELECT COUNT(*) FROM notifications WHERE type LIKE 'quickbooks.%'", []);
 
-    // Insert a fake queue row for an entity type with NO Pusher yet
+    // Insert a fake queue row for an entity type with NO Pusher yet.
+    // 'payment' is the next-up unbuilt Pusher (S-QBO-13/14 future).
+    // Migrated through 'customer' (S-QBO-3 ship) → 'invoice' (S-QBO-11
+    // ship) → 'payment' (current) as each prior entity got a Pusher.
     $createdQueue = db_insert('acc_qbo_sync_queue', [
-        // 'invoice' has no Pusher class yet (S-QBO-11 future) so the
-        // worker hits the pusher_not_implemented branch this test
-        // covers. Was 'customer' at S-QBO-3 ship; moved away from
-        // 'customer' at S-QBO-6 when CustomerPusher shipped.
-        'entity_type' => 'invoice',
+        'entity_type' => 'payment',
         'entity_id'   => 999999, // sentinel ID — no real entity
         'operation'   => 'create',
         'status'      => 'queued',

@@ -52,6 +52,21 @@ if (!$invoice) {
     exit;
 }
 
+/* ─── QBO push mapping (S-QBO-11) ───────────────────────────────── */
+// Drives the QuickBooks badge in the page header. Only renders when the
+// connection is established (no point teasing the feature pre-setup).
+// Mirrors the S-QBO-6 customer-show pattern.
+$qboInvoiceMapping = null;
+if ((string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected') {
+    $qboInvoiceMapping = db_row(
+        "SELECT id, qbo_invoice_id, qbo_doc_number, push_status, push_error,
+                pushed_at, last_synced_at
+           FROM acc_qbo_invoice_map
+          WHERE ff_invoice_id = ?",
+        [$invoiceId]
+    );
+}
+
 /* ─── Decode JSON fields ────────────────────────────────────────── */
 $rateExplanation = null;
 if (!empty($invoice['rate_method_explanation'])) {
@@ -1059,6 +1074,40 @@ require_once FF_ROOT . '/includes/header.php';
             <span class="badge badge-no-dot badge-danger" style="vertical-align:middle; margin-left:4px; font-size:11px;">
                 OVERDUE
             </span>
+            <?php endif; ?>
+            <?php /* S-QBO-11 QBO push status badge. Only renders when QBO
+                     is connected AND a mapping row exists for this invoice.
+                     5 states surface here; clicking the badge opens the
+                     QBO invoices admin page filtered to this row. */
+                if ($qboInvoiceMapping !== null):
+                    $qm_status = $qboInvoiceMapping['push_status'];
+                    $qm_badgeClass = match ($qm_status) {
+                        'pushed'           => 'badge-success',
+                        'pending'          => 'badge-neutral',
+                        'failed'           => 'badge-danger',
+                        'failed_preflight' => 'badge-warning',
+                        'skipped_voided',
+                        'skipped_by_mode'  => 'badge-neutral',
+                        default            => 'badge-neutral',
+                    };
+                    $qm_label = match ($qm_status) {
+                        'pushed'           => 'QuickBooks: Pushed' . ($qboInvoiceMapping['qbo_invoice_id'] ? ' #' . $qboInvoiceMapping['qbo_invoice_id'] : ''),
+                        'pending'          => 'QuickBooks: Queued',
+                        'failed'           => 'QuickBooks: Push Failed',
+                        'failed_preflight' => 'QuickBooks: Pre-flight Blocked',
+                        'skipped_voided'   => 'QuickBooks: Skipped (voided)',
+                        'skipped_by_mode'  => 'QuickBooks: Skipped (mode)',
+                        default            => 'QuickBooks: ' . $qm_status,
+                    };
+                    $qm_title = $qboInvoiceMapping['push_error']
+                        ?: ($qboInvoiceMapping['pushed_at'] ? 'pushed_at=' . $qboInvoiceMapping['pushed_at'] : '');
+            ?>
+            <a href="<?= base_url('quickbooks/invoices') ?>"
+               class="badge badge-no-dot <?= $qm_badgeClass ?>"
+               style="vertical-align:middle; margin-left:4px; font-size:11px; text-decoration:none;"
+               title="<?= e($qm_title) ?>">
+                <?= e($qm_label) ?>
+            </a>
             <?php endif; ?>
         </h1>
         <div class="text-secondary text-sm" style="margin-top:4px;">

@@ -1096,6 +1096,33 @@ CREATE TABLE `acc_qbo_customer_map` (
   CONSTRAINT `fk_qbo_cust_map_ff` FOREIGN KEY (`ff_customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_qbo_cust_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_qbo_invoice_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_invoice_id` int unsigned NOT NULL COMMENT 'NOT NULL: invoices originate in FF only in S-QBO-11. QBO-authored invoices (D-CPA-4) handled in S-QBO-26.',
+  `qbo_invoice_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit Invoice.Id; NULL until first successful push',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token; refreshed on every push/update',
+  `qbo_doc_number` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO DocNumber snapshot at last sync',
+  `qbo_total_amt` decimal(15,2) DEFAULT NULL COMMENT 'QBO TotalAmt snapshot — for drift comparison',
+  `qbo_balance` decimal(15,2) DEFAULT NULL COMMENT 'QBO Balance snapshot at last sync',
+  `qbo_status` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO EmailStatus/PaymentStatus snapshot',
+  `qbo_currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CurrencyRef.value (e.g. CAD/USD)',
+  `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
+  `ff_invoice_snapshot_total` decimal(15,2) DEFAULT NULL COMMENT 'FF total_amount snapshot at push time — drift baseline',
+  `ff_engine_version` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'period_independent | holistic | unknown. invoices.engine_version DOES NOT exist on disk today; column here is forward-compat. K-22 silent resolution per [[feedback_trust_file_over_prompt]].',
+  `push_status` enum('pending','pushed','failed','skipped_voided','skipped_by_mode','failed_preflight') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'D-QBO-11-1 lifecycle states',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error message for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_invoice` (`ff_invoice_id`) COMMENT 'One mapping row per FF invoice; enforces idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_invoice` (`qbo_invoice_id`) COMMENT 'No two FF invoices share a QBO Invoice.Id; NULL-multi-OK per InnoDB',
+  KEY `idx_status` (`push_status`),
+  KEY `idx_pushed_at` (`pushed_at`),
+  KEY `idx_engine_version` (`ff_engine_version`),
+  CONSTRAINT `fk_qbo_invoice_map_ff` FOREIGN KEY (`ff_invoice_id`) REFERENCES `invoices` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_qbo_vendor_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_vendor_id` int unsigned DEFAULT NULL COMMENT 'NULL = qbo_only state (QBO vendor with no FF link)',

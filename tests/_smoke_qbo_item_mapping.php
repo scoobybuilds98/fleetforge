@@ -528,12 +528,12 @@ if ($qboParent === null) {
     $c16Errors[] = 'QuickBooks parent entry with children not found';
 } else {
     $labels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Settings'];
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Settings'];
     if ($labels !== $expected) {
         $c16Errors[] = 'expected ' . json_encode($expected) . ' got ' . json_encode($labels);
     }
 }
-if (empty($c16Errors)) { echo "PASS C16 nav has 10 QuickBooks children with Items between Tax Codes and Settings\n"; $pass++; }
+if (empty($c16Errors)) { echo "PASS C16 nav has 11 QuickBooks children with Items between Tax Codes and Invoices/Settings\n"; $pass++; }
 else { echo "FAIL C16 " . implode('; ', $c16Errors) . "\n"; $failures[] = 'C16'; }
 
 // ── C17: ItemPuller::normalize maps representative JSON ──────
