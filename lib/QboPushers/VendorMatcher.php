@@ -67,9 +67,10 @@ class VendorMatcher
      *
      * @param  array<string, mixed> $ffVendor      FF vendor row — at minimum `name`; optional email, phone
      * @param  array<int, array<string, mixed>> $qboVendors  List of normalized QBO records (VendorPuller::normalize() shape)
+     * @param  array<string, bool> $claimedQboIds  qbo_id keys already claimed by an earlier iteration in matchAll() — each pass skips claimed candidates (D-QBO-MATCHER-1).
      * @return array{qbo_id: string, confidence: string}|null
      */
-    public static function findBestMatch(array $ffVendor, array $qboVendors): ?array
+    public static function findBestMatch(array $ffVendor, array $qboVendors, array $claimedQboIds = []): ?array
     {
         // vendors.name (NOT company_name) — this is the FF column for
         // vendors. Customers use company_name; vendors use name. K-22.
@@ -80,6 +81,7 @@ class VendorMatcher
         // Pass 1: exact normalized name.
         if ($ffName !== '') {
             foreach ($qboVendors as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboCandidate = $qbo['display_name'] !== '' ? $qbo['display_name'] : $qbo['company_name'];
                 $qboName      = self::normalizeName((string) $qboCandidate);
                 if ($qboName !== '' && $qboName === $ffName) {
@@ -92,6 +94,7 @@ class VendorMatcher
         // trivial false positives on short names.
         if ($ffName !== '') {
             foreach ($qboVendors as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboCandidate = $qbo['display_name'] !== '' ? $qbo['display_name'] : $qbo['company_name'];
                 $qboName      = self::normalizeName((string) $qboCandidate);
                 if ($qboName === '') {
@@ -107,6 +110,7 @@ class VendorMatcher
         // Pass 3: email match (case-insensitive).
         if ($ffEmail !== '') {
             foreach ($qboVendors as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboEmail = strtolower(trim((string) ($qbo['email'] ?? '')));
                 if ($qboEmail !== '' && $qboEmail === $ffEmail) {
                     return ['qbo_id' => (string) $qbo['qbo_id'], 'confidence' => 'medium'];
@@ -118,6 +122,7 @@ class VendorMatcher
         if (strlen($ffPhone) >= self::PHONE_MIN_DIGITS) {
             $ffLast7 = substr($ffPhone, -7);
             foreach ($qboVendors as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboPhone = preg_replace('/\D+/', '', (string) ($qbo['phone'] ?? '')) ?? '';
                 if (strlen($qboPhone) >= self::PHONE_MIN_DIGITS &&
                     substr($qboPhone, -7) === $ffLast7) {
@@ -158,7 +163,8 @@ class VendorMatcher
         $matchedQboIds = [];
 
         foreach ($ffVendors as $ff) {
-            $match = self::findBestMatch($ff, $qboVendors);
+            // Claimed-set tracking (D-QBO-MATCHER-1).
+            $match = self::findBestMatch($ff, $qboVendors, $matchedQboIds);
             if ($match !== null) {
                 $decisions[] = [
                     'ff_vendor_id'    => (int) $ff['id'],

@@ -212,9 +212,10 @@ class ItemMatcher
      * @param  string                              $ffItemType
      * @param  array<int, array<string, mixed>>    $qboItems    ItemPuller::normalize() shape
      * @param  ?string                             $variant
+     * @param  array<string, bool>                 $claimedQboIds  qbo_id keys already claimed by an earlier iteration in matchAll() — each pass skips claimed candidates (D-QBO-MATCHER-1).
      * @return array{qbo_id: string, confidence: string}|null
      */
-    public static function findBestMatch(string $ffItemType, array $qboItems, ?string $variant = null): ?array
+    public static function findBestMatch(string $ffItemType, array $qboItems, ?string $variant = null, array $claimedQboIds = []): ?array
     {
         $target = self::normalizeName(self::displayNameFor($ffItemType, $variant));
         if ($target === '') {
@@ -223,6 +224,7 @@ class ItemMatcher
 
         // Pass 1: exact normalized name.
         foreach ($qboItems as $qbo) {
+            if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
             $qboName = self::normalizeName((string) ($qbo['name'] ?? ''));
             if ($qboName !== '' && $qboName === $target) {
                 return ['qbo_id' => (string) $qbo['qbo_id'], 'confidence' => 'exact_name'];
@@ -231,6 +233,7 @@ class ItemMatcher
 
         // Pass 2: Levenshtein ≤ 3 (max-side ≥ 5 gate).
         foreach ($qboItems as $qbo) {
+            if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
             $qboName = self::normalizeName((string) ($qbo['name'] ?? ''));
             if ($qboName === '') {
                 continue;
@@ -245,6 +248,7 @@ class ItemMatcher
         $targetTokens = self::significantTokens($target);
         if (!empty($targetTokens)) {
             foreach ($qboItems as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboName = self::normalizeName((string) ($qbo['name'] ?? ''));
                 if ($qboName === '') {
                     continue;
@@ -289,7 +293,8 @@ class ItemMatcher
         foreach ($tuples as $tuple) {
             $itemType    = $tuple['ff_item_type'];
             $variant     = $tuple['variant'];
-            $match       = self::findBestMatch($itemType, $qboItems, $variant);
+            // Claimed-set tracking (D-QBO-MATCHER-1).
+            $match       = self::findBestMatch($itemType, $qboItems, $variant, $matchedQboIds);
 
             $isCredit    = ($itemType === 'base_rental_reconciliation_credit') ? 1 : 0;
             $presentation = null;

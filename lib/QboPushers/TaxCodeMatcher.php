@@ -88,9 +88,10 @@ class TaxCodeMatcher
      *
      * @param  array<string, mixed> $ffTaxRate    FF tax_rates row — at minimum name; optional province + 3 rate columns
      * @param  array<int, array<string, mixed>> $qboTaxCodes TaxCodePuller::normalize() shape
+     * @param  array<string, bool> $claimedQboIds  qbo_id keys already claimed by an earlier iteration in matchAll() — each pass skips claimed candidates (D-QBO-MATCHER-1).
      * @return array{qbo_id: string, confidence: string}|null
      */
-    public static function findBestMatch(array $ffTaxRate, array $qboTaxCodes): ?array
+    public static function findBestMatch(array $ffTaxRate, array $qboTaxCodes, array $claimedQboIds = []): ?array
     {
         $ffName     = self::normalizeName((string) ($ffTaxRate['name']     ?? ''));
         $ffProvince = strtolower(trim((string) ($ffTaxRate['province']     ?? '')));
@@ -98,6 +99,7 @@ class TaxCodeMatcher
         // Pass 1: exact normalized name match.
         if ($ffName !== '') {
             foreach ($qboTaxCodes as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboName = self::normalizeName((string) ($qbo['name'] ?? ''));
                 if ($qboName !== '' && $qboName === $ffName) {
                     return ['qbo_id' => (string) $qbo['qbo_id'], 'confidence' => 'exact_name'];
@@ -116,6 +118,7 @@ class TaxCodeMatcher
         // QBO name (case-insensitive substring).
         if ($ffProvince !== '' && $ffName !== '') {
             foreach ($qboTaxCodes as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboName = self::normalizeName((string) ($qbo['name'] ?? ''));
                 if ($qboName === '') {
                     continue;
@@ -169,7 +172,8 @@ class TaxCodeMatcher
         $matchedQboIds = [];
 
         foreach ($ffRates as $ff) {
-            $match = self::findBestMatch($ff, $qboTaxCodes);
+            // Claimed-set tracking (D-QBO-MATCHER-1).
+            $match = self::findBestMatch($ff, $qboTaxCodes, $matchedQboIds);
             if ($match !== null) {
                 $decisions[] = [
                     'ff_tax_rate_id'   => (int) $ff['id'],

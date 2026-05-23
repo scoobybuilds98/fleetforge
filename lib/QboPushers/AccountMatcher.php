@@ -20,8 +20,9 @@ declare(strict_types=1);
  *                     gating prevents Revenue↔Expense cross-matches.
  *   3. high         — Levenshtein distance ≤ 3 on normalized name
  *                     AND acct_type compatible. Catches typo + casing.
- *   4. medium       — same account_type + account_subtype + name
- *                     shares a token of ≥ 4 chars (post-normalize).
+ *   4. medium       — type-compatible + name shares a token of ≥ 4
+ *                     chars (post-normalize) AND subtype-agreement
+ *                     per SUBTYPE_EQUIVALENCE (D-QBO-MATCHER-2).
  *   5. low          — singleton type: if exactly one FF account of a
  *                     given (account_type, account_subtype) AND exactly
  *                     one QBO account of compatible type+subtype, link.
@@ -32,6 +33,12 @@ declare(strict_types=1);
  * (auto_match.php endpoint) — this class produces decisions; the
  * endpoint merges them against existing rows.
  *
+ * Claimed-set tracking (D-QBO-MATCHER-1): matchAll owns a $claimedQboIds
+ * set and passes it into findBestMatch. Each pass skips QBO candidates
+ * already claimed by an earlier FF row, preventing the auto_match.php
+ * UPDATE loop from overwriting an earlier mapping when two FF rows
+ * compete for the same QBO Account.
+ *
  * Type compatibility (D-QBO-8-3):
  *   FF acc_accounts.account_type ENUM has 8 lowercase values matching
  *   QBO's AccountType taxonomy 1:1 — the 8-value granularity (asset /
@@ -39,11 +46,21 @@ declare(strict_types=1);
  *   / other_income / other_expense) maps cleanly to QBO's high-level
  *   AccountType groupings.
  *
- * @session  S-QBO-8
+ * @session  S-QBO-8, S-QBO-MATCHER-GREEDY-FIX (Bug 1 + Bug 2 fix)
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §7.1 (account mapping table)
  * @decision D-QBO-8-3 (auto-match cascade — exact_code first, then
  *                       type-compatible name match, then fuzzy variants;
- *                       NEVER match across incompatible types)
+ *                       NEVER match across incompatible types),
+ *           D-QBO-MATCHER-1 (claimed-set tracking — findBestMatch sees
+ *                       qbo_ids already claimed by an earlier iteration
+ *                       and skips them across all passes),
+ *           D-QBO-MATCHER-2 (subtype-agreement gate at medium pass —
+ *                       FF.acct_subtype must map to a compatible QBO
+ *                       AccountSubType per SUBTYPE_EQUIVALENCE; FF keys
+ *                       are lowercase snake_case per the acc_accounts
+ *                       ENUM, NOT QBO PascalCase — K-22 catch resolved
+ *                       at session pre-flight per
+ *                       feedback_trust_file_over_prompt)
  */
 
 namespace FleetForge\QboPushers;
@@ -106,6 +123,90 @@ class AccountMatcher
     ];
 
     /**
+     * Subtype-agreement gate for the medium-confidence pass (D-QBO-MATCHER-2).
+     * FF.acct_subtype (lowercase snake_case per acc_accounts ENUM) →
+     * list of compatible QBO AccountSubType values (PascalCase per QBO
+     * API taxonomy; note OtherCurrent* are PLURAL).
+     *
+     * The gate ONLY applies to the medium-confidence pass — exact_code
+     * and exact_name passes have stronger signal and don't need
+     * subtype gating on top. Subtypes NOT listed here (operating_expense,
+     * other) fall back to TYPE_COMPATIBILITY-only checking, which is
+     * permissive on subtype but still type-gated. Empty QBO subtype is
+     * permissive (QBO has many subtypes we don't enumerate; operator
+     * can manual-link the edge cases).
+     *
+     * K-22 (S-QBO-MATCHER-GREEDY-FIX pre-flight): the original session
+     * prompt baseline used PascalCase keys (as if FF used QBO naming);
+     * actual FF.acct_subtype is lowercase snake_case. Resolved via
+     * AskUserQuestion per feedback_trust_file_over_prompt; keys here
+     * follow the live FF schema.
+     *
+     * @var array<string, list<string>>
+     */
+    public const SUBTYPE_EQUIVALENCE = [
+        'current_asset' => [
+            'AccountsReceivable',
+            'OtherCurrentAssets',
+            'PrepaidExpenses',
+            'Inventory',
+            'UndepositedFunds',
+            'AllowanceForBadDebts',
+        ],
+        'fixed_asset' => [
+            'AccumulatedDepreciation',
+            'Vehicles',
+            'Equipment',
+            'MachineryAndEquipment',
+            'Buildings',
+            'Land',
+            'LeaseholdImprovements',
+            'OtherFixedAssets',
+            'FurnitureAndFixtures',
+            'FixedAssetOtherToolsEquipment',
+        ],
+        'current_liability' => [
+            'AccountsPayable',
+            'CreditCard',
+            'OtherCurrentLiabilities',
+            'GlobalTaxPayable',
+            'PayrollTaxPayable',
+            'SalesTaxPayable',
+            'LineOfCredit',
+        ],
+        'long_term_liability' => [
+            'OtherLongTermLiabilities',
+            'NotesPayable',
+            'LongTermDebt',
+            'ShareholderNotesPayable',
+        ],
+        'equity' => [
+            'OpeningBalanceEquity',
+            'RetainedEarnings',
+            'Equity',
+            'PartnersEquity',
+            'OwnersEquity',
+            'PaidInCapitalOrSurplus',
+            'CommonStock',
+            'PreferredStock',
+        ],
+        'revenue' => [
+            'SalesOfProductIncome',
+            'ServiceFeeIncome',
+            'OtherPrimaryIncome',
+            'NonProfitIncome',
+            'DiscountsRefundsGiven',
+        ],
+        'cost_of_revenue' => [
+            'SuppliesMaterialsCogs',
+            'CostOfLaborCos',
+            'EquipmentRentalCos',
+            'ShippingFreightDeliveryCos',
+            'OtherCostsOfServiceCos',
+        ],
+    ];
+
+    /**
      * Normalize an account name for comparison. Same semantics as
      * CustomerMatcher::normalizeName but without the corporate-suffix
      * strip (account names don't end in Inc/Ltd/LLC — they describe
@@ -139,9 +240,10 @@ class AccountMatcher
      *
      * @param  array<string, mixed> $ffAccount   FF acc_accounts row — code, name, account_type, account_subtype
      * @param  array<int, array<string, mixed>> $qboAccounts AccountPuller::normalize() shape
+     * @param  array<string, bool> $claimedQboIds  qbo_id keys already claimed by an earlier iteration in matchAll(). Each pass skips candidates whose qbo_id is in this set, preventing the auto_match.php UPDATE loop from overwriting an earlier mapping (D-QBO-MATCHER-1).
      * @return array{qbo_id: string, confidence: string}|null
      */
-    public static function findBestMatch(array $ffAccount, array $qboAccounts): ?array
+    public static function findBestMatch(array $ffAccount, array $qboAccounts, array $claimedQboIds = []): ?array
     {
         $ffCode    = strtolower(trim((string) ($ffAccount['code'] ?? '')));
         $ffName    = self::normalizeAccountName((string) ($ffAccount['name'] ?? ''));
@@ -156,6 +258,7 @@ class AccountMatcher
         // needed).
         if ($ffCode !== '') {
             foreach ($qboAccounts as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboCode = strtolower(trim((string) ($qbo['account_number'] ?? '')));
                 if ($qboCode !== '' && $qboCode === $ffCode) {
                     return ['qbo_id' => (string) $qbo['qbo_id'], 'confidence' => 'exact_code'];
@@ -166,6 +269,7 @@ class AccountMatcher
         // Pass 2: exact normalized name + type compatibility.
         if ($ffName !== '') {
             foreach ($qboAccounts as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboName = self::normalizeAccountName((string) ($qbo['name'] ?? ''));
                 if ($qboName === '' || $qboName !== $ffName) {
                     continue;
@@ -180,6 +284,7 @@ class AccountMatcher
         // Pass 3: Levenshtein ≤ 3 + type compatibility.
         if ($ffName !== '') {
             foreach ($qboAccounts as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboName = self::normalizeAccountName((string) ($qbo['name'] ?? ''));
                 if ($qboName === '') {
                     continue;
@@ -194,22 +299,29 @@ class AccountMatcher
             }
         }
 
-        // Pass 4: subtype + significant shared token.
+        // Pass 4: type-compatible + significant shared token + subtype-agreement.
         // "shared token" = both names contain the same word of length
         // ≥ MIN_TOKEN_LENGTH after normalization.
-        if ($ffSubtype !== '' && $ffName !== '') {
+        // Subtype-agreement (D-QBO-MATCHER-2): when FF.acct_subtype is in
+        // SUBTYPE_EQUIVALENCE, QBO.AccountSubType must be in the compat
+        // list. Unknown FF subtypes fall through to type-only check
+        // (existing behavior). Empty QBO subtype is permissive.
+        if ($ffName !== '') {
             $ffTokens = self::significantTokens($ffName);
             foreach ($qboAccounts as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 if (!self::typesCompatible($ffType, (string) ($qbo['account_type'] ?? ''))) {
                     continue;
                 }
-                // QBO AccountSubType is a single string like 'AccountsReceivable';
-                // FF account_subtype is a free-form string like 'current_asset'.
-                // We can't do a structural match here — fall back to: SAME
-                // FF subtype assumed AND name shares a token.
                 $qboName = self::normalizeAccountName((string) ($qbo['name'] ?? ''));
                 if ($qboName === '') {
                     continue;
+                }
+                if (isset(self::SUBTYPE_EQUIVALENCE[$ffSubtype])) {
+                    $qboSubtype = (string) ($qbo['account_subtype'] ?? '');
+                    if ($qboSubtype !== '' && !in_array($qboSubtype, self::SUBTYPE_EQUIVALENCE[$ffSubtype], true)) {
+                        continue;
+                    }
                 }
                 $qboTokens = self::significantTokens($qboName);
                 $sharedTokens = array_intersect($ffTokens, $qboTokens);
@@ -264,7 +376,13 @@ class AccountMatcher
         $matchedQboIds = [];
 
         foreach ($ffAccounts as $ff) {
-            $match = self::findBestMatch($ff, $qboAccounts);
+            // Pass $matchedQboIds so findBestMatch skips QBO candidates
+            // already claimed by an earlier FF row (D-QBO-MATCHER-1).
+            // Iteration order = chart_of_accounts.id ascending; first
+            // FF to claim a QBO Account wins. A future ranking pass
+            // (S-QBO-MATCHER-PRIORITY-ORDER) could prioritize critical
+            // accounts and exact-code candidates first.
+            $match = self::findBestMatch($ff, $qboAccounts, $matchedQboIds);
             if ($match !== null) {
                 $decisions[] = [
                     'ff_account_id'    => (int) $ff['id'],

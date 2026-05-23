@@ -54,10 +54,21 @@ declare(strict_types=1);
  *       ff_only row and CLEARS it from the demoted qbo_only side
  *       (is_critical is an FF-side semantic; qbo_only rows shouldn't
  *       carry it)
+ *  C20: claimed-set tracking — when two FF accounts both auto-match
+ *       the same QBO account, only the first claims it; the second
+ *       falls through to no-match (D-QBO-MATCHER-1 Bug 1 fix)
+ *  C21: subtype-agreement gate rejects medium-confidence cross-subtype
+ *       match (FF long_term_liability cannot medium-match QBO
+ *       AccountsPayable even on shared token; D-QBO-MATCHER-2 Bug 2 fix)
+ *  C22: subtype-agreement gate permissive when QBO subtype empty —
+ *       allows medium match when type-compat holds and QBO subtype
+ *       unknown (D-QBO-MATCHER-2)
+ *  C23: SUBTYPE_EQUIVALENCE constant exists with 8 baseline FF subtype
+ *       keys (D-QBO-MATCHER-2)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
- * @session S-QBO-8
+ * @session S-QBO-8, S-QBO-MATCHER-GREEDY-FIX (C20-C23 added)
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §7.1
  */
 
@@ -71,7 +82,7 @@ use FleetForge\Exceptions\QuickBooksException;
 
 $failures = [];
 $pass     = 0;
-$total    = 19;
+$total    = 23;
 
 /** Sentinel ids we'll clean up. */
 $sentinelFfIds       = [];
@@ -776,16 +787,192 @@ if (empty($c19Errors)) {
     $failures[] = 'C19';
 }
 
+// ── C20: claimed-set tracking prevents double-claim (Bug 1) ─
+// Two FF accounts both auto-matchable via exact_name to the same
+// QBO account. After matchAll, only the first FF (by iteration order
+// = id ASC) gets mapped; the second falls through to ff_only.
+$c20Errors = [];
+$c20FfIds  = [];
+try {
+    // Insert 2 synthetic FF accounts with same normalized name + type.
+    $ffId1 = db_insert('acc_accounts', [
+        'id'              => 999990,
+        'code'            => 'SMOKE-C20-A',
+        'name'            => 'Zzqq Sentinel Sync',
+        'account_type'    => 'asset',
+        'account_subtype' => 'current_asset',
+        'is_active'       => 1,
+    ]);
+    $ffId2 = db_insert('acc_accounts', [
+        'id'              => 999991,
+        'code'            => 'SMOKE-C20-B',
+        'name'            => 'Zzqq Sentinel Sync',
+        'account_type'    => 'asset',
+        'account_subtype' => 'current_asset',
+        'is_active'       => 1,
+    ]);
+    $c20FfIds = [(int) $ffId1, (int) $ffId2];
+
+    // Single QBO candidate with matching name.
+    $qboCandidates = [
+        ['qbo_id' => 'TEST-SMOKE-A-C20', 'name' => 'Zzqq Sentinel Sync', 'account_type' => 'Other Current Asset', 'account_subtype' => '', 'account_number' => ''],
+    ];
+    $decisions = AccountMatcher::matchAll($qboCandidates);
+
+    // Count how many of our 2 synthetic FFs got mapped to the QBO.
+    $mappedCount = 0;
+    $ff1Status = null;
+    $ff2Status = null;
+    foreach ($decisions as $d) {
+        if ((int) ($d['ff_account_id'] ?? 0) === (int) $ffId1) { $ff1Status = $d['mapping_status']; }
+        if ((int) ($d['ff_account_id'] ?? 0) === (int) $ffId2) { $ff2Status = $d['mapping_status']; }
+        if (($d['qbo_account_id'] ?? null) === 'TEST-SMOKE-A-C20' && $d['mapping_status'] === 'mapped') {
+            $mappedCount++;
+        }
+    }
+    if ($mappedCount !== 1) {
+        $c20Errors[] = "expected exactly 1 mapped decision for QBO TEST-SMOKE-A-C20, got {$mappedCount}";
+    }
+    // First FF (lower id) wins; second falls through to ff_only.
+    if ($ff1Status !== 'mapped') {
+        $c20Errors[] = "expected ffId1 mapped, got " . ($ff1Status ?? 'null');
+    }
+    if ($ff2Status !== 'ff_only') {
+        $c20Errors[] = "expected ffId2 ff_only (claimed-set blocked it), got " . ($ff2Status ?? 'null');
+    }
+} catch (Throwable $e) {
+    $c20Errors[] = 'C20 threw: ' . $e->getMessage();
+}
+if (empty($c20Errors)) {
+    echo "PASS C20 claimed-set tracking — only first FF claims a contested QBO account (Bug 1)\n";
+    $pass++;
+} else {
+    echo "FAIL C20 " . implode('; ', $c20Errors) . "\n";
+    $failures[] = 'C20';
+}
+
+// ── C21: subtype-agreement gate rejects cross-subtype medium (Bug 2) ─
+// FF account: long_term_liability subtype + name 'Equipment Loans Payable'.
+// QBO candidate: AccountsPayable subtype, name shares token 'payable'.
+// Type-compat passes (FF liability → QBO 'Accounts Payable'). Token
+// 'payable' overlaps. WITHOUT the gate, this would have matched
+// medium. WITH the gate, FF long_term_liability does NOT permit QBO
+// AccountsPayable subtype → returns null.
+$c21Errors = [];
+try {
+    $ff = [
+        'code'            => '',
+        'name'            => 'Equipment Loans Payable',
+        'account_type'    => 'liability',
+        'account_subtype' => 'long_term_liability',
+    ];
+    $qbo = [
+        ['qbo_id' => 'TEST-SMOKE-A-C21', 'name' => 'Accounts Payable A/P', 'account_type' => 'Accounts Payable', 'account_subtype' => 'AccountsPayable', 'account_number' => ''],
+    ];
+    $m = AccountMatcher::findBestMatch($ff, $qbo);
+    if ($m !== null) {
+        $c21Errors[] = "expected null (subtype gate rejects long_term_liability → AccountsPayable), got " . json_encode($m);
+    }
+} catch (Throwable $e) {
+    $c21Errors[] = 'C21 threw: ' . $e->getMessage();
+}
+if (empty($c21Errors)) {
+    echo "PASS C21 subtype-agreement gate rejects long_term_liability → AccountsPayable medium match (Bug 2)\n";
+    $pass++;
+} else {
+    echo "FAIL C21 " . implode('; ', $c21Errors) . "\n";
+    $failures[] = 'C21';
+}
+
+// ── C22: subtype-agreement permissive when QBO subtype empty ─
+// FF operating_expense (not in SUBTYPE_EQUIVALENCE so falls back to
+// type-compat-only). QBO Expense type, empty AccountSubType. Token
+// 'office' shared. Should match at medium confidence.
+$c22Errors = [];
+try {
+    $ff = [
+        'code'            => '',
+        'name'            => 'Office Supplies',
+        'account_type'    => 'operating_expense',
+        'account_subtype' => 'operating_expense',
+    ];
+    $qbo = [
+        ['qbo_id' => 'TEST-SMOKE-A-C22', 'name' => 'Office Equipment', 'account_type' => 'Expense', 'account_subtype' => '', 'account_number' => ''],
+    ];
+    $m = AccountMatcher::findBestMatch($ff, $qbo);
+    if ($m === null) {
+        $c22Errors[] = 'expected medium match when QBO subtype empty, got null';
+    } elseif ($m['confidence'] !== 'medium' || $m['qbo_id'] !== 'TEST-SMOKE-A-C22') {
+        $c22Errors[] = 'expected medium match for C22, got ' . json_encode($m);
+    }
+} catch (Throwable $e) {
+    $c22Errors[] = 'C22 threw: ' . $e->getMessage();
+}
+if (empty($c22Errors)) {
+    echo "PASS C22 subtype-agreement gate permissive when QBO subtype empty\n";
+    $pass++;
+} else {
+    echo "FAIL C22 " . implode('; ', $c22Errors) . "\n";
+    $failures[] = 'C22';
+}
+
+// ── C23: SUBTYPE_EQUIVALENCE has 8 baseline FF keys ────────
+$c23Errors = [];
+try {
+    $expectedKeys = [
+        'current_asset', 'fixed_asset',
+        'current_liability', 'long_term_liability',
+        'equity', 'revenue', 'cost_of_revenue',
+    ];
+    $present = array_keys(AccountMatcher::SUBTYPE_EQUIVALENCE);
+    foreach ($expectedKeys as $k) {
+        if (!in_array($k, $present, true)) {
+            $c23Errors[] = "SUBTYPE_EQUIVALENCE missing FF subtype key: {$k}";
+        }
+    }
+    // FF keys are snake_case (NOT PascalCase) per K-22 resolution.
+    foreach ($present as $k) {
+        if ($k !== strtolower($k) || str_contains($k, ' ')) {
+            $c23Errors[] = "SUBTYPE_EQUIVALENCE key '{$k}' is not lowercase snake_case";
+        }
+    }
+    // Values should be PascalCase QBO subtype names — sanity check one.
+    if (!in_array('AccountsReceivable', AccountMatcher::SUBTYPE_EQUIVALENCE['current_asset'], true)) {
+        $c23Errors[] = "SUBTYPE_EQUIVALENCE[current_asset] missing 'AccountsReceivable'";
+    }
+    if (!in_array('OtherCurrentLiabilities', AccountMatcher::SUBTYPE_EQUIVALENCE['current_liability'], true)) {
+        $c23Errors[] = "SUBTYPE_EQUIVALENCE[current_liability] missing 'OtherCurrentLiabilities' (note: PLURAL per QBO taxonomy)";
+    }
+} catch (Throwable $e) {
+    $c23Errors[] = 'C23 threw: ' . $e->getMessage();
+}
+if (empty($c23Errors)) {
+    echo "PASS C23 SUBTYPE_EQUIVALENCE has 7 baseline FF snake_case keys with QBO PascalCase values\n";
+    $pass++;
+} else {
+    echo "FAIL C23 " . implode('; ', $c23Errors) . "\n";
+    $failures[] = 'C23';
+}
+
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────
     // Defensive sentinel cleanup — catches any TEST-SMOKE-A-* rows
-    // that slipped into acc_qbo_account_map during C11/C14.
+    // that slipped into acc_qbo_account_map during C11/C14/C20.
     try {
         db_execute(
             "DELETE FROM acc_qbo_account_map WHERE qbo_account_id LIKE 'TEST-SMOKE-A-%'"
         );
     } catch (Throwable $e) {
         echo "WARN  defensive qbo-only cleanup failed: " . $e->getMessage() . "\n";
+    }
+    // C20 synthetic FF accounts (id 999990, 999991). Also their
+    // acc_qbo_account_map rows (ff_only rows created by matchAll for
+    // the loser of the claimed-set contest).
+    try {
+        db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id IN (999990, 999991)");
+        db_execute("DELETE FROM acc_accounts WHERE id IN (999990, 999991)");
+    } catch (Throwable $e) {
+        echo "WARN  C20 synthetic FF cleanup failed: " . $e->getMessage() . "\n";
     }
     // Captured mapping ids (C11 baseline).
     if (!empty($sentinelMappingIds)) {

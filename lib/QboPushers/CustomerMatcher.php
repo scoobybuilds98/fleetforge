@@ -90,9 +90,10 @@ class CustomerMatcher
      *
      * @param  array<string, mixed> $ffCustomer    FF customer row — at minimum company_name; optional email, phone
      * @param  array<int, array<string, mixed>> $qboCustomers List of normalized QBO records (CustomerPuller::normalize() output shape)
+     * @param  array<string, bool> $claimedQboIds  qbo_id keys already claimed by an earlier iteration in matchAll() — each pass skips claimed candidates (D-QBO-MATCHER-1).
      * @return array{qbo_id: string, confidence: string}|null
      */
-    public static function findBestMatch(array $ffCustomer, array $qboCustomers): ?array
+    public static function findBestMatch(array $ffCustomer, array $qboCustomers, array $claimedQboIds = []): ?array
     {
         $ffName  = self::normalizeName((string) ($ffCustomer['company_name'] ?? ''));
         $ffEmail = strtolower(trim((string) ($ffCustomer['email'] ?? '')));
@@ -102,6 +103,7 @@ class CustomerMatcher
         // can't match an empty string against anything sensibly.
         if ($ffName !== '') {
             foreach ($qboCustomers as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboCandidate = $qbo['display_name'] !== '' ? $qbo['display_name'] : $qbo['company_name'];
                 $qboName      = self::normalizeName((string) $qboCandidate);
                 if ($qboName !== '' && $qboName === $ffName) {
@@ -116,6 +118,7 @@ class CustomerMatcher
         // one long + one short is fine as long as the long side is real.
         if ($ffName !== '') {
             foreach ($qboCustomers as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboCandidate = $qbo['display_name'] !== '' ? $qbo['display_name'] : $qbo['company_name'];
                 $qboName      = self::normalizeName((string) $qboCandidate);
                 if ($qboName === '') {
@@ -131,6 +134,7 @@ class CustomerMatcher
         // Pass 3: email match (case-insensitive, both non-empty).
         if ($ffEmail !== '') {
             foreach ($qboCustomers as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboEmail = strtolower(trim((string) ($qbo['email'] ?? '')));
                 if ($qboEmail !== '' && $qboEmail === $ffEmail) {
                     return ['qbo_id' => (string) $qbo['qbo_id'], 'confidence' => 'medium'];
@@ -142,6 +146,7 @@ class CustomerMatcher
         if (strlen($ffPhone) >= self::PHONE_MIN_DIGITS) {
             $ffLast7 = substr($ffPhone, -7);
             foreach ($qboCustomers as $qbo) {
+                if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboPhone = preg_replace('/\D+/', '', (string) ($qbo['phone'] ?? '')) ?? '';
                 if (strlen($qboPhone) >= self::PHONE_MIN_DIGITS &&
                     substr($qboPhone, -7) === $ffLast7) {
@@ -183,7 +188,9 @@ class CustomerMatcher
         $matchedQboIds = [];
 
         foreach ($ffCustomers as $ff) {
-            $match = self::findBestMatch($ff, $qboCustomers);
+            // Pass $matchedQboIds so claimed QBO ids are skipped in
+            // subsequent iterations (D-QBO-MATCHER-1).
+            $match = self::findBestMatch($ff, $qboCustomers, $matchedQboIds);
             if ($match !== null) {
                 $decisions[] = [
                     'ff_customer_id'   => (int) $ff['id'],
