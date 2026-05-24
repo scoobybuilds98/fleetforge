@@ -54,13 +54,22 @@ declare(strict_types=1);
  *   vendors.deleted_at non-null → SKIP (returns skipped_soft_deleted)
  *
  * @session  S-QBO-7
+ * @updated  S-QBO-FIXPACK-2 — always emit CurrencyRef on vendor create
+ *           payloads (D-QBO-FIXPACK-6 class-of-entity principle);
+ *           vendors table has no currency column so hardcoded 'CAD'
+ *           per D-QBO-FIXPACK-8 Option A (Mainland is Canadian);
+ *           idempotency-replay mismatch warning when QBO vendor is
+ *           currency-poisoned from a prior push (D-QBO-FIXPACK-10).
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract),
  *           §7.5 (vendor mapping table)
  * @decision D-QBO-7-1 (1099 out of scope v1),
  *           D-QBO-7-2 (vendor_type NOT mapped),
  *           D-QBO-7-3 (contact_name split on first space),
  *           D-QBO-7-4 (state-machine mapping pattern from D-QBO-5),
- *           D-PUSHER-DEMOTION-RULE (update→create demotion when no qbo_id)
+ *           D-PUSHER-DEMOTION-RULE (update→create demotion when no qbo_id),
+ *           D-QBO-FIXPACK-6 (class-of-entity CurrencyRef principle),
+ *           D-QBO-FIXPACK-8 (vendor CurrencyRef emit policy — hardcoded 'CAD'),
+ *           D-QBO-FIXPACK-10 (idempotency-replay mismatch warning)
  */
 
 namespace FleetForge\QboPushers;
@@ -139,7 +148,37 @@ class VendorPusher
         // 4. Idempotency on CREATE (D-QBO-6-2). If we already have a
         //    qbo_vendor_id, MUST NOT re-POST — would create a duplicate
         //    QBO Vendor with auto-discriminated name. Treat as no-op.
+        //
+        //    D-QBO-FIXPACK-10: Before returning 'already_mapped', probe
+        //    the QBO vendor's CurrencyRef and surface a warning when it
+        //    differs from our expected 'CAD' (D-QBO-FIXPACK-8 hardcodes
+        //    CAD for all vendors). A prior push that omitted CurrencyRef
+        //    could have caused QBO to default to home currency (USD in
+        //    Intuit US sandbox), poisoning the mapping permanently.
+        //    Best-effort: any network/auth failure is caught silently.
         if ($operation === 'create' && $mapping !== null && !empty($mapping['qbo_vendor_id'])) {
+            try {
+                $client     = new QuickBooksClient();
+                $qboResp    = $client->getEntity('vendor', (string) $mapping['qbo_vendor_id']);
+                $qboVend    = $qboResp['Vendor'] ?? null;
+                if (is_array($qboVend)) {
+                    $qboCurrency = strtoupper((string) ($qboVend['CurrencyRef']['value'] ?? ''));
+                    // D-QBO-FIXPACK-8: vendors are always CAD (hardcoded).
+                    if ($qboCurrency !== '' && $qboCurrency !== 'CAD') {
+                        error_log(
+                            "S-QBO-FIXPACK-10 WARNING: FF vendor {$ff['id']} expected CurrencyRef='CAD' " .
+                            "but mapped QBO vendor #{$mapping['qbo_vendor_id']} is '{$qboCurrency}'. " .
+                            "Mapping is currency-poisoned (Intuit forbids QBO vendor currency change after create). " .
+                            "Operator action: unlink FF vendor from QBO (set mapping_status='ff_only'), " .
+                            "mark QBO vendor inactive in QBO, then re-push to create a new QBO vendor."
+                        );
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Silent fallthrough — currency-mismatch check is advisory only.
+                // Don't block the idempotency no-op due to a transient QBO error.
+                error_log("S-QBO-FIXPACK-10: currency-mismatch check failed for FF vendor {$ff['id']}: " . $e->getMessage());
+            }
             return [
                 'success' => true,
                 'status'  => 'already_mapped',
@@ -157,6 +196,15 @@ class VendorPusher
 
         // 6. Build payload from FF row.
         $qboPayload = self::buildQboPayload($ff);
+
+        // D-QBO-FIXPACK-8: buildQboPayload always emits CurrencyRef='CAD'
+        // (vendors table has no currency column; hardcoded home currency per
+        // D-QBO-FIXPACK-8 Option A). On UPDATE, QBO rejects CurrencyRef
+        // because vendor currency is immutable after create per Intuit policy.
+        // Strip it from update payloads here so the HTTP call succeeds.
+        if ($effectiveOperation === 'update') {
+            unset($qboPayload['CurrencyRef']);
+        }
 
         // 7. HTTP call via QuickBooksClient. The client handles auth,
         //    retries (transient errors), Sentry capture, and sync_log
@@ -264,6 +312,13 @@ class VendorPusher
      *   AND "John A. Smith Jr." → ('John', 'A. Smith Jr.')
      *   AND single names like "Cher" → ('Cher', '').
      *
+     * Always emits CurrencyRef='CAD' per D-QBO-FIXPACK-6/-8. The
+     * vendors table has no currency column; all FF vendors are
+     * Canadian (hardcoded home currency). Queue S-VENDOR-CURRENCY-COLUMN
+     * if multi-currency vendor support is needed in the future.
+     * NOTE: pushImpl strips CurrencyRef from UPDATE payloads because
+     * QBO rejects it (vendor currency immutable after create).
+     *
      * Public-static so the offline smoke can exercise it without
      * going through the cURL boundary.
      *
@@ -276,6 +331,17 @@ class VendorPusher
             'DisplayName' => (string) ($ff['name'] ?? ''),
             'CompanyName' => (string) ($ff['name'] ?? ''),
         ];
+
+        // D-QBO-FIXPACK-6/-8: Always emit CurrencyRef on vendor payloads.
+        // WHY: Omitting CurrencyRef causes QBO to default to the company's
+        // home currency. In Intuit's US sandbox (home=USD), CAD vendors
+        // were silently recorded as USD — and Intuit forbids currency
+        // changes on existing vendors, so the mapping is permanently
+        // poisoned. The vendors table has no currency column (backlog:
+        // S-VENDOR-CURRENCY-COLUMN); Mainland is Canadian per spec §0,
+        // so 'CAD' is hardcoded here per D-QBO-FIXPACK-8 Option A.
+        // (pushImpl strips CurrencyRef for update ops.)
+        $payload['CurrencyRef'] = ['value' => 'CAD'];
 
         // D-QBO-7-3: split contact_name into GivenName + FamilyName.
         $contactName = trim((string) ($ff['contact_name'] ?? ''));

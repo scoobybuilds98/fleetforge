@@ -18,13 +18,15 @@ declare(strict_types=1);
  * restore so the smoke leaves quickbooks.sync_enabled at its original
  * value (D-CPA-5 — must remain '0' after the smoke).
  *
- * 10 sub-checks:
+ * 13 sub-checks:
  *   C1: CustomerPusher class surface — pushCreate + pushUpdate +
  *       buildQboPayload public static, match dispatcher contract
  *   C2: CustomerEnqueuer class surface — enqueue public static
  *   C3: buildQboPayload full FF row → expected QBO payload shape
- *   C4: buildQboPayload minimal FF row (company_name only) →
- *       DisplayName + CompanyName only, no PrimaryEmail / no BillAddr
+ *       including CurrencyRef.value='CAD' (D-QBO-FIXPACK-6/-7)
+ *   C4: buildQboPayload minimal FF row (company_name + currency only) →
+ *       DisplayName + CompanyName + CurrencyRef only, no PrimaryEmail /
+ *       no BillAddr
  *   C5: pushCreate sync mode gate — sync_mode.customer='qbo_to_ff'
  *       returns ['status'=>'skipped_by_mode'] without hitting QBO
  *   C6: pushCreate soft-delete skip — deleted_at non-null returns
@@ -38,10 +40,19 @@ declare(strict_types=1);
  *  C10: CustomerEnqueuer happy path — sync_enabled='1' + mode='sync'
  *       inserts a queue row with entity_type='customer', operation
  *       matches input, status='queued'
+ *  C11: buildQboPayload CAD customer → CurrencyRef.value='CAD'
+ *       (D-QBO-FIXPACK-7: explicit currency prevents silent QBO coercion)
+ *  C12: buildQboPayload USD customer → CurrencyRef.value='USD'
+ *       (D-QBO-FIXPACK-7: supports multi-currency)
+ *  C13: buildQboPayload empty currency → throws QuickBooksException
+ *       (D-QBO-FIXPACK-7: loud failure beats silent USD coercion)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
  * @session S-QBO-6
+ * @updated S-QBO-FIXPACK-2 — added CurrencyRef assertions to C3/C4;
+ *          added C11/C12/C13 for currency-emission edge cases
+ *          (D-QBO-FIXPACK-6/-7); total 13 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §8.1
  */
 
@@ -52,7 +63,7 @@ use FleetForge\QboPushers\CustomerEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 10;
+$total    = 13;
 
 /** Sentinel customer ids we inserted for synthetic testing. */
 $sentinelCustomerIds = [];
@@ -129,6 +140,8 @@ if (empty($c2Errors)) {
 }
 
 // ── C3: buildQboPayload full row ───────────────────────────
+// D-QBO-FIXPACK-6/-7: fixture must include currency so buildQboPayload
+// can emit CurrencyRef; empty currency throws QuickBooksException.
 $c3Errors = [];
 $fullFf = [
     'id'           => 999990,
@@ -140,6 +153,7 @@ $fullFf = [
     'province'     => 'BC',
     'postal_code'  => 'V5C 1A1',
     'country'      => 'CA',
+    'currency'     => 'CAD',
 ];
 $payload = CustomerPusher::buildQboPayload($fullFf);
 foreach ([
@@ -149,6 +163,10 @@ foreach ([
     if (($payload[$key] ?? null) !== $expected) {
         $c3Errors[] = "{$key} mismatch: got " . json_encode($payload[$key] ?? null);
     }
+}
+// D-QBO-FIXPACK-6/-7: CurrencyRef must be present with correct value.
+if (($payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+    $c3Errors[] = "CurrencyRef.value mismatch: got " . json_encode($payload['CurrencyRef']['value'] ?? null) . ", want 'CAD'";
 }
 if (($payload['PrimaryEmailAddr']['Address'] ?? null) !== 'ops@acmetrucking.test') {
     $c3Errors[] = 'PrimaryEmailAddr.Address missing/mismatch';
@@ -169,7 +187,7 @@ foreach ($expectedAddr as $k => $v) {
     }
 }
 if (empty($c3Errors)) {
-    echo "PASS C3  buildQboPayload full FF row maps DisplayName + CompanyName + PrimaryEmailAddr + PrimaryPhone + BillAddr\n";
+    echo "PASS C3  buildQboPayload full FF row maps DisplayName + CompanyName + CurrencyRef + PrimaryEmailAddr + PrimaryPhone + BillAddr\n";
     $pass++;
 } else {
     echo "FAIL C3  " . implode('; ', $c3Errors) . "\n";
@@ -177,14 +195,20 @@ if (empty($c3Errors)) {
 }
 
 // ── C4: buildQboPayload minimal row ────────────────────────
+// D-QBO-FIXPACK-6/-7: minimal row must include currency so
+// buildQboPayload can emit CurrencyRef without throwing.
 $c4Errors = [];
-$minFf = ['company_name' => 'Solo Driver Inc'];
+$minFf = ['company_name' => 'Solo Driver Inc', 'currency' => 'CAD'];
 $minPayload = CustomerPusher::buildQboPayload($minFf);
 if (($minPayload['DisplayName'] ?? null) !== 'Solo Driver Inc') {
     $c4Errors[] = 'DisplayName mismatch on minimal row';
 }
 if (($minPayload['CompanyName'] ?? null) !== 'Solo Driver Inc') {
     $c4Errors[] = 'CompanyName mismatch on minimal row';
+}
+// D-QBO-FIXPACK-6/-7: CurrencyRef must always be present.
+if (($minPayload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+    $c4Errors[] = "CurrencyRef.value mismatch on minimal row: got " . json_encode($minPayload['CurrencyRef']['value'] ?? null);
 }
 if (array_key_exists('PrimaryEmailAddr', $minPayload)) {
     $c4Errors[] = 'PrimaryEmailAddr should be omitted on empty email';
@@ -196,7 +220,7 @@ if (array_key_exists('BillAddr', $minPayload)) {
     $c4Errors[] = 'BillAddr should be omitted when no address fields populated';
 }
 if (empty($c4Errors)) {
-    echo "PASS C4  buildQboPayload minimal row omits empty PrimaryEmail / PrimaryPhone / BillAddr\n";
+    echo "PASS C4  buildQboPayload minimal row emits CurrencyRef + omits empty PrimaryEmail / PrimaryPhone / BillAddr\n";
     $pass++;
 } else {
     echo "FAIL C4  " . implode('; ', $c4Errors) . "\n";
@@ -418,6 +442,65 @@ if (empty($c10Errors)) {
 } else {
     echo "FAIL C10 " . implode('; ', $c10Errors) . "\n";
     $failures[] = 'C10';
+}
+
+// ── C11: buildQboPayload CAD → CurrencyRef.value='CAD' ────────
+// D-QBO-FIXPACK-7: verify CAD currency emits CurrencyRef.value='CAD'.
+$c11Errors = [];
+$cadFf = ['id' => 999994, 'company_name' => 'CAD Corp', 'currency' => 'CAD'];
+$cadPayload = CustomerPusher::buildQboPayload($cadFf);
+if (($cadPayload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+    $c11Errors[] = "CurrencyRef.value mismatch: got " . json_encode($cadPayload['CurrencyRef']['value'] ?? null) . ", want 'CAD'";
+}
+if (empty($c11Errors)) {
+    echo "PASS C11 buildQboPayload CAD customer → CurrencyRef.value='CAD'\n";
+    $pass++;
+} else {
+    echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";
+    $failures[] = 'C11';
+}
+
+// ── C12: buildQboPayload USD → CurrencyRef.value='USD' ────────
+// D-QBO-FIXPACK-7: verify USD currency emits CurrencyRef.value='USD'
+// (supports multi-currency customers; no QBO coercion possible).
+$c12Errors = [];
+$usdFf = ['id' => 999995, 'company_name' => 'USD Corp', 'currency' => 'usd']; // lowercase → strtoupper
+$usdPayload = CustomerPusher::buildQboPayload($usdFf);
+if (($usdPayload['CurrencyRef']['value'] ?? null) !== 'USD') {
+    $c12Errors[] = "CurrencyRef.value mismatch: got " . json_encode($usdPayload['CurrencyRef']['value'] ?? null) . ", want 'USD'";
+}
+if (empty($c12Errors)) {
+    echo "PASS C12 buildQboPayload USD customer → CurrencyRef.value='USD' (strtoupper normalisation)\n";
+    $pass++;
+} else {
+    echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";
+    $failures[] = 'C12';
+}
+
+// ── C13: buildQboPayload empty currency → throws ──────────────
+// D-QBO-FIXPACK-7: loud failure (QuickBooksException) beats silent
+// coercion to home currency. customers.currency is NOT NULL ENUM in
+// practice; this guard catches any bypass path (direct array call,
+// future schema changes, etc.).
+$c13Errors = [];
+try {
+    $emptyFf = ['id' => 999996, 'company_name' => 'Empty Curr Corp', 'currency' => ''];
+    CustomerPusher::buildQboPayload($emptyFf);
+    $c13Errors[] = 'expected QuickBooksException on empty currency; no exception thrown';
+} catch (\FleetForge\Exceptions\QuickBooksException $e) {
+    // Expected — message should mention the customer id and CurrencyRef.
+    if (strpos($e->getMessage(), 'currency') === false && strpos($e->getMessage(), 'CurrencyRef') === false) {
+        $c13Errors[] = 'exception thrown but message does not mention currency/CurrencyRef: ' . $e->getMessage();
+    }
+} catch (\Throwable $e) {
+    $c13Errors[] = 'unexpected exception type ' . get_class($e) . ': ' . $e->getMessage();
+}
+if (empty($c13Errors)) {
+    echo "PASS C13 buildQboPayload throws QuickBooksException on empty currency (prevents silent QBO coercion)\n";
+    $pass++;
+} else {
+    echo "FAIL C13 " . implode('; ', $c13Errors) . "\n";
+    $failures[] = 'C13';
 }
 
 } finally {

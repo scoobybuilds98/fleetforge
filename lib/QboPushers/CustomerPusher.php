@@ -47,10 +47,17 @@ declare(strict_types=1);
  *   customers.deleted_at non-null → SKIP (returns skipped_soft_deleted)
  *
  * @session  S-QBO-6
+ * @updated  S-QBO-FIXPACK-2 — always emit CurrencyRef on customer create
+ *           payloads (D-QBO-FIXPACK-6 class-of-entity principle);
+ *           idempotency-replay mismatch warning when QBO customer is
+ *           currency-poisoned from a prior push (D-QBO-FIXPACK-10).
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §8.1 (customer sync rules),
  *           §6.7 (worker dispatch pattern)
  * @decision D-QBO-6-1 (no delete enqueue), D-QBO-6-2 (idempotency),
- *           D-QBO-6-4 (sync mode gating), D-QBO-6-5 (field mapping)
+ *           D-QBO-6-4 (sync mode gating), D-QBO-6-5 (field mapping),
+ *           D-QBO-FIXPACK-6 (class-of-entity CurrencyRef principle),
+ *           D-QBO-FIXPACK-7 (customer CurrencyRef emit policy — create only),
+ *           D-QBO-FIXPACK-10 (idempotency-replay mismatch warning)
  */
 
 namespace FleetForge\QboPushers;
@@ -100,9 +107,11 @@ class CustomerPusher
         }
 
         // 2. Load FF customer state. Selects only the columns this
-        //    Pusher actually maps to QBO + the soft-delete flag.
+        //    Pusher actually maps to QBO + soft-delete flag + currency
+        //    (added S-QBO-FIXPACK-2: needed for CurrencyRef emission
+        //    per D-QBO-FIXPACK-6/-7).
         $ff = db_row(
-            "SELECT id, company_name, email, phone, address, city, province, postal_code, country, deleted_at, updated_at
+            "SELECT id, company_name, email, phone, address, city, province, postal_code, country, currency, deleted_at, updated_at
                FROM customers
               WHERE id = ?",
             [$ffCustomerId]
@@ -131,7 +140,38 @@ class CustomerPusher
         //    qbo_customer_id, we MUST NOT re-POST — that would create
         //    a duplicate QBO Customer with auto-discriminated name.
         //    Treat as no-op; the worker marks the queue row completed.
+        //
+        //    D-QBO-FIXPACK-10: Before returning 'already_mapped', probe
+        //    the QBO customer's CurrencyRef and surface a warning when
+        //    FF.currency ≠ QBO.CurrencyRef.value. This flags the
+        //    "currency-poisoned mapping" case — a prior push that omitted
+        //    CurrencyRef caused QBO to default to home currency (USD in
+        //    Intuit US sandbox), which Intuit forbids changing after the
+        //    fact. The check is best-effort: any network/auth failure is
+        //    caught silently so it never blocks the idempotency no-op.
         if ($operation === 'create' && $mapping !== null && !empty($mapping['qbo_customer_id'])) {
+            try {
+                $client     = new QuickBooksClient();
+                $qboResp    = $client->getEntity('customer', (string) $mapping['qbo_customer_id']);
+                $qboCust    = $qboResp['Customer'] ?? null;
+                if (is_array($qboCust)) {
+                    $qboCurrency = strtoupper((string) ($qboCust['CurrencyRef']['value'] ?? ''));
+                    $ffCurrency  = strtoupper((string) ($ff['currency'] ?? ''));
+                    if ($qboCurrency !== '' && $ffCurrency !== '' && $qboCurrency !== $ffCurrency) {
+                        error_log(
+                            "S-QBO-FIXPACK-10 WARNING: FF customer {$ff['id']} currency='{$ffCurrency}' " .
+                            "but mapped QBO customer #{$mapping['qbo_customer_id']} is '{$qboCurrency}'. " .
+                            "Mapping is currency-poisoned (Intuit forbids QBO customer currency change after create). " .
+                            "Operator action: unlink FF customer from QBO (set mapping_status='ff_only'), " .
+                            "mark QBO customer inactive in QBO, then re-push to create a new QBO customer."
+                        );
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Silent fallthrough — currency-mismatch check is advisory only.
+                // Don't block the idempotency no-op due to a transient QBO error.
+                error_log("S-QBO-FIXPACK-10: currency-mismatch check failed for FF customer {$ff['id']}: " . $e->getMessage());
+            }
             return [
                 'success' => true,
                 'status'  => 'already_mapped',
@@ -152,6 +192,15 @@ class CustomerPusher
 
         // 6. Build payload from FF row.
         $qboPayload = self::buildQboPayload($ff);
+
+        // D-QBO-FIXPACK-7: buildQboPayload always emits CurrencyRef (on
+        // create, this is required per the class-of-entity principle
+        // D-QBO-FIXPACK-6). On UPDATE, QBO rejects CurrencyRef because
+        // customer currency is immutable after create per Intuit policy.
+        // Strip it from update payloads here so the HTTP call succeeds.
+        if ($effectiveOperation === 'update') {
+            unset($qboPayload['CurrencyRef']);
+        }
 
         // 7. HTTP call via QuickBooksClient. The client handles auth,
         //    retries (transient errors), Sentry capture, and sync_log
@@ -248,6 +297,17 @@ class CustomerPusher
      * `array_filter()` drops null + empty-string entries before
      * deciding whether to attach the nested object.
      *
+     * Always emits CurrencyRef per D-QBO-FIXPACK-6/-7. Throws
+     * QuickBooksException if the currency field is absent or empty
+     * (customers.currency is NOT NULL ENUM so this should never happen
+     * in practice, but loud failure is safer than silent USD coercion).
+     *
+     * NOTE: pushImpl strips CurrencyRef from UPDATE payloads because
+     * QBO rejects it on updates (customer currency is immutable after
+     * create per Intuit policy). CurrencyRef is intentionally included
+     * here so the offline smoke (which calls buildQboPayload directly)
+     * can verify the emission logic.
+     *
      * Public-static so the offline smoke can exercise it without
      * going through the cURL boundary — matches the
      * QuickBooksClient::normalizeQueryResponse pattern from S-QBO-5-FIX-1.
@@ -258,6 +318,23 @@ class CustomerPusher
             'DisplayName' => (string) ($ff['company_name'] ?? ''),
             'CompanyName' => (string) ($ff['company_name'] ?? ''),
         ];
+
+        // D-QBO-FIXPACK-6/-7: Always emit CurrencyRef on customer payloads.
+        // WHY: Omitting CurrencyRef causes QBO to default to the company's
+        // home currency. In Intuit's US sandbox (home=USD), CAD customers
+        // were silently recorded as USD — and Intuit forbids currency
+        // changes on existing customers, so the mapping is permanently
+        // poisoned. Explicit CurrencyRef on every create payload prevents
+        // this coercion. (pushImpl strips CurrencyRef for update ops.)
+        $currency = strtoupper((string) ($ff['currency'] ?? ''));
+        if ($currency === '') {
+            throw new QuickBooksException(
+                "Customer " . ($ff['id'] ?? '?') . " has empty currency field; cannot push " .
+                "without explicit CurrencyRef (omitting causes silent QBO coercion to home " .
+                "currency). Verify customers.currency is populated (expected 'CAD' or 'USD')."
+            );
+        }
+        $payload['CurrencyRef'] = ['value' => $currency];
 
         if (!empty($ff['email'])) {
             $payload['PrimaryEmailAddr'] = ['Address' => (string) $ff['email']];

@@ -18,15 +18,17 @@ declare(strict_types=1);
  * + restore so the smoke leaves quickbooks.sync_enabled at its
  * original value (D-CPA-5 — must remain '0' after the smoke).
  *
- * 10 sub-checks (mirror of _smoke_qbo_customer_push.php):
+ * 12 sub-checks (mirror of _smoke_qbo_customer_push.php):
  *   C1: VendorPusher class surface — pushCreate + pushUpdate +
  *       buildQboPayload public static, match dispatcher contract
  *   C2: VendorEnqueuer class surface — enqueue public static
  *   C3: buildQboPayload full FF row → expected QBO payload shape
- *       (DisplayName + CompanyName + GivenName + FamilyName +
- *       PrimaryEmailAddr + PrimaryPhone + BillAddr with Country=CA)
+ *       (DisplayName + CompanyName + CurrencyRef='CAD' + GivenName +
+ *       FamilyName + PrimaryEmailAddr + PrimaryPhone + BillAddr
+ *       with Country=CA; D-QBO-FIXPACK-6/-8)
  *   C4: buildQboPayload minimal FF row (name only) → DisplayName +
- *       CompanyName only, no GivenName / no PrimaryEmail / no BillAddr
+ *       CompanyName + CurrencyRef='CAD', no GivenName / no PrimaryEmail
+ *       / no BillAddr (CurrencyRef always emitted per D-QBO-FIXPACK-8)
  *   C5: pushCreate sync mode gate — sync_mode.vendor='qbo_to_ff'
  *       returns ['status'=>'skipped_by_mode'] without hitting QBO
  *   C6: pushCreate soft-delete skip — deleted_at non-null returns
@@ -40,10 +42,19 @@ declare(strict_types=1);
  *  C10: VendorEnqueuer happy path — sync_enabled='1' + mode='sync'
  *       inserts a queue row with entity_type='vendor', operation
  *       matches input, status='queued'
+ *  C11: buildQboPayload always emits CurrencyRef='CAD' (hardcoded per
+ *       D-QBO-FIXPACK-8 Option A; vendors table has no currency column;
+ *       backlog: S-VENDOR-CURRENCY-COLUMN)
+ *  C12: buildQboPayload CurrencyRef is hardcoded 'CAD' regardless of
+ *       any 'currency' key passed in the $ff array (D-QBO-FIXPACK-8;
+ *       confirms the hardcoded path, not a pass-through)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
  * @session S-QBO-7
+ * @updated S-QBO-FIXPACK-2 — added CurrencyRef assertions to C3/C4;
+ *          added C11/C12 for hardcoded CAD emission (D-QBO-FIXPACK-6/-8);
+ *          total 12 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 + §7.5
  */
 
@@ -54,7 +65,7 @@ use FleetForge\QboPushers\VendorEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 10;
+$total    = 12;
 
 /** Sentinel vendor ids we inserted for synthetic testing. */
 $sentinelVendorIds = [];
@@ -133,7 +144,8 @@ if (empty($c2Errors)) {
 // ── C3: buildQboPayload full row ───────────────────────────
 // Exercises name → DisplayName+CompanyName, contact_name split
 // per D-QBO-7-3 ("John A. Smith" → GivenName='John', FamilyName='A. Smith'),
-// address+city+state → BillAddr with default Country=CA.
+// address+city+state → BillAddr with default Country=CA,
+// and D-QBO-FIXPACK-6/-8 CurrencyRef='CAD' (hardcoded).
 $c3Errors = [];
 $fullFf = [
     'id'           => 999990,
@@ -155,6 +167,10 @@ foreach ([
     if (($payload[$key] ?? null) !== $expected) {
         $c3Errors[] = "{$key} mismatch: got " . json_encode($payload[$key] ?? null) . ", want " . json_encode($expected);
     }
+}
+// D-QBO-FIXPACK-6/-8: CurrencyRef must always be present with value='CAD'.
+if (($payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+    $c3Errors[] = "CurrencyRef.value mismatch: got " . json_encode($payload['CurrencyRef']['value'] ?? null) . ", want 'CAD'";
 }
 if (($payload['PrimaryEmailAddr']['Address'] ?? null) !== 'service@acmediesel.test') {
     $c3Errors[] = 'PrimaryEmailAddr.Address missing/mismatch';
@@ -181,7 +197,7 @@ if (array_key_exists('PostalCode', $payload['BillAddr'] ?? [])) {
     $c3Errors[] = 'BillAddr.PostalCode should be absent (vendors has no postal_code column)';
 }
 if (empty($c3Errors)) {
-    echo "PASS C3  buildQboPayload full FF row maps DisplayName+CompanyName+GivenName+FamilyName+PrimaryEmail+PrimaryPhone+BillAddr\n";
+    echo "PASS C3  buildQboPayload full FF row maps DisplayName+CompanyName+CurrencyRef+GivenName+FamilyName+PrimaryEmail+PrimaryPhone+BillAddr\n";
     $pass++;
 } else {
     echo "FAIL C3  " . implode('; ', $c3Errors) . "\n";
@@ -190,6 +206,8 @@ if (empty($c3Errors)) {
 
 // ── C4: buildQboPayload minimal row ────────────────────────
 // Also exercises single-name contact (no space) → GivenName only.
+// D-QBO-FIXPACK-8: CurrencyRef='CAD' must be emitted even on minimal
+// row (hardcoded; no currency column on vendors).
 $c4Errors = [];
 $minFf = ['name' => 'Solo Vendor Inc'];
 $minPayload = VendorPusher::buildQboPayload($minFf);
@@ -198,6 +216,10 @@ if (($minPayload['DisplayName'] ?? null) !== 'Solo Vendor Inc') {
 }
 if (($minPayload['CompanyName'] ?? null) !== 'Solo Vendor Inc') {
     $c4Errors[] = 'CompanyName mismatch on minimal row';
+}
+// D-QBO-FIXPACK-6/-8: CurrencyRef must always be present with value='CAD'.
+if (($minPayload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+    $c4Errors[] = "CurrencyRef.value mismatch on minimal row: got " . json_encode($minPayload['CurrencyRef']['value'] ?? null);
 }
 if (array_key_exists('GivenName', $minPayload)) {
     $c4Errors[] = 'GivenName should be omitted when contact_name absent';
@@ -224,7 +246,7 @@ if (($singleNamePayload['FamilyName'] ?? null) !== '') {
     $c4Errors[] = "single-name contact: expected FamilyName='', got " . json_encode($singleNamePayload['FamilyName'] ?? null);
 }
 if (empty($c4Errors)) {
-    echo "PASS C4  buildQboPayload minimal row omits empty nested objects; single-name contact → GivenName only\n";
+    echo "PASS C4  buildQboPayload minimal row emits CurrencyRef='CAD', omits empty nested objects; single-name contact → GivenName only\n";
     $pass++;
 } else {
     echo "FAIL C4  " . implode('; ', $c4Errors) . "\n";
@@ -447,6 +469,45 @@ if (empty($c10Errors)) {
 } else {
     echo "FAIL C10 " . implode('; ', $c10Errors) . "\n";
     $failures[] = 'C10';
+}
+
+// ── C11: buildQboPayload always emits CurrencyRef='CAD' ───────
+// D-QBO-FIXPACK-6/-8: vendors table has no currency column, so
+// CurrencyRef is hardcoded 'CAD' (D-QBO-FIXPACK-8 Option A).
+// Backlog: S-VENDOR-CURRENCY-COLUMN for per-row currency support.
+$c11Errors = [];
+$c11Ff = ['name' => 'Northern Freight Ltd.'];
+$c11Payload = VendorPusher::buildQboPayload($c11Ff);
+if (($c11Payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+    $c11Errors[] = "CurrencyRef.value: got " . json_encode($c11Payload['CurrencyRef']['value'] ?? null) . ", want 'CAD'";
+}
+if (empty($c11Errors)) {
+    echo "PASS C11 buildQboPayload always emits hardcoded CurrencyRef='CAD' (vendors has no currency column; D-QBO-FIXPACK-8)\n";
+    $pass++;
+} else {
+    echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";
+    $failures[] = 'C11';
+}
+
+// ── C12: buildQboPayload CurrencyRef is hardcoded, not a passthrough ─
+// D-QBO-FIXPACK-8: even if a caller passes 'currency' => 'USD' in the
+// $ff array, the vendor payload always emits 'CAD' (hardcoded). This
+// test confirms the hardcoded path rather than a field pass-through.
+// When S-VENDOR-CURRENCY-COLUMN ships, this test will be updated to
+// validate per-row currency emission.
+$c12Errors = [];
+$c12Ff = ['name' => 'Future USD Vendor', 'currency' => 'USD']; // vendors table has no currency column
+$c12Payload = VendorPusher::buildQboPayload($c12Ff);
+if (($c12Payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+    $c12Errors[] = "CurrencyRef.value: got " . json_encode($c12Payload['CurrencyRef']['value'] ?? null) .
+        ", want 'CAD' (hardcoded per D-QBO-FIXPACK-8; 'currency' key in \$ff has no effect until S-VENDOR-CURRENCY-COLUMN)";
+}
+if (empty($c12Errors)) {
+    echo "PASS C12 buildQboPayload CurrencyRef hardcoded 'CAD' (not a passthrough; 'currency' key in \$ff ignored per D-QBO-FIXPACK-8)\n";
+    $pass++;
+} else {
+    echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";
+    $failures[] = 'C12';
 }
 
 } finally {
