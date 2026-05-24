@@ -4,13 +4,12 @@ declare(strict_types=1);
 /**
  * lib/QboPushers/InvoicePreflightGate.php
  *
- * Encapsulates the 5-step pre-flight check for invoice push. Called by
- * InvoicePusher::pushImpl BEFORE any payload build / HTTP call. Returns
- * a structured ['ok' => bool, 'reason' => string|null] result so the
- * caller can record the gate failure into acc_qbo_invoice_map without
- * a try/catch round-trip.
+ * Encapsulates the pre-flight check pipeline for invoice push. Called by
+ * InvoicePusher::pushImpl BEFORE any payload build / HTTP call. Returns a
+ * structured result so the caller can record the gate failure into
+ * acc_qbo_invoice_map without a try/catch round-trip.
  *
- * Gate order (fail-fast):
+ * Gate order (fail-fast — each gate returns immediately on failure):
  *   1. Connection status — settings.quickbooks.connection_status === 'connected'
  *   2. Tax-override target — settings.quickbooks.tax_override_code_id non-empty
  *   3. Account validator — AccountValidator::assertReadyForInvoicePush()
@@ -18,33 +17,49 @@ declare(strict_types=1);
  *      D-QBO-VALIDATOR-3/-4)
  *   4. Customer mapping — acc_qbo_customer_map for invoice.customer_id
  *      has mapping_status='mapped' AND non-null qbo_customer_id
- *   5. Item mappings — every distinct item_type on the invoice resolves
- *      to a mapped acc_qbo_item_map row (GPS lines check variant per
+ *   4.5 Currency-mismatch — FF invoice.currency must match QBO customer's
+ *      CurrencyRef (D-QBO-FIXPACK-3). Single HTTP call per push pre-flight;
+ *      falls through gracefully on any transient QBO API error (catch \Throwable).
+ *   5. Item mappings — every distinct item_type on the invoice resolves to a
+ *      mapped acc_qbo_item_map row (GPS lines check variant per
  *      customer.gps_revenue_presentation per D-QBO-10-2)
+ *   6. Field-length pre-flight — DocNumber/CustomerMemo/PrivateNote/
+ *      line descriptions checked against QboFieldLimits constants
+ *      (D-QBO-FIXPACK-4). Fails with typed status_code so operator gets
+ *      a clear remediation path without burning an HTTP round-trip on
+ *      QBO error 2050.
  *
- * Gates 1-2 are settings checks; 3 is the validator; 4-5 are mapping
- * lookups. All failures return ['ok' => false, 'reason' => '<actionable>']
- * so the operator gets a clear remediation path.
+ * Return shape: array{ok: bool, reason: ?string, status_code?: string}
+ *   - ok=true  → all gates passed
+ *   - ok=false → reason is actionable; status_code is a typed
+ *     push_status value (defaults to 'failed_preflight' when absent)
  *
  * @session  S-QBO-11
+ * @updated  S-QBO-11-FIXPACK-1 — added gate 4.5 (currency-mismatch) +
+ *           gate 6 (field-length) + typed status_code in return shape;
+ *           inner SELECT broadened to SELECT * for gate 6 fields
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher pre-flight gates),
  *           §7.1 (chart-of-accounts validator)
  * @decision D-QBO-11-7 (customer mapping gate),
  *           D-QBO-11-8 (item mapping gate + GPS variant resolution),
- *           D-VALIDATOR-PER-SESSION (per-Pusher assertReady*Push gates)
+ *           D-QBO-FIXPACK-3 (currency-mismatch gate; falls through on HTTP error),
+ *           D-QBO-FIXPACK-4 (QboFieldLimits single-source constants),
+ *           D-QBO-FIXPACK-5 (typed status codes: failed_preflight_field_too_long,
+ *                            failed_preflight_currency_mismatch)
  */
 
 namespace FleetForge\QboPushers;
 
 use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
+use FleetForge\QuickBooksClient;
 
 class InvoicePreflightGate
 {
     /**
-     * Run all 5 pre-flight checks for an FF invoice push.
+     * Run all pre-flight checks for an FF invoice push.
      *
      * @param  int $ffInvoiceId
-     * @return array{ok: bool, reason: ?string}
+     * @return array{ok: bool, reason: ?string, status_code?: string}
      */
     public static function check(int $ffInvoiceId): array
     {
@@ -77,8 +92,10 @@ class InvoicePreflightGate
         }
 
         // 4. Customer mapping (D-QBO-11-7)
+        // WHY: SELECT * so gate 6 (PrivateNote preview) and gate 4.5 (currency)
+        // have the full invoice row without a second query.
         $invoice = db_row(
-            "SELECT id, customer_id FROM invoices WHERE id = ?",
+            "SELECT * FROM invoices WHERE id = ?",
             [$ffInvoiceId]
         );
         if (!$invoice) {
@@ -109,6 +126,59 @@ class InvoicePreflightGate
             ];
         }
 
+        // 4.5 Currency-mismatch pre-flight (D-QBO-FIXPACK-3).
+        // WHY: Without this gate, InvoicePusher always emits CurrencyRef on the
+        // QBO payload (D-QBO-FIXPACK-1), but QBO will silently accept an invoice
+        // in currency X on a customer denominated in currency Y — the QBO ledger
+        // ends up with a corrupt AR entry. Better to surface this as a pre-flight
+        // rejection so the operator remaps before the push.
+        //
+        // LATENCY: One extra GET /customer/{id} per push. Acceptable per
+        // D-QBO-FIXPACK-3 reasoning (single call, customer denomination rarely
+        // changes, cacheable in a future iteration).
+        //
+        // FALLTHROUGH: Any transient infrastructure error (token expiry, network
+        // timeout, etc.) is logged and swallowed — we do NOT gate on QBO
+        // availability for a read-only pre-flight probe. The actual push will
+        // surface the connectivity issue through its own error path.
+        try {
+            $client = new QuickBooksClient();
+            $qboCustomerResp = $client->getEntity('customer', (string) $customerMap['qbo_customer_id']);
+            $qboCustomer = $qboCustomerResp['Customer'] ?? null;
+
+            if ($qboCustomer === null) {
+                // Mapping points to a QBO customer that no longer exists.
+                return [
+                    'ok'          => false,
+                    'reason'      => "QBO customer (id={$customerMap['qbo_customer_id']}) not found in sandbox; "
+                                   . "the mapping may be stale. Re-pull customers via /quickbooks/customers to refresh.",
+                    'status_code' => 'failed_preflight',
+                ];
+            }
+
+            $qboCurrency = strtoupper((string) ($qboCustomer['CurrencyRef']['value'] ?? ''));
+            $ffCurrency  = strtoupper((string) ($invoice['currency'] ?? ''));
+
+            if ($qboCurrency !== '' && $ffCurrency !== '' && $qboCurrency !== $ffCurrency) {
+                $qboName = (string) ($qboCustomer['DisplayName'] ?? '(unnamed)');
+                return [
+                    'ok'          => false,
+                    'reason'      => "Currency mismatch: FF invoice is {$ffCurrency} but QBO customer "
+                                   . "(id={$customerMap['qbo_customer_id']}, name='{$qboName}') is {$qboCurrency}. "
+                                   . "Either re-map FF customer {$invoice['customer_id']} to a QBO customer with "
+                                   . "matching currency, or change FF invoice.currency to match.",
+                    'status_code' => 'failed_preflight_currency_mismatch',
+                ];
+            }
+        } catch (\Throwable $e) {
+            // Transient QBO API issue — fall through gracefully.
+            // WHY: Pre-flight should never block a push on a network/auth hiccup.
+            // The actual createEntity call will surface connectivity issues.
+            // Log for operator observability.
+            error_log("[S-QBO-FIXPACK-1] Currency pre-flight QBO lookup failed for invoice {$ffInvoiceId} "
+                . "(qbo_customer={$customerMap['qbo_customer_id']}): " . $e->getMessage());
+        }
+
         // 5. Item mappings (D-QBO-11-8 + D-QBO-10-2 GPS variant resolution)
         $customer = db_row(
             "SELECT id, gps_revenue_presentation FROM customers WHERE id = ?",
@@ -122,7 +192,7 @@ class InvoicePreflightGate
         $unmappedTypes = [];
         foreach ($itemTypes as $row) {
             $itemType = (string) $row['item_type'];
-            $variant = null;
+            $variant  = null;
             if ($itemType === 'gps') {
                 $variant = (string) ($customer['gps_revenue_presentation'] ?? 'net');
             }
@@ -158,6 +228,68 @@ class InvoicePreflightGate
                 'reason' => "Unmapped item types: " . implode(', ', $unmappedTypes)
                           . ". Map via /quickbooks/items first.",
             ];
+        }
+
+        // 6. Field-length pre-flight (D-QBO-FIXPACK-4).
+        // WHY: QBO rejects pushes for field-length violations only AFTER the HTTP
+        // call (QBO error 2050). These checks fail-fast before burning the round-
+        // trip, and emit a typed status_code so the operator knows exactly which
+        // field to shorten — rather than decoding QBO's 2050 XML fault.
+
+        // DocNumber ← invoice.invoice_number (QBO max 21 chars)
+        $err = QboFieldLimits::checkLength(
+            'invoice.invoice_number → DocNumber',
+            $invoice['invoice_number'] ?? null,
+            QboFieldLimits::INVOICE_DOC_NUMBER_MAX
+        );
+        if ($err !== null) {
+            return ['ok' => false, 'reason' => $err, 'status_code' => 'failed_preflight_field_too_long'];
+        }
+
+        // CustomerMemo ← invoice.notes (QBO max 1000 chars)
+        $err = QboFieldLimits::checkLength(
+            'invoice.notes → CustomerMemo',
+            $invoice['notes'] ?? null,
+            QboFieldLimits::INVOICE_CUSTOMER_MEMO_MAX
+        );
+        if ($err !== null) {
+            return ['ok' => false, 'reason' => $err, 'status_code' => 'failed_preflight_field_too_long'];
+        }
+
+        // PrivateNote audit JSON (QBO max 4000 chars).
+        // WHY: Build a preview of the JSON now (cheap — pure string ops) to catch
+        // any edge case where an unusually long invoice_number or many audit fields
+        // push the PrivateNote over QBO's 4000-char limit. Typical length ~312 chars.
+        $previewNote = InvoicePusher::buildPrivateNoteJson($invoice);
+        $err = QboFieldLimits::checkLength(
+            'invoice PrivateNote (audit JSON)',
+            $previewNote,
+            QboFieldLimits::INVOICE_PRIVATE_NOTE_MAX
+        );
+        if ($err !== null) {
+            return [
+                'ok'          => false,
+                'reason'      => $err . " Investigate FF invoice audit columns for this edge case.",
+                'status_code' => 'failed_preflight_field_too_long',
+            ];
+        }
+
+        // Line descriptions (QBO max 4000 chars each)
+        $lines = db_select(
+            "SELECT sort_order, description FROM invoice_line_items
+              WHERE invoice_id = ?
+              ORDER BY sort_order ASC, id ASC",
+            [$ffInvoiceId]
+        );
+        foreach ($lines as $i => $line) {
+            $err = QboFieldLimits::checkLength(
+                "invoice_line_items[{$i}].description",
+                $line['description'] ?? null,
+                QboFieldLimits::INVOICE_LINE_DESCRIPTION_MAX
+            );
+            if ($err !== null) {
+                return ['ok' => false, 'reason' => $err, 'status_code' => 'failed_preflight_field_too_long'];
+            }
         }
 
         return ['ok' => true, 'reason' => null];

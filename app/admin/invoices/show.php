@@ -1082,22 +1082,26 @@ require_once FF_ROOT . '/includes/header.php';
                 if ($qboInvoiceMapping !== null):
                     $qm_status = $qboInvoiceMapping['push_status'];
                     $qm_badgeClass = match ($qm_status) {
-                        'pushed'           => 'badge-success',
-                        'pending'          => 'badge-neutral',
-                        'failed'           => 'badge-danger',
-                        'failed_preflight' => 'badge-warning',
+                        'pushed'                              => 'badge-success',
+                        'pending'                             => 'badge-neutral',
+                        'failed'                              => 'badge-danger',
+                        'failed_preflight',
+                        'failed_preflight_field_too_long',
+                        'failed_preflight_currency_mismatch'  => 'badge-warning',
                         'skipped_voided',
-                        'skipped_by_mode'  => 'badge-neutral',
-                        default            => 'badge-neutral',
+                        'skipped_by_mode'                     => 'badge-neutral',
+                        default                               => 'badge-neutral',
                     };
                     $qm_label = match ($qm_status) {
-                        'pushed'           => 'QuickBooks: Pushed' . ($qboInvoiceMapping['qbo_invoice_id'] ? ' #' . $qboInvoiceMapping['qbo_invoice_id'] : ''),
-                        'pending'          => 'QuickBooks: Queued',
-                        'failed'           => 'QuickBooks: Push Failed',
-                        'failed_preflight' => 'QuickBooks: Pre-flight Blocked',
-                        'skipped_voided'   => 'QuickBooks: Skipped (voided)',
-                        'skipped_by_mode'  => 'QuickBooks: Skipped (mode)',
-                        default            => 'QuickBooks: ' . $qm_status,
+                        'pushed'                             => 'QuickBooks: Pushed' . ($qboInvoiceMapping['qbo_invoice_id'] ? ' #' . $qboInvoiceMapping['qbo_invoice_id'] : ''),
+                        'pending'                            => 'QuickBooks: Queued',
+                        'failed'                             => 'QuickBooks: Push Failed',
+                        'failed_preflight'                   => 'QuickBooks: Pre-flight Blocked',
+                        'failed_preflight_field_too_long'    => 'QuickBooks: Pre-flight Blocked (field too long)',
+                        'failed_preflight_currency_mismatch' => 'QuickBooks: Pre-flight Blocked (currency mismatch)',
+                        'skipped_voided'                     => 'QuickBooks: Skipped (voided)',
+                        'skipped_by_mode'                    => 'QuickBooks: Skipped (mode)',
+                        default                              => 'QuickBooks: ' . $qm_status,
                     };
                     $qm_title = $qboInvoiceMapping['push_error']
                         ?: ($qboInvoiceMapping['pushed_at'] ? 'pushed_at=' . $qboInvoiceMapping['pushed_at'] : '');

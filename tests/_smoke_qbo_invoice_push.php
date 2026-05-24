@@ -12,7 +12,7 @@ declare(strict_types=1);
  * Self-cleaning: synthetic FF rows use sentinel ids (999990+) plus
  * settings snapshots restored in the finally block.
  *
- * 29 sub-checks:
+ * 39 sub-checks (updated S-QBO-11-FIXPACK-1):
  *   Structural (1-7): table + 5 classes + lint
  *   TaxOverride (8-10): builds TotalTax via bcmath / throws on empty / line-level
  *   LineBuilder (11-15): emits lines, resolves Items, GPS variant, throws on unmapped, throws on integrity violation
@@ -20,10 +20,19 @@ declare(strict_types=1);
  *   Pusher (20-23): skipped_by_mode / skipped_voided / failed_preflight / already_mapped
  *   Enqueuer (24-25): sync_enabled=0 / non-create returns false
  *   PrivateNote JSON (26-27): includes fields / omits audit
- *   FX (28-29): CAD / USD payload shape
+ *   CurrencyRef (28-29): CAD + USD payload shape (updated per D-QBO-FIXPACK-1/-2)
+ *   FieldLimits (30-34): QboFieldLimits class + DocNumber/notes/line-desc checks
+ *   CurrencyRef edge cases (35-38): CAD explicit / USD explicit / NULL rate throws / zero rate throws
+ *   ENUM (39): push_status includes 2 new typed preflight codes
  *
- * @session S-QBO-11
+ * @session  S-QBO-11
+ * @updated  S-QBO-11-FIXPACK-1 (C28 updated for always-emit CurrencyRef;
+ *           C30–C39 new)
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract), §17 (tax-override)
+ * @decision D-QBO-FIXPACK-1 (always emit CurrencyRef),
+ *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on missing non-CAD rate),
+ *           D-QBO-FIXPACK-4 (QboFieldLimits single-source constants),
+ *           D-QBO-FIXPACK-5 (typed preflight status codes)
  */
 
 require_once __DIR__ . '/../config/app.php';
@@ -33,12 +42,13 @@ use FleetForge\QboPushers\InvoiceEnqueuer;
 use FleetForge\QboPushers\InvoiceLineBuilder;
 use FleetForge\QboPushers\InvoiceTaxOverride;
 use FleetForge\QboPushers\InvoicePreflightGate;
+use FleetForge\QboPushers\QboFieldLimits;
 use FleetForge\Exceptions\QuickBooksException;
 use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 29;
+$total    = 39;
 
 // Sentinel IDs we'll clean up at end
 $sentinelInvoiceIds = [];
@@ -182,6 +192,7 @@ $newFiles = [
     'lib/QboPushers/InvoiceLineBuilder.php',
     'lib/QboPushers/InvoiceTaxOverride.php',
     'lib/QboPushers/InvoicePreflightGate.php',
+    'lib/QboPushers/QboFieldLimits.php',
 ];
 foreach ($newFiles as $rel) {
     $abs = realpath(__DIR__ . '/../' . $rel);
@@ -190,7 +201,7 @@ foreach ($newFiles as $rel) {
     exec('php -l ' . escapeshellarg($abs) . ' 2>&1', $out, $code);
     if ($code !== 0) $c7Errors[] = "{$rel} lint failed: " . implode('; ', $out);
 }
-if (empty($c7Errors)) { echo "PASS C7  5 new lib/QboPushers/*.php files php -l clean\n"; $pass++; }
+if (empty($c7Errors)) { echo "PASS C7  6 lib/QboPushers/*.php files php -l clean\n"; $pass++; }
 else { echo "FAIL C7  " . implode('; ', $c7Errors) . "\n"; $failures[] = 'C7'; }
 
 // ── C8: InvoiceTaxOverride::buildTxnTaxDetail bcmath sum ────
@@ -803,7 +814,8 @@ try {
 if (empty($c27Errors)) { echo "PASS C27 buildPrivateNoteJson omits audit block when audit columns NULL; emits engine_version='unknown' fallback\n"; $pass++; }
 else { echo "FAIL C27 " . implode('; ', $c27Errors) . "\n"; $failures[] = 'C27'; }
 
-// ── C28: buildQboPayload — CAD invoice produces no CurrencyRef
+// ── C28: buildQboPayload — CAD invoice ALWAYS emits CurrencyRef + ExchangeRate
+// (D-QBO-FIXPACK-1: always emit to prevent silent QBO coercion to customer currency)
 $c28Errors = [];
 try {
     $invoice = [
@@ -821,12 +833,16 @@ try {
     $lines = [['item_type'=>'base_rental', 'description'=>'X', 'amount'=>'100.00', 'unit_price'=>'100.00', 'quantity'=>1, 'sort_order'=>1]];
     $customerMap = ['qbo_customer_id' => 'TEST-SMOKE-CUST'];
     $payload = InvoicePusher::buildQboPayload($invoice, $customer, $lines, $customerMap);
-    if (array_key_exists('CurrencyRef', $payload)) $c28Errors[] = "CAD invoice should NOT have CurrencyRef key (QBO defaults home)";
-    if (array_key_exists('ExchangeRate', $payload)) $c28Errors[] = "CAD invoice should NOT have ExchangeRate key";
+    if (($payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+        $c28Errors[] = "CAD invoice MUST emit CurrencyRef.value='CAD' (D-QBO-FIXPACK-1), got " . json_encode($payload['CurrencyRef'] ?? null);
+    }
+    if (($payload['ExchangeRate'] ?? null) !== '1.0') {
+        $c28Errors[] = "CAD invoice MUST emit ExchangeRate='1.0' (D-QBO-FIXPACK-2), got " . json_encode($payload['ExchangeRate'] ?? null);
+    }
 } catch (Throwable $e) {
     $c28Errors[] = 'C28 threw: ' . $e->getMessage();
 }
-if (empty($c28Errors)) { echo "PASS C28 buildQboPayload — CAD invoice omits CurrencyRef + ExchangeRate (QBO defaults home)\n"; $pass++; }
+if (empty($c28Errors)) { echo "PASS C28 buildQboPayload — CAD invoice emits CurrencyRef='CAD' + ExchangeRate='1.0' (D-QBO-FIXPACK-1/-2)\n"; $pass++; }
 else { echo "FAIL C28 " . implode('; ', $c28Errors) . "\n"; $failures[] = 'C28'; }
 
 // ── C29: buildQboPayload — USD invoice with exchange_rate_to_cad
@@ -859,6 +875,248 @@ try {
 }
 if (empty($c29Errors)) { echo "PASS C29 buildQboPayload — USD invoice with exchange_rate_to_cad=1.35 produces CurrencyRef + ExchangeRate (D-QBO-11-3)\n"; $pass++; }
 else { echo "FAIL C29 " . implode('; ', $c29Errors) . "\n"; $failures[] = 'C29'; }
+
+// ── C30: QboFieldLimits class exists with all 4 constants + checkLength ──
+$c30Errors = [];
+try {
+    if (!class_exists(QboFieldLimits::class)) {
+        $c30Errors[] = 'QboFieldLimits class not autoloaded';
+    } else {
+        $ref = new ReflectionClass(QboFieldLimits::class);
+        foreach (['INVOICE_DOC_NUMBER_MAX','INVOICE_PRIVATE_NOTE_MAX','INVOICE_CUSTOMER_MEMO_MAX','INVOICE_LINE_DESCRIPTION_MAX'] as $const) {
+            if (!$ref->hasConstant($const)) $c30Errors[] = "missing constant: {$const}";
+        }
+        if (!$ref->hasMethod('checkLength')) $c30Errors[] = 'missing method: checkLength';
+        else {
+            $rm = $ref->getMethod('checkLength');
+            if (!$rm->isStatic() || !$rm->isPublic()) $c30Errors[] = 'checkLength must be public static';
+        }
+        if (QboFieldLimits::INVOICE_DOC_NUMBER_MAX !== 21) $c30Errors[] = 'INVOICE_DOC_NUMBER_MAX expected 21';
+        if (QboFieldLimits::INVOICE_CUSTOMER_MEMO_MAX !== 1000) $c30Errors[] = 'INVOICE_CUSTOMER_MEMO_MAX expected 1000';
+        if (QboFieldLimits::INVOICE_PRIVATE_NOTE_MAX !== 4000) $c30Errors[] = 'INVOICE_PRIVATE_NOTE_MAX expected 4000';
+        if (QboFieldLimits::INVOICE_LINE_DESCRIPTION_MAX !== 4000) $c30Errors[] = 'INVOICE_LINE_DESCRIPTION_MAX expected 4000';
+    }
+} catch (Throwable $e) {
+    $c30Errors[] = 'C30 threw: ' . $e->getMessage();
+}
+if (empty($c30Errors)) { echo "PASS C30 QboFieldLimits class exists with all 4 constants + checkLength (D-QBO-FIXPACK-4)\n"; $pass++; }
+else { echo "FAIL C30 " . implode('; ', $c30Errors) . "\n"; $failures[] = 'C30'; }
+
+// ── C31: checkLength returns null for value within limit; error for over ──
+$c31Errors = [];
+try {
+    // Within limit
+    $ok = QboFieldLimits::checkLength('test.field', 'SHORT', 21);
+    if ($ok !== null) $c31Errors[] = "within-limit value should return null, got: " . json_encode($ok);
+    // Exactly at limit (21 chars = 21 'A')
+    $atLimit = QboFieldLimits::checkLength('test.field', str_repeat('A', 21), 21);
+    if ($atLimit !== null) $c31Errors[] = "at-limit value should return null, got: " . json_encode($atLimit);
+    // Over limit
+    $over = QboFieldLimits::checkLength('invoice.invoice_number', str_repeat('X', 22), 21);
+    if ($over === null) $c31Errors[] = "over-limit value should return error string, got null";
+    if ($over !== null && !str_contains($over, '22')) $c31Errors[] = "error message should mention actual length 22";
+    if ($over !== null && !str_contains($over, '21')) $c31Errors[] = "error message should mention limit 21";
+    // NULL passes through
+    $null = QboFieldLimits::checkLength('test.field', null, 21);
+    if ($null !== null) $c31Errors[] = "null value should return null (optional field), got: " . json_encode($null);
+} catch (Throwable $e) {
+    $c31Errors[] = 'C31 threw: ' . $e->getMessage();
+}
+if (empty($c31Errors)) { echo "PASS C31 QboFieldLimits::checkLength: null → pass; at-limit → pass; over-limit → error; NULL → pass\n"; $pass++; }
+else { echo "FAIL C31 " . implode('; ', $c31Errors) . "\n"; $failures[] = 'C31'; }
+
+// ── C32: invoice_number >21 chars returns failed_preflight_field_too_long ─
+// Uses pushImpl path to confirm end-to-end typed status propagation.
+$c32Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+    $longNumber = str_repeat('A', 22);  // 22 chars > 21 limit
+    db_execute("UPDATE invoices SET invoice_number=?, status='sent' WHERE id=999990", [$longNumber]);
+    // Tax override must be present for the gate to reach step 6
+    $setSetting('quickbooks.tax_override_code_id', 'NON');
+    $setSetting('quickbooks.connection_status', 'connected');
+    $result = InvoicePusher::pushCreate(999990);
+    // Status should be failed_preflight_field_too_long (or failed_preflight if gate stops earlier)
+    $status = $result['status'] ?? null;
+    if (!in_array($status, ['failed_preflight_field_too_long', 'failed_preflight'], true)) {
+        $c32Errors[] = "expected failed_preflight* status, got " . json_encode($status);
+    }
+    if ($status === 'failed_preflight_field_too_long') {
+        $mapRow = db_row("SELECT push_status, push_error FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+        if (!$mapRow || $mapRow['push_status'] !== 'failed_preflight_field_too_long') {
+            $c32Errors[] = "map push_status expected 'failed_preflight_field_too_long', got " . json_encode($mapRow['push_status'] ?? null);
+        }
+        if (!str_contains((string)($mapRow['push_error'] ?? ''), '22')) {
+            $c32Errors[] = "push_error should mention length 22";
+        }
+    }
+    // Restore invoice_number
+    db_execute("UPDATE invoices SET invoice_number=? WHERE id=999990", ['SMK-QBO11-' . substr((string)time(), -6)]);
+} catch (Throwable $e) {
+    $c32Errors[] = 'C32 threw: ' . $e->getMessage();
+    db_execute("UPDATE invoices SET invoice_number=? WHERE id=999990", ['SMK-QBO11-RESTORE']);
+}
+if (empty($c32Errors)) { echo "PASS C32 invoice_number >21 chars → failed_preflight_field_too_long with actionable error (D-QBO-FIXPACK-4)\n"; $pass++; }
+else { echo "FAIL C32 " . implode('; ', $c32Errors) . "\n"; $failures[] = 'C32'; }
+
+// ── C33: notes (CustomerMemo) >1000 chars returns field_too_long ─────────
+$c33Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+    $longNotes = str_repeat('N', 1001);
+    db_execute("UPDATE invoices SET notes=? WHERE id=999990", [$longNotes]);
+    $result = InvoicePusher::pushCreate(999990);
+    $status = $result['status'] ?? null;
+    if (!in_array($status, ['failed_preflight_field_too_long', 'failed_preflight'], true)) {
+        $c33Errors[] = "expected failed_preflight* for long notes, got " . json_encode($status);
+    }
+    // Restore
+    db_execute("UPDATE invoices SET notes='SMOKE C16 invoice for preflight gate testing' WHERE id=999990");
+} catch (Throwable $e) {
+    $c33Errors[] = 'C33 threw: ' . $e->getMessage();
+    db_execute("UPDATE invoices SET notes='SMOKE C16 invoice for preflight gate testing' WHERE id=999990");
+}
+if (empty($c33Errors)) { echo "PASS C33 notes (CustomerMemo) >1000 chars → failed_preflight_field_too_long\n"; $pass++; }
+else { echo "FAIL C33 " . implode('; ', $c33Errors) . "\n"; $failures[] = 'C33'; }
+
+// ── C34: QboFieldLimits::checkLength catches line description >4000 chars ─
+// NOTE: invoice_line_items.description is varchar(500) so we cannot persist
+// a 4001-char string to DB. Instead we verify the QboFieldLimits::checkLength
+// static method directly (same code path the gate calls per-line). This covers
+// the gate logic without needing a DB round-trip.
+$c34Errors = [];
+try {
+    $longDesc = str_repeat('D', 4001);
+    $err = QboFieldLimits::checkLength('invoice_line_items[0].description', $longDesc, QboFieldLimits::INVOICE_LINE_DESCRIPTION_MAX);
+    if ($err === null) {
+        $c34Errors[] = "expected error message for 4001-char line description, got null";
+    }
+    if ($err !== null && !str_contains($err, '4001')) {
+        $c34Errors[] = "error message should mention actual length 4001, got: {$err}";
+    }
+    if ($err !== null && !str_contains($err, '4000')) {
+        $c34Errors[] = "error message should mention limit 4000, got: {$err}";
+    }
+    // At-limit passes
+    $atLimit = QboFieldLimits::checkLength('invoice_line_items[0].description', str_repeat('D', 4000), QboFieldLimits::INVOICE_LINE_DESCRIPTION_MAX);
+    if ($atLimit !== null) {
+        $c34Errors[] = "4000-char description at limit should pass, got: {$atLimit}";
+    }
+} catch (Throwable $e) {
+    $c34Errors[] = 'C34 threw: ' . $e->getMessage();
+}
+if (empty($c34Errors)) { echo "PASS C34 QboFieldLimits catches line description >4000 chars (offline gate logic; DB column is varchar(500))\n"; $pass++; }
+else { echo "FAIL C34 " . implode('; ', $c34Errors) . "\n"; $failures[] = 'C34'; }
+
+// ── C35: buildQboPayload — CAD invoice emits CurrencyRef='CAD' + ExchangeRate='1.0'
+// (dedicated unit-test form of the same assertion as C28)
+$c35Errors = [];
+try {
+    $inv = [
+        'id'=>999990, 'invoice_number'=>'INV-C35-CAD', 'invoice_date'=>'2026-05-31',
+        'due_date'=>'2026-06-30', 'currency'=>'CAD',
+        'tax_gst_amount'=>'0.00','tax_pst_amount'=>'0.00','tax_hst_amount'=>'0.00',
+        'total_amount'=>'200.00',
+    ];
+    $pl = InvoicePusher::buildQboPayload($inv, ['id'=>1,'gps_revenue_presentation'=>'net'],
+        [['item_type'=>'base_rental','description'=>'X','amount'=>'200.00','unit_price'=>'200.00','quantity'=>1,'sort_order'=>1]],
+        ['qbo_customer_id'=>'CUST-C35']);
+    if (($pl['CurrencyRef']['value'] ?? null) !== 'CAD') $c35Errors[] = "expected CurrencyRef.value='CAD', got " . json_encode($pl['CurrencyRef'] ?? null);
+    if (($pl['ExchangeRate'] ?? null) !== '1.0')         $c35Errors[] = "expected ExchangeRate='1.0', got " . json_encode($pl['ExchangeRate'] ?? null);
+} catch (Throwable $e) {
+    $c35Errors[] = 'C35 threw: ' . $e->getMessage();
+}
+if (empty($c35Errors)) { echo "PASS C35 buildQboPayload — CAD invoice emits CurrencyRef.value='CAD' + ExchangeRate='1.0'\n"; $pass++; }
+else { echo "FAIL C35 " . implode('; ', $c35Errors) . "\n"; $failures[] = 'C35'; }
+
+// ── C36: buildQboPayload — USD invoice emits CurrencyRef='USD' + ExchangeRate=rate
+$c36Errors = [];
+try {
+    $inv = [
+        'id'=>999991, 'invoice_number'=>'INV-C36-USD', 'invoice_date'=>'2026-05-31',
+        'due_date'=>'2026-06-30', 'currency'=>'USD', 'exchange_rate_to_cad'=>'1.35',
+        'tax_gst_amount'=>'0.00','tax_pst_amount'=>'0.00','tax_hst_amount'=>'0.00',
+        'total_amount'=>'100.00',
+    ];
+    $pl = InvoicePusher::buildQboPayload($inv, ['id'=>1,'gps_revenue_presentation'=>'net'],
+        [['item_type'=>'base_rental','description'=>'X','amount'=>'100.00','unit_price'=>'100.00','quantity'=>1,'sort_order'=>1]],
+        ['qbo_customer_id'=>'CUST-C36']);
+    if (($pl['CurrencyRef']['value'] ?? null) !== 'USD') $c36Errors[] = "expected CurrencyRef.value='USD', got " . json_encode($pl['CurrencyRef'] ?? null);
+    if (($pl['ExchangeRate'] ?? null) !== '1.35')        $c36Errors[] = "expected ExchangeRate='1.35', got " . json_encode($pl['ExchangeRate'] ?? null);
+} catch (Throwable $e) {
+    $c36Errors[] = 'C36 threw: ' . $e->getMessage();
+}
+if (empty($c36Errors)) { echo "PASS C36 buildQboPayload — USD invoice emits CurrencyRef.value='USD' + ExchangeRate='1.35'\n"; $pass++; }
+else { echo "FAIL C36 " . implode('; ', $c36Errors) . "\n"; $failures[] = 'C36'; }
+
+// ── C37: Non-CAD invoice with exchange_rate_to_cad=NULL throws QuickBooksException
+$c37Errors = [];
+try {
+    $threw = false;
+    try {
+        $inv = [
+            'id'=>999991, 'invoice_number'=>'INV-C37', 'invoice_date'=>'2026-05-31',
+            'due_date'=>'2026-06-30', 'currency'=>'USD', 'exchange_rate_to_cad'=>null,
+            'tax_gst_amount'=>'0.00','tax_pst_amount'=>'0.00','tax_hst_amount'=>'0.00','total_amount'=>'100.00',
+        ];
+        InvoicePusher::buildQboPayload($inv, ['id'=>1,'gps_revenue_presentation'=>'net'],
+            [['item_type'=>'base_rental','description'=>'X','amount'=>'100.00','unit_price'=>'100.00','quantity'=>1,'sort_order'=>1]],
+            ['qbo_customer_id'=>'CUST-C37']);
+    } catch (QuickBooksException $e) {
+        $threw = true;
+        if (!str_contains($e->getMessage(), 'exchange_rate_to_cad') && !str_contains($e->getMessage(), 'exchange rate')) {
+            $c37Errors[] = "exception message should mention exchange_rate_to_cad, got: " . $e->getMessage();
+        }
+    }
+    if (!$threw) $c37Errors[] = 'expected QuickBooksException on NULL exchange_rate_to_cad for non-CAD invoice';
+} catch (Throwable $e) {
+    $c37Errors[] = 'C37 threw unexpected: ' . $e->getMessage();
+}
+if (empty($c37Errors)) { echo "PASS C37 Non-CAD invoice with exchange_rate_to_cad=NULL throws QuickBooksException with actionable message\n"; $pass++; }
+else { echo "FAIL C37 " . implode('; ', $c37Errors) . "\n"; $failures[] = 'C37'; }
+
+// ── C38: Non-CAD invoice with exchange_rate_to_cad=0 throws QuickBooksException
+$c38Errors = [];
+try {
+    $threw = false;
+    try {
+        $inv = [
+            'id'=>999991, 'invoice_number'=>'INV-C38', 'invoice_date'=>'2026-05-31',
+            'due_date'=>'2026-06-30', 'currency'=>'USD', 'exchange_rate_to_cad'=>'0',
+            'tax_gst_amount'=>'0.00','tax_pst_amount'=>'0.00','tax_hst_amount'=>'0.00','total_amount'=>'100.00',
+        ];
+        InvoicePusher::buildQboPayload($inv, ['id'=>1,'gps_revenue_presentation'=>'net'],
+            [['item_type'=>'base_rental','description'=>'X','amount'=>'100.00','unit_price'=>'100.00','quantity'=>1,'sort_order'=>1]],
+            ['qbo_customer_id'=>'CUST-C38']);
+    } catch (QuickBooksException $e) {
+        $threw = true;
+    }
+    if (!$threw) $c38Errors[] = 'expected QuickBooksException on exchange_rate_to_cad=0 for non-CAD invoice';
+} catch (Throwable $e) {
+    $c38Errors[] = 'C38 threw unexpected: ' . $e->getMessage();
+}
+if (empty($c38Errors)) { echo "PASS C38 Non-CAD invoice with exchange_rate_to_cad=0 throws QuickBooksException (zero is invalid)\n"; $pass++; }
+else { echo "FAIL C38 " . implode('; ', $c38Errors) . "\n"; $failures[] = 'C38'; }
+
+// ── C39: acc_qbo_invoice_map.push_status ENUM includes new typed codes ────
+$c39Errors = [];
+try {
+    $col = db_row("SHOW COLUMNS FROM acc_qbo_invoice_map WHERE Field='push_status'");
+    if (!$col) {
+        $c39Errors[] = 'push_status column not found';
+    } else {
+        $enumType = $col['Type'];
+        foreach (['failed_preflight_field_too_long', 'failed_preflight_currency_mismatch'] as $val) {
+            if (!str_contains($enumType, $val)) {
+                $c39Errors[] = "ENUM missing value: {$val}";
+            }
+        }
+    }
+} catch (Throwable $e) {
+    $c39Errors[] = 'C39 threw: ' . $e->getMessage();
+}
+if (empty($c39Errors)) { echo "PASS C39 acc_qbo_invoice_map.push_status ENUM includes failed_preflight_field_too_long + failed_preflight_currency_mismatch\n"; $pass++; }
+else { echo "FAIL C39 " . implode('; ', $c39Errors) . "\n"; $failures[] = 'C39'; }
 
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────

@@ -38,6 +38,11 @@ declare(strict_types=1);
  * @session  S-QBO-11
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract),
  *           §17/§18 (tax-override architecture)
+ * @updated  S-QBO-11-FIXPACK-1 — always emit CurrencyRef + ExchangeRate
+ *           (D-QBO-FIXPACK-1/-2); throw on non-CAD missing rate rather than
+ *           silently defaulting (closes silent CAD→USD coercion bug F2);
+ *           pushImpl uses typed status_code from gate result (D-QBO-FIXPACK-5);
+ *           recordFailedPreflight accepts $status param for typed statuses
  * @decision D-QBO-11-1 (queued path; sync_mode gate),
  *           D-QBO-11-2 (tax-override at line + header),
  *           D-QBO-11-3 (FX rate via exchange_rate_to_cad),
@@ -47,7 +52,10 @@ declare(strict_types=1);
  *           D-QBO-11-7 (customer mapping gate),
  *           D-QBO-11-8 (item mapping gate),
  *           D-QBO-11-9 (voided-invoice skip),
- *           D-QBO-11-10 (D12 immutability + post-push freeze)
+ *           D-QBO-11-10 (D12 immutability + post-push freeze),
+ *           D-QBO-FIXPACK-1 (always emit CurrencyRef),
+ *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on non-CAD missing rate),
+ *           D-QBO-FIXPACK-5 (typed preflight status codes)
  */
 
 namespace FleetForge\QboPushers;
@@ -133,13 +141,17 @@ class InvoicePusher
             ];
         }
 
-        // 6. Pre-flight gates (5 sub-checks via InvoicePreflightGate).
+        // 6. Pre-flight gates (via InvoicePreflightGate; see gate docblock for full list).
+        // WHY: gate returns optional typed status_code (D-QBO-FIXPACK-5) so the
+        // mapping row uses the most specific status available — operator sees
+        // 'failed_preflight_field_too_long' vs the generic 'failed_preflight'.
         $gate = InvoicePreflightGate::check($ffInvoiceId);
         if (!$gate['ok']) {
-            self::recordFailedPreflight($ffInvoiceId, $invoice, (string) $gate['reason']);
+            $typedStatus = (string) ($gate['status_code'] ?? 'failed_preflight');
+            self::recordFailedPreflight($ffInvoiceId, $invoice, (string) $gate['reason'], $typedStatus);
             return [
                 'success' => false,
-                'status'  => 'failed_preflight',
+                'status'  => $typedStatus,
                 'error'   => $gate['reason'],
             ];
         }
@@ -231,21 +243,40 @@ class InvoicePusher
             $payload['DueDate'] = (string) $invoice['due_date'];
         }
 
-        // FX handling per D-QBO-11-3. K-22: column is exchange_rate_to_cad
-        // (NOT fx_rate as prompt drafted). Direction: rate from
-        // invoice.currency to home (CAD) — matches QBO Canada home-currency
-        // convention. CAD invoices: omit CurrencyRef so QBO defaults home.
+        // CurrencyRef + ExchangeRate per D-QBO-FIXPACK-1 + D-QBO-FIXPACK-2.
+        //
+        // WHY always emit (D-QBO-FIXPACK-1): Omitting CurrencyRef causes QBO to
+        // default to the *mapped customer's* currency, which silently corrupts the
+        // AR ledger when the customer is denominated in a different currency (e.g.
+        // USD QBO customer + CAD FF invoice → QBO records $340 USD, not $340 CAD).
+        // Explicit CurrencyRef on every push prevents silent coercion.
+        //
+        // WHY always emit ExchangeRate (D-QBO-FIXPACK-2): Explicit 1.0 on CAD
+        // invoices is harmless to QBO but makes the payload audit-trail
+        // self-documenting. Non-CAD without a rate would silently corrupt FX
+        // accounting — throw instead of defaulting (closes the S-QBO-11 K-22 hole
+        // where missing rate fell back to settings.quickbooks.default_fx_rate_*).
+        //
+        // K-22: column is exchange_rate_to_cad (NOT fx_rate).
         $currency = strtoupper((string) ($invoice['currency'] ?? 'CAD'));
-        if ($currency !== 'CAD' && $currency !== '') {
-            $payload['CurrencyRef'] = ['value' => $currency];
-            $fxRate = (float) ($invoice['exchange_rate_to_cad'] ?? 0);
-            if ($fxRate <= 0) {
-                $fxRateSetting = (string) settings_get("quickbooks.default_fx_rate_{$currency}_cad", '');
-                $fxRate = $fxRateSetting !== '' ? (float) $fxRateSetting : 1.0;
-                error_log(
-                    "[S-QBO-11] Invoice " . ($invoice['id'] ?? '?') . " has no exchange_rate_to_cad "
-                    . "for currency={$currency}; defaulting to {$fxRate}. Operator should pin "
-                    . "settings.quickbooks.default_fx_rate_{$currency}_cad to avoid surprise."
+        if ($currency === '') {
+            $currency = 'CAD';  // defensive default; should not occur given ENUM constraint
+        }
+
+        // Always emit CurrencyRef.
+        $payload['CurrencyRef'] = ['value' => $currency];
+
+        // Always emit ExchangeRate.
+        if ($currency === 'CAD') {
+            $payload['ExchangeRate'] = '1.0';  // home currency; explicit for audit clarity
+        } else {
+            $fxRate = $invoice['exchange_rate_to_cad'] ?? null;
+            if ($fxRate === null || (float) $fxRate <= 0) {
+                throw new QuickBooksException(
+                    "Non-CAD invoice " . ($invoice['id'] ?? '?') . " ({$currency}) has no "
+                    . "exchange_rate_to_cad or rate is ≤ 0 (value=" . json_encode($fxRate) . "). "
+                    . "Cannot push without an explicit exchange rate — doing so would silently "
+                    . "corrupt QBO FX accounting. Populate invoices.exchange_rate_to_cad before retrying."
                 );
             }
             $payload['ExchangeRate'] = (string) $fxRate;
@@ -384,9 +415,18 @@ class InvoicePusher
      * Record failed_preflight state. Distinct from push failure because
      * no HTTP call was attempted — operator remediation is mapping/setting
      * level, not retry-the-call.
+     *
+     * $status accepts typed preflight status codes (D-QBO-FIXPACK-5):
+     *   'failed_preflight'                   — generic gate failure
+     *   'failed_preflight_field_too_long'    — F3 field-length violation
+     *   'failed_preflight_currency_mismatch' — F2 FF↔QBO currency mismatch
      */
-    private static function recordFailedPreflight(int $ffInvoiceId, array $ffInvoice, string $reason): void
-    {
+    private static function recordFailedPreflight(
+        int    $ffInvoiceId,
+        array  $ffInvoice,
+        string $reason,
+        string $status = 'failed_preflight'
+    ): void {
         $existing = db_row(
             "SELECT id FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
@@ -397,18 +437,18 @@ class InvoicePusher
             db_insert('acc_qbo_invoice_map', [
                 'ff_invoice_id'     => $ffInvoiceId,
                 'ff_engine_version' => (string) ($ffInvoice['engine_version'] ?? 'unknown'),
-                'push_status'       => 'failed_preflight',
+                'push_status'       => $status,
                 'push_error'        => $reason,
                 'last_synced_at'    => $now,
             ]);
         } else {
             db_execute(
                 "UPDATE acc_qbo_invoice_map
-                    SET push_status = 'failed_preflight',
-                        push_error  = ?,
+                    SET push_status    = ?,
+                        push_error     = ?,
                         last_synced_at = ?
                   WHERE id = ?",
-                [$reason, $now, (int) $existing['id']]
+                [$status, $reason, $now, (int) $existing['id']]
             );
         }
     }

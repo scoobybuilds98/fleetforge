@@ -93,7 +93,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     <!-- ── Filter bar ──────────────────────────────────────────── -->
     <div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
         <div class="text-sm text-secondary">Filter by status:</div>
-        <template x-for="s in ['pending','pushed','failed','failed_preflight','skipped_voided','skipped_by_mode']" :key="s">
+        <template x-for="s in ['pending','pushed','failed','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch','skipped_voided','skipped_by_mode']" :key="s">
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
                 <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
                 <span x-text="s"></span>
@@ -152,7 +152,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
                         </td>
                         <td class="text-sm text-secondary font-mono" x-text="row.pushed_at ? formatTs(row.pushed_at) : '—'"></td>
                         <td>
-                            <template x-if="canRetry && (row.push_status === 'failed' || row.push_status === 'failed_preflight')">
+                            <template x-if="canRetry && ['failed','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch'].includes(row.push_status)">
                                 <button class="btn btn-secondary btn-xs" @click="retry(row.id)" :disabled="retrying[row.id]">
                                     <span x-show="!retrying[row.id]">Retry</span>
                                     <span x-show="retrying[row.id]" x-cloak>…</span>
@@ -184,7 +184,7 @@ function qboInvoicesAdmin(canEdit) {
         canRetry: canEdit,
         loading: false,
         rows: [],
-        kpis: { pushed: 0, pending: 0, failed: 0, failed_preflight: 0, skipped_voided: 0, skipped_by_mode: 0 },
+        kpis: { pushed: 0, pending: 0, failed: 0, failed_preflight: 0, failed_preflight_field_too_long: 0, failed_preflight_currency_mismatch: 0, skipped_voided: 0, skipped_by_mode: 0 },
         page: 1,
         perPage: 25,
         total: 0,
@@ -245,6 +245,8 @@ function qboInvoicesAdmin(canEdit) {
                 'pending': 'badge-secondary',
                 'failed': 'badge-danger',
                 'failed_preflight': 'badge-warning',
+                'failed_preflight_field_too_long': 'badge-warning',
+                'failed_preflight_currency_mismatch': 'badge-warning',
                 'skipped_voided': 'badge-secondary',
                 'skipped_by_mode': 'badge-secondary',
             }[s] || 'badge-secondary';

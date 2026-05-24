@@ -42,12 +42,15 @@ try {
         json_error('NOT_FOUND', "Mapping row {$mapId} not found", 404);
     }
 
-    // Only retry failed/failed_preflight rows. Pushed rows would
-    // already be present in QBO; pending rows are already in queue.
-    if (!in_array($row['push_status'], ['failed', 'failed_preflight'], true)) {
+    // Only retry failure states. Pushed rows are already in QBO; pending rows
+    // are already in queue. Typed preflight failures are retryable once the
+    // operator fixes the underlying issue (shorten invoice_number, remap
+    // customer currency, etc.) — D-QBO-FIXPACK-5.
+    $retryableStatuses = ['failed', 'failed_preflight', 'failed_preflight_field_too_long', 'failed_preflight_currency_mismatch'];
+    if (!in_array($row['push_status'], $retryableStatuses, true)) {
         json_error(
             'INVALID_STATE',
-            "Cannot retry row with push_status='{$row['push_status']}'. Only failed/failed_preflight rows are retryable.",
+            "Cannot retry row with push_status='{$row['push_status']}'. Only failed/failed_preflight* rows are retryable.",
             409
         );
     }
