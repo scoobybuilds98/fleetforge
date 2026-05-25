@@ -662,6 +662,27 @@ ITEM E-DEPLOY-RUNBOOK | 2026-05-20 | E — Data | Post-push deploy sequence (mig
     commands, optional alternative).
 ```
 
+```
+ITEM E2 | 2026-05-25 | E — Data | Apply S-SETTINGS-AUDIT-3 migration (audit_log.action ENUM extension)
+  Originating session: S-SETTINGS-AUDIT-3 (2026-05-25)
+  Surfaced into checklist: S-QBO-11-POSTVERIFY-FIXES (2026-05-25)
+  Detail: db_migrations/202605260000_S-SETTINGS-AUDIT-3.sql adds 'manual_trigger' to
+    the audit_log.action ENUM. This value is emitted by the Settings → System tab cron
+    "Run Now" buttons. Without this migration applied in production, every manual cron
+    trigger attempt silently fails with a MySQL "Data truncated for column 'action'" error
+    — the INSERT into audit_log is rejected, and the cron run itself may appear to succeed
+    but leaves no audit trail, or the endpoint returns a 500 if the error is not caught.
+    Original source: S-SETTINGS-AUDIT-3 cron run-now feature + FLEETFORGE_PREDEPLOY_CHECKLIST.md
+    gap surfaced during S-QBO-11-POSTVERIFY-FIXES post-verification audit.
+  Action: On next production deploy that includes this migration file, run the standard
+    3-step deploy sequence (E-DEPLOY-RUNBOOK):
+      sudo -u www-data php bin/migrate.php --apply
+    Verify with: SELECT migration_file FROM schema_migrations WHERE migration_file LIKE '%S-SETTINGS-AUDIT-3%';
+    Expected result: 1 row returned (migration marked applied).
+  Owner: Operator (next deploy after S-SETTINGS-AUDIT-3 commit reaches origin/main)
+  Status: PENDING
+```
+
 ### F — Accounting state
 
 ```

@@ -20,7 +20,7 @@ declare(strict_types=1);
  *
  * S-QBO-2 SCOPE — HTTP boundary (SHIPPED THIS SESSION):
  *   - get / post / put + query + getCompanyInfo
- *   - getEntity / createEntity / updateEntity
+ *   - getEntity / createEntity / updateEntity / voidEntity
  *   - executeRequest (single attempt — used by worker for next_retry_at)
  *   - executeWithRetry (in-process retry — used by ad-hoc callers)
  *   - classifyError + writeSyncLog + captureSentry + throttle helpers
@@ -429,6 +429,41 @@ class QuickBooksClient
 
         // QBO update endpoint pattern: POST /v3/company/{realmId}/{type}?operation=update
         return $this->dispatch('POST', strtolower($type) . '?operation=update', ['json' => $merged] + $opts);
+    }
+
+    /**
+     * Void a QBO entity (Invoice, Bill, etc.) via POST ?operation=void.
+     *
+     * QBO void semantics differ from update:
+     *   - Requires ?operation=void query param (NOT ?operation=update)
+     *   - Requires full entity body with at minimum Id + SyncToken
+     *   - Returns the voided entity with updated SyncToken + zeroed Amount fields
+     *
+     * WHY separate method: updateEntity() hardcodes '?operation=update' in the URL
+     * string — passing operation=void in $opts only sets logging metadata, not the
+     * actual HTTP query param. A dedicated method is required. (S-QBO-11-POSTVERIFY-FIXES)
+     *
+     * @param string $type       QBO entity type (e.g. 'Invoice', 'Bill')
+     * @param string $id         QBO entity Id
+     * @param string $syncToken  Current SyncToken (must be current or QBO returns 5010 stale error)
+     * @return array             QBO response array (voided entity under entity type key)
+     * @throws QuickBooksException on HTTP error, auth failure, or stale SyncToken
+     * @session S-QBO-11-POSTVERIFY-FIXES
+     */
+    public function voidEntity(string $type, string $id, string $syncToken): array
+    {
+        $payload = [
+            'Id'        => $id,
+            'SyncToken' => $syncToken,
+            'sparse'    => true,
+        ];
+        $opts                = [];
+        $opts['entity_type'] = $type;
+        $opts['entity_id']   = ctype_digit($id) ? (int) $id : null;
+        $opts['operation']   = 'void';
+
+        // QBO void endpoint pattern: POST /v3/company/{realmId}/{type}?operation=void
+        return $this->dispatch('POST', strtolower($type) . '?operation=void', ['json' => $payload] + $opts);
     }
 
     /**

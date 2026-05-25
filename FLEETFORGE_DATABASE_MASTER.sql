@@ -1570,7 +1570,7 @@ CREATE TABLE `audit_log` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int unsigned DEFAULT NULL,
   `user_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system',
-  `action` enum('create','update','delete','restore','login','logout','export','status_change','view','bulk_action','payment_recorded','invoice_sent','invoice_voided','lease_closed','cron') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` enum('create','update','delete','restore','login','logout','export','status_change','view','bulk_action','payment_recorded','invoice_sent','invoice_voided','lease_closed','cron','manual_trigger') COLLATE utf8mb4_unicode_ci NOT NULL,
   `module` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `entity_type` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `entity_id` int unsigned DEFAULT NULL,

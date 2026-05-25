@@ -9,7 +9,7 @@ declare(strict_types=1);
  * surface, exception hierarchy, classifyError categorisation, and
  * settings + sync_log guard logic are all wired correctly.
  *
- * 8 sub-checks:
+ * 9 sub-checks:
  *   C1: QuickBooksClient class exists with all 10 expected public methods
  *   C2: All 9 typed exception classes exist and extend QuickBooksException
  *       (which itself extends RuntimeException)
@@ -27,6 +27,10 @@ declare(strict_types=1);
  *       QuickBooksClient::setWorkerContext public static exists;
  *       3 new settings keys present (multi_currency_enabled,
  *       home_currency, company_country) (D-QBO-FIXPACK-11/-12/-15)
+ *   C9: voidEntity() method exists, is public, has exactly 3 params
+ *       (type, id, syncToken) — verifies QBO void operation path
+ *       is available for S-QBO-12 before that session ships.
+ *       (S-QBO-11-POSTVERIFY-FIXES)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
@@ -34,6 +38,8 @@ declare(strict_types=1);
  * @updated  S-QBO-FIXPACK-3 — fixed docblock (was 6, actually 7); added C8
  *           for CompanyInfoSync + setWorkerContext + 3 new settings keys;
  *           total 8 sub-checks (D-QBO-FIXPACK-11/-12/-15).
+ * @updated  S-QBO-11-POSTVERIFY-FIXES — added C9 voidEntity signature check;
+ *           total 9 sub-checks.
  */
 
 require_once __DIR__ . '/../config/app.php';
@@ -52,7 +58,7 @@ use FleetForge\Exceptions\QuickBooksRateLimitException;
 
 $failures = [];
 $pass     = 0;
-$total    = 8;
+$total    = 9;
 
 // ── C1: class exists + 10 expected public methods ─────────────
 $expectedMethods = [
@@ -397,6 +403,36 @@ if (empty($c8Errors)) {
 } else {
     echo "FAIL C8  " . implode('; ', $c8Errors) . "\n";
     $failures[] = 'C8';
+}
+
+// ── C9: voidEntity method exists with correct signature ──────────────────────
+// WHY: voidEntity() was added in S-QBO-11-POSTVERIFY-FIXES to support the
+// S-QBO-12 invoice void path. updateEntity() hardcodes ?operation=update in
+// the URL, so a separate method is required for QBO's ?operation=void semantics.
+$c9Errors = [];
+$refC9 = new ReflectionClass(QuickBooksClient::class);
+if (!$refC9->hasMethod('voidEntity')) {
+    $c9Errors[] = 'voidEntity method not found on QuickBooksClient';
+} else {
+    $voidMethod = $refC9->getMethod('voidEntity');
+    if (!$voidMethod->isPublic()) {
+        $c9Errors[] = 'voidEntity must be public';
+    }
+    $voidParams = $voidMethod->getParameters();
+    if (count($voidParams) !== 3) {
+        $c9Errors[] = 'voidEntity must have exactly 3 params; got ' . count($voidParams);
+    } else {
+        if ($voidParams[0]->getName() !== 'type')       $c9Errors[] = 'param 0 must be "type"; got "' . $voidParams[0]->getName() . '"';
+        if ($voidParams[1]->getName() !== 'id')         $c9Errors[] = 'param 1 must be "id"; got "' . $voidParams[1]->getName() . '"';
+        if ($voidParams[2]->getName() !== 'syncToken')  $c9Errors[] = 'param 2 must be "syncToken"; got "' . $voidParams[2]->getName() . '"';
+    }
+}
+if (empty($c9Errors)) {
+    echo "PASS C9  voidEntity exists, public, 3 params (type / id / syncToken)\n";
+    $pass++;
+} else {
+    echo "FAIL C9  " . implode('; ', $c9Errors) . "\n";
+    $failures[] = 'C9';
 }
 
 // ── Summary ───────────────────────────────────────────────────
