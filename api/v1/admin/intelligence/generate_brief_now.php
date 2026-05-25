@@ -49,12 +49,15 @@ try {
         json_error('BRIEFING_DISABLED', 'Morning briefing is disabled (ai.briefing_enabled=0). Enable it in the Morning Briefing section first.', 422);
     }
     // ── Gate 3: cache idempotency ──
+    // S-INTEL-FIX2: report_cache columns are generated_at + parameters_hash,
+    // NOT created_at + cache_key. Stale schema references caused this whole
+    // endpoint to 500. Aligned with cron/ai_fleet_brief.php's correct usage.
     if (!$force) {
         $existing = db_row(
-            "SELECT id, result_data, created_at
+            "SELECT id, result_data, generated_at
                FROM report_cache
               WHERE report_type = 'ai_fleet_brief' AND expires_at > NOW()
-                AND created_at >= DATE_SUB(NOW(), INTERVAL 60 MINUTE)
+                AND generated_at >= DATE_SUB(NOW(), INTERVAL 60 MINUTE)
               ORDER BY id DESC LIMIT 1"
         );
         if ($existing) {
@@ -64,7 +67,7 @@ try {
                 'generated'       => false,
                 'cache_hit'       => true,
                 'cache_id'        => (int) $existing['id'],
-                'cached_at'       => (string) $existing['created_at'],
+                'cached_at'       => (string) $existing['generated_at'],
                 'brief_preview'   => mb_substr($brief, 0, 400),
                 'brief_full'      => $brief,
                 'tokens_used'     => 0,
@@ -117,34 +120,55 @@ try {
 
     $client = new ClaudeClient(['model' => $model]);
     $start = microtime(true);
+    // S-INTEL-FIX2: ClaudeClient::sendMessage() parameter is $systemPrompt,
+    // NOT $system. The stale name made every call 500 with
+    // "Unknown named parameter $system". Aligned with cron/ai_fleet_brief.php
+    // which uses systemPrompt: correctly.
     $response = $client->sendMessage(
-        messages: [['role' => 'user', 'content' => $userMsg]],
-        system: $system,
-        userId: current_user_id(),
-        queryType: 'manual_fleet_brief'
+        messages:     [['role' => 'user', 'content' => $userMsg]],
+        systemPrompt: $system,
+        userId:       current_user_id(),
+        queryType:    'manual_fleet_brief'
     );
     $latencyMs = (int) round((microtime(true) - $start) * 1000);
 
-    $briefText = (string) ($response['content'][0]['text'] ?? '');
+    if ($response === null) {
+        $err = $client->getLastError();
+        json_error(
+            $err['code'] ?? 'AI_ERROR',
+            $err['message'] ?? 'Claude API call failed (no details).',
+            502
+        );
+    }
+
+    $briefText = trim((string) ($response['content'][0]['text'] ?? ''));
     if ($briefText === '') {
         json_error('AI_EMPTY_RESPONSE', 'Claude returned an empty response.', 502);
     }
 
     // ── Cache the result (24h TTL same as cron) ──
+    // S-INTEL-FIX2: report_cache columns are parameters_hash + generated_at,
+    // NOT cache_key + created_at. Schema mismatch made every insert error
+    // out, so even successful Claude calls would never be cached.
+    $generatedAt = date('Y-m-d H:i:s');
+    $expiresAt   = date('Y-m-d H:i:s', strtotime('+24 hours'));
     $cachePayload = [
         'brief'        => $briefText,
-        'generated_at' => date('Y-m-d H:i:s'),
+        'generated_at' => $generatedAt,
+        'expires_at'   => $expiresAt,
         'model'        => $model,
         'metrics'      => $metrics,
         'manual'       => true,
         'manual_by'    => current_user_id(),
     ];
     $cacheId = db_insert('report_cache', [
-        'report_type'  => 'ai_fleet_brief',
-        'cache_key'    => 'manual_' . date('Y-m-d_H-i-s') . '_' . current_user_id(),
-        'result_data'  => json_encode($cachePayload, JSON_UNESCAPED_SLASHES),
-        'expires_at'   => date('Y-m-d H:i:s', strtotime('+24 hours')),
-        'created_at'   => date('Y-m-d H:i:s'),
+        'report_type'     => 'ai_fleet_brief',
+        'parameters_hash' => sha1('ai_fleet_brief|manual|' . current_user_id() . '|' . $generatedAt),
+        'parameters'      => json_encode(['scope' => 'manual', 'by' => current_user_id()]),
+        'result_data'     => json_encode($cachePayload, JSON_UNESCAPED_SLASHES),
+        'generated_at'    => $generatedAt,
+        'expires_at'      => $expiresAt,
+        'generated_by'    => current_user_id(),
     ]);
 
     db_insert('audit_log', [

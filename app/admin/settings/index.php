@@ -1187,22 +1187,42 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                 <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 12px;">
                     <strong>Test send</strong> uses today's cached brief (free). <strong>Generate now</strong> calls Claude (~3000 tokens) and refreshes the cache.
                 </p>
+                <!-- S-INTEL-UX-1: surface the master-kill-switch dependency
+                     up-front. ai.enabled is a separate gate from ai.briefing_enabled
+                     — without this banner, clicking Generate while ai.enabled=0
+                     returns an AI_DISABLED error that scrolls below the fold and
+                     the user reads it as "still broken". -->
+                <div x-show="!history.ai_enabled" x-cloak class="alert alert-warning"
+                     style="margin:0 0 10px;font-size:0.8125rem;">
+                    <strong>AI Features Enabled is off.</strong> Turn on the master switch in AI Core above
+                    (and click <em>Save AI Settings</em>) before you can generate or test briefs.
+                </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button class="btn btn-secondary btn-sm" @click="sendTest()" :disabled="testSending || !history.cache_active">
+                    <button class="btn btn-secondary btn-sm" @click="sendTest()"
+                            :disabled="testSending || !history.cache_active || !history.ai_enabled || !history.briefing_enabled"
+                            :title="!history.ai_enabled ? 'AI Features Enabled is off — turn it on in AI Core above' : (!history.briefing_enabled ? 'Morning Briefing is disabled' : (!history.cache_active ? 'No cached brief to send — generate one first' : ''))">
                         <span x-show="!testSending">Test send (cached)</span>
                         <span x-show="testSending" x-cloak>Sending&hellip;</span>
                     </button>
-                    <button class="btn btn-primary btn-sm" @click="generateNow()" :disabled="generating"
-                            title="Calls Claude API now — costs ~3000 tokens">
+                    <button class="btn btn-primary btn-sm" @click="generateNow()"
+                            :disabled="generating || !history.ai_enabled"
+                            :title="!history.ai_enabled ? 'AI Features Enabled is off — turn it on in AI Core above' : 'Calls Claude API now — costs ~3000 tokens'">
                         <span x-show="!generating">Generate brief now</span>
                         <span x-show="generating" x-cloak>Generating (calling Claude)&hellip;</span>
                     </button>
                 </div>
+                <!-- S-INTEL-UX-1: x-effect scrolls the alert into view the
+                     moment a flash message appears, so error responses don't
+                     get missed when the user scrolled past the buttons. -->
                 <div x-show="testFlash.message" x-cloak
+                     x-ref="testFlashEl"
+                     x-effect="if (testFlash.message && $refs.testFlashEl) $refs.testFlashEl.scrollIntoView({behavior:'smooth', block:'center'})"
                      :class="testFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
                      style="margin-top:10px;font-size:0.8125rem;"
                      x-text="testFlash.message"></div>
                 <div x-show="genFlash.message" x-cloak
+                     x-ref="genFlashEl"
+                     x-effect="if (genFlash.message && $refs.genFlashEl) $refs.genFlashEl.scrollIntoView({behavior:'smooth', block:'center'})"
                      :class="genFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
                      style="margin-top:10px;font-size:0.8125rem;"
                      x-html="genFlash.message"></div>
