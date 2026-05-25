@@ -896,6 +896,145 @@ function FF_SamsaraTest() {
 
 <?php endif; ?>
 
+<!-- ── SES Email Connection Test ──────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:20px;" x-data="FF_SesTest()">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Email Delivery (AWS SES)
+        <span class="badge badge-info" style="font-size:0.7rem;">Diagnostics</span>
+    </div>
+    <div class="card-body">
+
+        <!-- Status strip (loaded on mount) -->
+        <div x-show="diag !== null" style="margin-bottom:16px;">
+            <!-- Mode indicator -->
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;font-size:0.875rem;margin-bottom:12px;"
+                 :style="diag?.mode === 'ses'
+                     ? 'background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);'
+                     : 'background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.3);'">
+                <span x-show="diag?.mode === 'ses'" style="color:var(--color-success);font-size:1.1rem;">&#10003;</span>
+                <span x-show="diag?.mode !== 'ses'" style="color:#b45309;font-size:1.1rem;">&#9888;</span>
+                <div>
+                    <strong x-text="diag?.mode === 'ses' ? 'SES mode active — emails will be delivered' : 'Log-only mode — emails are NOT delivered'"></strong>
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px;" x-text="diag?.mode_reason"></div>
+                </div>
+            </div>
+
+            <!-- Credential summary -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;font-size:0.8125rem;margin-bottom:12px;">
+                <div style="padding:8px 12px;background:var(--bg-secondary);border-radius:6px;">
+                    <div style="color:var(--text-muted);font-size:0.72rem;margin-bottom:2px;">ACCESS KEY</div>
+                    <div x-text="diag?.key_present ? (diag?.key_preview || '✓ Set') : '✗ Not configured'" :style="diag?.key_present ? 'color:var(--color-success);' : 'color:var(--color-danger);'" class="font-mono" style="font-size:0.8rem;"></div>
+                    <div style="color:var(--text-muted);font-size:0.7rem;" x-text="diag?.key_source ? 'Source: '+diag.key_source : ''"></div>
+                </div>
+                <div style="padding:8px 12px;background:var(--bg-secondary);border-radius:6px;">
+                    <div style="color:var(--text-muted);font-size:0.72rem;margin-bottom:2px;">SECRET KEY</div>
+                    <div :style="diag?.secret_present ? 'color:var(--color-success);' : 'color:var(--color-danger);'" x-text="diag?.secret_present ? '✓ Set' : '✗ Not configured'"></div>
+                </div>
+                <div style="padding:8px 12px;background:var(--bg-secondary);border-radius:6px;">
+                    <div style="color:var(--text-muted);font-size:0.72rem;margin-bottom:2px;">FROM ADDRESS</div>
+                    <div x-text="diag?.from_email || '(not set)'" class="font-mono" style="font-size:0.78rem;" :style="diag?.from_is_placeholder ? 'color:var(--color-danger);' : ''"></div>
+                    <div x-show="diag?.from_is_placeholder" style="color:var(--color-danger);font-size:0.7rem;">⚠ Placeholder — must be SES-verified</div>
+                </div>
+                <div style="padding:8px 12px;background:var(--bg-secondary);border-radius:6px;">
+                    <div style="color:var(--text-muted);font-size:0.72rem;margin-bottom:2px;">REGION</div>
+                    <div class="font-mono" style="font-size:0.8rem;" x-text="diag?.region"></div>
+                </div>
+            </div>
+
+            <!-- Warnings -->
+            <template x-if="diag?.warnings?.length">
+                <div style="background:rgba(220,38,38,0.05);border:1px solid rgba(220,38,38,0.2);border-radius:6px;padding:10px 14px;margin-bottom:12px;">
+                    <div style="font-weight:600;font-size:0.8rem;color:var(--color-danger);margin-bottom:6px;">Action Required</div>
+                    <template x-for="w in diag.warnings" :key="w">
+                        <div style="font-size:0.8125rem;color:var(--color-danger);margin-bottom:4px;" x-text="'• ' + w"></div>
+                    </template>
+                </div>
+            </template>
+        </div>
+
+        <!-- Send test result -->
+        <template x-if="sendResult">
+            <div style="padding:10px 14px;border-radius:6px;font-size:0.875rem;margin-bottom:12px;"
+                 :style="sendResult === 'sent'
+                     ? 'background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);color:var(--color-success);'
+                     : 'background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.2);color:var(--color-danger);'">
+                <template x-if="sendResult === 'sent'">
+                    <span>&#10003; Test email sent to <strong x-text="sentTo"></strong>. Check your inbox.</span>
+                </template>
+                <template x-if="sendResult !== 'sent'">
+                    <div>
+                        <strong>Send failed:</strong> <span x-text="sendError"></span>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-secondary btn-sm" @click="check()" :disabled="checking">
+                <span x-show="!checking">Refresh Diagnostics</span>
+                <span x-show="checking" x-cloak>Checking…</span>
+            </button>
+            <button class="btn btn-primary btn-sm" @click="sendTest()" :disabled="sending || checking">
+                <span x-show="!sending">Send Test Email to Me</span>
+                <span x-show="sending" x-cloak>Sending…</span>
+            </button>
+            <span style="font-size:0.75rem;color:var(--text-muted);">Sends a real email to your account address via SES</span>
+        </div>
+
+    </div>
+</div>
+
+<script>
+function FF_SesTest() {
+    return {
+        diag:       null,
+        checking:   false,
+        sending:    false,
+        sendResult: null,
+        sendError:  null,
+        sentTo:     null,
+
+        async init() { await this.check(); },
+
+        async check() {
+            this.checking = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/admin/integrations/test_email') ?>', { send: 0 });
+                if (r.success) this.diag = r.data;
+                else this.diag = { mode: 'error', mode_reason: r.error?.message || 'Diagnostics failed', warnings: [] };
+            } catch(e) {
+                this.diag = { mode: 'error', mode_reason: 'Network error', warnings: [] };
+            }
+            this.checking = false;
+        },
+
+        async sendTest() {
+            this.sending    = true;
+            this.sendResult = null;
+            this.sendError  = null;
+            this.sentTo     = null;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/admin/integrations/test_email') ?>', { send: 1 });
+                if (r.success) {
+                    this.sendResult = r.data.send_result;
+                    this.sendError  = r.data.send_error;
+                    this.sentTo     = r.data.to_email;
+                    // Refresh diag strip too
+                    this.diag = r.data;
+                } else {
+                    this.sendResult = 'failed';
+                    this.sendError  = r.error?.message || 'Request failed';
+                }
+            } catch(e) {
+                this.sendResult = 'failed';
+                this.sendError  = 'Network error';
+            }
+            this.sending = false;
+        },
+    };
+}
+</script>
+
 </div><!-- /integrations tab -->
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
