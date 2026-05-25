@@ -60,6 +60,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/app.php';
 
 use FleetForge\QboPusherDispatcher;
+use FleetForge\QuickBooksClient;
 use FleetForge\Exceptions\PusherNotImplementedException;
 use FleetForge\Exceptions\QuickBooksTransientException;
 use FleetForge\Exceptions\QuickBooksException;
@@ -220,29 +221,69 @@ try {
 
         // ── Real dispatch ─────────────────────────────────────
         try {
-            QboPusherDispatcher::dispatch($entityType, $operation, $entityId, $payloadSnap);
-            db_execute(
-                "UPDATE acc_qbo_sync_queue
-                    SET status='completed', completed_at=NOW(),
-                        error_code=NULL, error_message=NULL
-                  WHERE id=?",
-                [$qid]
-            );
-            $completed++;
+            // D-QBO-FIXPACK-15 (Bug C): Set static worker context so
+            // QuickBooksClient::writeSyncLog() can annotate sync_log
+            // rows with queue_id + entity_id even when the Pusher
+            // doesn't carry the queue context (Pushers only receive
+            // $entityId + optional $payloadSnapshot, not the queue row).
+            QuickBooksClient::setWorkerContext($qid, $entityType, $entityId);
 
-            db_insert('audit_log', [
-                'user_id'      => null,
-                'user_name'    => 'system',
-                'action'       => 'update',
-                'module'       => 'quickbooks',
-                'entity_type'  => 'qbo_sync_queue',
-                'entity_id'    => $qid,
-                'entity_label' => "{$entityType}#{$entityId} {$operation}",
-                'notes'        => "QBO push completed by worker.",
-                'ip_address'   => '127.0.0.1',
-            ]);
+            $result = QboPusherDispatcher::dispatch($entityType, $operation, $entityId, $payloadSnap);
 
-            echo "[{$startedAt}] OK   queue#{$qid} {$entityType}#{$entityId} {$operation}\n";
+            // D-QBO-FIXPACK-14 (Bug B) + D-QBO-FIXPACK-16 (Bug A):
+            // Inspect the Pusher's return value. Pushers that encounter a
+            // QBO error (e.g. error 6000 multi-currency disabled) catch the
+            // exception internally and return ['success' => false, ...] rather
+            // than re-throwing. The PREVIOUS code marked any non-exception
+            // return as 'completed' and incremented $completed — so queue#113
+            // was marked completed despite the HTTP 400 error 6000 push failure.
+            // Fix: inspect result['success'] to determine the actual outcome.
+            if (!empty($result['success'])) {
+                db_execute(
+                    "UPDATE acc_qbo_sync_queue
+                        SET status='completed', completed_at=NOW(),
+                            error_code=NULL, error_message=NULL
+                      WHERE id=?",
+                    [$qid]
+                );
+                $completed++; // D-QBO-FIXPACK-16: only increment when push actually succeeded
+
+                db_insert('audit_log', [
+                    'user_id'      => null,
+                    'user_name'    => 'system',
+                    'action'       => 'update',
+                    'module'       => 'quickbooks',
+                    'entity_type'  => 'qbo_sync_queue',
+                    'entity_id'    => $qid,
+                    'entity_label' => "{$entityType}#{$entityId} {$operation}",
+                    'notes'        => "QBO push completed by worker (status=" . ($result['status'] ?? 'ok') . ").",
+                    'ip_address'   => '127.0.0.1',
+                ]);
+
+                echo "[{$startedAt}] OK   queue#{$qid} {$entityType}#{$entityId} {$operation}\n";
+            } else {
+                // D-QBO-FIXPACK-14 (Bug B): Pusher returned success=false without
+                // throwing. Mark queue row 'failed' with the error from result.
+                $errorMsg  = substr((string) ($result['error'] ?? $result['status'] ?? 'Pusher returned success=false'), 0, 500);
+                $errorCode = substr((string) ($result['error_code'] ?? $result['status'] ?? 'pusher_failed'), 0, 100);
+                db_execute(
+                    "UPDATE acc_qbo_sync_queue
+                        SET status='failed', completed_at=NOW(),
+                            error_code=?,
+                            error_message=?
+                      WHERE id=?",
+                    [$errorCode, $errorMsg, $qid]
+                );
+                $failed++; // D-QBO-FIXPACK-16 (Bug A): increment failed, not completed
+
+                // Dispatch failure notification + drift event (same as caught-exception path).
+                // Build a synthetic QuickBooksException so the helper signatures match.
+                $syntheticErr = new QuickBooksException($errorMsg, $errorCode, null);
+                dispatchFailureNotification($row, $syntheticErr, $notifyUserIds);
+                insertDriftEvent($row, 'push_failed', $syntheticErr, $realmId, $environment);
+
+                echo "[{$startedAt}] FAIL queue#{$qid} {$entityType}#{$entityId} {$operation} — {$errorCode} (pusher returned success=false)\n";
+            }
         } catch (PusherNotImplementedException $e) {
             // Shouldn't happen — hasImplementation() above guards
             // against it. But the race window between check + invoke
@@ -339,6 +380,13 @@ try {
             \FleetForge\Observability\Sentry::captureException($e);
             dispatchFailureNotification($row, $e, $notifyUserIds);
             echo "[{$startedAt}] FAIL queue#{$qid} {$entityType}#{$entityId} {$operation} — unexpected: " . substr($e->getMessage(), 0, 100) . "\n";
+        } finally {
+            // D-QBO-FIXPACK-15 (Bug C): Clear static worker context after each
+            // queue row so the next row doesn't inherit a stale queue_id/entity_id.
+            // Using finally ensures context is always cleared even if an uncaught
+            // exception propagates (which shouldn't happen — every \Throwable is
+            // caught above — but defensive-in-depth).
+            QuickBooksClient::setWorkerContext(null, null, null);
         }
     }
 } finally {

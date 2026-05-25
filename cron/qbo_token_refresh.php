@@ -28,6 +28,7 @@ require_once __DIR__ . '/../config/app.php';
 
 use FleetForge\QuickBooksClient;
 use FleetForge\Notifications\NotificationService;
+use FleetForge\QboPushers\CompanyInfoSync;
 
 // ── D21 advisory lock ──────────────────────────────────────────
 // GET_LOCK with timeout=0 means: acquire-or-fail-immediately.
@@ -83,6 +84,16 @@ try {
             'notes'       => "Token refresh successful via pinger cron (was {$daysRemaining} days from expiry).",
             'ip_address'  => '127.0.0.1',
         ]);
+
+        // D-QBO-FIXPACK-11: Re-sync CompanyInfo on each token refresh so
+        // quickbooks.multi_currency_enabled stays current if the operator
+        // ever toggles multi-currency in their QBO account settings.
+        // Non-fatal: a failed CompanyInfo sync doesn't abort the token rotation.
+        try {
+            CompanyInfoSync::syncFromQbo($client);
+        } catch (\Throwable $companyInfoErr) {
+            error_log('cron/qbo_token_refresh: CompanyInfo sync failed after rotation: ' . $companyInfoErr->getMessage());
+        }
 
         echo "QBO token refresh: rotation OK.\n";
     } catch (\Throwable $e) {

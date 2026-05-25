@@ -6,6 +6,10 @@
  * Settings → QuickBooks. Three cards:
  *   1. Connection Status — environment badge + connection badge +
  *      timestamps + Connect / Disconnect / Test Connection buttons.
+ *   1.5 Company Detection — read-only display of auto-detected QBO
+ *      company settings (multi_currency_enabled, home_currency,
+ *      company_country). Populated by CompanyInfoSync at OAuth connect
+ *      and token refresh time (D-QBO-FIXPACK-11).
  *   2. API Credentials — environment + client_id + client_secret +
  *      webhook_verifier_token + sandbox_redirect_uri. Sensitive values
  *      always rendered masked to last 4 chars; full values never
@@ -224,6 +228,53 @@ require_once FF_ROOT . '/includes/header.php';
                 </template>
             </div>
         </div>
+    </div>
+
+    <!-- ============================================================
+         CARD 1.5 — Company Detection (D-QBO-FIXPACK-11)
+         Read-only display of QBO company settings auto-detected at
+         OAuth connect time and at each token refresh. These values
+         gate CurrencyRef emission across all Pushers (D-QBO-FIXPACK-12).
+         ============================================================ -->
+    <?php
+    $multiCurrEnabled = ($qbo['multi_currency_enabled'] ?? '0') === '1';
+    $homeCurrency     = $qbo['home_currency']    ?? '';
+    $companyCountry   = $qbo['company_country']  ?? '';
+    // Find when multi_currency_enabled was last updated (proxy for "last detected")
+    $lastDetectedRow  = db_row(
+        "SELECT updated_at FROM settings WHERE `key` = 'quickbooks.multi_currency_enabled'",
+        []
+    );
+    $lastDetected = $lastDetectedRow ? ff_qbo_format_ts($lastDetectedRow['updated_at']) : '—';
+    ?>
+    <div class="card" style="padding:20px;margin-bottom:16px;">
+        <h3 class="h6" style="margin:0 0 4px;">Company Detection</h3>
+        <p class="text-secondary text-sm" style="margin:0 0 14px;">
+            Auto-detected from QuickBooks on connect and token refresh — not editable here.
+            These settings gate <code>CurrencyRef</code> emission in all Pushers.
+            Re-connect QBO or wait for the next token rotation to refresh.
+        </p>
+        <dl class="dl-grid">
+            <dt>Multi-currency enabled</dt>
+            <dd>
+                <?php if ($multiCurrEnabled): ?>
+                    <span class="badge badge-success">Yes</span>
+                    <span class="text-secondary text-sm" style="margin-left:6px;">CurrencyRef will be emitted on entity pushes</span>
+                <?php else: ?>
+                    <span class="badge badge-neutral">No</span>
+                    <span class="text-secondary text-sm" style="margin-left:6px;">CurrencyRef omitted (QBO error 6000 prevention)</span>
+                <?php endif; ?>
+            </dd>
+
+            <dt>Home currency</dt>
+            <dd><?= $homeCurrency !== '' ? e($homeCurrency) : '<span class="text-secondary">Not detected yet</span>' ?></dd>
+
+            <dt>Company country</dt>
+            <dd><?= $companyCountry !== '' ? e($companyCountry) : '<span class="text-secondary">Not detected yet</span>' ?></dd>
+
+            <dt>Last detected</dt>
+            <dd><?= e($lastDetected) ?></dd>
+        </dl>
     </div>
 
     <!-- ============================================================

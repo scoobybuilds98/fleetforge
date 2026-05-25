@@ -43,6 +43,10 @@ declare(strict_types=1);
  *           silently defaulting (closes silent CAD→USD coercion bug F2);
  *           pushImpl uses typed status_code from gate result (D-QBO-FIXPACK-5);
  *           recordFailedPreflight accepts $status param for typed statuses
+ * @updated  S-QBO-FIXPACK-3 — CurrencyRef + ExchangeRate emission gated on
+ *           quickbooks.multi_currency_enabled (D-QBO-FIXPACK-12). When '0':
+ *           omit both fields (QBO error 6000 fires on single-currency companies
+ *           if CurrencyRef is sent). When '1': emit as FIXPACK-1 specified.
  * @decision D-QBO-11-1 (queued path; sync_mode gate),
  *           D-QBO-11-2 (tax-override at line + header),
  *           D-QBO-11-3 (FX rate via exchange_rate_to_cad),
@@ -243,44 +247,49 @@ class InvoicePusher
             $payload['DueDate'] = (string) $invoice['due_date'];
         }
 
-        // CurrencyRef + ExchangeRate per D-QBO-FIXPACK-1 + D-QBO-FIXPACK-2.
+        // CurrencyRef + ExchangeRate per D-QBO-FIXPACK-1 + D-QBO-FIXPACK-2,
+        // gated on quickbooks.multi_currency_enabled per D-QBO-FIXPACK-12.
         //
-        // WHY always emit (D-QBO-FIXPACK-1): Omitting CurrencyRef causes QBO to
-        // default to the *mapped customer's* currency, which silently corrupts the
-        // AR ledger when the customer is denominated in a different currency (e.g.
-        // USD QBO customer + CAD FF invoice → QBO records $340 USD, not $340 CAD).
-        // Explicit CurrencyRef on every push prevents silent coercion.
+        // WHY emit when multi-currency enabled (D-QBO-FIXPACK-1): Omitting
+        // CurrencyRef causes QBO to default to the customer's currency, silently
+        // corrupting the AR ledger when FF + QBO currencies differ.
         //
-        // WHY always emit ExchangeRate (D-QBO-FIXPACK-2): Explicit 1.0 on CAD
-        // invoices is harmless to QBO but makes the payload audit-trail
-        // self-documenting. Non-CAD without a rate would silently corrupt FX
-        // accounting — throw instead of defaulting (closes the S-QBO-11 K-22 hole
-        // where missing rate fell back to settings.quickbooks.default_fx_rate_*).
+        // WHY omit when multi-currency disabled (D-QBO-FIXPACK-3): QBO returns
+        // error 6000 ("Multi Currency should be enabled to perform this operation")
+        // when CurrencyRef is sent to a single-currency company. Operator discovered
+        // this live; CompanyInfoSync.syncFromQbo() detects and caches the flag.
+        //
+        // WHY also omit ExchangeRate when disabled: meaningless for single-currency
+        // companies and may confuse QBO's validation logic.
         //
         // K-22: column is exchange_rate_to_cad (NOT fx_rate).
-        $currency = strtoupper((string) ($invoice['currency'] ?? 'CAD'));
-        if ($currency === '') {
-            $currency = 'CAD';  // defensive default; should not occur given ENUM constraint
-        }
-
-        // Always emit CurrencyRef.
-        $payload['CurrencyRef'] = ['value' => $currency];
-
-        // Always emit ExchangeRate.
-        if ($currency === 'CAD') {
-            $payload['ExchangeRate'] = '1.0';  // home currency; explicit for audit clarity
-        } else {
-            $fxRate = $invoice['exchange_rate_to_cad'] ?? null;
-            if ($fxRate === null || (float) $fxRate <= 0) {
-                throw new QuickBooksException(
-                    "Non-CAD invoice " . ($invoice['id'] ?? '?') . " ({$currency}) has no "
-                    . "exchange_rate_to_cad or rate is ≤ 0 (value=" . json_encode($fxRate) . "). "
-                    . "Cannot push without an explicit exchange rate — doing so would silently "
-                    . "corrupt QBO FX accounting. Populate invoices.exchange_rate_to_cad before retrying."
-                );
+        if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
+            $currency = strtoupper((string) ($invoice['currency'] ?? 'CAD'));
+            if ($currency === '') {
+                $currency = 'CAD';  // defensive; should not occur given ENUM constraint
             }
-            $payload['ExchangeRate'] = (string) $fxRate;
+
+            // Emit CurrencyRef.
+            $payload['CurrencyRef'] = ['value' => $currency];
+
+            // Emit ExchangeRate.
+            if ($currency === 'CAD') {
+                $payload['ExchangeRate'] = '1.0';  // home currency; explicit for audit clarity
+            } else {
+                $fxRate = $invoice['exchange_rate_to_cad'] ?? null;
+                if ($fxRate === null || (float) $fxRate <= 0) {
+                    throw new QuickBooksException(
+                        "Non-CAD invoice " . ($invoice['id'] ?? '?') . " ({$currency}) has no "
+                        . "exchange_rate_to_cad or rate is ≤ 0 (value=" . json_encode($fxRate) . "). "
+                        . "Cannot push without an explicit exchange rate — doing so would silently "
+                        . "corrupt QBO FX accounting. Populate invoices.exchange_rate_to_cad before retrying."
+                    );
+                }
+                $payload['ExchangeRate'] = (string) $fxRate;
+            }
         }
+        // When multi_currency_enabled='0': omit CurrencyRef + ExchangeRate entirely
+        // (QBO error 6000 would fire on single-currency companies otherwise).
 
         // Customer-facing memo. K-22: no invoices.memo column — use
         // invoices.notes (customer-visible) NOT internal_notes.

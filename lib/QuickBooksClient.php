@@ -78,6 +78,24 @@ class QuickBooksClient
      */
     private bool $authRetryDone = false;
 
+    // ── D-QBO-FIXPACK-15: Static worker context ────────────────────
+    // The sync worker (cron/qbo_sync_worker.php) sets these via
+    // setWorkerContext() before dispatching each queue row. writeSyncLog()
+    // falls back to these static values when $opts['queue_id'] / $opts['entity_id']
+    // are absent — which they always are when a Pusher calls createEntity/
+    // updateEntity without carrying the queue context (Pushers don't receive
+    // the queue row; they only get $entityId + optional $payloadSnapshot).
+    //
+    // Static scope is intentional: a PHP CLI worker is single-threaded;
+    // the worker clears context (null, null, null) after each queue row
+    // completes so no row's context bleeds into the next.
+    /** @var int|null Queue row ID from acc_qbo_sync_queue, set by worker */
+    private static ?int $workerQueueId = null;
+    /** @var string|null Entity type from queue row (e.g. 'customer') */
+    private static ?string $workerEntityType = null;
+    /** @var int|null FF entity ID from queue row */
+    private static ?int $workerEntityId = null;
+
     /**
      * QBO Online minorversion. Locked as D-QBO-2-2 (see PROGRESS.md
      * DECISIONS). Bumping requires verifying the entity payload
@@ -124,6 +142,31 @@ class QuickBooksClient
     public function getEnvironment(): string
     {
         return (string) settings_get('quickbooks.environment', 'sandbox');
+    }
+
+    /**
+     * Set (or clear) worker context for sync_log enrichment.
+     *
+     * Called by cron/qbo_sync_worker.php before dispatching each queue row
+     * so that sync_log entries written by Pushers (which don't carry queue
+     * context themselves) are annotated with the correct queue_id + entity_id.
+     *
+     * Pass (null, null, null) to clear context between queue rows.
+     *
+     * Static so callers don't need a QuickBooksClient instance — the worker
+     * can call this before constructing the client (or before dispatch()).
+     *
+     * @param int|null    $queueId    acc_qbo_sync_queue.id of the current row
+     * @param string|null $entityType entity_type column value (e.g. 'customer')
+     * @param int|null    $entityId   FF entity ID from queue row
+     *
+     * @session  S-QBO-FIXPACK-3 (D-QBO-FIXPACK-15 — Bug C fix)
+     */
+    public static function setWorkerContext(?int $queueId, ?string $entityType, ?int $entityId): void
+    {
+        self::$workerQueueId    = $queueId;
+        self::$workerEntityType = $entityType;
+        self::$workerEntityId   = $entityId;
     }
 
     /**
@@ -880,10 +923,15 @@ class QuickBooksClient
 
             $user = function_exists('current_user') ? (current_user() ?? null) : null;
 
+            // D-QBO-FIXPACK-15 (Bug C): Fall back to static worker context when
+            // $row['queue_id'] / $row['entity_id'] are absent. Pushers call
+            // createEntity/updateEntity without carrying queue context, so
+            // sync_log rows written during a worker dispatch would have NULL
+            // queue_id + entity_id without this fallback.
             db_insert('acc_qbo_sync_log', [
                 'direction'        => $row['direction']        ?? 'push',
-                'entity_type'      => $row['entity_type']      ?? 'unknown',
-                'entity_id'        => $row['entity_id']        ?? null,
+                'entity_type'      => $row['entity_type']      ?? self::$workerEntityType ?? 'unknown',
+                'entity_id'        => $row['entity_id']        ?? self::$workerEntityId,
                 'qbo_entity_id'    => $row['qbo_entity_id']    ?? null,
                 'operation'        => $row['operation']        ?? 'unknown',
                 'http_method'      => $row['http_method']      ?? 'GET',
@@ -895,7 +943,7 @@ class QuickBooksClient
                 'error_code'       => $row['error_code']       ?? null,
                 'error_message'    => $row['error_message']    ?? null,
                 'user_id'          => ($user['id'] ?? null) ?: null,
-                'queue_id'         => $row['queue_id']         ?? null,
+                'queue_id'         => $row['queue_id']         ?? self::$workerQueueId,
                 'realm_id'         => $this->realmId,
                 'environment'      => (string) settings_get('quickbooks.environment', 'sandbox'),
             ]);

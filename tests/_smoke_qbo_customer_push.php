@@ -18,15 +18,16 @@ declare(strict_types=1);
  * restore so the smoke leaves quickbooks.sync_enabled at its original
  * value (D-CPA-5 — must remain '0' after the smoke).
  *
- * 13 sub-checks:
+ * 15 sub-checks:
  *   C1: CustomerPusher class surface — pushCreate + pushUpdate +
  *       buildQboPayload public static, match dispatcher contract
  *   C2: CustomerEnqueuer class surface — enqueue public static
  *   C3: buildQboPayload full FF row → expected QBO payload shape
- *       including CurrencyRef.value='CAD' (D-QBO-FIXPACK-6/-7)
+ *       including CurrencyRef.value='CAD' (multi_currency_enabled='1';
+ *       D-QBO-FIXPACK-6/-7/-12)
  *   C4: buildQboPayload minimal FF row (company_name + currency only) →
  *       DisplayName + CompanyName + CurrencyRef only, no PrimaryEmail /
- *       no BillAddr
+ *       no BillAddr (multi_currency_enabled='1'; D-QBO-FIXPACK-6/-7/-12)
  *   C5: pushCreate sync mode gate — sync_mode.customer='qbo_to_ff'
  *       returns ['status'=>'skipped_by_mode'] without hitting QBO
  *   C6: pushCreate soft-delete skip — deleted_at non-null returns
@@ -40,12 +41,16 @@ declare(strict_types=1);
  *  C10: CustomerEnqueuer happy path — sync_enabled='1' + mode='sync'
  *       inserts a queue row with entity_type='customer', operation
  *       matches input, status='queued'
- *  C11: buildQboPayload CAD customer → CurrencyRef.value='CAD'
- *       (D-QBO-FIXPACK-7: explicit currency prevents silent QBO coercion)
- *  C12: buildQboPayload USD customer → CurrencyRef.value='USD'
- *       (D-QBO-FIXPACK-7: supports multi-currency)
- *  C13: buildQboPayload empty currency → throws QuickBooksException
- *       (D-QBO-FIXPACK-7: loud failure beats silent USD coercion)
+ *  C11: buildQboPayload multi_currency='1' + CAD → CurrencyRef.value='CAD'
+ *       (D-QBO-FIXPACK-7/-12: explicit currency, gate active)
+ * C11b: buildQboPayload multi_currency='0' → CurrencyRef absent from payload
+ *       (D-QBO-FIXPACK-12: gate suppresses CurrencyRef in single-currency mode)
+ *  C12: buildQboPayload multi_currency='1' + USD → CurrencyRef.value='USD'
+ *       (D-QBO-FIXPACK-7/-12: multi-currency, gate active)
+ * C12b: buildQboPayload multi_currency='0' → CurrencyRef absent regardless of currency
+ *       (D-QBO-FIXPACK-12: gate suppresses CurrencyRef in single-currency mode)
+ *  C13: buildQboPayload multi_currency='1' + empty currency → QuickBooksException
+ *       (D-QBO-FIXPACK-7: loud failure beats silent coercion; only when gate active)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
@@ -53,6 +58,9 @@ declare(strict_types=1);
  * @updated S-QBO-FIXPACK-2 — added CurrencyRef assertions to C3/C4;
  *          added C11/C12/C13 for currency-emission edge cases
  *          (D-QBO-FIXPACK-6/-7); total 13 sub-checks.
+ * @updated S-QBO-FIXPACK-3 — gated C3/C4/C11/C12/C13 behind
+ *          multi_currency_enabled='1'; added C11b + C12b (multi_currency='0'
+ *          → CurrencyRef absent); total 15 sub-checks (D-QBO-FIXPACK-12).
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §8.1
  */
 
@@ -63,7 +71,7 @@ use FleetForge\QboPushers\CustomerEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 13;
+$total    = 15;
 
 /** Sentinel customer ids we inserted for synthetic testing. */
 $sentinelCustomerIds = [];
@@ -140,9 +148,12 @@ if (empty($c2Errors)) {
 }
 
 // ── C3: buildQboPayload full row ───────────────────────────
-// D-QBO-FIXPACK-6/-7: fixture must include currency so buildQboPayload
+// D-QBO-FIXPACK-6/-7/-12: fixture must include currency so buildQboPayload
 // can emit CurrencyRef; empty currency throws QuickBooksException.
+// multi_currency_enabled='1' must be set or CurrencyRef will be omitted.
 $c3Errors = [];
+// D-QBO-FIXPACK-12: activate gate so CurrencyRef is emitted.
+ff_smoke_set_setting('quickbooks.multi_currency_enabled', '1');
 $fullFf = [
     'id'           => 999990,
     'company_name' => 'Acme Trucking Ltd.',
@@ -195,9 +206,12 @@ if (empty($c3Errors)) {
 }
 
 // ── C4: buildQboPayload minimal row ────────────────────────
-// D-QBO-FIXPACK-6/-7: minimal row must include currency so
+// D-QBO-FIXPACK-6/-7/-12: minimal row must include currency so
 // buildQboPayload can emit CurrencyRef without throwing.
+// multi_currency_enabled='1' must be set or CurrencyRef will be omitted.
 $c4Errors = [];
+// D-QBO-FIXPACK-12: activate gate so CurrencyRef is emitted.
+ff_smoke_set_setting('quickbooks.multi_currency_enabled', '1');
 $minFf = ['company_name' => 'Solo Driver Inc', 'currency' => 'CAD'];
 $minPayload = CustomerPusher::buildQboPayload($minFf);
 if (($minPayload['DisplayName'] ?? null) !== 'Solo Driver Inc') {
@@ -444,45 +458,83 @@ if (empty($c10Errors)) {
     $failures[] = 'C10';
 }
 
-// ── C11: buildQboPayload CAD → CurrencyRef.value='CAD' ────────
-// D-QBO-FIXPACK-7: verify CAD currency emits CurrencyRef.value='CAD'.
+// ── C11: buildQboPayload multi_currency='1' + CAD → CurrencyRef.value='CAD' ──
+// D-QBO-FIXPACK-7 + D-QBO-FIXPACK-12: CurrencyRef emitted when gate is active.
 $c11Errors = [];
+ff_smoke_set_setting('quickbooks.multi_currency_enabled', '1');
 $cadFf = ['id' => 999994, 'company_name' => 'CAD Corp', 'currency' => 'CAD'];
 $cadPayload = CustomerPusher::buildQboPayload($cadFf);
 if (($cadPayload['CurrencyRef']['value'] ?? null) !== 'CAD') {
     $c11Errors[] = "CurrencyRef.value mismatch: got " . json_encode($cadPayload['CurrencyRef']['value'] ?? null) . ", want 'CAD'";
 }
 if (empty($c11Errors)) {
-    echo "PASS C11 buildQboPayload CAD customer → CurrencyRef.value='CAD'\n";
+    echo "PASS C11 buildQboPayload multi_currency='1' + CAD customer → CurrencyRef.value='CAD'\n";
     $pass++;
 } else {
     echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";
     $failures[] = 'C11';
 }
 
-// ── C12: buildQboPayload USD → CurrencyRef.value='USD' ────────
-// D-QBO-FIXPACK-7: verify USD currency emits CurrencyRef.value='USD'
-// (supports multi-currency customers; no QBO coercion possible).
+// ── C11b: buildQboPayload multi_currency='0' → CurrencyRef absent ─────────────
+// D-QBO-FIXPACK-12: when multi-currency is disabled, CurrencyRef must be omitted
+// entirely (QBO error 6000 fires when CurrencyRef is sent to single-currency company).
+$c11bErrors = [];
+ff_smoke_set_setting('quickbooks.multi_currency_enabled', '0');
+$cadPayloadNoMC = CustomerPusher::buildQboPayload($cadFf);
+if (array_key_exists('CurrencyRef', $cadPayloadNoMC)) {
+    $c11bErrors[] = "CurrencyRef present in payload when multi_currency_enabled='0'; got "
+                  . json_encode($cadPayloadNoMC['CurrencyRef']);
+}
+if (empty($c11bErrors)) {
+    echo "PASS C11b buildQboPayload multi_currency='0' → CurrencyRef absent (gate suppresses CurrencyRef)\n";
+    $pass++;
+} else {
+    echo "FAIL C11b " . implode('; ', $c11bErrors) . "\n";
+    $failures[] = 'C11b';
+}
+
+// ── C12: buildQboPayload multi_currency='1' + USD → CurrencyRef.value='USD' ──
+// D-QBO-FIXPACK-7 + D-QBO-FIXPACK-12: USD CurrencyRef emitted when gate active.
 $c12Errors = [];
+ff_smoke_set_setting('quickbooks.multi_currency_enabled', '1');
 $usdFf = ['id' => 999995, 'company_name' => 'USD Corp', 'currency' => 'usd']; // lowercase → strtoupper
 $usdPayload = CustomerPusher::buildQboPayload($usdFf);
 if (($usdPayload['CurrencyRef']['value'] ?? null) !== 'USD') {
     $c12Errors[] = "CurrencyRef.value mismatch: got " . json_encode($usdPayload['CurrencyRef']['value'] ?? null) . ", want 'USD'";
 }
 if (empty($c12Errors)) {
-    echo "PASS C12 buildQboPayload USD customer → CurrencyRef.value='USD' (strtoupper normalisation)\n";
+    echo "PASS C12 buildQboPayload multi_currency='1' + USD customer → CurrencyRef.value='USD' (strtoupper normalisation)\n";
     $pass++;
 } else {
     echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";
     $failures[] = 'C12';
 }
 
-// ── C13: buildQboPayload empty currency → throws ──────────────
-// D-QBO-FIXPACK-7: loud failure (QuickBooksException) beats silent
-// coercion to home currency. customers.currency is NOT NULL ENUM in
-// practice; this guard catches any bypass path (direct array call,
-// future schema changes, etc.).
+// ── C12b: buildQboPayload multi_currency='0' + USD → CurrencyRef absent ───────
+// D-QBO-FIXPACK-12: gate suppresses CurrencyRef regardless of customer currency.
+$c12bErrors = [];
+ff_smoke_set_setting('quickbooks.multi_currency_enabled', '0');
+$usdPayloadNoMC = CustomerPusher::buildQboPayload($usdFf);
+if (array_key_exists('CurrencyRef', $usdPayloadNoMC)) {
+    $c12bErrors[] = "CurrencyRef present in payload when multi_currency_enabled='0' (USD customer); got "
+                  . json_encode($usdPayloadNoMC['CurrencyRef']);
+}
+if (empty($c12bErrors)) {
+    echo "PASS C12b buildQboPayload multi_currency='0' + USD customer → CurrencyRef absent regardless of currency\n";
+    $pass++;
+} else {
+    echo "FAIL C12b " . implode('; ', $c12bErrors) . "\n";
+    $failures[] = 'C12b';
+}
+
+// ── C13: buildQboPayload multi_currency='1' + empty currency → throws ─────────
+// D-QBO-FIXPACK-7: loud failure (QuickBooksException) beats silent coercion to
+// home currency. Guard only fires when gate is active (multi_currency_enabled='1').
+// customers.currency is NOT NULL ENUM in practice; this catches any bypass path
+// (direct array call, future schema changes, etc.).
 $c13Errors = [];
+// D-QBO-FIXPACK-12: gate must be active to trigger the throw.
+ff_smoke_set_setting('quickbooks.multi_currency_enabled', '1');
 try {
     $emptyFf = ['id' => 999996, 'company_name' => 'Empty Curr Corp', 'currency' => ''];
     CustomerPusher::buildQboPayload($emptyFf);
@@ -496,7 +548,7 @@ try {
     $c13Errors[] = 'unexpected exception type ' . get_class($e) . ': ' . $e->getMessage();
 }
 if (empty($c13Errors)) {
-    echo "PASS C13 buildQboPayload throws QuickBooksException on empty currency (prevents silent QBO coercion)\n";
+    echo "PASS C13 buildQboPayload multi_currency='1' + empty currency → QuickBooksException thrown (prevents silent coercion)\n";
     $pass++;
 } else {
     echo "FAIL C13 " . implode('; ', $c13Errors) . "\n";

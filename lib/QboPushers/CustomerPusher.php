@@ -51,6 +51,12 @@ declare(strict_types=1);
  *           payloads (D-QBO-FIXPACK-6 class-of-entity principle);
  *           idempotency-replay mismatch warning when QBO customer is
  *           currency-poisoned from a prior push (D-QBO-FIXPACK-10).
+ * @updated  S-QBO-FIXPACK-3 — CurrencyRef emission gated on
+ *           quickbooks.multi_currency_enabled (D-QBO-FIXPACK-12). When
+ *           '0': omit CurrencyRef entirely (QBO error 6000 fires otherwise
+ *           on single-currency companies). When '1': emit CurrencyRef as
+ *           FIXPACK-2 specified. The throw-on-empty-currency guard is
+ *           likewise gated — only relevant when multi-currency is on.
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §8.1 (customer sync rules),
  *           §6.7 (worker dispatch pattern)
  * @decision D-QBO-6-1 (no delete enqueue), D-QBO-6-2 (idempotency),
@@ -297,16 +303,17 @@ class CustomerPusher
      * `array_filter()` drops null + empty-string entries before
      * deciding whether to attach the nested object.
      *
-     * Always emits CurrencyRef per D-QBO-FIXPACK-6/-7. Throws
-     * QuickBooksException if the currency field is absent or empty
-     * (customers.currency is NOT NULL ENUM so this should never happen
-     * in practice, but loud failure is safer than silent USD coercion).
+     * Emits CurrencyRef only when quickbooks.multi_currency_enabled='1'
+     * (D-QBO-FIXPACK-12). Throws QuickBooksException on empty currency
+     * in multi-currency mode. When multi-currency is disabled: omits
+     * CurrencyRef entirely so single-currency QBO companies don't receive
+     * error 6000 ("Multi Currency should be enabled").
      *
      * NOTE: pushImpl strips CurrencyRef from UPDATE payloads because
      * QBO rejects it on updates (customer currency is immutable after
      * create per Intuit policy). CurrencyRef is intentionally included
-     * here so the offline smoke (which calls buildQboPayload directly)
-     * can verify the emission logic.
+     * in buildQboPayload output (when enabled) so the offline smoke can
+     * verify the emission logic by setting multi_currency_enabled='1'.
      *
      * Public-static so the offline smoke can exercise it without
      * going through the cURL boundary — matches the
@@ -319,22 +326,28 @@ class CustomerPusher
             'CompanyName' => (string) ($ff['company_name'] ?? ''),
         ];
 
-        // D-QBO-FIXPACK-6/-7: Always emit CurrencyRef on customer payloads.
-        // WHY: Omitting CurrencyRef causes QBO to default to the company's
-        // home currency. In Intuit's US sandbox (home=USD), CAD customers
-        // were silently recorded as USD — and Intuit forbids currency
-        // changes on existing customers, so the mapping is permanently
-        // poisoned. Explicit CurrencyRef on every create payload prevents
-        // this coercion. (pushImpl strips CurrencyRef for update ops.)
-        $currency = strtoupper((string) ($ff['currency'] ?? ''));
-        if ($currency === '') {
-            throw new QuickBooksException(
-                "Customer " . ($ff['id'] ?? '?') . " has empty currency field; cannot push " .
-                "without explicit CurrencyRef (omitting causes silent QBO coercion to home " .
-                "currency). Verify customers.currency is populated (expected 'CAD' or 'USD')."
-            );
+        // D-QBO-FIXPACK-12: Gate CurrencyRef emission on multi-currency setting.
+        // WHY: QBO error 6000 ("Multi Currency should be enabled to perform this
+        // operation") fires when CurrencyRef is sent to a single-currency company.
+        // FIXPACK-2 established "always emit CurrencyRef" (D-QBO-FIXPACK-6/-7),
+        // but that assumed multi-currency is always enabled — operator discovered
+        // live that the Intuit sandbox has multi-currency disabled by default.
+        // When '1': emit CurrencyRef from customers.currency (throw on empty).
+        // When '0': omit CurrencyRef entirely; QBO enforces home currency by
+        // default, which is acceptable for single-currency deployments.
+        // (pushImpl strips CurrencyRef for update ops regardless of this gate.)
+        if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
+            $currency = strtoupper((string) ($ff['currency'] ?? ''));
+            if ($currency === '') {
+                throw new QuickBooksException(
+                    "Customer " . ($ff['id'] ?? '?') . " has empty currency field; cannot push " .
+                    "without explicit CurrencyRef (omitting causes silent QBO coercion to home " .
+                    "currency). Verify customers.currency is populated (expected 'CAD' or 'USD')."
+                );
+            }
+            $payload['CurrencyRef'] = ['value' => $currency];
         }
-        $payload['CurrencyRef'] = ['value' => $currency];
+        // When multi_currency_enabled='0': omit CurrencyRef (QBO error 6000 otherwise).
 
         if (!empty($ff['email'])) {
             $payload['PrimaryEmailAddr'] = ['Address' => (string) $ff['email']];

@@ -20,14 +20,18 @@ declare(strict_types=1);
  *   Pusher (20-23): skipped_by_mode / skipped_voided / failed_preflight / already_mapped
  *   Enqueuer (24-25): sync_enabled=0 / non-create returns false
  *   PrivateNote JSON (26-27): includes fields / omits audit
- *   CurrencyRef (28-29): CAD + USD payload shape (updated per D-QBO-FIXPACK-1/-2)
+ *   CurrencyRef (28-29): CAD + USD payload shape when multi_currency_enabled='1'
+ *       (D-QBO-FIXPACK-1/-2/-12)
  *   FieldLimits (30-34): QboFieldLimits class + DocNumber/notes/line-desc checks
- *   CurrencyRef edge cases (35-38): CAD explicit / USD explicit / NULL rate throws / zero rate throws
+ *   CurrencyRef edge cases (35-38): CAD/USD explicit + NULL/zero rate throws
+ *       (all gated on multi_currency_enabled='1'; D-QBO-FIXPACK-12)
  *   ENUM (39): push_status includes 2 new typed preflight codes
  *
  * @session  S-QBO-11
  * @updated  S-QBO-11-FIXPACK-1 (C28 updated for always-emit CurrencyRef;
  *           C30–C39 new)
+ * @updated  S-QBO-FIXPACK-3 (C28/C29/C35–C38 gated behind
+ *           multi_currency_enabled='1'; D-QBO-FIXPACK-12)
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract), §17 (tax-override)
  * @decision D-QBO-FIXPACK-1 (always emit CurrencyRef),
  *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on missing non-CAD rate),
@@ -64,6 +68,7 @@ $settingsKeysToSnapshot = [
     'quickbooks.sync_enabled',
     'quickbooks.sync_mode.invoice',
     'quickbooks.tax_override_code_id',
+    'quickbooks.multi_currency_enabled', // D-QBO-FIXPACK-12: C28/C29/C35-C38 gate
 ];
 foreach ($settingsKeysToSnapshot as $k) {
     $r = db_row("SELECT value FROM settings WHERE `key` = ?", [$k]);
@@ -814,9 +819,10 @@ try {
 if (empty($c27Errors)) { echo "PASS C27 buildPrivateNoteJson omits audit block when audit columns NULL; emits engine_version='unknown' fallback\n"; $pass++; }
 else { echo "FAIL C27 " . implode('; ', $c27Errors) . "\n"; $failures[] = 'C27'; }
 
-// ── C28: buildQboPayload — CAD invoice ALWAYS emits CurrencyRef + ExchangeRate
-// (D-QBO-FIXPACK-1: always emit to prevent silent QBO coercion to customer currency)
+// ── C28: buildQboPayload — CAD invoice emits CurrencyRef + ExchangeRate when multi-currency enabled
+// D-QBO-FIXPACK-1/-12: gate must be active (multi_currency_enabled='1') to emit CurrencyRef.
 $c28Errors = [];
+$setSetting('quickbooks.multi_currency_enabled', '1'); // D-QBO-FIXPACK-12: activate gate
 try {
     $invoice = [
         'id'             => 999990,
@@ -842,11 +848,13 @@ try {
 } catch (Throwable $e) {
     $c28Errors[] = 'C28 threw: ' . $e->getMessage();
 }
-if (empty($c28Errors)) { echo "PASS C28 buildQboPayload — CAD invoice emits CurrencyRef='CAD' + ExchangeRate='1.0' (D-QBO-FIXPACK-1/-2)\n"; $pass++; }
+if (empty($c28Errors)) { echo "PASS C28 buildQboPayload — multi_currency='1' + CAD invoice emits CurrencyRef='CAD' + ExchangeRate='1.0' (D-QBO-FIXPACK-1/-2/-12)\n"; $pass++; }
 else { echo "FAIL C28 " . implode('; ', $c28Errors) . "\n"; $failures[] = 'C28'; }
 
-// ── C29: buildQboPayload — USD invoice with exchange_rate_to_cad
+// ── C29: buildQboPayload — USD invoice emits CurrencyRef + ExchangeRate when gate active
+// D-QBO-FIXPACK-12: multi_currency_enabled='1' required.
 $c29Errors = [];
+$setSetting('quickbooks.multi_currency_enabled', '1'); // D-QBO-FIXPACK-12
 try {
     $invoice = [
         'id'                   => 999991,
@@ -873,7 +881,7 @@ try {
 } catch (Throwable $e) {
     $c29Errors[] = 'C29 threw: ' . $e->getMessage();
 }
-if (empty($c29Errors)) { echo "PASS C29 buildQboPayload — USD invoice with exchange_rate_to_cad=1.35 produces CurrencyRef + ExchangeRate (D-QBO-11-3)\n"; $pass++; }
+if (empty($c29Errors)) { echo "PASS C29 buildQboPayload — multi_currency='1' + USD invoice emits CurrencyRef='USD' + ExchangeRate='1.35' (D-QBO-11-3/-12)\n"; $pass++; }
 else { echo "FAIL C29 " . implode('; ', $c29Errors) . "\n"; $failures[] = 'C29'; }
 
 // ── C30: QboFieldLimits class exists with all 4 constants + checkLength ──
@@ -1009,8 +1017,9 @@ if (empty($c34Errors)) { echo "PASS C34 QboFieldLimits catches line description 
 else { echo "FAIL C34 " . implode('; ', $c34Errors) . "\n"; $failures[] = 'C34'; }
 
 // ── C35: buildQboPayload — CAD invoice emits CurrencyRef='CAD' + ExchangeRate='1.0'
-// (dedicated unit-test form of the same assertion as C28)
+// (dedicated unit-test form of C28; D-QBO-FIXPACK-12: gate must be active)
 $c35Errors = [];
+$setSetting('quickbooks.multi_currency_enabled', '1'); // D-QBO-FIXPACK-12
 try {
     $inv = [
         'id'=>999990, 'invoice_number'=>'INV-C35-CAD', 'invoice_date'=>'2026-05-31',
@@ -1030,7 +1039,9 @@ if (empty($c35Errors)) { echo "PASS C35 buildQboPayload — CAD invoice emits Cu
 else { echo "FAIL C35 " . implode('; ', $c35Errors) . "\n"; $failures[] = 'C35'; }
 
 // ── C36: buildQboPayload — USD invoice emits CurrencyRef='USD' + ExchangeRate=rate
+// D-QBO-FIXPACK-12: gate must be active.
 $c36Errors = [];
+$setSetting('quickbooks.multi_currency_enabled', '1'); // D-QBO-FIXPACK-12
 try {
     $inv = [
         'id'=>999991, 'invoice_number'=>'INV-C36-USD', 'invoice_date'=>'2026-05-31',
@@ -1050,7 +1061,9 @@ if (empty($c36Errors)) { echo "PASS C36 buildQboPayload — USD invoice emits Cu
 else { echo "FAIL C36 " . implode('; ', $c36Errors) . "\n"; $failures[] = 'C36'; }
 
 // ── C37: Non-CAD invoice with exchange_rate_to_cad=NULL throws QuickBooksException
+// D-QBO-FIXPACK-12: throw only fires when gate is active (multi_currency_enabled='1').
 $c37Errors = [];
+$setSetting('quickbooks.multi_currency_enabled', '1'); // D-QBO-FIXPACK-12
 try {
     $threw = false;
     try {
@@ -1076,7 +1089,9 @@ if (empty($c37Errors)) { echo "PASS C37 Non-CAD invoice with exchange_rate_to_ca
 else { echo "FAIL C37 " . implode('; ', $c37Errors) . "\n"; $failures[] = 'C37'; }
 
 // ── C38: Non-CAD invoice with exchange_rate_to_cad=0 throws QuickBooksException
+// D-QBO-FIXPACK-12: throw only fires when gate is active.
 $c38Errors = [];
+$setSetting('quickbooks.multi_currency_enabled', '1'); // D-QBO-FIXPACK-12
 try {
     $threw = false;
     try {

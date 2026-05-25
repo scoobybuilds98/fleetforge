@@ -9,7 +9,7 @@ declare(strict_types=1);
  * surface, exception hierarchy, classifyError categorisation, and
  * settings + sync_log guard logic are all wired correctly.
  *
- * 6 sub-checks:
+ * 8 sub-checks:
  *   C1: QuickBooksClient class exists with all 10 expected public methods
  *   C2: All 9 typed exception classes exist and extend QuickBooksException
  *       (which itself extends RuntimeException)
@@ -21,15 +21,25 @@ declare(strict_types=1);
  *   C6: writeSyncLog() degrades gracefully when the shape-mismatch
  *       check fires (simulated by inspecting the static-cache reset
  *       behaviour via repeated instantiation)
+ *   C7: normalizeQueryResponse handles empty / 1-object / N-array /
+ *       metadata-preserved shapes (K-22 Trap #60 guard)
+ *   C8: CompanyInfoSync class exists + syncFromQbo public static;
+ *       QuickBooksClient::setWorkerContext public static exists;
+ *       3 new settings keys present (multi_currency_enabled,
+ *       home_currency, company_country) (D-QBO-FIXPACK-11/-12/-15)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
  * @session  S-QBO-2
+ * @updated  S-QBO-FIXPACK-3 — fixed docblock (was 6, actually 7); added C8
+ *           for CompanyInfoSync + setWorkerContext + 3 new settings keys;
+ *           total 8 sub-checks (D-QBO-FIXPACK-11/-12/-15).
  */
 
 require_once __DIR__ . '/../config/app.php';
 
 use FleetForge\QuickBooksClient;
+use FleetForge\QboPushers\CompanyInfoSync;
 use FleetForge\Exceptions\QuickBooksException;
 use FleetForge\Exceptions\QuickBooksAuthExpiredException;
 use FleetForge\Exceptions\QuickBooksStaleObjectException;
@@ -42,7 +52,7 @@ use FleetForge\Exceptions\QuickBooksRateLimitException;
 
 $failures = [];
 $pass     = 0;
-$total    = 7;
+$total    = 8;
 
 // ── C1: class exists + 10 expected public methods ─────────────
 $expectedMethods = [
@@ -331,6 +341,62 @@ if (empty($c7Errors)) {
 } else {
     echo "FAIL C7  " . implode('; ', $c7Errors) . "\n";
     $failures[] = 'C7';
+}
+
+// ── C8: CompanyInfoSync + setWorkerContext + 3 new settings keys ──────────────
+// D-QBO-FIXPACK-11/-12/-15: verifies that the three new components added in
+// S-QBO-FIXPACK-3 are all reachable + have the expected public-static interface.
+$c8Errors = [];
+
+// 8a: CompanyInfoSync class + syncFromQbo public static
+if (!class_exists(CompanyInfoSync::class)) {
+    $c8Errors[] = 'CompanyInfoSync class not autoloaded (lib/QboPushers/CompanyInfoSync.php)';
+} else {
+    $ref = new ReflectionClass(CompanyInfoSync::class);
+    if (!$ref->hasMethod('syncFromQbo')) {
+        $c8Errors[] = 'CompanyInfoSync::syncFromQbo method missing';
+    } else {
+        $rm = $ref->getMethod('syncFromQbo');
+        if (!$rm->isPublic() || !$rm->isStatic()) {
+            $c8Errors[] = 'CompanyInfoSync::syncFromQbo must be public static';
+        }
+    }
+}
+
+// 8b: QuickBooksClient::setWorkerContext public static
+if (!class_exists(QuickBooksClient::class)) {
+    $c8Errors[] = 'QuickBooksClient class not loaded (already caught in C1)';
+} else {
+    $ref = new ReflectionClass(QuickBooksClient::class);
+    if (!$ref->hasMethod('setWorkerContext')) {
+        $c8Errors[] = 'QuickBooksClient::setWorkerContext method missing (D-QBO-FIXPACK-15)';
+    } else {
+        $rm = $ref->getMethod('setWorkerContext');
+        if (!$rm->isPublic() || !$rm->isStatic()) {
+            $c8Errors[] = 'QuickBooksClient::setWorkerContext must be public static';
+        }
+    }
+}
+
+// 8c: 3 new settings keys seeded by migration 202605250000_S-QBO-FIXPACK-3.sql
+$newKeys = [
+    'quickbooks.multi_currency_enabled',
+    'quickbooks.home_currency',
+    'quickbooks.company_country',
+];
+foreach ($newKeys as $k) {
+    $row = db_row("SELECT `value` FROM settings WHERE `key` = ?", [$k]);
+    if ($row === null) {
+        $c8Errors[] = "settings key missing (migration not applied?): {$k}";
+    }
+}
+
+if (empty($c8Errors)) {
+    echo "PASS C8  CompanyInfoSync::syncFromQbo + QuickBooksClient::setWorkerContext public static; 3 new settings keys present\n";
+    $pass++;
+} else {
+    echo "FAIL C8  " . implode('; ', $c8Errors) . "\n";
+    $failures[] = 'C8';
 }
 
 // ── Summary ───────────────────────────────────────────────────

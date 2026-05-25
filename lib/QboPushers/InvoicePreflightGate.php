@@ -126,58 +126,63 @@ class InvoicePreflightGate
             ];
         }
 
-        // 4.5 Currency-mismatch pre-flight (D-QBO-FIXPACK-3).
-        // WHY: Without this gate, InvoicePusher always emits CurrencyRef on the
-        // QBO payload (D-QBO-FIXPACK-1), but QBO will silently accept an invoice
-        // in currency X on a customer denominated in currency Y — the QBO ledger
-        // ends up with a corrupt AR entry. Better to surface this as a pre-flight
-        // rejection so the operator remaps before the push.
+        // 4.5 Currency-mismatch pre-flight (D-QBO-FIXPACK-3), gated on
+        // quickbooks.multi_currency_enabled (D-QBO-FIXPACK-12).
         //
-        // LATENCY: One extra GET /customer/{id} per push. Acceptable per
-        // D-QBO-FIXPACK-3 reasoning (single call, customer denomination rarely
-        // changes, cacheable in a future iteration).
+        // WHY gate on multi_currency_enabled: when multi-currency is disabled,
+        // QBO enforces a single home currency for all entities — CurrencyRef
+        // is irrelevant and the HTTP probe to read the customer's CurrencyRef
+        // is a wasted round-trip (QBO won't have the field in single-currency
+        // mode). Skipping the check when multi-currency is disabled is safe:
+        // InvoicePusher also omits CurrencyRef+ExchangeRate in that mode, so
+        // there is no currency to mismatch against.
         //
-        // FALLTHROUGH: Any transient infrastructure error (token expiry, network
-        // timeout, etc.) is logged and swallowed — we do NOT gate on QBO
-        // availability for a read-only pre-flight probe. The actual push will
-        // surface the connectivity issue through its own error path.
-        try {
-            $client = new QuickBooksClient();
-            $qboCustomerResp = $client->getEntity('customer', (string) $customerMap['qbo_customer_id']);
-            $qboCustomer = $qboCustomerResp['Customer'] ?? null;
+        // WHY the check exists when enabled (D-QBO-FIXPACK-3): InvoicePusher
+        // emits CurrencyRef=FF.currency; QBO will accept an invoice in currency
+        // X on a customer denominated in Y but the AR ledger ends up corrupt.
+        //
+        // FALLTHROUGH: Transient QBO API errors are swallowed — never block a
+        // push on a read-only pre-flight probe connectivity issue.
+        if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
+            try {
+                $client = new QuickBooksClient();
+                $qboCustomerResp = $client->getEntity('customer', (string) $customerMap['qbo_customer_id']);
+                $qboCustomer = $qboCustomerResp['Customer'] ?? null;
 
-            if ($qboCustomer === null) {
-                // Mapping points to a QBO customer that no longer exists.
-                return [
-                    'ok'          => false,
-                    'reason'      => "QBO customer (id={$customerMap['qbo_customer_id']}) not found in sandbox; "
-                                   . "the mapping may be stale. Re-pull customers via /quickbooks/customers to refresh.",
-                    'status_code' => 'failed_preflight',
-                ];
+                if ($qboCustomer === null) {
+                    // Mapping points to a QBO customer that no longer exists.
+                    return [
+                        'ok'          => false,
+                        'reason'      => "QBO customer (id={$customerMap['qbo_customer_id']}) not found in sandbox; "
+                                       . "the mapping may be stale. Re-pull customers via /quickbooks/customers to refresh.",
+                        'status_code' => 'failed_preflight',
+                    ];
+                }
+
+                $qboCurrency = strtoupper((string) ($qboCustomer['CurrencyRef']['value'] ?? ''));
+                $ffCurrency  = strtoupper((string) ($invoice['currency'] ?? ''));
+
+                if ($qboCurrency !== '' && $ffCurrency !== '' && $qboCurrency !== $ffCurrency) {
+                    $qboName = (string) ($qboCustomer['DisplayName'] ?? '(unnamed)');
+                    return [
+                        'ok'          => false,
+                        'reason'      => "Currency mismatch: FF invoice is {$ffCurrency} but QBO customer "
+                                       . "(id={$customerMap['qbo_customer_id']}, name='{$qboName}') is {$qboCurrency}. "
+                                       . "Either re-map FF customer {$invoice['customer_id']} to a QBO customer with "
+                                       . "matching currency, or change FF invoice.currency to match.",
+                        'status_code' => 'failed_preflight_currency_mismatch',
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // Transient QBO API issue — fall through gracefully.
+                // WHY: Pre-flight should never block a push on a network/auth hiccup.
+                // The actual createEntity call will surface connectivity issues.
+                // Log for operator observability.
+                error_log("[S-QBO-FIXPACK-3] Currency pre-flight QBO lookup failed for invoice {$ffInvoiceId} "
+                    . "(qbo_customer={$customerMap['qbo_customer_id']}): " . $e->getMessage());
             }
-
-            $qboCurrency = strtoupper((string) ($qboCustomer['CurrencyRef']['value'] ?? ''));
-            $ffCurrency  = strtoupper((string) ($invoice['currency'] ?? ''));
-
-            if ($qboCurrency !== '' && $ffCurrency !== '' && $qboCurrency !== $ffCurrency) {
-                $qboName = (string) ($qboCustomer['DisplayName'] ?? '(unnamed)');
-                return [
-                    'ok'          => false,
-                    'reason'      => "Currency mismatch: FF invoice is {$ffCurrency} but QBO customer "
-                                   . "(id={$customerMap['qbo_customer_id']}, name='{$qboName}') is {$qboCurrency}. "
-                                   . "Either re-map FF customer {$invoice['customer_id']} to a QBO customer with "
-                                   . "matching currency, or change FF invoice.currency to match.",
-                    'status_code' => 'failed_preflight_currency_mismatch',
-                ];
-            }
-        } catch (\Throwable $e) {
-            // Transient QBO API issue — fall through gracefully.
-            // WHY: Pre-flight should never block a push on a network/auth hiccup.
-            // The actual createEntity call will surface connectivity issues.
-            // Log for operator observability.
-            error_log("[S-QBO-FIXPACK-1] Currency pre-flight QBO lookup failed for invoice {$ffInvoiceId} "
-                . "(qbo_customer={$customerMap['qbo_customer_id']}): " . $e->getMessage());
         }
+        // When multi_currency_enabled='0': skip currency-mismatch check (no CurrencyRef emitted).
 
         // 5. Item mappings (D-QBO-11-8 + D-QBO-10-2 GPS variant resolution)
         $customer = db_row(

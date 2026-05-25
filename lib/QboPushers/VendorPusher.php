@@ -60,6 +60,10 @@ declare(strict_types=1);
  *           per D-QBO-FIXPACK-8 Option A (Mainland is Canadian);
  *           idempotency-replay mismatch warning when QBO vendor is
  *           currency-poisoned from a prior push (D-QBO-FIXPACK-10).
+ * @updated  S-QBO-FIXPACK-3 — CurrencyRef emission gated on
+ *           quickbooks.multi_currency_enabled (D-QBO-FIXPACK-12). When
+ *           '0': omit CurrencyRef entirely. When '1': emit hardcoded
+ *           'CAD' per D-QBO-FIXPACK-8 Option A.
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract),
  *           §7.5 (vendor mapping table)
  * @decision D-QBO-7-1 (1099 out of scope v1),
@@ -312,9 +316,11 @@ class VendorPusher
      *   AND "John A. Smith Jr." → ('John', 'A. Smith Jr.')
      *   AND single names like "Cher" → ('Cher', '').
      *
-     * Always emits CurrencyRef='CAD' per D-QBO-FIXPACK-6/-8. The
-     * vendors table has no currency column; all FF vendors are
-     * Canadian (hardcoded home currency). Queue S-VENDOR-CURRENCY-COLUMN
+     * Emits CurrencyRef='CAD' only when quickbooks.multi_currency_enabled='1'
+     * (D-QBO-FIXPACK-12). The vendors table has no currency column; all FF
+     * vendors are Canadian (hardcoded 'CAD' per D-QBO-FIXPACK-8 Option A).
+     * When multi-currency is disabled: omits CurrencyRef so single-currency
+     * QBO companies don't receive error 6000. Queue S-VENDOR-CURRENCY-COLUMN
      * if multi-currency vendor support is needed in the future.
      * NOTE: pushImpl strips CurrencyRef from UPDATE payloads because
      * QBO rejects it (vendor currency immutable after create).
@@ -332,16 +338,19 @@ class VendorPusher
             'CompanyName' => (string) ($ff['name'] ?? ''),
         ];
 
-        // D-QBO-FIXPACK-6/-8: Always emit CurrencyRef on vendor payloads.
-        // WHY: Omitting CurrencyRef causes QBO to default to the company's
-        // home currency. In Intuit's US sandbox (home=USD), CAD vendors
-        // were silently recorded as USD — and Intuit forbids currency
-        // changes on existing vendors, so the mapping is permanently
-        // poisoned. The vendors table has no currency column (backlog:
-        // S-VENDOR-CURRENCY-COLUMN); Mainland is Canadian per spec §0,
-        // so 'CAD' is hardcoded here per D-QBO-FIXPACK-8 Option A.
-        // (pushImpl strips CurrencyRef for update ops.)
-        $payload['CurrencyRef'] = ['value' => 'CAD'];
+        // D-QBO-FIXPACK-12: Gate CurrencyRef emission on multi-currency setting.
+        // WHY: QBO error 6000 fires when CurrencyRef is sent to a single-currency
+        // company (D-QBO-FIXPACK-3 root cause discovery). Emit only when the
+        // connected QBO company has multi-currency enabled (auto-detected at
+        // connect/refresh time and cached in quickbooks.multi_currency_enabled).
+        // When '1': emit CurrencyRef='CAD' per D-QBO-FIXPACK-8 Option A
+        //   (vendors table has no currency column; Mainland is Canadian).
+        // When '0': omit CurrencyRef entirely; QBO enforces home currency.
+        // (pushImpl strips CurrencyRef for update ops regardless of this gate.)
+        if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
+            $payload['CurrencyRef'] = ['value' => 'CAD'];
+        }
+        // When multi_currency_enabled='0': omit CurrencyRef (QBO error 6000 otherwise).
 
         // D-QBO-7-3: split contact_name into GivenName + FamilyName.
         $contactName = trim((string) ($ff['contact_name'] ?? ''));

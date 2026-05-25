@@ -18,17 +18,17 @@ declare(strict_types=1);
  * + restore so the smoke leaves quickbooks.sync_enabled at its
  * original value (D-CPA-5 — must remain '0' after the smoke).
  *
- * 12 sub-checks (mirror of _smoke_qbo_customer_push.php):
+ * 13 sub-checks (mirror of _smoke_qbo_customer_push.php):
  *   C1: VendorPusher class surface — pushCreate + pushUpdate +
  *       buildQboPayload public static, match dispatcher contract
  *   C2: VendorEnqueuer class surface — enqueue public static
  *   C3: buildQboPayload full FF row → expected QBO payload shape
  *       (DisplayName + CompanyName + CurrencyRef='CAD' + GivenName +
  *       FamilyName + PrimaryEmailAddr + PrimaryPhone + BillAddr
- *       with Country=CA; D-QBO-FIXPACK-6/-8)
+ *       with Country=CA; multi_currency_enabled='1'; D-QBO-FIXPACK-6/-8/-12)
  *   C4: buildQboPayload minimal FF row (name only) → DisplayName +
  *       CompanyName + CurrencyRef='CAD', no GivenName / no PrimaryEmail
- *       / no BillAddr (CurrencyRef always emitted per D-QBO-FIXPACK-8)
+ *       / no BillAddr (multi_currency_enabled='1'; D-QBO-FIXPACK-8/-12)
  *   C5: pushCreate sync mode gate — sync_mode.vendor='qbo_to_ff'
  *       returns ['status'=>'skipped_by_mode'] without hitting QBO
  *   C6: pushCreate soft-delete skip — deleted_at non-null returns
@@ -42,12 +42,12 @@ declare(strict_types=1);
  *  C10: VendorEnqueuer happy path — sync_enabled='1' + mode='sync'
  *       inserts a queue row with entity_type='vendor', operation
  *       matches input, status='queued'
- *  C11: buildQboPayload always emits CurrencyRef='CAD' (hardcoded per
- *       D-QBO-FIXPACK-8 Option A; vendors table has no currency column;
- *       backlog: S-VENDOR-CURRENCY-COLUMN)
- *  C12: buildQboPayload CurrencyRef is hardcoded 'CAD' regardless of
- *       any 'currency' key passed in the $ff array (D-QBO-FIXPACK-8;
- *       confirms the hardcoded path, not a pass-through)
+ *  C11: buildQboPayload multi_currency='1' → CurrencyRef='CAD' emitted
+ *       (hardcoded; vendors has no currency column; D-QBO-FIXPACK-8/-12)
+ * C11b: buildQboPayload multi_currency='0' → CurrencyRef absent from payload
+ *       (D-QBO-FIXPACK-12: gate suppresses CurrencyRef in single-currency mode)
+ *  C12: buildQboPayload multi_currency='1' + 'currency'='USD' in $ff →
+ *       CurrencyRef still 'CAD' (hardcoded, not pass-through; D-QBO-FIXPACK-8/-12)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
@@ -55,6 +55,9 @@ declare(strict_types=1);
  * @updated S-QBO-FIXPACK-2 — added CurrencyRef assertions to C3/C4;
  *          added C11/C12 for hardcoded CAD emission (D-QBO-FIXPACK-6/-8);
  *          total 12 sub-checks.
+ * @updated S-QBO-FIXPACK-3 — gated C3/C4/C11/C12 behind
+ *          multi_currency_enabled='1'; added C11b (multi_currency='0'
+ *          → CurrencyRef absent); total 13 sub-checks (D-QBO-FIXPACK-12).
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 + §7.5
  */
 
@@ -65,7 +68,7 @@ use FleetForge\QboPushers\VendorEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 12;
+$total    = 13;
 
 /** Sentinel vendor ids we inserted for synthetic testing. */
 $sentinelVendorIds = [];
@@ -145,8 +148,10 @@ if (empty($c2Errors)) {
 // Exercises name → DisplayName+CompanyName, contact_name split
 // per D-QBO-7-3 ("John A. Smith" → GivenName='John', FamilyName='A. Smith'),
 // address+city+state → BillAddr with default Country=CA,
-// and D-QBO-FIXPACK-6/-8 CurrencyRef='CAD' (hardcoded).
+// and D-QBO-FIXPACK-6/-8 CurrencyRef='CAD' (hardcoded, gate active).
 $c3Errors = [];
+// D-QBO-FIXPACK-12: activate gate so CurrencyRef is emitted.
+ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '1');
 $fullFf = [
     'id'           => 999990,
     'name'         => 'Acme Diesel Repair Ltd.',
@@ -206,9 +211,11 @@ if (empty($c3Errors)) {
 
 // ── C4: buildQboPayload minimal row ────────────────────────
 // Also exercises single-name contact (no space) → GivenName only.
-// D-QBO-FIXPACK-8: CurrencyRef='CAD' must be emitted even on minimal
-// row (hardcoded; no currency column on vendors).
+// D-QBO-FIXPACK-8/-12: CurrencyRef='CAD' must be emitted when gate active
+// (hardcoded; no currency column on vendors).
 $c4Errors = [];
+// D-QBO-FIXPACK-12: activate gate so CurrencyRef is emitted.
+ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '1');
 $minFf = ['name' => 'Solo Vendor Inc'];
 $minPayload = VendorPusher::buildQboPayload($minFf);
 if (($minPayload['DisplayName'] ?? null) !== 'Solo Vendor Inc') {
@@ -471,31 +478,49 @@ if (empty($c10Errors)) {
     $failures[] = 'C10';
 }
 
-// ── C11: buildQboPayload always emits CurrencyRef='CAD' ───────
-// D-QBO-FIXPACK-6/-8: vendors table has no currency column, so
-// CurrencyRef is hardcoded 'CAD' (D-QBO-FIXPACK-8 Option A).
-// Backlog: S-VENDOR-CURRENCY-COLUMN for per-row currency support.
+// ── C11: buildQboPayload multi_currency='1' → CurrencyRef='CAD' emitted ──────
+// D-QBO-FIXPACK-8/-12: vendors table has no currency column, so CurrencyRef is
+// hardcoded 'CAD' when gate is active. Backlog: S-VENDOR-CURRENCY-COLUMN.
 $c11Errors = [];
+ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '1');
 $c11Ff = ['name' => 'Northern Freight Ltd.'];
 $c11Payload = VendorPusher::buildQboPayload($c11Ff);
 if (($c11Payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
     $c11Errors[] = "CurrencyRef.value: got " . json_encode($c11Payload['CurrencyRef']['value'] ?? null) . ", want 'CAD'";
 }
 if (empty($c11Errors)) {
-    echo "PASS C11 buildQboPayload always emits hardcoded CurrencyRef='CAD' (vendors has no currency column; D-QBO-FIXPACK-8)\n";
+    echo "PASS C11 buildQboPayload multi_currency='1' → hardcoded CurrencyRef='CAD' emitted (D-QBO-FIXPACK-8/-12)\n";
     $pass++;
 } else {
     echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";
     $failures[] = 'C11';
 }
 
-// ── C12: buildQboPayload CurrencyRef is hardcoded, not a passthrough ─
-// D-QBO-FIXPACK-8: even if a caller passes 'currency' => 'USD' in the
-// $ff array, the vendor payload always emits 'CAD' (hardcoded). This
-// test confirms the hardcoded path rather than a field pass-through.
-// When S-VENDOR-CURRENCY-COLUMN ships, this test will be updated to
-// validate per-row currency emission.
+// ── C11b: buildQboPayload multi_currency='0' → CurrencyRef absent ─────────────
+// D-QBO-FIXPACK-12: gate suppresses CurrencyRef when multi-currency is disabled
+// (QBO error 6000 fires when CurrencyRef is sent to single-currency company).
+$c11bErrors = [];
+ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '0');
+$c11bPayload = VendorPusher::buildQboPayload($c11Ff);
+if (array_key_exists('CurrencyRef', $c11bPayload)) {
+    $c11bErrors[] = "CurrencyRef present in payload when multi_currency_enabled='0'; got "
+                  . json_encode($c11bPayload['CurrencyRef']);
+}
+if (empty($c11bErrors)) {
+    echo "PASS C11b buildQboPayload multi_currency='0' → CurrencyRef absent (gate suppresses CurrencyRef)\n";
+    $pass++;
+} else {
+    echo "FAIL C11b " . implode('; ', $c11bErrors) . "\n";
+    $failures[] = 'C11b';
+}
+
+// ── C12: buildQboPayload multi_currency='1' + 'currency'=>'USD' → still 'CAD' ─
+// D-QBO-FIXPACK-8/-12: even if a caller passes 'currency' => 'USD' in the
+// $ff array, the vendor payload always emits 'CAD' (hardcoded; no currency
+// column on vendors). Gate must be active to test the hardcoded emission path.
+// When S-VENDOR-CURRENCY-COLUMN ships, this test will be updated.
 $c12Errors = [];
+ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '1');
 $c12Ff = ['name' => 'Future USD Vendor', 'currency' => 'USD']; // vendors table has no currency column
 $c12Payload = VendorPusher::buildQboPayload($c12Ff);
 if (($c12Payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
@@ -503,7 +528,7 @@ if (($c12Payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
         ", want 'CAD' (hardcoded per D-QBO-FIXPACK-8; 'currency' key in \$ff has no effect until S-VENDOR-CURRENCY-COLUMN)";
 }
 if (empty($c12Errors)) {
-    echo "PASS C12 buildQboPayload CurrencyRef hardcoded 'CAD' (not a passthrough; 'currency' key in \$ff ignored per D-QBO-FIXPACK-8)\n";
+    echo "PASS C12 buildQboPayload multi_currency='1' + 'currency'=>'USD' → CurrencyRef still 'CAD' (hardcoded, not pass-through; D-QBO-FIXPACK-8)\n";
     $pass++;
 } else {
     echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";

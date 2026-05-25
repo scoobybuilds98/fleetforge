@@ -85,11 +85,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             }
 
         } elseif ($groupName) {
-            // Fetch all keys belonging to this group
-            $groupKeys = db_select(
-                "SELECT `key`, value_type FROM settings WHERE group_name = ?",
-                [$groupName]
-            );
+            // S-INTEL-FIX: per-form opt-in via _form_keys[]
+            //
+            // The Intelligence tab has 3 distinct forms that all carry
+            // _group=ai (AI Core, Morning Briefing, Budget Alert Config).
+            // The original handler reloaded ALL ai.* keys and treated
+            // "field missing from POST" as "user wants to clear it",
+            // so saving any one of those forms WIPED the fields owned
+            // by the other two — including ai.anthropic_api_key,
+            // ai.model, ai.briefing_recipient_roles, etc.
+            //
+            // Fix: each form may declare its keys via hidden
+            // <input name="_form_keys[]" value="ai.foo"> markers. When
+            // present, we restrict the iteration to those keys. When
+            // absent, we fall back to all-keys-in-group for backward
+            // compatibility with the General / Integrations / Notifications
+            // forms where one form covers its entire group.
+            $declaredKeys = $_POST['_form_keys'] ?? null;
+            if (is_array($declaredKeys) && !empty($declaredKeys)) {
+                // Sanitize: keep only well-formed setting keys (group.subkey).
+                $cleanKeys = array_values(array_unique(array_filter(
+                    array_map('strval', $declaredKeys),
+                    static fn(string $k): bool =>
+                        $k !== '' &&
+                        (bool) preg_match('/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/i', $k)
+                )));
+                if (!empty($cleanKeys)) {
+                    $ph = implode(',', array_fill(0, count($cleanKeys), '?'));
+                    $groupKeys = db_select(
+                        "SELECT `key`, value_type FROM settings WHERE `key` IN ($ph)",
+                        $cleanKeys
+                    );
+                } else {
+                    $groupKeys = [];
+                }
+            } else {
+                // Backward-compat path: all keys in the submitted group.
+                $groupKeys = db_select(
+                    "SELECT `key`, value_type FROM settings WHERE group_name = ?",
+                    [$groupName]
+                );
+            }
 
             // INT-1: list of keys whose values are secret. The form
             // renders these as masked password fields and submits the
@@ -912,6 +948,16 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
         <form method="POST" action="">
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
             <input type="hidden" name="_group"     value="ai">
+            <?php
+            // S-INTEL-FIX: keys owned by the OTHER two ai.* forms. AI Core
+            // must NOT touch these or it'll wipe what those forms set.
+            $aiSidecarKeys = [
+                'ai.briefing_recipient_roles',
+                'ai.budget_alert_thresholds',
+                'ai.budget_alert_recipients',
+                'ai.budget_alert_last_sent',  // system-managed, never edited via UI
+            ];
+            ?>
 
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
             <?php foreach ($grouped['ai'] as $setting):
@@ -926,9 +972,10 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                 // S-INTEL-TAB: ai.briefing_recipient_roles renders as a
                 // multi-checkbox over user_roles (mirrors the MFA pattern).
                 // Render it OUTSIDE this generic loop — see "Morning Briefing"
-                // section below.
-                if ($key === 'ai.briefing_recipient_roles') continue;
+                // section below. Budget alert keys live in their own card.
+                if (in_array($key, $aiSidecarKeys, true)) continue;
             ?>
+            <input type="hidden" name="_form_keys[]" value="<?= e($key) ?>">
             <div class="form-group" style="margin-bottom:0;">
                 <label class="form-label" for="<?= e($key) ?>"><?= e($label) ?></label>
                 <?php if ($vtype === 'boolean'): ?>
@@ -1074,10 +1121,15 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
             </div>
         </div>
 
-        <!-- Settings form: digest_hour + recipient_roles multi-checkbox -->
+        <!-- Settings form: recipient_roles + digest_hour.
+             S-INTEL-FIX: declares _form_keys[] so the handler only touches
+             these two keys — the AI Core form above and the Budget Alert
+             form below are no longer wiped when this form submits. -->
         <form method="POST" action="" style="margin-bottom:18px;">
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
             <input type="hidden" name="_group"     value="ai">
+            <input type="hidden" name="_form_keys[]" value="ai.briefing_recipient_roles">
+            <input type="hidden" name="_form_keys[]" value="notifications.digest_hour">
 
             <div style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:24px;align-items:start;">
 
@@ -1113,8 +1165,7 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                                value="<?= e((string) $digestHourSetting['value']) ?>" min="0" max="23" style="max-width:120px;"
                                <?= !$canEdit ? 'readonly' : '' ?>>
                         <p class="text-muted" style="font-size:0.72rem;margin:4px 0 0;">
-                            Hour (0–23) when notification_digest cron dispatches the morning email. Reads <code>company.timezone</code> for the local clock.
-                            (Note: changing this requires saving the Notifications group, NOT AI — separate form below.)
+                            Hour (0–23) when notification_digest cron dispatches the morning email. Reads <code>company.timezone</code> for the local clock. Saved by this form alongside the recipient roles.
                         </p>
                     </div>
                     <?php endif; ?>
@@ -1123,7 +1174,7 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
 
             <?php if ($canEdit): ?>
             <div style="padding-top:14px;margin-top:14px;border-top:1px solid var(--border-default);">
-                <button type="submit" class="btn btn-primary btn-sm">Save Recipient Roles</button>
+                <button type="submit" class="btn btn-primary btn-sm">Save Recipient Roles &amp; Send Hour</button>
             </div>
             <?php endif; ?>
         </form>
@@ -1900,6 +1951,10 @@ function FF_RecipientManager() {
         <form method="POST" action="">
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
             <input type="hidden" name="_group"     value="ai">
+            <!-- S-INTEL-FIX: declare ownership so this form only touches its
+                 two keys — never wipes ai.anthropic_api_key, ai.model, etc. -->
+            <input type="hidden" name="_form_keys[]" value="ai.budget_alert_thresholds">
+            <input type="hidden" name="_form_keys[]" value="ai.budget_alert_recipients">
 
             <?php
             $thresholdsJson = (string) settings_get('ai.budget_alert_thresholds', '[0.5,0.8,1.0]');

@@ -37,6 +37,7 @@ require_once FF_ROOT . '/includes/auth.php';
 
 use FleetForge\QuickBooksClient;
 use FleetForge\OAuth\StateManager;
+use FleetForge\QboPushers\CompanyInfoSync;
 
 /**
  * ff_qbo_redirect_to_settings — emit a Location header to the
@@ -205,5 +206,17 @@ db_insert('audit_log', [
     'notes'        => 'OAuth connection established for environment=' . $environment,
     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
 ]);
+
+// D-QBO-FIXPACK-11: Detect + cache CompanyInfo on connect so Pushers
+// know whether multi-currency is enabled before any entity is pushed.
+// Non-fatal: a failed CompanyInfo query doesn't block OAuth connect.
+// The conservative default (multi_currency_enabled='0') stays in effect
+// until CompanyInfoSync succeeds on next connect or token refresh.
+try {
+    $companyInfoClient = new QuickBooksClient();
+    CompanyInfoSync::syncFromQbo($companyInfoClient);
+} catch (\Throwable $companyInfoErr) {
+    error_log('S-QBO-FIXPACK-3: CompanyInfo sync failed at connect: ' . $companyInfoErr->getMessage());
+}
 
 ff_qbo_redirect_to_settings('success', 'Connected to QuickBooks (realm ' . $realmId . ').');
