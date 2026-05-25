@@ -29,24 +29,24 @@ $date    = trim((string) ($_GET['date'] ?? ''));
 try {
     if ($cacheId !== null) {
         $row = db_row(
-            "SELECT id, cache_key, result_data, expires_at, created_at
+            "SELECT id, parameters_hash AS cache_key, result_data, expires_at, generated_at AS created_at
                FROM report_cache
               WHERE id = ? AND report_type = 'ai_fleet_brief'",
             [$cacheId]
         );
     } elseif ($date !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         $row = db_row(
-            "SELECT id, cache_key, result_data, expires_at, created_at
+            "SELECT id, parameters_hash AS cache_key, result_data, expires_at, generated_at AS created_at
                FROM report_cache
               WHERE report_type = 'ai_fleet_brief'
-                AND DATE(created_at) = ?
+                AND DATE(generated_at) = ?
               ORDER BY id DESC LIMIT 1",
             [$date]
         );
     } else {
         // Latest available.
         $row = db_row(
-            "SELECT id, cache_key, result_data, expires_at, created_at
+            "SELECT id, parameters_hash AS cache_key, result_data, expires_at, generated_at AS created_at
                FROM report_cache
               WHERE report_type = 'ai_fleet_brief'
               ORDER BY id DESC LIMIT 1"

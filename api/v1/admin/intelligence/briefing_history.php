@@ -54,8 +54,10 @@ try {
     // Plus: the most recent cached brief generation timestamp, so the
     // UI can show "last generated at <ts>" alongside the dispatch
     // history.
+    // report_cache schema: id, report_type, parameters_hash, parameters,
+    // result_data, generated_at (NOT created_at), expires_at, generated_by.
     $cacheRow = db_row(
-        "SELECT result_data, created_at, expires_at FROM report_cache
+        "SELECT result_data, generated_at, expires_at FROM report_cache
           WHERE report_type = 'ai_fleet_brief'
           ORDER BY id DESC LIMIT 1"
     );
@@ -66,7 +68,7 @@ try {
         $payload = json_decode((string) $cacheRow['result_data'], true);
         $generatedAt = is_array($payload) && !empty($payload['generated_at'])
             ? (string) $payload['generated_at']
-            : (string) $cacheRow['created_at'];
+            : (string) $cacheRow['generated_at'];
     }
 
     // Recipient roll-up — how many users currently match the three-gate
