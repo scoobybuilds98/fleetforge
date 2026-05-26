@@ -572,6 +572,12 @@ The validator architecture is sound: `SESSION_REQUIREMENTS` const matches spec e
 
 ---
 
+### §12.6 D131 baseline drift diagnostic (S-D131-BASELINE-RESTORE, 2026-05-26)
+
+D131 baseline drift diagnosed by S-D131-BASELINE-RESTORE 2026-05-26; full diagnosis at `docs/D131_BASELINE_RESTORE_2026-05-26.md`. **Baseline state after this session: 20/22 PASS.** Two persistent failures DEFERRED: `_smoke_model_b_lifecycle.php` S07 (FIXTURE DRIFT — `settings.invoice.next_number.2026=0` collides with existing `invoices.invoice_number` max `INV-2026-00110`; 1-line DB UPDATE in a follow-up session restores) + `_smoke_settings_endpoints.php` (ENVIRONMENTAL — requires a running preview server on localhost:8899). The previously-reported samsara T14 failure was a state-dependent phantom (passes under counter=0; would fail under counter=1+); fixing the counter for model_b resolves the underlying class. **New discipline locked as D-D131-DISCIPLINE**: SESSION LOG SC column states actual D131 result every session; aspirational state is a discipline violation. Full diagnosis + per-failure follow-up scope in the referenced doc.
+
+---
+
 ## 11. CHANGELOG
 
 ### v1.0 (2026-05-18) — Initial progress tracker
