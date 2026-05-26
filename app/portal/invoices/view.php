@@ -134,11 +134,14 @@ require_once dirname(__DIR__) . '/includes/header.php';
             <?php endif; ?>
             <li><span class="portal-info-label">Currency</span><span class="portal-info-value"><?= e($inv['currency'] ?? 'CAD') ?></span></li>
             <li><span class="portal-info-label">Subtotal</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['subtotal'])) ?></span></li>
-            <?php if (bccomp($inv['gst_amount'] ?? '0', '0', 2) > 0): ?>
-            <li><span class="portal-info-label">GST</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['gst_amount'])) ?></span></li>
+            <?php if (bccomp($inv['tax_gst_amount'] ?? '0', '0', 2) > 0): ?>
+            <li><span class="portal-info-label">GST</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['tax_gst_amount'])) ?></span></li>
             <?php endif; ?>
-            <?php if (bccomp($inv['pst_amount'] ?? '0', '0', 2) > 0): ?>
-            <li><span class="portal-info-label">PST</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['pst_amount'])) ?></span></li>
+            <?php if (bccomp($inv['tax_pst_amount'] ?? '0', '0', 2) > 0): ?>
+            <li><span class="portal-info-label">PST</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['tax_pst_amount'])) ?></span></li>
+            <?php endif; ?>
+            <?php if (bccomp($inv['tax_hst_amount'] ?? '0', '0', 2) > 0): ?>
+            <li><span class="portal-info-label">HST</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['tax_hst_amount'])) ?></span></li>
             <?php endif; ?>
             <li style="font-weight:700;font-size:0.875rem;"><span class="portal-info-label">Total</span><span class="portal-info-value font-mono"><?= e(format_currency($inv['total_amount'])) ?></span></li>
             <?php

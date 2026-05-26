@@ -356,6 +356,49 @@ To be filled in during S-QBO-30 14-day monitoring window:
 
 ---
 
+## 12. PHASE QBO RIGOROUS TESTING FINDINGS
+
+### Phase 1 trap sweep findings (S-QBO-PHASE-1-TRAP-SWEEP, 2026-05-26)
+
+Read-only sweep across `app/ api/ lib/ cron/ includes/` for 12 known-bad patterns from the K-22 trap catalog ([FLEETFORGE_CLAUDE_CODE_REFERENCE.md](FLEETFORGE_CLAUDE_CODE_REFERENCE.md) §11) plus the Phase QBO rigorous-testing handoff list. **1 CRITICAL / 0 MEDIUM / ~50 LOW (false-positive)** across ~50 raw grep hits.
+
+#### CRITICAL — portal invoice GST/PST silently never renders
+
+- **File / lines:** [app/portal/invoices/view.php:137-141](../app/portal/invoices/view.php:137)
+- **Pattern:** B8 — bare `gst_amount` / `pst_amount` column refs (canonical column = `tax_gst_amount` / `tax_pst_amount` / `tax_hst_amount` with `tax_` prefix per [FLEETFORGE_DATABASE_MASTER.sql](../FLEETFORGE_DATABASE_MASTER.sql) lines 2410-2412)
+- **Context:** Portal customer-facing invoice detail page reads `$inv['gst_amount']` and `$inv['pst_amount']` inside `bccomp(... ?? '0', '0', 2) > 0` guards. Since the `invoices` table has no `gst_amount` / `pst_amount` columns, the `?? '0'` fallback always fires and the guard is `'0' > '0'` = false. Result: **GST and PST rows never render in the portal invoice detail page regardless of actual tax amount.** HST is also absent — no display branch exists for `tax_hst_amount` at all.
+- **Blast radius:** Every portal customer viewing any invoice with non-zero GST/PST/HST sees the invoice missing those line items. Total + balance still correct (those come from `total_amount` / `balance_due`), but the line breakdown is incomplete and inconsistent with the admin view. Silent failure (no error, no Sentry capture).
+- **Proposed fix:** Rename `gst_amount` → `tax_gst_amount`, `pst_amount` → `tax_pst_amount` in both the `bccomp()` guard and the `format_currency()` echo; add an HST display branch reading `tax_hst_amount`. ≤6 line diff. Queue as immediate-priority follow-up session before any further Phase QBO testing phase runs.
+
+#### LOW (false positives — all surface area benign)
+
+- **B3 — `created_at` near `acc_qbo_sync_queue`:** [api/v1/quickbooks/dashboard_metrics.php](../api/v1/quickbooks/dashboard_metrics.php) line 19 (comment) + lines 69/74/80/103/107/108/128/131 (SQL) — every actual SQL reference targets `acc_qbo_sync_log` (different table with legitimate `created_at` column per master line 1203), not `acc_qbo_sync_queue`. Grep heuristic false-positive.
+- **B5 — `fx_rate`:** [lib/QboPushers/InvoicePusher.php:31](../lib/QboPushers/InvoicePusher.php:31) + [:265](../lib/QboPushers/InvoicePusher.php:265) — both are docblock/inline comments correctly documenting the K-22 trap ("column is exchange_rate_to_cad, NOT fx_rate"). No code uses `fx_rate`.
+- **B6 — `line_order`:** [lib/QboPushers/InvoiceLineBuilder.php:18](../lib/QboPushers/InvoiceLineBuilder.php:18) + [lib/QboPushers/InvoicePusher.php:164](../lib/QboPushers/InvoicePusher.php:164) — both are docblock/inline comments correctly documenting the K-22 trap ("sort_order, NOT line_order"). No code uses `line_order`.
+- **B7 — `subtotal`:** ~30 hits across `app/portal/invoices/view.php`, `app/admin/invoices/show.php`, `api/v1/accounting/bills/*`, `api/v1/invoices/*`, `api/v1/leases/close.php`, `lib/Accounting/ReportPdfRenderer.php` (CSS class), `lib/Accounting/TaxFilingService.php`, `lib/AI/Tools/FleetForgeTools.php`, `lib/Billing/TaxCalculator.php` (function param), `lib/Billing/InvoiceGenerator.php` — all invoice-header / bill-header / pre-tax-amount-function-param contexts. None are line-item column refs (line-item amount column is `amount` / `lineAmount`, not `subtotal`). Per task definition all acceptable.
+- **B8 — `*_amount` comment:** [app/admin/invoices/show.php:1892](../app/admin/invoices/show.php:1892) — comment correctly references canonical `tax_gst/pst/hst_amount`.
+- **B10 — per-entity QBO wrappers:** [lib/QboPushers/VendorPusher.php:216](../lib/QboPushers/VendorPusher.php:216) — comment correctly documenting K-22 ("NEVER use per-entity wrappers like createVendor()"). No code calls them.
+- **B12 — PascalCase QBO type literals:** 9 hits across [lib/QboPushers/AccountMatcher.php](../lib/QboPushers/AccountMatcher.php) lines 149-195 — all inside the `SUBTYPE_EQUIVALENCE` constant which is the legitimate cross-system equivalence map (FF key → QBO compat list per K-22 Trap #65 prescription). 1 hit at [lib/QboPushers/AccountValidator.php:51](../lib/QboPushers/AccountValidator.php:51) — comment documenting K-22.
+
+#### Patterns with zero hits (clean)
+
+- **B1** `db_query_one` — 0 hits ✓
+- **B2** `db_query(` — 0 hits ✓
+- **B4** `business_name` — 0 hits ✓ (column does not exist in schema; no code references it)
+- **B9** `current_user_name(` — 0 hits ✓ (correct helper `current_user()['name']` per Trap #56)
+- **B11** combined `function push(` in `lib/QboPushers/*Pusher.php` — 0 hits ✓ (every Pusher uses `pushCreate` + `pushUpdate` per D-PUSHER-CONTRACT)
+
+#### Disposition
+
+Per session STOP conditions: 1 CRITICAL live production bug surfaced → **session halted before commit; no D131 gate run; no SESSION LOG row appended**. Audit findings live in this section uncommitted; next planning chat decides whether to:
+
+1. Spin up an immediate-priority remediation session (e.g. S-PORTAL-INVOICE-TAX-DISPLAY-FIX) that lands the [app/portal/invoices/view.php](../app/portal/invoices/view.php) fix + folds this audit section into its commit, OR
+2. Commit the audit alone as its own RO landing then queue the fix session separately.
+
+Phase 1 trap sweep itself is otherwise clean — only finding is the portal display bug; all 11 other patterns produced either zero hits or comment/correct-equivalence false-positives. No K-22 catalog gaps to backfill in the reference doc.
+
+---
+
 ## 11. CHANGELOG
 
 ### v1.0 (2026-05-18) — Initial progress tracker
