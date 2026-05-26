@@ -477,6 +477,99 @@ No CRITICAL findings. No missing/extra Pusher or Enqueuer classes. No code paths
 
 ---
 
+### §12.5 Phase 3 validator gate audit findings (S-QBO-PHASE-3-VALIDATOR-GATE-AUDIT, 2026-05-26)
+
+Read-only audit of the 6 `assertReadyFor*Push()` gates in `lib/QboPushers/AccountValidator.php` across three axes: (1) test coverage matrix — 6 gates × 5 meaningful chart states; (2) error message conformance against D-QBO-VALIDATOR-5; (3) `SESSION_REQUIREMENTS` const correctness against D-QBO-VALIDATOR-3. Files examined: `lib/QboPushers/AccountValidator.php`, `lib/Exceptions/ChartOfAccountsIncompleteException.php`, `tests/_smoke_qbo_account_mapping.php` (C24–C29), `FLEETFORGE_QUICKBOOKS_SPEC.md §7.1`, `FLEETFORGE_PROGRESS.md` D-QBO-VALIDATOR-1 through -5 + D-QBO-8-2, `FLEETFORGE_CLAUDE_CODE_REFERENCE.md §11 Trap #68`. **1 CRITICAL / 6 MEDIUM / 3 LOW.** All 10 findings are SMOKE ADDITION — no code defect found; validator logic, message construction, and const literal are correct.
+
+#### COVERAGE MATRIX (6 gates × 5 states)
+
+State definitions:
+- **S1 — All required mapped → pass silently** (all required categories have ≥1 mapped FF account)
+- **S2 — One required category unmapped → throw** (one category blocking, ≥1 FF accounts exist for it but none mapped)
+- **S3 — Multiple required categories unmapped → throw** (≥2 categories blocking simultaneously)
+- **S4 — Empty-category state → "no FF account tagged" throw** (a required category has ZERO FF accounts tagged; applies naturally to `undeposited_funds` in v1 chart)
+- **S5 — Gate's categories mapped; others unmapped → pass** (regression guard for D-QBO-VALIDATOR-4 narrowing — confirms gate doesn't over-check)
+
+| Gate | Required Categories | S1 (pass) | S2 (one blocked) | S3 (multi blocked) | S4 (empty-cat) | S5 (scope narrow) |
+|---|---|---|---|---|---|---|
+| **assertReadyForInvoicePush** | ar_clearing, sales_revenue | **COVERED C24** — ar+sales mapped, others unmapped, gate passes | **COVERED C25** — only ar_clearing mapped; throws naming 'sales_revenue' | **COVERED C13†** — both unmapped (natural chart state); throws + unmappedAccounts non-empty | **GAP CRITICAL** — no sub-check tests empty-category path for a live gate (both categories have FF accounts in normal chart, so requires deliberate deactivation) | **COVERED C24** — passes when only required categories satisfied; irrelevant categories (AP, tax, UF) unmapped |
+| **assertReadyForPaymentPush** | ar_clearing, undeposited_funds | **GAP MEDIUM** — UF has no FF account in v1 chart; S1 requires synthetic UF row; no smoke covers pass state | **GAP MEDIUM** — S2 requires UF to have FF accounts (absent in v1); not naturally testable without chart extension | **GAP MEDIUM** — no smoke calls gate with both categories in default unmapped state | **COVERED C27** — ar_clearing mapped; UF has zero tagged FF accounts; throws naming 'undeposited_funds' + 'no FF account tagged'; ar_clearing correctly absent from message | **GAP MEDIUM** — no smoke verifies gate passes without checking AP/tax/sales_revenue |
+| **assertReadyForBillPush** | ap_clearing | **GAP MEDIUM** — no smoke calls gate with ap_clearing mapped | **GAP MEDIUM** — no smoke calls gate at all (ap_clearing unmapped → throw path untested) | **N/A** — single-category gate; structurally impossible to have >1 blocking | **GAP LOW** — ap_clearing has FF 2010 in chart; S4 not naturally reachable | **GAP MEDIUM** — no smoke calls gate in any state to confirm scope |
+| **assertReadyForBillPaymentPush** | ap_clearing, undeposited_funds | **GAP MEDIUM** — no smoke covers pass state (same UF constraint as PaymentPush) | **GAP MEDIUM** — no smoke tests one-category-blocked state | **GAP MEDIUM** — no smoke calls gate with both blocking simultaneously | **GAP MEDIUM** — no smoke calls gate to exercise UF empty-category branch via this gate | **GAP MEDIUM** — no smoke calls gate in any state |
+| **assertReadyForJournalEntryPush** | tax_receivable, tax_payable | **GAP MEDIUM** — no smoke calls gate with both tax categories mapped | **GAP MEDIUM** — no smoke tests one-tax-category unmapped path | **GAP MEDIUM** — no smoke calls gate with both unmapped (default chart state) | **GAP LOW** — tax_receivable has FF 1050+1060; tax_payable has 2030+2040; S4 not naturally reachable | **GAP MEDIUM** — no smoke calls gate to confirm scope excludes AR/AP/UF |
+| **assertReadyForFullCompliance** | all 6 | **GAP LOW** — no smoke maps all 6 and verifies pass; cutover-time check, manual in practice | **GAP LOW** — no smoke tests exactly-one-blocking; singular 'category' inflection unverified by this gate | **COVERED C26** — ar+sales mapped; gate throws naming ≥3 of {ap_clearing, tax_receivable, tax_payable, undeposited_funds} | **COVERED C26†** — UF empty-category fires within the FullCompliance throw; 'undeposited_funds' confirmed in message; "no FF account tagged" phrase not separately asserted | **GAP LOW** — no smoke calls assertReadyForFullCompliance in pass state |
+
+† Weak verification — sub-check exercises the code path but does not assert all required message details.
+
+**Covered cells: 8** (InvoicePush×S1, S2, S3, S5 + PaymentPush×S4 + FullCompliance×S3, S4 + InvoicePush×S5 counted with C24).
+**N/A cells: 1** (BillPush×S3 — structurally impossible).
+**GAP cells: 21** (below the 25-cell STOP threshold).
+
+#### ERROR MESSAGE CONFORMANCE (D-QBO-VALIDATOR-5)
+
+For each gate that throws (S2/S3/S4), the exception message is constructed in `assertCategoriesReady()` lines 395–430 of `AccountValidator.php`. Verified against all 4 criteria:
+
+| Criterion | Requirement | Code behavior | Status |
+|---|---|---|---|
+| **D1** | Blocking categories named explicitly | `foreach ($blocking as $cat)` — each blocking category appears as `$cat` prefix in message part | ✅ CONFORMS |
+| **D2** | Contributing FF accounts listed as `{code} {name}` | `array_map(fn($r) => "{$r['code']} {$r['name']}", ...)` — uses unmapped rows first, falls back to all-critical-rows if no unmapped | ✅ CONFORMS |
+| **D3** | Singular/plural inflection (`1 category` vs `N categories`) | `count($blocking) === 1 ? 'category' : 'categories'` | ✅ CONFORMS |
+| **D4** | Empty-category branch uses canonical phrasing | `"{$cat} (no FF account tagged with this category — operator must add + tag one before push)"` — exact Trap #68 phrase | ✅ CONFORMS |
+
+Full message template (reconstructed from code): `"{session_label} blocked: N required {category/categories} unmapped — {cat1}: {code1} {name1}, {code2} {name2} | {cat2}: ... | {cat3} (no FF account tagged with this category — operator must add + tag one before push). Map via /quickbooks/accounts before push."`
+
+**No CODE FIX findings.** Message construction code is correct for all reachable states.
+
+**One SMOKE-ONLY gap noted:** C13 (InvoicePush × S3) verifies throw + `unmappedAccounts` populated + 'unmapped' substring in message, but does NOT assert both `ar_clearing` and `sales_revenue` appear by name. D1 criterion is not fully verified by the smoke for the multi-blocking InvoicePush path.
+
+#### SESSION_REQUIREMENTS CONST VERIFICATION
+
+`AccountValidator::SESSION_REQUIREMENTS` (lines 101–108):
+
+| Session key | Const value (actual) | D-QBO-VALIDATOR-3 spec requirement | Match |
+|---|---|---|---|
+| `invoice_push` | `['ar_clearing', 'sales_revenue']` | `[ar_clearing, sales_revenue]` | ✅ EXACT |
+| `payment_push` | `['ar_clearing', 'undeposited_funds']` | `[ar_clearing, undeposited_funds]` | ✅ EXACT |
+| `bill_push` | `['ap_clearing']` | `[ap_clearing]` | ✅ EXACT |
+| `bill_payment_push` | `['ap_clearing', 'undeposited_funds']` | `[ap_clearing, undeposited_funds]` | ✅ EXACT |
+| `journal_entry_push` | `['tax_receivable', 'tax_payable']` | `[tax_receivable, tax_payable]` | ✅ EXACT |
+| `full_compliance` | `['ar_clearing', 'ap_clearing', 'undeposited_funds', 'tax_receivable', 'tax_payable', 'sales_revenue']` | `[all 6]` | ✅ EXACT |
+
+**No CRITICAL findings.** Const matches spec and D-QBO-VALIDATOR-3 decisions exactly.
+
+Spec §7.1 prose (`FLEETFORGE_QUICKBOOKS_SPEC.md` line 819) also matches — same 6 keys, same category lists, same UF actionable-error policy. ✅
+
+#### FINDINGS BY CLASSIFICATION
+
+All 10 findings are **SMOKE ADDITION**. No CODE FIX. No SPEC AMBIGUITY.
+
+| Finding | File | Classification | Summary | Remediation |
+|---|---|---|---|---|
+| **F-P3-01** | `tests/_smoke_qbo_account_mapping.php` | **CRITICAL / SMOKE ADDITION** | InvoicePush × S4: no sub-check tests invoice gate when ar_clearing or sales_revenue has zero tagged FF accounts (empty-category throw path for the live gate; InvoicePusher S-QBO-11 is production) | Add sub-check: temporarily clear `is_critical` on all `sales_revenue` rows, call `assertReadyForInvoicePush()`, assert throws with "no FF account tagged" phrase; restore `is_critical` in finally |
+| **F-P3-02** | `tests/_smoke_qbo_account_mapping.php:471–492` (C13) | **MEDIUM / SMOKE ADDITION** | InvoicePush × S3 message content: C13 asserts throw + 'unmapped' substring but does NOT verify both `ar_clearing` and `sales_revenue` appear by name (D1 criterion weakly covered) | Strengthen C13 or add separate sub-check: assert `str_contains($msg, 'ar_clearing')` AND `str_contains($msg, 'sales_revenue')` when both categories blocking |
+| **F-P3-03** | `tests/_smoke_qbo_account_mapping.php` | **MEDIUM / SMOKE ADDITION** | PaymentPush × S3 + S5: no sub-check calls `assertReadyForPaymentPush()` in multi-blocked state (default chart: ar_clearing unmapped + UF empty) or in scope-narrow state | Add sub-check for S3: call gate with no setup → assert throws naming both `ar_clearing` and `undeposited_funds`; add S5 sub-check: map ar_clearing + synthetic UF, verify AP/tax/sales don't block the gate |
+| **F-P3-04** | `tests/_smoke_qbo_account_mapping.php` | **MEDIUM / SMOKE ADDITION** | PaymentPush × S1 + S2: pass state and single-blocked-with-FF-account state are unreachable without a synthetic `undeposited_funds`-tagged FF account (v1 chart has none) | Add sub-check: insert synthetic FF account + `acc_qbo_account_map` row tagged `critical_category='undeposited_funds'`; test S1 (both mapped → pass) and S2 (only ar_clearing blocked → throws naming ar_clearing, not UF) |
+| **F-P3-05** | `tests/_smoke_qbo_account_mapping.php` | **MEDIUM / SMOKE ADDITION** | BillPush: zero sub-checks call `assertReadyForBillPush()` in any state | Add sub-checks: S2 (ap_clearing unmapped → throws naming 'ap_clearing'); S1 (ap_clearing mapped → passes); S5 (ar/tax/UF unmapped, ap_clearing mapped → passes, confirming scope) |
+| **F-P3-06** | `tests/_smoke_qbo_account_mapping.php` | **MEDIUM / SMOKE ADDITION** | BillPaymentPush: zero sub-checks call `assertReadyForBillPaymentPush()` in any state | Add sub-checks: S3 (both ap_clearing + UF blocking simultaneously → throws naming both categories, UF uses "no FF account tagged" phrase); S5 (scope narrow — ap_clearing + synthetic UF mapped, others irrelevant) |
+| **F-P3-07** | `tests/_smoke_qbo_account_mapping.php` | **MEDIUM / SMOKE ADDITION** | JournalEntryPush: zero sub-checks call `assertReadyForJournalEntryPush()` in any state | Add sub-checks: S3 (both tax_receivable + tax_payable unmapped → throws naming both); S1 (both mapped → passes); S5 (AR/AP/UF/sales unmapped, tax categories mapped → passes, confirming gate doesn't over-check) |
+| **F-P3-08** | `tests/_smoke_qbo_account_mapping.php` | **LOW / SMOKE ADDITION** | FullCompliance × S1: no sub-check calls `assertReadyForFullCompliance()` when all 6 categories mapped (the pre-cutover pass state; manual in practice, not CI-exercised) | Add sub-check: map all 6 categories synthetically (temp-map all 7 critical FF accounts), call `assertReadyForFullCompliance()`, assert no exception |
+| **F-P3-09** | `tests/_smoke_qbo_account_mapping.php` | **LOW / SMOKE ADDITION** | FullCompliance × S2: no sub-check tests exactly-one-blocking scenario; singular `'category'` inflection in exception message unverified for FullCompliance gate | Add sub-check: map 5 of 6 categories (leave ap_clearing unmapped); call `assertReadyForFullCompliance()`; assert message uses singular "1 required category unmapped" |
+| **F-P3-10** | `tests/_smoke_qbo_account_mapping.php` | **LOW / SMOKE ADDITION** | BillPush × S4 + JournalEntryPush × S4: empty-category path for `ap_clearing` / `tax_receivable` / `tax_payable` not tested (not naturally reachable — all 3 categories have FF accounts in live chart) | Add sub-checks: temporarily clear `is_critical` on all rows for each category; verify respective gate throws with "no FF account tagged" phrase; restore in finally |
+
+#### STOP CONDITION CHECK
+
+- **Part E (const mismatch):** ✅ None — `SESSION_REQUIREMENTS` matches D-QBO-VALIDATOR-3 on all 6 keys. PROCEED.
+- **Part D (live-path message error):** ✅ None — message construction is correct for all states including the live InvoicePush paths. PROCEED.
+- **GAP count:** 21 of 30 cells (below the 25-cell STOP threshold). PROCEED.
+
+#### SUMMARY
+
+**1 CRITICAL / 6 MEDIUM / 3 LOW gaps. 0 CODE FIX / 10 SMOKE ADDITION / 0 SPEC AMBIGUITY.**
+
+The validator architecture is sound: `SESSION_REQUIREMENTS` const matches spec exactly, message construction conforms to all D-QBO-VALIDATOR-5 criteria, and the empty-category Trap #68 branch fires correctly. All 10 findings are purely test coverage gaps for dormant Pusher sessions (S-QBO-13 through S-QBO-21 scope) — the single CRITICAL gap (InvoicePush × S4) is a defensive edge case for a live gate but not a reachable production state with the current chart (ar_clearing and sales_revenue both have active FF accounts). The recommended next step is a smoke-addition write-mode session extending `tests/_smoke_qbo_account_mapping.php` with sub-checks covering F-P3-01 (CRITICAL, address first) and F-P3-02 through F-P3-07 (MEDIUM, address before each dormant Pusher session ships).
+
+---
+
 ## 11. CHANGELOG
 
 ### v1.0 (2026-05-18) — Initial progress tracker
