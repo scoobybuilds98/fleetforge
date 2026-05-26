@@ -133,13 +133,22 @@ function sample_value(string $key, string $valueType): array {
 }
 
 // ── 1. Snapshot ALL settings that the UI can touch ─────────────────────
+// S-COUNTER-DRIFT-SECOND-PATH-AUDIT (2026-05-26): snapshot intentionally
+// does NOT filter by `label IS NOT NULL`. simulate_post() iterates over
+// ALL keys in the group when _form_keys is not provided (matching the
+// real settings-form handler) — including label-NULL housekeeping keys
+// like `invoice.next_number.YYYY` and `acc.next_je_number.YYYY` that
+// would otherwise be silently overwritten to '0' (integer default) by
+// simulate_post and never restored. The snapshot must cover everything
+// simulate_post could mutate, so the restore at the bottom of the file
+// returns the DB to its pre-test state.
 $uiGroups = [
     'company','invoices','leases','maintenance','alerts','notifications','yards',
     'gps','email','storage','aws','security','ai','slack','twilio','currency',
 ];
 $snapshotRows = db_select(
     "SELECT `key`, `value` FROM settings WHERE group_name IN (" .
-    implode(',', array_fill(0, count($uiGroups), '?')) . ") AND label IS NOT NULL",
+    implode(',', array_fill(0, count($uiGroups), '?')) . ")",
     $uiGroups
 );
 $snapshot = [];
