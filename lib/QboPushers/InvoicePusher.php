@@ -47,6 +47,12 @@ declare(strict_types=1);
  *           quickbooks.multi_currency_enabled (D-QBO-FIXPACK-12). When '0':
  *           omit both fields (QBO error 6000 fires on single-currency companies
  *           if CurrencyRef is sent). When '1': emit as FIXPACK-1 specified.
+ * @updated  S-QBO-PUSHER-CONTRACT-PAYDOWN — added private RESULT_BASE +
+ *           applied §6.8 canonical 5-key return shape on every path
+ *           (MEDIUM-C6 fix); backported D-QBO-FIXPACK-10 qbo_currency
+ *           snapshot mismatch warning to already_mapped branch
+ *           (MEDIUM-C9 fix; uses acc_qbo_invoice_map.qbo_currency column,
+ *           no HTTP call needed).
  * @decision D-QBO-11-1 (queued path; sync_mode gate),
  *           D-QBO-11-2 (tax-override at line + header),
  *           D-QBO-11-3 (FX rate via exchange_rate_to_cad),
@@ -70,6 +76,21 @@ use FleetForge\Exceptions\QuickBooksException;
 class InvoicePusher
 {
     /**
+     * Canonical §6.8 Pusher return shape — ensures all 5 keys are
+     * present on every return path. PHP + union operator fills absent
+     * keys with null; left-hand values always win so method-specific
+     * keys (http_code, error_code, mode) pass through unchanged.
+     * @spec FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 "Return shape"
+     */
+    private const RESULT_BASE = [
+        'success'    => null,
+        'status'     => null,
+        'qbo_id'     => null,
+        'sync_token' => null,
+        'error'      => null,
+    ];
+
+    /**
      * Push a new FF invoice into QBO. Idempotent — if already mapped,
      * returns 'already_mapped' without re-POSTing.
      */
@@ -89,7 +110,7 @@ class InvoicePusher
             'success' => false,
             'status'  => 'unsupported_in_session',
             'error'   => 'InvoicePusher::pushUpdate deferred to S-QBO-12 (Invoice Modification & Void Semantics).',
-        ];
+        ] + self::RESULT_BASE;
     }
 
     /**
@@ -103,7 +124,7 @@ class InvoicePusher
         //    mid-queue gets the new behavior next dispatch.
         $mode = (string) settings_get('quickbooks.sync_mode.invoice', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
-            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode];
+            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode] + self::RESULT_BASE;
         }
 
         // 2. Load FF invoice.
@@ -113,36 +134,54 @@ class InvoicePusher
                 'success' => false,
                 'status'  => 'ff_not_found',
                 'error'   => "FF invoice {$ffInvoiceId} not found",
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 3. Voided check per D-QBO-11-9. K-22: status enum value is
         //    'void' (NOT 'voided' as prompt drafted).
         if ($invoice['status'] === 'void') {
             self::recordSkipped($ffInvoiceId, $invoice, 'skipped_voided');
-            return ['success' => true, 'status' => 'skipped_voided'];
+            return ['success' => true, 'status' => 'skipped_voided'] + self::RESULT_BASE;
         }
 
         // 4. Soft-deleted check.
         if (($invoice['deleted_at'] ?? null) !== null) {
-            return ['success' => true, 'status' => 'skipped_soft_deleted'];
+            return ['success' => true, 'status' => 'skipped_soft_deleted'] + self::RESULT_BASE;
         }
 
         // 5. Existing mapping check (idempotency on CREATE per D-QBO-6-2 pattern).
         // Short-circuit BEFORE pre-flight so already-pushed invoices don't
         // re-evaluate the gates on every retry — they're done.
         $mapping = db_row(
-            "SELECT id, qbo_invoice_id, qbo_sync_token, push_status
+            "SELECT id, qbo_invoice_id, qbo_sync_token, push_status, qbo_currency
                FROM acc_qbo_invoice_map
               WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
         );
         if ($operation === 'create' && $mapping !== null && !empty($mapping['qbo_invoice_id'])) {
+            // D-QBO-FIXPACK-10 backport: compare FF invoice currency against
+            // qbo_currency snapshot (no HTTP needed — snapshotted at push time by
+            // recordSuccessfulPush). Best-effort: any error is caught silently so
+            // the idempotency no-op is never blocked by the advisory check.
+            try {
+                $ffCurrency  = strtoupper((string) ($invoice['currency'] ?? 'CAD'));
+                $qboCurrency = strtoupper((string) ($mapping['qbo_currency'] ?? ''));
+                if ($qboCurrency !== '' && $ffCurrency !== '' && $qboCurrency !== $ffCurrency) {
+                    error_log(
+                        "S-QBO-FIXPACK-10 WARNING: FF invoice {$ffInvoiceId} currency='{$ffCurrency}' " .
+                        "but mapped QBO invoice #{$mapping['qbo_invoice_id']} has qbo_currency='{$qboCurrency}'. " .
+                        "Currency drift detected. Operator action: void the QBO invoice, unlink the FF invoice " .
+                        "mapping (set qbo_invoice_id=NULL), then re-push."
+                    );
+                }
+            } catch (\Throwable $e) {
+                error_log("S-QBO-FIXPACK-10: InvoicePusher currency-mismatch check failed for FF invoice {$ffInvoiceId}: " . $e->getMessage());
+            }
             return [
                 'success' => true,
                 'status'  => 'already_mapped',
                 'qbo_id'  => (string) $mapping['qbo_invoice_id'],
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 6. Pre-flight gates (via InvoicePreflightGate; see gate docblock for full list).
@@ -157,7 +196,7 @@ class InvoicePusher
                 'success' => false,
                 'status'  => $typedStatus,
                 'error'   => $gate['reason'],
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 7. Load related entities. Customer used for GPS variant; lines
@@ -182,8 +221,9 @@ class InvoicePusher
             self::recordPushFailure($ffInvoiceId, $invoice, "Payload build failed: " . $e->getMessage(), 0);
             return [
                 'success' => false,
+                'status'  => 'payload_build_failed',
                 'error'   => "Payload build failed: " . $e->getMessage(),
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 9. HTTP call.
@@ -199,7 +239,7 @@ class InvoicePusher
                 'error'      => $e->getMessage(),
                 'http_code'  => $httpCode,
                 'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
-            ];
+            ] + self::RESULT_BASE;
         }
 
         $createdInvoice = $response['Invoice'] ?? null;
@@ -209,7 +249,7 @@ class InvoicePusher
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
                 'error'   => 'QBO response missing Invoice.Id',
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 10. Persist mapping with success state. SyncToken pinned per D-QBO-11-4.
@@ -220,7 +260,7 @@ class InvoicePusher
             'status'     => 'created',
             'qbo_id'     => (string) $createdInvoice['Id'],
             'sync_token' => (string) ($createdInvoice['SyncToken'] ?? '0'),
-        ];
+        ] + self::RESULT_BASE;
     }
 
     /**

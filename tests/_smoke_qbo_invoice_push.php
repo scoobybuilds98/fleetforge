@@ -12,7 +12,7 @@ declare(strict_types=1);
  * Self-cleaning: synthetic FF rows use sentinel ids (999990+) plus
  * settings snapshots restored in the finally block.
  *
- * 39 sub-checks (updated S-QBO-11-FIXPACK-1):
+ * 41 sub-checks (updated S-QBO-PUSHER-CONTRACT-PAYDOWN):
  *   Structural (1-7): table + 5 classes + lint
  *   TaxOverride (8-10): builds TotalTax via bcmath / throws on empty / line-level
  *   LineBuilder (11-15): emits lines, resolves Items, GPS variant, throws on unmapped, throws on integrity violation
@@ -26,12 +26,18 @@ declare(strict_types=1);
  *   CurrencyRef edge cases (35-38): CAD/USD explicit + NULL/zero rate throws
  *       (all gated on multi_currency_enabled='1'; D-QBO-FIXPACK-12)
  *   ENUM (39): push_status includes 2 new typed preflight codes
+ *   ReturnShape (40): §6.8 canonical 5-key return shape on skipped_by_mode path
+ *       (MEDIUM-C6 fix; S-QBO-PUSHER-CONTRACT-PAYDOWN)
+ *   FIXPACK-10 (41): already_mapped branch emits S-QBO-FIXPACK-10 WARNING when
+ *       FF invoice currency ≠ qbo_currency snapshot (MEDIUM-C9 backport)
  *
  * @session  S-QBO-11
  * @updated  S-QBO-11-FIXPACK-1 (C28 updated for always-emit CurrencyRef;
  *           C30–C39 new)
  * @updated  S-QBO-FIXPACK-3 (C28/C29/C35–C38 gated behind
  *           multi_currency_enabled='1'; D-QBO-FIXPACK-12)
+ * @updated  S-QBO-PUSHER-CONTRACT-PAYDOWN — added C40 (§6.8 return shape) +
+ *           C41 (FIXPACK-10 mismatch warning probe); total 41 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract), §17 (tax-override)
  * @decision D-QBO-FIXPACK-1 (always emit CurrencyRef),
  *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on missing non-CAD rate),
@@ -52,7 +58,7 @@ use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 39;
+$total    = 41;
 
 // Sentinel IDs we'll clean up at end
 $sentinelInvoiceIds = [];
@@ -1132,6 +1138,81 @@ try {
 }
 if (empty($c39Errors)) { echo "PASS C39 acc_qbo_invoice_map.push_status ENUM includes failed_preflight_field_too_long + failed_preflight_currency_mismatch\n"; $pass++; }
 else { echo "FAIL C39 " . implode('; ', $c39Errors) . "\n"; $failures[] = 'C39'; }
+
+// ── C40: §6.8 canonical return shape — all 5 keys present on skipped_by_mode path ──
+// Exercises RESULT_BASE merge: mode gate fires before the DB load so id=0 is fine.
+$c40Errors = [];
+try {
+    $setSetting('quickbooks.sync_mode.invoice', 'qbo_to_ff');
+    try {
+        $shapeResult = InvoicePusher::pushCreate(0); // mode gate fires before DB load; no real row needed
+    } finally {
+        $setSetting('quickbooks.sync_mode.invoice', 'sync');
+    }
+    foreach (['success', 'status', 'qbo_id', 'sync_token', 'error'] as $key) {
+        if (!array_key_exists($key, $shapeResult)) {
+            $c40Errors[] = "return shape missing key '{$key}' on skipped_by_mode path";
+        }
+    }
+    if (isset($shapeResult['success']) && !is_bool($shapeResult['success'])) {
+        $c40Errors[] = "'success' should be bool, got " . gettype($shapeResult['success']);
+    }
+} catch (Throwable $e) {
+    $c40Errors[] = 'C40 threw: ' . $e->getMessage();
+}
+if (empty($c40Errors)) {
+    echo "PASS C40 §6.8 canonical return shape — all 5 keys present (skipped_by_mode path; S-QBO-PUSHER-CONTRACT-PAYDOWN C6)\n";
+    $pass++;
+} else {
+    echo "FAIL C40 " . implode('; ', $c40Errors) . "\n";
+    $failures[] = 'C40';
+}
+
+// ── C41: D-QBO-FIXPACK-10 backport — already_mapped branch emits mismatch warning ──
+// Uses invoice 999990 (currency='CAD') + inserts mapping with qbo_currency='USD'.
+// Captures error_log output via ini_set to verify the S-QBO-FIXPACK-10 WARNING text.
+$c41Errors = [];
+try {
+    // Clean + insert mapping with qbo_currency='USD' to trigger mismatch probe.
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = 999990");
+    db_insert('acc_qbo_invoice_map', [
+        'ff_invoice_id'  => 999990,
+        'qbo_invoice_id' => 'TEST-SMOKE-FIXPACK10',
+        'qbo_sync_token' => '0',
+        'qbo_currency'   => 'USD',   // FF invoice has currency='CAD' → mismatch fires
+        'push_status'    => 'pushed',
+    ]);
+
+    // Redirect error_log to a temp file so we can inspect the warning output.
+    $tmpLog  = tempnam(sys_get_temp_dir(), 'ff_smoke_c41_');
+    $origLog = ini_get('error_log');
+    ini_set('error_log', (string) $tmpLog);
+
+    $result = InvoicePusher::pushCreate(999990);
+
+    ini_set('error_log', (string) $origLog);
+    $logContent = (file_exists($tmpLog) && is_readable($tmpLog)) ? file_get_contents($tmpLog) : '';
+    @unlink($tmpLog);
+
+    if (($result['status'] ?? null) !== 'already_mapped') {
+        $c41Errors[] = "expected status='already_mapped', got " . json_encode($result['status'] ?? null);
+    }
+    if (!str_contains($logContent, 'S-QBO-FIXPACK-10 WARNING')) {
+        $c41Errors[] = "expected 'S-QBO-FIXPACK-10 WARNING' in error_log output; captured: " . substr($logContent, 0, 300);
+    }
+    if (!str_contains($logContent, "qbo_currency='USD'")) {
+        $c41Errors[] = "warning should mention qbo_currency='USD'; captured: " . substr($logContent, 0, 300);
+    }
+} catch (Throwable $e) {
+    $c41Errors[] = 'C41 threw: ' . $e->getMessage();
+}
+if (empty($c41Errors)) {
+    echo "PASS C41 InvoicePusher already_mapped branch emits S-QBO-FIXPACK-10 WARNING on CAD/USD mismatch (MEDIUM-C9 fix)\n";
+    $pass++;
+} else {
+    echo "FAIL C41 " . implode('; ', $c41Errors) . "\n";
+    $failures[] = 'C41';
+}
 
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────

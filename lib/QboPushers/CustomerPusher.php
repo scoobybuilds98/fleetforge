@@ -57,6 +57,10 @@ declare(strict_types=1);
  *           on single-currency companies). When '1': emit CurrencyRef as
  *           FIXPACK-2 specified. The throw-on-empty-currency guard is
  *           likewise gated — only relevant when multi-currency is on.
+ * @updated  S-QBO-PUSHER-CONTRACT-PAYDOWN — standardized §6.8 5-key
+ *           return shape via RESULT_BASE + union operator (MEDIUM-C6
+ *           from Phase 2 contract audit). All return paths now guarantee
+ *           presence of success/status/qbo_id/sync_token/error keys.
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §8.1 (customer sync rules),
  *           §6.7 (worker dispatch pattern)
  * @decision D-QBO-6-1 (no delete enqueue), D-QBO-6-2 (idempotency),
@@ -73,6 +77,21 @@ use FleetForge\Exceptions\QuickBooksException;
 
 class CustomerPusher
 {
+    /**
+     * Canonical §6.8 Pusher return shape — ensures all 5 keys are
+     * present on every return path. PHP + union operator fills absent
+     * keys with null; left-hand values always win so method-specific
+     * keys (error_code, mode, http_code) pass through unchanged.
+     * @spec FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 "Return shape"
+     */
+    private const RESULT_BASE = [
+        'success'    => null,
+        'status'     => null,
+        'qbo_id'     => null,
+        'sync_token' => null,
+        'error'      => null,
+    ];
+
     /**
      * Push a new FF customer into QBO. Idempotent — if the customer
      * is already mapped (has a qbo_customer_id), returns
@@ -109,7 +128,7 @@ class CustomerPusher
         //    next dispatch without restarting the worker.
         $mode = (string) settings_get('quickbooks.sync_mode.customer', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
-            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode];
+            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode] + self::RESULT_BASE;
         }
 
         // 2. Load FF customer state. Selects only the columns this
@@ -123,13 +142,13 @@ class CustomerPusher
             [$ffCustomerId]
         );
         if ($ff === null) {
-            return ['success' => false, 'status' => 'ff_not_found', 'error' => "FF customer {$ffCustomerId} not found"];
+            return ['success' => false, 'status' => 'ff_not_found', 'error' => "FF customer {$ffCustomerId} not found"] + self::RESULT_BASE;
         }
         if ($ff['deleted_at'] !== null) {
             // Per D-QBO-6-1: FF soft-delete does NOT propagate to QBO.
             // Reaching here means the queue row was enqueued before
             // the customer was soft-deleted (or via an out-of-band path).
-            return ['success' => true, 'status' => 'skipped_soft_deleted'];
+            return ['success' => true, 'status' => 'skipped_soft_deleted'] + self::RESULT_BASE;
         }
 
         // 3. Look up existing mapping. May be NULL (first push), or
@@ -182,7 +201,7 @@ class CustomerPusher
                 'success' => true,
                 'status'  => 'already_mapped',
                 'qbo_id'  => (string) $mapping['qbo_customer_id'],
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 5. UPDATE path requires an existing mapping with both the
@@ -225,11 +244,11 @@ class CustomerPusher
             }
         } catch (QuickBooksException $e) {
             return [
-                'success'   => false,
-                'status'    => 'qbo_error',
-                'error'     => $e->getMessage(),
+                'success'    => false,
+                'status'     => 'qbo_error',
+                'error'      => $e->getMessage(),
                 'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 8. QBO returns { "Customer": {...}, "time": "..." } for both
@@ -240,7 +259,7 @@ class CustomerPusher
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
                 'error'   => 'QBO response missing Customer.Id',
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 9. Persist the mapping. Snapshot QBO-side fields so drift
@@ -291,7 +310,7 @@ class CustomerPusher
                               : ($effectiveOperation !== $operation ? 'created_from_update' : 'created'),
             'qbo_id'     => (string) $qboCustomer['Id'],
             'sync_token' => (string) ($qboCustomer['SyncToken'] ?? '0'),
-        ];
+        ] + self::RESULT_BASE;
     }
 
     /**

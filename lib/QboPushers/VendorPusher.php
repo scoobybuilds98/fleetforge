@@ -64,6 +64,9 @@ declare(strict_types=1);
  *           quickbooks.multi_currency_enabled (D-QBO-FIXPACK-12). When
  *           '0': omit CurrencyRef entirely. When '1': emit hardcoded
  *           'CAD' per D-QBO-FIXPACK-8 Option A.
+ * @updated  S-QBO-PUSHER-CONTRACT-PAYDOWN — added private RESULT_BASE +
+ *           applied §6.8 canonical 5-key return shape on every path
+ *           (MEDIUM-C6 fix).
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract),
  *           §7.5 (vendor mapping table)
  * @decision D-QBO-7-1 (1099 out of scope v1),
@@ -83,6 +86,21 @@ use FleetForge\Exceptions\QuickBooksException;
 
 class VendorPusher
 {
+    /**
+     * Canonical §6.8 Pusher return shape — ensures all 5 keys are
+     * present on every return path. PHP + union operator fills absent
+     * keys with null; left-hand values always win so method-specific
+     * keys (error_code, mode, http_code) pass through unchanged.
+     * @spec FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 "Return shape"
+     */
+    private const RESULT_BASE = [
+        'success'    => null,
+        'status'     => null,
+        'qbo_id'     => null,
+        'sync_token' => null,
+        'error'      => null,
+    ];
+
     /**
      * Push a new FF vendor into QBO. Idempotent — if the vendor is
      * already mapped (has a qbo_vendor_id), returns
@@ -115,7 +133,7 @@ class VendorPusher
         //    mode mid-queue gets the new behavior on the next dispatch.
         $mode = (string) settings_get('quickbooks.sync_mode.vendor', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
-            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode];
+            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode] + self::RESULT_BASE;
         }
 
         // 2. Load FF vendor state. Selects only the columns this Pusher
@@ -129,14 +147,14 @@ class VendorPusher
             [$ffVendorId]
         );
         if ($ff === null) {
-            return ['success' => false, 'status' => 'ff_not_found', 'error' => "FF vendor {$ffVendorId} not found"];
+            return ['success' => false, 'status' => 'ff_not_found', 'error' => "FF vendor {$ffVendorId} not found"] + self::RESULT_BASE;
         }
         if ($ff['deleted_at'] !== null) {
             // D-QBO-6-1 carry-over: FF soft-delete does NOT propagate
             // to QBO. Reaching here means the queue row was enqueued
             // before the vendor was soft-deleted (or via an out-of-band
             // path).
-            return ['success' => true, 'status' => 'skipped_soft_deleted'];
+            return ['success' => true, 'status' => 'skipped_soft_deleted'] + self::RESULT_BASE;
         }
 
         // 3. Look up existing mapping. May be NULL (first push), or
@@ -187,7 +205,7 @@ class VendorPusher
                 'success' => true,
                 'status'  => 'already_mapped',
                 'qbo_id'  => (string) $mapping['qbo_vendor_id'],
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 5. UPDATE path requires an existing mapping with qbo_vendor_id
@@ -233,7 +251,7 @@ class VendorPusher
                 'status'     => 'qbo_error',
                 'error'      => $e->getMessage(),
                 'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 8. QBO returns { "Vendor": {...}, "time": "..." } for both
@@ -244,7 +262,7 @@ class VendorPusher
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
                 'error'   => 'QBO response missing Vendor.Id',
-            ];
+            ] + self::RESULT_BASE;
         }
 
         // 9. Persist the mapping. Snapshot QBO-side fields so drift
@@ -298,7 +316,7 @@ class VendorPusher
                               : ($effectiveOperation !== $operation ? 'created_from_update' : 'created'),
             'qbo_id'     => (string) $qboVendor['Id'],
             'sync_token' => (string) ($qboVendor['SyncToken'] ?? '0'),
-        ];
+        ] + self::RESULT_BASE;
     }
 
     /**

@@ -18,7 +18,7 @@ declare(strict_types=1);
  * restore so the smoke leaves quickbooks.sync_enabled at its original
  * value (D-CPA-5 — must remain '0' after the smoke).
  *
- * 15 sub-checks:
+ * 16 sub-checks:
  *   C1: CustomerPusher class surface — pushCreate + pushUpdate +
  *       buildQboPayload public static, match dispatcher contract
  *   C2: CustomerEnqueuer class surface — enqueue public static
@@ -51,6 +51,8 @@ declare(strict_types=1);
  *       (D-QBO-FIXPACK-12: gate suppresses CurrencyRef in single-currency mode)
  *  C13: buildQboPayload multi_currency='1' + empty currency → QuickBooksException
  *       (D-QBO-FIXPACK-7: loud failure beats silent coercion; only when gate active)
+ *  C14: §6.8 canonical 5-key return shape present on skipped_by_mode path
+ *       (MEDIUM-C6 fix; S-QBO-PUSHER-CONTRACT-PAYDOWN)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
@@ -61,6 +63,8 @@ declare(strict_types=1);
  * @updated S-QBO-FIXPACK-3 — gated C3/C4/C11/C12/C13 behind
  *          multi_currency_enabled='1'; added C11b + C12b (multi_currency='0'
  *          → CurrencyRef absent); total 15 sub-checks (D-QBO-FIXPACK-12).
+ * @updated S-QBO-PUSHER-CONTRACT-PAYDOWN — added C14 (§6.8 return shape
+ *          check); total 16 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §8.1
  */
 
@@ -71,7 +75,7 @@ use FleetForge\QboPushers\CustomerEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 15;
+$total    = 16;
 
 /** Sentinel customer ids we inserted for synthetic testing. */
 $sentinelCustomerIds = [];
@@ -553,6 +557,32 @@ if (empty($c13Errors)) {
 } else {
     echo "FAIL C13 " . implode('; ', $c13Errors) . "\n";
     $failures[] = 'C13';
+}
+
+// ── C14: §6.8 canonical return shape — all 5 keys present on skipped_by_mode path ──
+// Exercises RESULT_BASE merge: mode gate fires before the DB load so id=0 is fine.
+$c14Errors = [];
+try {
+    ff_smoke_set_setting('quickbooks.sync_mode.customer', 'qbo_to_ff');
+    $shapeResult = CustomerPusher::pushCreate(0); // mode gate fires before DB load; no real row needed
+    ff_smoke_set_setting('quickbooks.sync_mode.customer', 'sync');
+    foreach (['success', 'status', 'qbo_id', 'sync_token', 'error'] as $key) {
+        if (!array_key_exists($key, $shapeResult)) {
+            $c14Errors[] = "return shape missing key '{$key}' on skipped_by_mode path";
+        }
+    }
+    if (isset($shapeResult['success']) && !is_bool($shapeResult['success'])) {
+        $c14Errors[] = "'success' should be bool, got " . gettype($shapeResult['success']);
+    }
+} catch (Throwable $e) {
+    $c14Errors[] = 'C14 threw: ' . $e->getMessage();
+}
+if (empty($c14Errors)) {
+    echo "PASS C14 §6.8 canonical return shape — all 5 keys present (skipped_by_mode path; S-QBO-PUSHER-CONTRACT-PAYDOWN C6)\n";
+    $pass++;
+} else {
+    echo "FAIL C14 " . implode('; ', $c14Errors) . "\n";
+    $failures[] = 'C14';
 }
 
 } finally {
