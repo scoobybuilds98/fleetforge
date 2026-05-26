@@ -90,6 +90,14 @@ $page = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
 $perPage = min(100, max(10, clean_int($_GET['per_page'] ?? 25) ?? 25));
 $offset = ($page - 1) * $perPage;
 
+// S-QBO-INVOICE-LIST-BADGE: project the QBO mapping row alongside each
+// invoice when QBO is connected, so the index page can render a per-row
+// push-status badge. JOIN omitted entirely when disconnected to keep the
+// query cost minimal. Aliased columns match the UI's Alpine fields.
+$qboConnected = (string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected';
+$qboSelect    = $qboConnected ? ", m.push_status AS qbo_push_status, m.qbo_invoice_id AS qbo_invoice_id" : "";
+$qboJoin      = $qboConnected ? " LEFT JOIN acc_qbo_invoice_map m ON m.ff_invoice_id = i.id" : "";
+
 $total = db_count("SELECT COUNT(*) FROM invoices i WHERE {$whereSQL}", $params);
 $rows = db_select(
     "SELECT
@@ -122,7 +130,9 @@ $rows = db_select(
         i.auto_generated,
         i.created_at,
         i.updated_at
+        {$qboSelect}
      FROM invoices i
+     {$qboJoin}
      WHERE {$whereSQL}
      ORDER BY i.{$sort} {$dir}
      LIMIT {$perPage} OFFSET {$offset}",

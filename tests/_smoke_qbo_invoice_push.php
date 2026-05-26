@@ -38,6 +38,9 @@ declare(strict_types=1);
  *           multi_currency_enabled='1'; D-QBO-FIXPACK-12)
  * @updated  S-QBO-PUSHER-CONTRACT-PAYDOWN — added C40 (§6.8 return shape) +
  *           C41 (FIXPACK-10 mismatch warning probe); total 41 sub-checks.
+ * @updated  S-QBO-INVOICE-LIST-BADGE — added C42 (API LEFT JOIN +
+ *           connection_status gate) + C43 (UI column conditional + Alpine
+ *           helpers); total 43 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract), §17 (tax-override)
  * @decision D-QBO-FIXPACK-1 (always emit CurrencyRef),
  *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on missing non-CAD rate),
@@ -58,7 +61,7 @@ use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 41;
+$total    = 43;
 
 // Sentinel IDs we'll clean up at end
 $sentinelInvoiceIds = [];
@@ -1212,6 +1215,78 @@ if (empty($c41Errors)) {
 } else {
     echo "FAIL C41 " . implode('; ', $c41Errors) . "\n";
     $failures[] = 'C41';
+}
+
+// ── C42: S-QBO-INVOICE-LIST-BADGE — API extends invoice list SELECT with LEFT JOIN ──
+// api/v1/invoices/index.php must JOIN acc_qbo_invoice_map when QBO connected
+// so the index page can render the per-row QBO badge.
+$c42Errors = [];
+try {
+    $apiPath = realpath(__DIR__ . '/../api/v1/invoices/index.php');
+    if ($apiPath === false || !is_readable($apiPath)) {
+        $c42Errors[] = 'api/v1/invoices/index.php missing or unreadable';
+    } else {
+        $src = file_get_contents($apiPath);
+        if (!preg_match('/LEFT\s+JOIN\s+acc_qbo_invoice_map\s+m\s+ON\s+m\.ff_invoice_id\s*=\s*i\.id/i', $src)) {
+            $c42Errors[] = "expected LEFT JOIN acc_qbo_invoice_map m ON m.ff_invoice_id = i.id in invoice list SELECT";
+        }
+        if (!str_contains($src, 'qbo_push_status')) {
+            $c42Errors[] = "expected qbo_push_status alias projected in invoice list SELECT";
+        }
+        if (!str_contains($src, "quickbooks.connection_status")) {
+            $c42Errors[] = "expected connection_status gate on JOIN — JOIN must be omitted when QBO disconnected";
+        }
+    }
+} catch (Throwable $e) {
+    $c42Errors[] = 'C42 threw: ' . $e->getMessage();
+}
+if (empty($c42Errors)) {
+    echo "PASS C42 api/v1/invoices/index.php LEFT JOINs acc_qbo_invoice_map when QBO connected (S-QBO-INVOICE-LIST-BADGE)\n";
+    $pass++;
+} else {
+    echo "FAIL C42 " . implode('; ', $c42Errors) . "\n";
+    $failures[] = 'C42';
+}
+
+// ── C43: S-QBO-INVOICE-LIST-BADGE — UI gates the column on QBO connection ──
+// app/admin/invoices/index.php must reference qbo_push_status / qboIcon /
+// qboBadgeClass only inside a $qboConnected conditional sourced from
+// settings_get('quickbooks.connection_status', ...).
+$c43Errors = [];
+try {
+    $uiPath = realpath(__DIR__ . '/../app/admin/invoices/index.php');
+    if ($uiPath === false || !is_readable($uiPath)) {
+        $c43Errors[] = 'app/admin/invoices/index.php missing or unreadable';
+    } else {
+        $src = file_get_contents($uiPath);
+        if (!preg_match("/\\\$qboConnected\s*=\s*\(string\)\s*settings_get\('quickbooks\.connection_status'/", $src)) {
+            $c43Errors[] = "expected \$qboConnected assignment sourced from settings_get('quickbooks.connection_status', ...)";
+        }
+        if (!preg_match('/<\?php\s+if\s*\(\s*\$qboConnected\s*\)\s*:/', $src)) {
+            $c43Errors[] = "expected at least one <?php if (\$qboConnected): ?> gate wrapping the QBO column";
+        }
+        if (!str_contains($src, 'qbo_push_status')) {
+            $c43Errors[] = "expected qbo_push_status reference in the column body";
+        }
+        if (!str_contains($src, 'qboBadgeClass') || !str_contains($src, 'qboIcon') || !str_contains($src, 'qboLabel')) {
+            $c43Errors[] = "expected qboBadgeClass + qboIcon + qboLabel Alpine helpers defined";
+        }
+        // PHP lint on the UI file
+        $out = []; $code = 0;
+        exec('php -l ' . escapeshellarg($uiPath) . ' 2>&1', $out, $code);
+        if ($code !== 0) {
+            $c43Errors[] = "app/admin/invoices/index.php lint failed: " . implode('; ', $out);
+        }
+    }
+} catch (Throwable $e) {
+    $c43Errors[] = 'C43 threw: ' . $e->getMessage();
+}
+if (empty($c43Errors)) {
+    echo "PASS C43 app/admin/invoices/index.php QBO column gated on connection_status + Alpine helpers defined (S-QBO-INVOICE-LIST-BADGE)\n";
+    $pass++;
+} else {
+    echo "FAIL C43 " . implode('; ', $c43Errors) . "\n";
+    $failures[] = 'C43';
 }
 
 } finally {

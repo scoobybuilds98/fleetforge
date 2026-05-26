@@ -59,6 +59,12 @@ $ar90 = db_row(
     []
 );
 
+// S-QBO-INVOICE-LIST-BADGE: per-row QBO push-status column on the list.
+// Visible only when QBO is connected — column hidden entirely (header
+// + body cell) when disconnected so the layout stays compact for
+// non-QBO operators.
+$qboConnected = (string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected';
+
 $pageTitle = 'Invoices';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -294,6 +300,9 @@ require_once FF_ROOT . '/includes/header.php';
                                 <span x-show="filters.sort === 'status'"
                                       x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                             </th>
+                            <?php if ($qboConnected): /* S-QBO-INVOICE-LIST-BADGE column header — gated on quickbooks.connection_status */ ?>
+                            <th scope="col" style="width:1%;white-space:nowrap;text-align:center;" title="QuickBooks sync status">QBO</th>
+                            <?php endif; ?>
                             <th scope="col" style="width:1%;white-space:nowrap;"></th>
                         </tr>
                     </thead>
@@ -341,6 +350,21 @@ require_once FF_ROOT . '/includes/header.php';
                                           x-text="statusLabel(inv.status)">
                                     </span>
                                 </td>
+                                <?php if ($qboConnected): /* S-QBO-INVOICE-LIST-BADGE per-row badge — clicks open the QBO invoices admin */ ?>
+                                <td style="text-align:center;white-space:nowrap;">
+                                    <template x-if="inv.qbo_push_status">
+                                        <a :href="'<?= base_url('quickbooks/invoices') ?>'"
+                                           :title="qboLabel(inv.qbo_push_status)"
+                                           :class="qboBadgeClass(inv.qbo_push_status)"
+                                           class="badge badge-no-dot"
+                                           style="font-size:11px; text-decoration:none; min-width:1.5em; display:inline-block;"
+                                           x-text="qboIcon(inv.qbo_push_status)"></a>
+                                    </template>
+                                    <template x-if="!inv.qbo_push_status">
+                                        <span class="text-muted" style="font-size:11px;" title="QuickBooks: not synced">○</span>
+                                    </template>
+                                </td>
+                                <?php endif; ?>
                                 <td style="text-align:right;white-space:nowrap;">
                                     <a :href="'<?= base_url('invoices/show') ?>?id=' + inv.id"
                                        class="btn btn-ghost btn-xs">View</a>
@@ -597,6 +621,37 @@ function FF_Invoices() {
             const n = parseFloat(val);
             if (isNaN(n)) return '0.00';
             return n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        // S-QBO-INVOICE-LIST-BADGE: per-row QBO push-status helpers.
+        // Vocabulary mirrors app/admin/invoices/show.php lines 1082-1107
+        // so the list-view badge classifications stay consistent with
+        // the canonical S-QBO-11 show-page badge.
+        qboBadgeClass(s) {
+            if (s === 'pushed') return 'badge-success';
+            if (s === 'failed') return 'badge-danger';
+            if (typeof s === 'string' && s.startsWith('failed_preflight')) return 'badge-warning';
+            return 'badge-neutral'; // pending, skipped_*, anything else
+        },
+        qboIcon(s) {
+            if (s === 'pushed') return '✓';
+            if (s === 'pending') return '⋯';
+            if (typeof s === 'string' && s.startsWith('failed')) return '✗';
+            if (typeof s === 'string' && s.startsWith('skipped')) return '–';
+            return '○';
+        },
+        qboLabel(s) {
+            const m = {
+                pushed:                              'QuickBooks: Pushed',
+                pending:                             'QuickBooks: Queued',
+                failed:                              'QuickBooks: Push Failed',
+                failed_preflight:                    'QuickBooks: Pre-flight Blocked',
+                failed_preflight_field_too_long:     'QuickBooks: Pre-flight Blocked (field too long)',
+                failed_preflight_currency_mismatch:  'QuickBooks: Pre-flight Blocked (currency mismatch)',
+                skipped_voided:                      'QuickBooks: Skipped (voided)',
+                skipped_by_mode:                     'QuickBooks: Skipped (mode)',
+            };
+            return m[s] || (s ? ('QuickBooks: ' + s) : 'QuickBooks: not synced');
         },
     };
 }
