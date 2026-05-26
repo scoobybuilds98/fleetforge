@@ -31,7 +31,7 @@ $perPage = min(100, max(10, (int) ($_GET['per_page'] ?? 25)));
 $offset = ($page - 1) * $perPage;
 
 // Status filter — whitelist against actual ENUM values.
-$validStatuses = ['pending','pushed','failed','skipped_voided','skipped_by_mode','failed_preflight'];
+$validStatuses = ['pending','pushed','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight'];
 $statusFilter = isset($_GET['status']) && $_GET['status'] !== ''
     ? array_values(array_intersect(explode(',', (string) $_GET['status']), $validStatuses))
     : [];
@@ -51,12 +51,13 @@ try {
         "SELECT push_status, COUNT(*) AS c FROM acc_qbo_invoice_map GROUP BY push_status"
     );
     $kpis = [
-        'pending'          => 0,
-        'pushed'           => 0,
-        'failed'           => 0,
-        'failed_preflight' => 0,
-        'skipped_voided'   => 0,
-        'skipped_by_mode'  => 0,
+        'pending'              => 0,
+        'pushed'               => 0,
+        'failed'               => 0,
+        'failed_preflight'     => 0,
+        'skipped_voided'       => 0,
+        'skipped_by_mode'      => 0,
+        'skipped_soft_deleted' => 0,
     ];
     foreach ($kpiRows as $k) {
         $kpis[$k['push_status']] = (int) $k['c'];

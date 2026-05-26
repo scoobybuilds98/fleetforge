@@ -45,6 +45,9 @@ declare(strict_types=1);
  *           sync_log data load) + C45 (panel gated on connection_status) +
  *           C46 (old header badge removed) + C47 (Retry button gated on
  *           quickbooks.edit_credentials); total 47 sub-checks.
+ * @updated  S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE — added C48 (soft-deleted
+ *           skip records map + sync_log) + C49 (sync_mode=disabled skip
+ *           records map + sync_log); total 49 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract), §17 (tax-override)
  * @decision D-QBO-FIXPACK-1 (always emit CurrencyRef),
  *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on missing non-CAD rate),
@@ -65,7 +68,7 @@ use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 47;
+$total    = 49;
 
 // Sentinel IDs we'll clean up at end
 $sentinelInvoiceIds = [];
@@ -1432,6 +1435,176 @@ if (empty($c47Errors)) {
     $failures[] = 'C47';
 }
 
+// ── C48: S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE — soft-deleted invoice push ──
+// Asserts InvoicePusher::pushCreate on a soft-deleted invoice:
+//   - Returns success=true, status='skipped_soft_deleted', outcome='skipped'
+//   - Records map row with push_status='skipped_soft_deleted'
+//   - Writes acc_qbo_sync_log row with error_code='skipped_soft_deleted', response_status NULL
+// Closes the silent false-complete bug class identified in S-QBO-WORKER-FALSE-COMPLETE-DIAGNOSIS.
+$c48Errors = [];
+try {
+    // Fixture: invoice 999992, status='sent', deleted_at set (soft-deleted).
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = 999992");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='invoice' AND entity_id = 999992");
+    db_execute("DELETE FROM invoice_line_items WHERE invoice_id = 999992");
+    db_execute("DELETE FROM invoices WHERE id = 999992");
+
+    db_insert('invoices', [
+        'id'                    => 999992,
+        'invoice_number'        => 'SMK-C48-' . substr((string) time(), -6),
+        'customer_id'           => 999990,
+        'invoice_type'          => 'regular',
+        'billing_period_start'  => '2026-05-01',
+        'billing_period_end'    => '2026-05-31',
+        'billing_period_days'   => 31,
+        'billing_type'          => 'single_period',
+        'invoice_date'          => '2026-05-31',
+        'due_date'              => '2026-06-30',
+        'status'                => 'sent',
+        'subtotal'              => '500.00',
+        'tax_total'             => '0.00',
+        'total_amount'          => '500.00',
+        'balance_due'           => '500.00',
+        'currency'              => 'CAD',
+        'company_name_snapshot' => 'SMOKE C48 Customer',
+        'subtotal_after_discount' => '500.00',
+        'notes'                 => 'SMOKE C48 — soft-deleted invoice',
+        'deleted_at'            => '2026-05-26 00:00:00',
+    ]);
+
+    // Ensure sync_mode.invoice is 'sync' so gate 1 doesn't intercept first.
+    $setSetting('quickbooks.sync_mode.invoice', 'sync');
+
+    $result = InvoicePusher::pushCreate(999992, null);
+
+    if (($result['success'] ?? null) !== true) {
+        $c48Errors[] = "expected success=true, got " . var_export($result['success'] ?? null, true);
+    }
+    if (($result['status'] ?? null) !== 'skipped_soft_deleted') {
+        $c48Errors[] = "expected status='skipped_soft_deleted', got '" . ($result['status'] ?? 'NULL') . "'";
+    }
+    if (($result['outcome'] ?? null) !== 'skipped') {
+        $c48Errors[] = "expected outcome='skipped', got '" . ($result['outcome'] ?? 'NULL') . "'";
+    }
+
+    $mapRow = db_row("SELECT push_status FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?", [999992]);
+    if ($mapRow === null) {
+        $c48Errors[] = "expected acc_qbo_invoice_map row for ff_invoice_id=999992 (none found)";
+    } elseif (($mapRow['push_status'] ?? null) !== 'skipped_soft_deleted') {
+        $c48Errors[] = "expected map.push_status='skipped_soft_deleted', got '" . ($mapRow['push_status'] ?? 'NULL') . "'";
+    }
+
+    $logRow = db_row(
+        "SELECT error_code, response_status, http_method FROM acc_qbo_sync_log
+          WHERE entity_type='invoice' AND entity_id=? AND error_code='skipped_soft_deleted'
+          ORDER BY id DESC LIMIT 1",
+        [999992]
+    );
+    if ($logRow === null) {
+        $c48Errors[] = "expected acc_qbo_sync_log row with error_code='skipped_soft_deleted' for entity_id=999992 (none found)";
+    } else {
+        if ($logRow['response_status'] !== null) {
+            $c48Errors[] = "expected sync_log.response_status=NULL (non-HTTP skip), got " . var_export($logRow['response_status'], true);
+        }
+        if ($logRow['http_method'] !== 'SKIP') {
+            $c48Errors[] = "expected sync_log.http_method='SKIP' sentinel, got '" . ($logRow['http_method'] ?? 'NULL') . "'";
+        }
+    }
+} catch (Throwable $e) {
+    $c48Errors[] = 'C48 threw: ' . $e->getMessage();
+}
+if (empty($c48Errors)) {
+    echo "PASS C48 InvoicePusher soft-deleted skip records map + sync_log (S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE)\n";
+    $pass++;
+} else {
+    echo "FAIL C48 " . implode('; ', $c48Errors) . "\n";
+    $failures[] = 'C48';
+}
+
+// ── C49: S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE — sync_mode=disabled invoice push ──
+// Same shape as C48 but the skip is triggered by sync_mode.invoice='disabled'
+// rather than soft-deletion. Asserts:
+//   - Returns success=true, status='skipped_by_mode', outcome='skipped'
+//   - Records map row with push_status='skipped_by_mode'
+//   - Writes acc_qbo_sync_log row with error_code='skipped_by_mode'
+$c49Errors = [];
+try {
+    // Fixture: invoice 999993, status='sent', deleted_at NULL.
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = 999993");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='invoice' AND entity_id = 999993");
+    db_execute("DELETE FROM invoice_line_items WHERE invoice_id = 999993");
+    db_execute("DELETE FROM invoices WHERE id = 999993");
+
+    db_insert('invoices', [
+        'id'                    => 999993,
+        'invoice_number'        => 'SMK-C49-' . substr((string) time(), -6),
+        'customer_id'           => 999990,
+        'invoice_type'          => 'regular',
+        'billing_period_start'  => '2026-05-01',
+        'billing_period_end'    => '2026-05-31',
+        'billing_period_days'   => 31,
+        'billing_type'          => 'single_period',
+        'invoice_date'          => '2026-05-31',
+        'due_date'              => '2026-06-30',
+        'status'                => 'sent',
+        'subtotal'              => '500.00',
+        'tax_total'             => '0.00',
+        'total_amount'          => '500.00',
+        'balance_due'           => '500.00',
+        'currency'              => 'CAD',
+        'company_name_snapshot' => 'SMOKE C49 Customer',
+        'subtotal_after_discount' => '500.00',
+        'notes'                 => 'SMOKE C49 — sync_mode=disabled',
+    ]);
+
+    // Flip sync_mode.invoice so gate 1 intercepts. $origSettings already
+    // snapshotted at smoke start; finally{} restores.
+    $setSetting('quickbooks.sync_mode.invoice', 'disabled');
+
+    $result = InvoicePusher::pushCreate(999993, null);
+
+    // Restore sync_mode immediately so subsequent assertions aren't affected.
+    $setSetting('quickbooks.sync_mode.invoice', 'sync');
+
+    if (($result['success'] ?? null) !== true) {
+        $c49Errors[] = "expected success=true, got " . var_export($result['success'] ?? null, true);
+    }
+    if (($result['status'] ?? null) !== 'skipped_by_mode') {
+        $c49Errors[] = "expected status='skipped_by_mode', got '" . ($result['status'] ?? 'NULL') . "'";
+    }
+    if (($result['outcome'] ?? null) !== 'skipped') {
+        $c49Errors[] = "expected outcome='skipped', got '" . ($result['outcome'] ?? 'NULL') . "'";
+    }
+
+    $mapRow = db_row("SELECT push_status FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?", [999993]);
+    if ($mapRow === null) {
+        $c49Errors[] = "expected acc_qbo_invoice_map row for ff_invoice_id=999993 (none found)";
+    } elseif (($mapRow['push_status'] ?? null) !== 'skipped_by_mode') {
+        $c49Errors[] = "expected map.push_status='skipped_by_mode', got '" . ($mapRow['push_status'] ?? 'NULL') . "'";
+    }
+
+    $logRow = db_row(
+        "SELECT error_code, response_status FROM acc_qbo_sync_log
+          WHERE entity_type='invoice' AND entity_id=? AND error_code='skipped_by_mode'
+          ORDER BY id DESC LIMIT 1",
+        [999993]
+    );
+    if ($logRow === null) {
+        $c49Errors[] = "expected acc_qbo_sync_log row with error_code='skipped_by_mode' for entity_id=999993 (none found)";
+    } elseif ($logRow['response_status'] !== null) {
+        $c49Errors[] = "expected sync_log.response_status=NULL (non-HTTP skip), got " . var_export($logRow['response_status'], true);
+    }
+} catch (Throwable $e) {
+    $c49Errors[] = 'C49 threw: ' . $e->getMessage();
+}
+if (empty($c49Errors)) {
+    echo "PASS C49 InvoicePusher sync_mode='disabled' skip records map + sync_log (S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE)\n";
+    $pass++;
+} else {
+    echo "FAIL C49 " . implode('; ', $c49Errors) . "\n";
+    $failures[] = 'C49';
+}
+
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────
     // Restore settings to pre-smoke values
@@ -1451,12 +1624,15 @@ if (empty($c47Errors)) {
         }
     }
 
-    // Sentinel cleanup — invoice_map + invoice_line_items + invoices + customer_map + customers
+    // Sentinel cleanup — invoice_map + sync_log + invoice_line_items + invoices + customer_map + customers
+    // S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE added 999992 + 999993 (C48 + C49)
+    // and the new sync_log writes from recordSkipped — clean both.
     try {
-        db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id IN (999990, 999991)");
-        db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id IN (999990, 999991)");
-        db_execute("DELETE FROM invoice_line_items WHERE invoice_id IN (999990, 999991)");
-        db_execute("DELETE FROM invoices WHERE id IN (999990, 999991)");
+        db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id IN (999990, 999991, 999992, 999993)");
+        db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id IN (999990, 999991, 999992, 999993)");
+        db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='invoice' AND entity_id IN (999990, 999991, 999992, 999993)");
+        db_execute("DELETE FROM invoice_line_items WHERE invoice_id IN (999990, 999991, 999992, 999993)");
+        db_execute("DELETE FROM invoices WHERE id IN (999990, 999991, 999992, 999993)");
         db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = 999990 OR qbo_customer_id LIKE 'TEST-SMOKE-C-%'");
         db_execute("DELETE FROM customers WHERE id = 999990");
     } catch (Throwable $e) {

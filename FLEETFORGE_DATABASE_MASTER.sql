@@ -1109,7 +1109,7 @@ CREATE TABLE `acc_qbo_invoice_map` (
   `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
   `ff_invoice_snapshot_total` decimal(15,2) DEFAULT NULL COMMENT 'FF total_amount snapshot at push time — drift baseline',
   `ff_engine_version` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'period_independent | holistic | unknown. invoices.engine_version DOES NOT exist on disk today; column here is forward-compat. K-22 silent resolution per [[feedback_trust_file_over_prompt]].',
-  `push_status` enum('pending','pushed','failed','skipped_voided','skipped_by_mode','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'D-QBO-11-1 lifecycle states; typed preflight codes per D-QBO-FIXPACK-5',
+  `push_status` enum('pending','pushed','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'D-QBO-11-1 lifecycle states; typed preflight codes per D-QBO-FIXPACK-5; skipped_soft_deleted added in S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE',
   `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error message for failed/failed_preflight states',
   `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
   `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',

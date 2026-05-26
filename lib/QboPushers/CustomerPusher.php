@@ -128,7 +128,7 @@ class CustomerPusher
         //    next dispatch without restarting the worker.
         $mode = (string) settings_get('quickbooks.sync_mode.customer', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
-            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode] + self::RESULT_BASE;
+            return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
         }
 
         // 2. Load FF customer state. Selects only the columns this
@@ -142,13 +142,13 @@ class CustomerPusher
             [$ffCustomerId]
         );
         if ($ff === null) {
-            return ['success' => false, 'status' => 'ff_not_found', 'error' => "FF customer {$ffCustomerId} not found"] + self::RESULT_BASE;
+            return ['success' => false, 'status' => 'ff_not_found', 'outcome' => 'failed', 'error' => "FF customer {$ffCustomerId} not found"] + self::RESULT_BASE;
         }
         if ($ff['deleted_at'] !== null) {
             // Per D-QBO-6-1: FF soft-delete does NOT propagate to QBO.
             // Reaching here means the queue row was enqueued before
             // the customer was soft-deleted (or via an out-of-band path).
-            return ['success' => true, 'status' => 'skipped_soft_deleted'] + self::RESULT_BASE;
+            return ['success' => true, 'status' => 'skipped_soft_deleted', 'outcome' => 'skipped'] + self::RESULT_BASE;
         }
 
         // 3. Look up existing mapping. May be NULL (first push), or
@@ -200,6 +200,7 @@ class CustomerPusher
             return [
                 'success' => true,
                 'status'  => 'already_mapped',
+                'outcome' => 'created',  // replay no-op == created semantically
                 'qbo_id'  => (string) $mapping['qbo_customer_id'],
             ] + self::RESULT_BASE;
         }
@@ -246,6 +247,7 @@ class CustomerPusher
             return [
                 'success'    => false,
                 'status'     => 'qbo_error',
+                'outcome'    => 'failed',
                 'error'      => $e->getMessage(),
                 'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
             ] + self::RESULT_BASE;
@@ -258,6 +260,7 @@ class CustomerPusher
             return [
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
+                'outcome' => 'failed',
                 'error'   => 'QBO response missing Customer.Id',
             ] + self::RESULT_BASE;
         }
@@ -308,6 +311,7 @@ class CustomerPusher
             'status'     => $effectiveOperation === 'update'
                               ? 'updated'
                               : ($effectiveOperation !== $operation ? 'created_from_update' : 'created'),
+            'outcome'    => $effectiveOperation === 'update' ? 'updated' : 'created',
             'qbo_id'     => (string) $qboCustomer['Id'],
             'sync_token' => (string) ($qboCustomer['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;

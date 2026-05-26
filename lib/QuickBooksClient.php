@@ -170,6 +170,21 @@ class QuickBooksClient
     }
 
     /**
+     * Read accessor for the static worker queue_id. Returns null when no
+     * worker context is set (e.g. direct CLI invocation, smoke runs).
+     *
+     * Used by Pushers' record* helpers so non-HTTP sync_log rows (skip
+     * events per S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE) can still be
+     * linked back to the queue row that triggered them.
+     *
+     * @session  S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE (D-SYNC-LOG-NON-HTTP-INVOICE-4)
+     */
+    public static function workerQueueId(): ?int
+    {
+        return self::$workerQueueId;
+    }
+
+    /**
      * Ensure $this->accessToken holds a valid token, refreshing if
      * the stored access token expires within 5 minutes. Called by
      * every HTTP-issuing method before the request goes out.

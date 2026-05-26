@@ -109,6 +109,7 @@ class InvoicePusher
         return [
             'success' => false,
             'status'  => 'unsupported_in_session',
+            'outcome' => 'failed',
             'error'   => 'InvoicePusher::pushUpdate deferred to S-QBO-12 (Invoice Modification & Void Semantics).',
         ] + self::RESULT_BASE;
     }
@@ -124,7 +125,14 @@ class InvoicePusher
         //    mid-queue gets the new behavior next dispatch.
         $mode = (string) settings_get('quickbooks.sync_mode.invoice', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
-            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode] + self::RESULT_BASE;
+            // S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE: previously returned
+            // success=true with no side effects → worker false-completed.
+            // Now records the skip in both map row + sync_log.
+            // Invoice load before recordSkipped — needs ff_engine_version
+            // for the map row insert path.
+            $invoiceForSkip = db_row("SELECT * FROM invoices WHERE id = ?", [$ffInvoiceId]) ?? ['id' => $ffInvoiceId];
+            self::recordSkipped($ffInvoiceId, $invoiceForSkip, 'skipped_by_mode', $operation);
+            return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
         }
 
         // 2. Load FF invoice.
@@ -133,6 +141,7 @@ class InvoicePusher
             return [
                 'success' => false,
                 'status'  => 'ff_not_found',
+                'outcome' => 'failed',
                 'error'   => "FF invoice {$ffInvoiceId} not found",
             ] + self::RESULT_BASE;
         }
@@ -140,13 +149,17 @@ class InvoicePusher
         // 3. Voided check per D-QBO-11-9. K-22: status enum value is
         //    'void' (NOT 'voided' as prompt drafted).
         if ($invoice['status'] === 'void') {
-            self::recordSkipped($ffInvoiceId, $invoice, 'skipped_voided');
-            return ['success' => true, 'status' => 'skipped_voided'] + self::RESULT_BASE;
+            self::recordSkipped($ffInvoiceId, $invoice, 'skipped_voided', $operation);
+            return ['success' => true, 'status' => 'skipped_voided', 'outcome' => 'skipped'] + self::RESULT_BASE;
         }
 
         // 4. Soft-deleted check.
+        // S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE: previously returned
+        // success=true with no side effects → worker false-completed.
+        // Now records the skip in both map row + sync_log.
         if (($invoice['deleted_at'] ?? null) !== null) {
-            return ['success' => true, 'status' => 'skipped_soft_deleted'] + self::RESULT_BASE;
+            self::recordSkipped($ffInvoiceId, $invoice, 'skipped_soft_deleted', $operation);
+            return ['success' => true, 'status' => 'skipped_soft_deleted', 'outcome' => 'skipped'] + self::RESULT_BASE;
         }
 
         // 5. Existing mapping check (idempotency on CREATE per D-QBO-6-2 pattern).
@@ -180,6 +193,7 @@ class InvoicePusher
             return [
                 'success' => true,
                 'status'  => 'already_mapped',
+                'outcome' => 'created',  // replay no-op == created semantically
                 'qbo_id'  => (string) $mapping['qbo_invoice_id'],
             ] + self::RESULT_BASE;
         }
@@ -195,6 +209,7 @@ class InvoicePusher
             return [
                 'success' => false,
                 'status'  => $typedStatus,
+                'outcome' => 'failed',
                 'error'   => $gate['reason'],
             ] + self::RESULT_BASE;
         }
@@ -222,6 +237,7 @@ class InvoicePusher
             return [
                 'success' => false,
                 'status'  => 'payload_build_failed',
+                'outcome' => 'failed',
                 'error'   => "Payload build failed: " . $e->getMessage(),
             ] + self::RESULT_BASE;
         }
@@ -236,6 +252,7 @@ class InvoicePusher
             return [
                 'success'    => false,
                 'status'     => 'qbo_error',
+                'outcome'    => 'failed',
                 'error'      => $e->getMessage(),
                 'http_code'  => $httpCode,
                 'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
@@ -248,6 +265,7 @@ class InvoicePusher
             return [
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
+                'outcome' => 'failed',
                 'error'   => 'QBO response missing Invoice.Id',
             ] + self::RESULT_BASE;
         }
@@ -258,6 +276,7 @@ class InvoicePusher
         return [
             'success'    => true,
             'status'     => 'created',
+            'outcome'    => 'created',
             'qbo_id'     => (string) $createdInvoice['Id'],
             'sync_token' => (string) ($createdInvoice['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;
@@ -503,10 +522,36 @@ class InvoicePusher
     }
 
     /**
-     * Record skipped state (voided or by mode).
+     * Record skipped state. Extended in S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE
+     * to also write an acc_qbo_sync_log row so the operator-facing show-page
+     * Push History table + worker tally surface every dispatch attempt,
+     * including the non-HTTP skip branches (skipped_by_mode +
+     * skipped_soft_deleted) that previously left no trace.
+     *
+     * @param string $skippedStatus one of: skipped_voided | skipped_by_mode | skipped_soft_deleted
+     * @param string $operation     the queue operation ('create' typically) — used for the sync_log row
      */
-    private static function recordSkipped(int $ffInvoiceId, array $ffInvoice, string $skippedStatus): void
+    private static function recordSkipped(int $ffInvoiceId, array $ffInvoice, string $skippedStatus, string $operation = 'create'): void
     {
+        // ── FK guard ───────────────────────────────────────────────
+        // recordSkipped can be invoked from the sync_mode gate (line 126-128)
+        // which fires BEFORE the invoice load — so $ffInvoiceId may not
+        // exist in `invoices`. Cases:
+        //   - C40 smoke uses pushCreate(0) to exercise the early-gate
+        //     return-shape invariant.
+        //   - An orphan queue row pre-S-QBO-ENQUEUER-ELIGIBILITY-GATE
+        //     could point at a hard-deleted invoice.
+        // acc_qbo_invoice_map.ff_invoice_id has an FK to invoices(id);
+        // a ghost id would trigger a constraint violation. Early-return
+        // makes recordSkipped a no-op in that case. The Pusher's return
+        // shape is unchanged (caller still receives outcome='skipped'),
+        // so the worker tally + queue.status='skipped' write are preserved.
+        $invoiceExists = db_row("SELECT 1 AS x FROM invoices WHERE id = ?", [$ffInvoiceId]) !== null;
+        if (!$invoiceExists) {
+            return;
+        }
+
+        // ── Map row write (existing behaviour generalized) ─────────
         $existing = db_row(
             "SELECT id FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
@@ -527,6 +572,40 @@ class InvoicePusher
                         last_synced_at = ?
                   WHERE id = ?",
                 [$skippedStatus, $now, (int) $existing['id']]
+            );
+        }
+
+        // ── Sync log row (NEW per D-SYNC-LOG-NON-HTTP-INVOICE-4) ───
+        // Records the non-HTTP skip event so the show-page Push History
+        // table reflects every dispatch attempt, not just real HTTP calls.
+        // Best-effort: any error is logged + swallowed so a sync_log
+        // failure never blocks the map row write or the worker tally.
+        try {
+            $messages = [
+                'skipped_voided'       => 'Invoice voided in FF; skip recorded without QBO push attempt.',
+                'skipped_by_mode'      => 'sync_mode.invoice refuses FF→QBO direction; skip recorded without QBO push attempt.',
+                'skipped_soft_deleted' => 'Invoice soft-deleted in FF; skip recorded without QBO push attempt.',
+            ];
+            $msg = $messages[$skippedStatus] ?? "Skipped: {$skippedStatus}";
+
+            db_insert('acc_qbo_sync_log', [
+                'direction'       => 'push',
+                'entity_type'     => 'invoice',
+                'entity_id'       => $ffInvoiceId,
+                'operation'       => $operation,
+                'http_method'     => 'SKIP',  // sentinel: no real HTTP call made
+                'endpoint'        => '',      // no endpoint exercised
+                'response_status' => null,    // http_status_code per D-SYNC-LOG-NON-HTTP-INVOICE-4
+                'error_code'      => $skippedStatus,  // typed status code (reuses error_code column; not an error semantically but the schema's typed-code channel)
+                'error_message'   => $msg,
+                'queue_id'        => QuickBooksClient::workerQueueId(),  // null when not under worker context (CLI/smoke)
+                'realm_id'        => (string) settings_get('quickbooks.realm_id', 'unknown'),
+                'environment'     => (string) settings_get('quickbooks.environment', 'sandbox'),
+            ]);
+        } catch (\Throwable $e) {
+            error_log(
+                "InvoicePusher::recordSkipped sync_log insert failed for ff_invoice_id={$ffInvoiceId} "
+                . "status={$skippedStatus}: " . $e->getMessage()
             );
         }
     }

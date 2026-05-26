@@ -133,7 +133,7 @@ class VendorPusher
         //    mode mid-queue gets the new behavior on the next dispatch.
         $mode = (string) settings_get('quickbooks.sync_mode.vendor', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
-            return ['success' => true, 'status' => 'skipped_by_mode', 'mode' => $mode] + self::RESULT_BASE;
+            return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
         }
 
         // 2. Load FF vendor state. Selects only the columns this Pusher
@@ -147,14 +147,14 @@ class VendorPusher
             [$ffVendorId]
         );
         if ($ff === null) {
-            return ['success' => false, 'status' => 'ff_not_found', 'error' => "FF vendor {$ffVendorId} not found"] + self::RESULT_BASE;
+            return ['success' => false, 'status' => 'ff_not_found', 'outcome' => 'failed', 'error' => "FF vendor {$ffVendorId} not found"] + self::RESULT_BASE;
         }
         if ($ff['deleted_at'] !== null) {
             // D-QBO-6-1 carry-over: FF soft-delete does NOT propagate
             // to QBO. Reaching here means the queue row was enqueued
             // before the vendor was soft-deleted (or via an out-of-band
             // path).
-            return ['success' => true, 'status' => 'skipped_soft_deleted'] + self::RESULT_BASE;
+            return ['success' => true, 'status' => 'skipped_soft_deleted', 'outcome' => 'skipped'] + self::RESULT_BASE;
         }
 
         // 3. Look up existing mapping. May be NULL (first push), or
@@ -204,6 +204,7 @@ class VendorPusher
             return [
                 'success' => true,
                 'status'  => 'already_mapped',
+                'outcome' => 'created',  // replay no-op == created semantically
                 'qbo_id'  => (string) $mapping['qbo_vendor_id'],
             ] + self::RESULT_BASE;
         }
@@ -249,6 +250,7 @@ class VendorPusher
             return [
                 'success'    => false,
                 'status'     => 'qbo_error',
+                'outcome'    => 'failed',
                 'error'      => $e->getMessage(),
                 'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
             ] + self::RESULT_BASE;
@@ -261,6 +263,7 @@ class VendorPusher
             return [
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
+                'outcome' => 'failed',
                 'error'   => 'QBO response missing Vendor.Id',
             ] + self::RESULT_BASE;
         }
@@ -314,6 +317,7 @@ class VendorPusher
             'status'     => $effectiveOperation === 'update'
                               ? 'updated'
                               : ($effectiveOperation !== $operation ? 'created_from_update' : 'created'),
+            'outcome'    => $effectiveOperation === 'update' ? 'updated' : 'created',
             'qbo_id'     => (string) $qboVendor['Id'],
             'sync_token' => (string) ($qboVendor['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;

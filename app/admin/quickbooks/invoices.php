@@ -62,8 +62,8 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
          style="margin-bottom:14px;"
          x-text="flash.message"></div>
 
-    <!-- ── 6 KPI tiles ─────────────────────────────────────────── -->
-    <div class="kpi-grid kpi-grid--qbo" style="grid-template-columns:repeat(6,1fr);margin-bottom:14px;">
+    <!-- ── 7 KPI tiles (S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE: +Soft-Deleted) ── -->
+    <div class="kpi-grid kpi-grid--qbo" style="grid-template-columns:repeat(7,1fr);margin-bottom:14px;">
         <div class="kpi-tile">
             <div class="kpi-label">Pushed</div>
             <div class="kpi-value text-success" x-text="kpis.pushed">0</div>
@@ -88,12 +88,16 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
             <div class="kpi-label">Mode-Skipped</div>
             <div class="kpi-value text-secondary" x-text="kpis.skipped_by_mode">0</div>
         </div>
+        <div class="kpi-tile">
+            <div class="kpi-label">Soft-Deleted</div>
+            <div class="kpi-value text-secondary" x-text="kpis.skipped_soft_deleted">0</div>
+        </div>
     </div>
 
     <!-- ── Filter bar ──────────────────────────────────────────── -->
     <div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
         <div class="text-sm text-secondary">Filter by status:</div>
-        <template x-for="s in ['pending','pushed','failed','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch','skipped_voided','skipped_by_mode']" :key="s">
+        <template x-for="s in ['pending','pushed','failed','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch','skipped_voided','skipped_by_mode','skipped_soft_deleted']" :key="s">
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
                 <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
                 <span x-text="s"></span>
@@ -184,7 +188,7 @@ function qboInvoicesAdmin(canEdit) {
         canRetry: canEdit,
         loading: false,
         rows: [],
-        kpis: { pushed: 0, pending: 0, failed: 0, failed_preflight: 0, failed_preflight_field_too_long: 0, failed_preflight_currency_mismatch: 0, skipped_voided: 0, skipped_by_mode: 0 },
+        kpis: { pushed: 0, pending: 0, failed: 0, failed_preflight: 0, failed_preflight_field_too_long: 0, failed_preflight_currency_mismatch: 0, skipped_voided: 0, skipped_by_mode: 0, skipped_soft_deleted: 0 },
         page: 1,
         perPage: 25,
         total: 0,
@@ -249,6 +253,7 @@ function qboInvoicesAdmin(canEdit) {
                 'failed_preflight_currency_mismatch': 'badge-warning',
                 'skipped_voided': 'badge-secondary',
                 'skipped_by_mode': 'badge-secondary',
+                'skipped_soft_deleted': 'badge-secondary',
             }[s] || 'badge-secondary';
         },
 

@@ -230,15 +230,33 @@ try {
 
             $result = QboPusherDispatcher::dispatch($entityType, $operation, $entityId, $payloadSnap);
 
-            // D-QBO-FIXPACK-14 (Bug B) + D-QBO-FIXPACK-16 (Bug A):
-            // Inspect the Pusher's return value. Pushers that encounter a
-            // QBO error (e.g. error 6000 multi-currency disabled) catch the
-            // exception internally and return ['success' => false, ...] rather
-            // than re-throwing. The PREVIOUS code marked any non-exception
-            // return as 'completed' and incremented $completed — so queue#113
-            // was marked completed despite the HTTP 400 error 6000 push failure.
-            // Fix: inspect result['success'] to determine the actual outcome.
-            if (!empty($result['success'])) {
+            // S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE (D-WORKER-OUTCOME-DISPATCH-3):
+            // Worker now branches on the explicit `outcome` field
+            // ('created' | 'updated' | 'skipped' | 'failed') so silent-success
+            // skip paths get tallied under skipped= (NOT completed=) and the
+            // queue row's status reflects reality.
+            //
+            // Backward-compat shim: until ALL Pushers (Account/Item/TaxCode
+            // and any future) emit `outcome` on every path, infer from
+            // existing fields. This is transitional — remove the shim once
+            // every Pusher's return shape includes outcome.
+            $outcome = $result['outcome'] ?? null;
+            if ($outcome === null) {
+                $status = (string) ($result['status'] ?? '');
+                if ($status !== '' && str_starts_with($status, 'skipped_')) {
+                    $outcome = 'skipped';
+                } elseif (empty($result['success'])) {
+                    $outcome = 'failed';
+                } else {
+                    $outcome = 'created';
+                }
+            }
+
+            if ($outcome === 'created' || $outcome === 'updated') {
+                // ── Real push succeeded (or replay no-op via already_mapped) ──
+                // D-QBO-FIXPACK-14 (Bug B) + D-QBO-FIXPACK-16 (Bug A) discipline:
+                // queue.status='completed' only when Pusher actually pushed
+                // (or confirmed prior push via already_mapped).
                 db_execute(
                     "UPDATE acc_qbo_sync_queue
                         SET status='completed', completed_at=NOW(),
@@ -256,12 +274,33 @@ try {
                     'entity_type'  => 'qbo_sync_queue',
                     'entity_id'    => $qid,
                     'entity_label' => "{$entityType}#{$entityId} {$operation}",
-                    'notes'        => "QBO push completed by worker (status=" . ($result['status'] ?? 'ok') . ").",
+                    'notes'        => "QBO push completed by worker (status=" . ($result['status'] ?? 'ok') . ", outcome={$outcome}).",
                     'ip_address'   => '127.0.0.1',
                 ]);
 
                 echo "[{$startedAt}] OK   queue#{$qid} {$entityType}#{$entityId} {$operation}\n";
+            } elseif ($outcome === 'skipped') {
+                // ── Pusher decided not to push (mode/voided/soft-deleted) ──
+                // S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE: queue.status='skipped'
+                // (not 'completed') so the QBO admin queue table tells the
+                // truth. Pusher's recordSkipped (invoice path) already wrote
+                // the map row + sync_log entry; worker just records the
+                // queue-level outcome here.
+                $typedCode = substr((string) ($result['status'] ?? 'skipped'), 0, 50);
+                $skipMsg   = substr("Skipped: " . ($result['status'] ?? 'unknown'), 0, 500);
+                db_execute(
+                    "UPDATE acc_qbo_sync_queue
+                        SET status='skipped', completed_at=NOW(),
+                            error_code=?,
+                            error_message=?
+                      WHERE id=?",
+                    [$typedCode, $skipMsg, $qid]
+                );
+                $skipped++;
+
+                echo "[{$startedAt}] SKIP queue#{$qid} {$entityType}#{$entityId} {$operation} ({$typedCode})\n";
             } else {
+                // ── Pusher returned outcome='failed' (or implicit failure) ──
                 // D-QBO-FIXPACK-14 (Bug B): Pusher returned success=false without
                 // throwing. Mark queue row 'failed' with the error from result.
                 $errorMsg  = substr((string) ($result['error'] ?? $result['status'] ?? 'Pusher returned success=false'), 0, 500);
