@@ -52,19 +52,47 @@ if (!$invoice) {
     exit;
 }
 
-/* ─── QBO push mapping (S-QBO-11) ───────────────────────────────── */
-// Drives the QuickBooks badge in the page header. Only renders when the
-// connection is established (no point teasing the feature pre-setup).
+/* ─── QBO push mapping + sync log (S-QBO-INVOICE-SHOW-RICH-PANEL) ── */
+// Drives the QuickBooks Sync inline panel that replaced the simple
+// S-QBO-11 header badge. Only loads when the connection is established
+// (no point loading mapping/log when the panel won't render anyway).
 // Mirrors the S-QBO-6 customer-show pattern.
-$qboInvoiceMapping = null;
-if ((string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected') {
+$qboConnected         = ((string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected');
+$qboCanEdit           = $qboConnected && can('quickbooks', 'edit_credentials');
+$qboInvoiceMapping    = null;
+$qboSyncLogHistory    = [];
+$qboSyncLogTotalCount = 0;
+$qboEnvironment       = 'sandbox';
+if ($qboConnected) {
+    // Full mapping row — qbo_currency snapshot column added in
+    // S-QBO-PUSHER-CONTRACT-PAYDOWN drives the panel currency line.
     $qboInvoiceMapping = db_row(
-        "SELECT id, qbo_invoice_id, qbo_doc_number, push_status, push_error,
-                pushed_at, last_synced_at
+        "SELECT id, qbo_invoice_id, qbo_sync_token, qbo_doc_number, qbo_currency,
+                push_status, push_error, pushed_at, last_synced_at, created_at, updated_at
            FROM acc_qbo_invoice_map
           WHERE ff_invoice_id = ?",
         [$invoiceId]
     );
+    // Push history — last 20 rows per the panel design. Filtered to
+    // entity_type='invoice' AND entity_id=ff_invoice_id; uses the
+    // idx_entity(entity_type, entity_id) covering index.
+    $qboSyncLogHistory = db_select(
+        "SELECT id, direction, operation, http_method, response_status,
+                duration_ms, error_code, error_message, created_at
+           FROM acc_qbo_sync_log
+          WHERE entity_type = 'invoice' AND entity_id = ?
+          ORDER BY created_at DESC
+          LIMIT 20",
+        [$invoiceId]
+    );
+    // Total count drives the "+N more attempts" footer when >20.
+    $qboSyncLogTotalRow = db_row(
+        "SELECT COUNT(*) AS cnt FROM acc_qbo_sync_log
+          WHERE entity_type = 'invoice' AND entity_id = ?",
+        [$invoiceId]
+    );
+    $qboSyncLogTotalCount = (int) ($qboSyncLogTotalRow['cnt'] ?? 0);
+    $qboEnvironment       = (string) settings_get('quickbooks.environment', 'sandbox');
 }
 
 /* ─── Decode JSON fields ────────────────────────────────────────── */
@@ -1075,44 +1103,13 @@ require_once FF_ROOT . '/includes/header.php';
                 OVERDUE
             </span>
             <?php endif; ?>
-            <?php /* S-QBO-11 QBO push status badge. Only renders when QBO
-                     is connected AND a mapping row exists for this invoice.
-                     5 states surface here; clicking the badge opens the
-                     QBO invoices admin page filtered to this row. */
-                if ($qboInvoiceMapping !== null):
-                    $qm_status = $qboInvoiceMapping['push_status'];
-                    $qm_badgeClass = match ($qm_status) {
-                        'pushed'                              => 'badge-success',
-                        'pending'                             => 'badge-neutral',
-                        'failed'                              => 'badge-danger',
-                        'failed_preflight',
-                        'failed_preflight_field_too_long',
-                        'failed_preflight_currency_mismatch'  => 'badge-warning',
-                        'skipped_voided',
-                        'skipped_by_mode'                     => 'badge-neutral',
-                        default                               => 'badge-neutral',
-                    };
-                    $qm_label = match ($qm_status) {
-                        'pushed'                             => 'QuickBooks: Pushed' . ($qboInvoiceMapping['qbo_invoice_id'] ? ' #' . $qboInvoiceMapping['qbo_invoice_id'] : ''),
-                        'pending'                            => 'QuickBooks: Queued',
-                        'failed'                             => 'QuickBooks: Push Failed',
-                        'failed_preflight'                   => 'QuickBooks: Pre-flight Blocked',
-                        'failed_preflight_field_too_long'    => 'QuickBooks: Pre-flight Blocked (field too long)',
-                        'failed_preflight_currency_mismatch' => 'QuickBooks: Pre-flight Blocked (currency mismatch)',
-                        'skipped_voided'                     => 'QuickBooks: Skipped (voided)',
-                        'skipped_by_mode'                    => 'QuickBooks: Skipped (mode)',
-                        default                              => 'QuickBooks: ' . $qm_status,
-                    };
-                    $qm_title = $qboInvoiceMapping['push_error']
-                        ?: ($qboInvoiceMapping['pushed_at'] ? 'pushed_at=' . $qboInvoiceMapping['pushed_at'] : '');
-            ?>
-            <a href="<?= base_url('quickbooks/invoices') ?>"
-               class="badge badge-no-dot <?= $qm_badgeClass ?>"
-               style="vertical-align:middle; margin-left:4px; font-size:11px; text-decoration:none;"
-               title="<?= e($qm_title) ?>">
-                <?= e($qm_label) ?>
-            </a>
-            <?php endif; ?>
+            <?php /* S-QBO-INVOICE-SHOW-RICH-PANEL: header badge retired —
+                     replaced by the full QuickBooks Sync panel rendered
+                     below the KPI stat cards (lines ~1410). Operator
+                     feedback: header badge "disappeared" for invoices
+                     without a mapping row + showed no info beyond the
+                     state. Maximalist inline panel surfaces everything
+                     visible at once. */ ?>
         </h1>
         <div class="text-secondary text-sm" style="margin-top:4px;">
             <?php if ($invoice['customer_id']): ?>
@@ -1407,6 +1404,220 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
     </div>
     <?php endif; ?>
 </div>
+
+
+<!-- ================================================================
+     QUICKBOOKS SYNC PANEL (S-QBO-INVOICE-SHOW-RICH-PANEL)
+     Maximalist inline replacement for the retired S-QBO-11 header
+     badge. Surfaces 6-state badge + QBO IDs + deep-link + last-pushed
+     timestamp + currency + sync token + last-20 push history +
+     Retry/View-in-QBO actions. Hidden in print (operator-facing only).
+     Conditional on quickbooks.connection_status='connected'; renders
+     nothing when QBO is disconnected.
+     ================================================================ -->
+<?php if ($qboConnected):
+    // ── State classification ──────────────────────────────────────
+    // 6-state vocabulary mapped from the canonical push_status ENUM
+    // (FLEETFORGE_DATABASE_MASTER.sql line 1112). Synced = pushed
+    // (single ENUM value, not the prompt's hypothetical
+    // success_created/success_updated/already_mapped). When no
+    // mapping row exists, the panel still renders in "Not Synced"
+    // state — addressing the operator complaint that the prior
+    // header badge "disappeared" for unmapped invoices.
+    $rp_status = $qboInvoiceMapping['push_status'] ?? null;
+    $rp_qbo_id = $qboInvoiceMapping['qbo_invoice_id'] ?? null;
+
+    if ($qboInvoiceMapping === null) {
+        $rp_state       = 'not_synced';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '○';
+        $rp_state_label = 'Not Synced';
+    } elseif ($rp_status === 'pushed') {
+        $rp_state       = 'synced';
+        $rp_badge_class = 'badge-success';
+        $rp_state_icon  = '✓';
+        $rp_state_label = 'Synced';
+    } elseif ($rp_status === 'pending') {
+        $rp_state       = 'pending';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '⋯';
+        $rp_state_label = 'Pending';
+    } elseif ($rp_status === 'failed') {
+        $rp_state       = 'failed';
+        $rp_badge_class = 'badge-danger';
+        $rp_state_icon  = '✗';
+        $rp_state_label = 'Failed';
+    } elseif (str_starts_with((string)$rp_status, 'failed_preflight')) {
+        $rp_state       = 'failed_preflight';
+        $rp_badge_class = 'badge-warning';
+        $rp_state_icon  = '⚠';
+        $rp_state_label = 'Failed Pre-flight';
+    } elseif (str_starts_with((string)$rp_status, 'skipped_')) {
+        $rp_state       = 'skipped';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '–';
+        $rp_state_label = 'Skipped';
+    } else {
+        $rp_state       = 'unknown';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '○';
+        $rp_state_label = ucfirst(str_replace('_', ' ', (string)$rp_status));
+    }
+
+    // Retryable iff edit perm held AND push_status is in the
+    // retryable set — matches retry.php line 49's whitelist.
+    $rp_retryable_statuses = ['failed', 'failed_preflight', 'failed_preflight_field_too_long', 'failed_preflight_currency_mismatch'];
+    $rp_show_retry         = $qboCanEdit && $qboInvoiceMapping !== null
+                          && in_array($rp_status, $rp_retryable_statuses, true);
+
+    // QBO web app deep-link — host swap on sandbox/production.
+    $rp_qbo_host    = $qboEnvironment === 'production' ? 'app.qbo.intuit.com' : 'app.sandbox.qbo.intuit.com';
+    $rp_qbo_url     = $rp_qbo_id ? "https://{$rp_qbo_host}/app/invoice?txnId=" . urlencode((string)$rp_qbo_id) : null;
+
+    // Inline time-ago helper — no canonical helper exists in lib/.
+    // Returns NULL for NULL/empty input so the caller can skip rendering.
+    $rp_time_ago = static function (?string $ts): ?string {
+        if (!$ts) return null;
+        $t = strtotime($ts);
+        if ($t === false) return null;
+        $diff = time() - $t;
+        if ($diff < 60)      return $diff <= 1 ? 'just now' : $diff . ' seconds ago';
+        if ($diff < 3600)    return floor($diff / 60) . ' min ago';
+        if ($diff < 86400)   return floor($diff / 3600) . ' hr ago';
+        if ($diff < 2592000) return floor($diff / 86400) . ' days ago';
+        return date('Y-m-d', $t);
+    };
+    $rp_pushed_rel = $rp_time_ago($qboInvoiceMapping['pushed_at'] ?? null);
+?>
+<div class="card ff-print-hide" id="qbo-sync-panel" style="margin-bottom:24px;">
+
+    <!-- Panel header: state badge + identifiers row -->
+    <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0;">QuickBooks Sync</h3>
+            <span class="badge badge-no-dot <?= $rp_badge_class ?>"
+                  style="font-size:12px; padding:3px 10px;"
+                  title="<?= e($rp_status ?? 'no mapping row') ?>">
+                <span style="font-family:'DM Mono',monospace;"><?= e($rp_state_icon) ?></span>
+                <?= e($rp_state_label) ?>
+            </span>
+        </div>
+
+        <!-- Identifiers row: QBO ID + last-pushed + currency + sync token -->
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-size:13px; margin-left:auto;">
+            <?php if ($rp_qbo_id): ?>
+                <div>
+                    <span class="text-secondary">QBO</span>
+                    <a href="<?= e($rp_qbo_url) ?>" target="_blank" rel="noopener noreferrer"
+                       class="font-mono link" title="Open in QuickBooks">#<?= e($rp_qbo_id) ?> ↗</a>
+                </div>
+            <?php endif; ?>
+            <?php if ($qboInvoiceMapping && !empty($qboInvoiceMapping['pushed_at'])): ?>
+                <div title="<?= e((string)$qboInvoiceMapping['pushed_at']) ?>">
+                    <span class="text-secondary">Pushed</span>
+                    <span class="font-mono"><?= e($rp_pushed_rel ?? (string)$qboInvoiceMapping['pushed_at']) ?></span>
+                </div>
+            <?php endif; ?>
+            <?php if ($qboInvoiceMapping && !empty($qboInvoiceMapping['qbo_currency'])): ?>
+                <div>
+                    <span class="text-secondary">Currency</span>
+                    <span class="font-mono"><?= e($qboInvoiceMapping['qbo_currency']) ?></span>
+                </div>
+            <?php endif; ?>
+            <?php if ($qboInvoiceMapping && $qboInvoiceMapping['qbo_sync_token'] !== null && $qboInvoiceMapping['qbo_sync_token'] !== ''): ?>
+                <div class="text-secondary text-sm" title="QBO optimistic-lock token — used to detect divergent updates.">
+                    Token: <span class="font-mono"><?= e($qboInvoiceMapping['qbo_sync_token']) ?></span>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Push history table -->
+    <div style="padding:14px 20px;">
+        <h4 style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 8px 0;">
+            Push History
+        </h4>
+        <?php if (empty($qboSyncLogHistory)): ?>
+            <p class="text-secondary text-sm" style="margin:0;">No push attempts yet.</p>
+        <?php else: ?>
+            <table class="table" style="margin:0; font-size:12px;">
+                <thead>
+                    <tr>
+                        <th style="font-size:10px;">Timestamp</th>
+                        <th style="font-size:10px;">Operation</th>
+                        <th style="font-size:10px;">Status</th>
+                        <th style="font-size:10px;">Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($qboSyncLogHistory as $lr): ?>
+                        <?php
+                        // Status row color: HTTP 2xx → success, 4xx/5xx → danger,
+                        // null → neutral (queued but not yet dispatched).
+                        $lr_status = (int)($lr['response_status'] ?? 0);
+                        if ($lr_status >= 200 && $lr_status < 300) {
+                            $lr_badge = 'badge-success';
+                            $lr_icon  = '✓';
+                        } elseif ($lr_status >= 400) {
+                            $lr_badge = 'badge-danger';
+                            $lr_icon  = '✗';
+                        } else {
+                            $lr_badge = 'badge-neutral';
+                            $lr_icon  = '⋯';
+                        }
+                        ?>
+                        <tr>
+                            <td class="font-mono text-sm" style="white-space:nowrap;" title="<?= e((string)$lr['created_at']) ?>">
+                                <?= e($rp_time_ago($lr['created_at']) ?? (string)$lr['created_at']) ?>
+                            </td>
+                            <td class="text-sm"><?= e(($lr['http_method'] ?? '') . ' ' . ($lr['operation'] ?? '')) ?></td>
+                            <td>
+                                <span class="badge badge-no-dot <?= $lr_badge ?>" style="font-size:10px;">
+                                    <?= e($lr_icon) ?> <?= e($lr_status > 0 ? (string)$lr_status : 'queued') ?>
+                                </span>
+                            </td>
+                            <td class="text-sm text-secondary" style="max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                                title="<?= e((string)($lr['error_message'] ?? '')) ?>">
+                                <?php if (!empty($lr['error_code'])): ?>
+                                    <span class="font-mono text-danger"><?= e((string)$lr['error_code']) ?></span>
+                                <?php endif; ?>
+                                <?= e((string)($lr['error_message'] ?? '')) ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php if ($qboSyncLogTotalCount > count($qboSyncLogHistory)): ?>
+                <p class="text-secondary text-sm" style="margin:8px 0 0 0; font-size:11px;">
+                    +<?= (int)($qboSyncLogTotalCount - count($qboSyncLogHistory)) ?> more attempts (showing most recent 20)
+                </p>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
+    <!-- Actions row -->
+    <?php if ($rp_show_retry || $rp_qbo_url): ?>
+    <div style="padding:12px 20px; border-top:1px solid var(--border-color); display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
+         x-data="qboSyncPanel(<?= (int)($qboInvoiceMapping['id'] ?? 0) ?>)">
+        <?php if ($rp_show_retry): ?>
+            <button type="button" class="btn btn-secondary btn-sm"
+                    @click="retry()" :disabled="retrying">
+                <span x-show="!retrying">Retry Push</span>
+                <span x-show="retrying" x-cloak>Retrying…</span>
+            </button>
+        <?php endif; ?>
+        <?php if ($rp_qbo_url): ?>
+            <a href="<?= e($rp_qbo_url) ?>" target="_blank" rel="noopener noreferrer"
+               class="btn btn-secondary btn-sm">
+                View in QBO ↗
+            </a>
+        <?php endif; ?>
+        <span x-show="flash" x-cloak x-text="flash" class="text-sm" :class="flashType === 'success' ? 'text-success' : 'text-danger'"></span>
+    </div>
+    <?php endif; ?>
+
+</div>
+<?php endif; /* $qboConnected */ ?>
 
 
 <!-- ================================================================
@@ -2982,6 +3193,50 @@ function FF_InvoiceShow() {
             this.toastType = type;
             setTimeout(() => { this.toast = ''; }, 4000);
         }
+    };
+}
+
+/* ── S-QBO-INVOICE-SHOW-RICH-PANEL: Retry button factory ──────────
+   Scoped to the QuickBooks Sync panel only. Wires Retry → POST
+   api/v1/quickbooks/invoices/retry.php with the mapping row id
+   (NOT ff_invoice_id — matches retry.php's contract at lines 28-32).
+   On success reloads the page so the new sync_log row + updated
+   push_status render in the panel immediately. */
+function qboSyncPanel(mappingId) {
+    return {
+        retrying:  false,
+        flash:     '',
+        flashType: '',
+        async retry() {
+            if (!mappingId) {
+                this.flash = 'No mapping row to retry.';
+                this.flashType = 'danger';
+                return;
+            }
+            this.retrying = true;
+            this.flash    = '';
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/quickbooks/invoices/retry') ?>', { id: mappingId });
+                if (r.success) {
+                    if (r.action === 'enqueued') {
+                        this.flash = 'Re-enqueued for push — reloading…';
+                        this.flashType = 'success';
+                        setTimeout(() => window.location.reload(), 600);
+                    } else {
+                        this.flash = 'Skipped: ' + (r.reason || 'gate refused');
+                        this.flashType = 'danger';
+                    }
+                } else {
+                    this.flash = 'Retry failed: ' + (r.message || 'unknown error');
+                    this.flashType = 'danger';
+                }
+            } catch (e) {
+                this.flash = 'Retry failed: ' + (e.message || e);
+                this.flashType = 'danger';
+            } finally {
+                this.retrying = false;
+            }
+        },
     };
 }
 </script>

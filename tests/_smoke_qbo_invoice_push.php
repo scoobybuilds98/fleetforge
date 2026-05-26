@@ -41,6 +41,10 @@ declare(strict_types=1);
  * @updated  S-QBO-INVOICE-LIST-BADGE — added C42 (API LEFT JOIN +
  *           connection_status gate) + C43 (UI column conditional + Alpine
  *           helpers); total 43 sub-checks.
+ * @updated  S-QBO-INVOICE-SHOW-RICH-PANEL — added C44 (show.php mapping +
+ *           sync_log data load) + C45 (panel gated on connection_status) +
+ *           C46 (old header badge removed) + C47 (Retry button gated on
+ *           quickbooks.edit_credentials); total 47 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract), §17 (tax-override)
  * @decision D-QBO-FIXPACK-1 (always emit CurrencyRef),
  *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on missing non-CAD rate),
@@ -61,7 +65,7 @@ use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 43;
+$total    = 47;
 
 // Sentinel IDs we'll clean up at end
 $sentinelInvoiceIds = [];
@@ -1287,6 +1291,145 @@ if (empty($c43Errors)) {
 } else {
     echo "FAIL C43 " . implode('; ', $c43Errors) . "\n";
     $failures[] = 'C43';
+}
+
+// ── C44: S-QBO-INVOICE-SHOW-RICH-PANEL — show.php loads mapping + sync_log ──
+// Assert app/admin/invoices/show.php queries acc_qbo_invoice_map AND
+// acc_qbo_sync_log when QBO is connected. The data load drives the
+// maximalist inline panel that replaced the S-QBO-11 header badge.
+$c44Errors = [];
+try {
+    $showPath = realpath(__DIR__ . '/../app/admin/invoices/show.php');
+    if ($showPath === false || !is_readable($showPath)) {
+        $c44Errors[] = 'app/admin/invoices/show.php missing or unreadable';
+    } else {
+        $src = file_get_contents($showPath);
+        if (!preg_match('/FROM\s+acc_qbo_invoice_map\s+WHERE\s+ff_invoice_id/i', $src)) {
+            $c44Errors[] = "expected SELECT ... FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?";
+        }
+        if (!preg_match("/FROM\s+acc_qbo_sync_log\s+WHERE\s+entity_type\s*=\s*'invoice'/i", $src)) {
+            $c44Errors[] = "expected SELECT ... FROM acc_qbo_sync_log WHERE entity_type='invoice' (last-20 history query)";
+        }
+        if (!str_contains($src, '$qboSyncLogHistory')) {
+            $c44Errors[] = "expected \$qboSyncLogHistory variable holding the history rows";
+        }
+        if (!str_contains($src, '$qboCanEdit')) {
+            $c44Errors[] = "expected \$qboCanEdit boolean for the Retry button permission gate";
+        }
+    }
+} catch (Throwable $e) {
+    $c44Errors[] = 'C44 threw: ' . $e->getMessage();
+}
+if (empty($c44Errors)) {
+    echo "PASS C44 app/admin/invoices/show.php loads acc_qbo_invoice_map + acc_qbo_sync_log when QBO connected (S-QBO-INVOICE-SHOW-RICH-PANEL)\n";
+    $pass++;
+} else {
+    echo "FAIL C44 " . implode('; ', $c44Errors) . "\n";
+    $failures[] = 'C44';
+}
+
+// ── C45: S-QBO-INVOICE-SHOW-RICH-PANEL — panel gated on connection_status ──
+// The QuickBooks Sync panel block must be wrapped in a $qboConnected
+// conditional sourced from settings_get('quickbooks.connection_status', ...).
+$c45Errors = [];
+try {
+    $showPath = realpath(__DIR__ . '/../app/admin/invoices/show.php');
+    if ($showPath === false || !is_readable($showPath)) {
+        $c45Errors[] = 'app/admin/invoices/show.php missing or unreadable';
+    } else {
+        $src = file_get_contents($showPath);
+        if (!preg_match("/\\\$qboConnected\s*=\s*\(\s*\(string\)\s*settings_get\('quickbooks\.connection_status'/", $src)) {
+            $c45Errors[] = "expected \$qboConnected sourced from settings_get('quickbooks.connection_status', ...)";
+        }
+        if (!preg_match('/<\?php\s+if\s*\(\s*\$qboConnected\s*\)\s*:/', $src)) {
+            $c45Errors[] = "expected <?php if (\$qboConnected): ?> gate wrapping the panel";
+        }
+        if (!str_contains($src, 'qbo-sync-panel')) {
+            $c45Errors[] = "expected panel container with id='qbo-sync-panel'";
+        }
+        if (!str_contains($src, 'Push History')) {
+            $c45Errors[] = "expected 'Push History' section heading inside the panel";
+        }
+    }
+} catch (Throwable $e) {
+    $c45Errors[] = 'C45 threw: ' . $e->getMessage();
+}
+if (empty($c45Errors)) {
+    echo "PASS C45 show.php QuickBooks Sync panel gated on connection_status + Push History section present (S-QBO-INVOICE-SHOW-RICH-PANEL)\n";
+    $pass++;
+} else {
+    echo "FAIL C45 " . implode('; ', $c45Errors) . "\n";
+    $failures[] = 'C45';
+}
+
+// ── C46: S-QBO-INVOICE-SHOW-RICH-PANEL — old header badge removed ──
+// The S-QBO-11 simple header badge used the local var $qm_badgeClass +
+// $qm_label inside an <a> tag in the page-header h1. Assert those
+// match-expression variables no longer appear (panel replaces them).
+$c46Errors = [];
+try {
+    $showPath = realpath(__DIR__ . '/../app/admin/invoices/show.php');
+    if ($showPath === false || !is_readable($showPath)) {
+        $c46Errors[] = 'app/admin/invoices/show.php missing or unreadable';
+    } else {
+        $src = file_get_contents($showPath);
+        if (preg_match('/\$qm_badgeClass\s*=\s*match/', $src)) {
+            $c46Errors[] = "old \$qm_badgeClass match expression still present — header badge should be removed";
+        }
+        if (preg_match('/\$qm_label\s*=\s*match/', $src)) {
+            $c46Errors[] = "old \$qm_label match expression still present — header badge should be removed";
+        }
+        // Confirm the removal-marker comment is present so future readers
+        // know the badge was intentionally retired (not accidentally dropped).
+        if (!str_contains($src, 'header badge retired')) {
+            $c46Errors[] = "expected 'header badge retired' marker comment documenting the removal";
+        }
+    }
+} catch (Throwable $e) {
+    $c46Errors[] = 'C46 threw: ' . $e->getMessage();
+}
+if (empty($c46Errors)) {
+    echo "PASS C46 show.php S-QBO-11 header badge removed (replaced by inline panel) (S-QBO-INVOICE-SHOW-RICH-PANEL)\n";
+    $pass++;
+} else {
+    echo "FAIL C46 " . implode('; ', $c46Errors) . "\n";
+    $failures[] = 'C46';
+}
+
+// ── C47: S-QBO-INVOICE-SHOW-RICH-PANEL — Retry button perm-gated ──
+// The Retry button must be gated by can('quickbooks', 'edit_credentials'),
+// matching api/v1/quickbooks/invoices/retry.php's require_permission gate
+// (retry.php line 26). Assert the gate is via the $qboCanEdit boolean
+// (set from the same can() check on show.php line ~59).
+$c47Errors = [];
+try {
+    $showPath = realpath(__DIR__ . '/../app/admin/invoices/show.php');
+    if ($showPath === false || !is_readable($showPath)) {
+        $c47Errors[] = 'app/admin/invoices/show.php missing or unreadable';
+    } else {
+        $src = file_get_contents($showPath);
+        if (!preg_match("/\\\$qboCanEdit\s*=\s*\\\$qboConnected\s*&&\s*can\('quickbooks',\s*'edit_credentials'\)/", $src)) {
+            $c47Errors[] = "expected \$qboCanEdit = \$qboConnected && can('quickbooks', 'edit_credentials') in data load";
+        }
+        if (!preg_match('/\$rp_show_retry\s*=\s*\$qboCanEdit/', $src)) {
+            $c47Errors[] = "expected \$rp_show_retry to gate on \$qboCanEdit before rendering the Retry button";
+        }
+        if (!str_contains($src, 'function qboSyncPanel')) {
+            $c47Errors[] = "expected qboSyncPanel() Alpine factory wiring the retry POST";
+        }
+        if (!str_contains($src, 'api/v1/quickbooks/invoices/retry')) {
+            $c47Errors[] = "expected POST target api/v1/quickbooks/invoices/retry in the Alpine factory";
+        }
+    }
+} catch (Throwable $e) {
+    $c47Errors[] = 'C47 threw: ' . $e->getMessage();
+}
+if (empty($c47Errors)) {
+    echo "PASS C47 show.php Retry button gated on quickbooks.edit_credentials + wires to retry endpoint (S-QBO-INVOICE-SHOW-RICH-PANEL)\n";
+    $pass++;
+} else {
+    echo "FAIL C47 " . implode('; ', $c47Errors) . "\n";
+    $failures[] = 'C47';
 }
 
 } finally {
