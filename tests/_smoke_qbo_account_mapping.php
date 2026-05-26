@@ -13,7 +13,7 @@ declare(strict_types=1);
  * ids (FF acc_accounts id=999990+, qbo_account_id='TEST-SMOKE-A-*')
  * so the finally block scrubs them on pass or fail.
  *
- * 17 sub-checks:
+ * 42 sub-checks:
  *   C1: acc_qbo_account_map table shape — columns + indexes + FK +
  *       is_critical + critical_reason
  *   C2: AccountPuller class surface (pullAll + normalize public static)
@@ -82,11 +82,48 @@ declare(strict_types=1);
  *  C29: Migration backfill verification — every is_critical=1 row in
  *       acc_qbo_account_map has non-null critical_category in the
  *       expected category whitelist
+ *  C30: assertReadyForInvoicePush × S4 — ar_clearing empty-category
+ *       throw path (Trap #68 / D-QBO-VALIDATOR-5 D4): strip is_critical
+ *       from all ar_clearing rows; expect throw with 'no FF account
+ *       tagged' phrase + 'ar_clearing'; restore is_critical in finally
+ *  C31: assertReadyForInvoicePush × S4 — sales_revenue empty-category
+ *       throw path (same Trap #68 phrase for the second invoice
+ *       required category)
+ *  C32: assertReadyForPaymentPush × S3 multi-blocked default state —
+ *       ar_clearing has FF 1030 unmapped + UF has zero tagged FF;
+ *       throws naming both with 'no FF account tagged' on UF only
+ *  C33: assertReadyForPaymentPush × S2 — synthetic UF mapped + AR
+ *       unmapped; throws naming ONLY ar_clearing (UF correctly absent)
+ *       + singular '1 required category' inflection
+ *  C34: assertReadyForPaymentPush × S1+S5 — synthetic UF + AR both
+ *       mapped; gate passes (AP/tax/sales unmapped — irrelevant,
+ *       proves D-QBO-VALIDATOR-4 narrow-scope discipline)
+ *  C35: assertReadyForBillPush × S2 — ap_clearing unmapped (default
+ *       state); throws naming 'ap_clearing' + FF '2010' + singular
+ *  C36: assertReadyForBillPush × S1+S5 — ap_clearing mapped, all
+ *       other categories unmapped; passes silently (S3 N/A —
+ *       single-required-category gate cannot multi-block)
+ *  C37: assertReadyForBillPaymentPush × S3 — default state: AP
+ *       unmapped + UF empty-cat both blocking; throws naming both
+ *  C38: assertReadyForBillPaymentPush × S2 — synthetic UF mapped +
+ *       AP unmapped; throws naming ONLY ap_clearing
+ *  C39: assertReadyForBillPaymentPush × S1+S5 — synthetic UF + AP
+ *       both mapped; gate passes (AR/tax/sales unmapped — irrelevant)
+ *  C40: assertReadyForJournalEntryPush × S3 — both tax_receivable +
+ *       tax_payable unmapped (default state); throws naming both
+ *  C41: assertReadyForJournalEntryPush × S2 — only tax_receivable
+ *       mapped (1050); throws naming ONLY tax_payable + singular
+ *  C42: assertReadyForJournalEntryPush × S1+S5 — both tax categories
+ *       mapped (1050 + 2030); gate passes (AR/AP/UF/sales unmapped
+ *       — irrelevant, proves narrow scope)
  *
  * Exit 0 on all PASS; exit 1 with diagnostic list on any FAIL.
  *
  * @session S-QBO-8, S-QBO-MATCHER-GREEDY-FIX (C20-C23 added),
- *          S-QBO-VALIDATOR-SCOPE-SPLIT (C24-C29 added)
+ *          S-QBO-VALIDATOR-SCOPE-SPLIT (C24-C29 added),
+ *          S-QBO-VALIDATOR-GATE-SMOKE-COVERAGE (C30-C42 added +
+ *          C13 strengthened — closes Phase 3 audit F-P3-01 CRITICAL
+ *          + F-P3-02 through F-P3-07 MEDIUM ×6)
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §7.1, §6.8 (Pusher pre-flight gates)
  */
 
@@ -100,7 +137,7 @@ use FleetForge\Exceptions\QuickBooksException;
 
 $failures = [];
 $pass     = 0;
-$total    = 29;
+$total    = 42;
 
 /** Sentinel ids we'll clean up. */
 $sentinelFfIds       = [];
@@ -468,7 +505,12 @@ if (empty($c12Errors)) {
     $failures[] = 'C12';
 }
 
-// ── C13: assertReadyForInvoicePush throws when critical unmapped ──
+// ── C13: assertReadyForInvoicePush throws with full message content ──
+// Strengthened per Phase 3 audit F-P3-02: original C13 verified throw +
+// 'unmapped' substring only; now also asserts D-QBO-VALIDATOR-5 D1
+// (both blocking categories named explicitly), D2 (FF account in
+// '{code} {name}' format — AR '1030' is the stable check), and D3
+// (plural inflection '2 required categories').
 $c13Errors = [];
 try {
     AccountValidator::markCriticalAccounts(); // ensure critical rows exist
@@ -476,18 +518,37 @@ try {
         AccountValidator::assertReadyForInvoicePush();
         $c13Errors[] = 'expected exception, none thrown';
     } catch (ChartOfAccountsIncompleteException $e) {
+        $msg = $e->getMessage();
         if (empty($e->unmappedAccounts)) {
             $c13Errors[] = 'exception thrown but unmappedAccounts is empty';
         }
-        if (!str_contains($e->getMessage(), 'unmapped')) {
-            $c13Errors[] = "expected message to mention 'unmapped', got: " . $e->getMessage();
+        if (!str_contains($msg, 'unmapped')) {
+            $c13Errors[] = "expected message to mention 'unmapped', got: {$msg}";
+        }
+        // D1 — both blocking categories named explicitly.
+        if (!str_contains($msg, 'ar_clearing')) {
+            $c13Errors[] = "D1: expected 'ar_clearing' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, 'sales_revenue')) {
+            $c13Errors[] = "D1: expected 'sales_revenue' in message, got: {$msg}";
+        }
+        // D2 — at least one FF account named in '{code} {name}' format
+        // (AR code '1030' is stable across seed; sales_revenue codes
+        // vary by chart but 1030 is reliable).
+        if (!str_contains($msg, '1030')) {
+            $c13Errors[] = "D2: expected '1030' (AR FF code) in message, got: {$msg}";
+        }
+        // D3 — plural inflection (both ar_clearing + sales_revenue blocking
+        // in default state → 'categories' not 'category').
+        if (!str_contains($msg, '2 required categories')) {
+            $c13Errors[] = "D3: expected plural '2 required categories', got: {$msg}";
         }
     }
 } catch (Throwable $e) {
     $c13Errors[] = 'C13 threw unexpected: ' . get_class($e) . ' ' . $e->getMessage();
 }
 if (empty($c13Errors)) {
-    echo "PASS C13 assertReadyForInvoicePush throws ChartOfAccountsIncompleteException with unmappedAccounts populated\n";
+    echo "PASS C13 assertReadyForInvoicePush throws naming ar_clearing + sales_revenue + FF '1030' + plural inflection (D-QBO-VALIDATOR-5 D1+D2+D3)\n";
     $pass++;
 } else {
     echo "FAIL C13 " . implode('; ', $c13Errors) . "\n";
@@ -1364,6 +1425,528 @@ if (empty($c29Errors)) {
     $failures[] = 'C29';
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// S-QBO-VALIDATOR-GATE-SMOKE-COVERAGE — C30-C42 below close Phase 3
+// audit findings F-P3-01 (CRITICAL) + F-P3-02 through F-P3-07 (MEDIUM
+// ×6). All gates are real production code; sub-checks exercise empty-
+// category Trap #68 branch for the LIVE invoice gate + S1/S2/S3/S5
+// coverage for the 4 dormant gates (Payment/Bill/BillPayment/JE) so
+// when those Pusher sessions ship (S-QBO-13+) the regression net is
+// already in place. F-P3-08/09/10 LOW deferred (revisit post Phase 4).
+// ─────────────────────────────────────────────────────────────────────
+
+// ── C30: InvoicePush × S4 — ar_clearing empty-category ─────
+// Strip is_critical from all ar_clearing rows; the live invoice gate
+// must throw with Trap #68 'no FF account tagged' phrasing per
+// D-QBO-VALIDATOR-5 D4. ar_clearing IS naturally populated in v1 chart
+// (FF 1030), so the strip simulates the S4 state for regression-net.
+$c30Errors = [];
+$c30Stripped = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    $c30Stripped = p3_smoke_strip_category('ar_clearing');
+    if (empty($c30Stripped)) {
+        $c30Errors[] = 'pre-condition: ar_clearing had no is_critical rows to strip';
+    } else {
+        try {
+            AccountValidator::assertReadyForInvoicePush();
+            $c30Errors[] = 'expected exception, none thrown';
+        } catch (ChartOfAccountsIncompleteException $e) {
+            $msg = $e->getMessage();
+            if (!str_contains($msg, 'ar_clearing')) {
+                $c30Errors[] = "expected 'ar_clearing' in message, got: {$msg}";
+            }
+            if (!str_contains($msg, 'no FF account tagged')) {
+                $c30Errors[] = "expected 'no FF account tagged' phrase, got: {$msg}";
+            }
+        } catch (\Throwable $e) {
+            $c30Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c30Errors[] = 'C30 setup threw: ' . $e->getMessage();
+} finally {
+    p3_smoke_restore_stripped($c30Stripped);
+}
+if (empty($c30Errors)) {
+    echo "PASS C30 assertReadyForInvoicePush throws 'no FF account tagged' when ar_clearing empty-cat (F-P3-01)\n";
+    $pass++;
+} else {
+    echo "FAIL C30 " . implode('; ', $c30Errors) . "\n";
+    $failures[] = 'C30';
+}
+
+// ── C31: InvoicePush × S4 — sales_revenue empty-category ───
+$c31Errors = [];
+$c31Stripped = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    $c31Stripped = p3_smoke_strip_category('sales_revenue');
+    if (empty($c31Stripped)) {
+        $c31Errors[] = 'pre-condition: sales_revenue had no is_critical rows to strip';
+    } else {
+        try {
+            AccountValidator::assertReadyForInvoicePush();
+            $c31Errors[] = 'expected exception, none thrown';
+        } catch (ChartOfAccountsIncompleteException $e) {
+            $msg = $e->getMessage();
+            if (!str_contains($msg, 'sales_revenue')) {
+                $c31Errors[] = "expected 'sales_revenue' in message, got: {$msg}";
+            }
+            if (!str_contains($msg, 'no FF account tagged')) {
+                $c31Errors[] = "expected 'no FF account tagged' phrase, got: {$msg}";
+            }
+        } catch (\Throwable $e) {
+            $c31Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c31Errors[] = 'C31 setup threw: ' . $e->getMessage();
+} finally {
+    p3_smoke_restore_stripped($c31Stripped);
+}
+if (empty($c31Errors)) {
+    echo "PASS C31 assertReadyForInvoicePush throws 'no FF account tagged' when sales_revenue empty-cat (F-P3-01)\n";
+    $pass++;
+} else {
+    echo "FAIL C31 " . implode('; ', $c31Errors) . "\n";
+    $failures[] = 'C31';
+}
+
+// ── C32: PaymentPush × S3 — multi-blocked default state ────
+// AR has FF 1030 unmapped (mapping_status blocking); UF has zero
+// FF rows (empty-cat blocking via Trap #68). Both must appear in
+// the gate's message; UF gets the canonical "no FF account tagged"
+// phrase, AR gets "{code} {name}" formatting per D2.
+$c32Errors = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    try {
+        AccountValidator::assertReadyForPaymentPush();
+        $c32Errors[] = 'expected exception, none thrown';
+    } catch (ChartOfAccountsIncompleteException $e) {
+        $msg = $e->getMessage();
+        if (!str_contains($msg, 'ar_clearing')) {
+            $c32Errors[] = "expected 'ar_clearing' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, 'undeposited_funds')) {
+            $c32Errors[] = "expected 'undeposited_funds' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, 'no FF account tagged')) {
+            $c32Errors[] = "expected 'no FF account tagged' phrase (UF empty-cat), got: {$msg}";
+        }
+        if (!str_contains($msg, '1030')) {
+            $c32Errors[] = "expected FF code '1030' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '2 required categories')) {
+            $c32Errors[] = "expected plural '2 required categories', got: {$msg}";
+        }
+    } catch (\Throwable $e) {
+        $c32Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+    }
+} catch (Throwable $e) {
+    $c32Errors[] = 'C32 setup threw: ' . $e->getMessage();
+}
+if (empty($c32Errors)) {
+    echo "PASS C32 assertReadyForPaymentPush S3 multi-blocked — names both ar_clearing + undeposited_funds; UF gets Trap #68 phrase (F-P3-03)\n";
+    $pass++;
+} else {
+    echo "FAIL C32 " . implode('; ', $c32Errors) . "\n";
+    $failures[] = 'C32';
+}
+
+// ── C33: PaymentPush × S2 — synthetic UF mapped, AR unmapped ──
+// Verifies one-blocked-with-specific-category path: UF is satisfied
+// (synthetic FF account exists + is mapped) so the message names ONLY
+// ar_clearing (NOT undeposited_funds) + singular '1 required category'.
+$c33Errors = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    p3_smoke_create_synthetic_uf('mapped');
+    try {
+        AccountValidator::assertReadyForPaymentPush();
+        $c33Errors[] = 'expected exception, none thrown';
+    } catch (ChartOfAccountsIncompleteException $e) {
+        $msg = $e->getMessage();
+        if (!str_contains($msg, 'ar_clearing')) {
+            $c33Errors[] = "expected 'ar_clearing' in message, got: {$msg}";
+        }
+        // UF should NOT appear — it's satisfied by the synthetic FF.
+        if (str_contains($msg, 'undeposited_funds')) {
+            $c33Errors[] = "UF is mapped — should NOT appear in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '1 required category') || str_contains($msg, '1 required categories')) {
+            $c33Errors[] = "expected singular '1 required category' (only ar_clearing blocking), got: {$msg}";
+        }
+        if (!str_contains($msg, '1030')) {
+            $c33Errors[] = "expected FF code '1030' for ar_clearing, got: {$msg}";
+        }
+    } catch (\Throwable $e) {
+        $c33Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+    }
+} catch (Throwable $e) {
+    $c33Errors[] = 'C33 setup threw: ' . $e->getMessage();
+} finally {
+    p3_smoke_delete_synthetic_uf();
+}
+if (empty($c33Errors)) {
+    echo "PASS C33 assertReadyForPaymentPush S2 — synthetic UF mapped, AR unmapped → throws naming ONLY ar_clearing + singular (F-P3-04)\n";
+    $pass++;
+} else {
+    echo "FAIL C33 " . implode('; ', $c33Errors) . "\n";
+    $failures[] = 'C33';
+}
+
+// ── C34: PaymentPush × S1+S5 — both required mapped ────────
+// Synthetic UF + live AR (1030) both mapped. AP/tax/sales_revenue
+// remain unmapped (default state) — gate must NOT block on those
+// (D-QBO-VALIDATOR-4 narrow-scope discipline). Combined S1 pass-state
+// and S5 scope-narrow since the live chart's default has non-required
+// categories unmapped.
+$c34Errors = [];
+$c34ArFfId = null;
+try {
+    AccountValidator::markCriticalAccounts();
+    p3_smoke_create_synthetic_uf('mapped');
+    $arFf = db_row("SELECT id FROM acc_accounts WHERE code='1030' AND is_active=1");
+    if ($arFf === null) {
+        $c34Errors[] = 'pre-condition: AR (1030) absent';
+    } else {
+        $c34ArFfId = (int) $arFf['id'];
+        p3_smoke_map_critical($c34ArFfId);
+        try {
+            AccountValidator::assertReadyForPaymentPush();
+            // No exception = PASS.
+        } catch (\Throwable $e) {
+            $c34Errors[] = 'expected no exception, got ' . get_class($e) . ': ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c34Errors[] = 'C34 setup threw: ' . $e->getMessage();
+} finally {
+    if ($c34ArFfId !== null) {
+        p3_smoke_revert_critical($c34ArFfId);
+    }
+    p3_smoke_delete_synthetic_uf();
+}
+if (empty($c34Errors)) {
+    echo "PASS C34 assertReadyForPaymentPush S1+S5 passes — synthetic UF + AR mapped; AP/tax/sales unmapped (narrow-scope, F-P3-04)\n";
+    $pass++;
+} else {
+    echo "FAIL C34 " . implode('; ', $c34Errors) . "\n";
+    $failures[] = 'C34';
+}
+
+// ── C35: BillPush × S2 — ap_clearing unmapped (default) ────
+$c35Errors = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    try {
+        AccountValidator::assertReadyForBillPush();
+        $c35Errors[] = 'expected exception, none thrown';
+    } catch (ChartOfAccountsIncompleteException $e) {
+        $msg = $e->getMessage();
+        if (!str_contains($msg, 'ap_clearing')) {
+            $c35Errors[] = "expected 'ap_clearing' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '2010')) {
+            $c35Errors[] = "expected FF code '2010' (AP) in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '1 required category') || str_contains($msg, '1 required categories')) {
+            $c35Errors[] = "expected singular '1 required category', got: {$msg}";
+        }
+    } catch (\Throwable $e) {
+        $c35Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+    }
+} catch (Throwable $e) {
+    $c35Errors[] = 'C35 setup threw: ' . $e->getMessage();
+}
+if (empty($c35Errors)) {
+    echo "PASS C35 assertReadyForBillPush S2 — AP unmapped → throws naming ap_clearing + FF '2010' + singular (F-P3-05)\n";
+    $pass++;
+} else {
+    echo "FAIL C35 " . implode('; ', $c35Errors) . "\n";
+    $failures[] = 'C35';
+}
+
+// ── C36: BillPush × S1+S5 — ap_clearing mapped, others unmapped ──
+// Single-required-category gate; AR/UF/tax/sales must not affect
+// gate decision. S3 N/A by definition (only 1 required category
+// → cannot multi-block).
+$c36Errors = [];
+$c36ApFfId = null;
+try {
+    AccountValidator::markCriticalAccounts();
+    $apFf = db_row("SELECT id FROM acc_accounts WHERE code='2010' AND is_active=1");
+    if ($apFf === null) {
+        $c36Errors[] = 'pre-condition: AP (2010) absent';
+    } else {
+        $c36ApFfId = (int) $apFf['id'];
+        p3_smoke_map_critical($c36ApFfId);
+        try {
+            AccountValidator::assertReadyForBillPush();
+            // PASS — no exception.
+        } catch (\Throwable $e) {
+            $c36Errors[] = 'expected no exception (S5 narrow-scope), got ' . get_class($e) . ': ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c36Errors[] = 'C36 setup threw: ' . $e->getMessage();
+} finally {
+    if ($c36ApFfId !== null) {
+        p3_smoke_revert_critical($c36ApFfId);
+    }
+}
+if (empty($c36Errors)) {
+    echo "PASS C36 assertReadyForBillPush S1+S5 passes — AP mapped; AR/UF/tax/sales unmapped don't block (S3 N/A, F-P3-05)\n";
+    $pass++;
+} else {
+    echo "FAIL C36 " . implode('; ', $c36Errors) . "\n";
+    $failures[] = 'C36';
+}
+
+// ── C37: BillPaymentPush × S3 — AP unmapped + UF empty-cat ──
+$c37Errors = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    try {
+        AccountValidator::assertReadyForBillPaymentPush();
+        $c37Errors[] = 'expected exception, none thrown';
+    } catch (ChartOfAccountsIncompleteException $e) {
+        $msg = $e->getMessage();
+        if (!str_contains($msg, 'ap_clearing')) {
+            $c37Errors[] = "expected 'ap_clearing' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, 'undeposited_funds')) {
+            $c37Errors[] = "expected 'undeposited_funds' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, 'no FF account tagged')) {
+            $c37Errors[] = "expected 'no FF account tagged' for UF empty-cat, got: {$msg}";
+        }
+        if (!str_contains($msg, '2010')) {
+            $c37Errors[] = "expected FF '2010' (AP) in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '2 required categories')) {
+            $c37Errors[] = "expected plural '2 required categories', got: {$msg}";
+        }
+    } catch (\Throwable $e) {
+        $c37Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+    }
+} catch (Throwable $e) {
+    $c37Errors[] = 'C37 setup threw: ' . $e->getMessage();
+}
+if (empty($c37Errors)) {
+    echo "PASS C37 assertReadyForBillPaymentPush S3 multi-blocked — names both ap_clearing + undeposited_funds; UF Trap #68 phrase (F-P3-06)\n";
+    $pass++;
+} else {
+    echo "FAIL C37 " . implode('; ', $c37Errors) . "\n";
+    $failures[] = 'C37';
+}
+
+// ── C38: BillPaymentPush × S2 — synthetic UF mapped, AP unmapped ──
+$c38Errors = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    p3_smoke_create_synthetic_uf('mapped');
+    try {
+        AccountValidator::assertReadyForBillPaymentPush();
+        $c38Errors[] = 'expected exception, none thrown';
+    } catch (ChartOfAccountsIncompleteException $e) {
+        $msg = $e->getMessage();
+        if (!str_contains($msg, 'ap_clearing')) {
+            $c38Errors[] = "expected 'ap_clearing' in message, got: {$msg}";
+        }
+        if (str_contains($msg, 'undeposited_funds')) {
+            $c38Errors[] = "UF is mapped — should NOT appear in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '1 required category') || str_contains($msg, '1 required categories')) {
+            $c38Errors[] = "expected singular '1 required category', got: {$msg}";
+        }
+    } catch (\Throwable $e) {
+        $c38Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+    }
+} catch (Throwable $e) {
+    $c38Errors[] = 'C38 setup threw: ' . $e->getMessage();
+} finally {
+    p3_smoke_delete_synthetic_uf();
+}
+if (empty($c38Errors)) {
+    echo "PASS C38 assertReadyForBillPaymentPush S2 — synthetic UF mapped, AP unmapped → throws naming ONLY ap_clearing + singular (F-P3-06)\n";
+    $pass++;
+} else {
+    echo "FAIL C38 " . implode('; ', $c38Errors) . "\n";
+    $failures[] = 'C38';
+}
+
+// ── C39: BillPaymentPush × S1+S5 — both required mapped ────
+$c39Errors = [];
+$c39ApFfId = null;
+try {
+    AccountValidator::markCriticalAccounts();
+    p3_smoke_create_synthetic_uf('mapped');
+    $apFf = db_row("SELECT id FROM acc_accounts WHERE code='2010' AND is_active=1");
+    if ($apFf === null) {
+        $c39Errors[] = 'pre-condition: AP (2010) absent';
+    } else {
+        $c39ApFfId = (int) $apFf['id'];
+        p3_smoke_map_critical($c39ApFfId);
+        try {
+            AccountValidator::assertReadyForBillPaymentPush();
+            // PASS — no exception.
+        } catch (\Throwable $e) {
+            $c39Errors[] = 'expected no exception, got ' . get_class($e) . ': ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c39Errors[] = 'C39 setup threw: ' . $e->getMessage();
+} finally {
+    if ($c39ApFfId !== null) {
+        p3_smoke_revert_critical($c39ApFfId);
+    }
+    p3_smoke_delete_synthetic_uf();
+}
+if (empty($c39Errors)) {
+    echo "PASS C39 assertReadyForBillPaymentPush S1+S5 passes — synthetic UF + AP mapped; AR/tax/sales unmapped (F-P3-06)\n";
+    $pass++;
+} else {
+    echo "FAIL C39 " . implode('; ', $c39Errors) . "\n";
+    $failures[] = 'C39';
+}
+
+// ── C40: JournalEntryPush × S3 — both tax categories unmapped ──
+// Default state: tax_receivable (1050+1060) + tax_payable (2030+2040)
+// all is_critical=1, ff_only. Gate throws naming both categories.
+$c40Errors = [];
+try {
+    AccountValidator::markCriticalAccounts();
+    try {
+        AccountValidator::assertReadyForJournalEntryPush();
+        $c40Errors[] = 'expected exception, none thrown';
+    } catch (ChartOfAccountsIncompleteException $e) {
+        $msg = $e->getMessage();
+        if (!str_contains($msg, 'tax_receivable')) {
+            $c40Errors[] = "expected 'tax_receivable' in message, got: {$msg}";
+        }
+        if (!str_contains($msg, 'tax_payable')) {
+            $c40Errors[] = "expected 'tax_payable' in message, got: {$msg}";
+        }
+        // D2 — at least one FF code per category (1050 receivable, 2030 payable).
+        if (!str_contains($msg, '1050')) {
+            $c40Errors[] = "expected FF '1050' (GST/HST Receivable) in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '2030')) {
+            $c40Errors[] = "expected FF '2030' (GST/HST Payable) in message, got: {$msg}";
+        }
+        if (!str_contains($msg, '2 required categories')) {
+            $c40Errors[] = "expected plural '2 required categories', got: {$msg}";
+        }
+    } catch (\Throwable $e) {
+        $c40Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+    }
+} catch (Throwable $e) {
+    $c40Errors[] = 'C40 setup threw: ' . $e->getMessage();
+}
+if (empty($c40Errors)) {
+    echo "PASS C40 assertReadyForJournalEntryPush S3 multi-blocked — names both tax_receivable + tax_payable + FF codes (F-P3-07)\n";
+    $pass++;
+} else {
+    echo "FAIL C40 " . implode('; ', $c40Errors) . "\n";
+    $failures[] = 'C40';
+}
+
+// ── C41: JournalEntryPush × S2 — only tax_receivable mapped ──
+// Maps 1050 (GST/HST Receivable). tax_receivable category now has
+// 1 mapped FF → not blocking. tax_payable still 0 mapped → blocking.
+// Message names ONLY tax_payable, singular inflection.
+$c41Errors = [];
+$c41TaxRecFfId = null;
+try {
+    AccountValidator::markCriticalAccounts();
+    $taxRecFf = db_row("SELECT id FROM acc_accounts WHERE code='1050' AND is_active=1");
+    if ($taxRecFf === null) {
+        $c41Errors[] = 'pre-condition: tax_receivable FF (1050) absent';
+    } else {
+        $c41TaxRecFfId = (int) $taxRecFf['id'];
+        p3_smoke_map_critical($c41TaxRecFfId);
+        try {
+            AccountValidator::assertReadyForJournalEntryPush();
+            $c41Errors[] = 'expected exception, none thrown';
+        } catch (ChartOfAccountsIncompleteException $e) {
+            $msg = $e->getMessage();
+            if (!str_contains($msg, 'tax_payable')) {
+                $c41Errors[] = "expected 'tax_payable' in message, got: {$msg}";
+            }
+            // tax_receivable is now satisfied; should NOT appear with colon prefix.
+            // (Substring 'tax_receivable' could appear in a different context, so
+            // we assert the colon-prefixed form is absent — that's what the
+            // message-build loop emits for blocking categories.)
+            if (str_contains($msg, 'tax_receivable:') || str_contains($msg, 'tax_receivable (no FF')) {
+                $c41Errors[] = "tax_receivable is mapped — should NOT appear as blocking, got: {$msg}";
+            }
+            if (!str_contains($msg, '1 required category') || str_contains($msg, '1 required categories')) {
+                $c41Errors[] = "expected singular '1 required category', got: {$msg}";
+            }
+        } catch (\Throwable $e) {
+            $c41Errors[] = 'unexpected exception: ' . get_class($e) . ' — ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c41Errors[] = 'C41 setup threw: ' . $e->getMessage();
+} finally {
+    if ($c41TaxRecFfId !== null) {
+        p3_smoke_revert_critical($c41TaxRecFfId);
+    }
+}
+if (empty($c41Errors)) {
+    echo "PASS C41 assertReadyForJournalEntryPush S2 — tax_receivable mapped, tax_payable unmapped → throws naming ONLY tax_payable + singular (F-P3-07)\n";
+    $pass++;
+} else {
+    echo "FAIL C41 " . implode('; ', $c41Errors) . "\n";
+    $failures[] = 'C41';
+}
+
+// ── C42: JournalEntryPush × S1+S5 — both tax categories mapped ──
+// Maps 1050 + 2030 (one FF per tax category). AR/AP/UF/sales remain
+// unmapped (default) — gate must not block on those (narrow-scope).
+$c42Errors = [];
+$c42TaxRecFfId = null;
+$c42TaxPayFfId = null;
+try {
+    AccountValidator::markCriticalAccounts();
+    $taxRecFf = db_row("SELECT id FROM acc_accounts WHERE code='1050' AND is_active=1");
+    $taxPayFf = db_row("SELECT id FROM acc_accounts WHERE code='2030' AND is_active=1");
+    if ($taxRecFf === null || $taxPayFf === null) {
+        $c42Errors[] = 'pre-condition: tax FF accounts (1050 or 2030) absent';
+    } else {
+        $c42TaxRecFfId = (int) $taxRecFf['id'];
+        $c42TaxPayFfId = (int) $taxPayFf['id'];
+        p3_smoke_map_critical($c42TaxRecFfId);
+        p3_smoke_map_critical($c42TaxPayFfId);
+        try {
+            AccountValidator::assertReadyForJournalEntryPush();
+            // PASS — no exception.
+        } catch (\Throwable $e) {
+            $c42Errors[] = 'expected no exception, got ' . get_class($e) . ': ' . $e->getMessage();
+        }
+    }
+} catch (Throwable $e) {
+    $c42Errors[] = 'C42 setup threw: ' . $e->getMessage();
+} finally {
+    if ($c42TaxRecFfId !== null) {
+        p3_smoke_revert_critical($c42TaxRecFfId);
+    }
+    if ($c42TaxPayFfId !== null) {
+        p3_smoke_revert_critical($c42TaxPayFfId);
+    }
+}
+if (empty($c42Errors)) {
+    echo "PASS C42 assertReadyForJournalEntryPush S1+S5 passes — both tax categories mapped; AR/AP/UF/sales unmapped (narrow-scope, F-P3-07)\n";
+    $pass++;
+} else {
+    echo "FAIL C42 " . implode('; ', $c42Errors) . "\n";
+    $failures[] = 'C42';
+}
+
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────
     // Defensive sentinel cleanup — catches any TEST-SMOKE-A-* rows
@@ -1377,12 +1960,14 @@ if (empty($c29Errors)) {
     }
     // C20 synthetic FF accounts (id 999990, 999991). Also their
     // acc_qbo_account_map rows (ff_only rows created by matchAll for
-    // the loser of the claimed-set contest).
+    // the loser of the claimed-set contest). 999992 = C33/C34/C38/C39
+    // synthetic UF (S-QBO-VALIDATOR-GATE-SMOKE-COVERAGE); per-sub-check
+    // teardown deletes it but defensive cleanup catches any leak.
     try {
-        db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id IN (999990, 999991)");
-        db_execute("DELETE FROM acc_accounts WHERE id IN (999990, 999991)");
+        db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id IN (999990, 999991, 999992)");
+        db_execute("DELETE FROM acc_accounts WHERE id IN (999990, 999991, 999992)");
     } catch (Throwable $e) {
-        echo "WARN  C20 synthetic FF cleanup failed: " . $e->getMessage() . "\n";
+        echo "WARN  C20/P3 synthetic FF cleanup failed: " . $e->getMessage() . "\n";
     }
     // Captured mapping ids (C11 baseline).
     if (!empty($sentinelMappingIds)) {
@@ -1411,3 +1996,142 @@ if (!empty($failures)) {
 }
 echo "\n";
 exit(0);
+
+// ─────────────────────────────────────────────────────────────────────
+// S-QBO-VALIDATOR-GATE-SMOKE-COVERAGE helpers (C30–C42). Declared at
+// the bottom of the file; PHP hoists top-level function declarations
+// at parse time so they're callable from the try block above. Kept
+// out of the main flow so the sub-check sequence reads top-down
+// without helper-bodies cluttering the test narrative.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Insert a synthetic Undeposited-Funds FF account + its mapping row.
+ * v1 chart has no UF FF account by design (per D-QBO-VALIDATOR-3
+ * operator AskUserQuestion resolution); these helpers create one on
+ * the fly for Payment/BillPayment gate pass-state coverage.
+ *
+ * @param string $state  'ff_only' or 'mapped'
+ * @return int  Synthetic FF account id (always 999992)
+ */
+function p3_smoke_create_synthetic_uf(string $state = 'ff_only'): int
+{
+    db_insert('acc_accounts', [
+        'id'              => 999992,
+        'code'            => 'SMOKE-P3-UF',
+        'name'            => 'Zzqq SMOKE Undeposited Funds',
+        'account_type'    => 'asset',
+        'account_subtype' => 'current_asset',
+        'is_active'       => 1,
+    ]);
+    $cols = [
+        'ff_account_id'     => 999992,
+        'mapping_status'    => $state,
+        'is_critical'       => 1,
+        'critical_reason'   => 'SMOKE P3 synthetic Undeposited Funds',
+        'critical_category' => 'undeposited_funds',
+    ];
+    if ($state === 'mapped') {
+        $cols['qbo_account_id']   = 'TEST-SMOKE-A-P3-UF-' . bin2hex(random_bytes(4));
+        $cols['qbo_sync_token']   = '0';
+        $cols['qbo_name']         = 'SMOKE P3 UF mirror';
+        $cols['match_confidence'] = 'manual';
+    }
+    db_insert('acc_qbo_account_map', $cols);
+    return 999992;
+}
+
+/**
+ * Tear down the synthetic UF FF account + its mapping row. Safe to
+ * call when no synthetic UF exists (DELETE is no-op).
+ */
+function p3_smoke_delete_synthetic_uf(): void
+{
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id = 999992");
+    db_execute("DELETE FROM acc_accounts WHERE id = 999992");
+}
+
+/**
+ * Temporarily UPDATE a live critical FF mapping row to mapped state
+ * with a sentinel qbo_account_id. Sentinel prefix is caught by the
+ * defensive 'TEST-SMOKE-A-%' cleanup at the smoke's global finally.
+ *
+ * @param int $ffId  FF account id whose acc_qbo_account_map row is
+ *                   already is_critical=1, mapping_status='ff_only'.
+ * @return string  Sentinel qbo_account_id assigned.
+ */
+function p3_smoke_map_critical(int $ffId): string
+{
+    $sentinel = 'TEST-SMOKE-A-P3-' . bin2hex(random_bytes(4));
+    db_execute(
+        "UPDATE acc_qbo_account_map SET
+            qbo_account_id   = ?, qbo_sync_token = '0',
+            qbo_name         = 'SMOKE P3 mirror',
+            mapping_status   = 'mapped',
+            match_confidence = 'manual'
+          WHERE ff_account_id = ? AND is_critical = 1",
+        [$sentinel, $ffId]
+    );
+    return $sentinel;
+}
+
+/**
+ * Revert a critical FF mapping row back to ff_only state. Matches
+ * the per-sub-check cleanup pattern in C14/C24/C25/C26/C27.
+ */
+function p3_smoke_revert_critical(int $ffId): void
+{
+    db_execute(
+        "UPDATE acc_qbo_account_map SET
+            qbo_account_id   = NULL, qbo_sync_token = NULL, qbo_name = NULL,
+            mapping_status   = 'ff_only', match_confidence = NULL
+          WHERE ff_account_id = ?",
+        [$ffId]
+    );
+}
+
+/**
+ * Strip is_critical=0 from all mapping rows in a category. Used to
+ * simulate the S4 empty-category state for categories whose default
+ * chart state has FF accounts (ar_clearing, sales_revenue, etc.).
+ * Returns the captured row state so p3_smoke_restore_stripped can
+ * put it back exactly.
+ *
+ * @param string $category
+ * @return list<array{id:int,is_critical:int,critical_reason:?string,critical_category:?string}>
+ */
+function p3_smoke_strip_category(string $category): array
+{
+    $captured = db_select(
+        "SELECT id, is_critical, critical_reason, critical_category
+           FROM acc_qbo_account_map
+          WHERE critical_category = ? AND is_critical = 1",
+        [$category]
+    );
+    db_execute(
+        "UPDATE acc_qbo_account_map SET is_critical = 0
+          WHERE critical_category = ? AND is_critical = 1",
+        [$category]
+    );
+    return $captured;
+}
+
+/**
+ * Restore the rows captured by p3_smoke_strip_category().
+ */
+function p3_smoke_restore_stripped(array $captured): void
+{
+    foreach ($captured as $row) {
+        db_execute(
+            "UPDATE acc_qbo_account_map SET
+                is_critical = ?, critical_reason = ?, critical_category = ?
+              WHERE id = ?",
+            [
+                (int) $row['is_critical'],
+                $row['critical_reason'],
+                $row['critical_category'],
+                (int) $row['id'],
+            ]
+        );
+    }
+}
