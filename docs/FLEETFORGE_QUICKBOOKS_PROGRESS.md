@@ -399,6 +399,84 @@ Phase 1 trap sweep itself is otherwise clean — only finding is the portal disp
 
 ---
 
+### §12.2 Phase 2 conformance audit findings (S-QBO-PHASE-2-CONTRACT-AUDIT, 2026-05-26)
+
+Read-only conformance check of all shipped Pusher and Enqueuer classes against §6.8 and §6.9 contracts. **0 CRITICAL / 2 MEDIUM / 5 LOW.** No production code modified. Files examined: `lib/QboPushers/CustomerPusher.php`, `lib/QboPushers/VendorPusher.php`, `lib/QboPushers/InvoicePusher.php`, `lib/QboPushers/CustomerEnqueuer.php`, `lib/QboPushers/VendorEnqueuer.php`, `lib/QboPushers/InvoiceEnqueuer.php`, `lib/QboPushers/ItemCreator.php`, `FLEETFORGE_QUICKBOOKS_SPEC.md §6.8–§6.9`, `cron/qbo_sync_worker.php`, `FLEETFORGE_DATABASE_MASTER.sql (acc_qbo_sync_queue schema)`.
+
+#### DISCOVERY (PART B)
+
+Roster confirmed: **3 Pushers** (CustomerPusher S-QBO-6, VendorPusher S-QBO-7, InvoicePusher S-QBO-11), **3 Enqueuers** (CustomerEnqueuer S-QBO-6, VendorEnqueuer S-QBO-7, InvoiceEnqueuer S-QBO-11), **1 Creator** (ItemCreator S-QBO-10 — Creator-pattern, separate from §6.8). No missing or extra classes; B5 clean.
+
+Accounts are pull-only per D-QBO-8-1 (no AccountPusher + no AccountEnqueuer). Tax codes and items are one-way (TaxCodePuller only; ItemCreator not a dispatcher Pusher). Neither absence is a B5 finding.
+
+#### PUSHER CONFORMANCE MATRIX (§6.8)
+
+| Check | CustomerPusher | VendorPusher | InvoicePusher |
+|---|---|---|---|
+| **C1** Method surface (`pushCreate` + `pushUpdate` + `pushImpl`; no combined `push()`) | PASS | PASS | PASS |
+| **C2** Demotion rule (`pushUpdate` with no `qbo_id` → demote to create) | PASS | PASS | N/A — `pushUpdate` stubbed; returns `unsupported_in_session` per D-QBO-11-4 |
+| **C3** Idempotency BEFORE pre-flight | N/A — no per-Pusher pre-flight gate | N/A — no per-Pusher pre-flight gate | PASS — idempotency check at step 5; `InvoicePreflightGate::check()` at step 6 |
+| **C4** Pre-flight gate invocation | LOW — relies on Enqueuer-level gating only; no `assertReadyFor*` call inside Pusher; intentional design per class docblock | LOW — same as CustomerPusher | PASS — `InvoicePreflightGate::check()` → includes `AccountValidator::assertReadyForInvoicePush()` |
+| **C5** CurrencyRef emission gated on `multi_currency_enabled` (D-QBO-FIXPACK-12) | PASS — `buildQboPayload` gates on `settings_get('quickbooks.multi_currency_enabled','0')==='1'`; throws on empty currency in multi-currency mode | PASS — same gate; hardcodes `'CAD'` per D-QBO-FIXPACK-8 | PASS — `buildQboPayload` gates same way; emits `ExchangeRate` too; throws on non-CAD missing rate |
+| **C6** Return shape consistency (spec: `['success','status','qbo_id','sync_token','error']` on every path) | MEDIUM — skip/error paths omit `qbo_id`/`sync_token`/`error`; success paths omit `error`; extra `'mode'`/`'error_code'` keys on some paths | MEDIUM — identical pattern to CustomerPusher | MEDIUM — same as Customer/Vendor; additionally the payload-build exception path at line 182–186 omits `'status'` entirely |
+| **C7** Exception hierarchy (all thrown exceptions extend `QuickBooksException`) | PASS — `use FleetForge\Exceptions\QuickBooksException` present; caught + returned on HTTP error | PASS | PASS |
+| **C8** `setWorkerContext` propagation (D-QBO-FIXPACK-15) | PASS — context is set by `cron/qbo_sync_worker.php` line 229 *before* dispatcher call; Pushers call `new QuickBooksClient()` which inherits the static context; Pushers do NOT call `setWorkerContext` directly — correct design | PASS | PASS |
+| **C9** Idempotency-replay currency mismatch warning (D-QBO-FIXPACK-10) | PASS — `already_mapped` branch probes QBO CurrencyRef; `catch (\Throwable)` ensures offline smokes pass | PASS — probes for `'CAD'` hardcoded per D-QBO-FIXPACK-8 | MEDIUM — `already_mapped` branch (lines 140–145) returns immediately with no CurrencyRef probe; D-QBO-FIXPACK-10 was applied to Customer/Vendor but not backported to Invoice |
+
+#### ENQUEUER CONFORMANCE MATRIX (§6.9)
+
+| Check | CustomerEnqueuer | VendorEnqueuer | InvoiceEnqueuer |
+|---|---|---|---|
+| **D1** Method surface (`enqueue(int $id, string $operation): bool`) | PASS | PASS | PASS |
+| **D2** 4-step gating order (master kill → mode kill → operation allowlist → INSERT) | PASS | PASS | PASS — operation allowlist accepts only `'create'` (not `['create','update']`) per D-QBO-11-4; intentional narrowing, not drift |
+| **D3** Best-effort swallow (`try/catch(\Throwable)`; never throws; always returns `false` on error) | PASS | PASS | PASS |
+| **D4** Idempotency on enqueue (skip if pending row already exists) | LOW — no pre-INSERT duplicate check; consistent across all 3 Enqueuers; spec §6.9 does not require it; Pusher's `already_mapped` guard is the defence; a double-enqueue produces 2 queue rows, 2nd invocation short-circuits at Pusher | LOW | LOW |
+| **D5** Queue row schema correctness (K-22 Trap #62: `enqueued_at` not `created_at`; `status='queued'`; `max_retries=3`; no `next_retry_at` on initial enqueue) | PASS — correct columns; `enqueued_at` uses DB DEFAULT (not inserted); LOW note: `max_retries=3` overrides DB DEFAULT of 5; explicit INSERT value is correct per §6.9, but DB DEFAULT is out of sync | PASS / LOW same | PASS / LOW same |
+
+#### ITEMCREATOR AUDIT (PART E — Creator-pattern, separate track)
+
+`ItemCreator` is intentionally NOT a §6.8 dispatcher Pusher. Documented in class docblock: "NOT a Pusher in the dispatcher sense — Items are reference data (created once during S-QBO-10 mapping phase + then static). There is no pushCreate/pushUpdate contract here; no enqueuing; no acc_qbo_sync_queue interaction." Decision refs: D-QBO-10-3 (sync+idempotency design) + D-QBO-10-4 (operator confirmation gate). §6.8 anticipated Items would be future Pushers; S-QBO-10 chose Creator-pattern — **LOW documented intentional deviation.**
+
+Internal consistency: uses `createEntity('item', $payload)` per Trap #63 ✓. Returns `['success','qbo_id','qbo_name','sync_token','income_account_id','income_account_name','error']` — complete and consistent on all paths ✓. `resolveIncomeAccount` correctly throws `ChartOfAccountsIncompleteException` (extends `QuickBooksException`) on total absence of mapped revenue accounts ✓.
+
+**LOW gap:** `createMissingItem` has no internal idempotency check — does not query `acc_qbo_item_map` for an existing `qbo_item_id` before calling `createEntity`. A double-call for the same (item_type, variant) would create a duplicate QBO Item. Relies entirely on the caller UI/endpoint to prevent double-creation.
+
+#### FINDINGS BY CLASSIFICATION
+
+**MEDIUM (2):**
+
+1. **C6 — Return shape incomplete on all 3 Pushers** | `lib/QboPushers/InvoicePusher.php:182–186`, `CustomerPusher.php`, `VendorPusher.php` | §6.8 specifies a full 5-key shape `['success','status','qbo_id','sync_token','error']` on every return path. All 3 Pushers return sparse shapes: skip/error paths omit `qbo_id`/`sync_token`; success paths omit `error`; extra un-specced keys appear (`'mode'`, `'error_code'`, `'http_code'`). Most egregious: InvoicePusher payload-build exception path (line 182–186) omits `'status'` entirely. **Not a current production bug** — `cron/qbo_sync_worker.php` uses null-coalesce (`$result['status'] ?? 'ok'`, `$result['error'] ?? $result['status'] ?? 'Pusher returned success=false'`) on every key access. Risk: any future consumer that assumes the full shape without `??` defensiveness will get PHP Notices. Proposed fix: add null-value placeholders for all 5 keys as a base array and merge status-specific keys on top; add `'status'` to InvoicePusher line 182–186 path (1-line fix).
+
+2. **C9 — InvoicePusher missing idempotency-replay CurrencyRef mismatch warning** | `lib/QboPushers/InvoicePusher.php:140–145` | CustomerPusher and VendorPusher both implement D-QBO-FIXPACK-10: on the `already_mapped` branch, probe the QBO entity's `CurrencyRef.value` and `error_log` a warning when FF currency ≠ QBO currency. InvoicePusher's `already_mapped` branch (steps 5 at lines 140–145) returns immediately without any probe. InvoicePusher is currency-aware (D-QBO-FIXPACK-12 gate + ExchangeRate emit). If a prior push produced an invoice with the wrong currency in QBO (e.g., before FIXPACK-1 shipped), the already_mapped short-circuit prevents any warning from reaching the operator. **Not a current production bug** (invoice currency-poisoning is detectable from the mapping table snapshot `qbo_currency` column), but inconsistent with the FIXPACK-10 pattern. Proposed fix: add the same CurrencyRef-probe block (with `catch (\Throwable)`) to InvoicePusher's already_mapped branch; check `$mapping['qbo_currency']` against `$invoice['currency']` before making the HTTP call (avoids the getEntity call on every already_mapped hit).
+
+**LOW (5):**
+
+3. **C4 — Customer/VendorPusher: no per-Pusher pre-flight gate** | `CustomerPusher.php`, `VendorPusher.php` | Both rely on Enqueuer-level gating only. §6.8 notes "either is acceptable." The class docblocks document the sync_mode gate but don't call out the absence of an assertReadyFor* call. No production impact; flagged for documentation completeness.
+
+4. **D4 — All 3 Enqueuers: no idempotency on enqueue** | `CustomerEnqueuer.php:74–84`, `VendorEnqueuer.php:79–87`, `InvoiceEnqueuer.php:76–84` | None check for an existing pending queue row before INSERT. Spec §6.9 does not require it. Consequence of double-enqueue: two rows appear; second Pusher invocation short-circuits at `already_mapped` (for create) or produces an identical update (for update). Consistent across all 3; Pusher-level idempotency is the architectural defence.
+
+5. **D5 — `max_retries=3` explicit vs DB DEFAULT 5** | All 3 Enqueuer INSERT statements | All explicitly set `max_retries=3` per §6.9 spec ("retry_count=0; max_retries=3"). `FLEETFORGE_DATABASE_MASTER.sql` line 1220 shows `max_retries TINYINT DEFAULT '5'`. Explicit INSERT value overrides the DB default — current behavior is correct. Risk: future Enqueuer that omits `max_retries` from the INSERT would silently get 5 retries instead of 3.
+
+6. **E1 — ItemCreator is Creator-pattern, not §6.8 Pusher** | `lib/QboPushers/ItemCreator.php:1–50` | §6.8 header paragraph lists "item (S-QBO-8)" as an anticipated future §6.8 Pusher. S-QBO-10 implemented Creator-pattern instead. Class docblock documents the deviation with D-QBO-10-3/-4 references. No dispatcher integration; no Enqueuer pairing; no acc_qbo_sync_queue involvement. Intentional and documented.
+
+7. **E2 — ItemCreator lacks internal idempotency guard** | `lib/QboPushers/ItemCreator.php:106–108` | `createMissingItem` calls `createEntity('item', $payload)` without first checking `acc_qbo_item_map` for an existing `qbo_item_id`. Double-call for the same (item_type, variant) would create a duplicate QBO Item. Relies on caller UI/endpoint to prevent repeat invocations. Since this is an operator-confirmed action (D-QBO-10-4) the risk is low in practice; flag for future defensive hardening.
+
+#### STOP CONDITION CHECK
+
+No CRITICAL findings. No missing/extra Pusher or Enqueuer classes. No code paths where a MEDIUM finding produces an active runtime error (worker is defensive with `??`). Proceeding to commit.
+
+---
+
+### §12.3 C13 smoke-parallelism side-finding (Phase 1, 2026-05-26)
+
+**Context:** During Phase 1 testing, running `tests/_smoke_qbo_account_mapping.php` and `tests/_smoke_qbo_invoice_push.php` in the same parallel batch caused `_smoke_qbo_account_mapping.php` sub-check C13 (`assertReadyForInvoicePush()` should throw when accounts unmapped) to fail with "expected exception, none thrown." Root cause: `_smoke_qbo_invoice_push.php` temporarily maps accounts as part of its own test setup; C13 checks that `assertReadyForInvoicePush()` throws when accounts are unmapped, but with concurrent mapping from the sibling smoke the accounts appear mapped.
+
+**Finding:** Both smokes pass individually (29/29 and 39/39). The interference is a pre-existing test suite characteristic (shared DB state across test processes). Not a code bug — no fix required in production code.
+
+**Action:** Run `_smoke_qbo_account_mapping.php` and `_smoke_qbo_invoice_push.php` sequentially when both are in scope. Other D131 smokes can still run in parallel. A future improvement would add `acc_qbo_account_map` cleanup to `_smoke_qbo_invoice_push.php`'s teardown to restore the pre-test unmapped state, making the two smokes order-independent.
+
+---
+
 ## 11. CHANGELOG
 
 ### v1.0 (2026-05-18) — Initial progress tracker
