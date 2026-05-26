@@ -54,6 +54,28 @@ class VendorEnqueuer
      */
     public static function enqueue(int $ffVendorId, string $operation): bool
     {
+        // Gate 0: entity eligibility (D-ENQUEUER-GATE-0-ELIGIBILITY).
+        //
+        // Defensive guard mirroring CustomerEnqueuer. vendors has no
+        // status/is_active column (verified via DESCRIBE vendors); only
+        // hard-deletion via deleted_at is in scope. Missing row check
+        // protects against typos / orphan FK / future call sites with
+        // dirty input.
+        //
+        // Best-effort: silent reject + error_log per §6.9 contract.
+        $vendor = db_row(
+            "SELECT id, deleted_at FROM vendors WHERE id = ?",
+            [$ffVendorId]
+        );
+        if ($vendor === null) {
+            error_log("[VendorEnqueuer] gate-0 reject: vendor id {$ffVendorId} not found");
+            return false;
+        }
+        if ($vendor['deleted_at'] !== null) {
+            error_log("[VendorEnqueuer] gate-0 reject: vendor id {$ffVendorId} is soft-deleted (deleted_at={$vendor['deleted_at']})");
+            return false;
+        }
+
         // Gate 1: master kill switch (D-CPA-5).
         if ((string) settings_get('quickbooks.sync_enabled', '0') !== '1') {
             return false;

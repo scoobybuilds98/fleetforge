@@ -48,6 +48,10 @@ declare(strict_types=1);
  * @updated  S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE — added C48 (soft-deleted
  *           skip records map + sync_log) + C49 (sync_mode=disabled skip
  *           records map + sync_log); total 49 sub-checks.
+ * @updated  S-QBO-ENQUEUER-ELIGIBILITY-GATE — added C50 (gate-0 rejects
+ *           missing invoice id) + C51 (gate-0 rejects soft-deleted) +
+ *           C52 (gate-0 rejects status='draft' for op='create');
+ *           total 52 sub-checks.
  * @spec    FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract), §17 (tax-override)
  * @decision D-QBO-FIXPACK-1 (always emit CurrencyRef),
  *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on missing non-CAD rate),
@@ -68,7 +72,7 @@ use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 49;
+$total    = 52;
 
 // Sentinel IDs we'll clean up at end
 $sentinelInvoiceIds = [];
@@ -1605,6 +1609,142 @@ if (empty($c49Errors)) {
     $failures[] = 'C49';
 }
 
+// ── C50: S-QBO-ENQUEUER-ELIGIBILITY-GATE — gate-0 rejects missing invoice ──
+// Set sync_enabled='1' first so gate-1 wouldn't reject — if no queue row
+// is written, gate-0 must have been the rejector.
+$c50Errors = [];
+try {
+    db_execute("DELETE FROM invoices WHERE id = 999994");  // ensure absent
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id = 999994");
+    $setSetting('quickbooks.sync_enabled', '1');
+
+    $r = InvoiceEnqueuer::enqueue(999994, 'create');
+
+    if ($r !== false) {
+        $c50Errors[] = "expected enqueue to return false for missing invoice id, got " . var_export($r, true);
+    }
+    $row = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id = ?", [999994]);
+    if ($row !== null) {
+        $c50Errors[] = "expected NO queue row written; found queue id={$row['id']}";
+    }
+} catch (Throwable $e) {
+    $c50Errors[] = 'C50 threw: ' . $e->getMessage();
+} finally {
+    $setSetting('quickbooks.sync_enabled', '0');
+}
+if (empty($c50Errors)) {
+    echo "PASS C50 InvoiceEnqueuer gate-0 rejects missing invoice id (S-QBO-ENQUEUER-ELIGIBILITY-GATE)\n";
+    $pass++;
+} else {
+    echo "FAIL C50 " . implode('; ', $c50Errors) . "\n";
+    $failures[] = 'C50';
+}
+
+// ── C51: S-QBO-ENQUEUER-ELIGIBILITY-GATE — gate-0 rejects soft-deleted ──
+$c51Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = 999995");
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id = 999995");
+    db_execute("DELETE FROM invoice_line_items WHERE invoice_id = 999995");
+    db_execute("DELETE FROM invoices WHERE id = 999995");
+
+    db_insert('invoices', [
+        'id'                    => 999995,
+        'invoice_number'        => 'SMK-C51-' . substr((string) time(), -6),
+        'customer_id'           => 999990,
+        'invoice_type'          => 'regular',
+        'billing_period_start'  => '2026-05-01',
+        'billing_period_end'    => '2026-05-31',
+        'billing_period_days'   => 31,
+        'billing_type'          => 'single_period',
+        'invoice_date'          => '2026-05-31',
+        'due_date'              => '2026-06-30',
+        'status'                => 'sent',  // sent so the status check would pass
+        'subtotal'              => '100.00',
+        'tax_total'             => '0.00',
+        'total_amount'          => '100.00',
+        'balance_due'           => '100.00',
+        'currency'              => 'CAD',
+        'company_name_snapshot' => 'SMOKE C51 Customer',
+        'subtotal_after_discount' => '100.00',
+        'deleted_at'            => '2026-05-26 00:00:00',  // gate-0 reject path
+    ]);
+    $setSetting('quickbooks.sync_enabled', '1');
+
+    $r = InvoiceEnqueuer::enqueue(999995, 'create');
+
+    if ($r !== false) {
+        $c51Errors[] = "expected enqueue to return false for soft-deleted invoice, got " . var_export($r, true);
+    }
+    $row = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id = ?", [999995]);
+    if ($row !== null) {
+        $c51Errors[] = "expected NO queue row written; found queue id={$row['id']}";
+    }
+} catch (Throwable $e) {
+    $c51Errors[] = 'C51 threw: ' . $e->getMessage();
+} finally {
+    $setSetting('quickbooks.sync_enabled', '0');
+}
+if (empty($c51Errors)) {
+    echo "PASS C51 InvoiceEnqueuer gate-0 rejects soft-deleted invoice (S-QBO-ENQUEUER-ELIGIBILITY-GATE)\n";
+    $pass++;
+} else {
+    echo "FAIL C51 " . implode('; ', $c51Errors) . "\n";
+    $failures[] = 'C51';
+}
+
+// ── C52: S-QBO-ENQUEUER-ELIGIBILITY-GATE — gate-0 rejects wrong status for op='create' ──
+$c52Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = 999996");
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id = 999996");
+    db_execute("DELETE FROM invoice_line_items WHERE invoice_id = 999996");
+    db_execute("DELETE FROM invoices WHERE id = 999996");
+
+    db_insert('invoices', [
+        'id'                    => 999996,
+        'invoice_number'        => 'SMK-C52-' . substr((string) time(), -6),
+        'customer_id'           => 999990,
+        'invoice_type'          => 'regular',
+        'billing_period_start'  => '2026-05-01',
+        'billing_period_end'    => '2026-05-31',
+        'billing_period_days'   => 31,
+        'billing_type'          => 'single_period',
+        'invoice_date'          => '2026-05-31',
+        'due_date'              => '2026-06-30',
+        'status'                => 'draft',  // wrong for op='create' (gate-0 requires 'sent')
+        'subtotal'              => '100.00',
+        'tax_total'             => '0.00',
+        'total_amount'          => '100.00',
+        'balance_due'           => '100.00',
+        'currency'              => 'CAD',
+        'company_name_snapshot' => 'SMOKE C52 Customer',
+        'subtotal_after_discount' => '100.00',
+    ]);
+    $setSetting('quickbooks.sync_enabled', '1');
+
+    $r = InvoiceEnqueuer::enqueue(999996, 'create');
+
+    if ($r !== false) {
+        $c52Errors[] = "expected enqueue to return false for status='draft' on op='create', got " . var_export($r, true);
+    }
+    $row = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id = ?", [999996]);
+    if ($row !== null) {
+        $c52Errors[] = "expected NO queue row written; found queue id={$row['id']}";
+    }
+} catch (Throwable $e) {
+    $c52Errors[] = 'C52 threw: ' . $e->getMessage();
+} finally {
+    $setSetting('quickbooks.sync_enabled', '0');
+}
+if (empty($c52Errors)) {
+    echo "PASS C52 InvoiceEnqueuer gate-0 rejects status='draft' on op='create' (S-QBO-ENQUEUER-ELIGIBILITY-GATE)\n";
+    $pass++;
+} else {
+    echo "FAIL C52 " . implode('; ', $c52Errors) . "\n";
+    $failures[] = 'C52';
+}
+
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────
     // Restore settings to pre-smoke values
@@ -1628,11 +1768,11 @@ if (empty($c49Errors)) {
     // S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE added 999992 + 999993 (C48 + C49)
     // and the new sync_log writes from recordSkipped — clean both.
     try {
-        db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id IN (999990, 999991, 999992, 999993)");
-        db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id IN (999990, 999991, 999992, 999993)");
-        db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='invoice' AND entity_id IN (999990, 999991, 999992, 999993)");
-        db_execute("DELETE FROM invoice_line_items WHERE invoice_id IN (999990, 999991, 999992, 999993)");
-        db_execute("DELETE FROM invoices WHERE id IN (999990, 999991, 999992, 999993)");
+        db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id IN (999990, 999991, 999992, 999993, 999994, 999995, 999996)");
+        db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id IN (999990, 999991, 999992, 999993, 999994, 999995, 999996)");
+        db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='invoice' AND entity_id IN (999990, 999991, 999992, 999993, 999994, 999995, 999996)");
+        db_execute("DELETE FROM invoice_line_items WHERE invoice_id IN (999990, 999991, 999992, 999993, 999994, 999995, 999996)");
+        db_execute("DELETE FROM invoices WHERE id IN (999990, 999991, 999992, 999993, 999994, 999995, 999996)");
         db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = 999990 OR qbo_customer_id LIKE 'TEST-SMOKE-C-%'");
         db_execute("DELETE FROM customers WHERE id = 999990");
     } catch (Throwable $e) {

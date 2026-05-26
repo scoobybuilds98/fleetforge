@@ -50,6 +50,34 @@ class CustomerEnqueuer
      */
     public static function enqueue(int $ffCustomerId, string $operation): bool
     {
+        // Gate 0: entity eligibility (D-ENQUEUER-GATE-0-ELIGIBILITY).
+        //
+        // Defensive guard against non-canonical call sites + enqueue↔dispatch
+        // races where the entity changes state between API write and worker
+        // dispatch. Canonical callers (api/v1/customers/create.php +
+        // update.php) are eligible-by-construction; gate 0 protects future
+        // call sites + manual CLI invocations.
+        //
+        // No status column check — `customers.status` is operator-workflow
+        // soft-state (active/inactive/pending/suspended/credit_hold); push
+        // eligibility is conservatively gated on the hard-deletion column
+        // only. Inactive customers may still legitimately need QBO record
+        // updates (e.g. marking inactive in QBO mirror).
+        //
+        // Best-effort: silent reject + error_log per §6.9 contract.
+        $customer = db_row(
+            "SELECT id, deleted_at FROM customers WHERE id = ?",
+            [$ffCustomerId]
+        );
+        if ($customer === null) {
+            error_log("[CustomerEnqueuer] gate-0 reject: customer id {$ffCustomerId} not found");
+            return false;
+        }
+        if ($customer['deleted_at'] !== null) {
+            error_log("[CustomerEnqueuer] gate-0 reject: customer id {$ffCustomerId} is soft-deleted (deleted_at={$customer['deleted_at']})");
+            return false;
+        }
+
         // Gate 1: master kill switch (D-CPA-5).
         if ((string) settings_get('quickbooks.sync_enabled', '0') !== '1') {
             return false;

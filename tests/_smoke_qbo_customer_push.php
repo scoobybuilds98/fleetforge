@@ -75,7 +75,7 @@ use FleetForge\QboPushers\CustomerEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 16;
+$total    = 18;
 
 /** Sentinel customer ids we inserted for synthetic testing. */
 $sentinelCustomerIds = [];
@@ -583,6 +583,71 @@ if (empty($c14Errors)) {
 } else {
     echo "FAIL C14 " . implode('; ', $c14Errors) . "\n";
     $failures[] = 'C14';
+}
+
+// ── C15: S-QBO-ENQUEUER-ELIGIBILITY-GATE — gate-0 rejects missing customer ──
+// Set sync_enabled='1' first so gate-1 wouldn't reject. If no queue row
+// is written, gate-0 must have been the rejector.
+$c15Errors = [];
+try {
+    db_execute("DELETE FROM customers WHERE id = 999994");
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='customer' AND entity_id = 999994");
+    ff_smoke_set_setting('quickbooks.sync_enabled', '1');
+
+    $r = CustomerEnqueuer::enqueue(999994, 'create');
+
+    if ($r !== false) {
+        $c15Errors[] = "expected enqueue to return false for missing customer id, got " . var_export($r, true);
+    }
+    $row = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='customer' AND entity_id = ?", [999994]);
+    if ($row !== null) {
+        $c15Errors[] = "expected NO queue row written; found queue id={$row['id']}";
+    }
+} catch (Throwable $e) {
+    $c15Errors[] = 'C15 threw: ' . $e->getMessage();
+} finally {
+    ff_smoke_set_setting('quickbooks.sync_enabled', '0');
+}
+if (empty($c15Errors)) {
+    echo "PASS C15 CustomerEnqueuer gate-0 rejects missing customer id (S-QBO-ENQUEUER-ELIGIBILITY-GATE)\n";
+    $pass++;
+} else {
+    echo "FAIL C15 " . implode('; ', $c15Errors) . "\n";
+    $failures[] = 'C15';
+}
+
+// ── C16: S-QBO-ENQUEUER-ELIGIBILITY-GATE — gate-0 rejects soft-deleted ──
+$c16Errors = [];
+try {
+    db_execute("DELETE FROM customers WHERE id = 999995");
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='customer' AND entity_id = 999995");
+    db_execute(
+        "INSERT INTO customers (id, company_name, deleted_at) VALUES (999995, ?, NOW())",
+        ['SMOKE C16 Soft-Deleted Customer']
+    );
+    $sentinelCustomerIds[] = 999995;
+    ff_smoke_set_setting('quickbooks.sync_enabled', '1');
+
+    $r = CustomerEnqueuer::enqueue(999995, 'create');
+
+    if ($r !== false) {
+        $c16Errors[] = "expected enqueue to return false for soft-deleted customer, got " . var_export($r, true);
+    }
+    $row = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='customer' AND entity_id = ?", [999995]);
+    if ($row !== null) {
+        $c16Errors[] = "expected NO queue row written; found queue id={$row['id']}";
+    }
+} catch (Throwable $e) {
+    $c16Errors[] = 'C16 threw: ' . $e->getMessage();
+} finally {
+    ff_smoke_set_setting('quickbooks.sync_enabled', '0');
+}
+if (empty($c16Errors)) {
+    echo "PASS C16 CustomerEnqueuer gate-0 rejects soft-deleted customer (S-QBO-ENQUEUER-ELIGIBILITY-GATE)\n";
+    $pass++;
+} else {
+    echo "FAIL C16 " . implode('; ', $c16Errors) . "\n";
+    $failures[] = 'C16';
 }
 
 } finally {
