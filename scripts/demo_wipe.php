@@ -114,14 +114,22 @@ $reset = db_execute(
 );
 echo "  Equipment units reset: {$reset} rows\n";
 
-// Re-seed invoice number counter so new invoices start at 001
-echo "\nResetting invoice number counter...\n";
+// Re-seed invoice number counter consistent with invoices-table reality.
+// S-DEMO-WIPE-COUNTER-SYNC (2026-05-26): the prior implementation hardcoded
+// value='1', which collided with existing INV-YYYY-NNNNN rows if invoices
+// weren't fully truncated (e.g. a future edit removing 'invoices' from
+// $toWipe, or a partial-wipe run). Now we sync to MAX(invoice_number)+1
+// per year, so the post-wipe state is self-consistent regardless of how
+// many invoice rows survive the TRUNCATE pass. See S-INVOICE-COUNTER-BUMP
+// for the recurring drift this resolves at root.
+echo "\nResetting invoice number counter (sync to MAX(invoice_number)+1)...\n";
 db_execute("DELETE FROM settings WHERE `key` LIKE 'invoice.next_number.%'", []);
-db_execute(
-    "INSERT INTO settings (`key`, `value`, `value_type`, `group_name`) VALUES (?, '1', 'integer', 'invoices')",
-    ['invoice.next_number.' . date('Y')]
-);
-echo "  Counter reset to 1 for " . date('Y') . "\n";
+$_yr = date('Y');
+$_prefix = settings_get('invoice.prefix', 'INV');
+$_max = (int)(db_row("SELECT MAX(CAST(SUBSTRING_INDEX(invoice_number, '-', -1) AS UNSIGNED)) AS m FROM invoices WHERE invoice_number LIKE ?", ["{$_prefix}-{$_yr}-%"])['m'] ?? 0);
+$_next = $_max + 1;
+db_execute("INSERT INTO settings (`key`, `value`, `value_type`, `group_name`) VALUES (?, ?, 'integer', 'invoices')", ["invoice.next_number.{$_yr}", (string)$_next]);
+echo "  Counter for {$_yr} set to {$_next} (MAX existing INV-{$_yr}-* was {$_max})\n";
 
 // Re-seed journal entry counter
 db_execute("DELETE FROM settings WHERE `key` LIKE 'acc.next_je_number.%'", []);
