@@ -167,6 +167,13 @@ if ($customerId === 0 || $unitId === 0 || $userId === 0) {
 echo "S-MILEAGE-5 — _smoke_model_b_lifecycle.php\n";
 echo str_repeat('═', 76), "\n";
 
+// S-INVOICE-COUNTER-BUMP — drift WARN: surface counter ≤ MAX(invoice_number) before it becomes an opaque UNIQUE collision in any scenario that generates ≥2 invoices.
+$_yr = date('Y');
+$_counter = (int)(db_row("SELECT value FROM settings WHERE `key` = ?", ["invoice.next_number.{$_yr}"])['value'] ?? 1);
+$_maxStr = db_row("SELECT MAX(invoice_number) AS m FROM invoices WHERE invoice_number LIKE ?", ["INV-{$_yr}-%"])['m'] ?? '';
+$_maxNum = $_maxStr !== '' ? (int)substr(strrchr($_maxStr, '-'), 1) : 0;
+if ($_counter <= $_maxNum) { fwrite(STDERR, "WARN invoice-counter-drift: invoice.next_number.{$_yr}={$_counter} <= MAX(invoice_number)={$_maxNum}; next generateInvoiceNumber() will collide. Run: UPDATE settings SET value='" . ($_maxNum + 5) . "' WHERE `key`='invoice.next_number.{$_yr}'. See S-D131-BASELINE-RESTORE / S-INVOICE-COUNTER-BUMP.\n"); }
+
 $periodStart = '2026-04-01';
 $periodEnd   = '2026-04-30';
 

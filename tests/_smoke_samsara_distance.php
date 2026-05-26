@@ -84,6 +84,13 @@ function record(array &$results, string $id, string $name, bool $passed, string 
 // =====================================================================
 // T1 — Standard 30-day period: returns expected distance, no warnings
 // =====================================================================
+// S-INVOICE-COUNTER-BUMP — drift WARN: surface counter ≤ MAX(invoice_number) before it becomes an opaque UNIQUE collision in T14 (precharge_invoice_emit calls InvoiceGenerator::createFromLease).
+$_yr = date('Y');
+$_counter = (int)(db_row("SELECT value FROM settings WHERE `key` = ?", ["invoice.next_number.{$_yr}"])['value'] ?? 1);
+$_maxStr = db_row("SELECT MAX(invoice_number) AS m FROM invoices WHERE invoice_number LIKE ?", ["INV-{$_yr}-%"])['m'] ?? '';
+$_maxNum = $_maxStr !== '' ? (int)substr(strrchr($_maxStr, '-'), 1) : 0;
+if ($_counter <= $_maxNum) { fwrite(STDERR, "WARN invoice-counter-drift: invoice.next_number.{$_yr}={$_counter} <= MAX(invoice_number)={$_maxNum}; next generateInvoiceNumber() will collide. Run: UPDATE settings SET value='" . ($_maxNum + 5) . "' WHERE `key`='invoice.next_number.{$_yr}'. See S-D131-BASELINE-RESTORE / S-INVOICE-COUNTER-BUMP.\n"); }
+
 echo "\n[Running 16 stress tests: T1-T13 fixture-mode coverage, T14-T16 S-MILEAGE-2A surface]\n\n";
 
 $start = new DateTimeImmutable('2026-04-01T00:00:00Z');
