@@ -70,6 +70,16 @@ $state       = clean_string($body['state'] ?? null, 100);
 $notes       = clean_string($body['notes'] ?? null, 5000);
 $isPreferred = isset($body['is_preferred']) ? (int)(bool)$body['is_preferred'] : 0;
 
+// S-VENDOR-CURRENCY-COLUMN: currency ENUM('CAD','USD') default 'CAD'.
+// Matches the customer create.php pattern (validates, defaults, persists).
+// VendorPusher reads $ff['currency'] post-S-VENDOR-CURRENCY-COLUMN to emit
+// the QBO CurrencyRef (was hardcoded 'CAD' per D-QBO-FIXPACK-8 backlog).
+$rawCurrency = $body['currency'] ?? 'CAD';
+$currency    = in_array($rawCurrency, ['CAD', 'USD'], true) ? $rawCurrency : 'CAD';
+if (isset($body['currency']) && !in_array($body['currency'], ['CAD', 'USD'], true)) {
+    $fields['currency'] = "Currency must be 'CAD' or 'USD'.";
+}
+
 // VALID-2: email format check (only when provided)
 $email     = null;
 $rawEmail  = $body['email'] ?? null;
@@ -137,7 +147,7 @@ if (db_exists('vendors', 'name = ? AND deleted_at IS NULL', [$name])) {
 $newId = db_transaction(function() use (
     $name, $vendorType, $contactName, $email, $phone,
     $address, $city, $state, $specializations,
-    $hourlyRate, $rating, $notes, $isPreferred
+    $hourlyRate, $rating, $notes, $isPreferred, $currency
 ) {
     $id = db_insert('vendors', [
         'name'            => $name,
@@ -153,6 +163,7 @@ $newId = db_transaction(function() use (
         'rating'          => $rating,
         'notes'           => $notes,
         'is_preferred'    => $isPreferred,
+        'currency'        => $currency,
         'total_spent'     => '0.00',
         'created_by'      => current_user_id(),
     ]);

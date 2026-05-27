@@ -3480,6 +3480,7 @@ CREATE TABLE `vendors` (
   `hourly_rate` decimal(10,2) DEFAULT NULL,
   `rating` tinyint unsigned DEFAULT NULL,
   `notes` text COLLATE utf8mb4_unicode_ci,
+  `currency` enum('CAD','USD') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'CAD' COMMENT 'Vendor billing currency (CAD or USD). Default CAD matches D-QBO-FIXPACK-8 pre-migration assumption. Mirrors customers.currency ENUM. Added in S-VENDOR-CURRENCY-COLUMN closing D-QBO-FIXPACK-8 backlog.',
   `is_preferred` tinyint(1) NOT NULL DEFAULT '0',
   `total_spent` decimal(14,2) NOT NULL DEFAULT '0.00',
   `created_by` int unsigned DEFAULT NULL,

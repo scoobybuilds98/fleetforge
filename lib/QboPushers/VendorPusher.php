@@ -67,6 +67,14 @@ declare(strict_types=1);
  * @updated  S-QBO-PUSHER-CONTRACT-PAYDOWN — added private RESULT_BASE +
  *           applied §6.8 canonical 5-key return shape on every path
  *           (MEDIUM-C6 fix).
+ * @updated  S-VENDOR-CURRENCY-COLUMN — vendors.currency ENUM('CAD','USD')
+ *           NOT NULL DEFAULT 'CAD' added (mirrors customers.currency).
+ *           buildQboPayload now reads $ff['currency'] (was hardcoded 'CAD'
+ *           per D-QBO-FIXPACK-8 Option A). pushImpl idempotency-replay
+ *           mismatch warning compares against $ff['currency'] (was
+ *           hardcoded 'CAD'). pushImpl SELECT extended to include currency
+ *           column. Closes D-QBO-FIXPACK-8 backlog item. api/v1/vendors/
+ *           create.php + update.php accept currency input.
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.8 (Pusher Contract),
  *           §7.5 (vendor mapping table)
  * @decision D-QBO-7-1 (1099 out of scope v1),
@@ -75,8 +83,13 @@ declare(strict_types=1);
  *           D-QBO-7-4 (state-machine mapping pattern from D-QBO-5),
  *           D-PUSHER-DEMOTION-RULE (update→create demotion when no qbo_id),
  *           D-QBO-FIXPACK-6 (class-of-entity CurrencyRef principle),
- *           D-QBO-FIXPACK-8 (vendor CurrencyRef emit policy — hardcoded 'CAD'),
- *           D-QBO-FIXPACK-10 (idempotency-replay mismatch warning)
+ *           D-QBO-FIXPACK-8 (vendor CurrencyRef emit policy — SUPERSEDED
+ *               by D-VENDOR-CURRENCY-COLUMN-1; was hardcoded 'CAD' until
+ *               S-VENDOR-CURRENCY-COLUMN added per-row currency),
+ *           D-QBO-FIXPACK-10 (idempotency-replay mismatch warning),
+ *           D-VENDOR-CURRENCY-COLUMN-1 (vendors.currency ENUM mirrors
+ *               customers.currency; buildQboPayload reads $ff['currency'];
+ *               supersedes D-QBO-FIXPACK-8 hardcode)
  */
 
 namespace FleetForge\QboPushers;
@@ -144,8 +157,12 @@ class VendorPusher
         //    actually maps to QBO + the soft-delete flag. vendors uses
         //    `state` (not `province` like customers) and has no
         //    postal_code or country column on disk.
+        // S-VENDOR-CURRENCY-COLUMN: + currency (was hardcoded 'CAD' in
+        // buildQboPayload per D-QBO-FIXPACK-8 Option A; column now exists
+        // in vendors table and is included here so buildQboPayload + the
+        // idempotency-replay mismatch warning can read per-row currency).
         $ff = db_row(
-            "SELECT id, name, contact_name, email, phone, address, city, state, deleted_at, updated_at
+            "SELECT id, name, contact_name, email, phone, address, city, state, currency, deleted_at, updated_at
                FROM vendors
               WHERE id = ?",
             [$ffVendorId]
@@ -194,10 +211,14 @@ class VendorPusher
                 $qboVend    = $qboResp['Vendor'] ?? null;
                 if (is_array($qboVend)) {
                     $qboCurrency = strtoupper((string) ($qboVend['CurrencyRef']['value'] ?? ''));
-                    // D-QBO-FIXPACK-8: vendors are always CAD (hardcoded).
-                    if ($qboCurrency !== '' && $qboCurrency !== 'CAD') {
+                    // S-VENDOR-CURRENCY-COLUMN: compare against $ff['currency']
+                    // (was hardcoded 'CAD' per D-QBO-FIXPACK-8; now per-row).
+                    // ?? 'CAD' defensive fallback in case the SELECT misses
+                    // the column (shouldn't happen post-migration, but cheap).
+                    $expectedCurrency = strtoupper((string) ($ff['currency'] ?? 'CAD'));
+                    if ($qboCurrency !== '' && $qboCurrency !== $expectedCurrency) {
                         error_log(
-                            "S-QBO-FIXPACK-10 WARNING: FF vendor {$ff['id']} expected CurrencyRef='CAD' " .
+                            "S-QBO-FIXPACK-10 WARNING: FF vendor {$ff['id']} expected CurrencyRef='{$expectedCurrency}' " .
                             "but mapped QBO vendor #{$mapping['qbo_vendor_id']} is '{$qboCurrency}'. " .
                             "Mapping is currency-poisoned (Intuit forbids QBO vendor currency change after create). " .
                             "Operator action: unlink FF vendor from QBO (set mapping_status='ff_only'), " .
@@ -315,14 +336,14 @@ class VendorPusher
      *   AND "John A. Smith Jr." → ('John', 'A. Smith Jr.')
      *   AND single names like "Cher" → ('Cher', '').
      *
-     * Emits CurrencyRef='CAD' only when quickbooks.multi_currency_enabled='1'
-     * (D-QBO-FIXPACK-12). The vendors table has no currency column; all FF
-     * vendors are Canadian (hardcoded 'CAD' per D-QBO-FIXPACK-8 Option A).
-     * When multi-currency is disabled: omits CurrencyRef so single-currency
-     * QBO companies don't receive error 6000. Queue S-VENDOR-CURRENCY-COLUMN
-     * if multi-currency vendor support is needed in the future.
-     * NOTE: pushImpl strips CurrencyRef from UPDATE payloads because
-     * QBO rejects it (vendor currency immutable after create).
+     * Emits CurrencyRef per $ff['currency'] only when multi-currency is
+     * enabled (quickbooks.multi_currency_enabled='1' per D-QBO-FIXPACK-12).
+     * S-VENDOR-CURRENCY-COLUMN added vendors.currency (ENUM 'CAD','USD'
+     * NOT NULL DEFAULT 'CAD') replacing the D-QBO-FIXPACK-8 hardcode. Reads
+     * from the row with ?? 'CAD' defensive fallback. When multi-currency
+     * is disabled: omits CurrencyRef so single-currency QBO companies don't
+     * receive error 6000. pushImpl strips CurrencyRef from UPDATE payloads
+     * because QBO rejects it (vendor currency immutable after create).
      *
      * Public-static so the offline smoke can exercise it without
      * going through the cURL boundary.
@@ -342,12 +363,20 @@ class VendorPusher
         // company (D-QBO-FIXPACK-3 root cause discovery). Emit only when the
         // connected QBO company has multi-currency enabled (auto-detected at
         // connect/refresh time and cached in quickbooks.multi_currency_enabled).
-        // When '1': emit CurrencyRef='CAD' per D-QBO-FIXPACK-8 Option A
-        //   (vendors table has no currency column; Mainland is Canadian).
+        //
+        // S-VENDOR-CURRENCY-COLUMN: read $ff['currency'] (was hardcoded 'CAD'
+        // per D-QBO-FIXPACK-8 Option A — vendors table now has currency column).
+        // strtoupper + ?? 'CAD' defensive: handles lowercase input + missing
+        // column edge case (shouldn't happen post-migration; cheap insurance).
+        // When '1': emit CurrencyRef from per-row currency.
         // When '0': omit CurrencyRef entirely; QBO enforces home currency.
         // (pushImpl strips CurrencyRef for update ops regardless of this gate.)
         if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
-            $payload['CurrencyRef'] = ['value' => 'CAD'];
+            $currency = strtoupper((string) ($ff['currency'] ?? 'CAD'));
+            if ($currency === '') {
+                $currency = 'CAD';  // defensive; ENUM NOT NULL DEFAULT prevents this
+            }
+            $payload['CurrencyRef'] = ['value' => $currency];
         }
         // When multi_currency_enabled='0': omit CurrencyRef (QBO error 6000 otherwise).
 

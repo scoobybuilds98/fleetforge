@@ -100,6 +100,22 @@ $isRelatedParty = isset($body['is_related_party'])
     ? (int)(bool)$body['is_related_party']
     : (int)($existing['is_related_party'] ?? 0);
 
+// S-VENDOR-CURRENCY-COLUMN: currency ENUM('CAD','USD'). array_key_exists
+// pattern preserves the existing value when caller omits the field
+// (matches the rating/hourly_rate update pattern). Validates input;
+// rejects unknown ENUM values with 422 rather than silently coercing.
+// VendorPusher::pushImpl strips CurrencyRef from UPDATE payloads (QBO
+// rejects it — vendor currency is immutable after create per Intuit policy),
+// but FF-side updates are still recorded for future re-create scenarios
+// (e.g. unlink + re-push to correct a poisoned mapping).
+$currency = $existing['currency'] ?? 'CAD';
+if (array_key_exists('currency', $body)) {
+    if (!in_array($body['currency'], ['CAD', 'USD'], true)) {
+        json_error('VALIDATION_ERROR', "currency must be 'CAD' or 'USD'.", 422);
+    }
+    $currency = $body['currency'];
+}
+
 // rating: 1–5 or null
 $rating = $existing['rating'];
 if (array_key_exists('rating', $body)) {
@@ -161,6 +177,7 @@ $newValues = [
     'notes'            => $notes,
     'is_preferred'     => $isPreferred,
     'is_related_party' => $isRelatedParty,
+    'currency'         => $currency,
 ];
 
 db_transaction(function() use ($id, $newValues, $existing) {

@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-27
-**Tables:** 139 total · **Columns:** 2208
+**Tables:** 139 total · **Columns:** 2209
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -509,6 +509,7 @@ _12 tables._
 | `hourly_rate` | decimal(10,2) |  | YES |
 | `rating` | tinyint unsigned |  | YES |
 | `notes` | text |  | YES |
+| `currency` | enum('CAD','USD') |  | NO |
 | `is_preferred` | tinyint(1) |  | NO |
 | `total_spent` | decimal(14,2) |  | NO |
 | `created_by` | int unsigned | MUL | YES |

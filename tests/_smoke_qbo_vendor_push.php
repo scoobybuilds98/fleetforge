@@ -72,7 +72,7 @@ use FleetForge\QboPushers\VendorEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 18;
+$total    = 20;
 
 /** Sentinel vendor ids we inserted for synthetic testing. */
 $sentinelVendorIds = [];
@@ -482,18 +482,23 @@ if (empty($c10Errors)) {
     $failures[] = 'C10';
 }
 
-// ── C11: buildQboPayload multi_currency='1' → CurrencyRef='CAD' emitted ──────
-// D-QBO-FIXPACK-8/-12: vendors table has no currency column, so CurrencyRef is
-// hardcoded 'CAD' when gate is active. Backlog: S-VENDOR-CURRENCY-COLUMN.
+// ── C11: buildQboPayload multi_currency='1' → CurrencyRef per $ff['currency'] ──
+// S-VENDOR-CURRENCY-COLUMN: vendors.currency ENUM('CAD','USD') NOT NULL DEFAULT 'CAD'
+// now exists. buildQboPayload reads $ff['currency'] (was hardcoded 'CAD' per
+// D-QBO-FIXPACK-8 Option A pre-S-VENDOR-CURRENCY-COLUMN). When $ff omits the
+// 'currency' key (defensive fallback path), the payload still emits 'CAD'.
 $c11Errors = [];
 ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '1');
+// C11 omits 'currency' to exercise the ?? 'CAD' defensive fallback in
+// buildQboPayload (handles any edge case where SELECT misses the column;
+// shouldn't happen post-migration but documents the defensive contract).
 $c11Ff = ['name' => 'Northern Freight Ltd.'];
 $c11Payload = VendorPusher::buildQboPayload($c11Ff);
 if (($c11Payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
-    $c11Errors[] = "CurrencyRef.value: got " . json_encode($c11Payload['CurrencyRef']['value'] ?? null) . ", want 'CAD'";
+    $c11Errors[] = "CurrencyRef.value: got " . json_encode($c11Payload['CurrencyRef']['value'] ?? null) . ", want 'CAD' (defensive fallback when 'currency' key absent in \$ff)";
 }
 if (empty($c11Errors)) {
-    echo "PASS C11 buildQboPayload multi_currency='1' → hardcoded CurrencyRef='CAD' emitted (D-QBO-FIXPACK-8/-12)\n";
+    echo "PASS C11 buildQboPayload multi_currency='1' + no 'currency' key → defensive 'CAD' fallback (S-VENDOR-CURRENCY-COLUMN)\n";
     $pass++;
 } else {
     echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";
@@ -518,25 +523,73 @@ if (empty($c11bErrors)) {
     $failures[] = 'C11b';
 }
 
-// ── C12: buildQboPayload multi_currency='1' + 'currency'=>'USD' → still 'CAD' ─
-// D-QBO-FIXPACK-8/-12: even if a caller passes 'currency' => 'USD' in the
-// $ff array, the vendor payload always emits 'CAD' (hardcoded; no currency
-// column on vendors). Gate must be active to test the hardcoded emission path.
-// When S-VENDOR-CURRENCY-COLUMN ships, this test will be updated.
+// ── C12: buildQboPayload multi_currency='1' + 'currency'=>'USD' → CurrencyRef='USD' ─
+// S-VENDOR-CURRENCY-COLUMN FLIPPED (was: hardcoded 'CAD' regardless of $ff['currency']
+// per D-QBO-FIXPACK-8 Option A). Now: $ff['currency'] flows through to the
+// QBO payload, supporting per-vendor currency (e.g. US-based vendors as USD).
+// Verifies the core S-VENDOR-CURRENCY-COLUMN unlock — VendorPusher honors
+// the per-row currency rather than hardcoding 'CAD' for every vendor.
 $c12Errors = [];
 ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '1');
-$c12Ff = ['name' => 'Future USD Vendor', 'currency' => 'USD']; // vendors table has no currency column
+$c12Ff = ['name' => 'Cross-Border Logistics LLC', 'currency' => 'USD'];
 $c12Payload = VendorPusher::buildQboPayload($c12Ff);
-if (($c12Payload['CurrencyRef']['value'] ?? null) !== 'CAD') {
+if (($c12Payload['CurrencyRef']['value'] ?? null) !== 'USD') {
     $c12Errors[] = "CurrencyRef.value: got " . json_encode($c12Payload['CurrencyRef']['value'] ?? null) .
-        ", want 'CAD' (hardcoded per D-QBO-FIXPACK-8; 'currency' key in \$ff has no effect until S-VENDOR-CURRENCY-COLUMN)";
+        ", want 'USD' (S-VENDOR-CURRENCY-COLUMN: \$ff['currency']='USD' should flow through; was hardcoded 'CAD' under D-QBO-FIXPACK-8)";
 }
 if (empty($c12Errors)) {
-    echo "PASS C12 buildQboPayload multi_currency='1' + 'currency'=>'USD' → CurrencyRef still 'CAD' (hardcoded, not pass-through; D-QBO-FIXPACK-8)\n";
+    echo "PASS C12 buildQboPayload multi_currency='1' + 'currency'=>'USD' → CurrencyRef='USD' (S-VENDOR-CURRENCY-COLUMN; D-QBO-FIXPACK-8 superseded by D-VENDOR-CURRENCY-COLUMN-1)\n";
     $pass++;
 } else {
     echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";
     $failures[] = 'C12';
+}
+
+// ── C12b: buildQboPayload normalizes 'currency' case (lowercase → uppercase) ──
+// S-VENDOR-CURRENCY-COLUMN defensive: even though the vendors.currency ENUM
+// stores uppercase ('CAD'|'USD'), buildQboPayload applies strtoupper() to
+// catch any caller that passes lowercase (matches CustomerPusher pattern).
+$c12bErrors = [];
+ff_smoke_v_set_setting('quickbooks.multi_currency_enabled', '1');
+$c12bFf = ['name' => 'Lowercase Currency Test', 'currency' => 'usd'];
+$c12bPayload = VendorPusher::buildQboPayload($c12bFf);
+if (($c12bPayload['CurrencyRef']['value'] ?? null) !== 'USD') {
+    $c12bErrors[] = "CurrencyRef.value: got " . json_encode($c12bPayload['CurrencyRef']['value'] ?? null) .
+        ", want 'USD' (strtoupper should normalize 'usd' → 'USD')";
+}
+if (empty($c12bErrors)) {
+    echo "PASS C12b buildQboPayload normalizes lowercase 'currency' via strtoupper (S-VENDOR-CURRENCY-COLUMN defensive)\n";
+    $pass++;
+} else {
+    echo "FAIL C12b " . implode('; ', $c12bErrors) . "\n";
+    $failures[] = 'C12b';
+}
+
+// ── C12c: vendors.currency column exists with ENUM('CAD','USD') NOT NULL DEFAULT 'CAD' ──
+// Verifies the S-VENDOR-CURRENCY-COLUMN migration applied. Catches drift if
+// someone reverts the migration without backing out the code changes.
+$c12cErrors = [];
+$col = db_row("SHOW COLUMNS FROM vendors WHERE Field = 'currency'");
+if (!$col) {
+    $c12cErrors[] = "vendors.currency column not found — S-VENDOR-CURRENCY-COLUMN migration not applied";
+} else {
+    $type = (string) ($col['Type'] ?? '');
+    if (!str_contains($type, "'CAD'") || !str_contains($type, "'USD'")) {
+        $c12cErrors[] = "vendors.currency ENUM should include 'CAD' and 'USD'; got: " . $type;
+    }
+    if (($col['Null'] ?? null) !== 'NO') {
+        $c12cErrors[] = "vendors.currency should be NOT NULL; got Null=" . json_encode($col['Null'] ?? null);
+    }
+    if (($col['Default'] ?? null) !== 'CAD') {
+        $c12cErrors[] = "vendors.currency DEFAULT should be 'CAD'; got " . json_encode($col['Default'] ?? null);
+    }
+}
+if (empty($c12cErrors)) {
+    echo "PASS C12c vendors.currency ENUM('CAD','USD') NOT NULL DEFAULT 'CAD' (S-VENDOR-CURRENCY-COLUMN migration)\n";
+    $pass++;
+} else {
+    echo "FAIL C12c " . implode('; ', $c12cErrors) . "\n";
+    $failures[] = 'C12c';
 }
 
 // ── C14: §6.8 canonical return shape — all 5 keys present on skipped_by_mode path ──
