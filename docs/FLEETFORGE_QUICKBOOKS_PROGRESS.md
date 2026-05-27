@@ -4,11 +4,11 @@
 **Companion docs:** `FLEETFORGE_QUICKBOOKS_SPEC.md` (canonical reference), `FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md` §9 (session-by-session plan), `FLEETFORGE_PROGRESS.md` (master FF progress log).
 **Purpose:** Single living tracker for the QuickBooks integration arc. Every S-QBO-N session appends its row here when it ships. Decision locks land in the D-QBO-* table. Schema additions, crons, and settings tracked separately for quick lookup.
 
-**Current arc status (as of 2026-05-25):**
+**Current arc status (as of 2026-05-27):**
 
-🟢 **PHASE QBO-1 COMPLETE + Phase QBO-2/3/4 in progress — 9 of 30 sessions shipped (4 Phase QBO-1 + 2 Phase QBO-2 + 1 Phase QBO-3 + 2 Phase QBO-4 of 3; +2 debt-paydowns).** Phase QBO-1: S-QBO-1..4. Phase QBO-2 (customers): S-QBO-5 + S-QBO-6 full pull/match/push arc. Phase QBO-3 (vendors): S-QBO-7 entire vendor arc one session. Phase QBO-4 (reference data): **S-QBO-8 (2026-05-21)** chart of accounts mapping + AccountValidator gate (Puller-only); **S-QBO-9 (2026-05-21)** tax code mapping + NON override target identification (Puller-only). The S-QBO-9 deliverable that unlocks downstream invoice push: `settings.quickbooks.tax_override_code_id` populated with the QBO 'NON' code Id via TaxCodeMatcher::identifyOverrideTarget — without this, S-QBO-11 invoice push's tax-override pattern (D-QBO-CORE-6 — TxnTaxDetail.TotalTax + TaxCodeRef='NON') cannot fire. **5 decisions locked S-QBO-9**: D-QBO-9-1 (Puller-only — no TaxCodePusher; accountant owns tax codes), D-QBO-9-2 (NON override target identification + UNIQUE-on-nullable enforcement of is_override_target column), D-QBO-9-3 (FF→QBO mapping informational; FF authoritative for tax computation; QBO via override), D-QBO-9-4 (effective-date awareness — snapshot CURRENT active rate at mapping time), D-QBO-9-5 (active-only filter — historical FF tax_rates accessible via toggle). Master sync kill-switch `quickbooks.sync_enabled='0'` per D-CPA-5. **Debt-paydowns**: S-QBO-OAUTH-FIX + S-QBO-5-FIX-1.
+🟢 **PHASE QBO-1 through QBO-4 COMPLETE + Phase QBO-5 in progress — 11 of 30 numbered sessions shipped (4 Phase QBO-1 + 2 Phase QBO-2 + 1 Phase QBO-3 + 3 Phase QBO-4 + 1 Phase QBO-5; +27 debt-paydowns/infra).** Phase QBO-1: S-QBO-1..4. Phase QBO-2: S-QBO-5 + S-QBO-6. Phase QBO-3: S-QBO-7. Phase QBO-4: S-QBO-8 + S-QBO-9 + S-QBO-10. Phase QBO-5: **S-QBO-11 (2026-05-24)** invoice push (FF→QBO) with tax-override pattern, FX, 6 pre-flight gates, engine-version dispatch; **S-QBO-12 still pending** (`pushUpdate` stubbed per D-QBO-11-4; void operation outstanding). **First real FF→QBO push on record**: QBO Invoice #147 (FF INV-2026-00098) shipped during S-QBO-LIVE-VERIFY-RERUN-2026-05-26 against sandbox realm 9341457119548719. Master sync kill-switch `quickbooks.sync_enabled='0'` per D-CPA-5. **27 debt-paydown/infra sessions** include: OAuth state machine, MATCHER greedy + wedge + claimed-set fixes, VALIDATOR scope split + 6 per-Pusher gates + smoke coverage, 3 FIXPACKs (CurrencyRef silent USD coercion + DocNumber 21-char overflow + multi-currency auto-detection + 3 worker bugs), POSTVERIFY (D131 19→22 + voidEntity), PUSHER-SKIP-RECORD-FIX-INVOICE + ENQUEUER-ELIGIBILITY-GATE + CUSTOMER-VENDOR-PUSH-STATE-INFRA closing the false-complete bug class, INVOICE-LIST-BADGE + INVOICE-SHOW-RICH-PANEL UI surfaces, D131-BASELINE-RESTORE + INVOICE-COUNTER-BUMP + SETTINGS-ENDPOINTS-PREVIEW-SKIP + DEMO-WIPE-COUNTER-SYNC + COUNTER-DRIFT-SECOND-PATH-AUDIT restoring D131 baseline 21/22 with 1 environmental DEFERRED. **Phase QBO rigorous-testing arc (Phase 1/2/3): CLOSED 2026-05-26** with 1 CRITICAL portal display bug fixed + 2 MEDIUM Pusher contract gaps paid down + 1 CRITICAL + 6 MEDIUM validator-gate smoke gaps closed (3 LOWs deferred). **Phase 4-10: PAUSED per operator pivot 2026-05-26** pending build-out completion (see §12.0 below). **Inventory + roadmap doc**: [FLEETFORGE_QBO_REMAINING_WORK_2026-05-26.md](FLEETFORGE_QBO_REMAINING_WORK_2026-05-26.md) (S-QBO-INVENTORY-AND-ROADMAP-2026-05-26).
 
-**Next session up:** S-QBO-10 — third Phase QBO-4 session. Item / Product mapping: create QBO Items for the 17 FF item_type values (including dedicated "Rental Reconciliation Credit" Item per D-QBO-10-1 already locked), populate `acc_qbo_item_map`. Last reference-data session before Phase QBO-5 (invoices) begins.
+**Next session up:** **S-QBO-12** — Invoice modification + void semantics (Phase QBO-5 / 2 of 2). Implements `InvoicePusher::pushUpdate` (currently stubbed per D-QBO-11-4 → returns `unsupported_in_session`) + `pushVoid` using `QuickBooksClient::voidEntity()` already shipped in S-QBO-11-POSTVERIFY-FIXES 2026-05-25. Respects D14 immutability for sent invoice fields. Closes Phase QBO-5.
 
 ---
 
@@ -51,8 +51,8 @@ Legend: 📋 PLANNED | 🟡 QUEUED | 🔄 IN-PROGRESS | ✅ DONE | ⛔ BLOCKED |
 
 | ID | Status | Date shipped | Description |
 |---|---|---|---|
-| S-QBO-11 | 📋 PLANNED | — | Invoice push (FF → QBO) on send: QboInvoicePusher with tax-override pattern, engine-version dispatch (period_independent vs holistic), FX rate pinning for USD, async queue path for cron-generated, sync path for user-initiated |
-| S-QBO-12 | 📋 PLANNED | — | Invoice void + status sync: void operation, paid status from payment push, immutability guard |
+| S-QBO-11 | ✅ DONE | 2026-05-24 | Invoice push (FF → QBO) on send. 5 lib classes (InvoiceTaxOverride / InvoiceLineBuilder / InvoicePreflightGate / InvoicePusher / InvoiceEnqueuer) + acc_qbo_invoice_map schema + 2 API endpoints + admin page + invoice-show QBO badge. Tax-override per D-QBO-11-2 (every line TaxCodeRef='NON' + header TxnTaxDetail.TotalTax). FX per D-QBO-11-3 (exchange_rate_to_cad pinned at FF creation). 6 pre-flight gates. Engine-version dispatch per D-QBO-11-5 (degraded to 'unknown' literal — column does not exist on disk). **10 decisions locked**: D-QBO-11-1 through D-QBO-11-10. **3 FIXPACK sessions** followed (CurrencyRef silent USD + DocNumber 21-char + multi-currency auto-detection + worker failure-handling). **First real FF→QBO push on record**: QBO Invoice #147 (FF INV-2026-00098) shipped 2026-05-26 via S-QBO-LIVE-VERIFY-RERUN-2026-05-26 against sandbox realm 9341457119548719. |
+| S-QBO-12 | 📋 PLANNED (next-up 2026-05-27) | — | Invoice modification + void semantics: implement `InvoicePusher::pushUpdate` (currently stubbed per D-QBO-11-4) using `QuickBooksClient::updateEntity()` + `pushVoid` using `QuickBooksClient::voidEntity()` shipped 2026-05-25 in S-QBO-11-POSTVERIFY-FIXES. Respects D14 immutability for sent fields. acc_qbo_invoice_map.push_status ENUM already supports void state. |
 
 ### Phase QBO-6: Payments + Portal Embed (3 sessions)
 
@@ -324,11 +324,11 @@ Q-CPA-1 through Q-CPA-7 must be resolved before S-QBO-1 starts:
 - [x] SSL active (Let's Encrypt)
 - [x] HolisticLeaseEngine shipped (S-BILLING-HOLISTIC-ENGINE 2026-05-17)
 - [x] S-PROD-2 shipped (Sentry + SES webhook pattern available for QBO webhook reuse)
-- [ ] Phase A complete (S-ACCT-FIX-AP, S-ACCT-FIX-DOCS)
-- [ ] Phase B complete (S036, S037-FX, S037-YE, S037-REC, S037-CRONS, S037-CRUD)
-- [ ] Phase C complete (11 S-ACCT-* sessions)
-- [ ] Phase D complete (6 S-ACCT-LESSOR-* sessions)
-- [ ] S-MILEAGE-3-ACCT-SPEC unblocked or deferred (affects S-QBO-17 only)
+- [ ] Phase A complete (S-ACCT-FIX-AP queued, S-ACCT-FIX-DOCS planned)
+- [~] Phase B partial — 5 of 6 ✅ DONE 2026-05-19 (S037-FX, S037-YE, S037-REC, S037-CRONS, S037-CRUD); S036 (Reports + Budget) still 📋 PLANNED
+- [x] Phase C complete (11 S-ACCT-* sessions, all ✅ DONE 2026-05-19)
+- [x] Phase D complete (6 S-ACCT-LESSOR-* sessions, all ✅ DONE 2026-05-19)
+- [ ] S-MILEAGE-3-ACCT-SPEC unblocked or deferred (affects S-QBO-17 only — CPA-blocked on 5 questions per D-I (A) / D176)
 
 ---
 
@@ -348,15 +348,36 @@ To be filled in during S-QBO-30 14-day monitoring window:
 
 ## 10. NEXT SESSION UP
 
-**Next QBO session:** S-QBO-1 (Foundation: OAuth + Settings + sync queue + drift detection scaffolding).
-**Blocked by:** Phase A → B → C → D completion (D-ARCH-9 strict order).
-**Estimated start:** TBD — depends on Phase A-D execution pace.
+**Next QBO session:** **S-QBO-12** (Phase QBO-5 / 2 of 2 — Invoice modification + void semantics).
+**Scope:** Implement `InvoicePusher::pushUpdate` (currently stubbed per D-QBO-11-4 → returns `unsupported_in_session`) using `QuickBooksClient::updateEntity()`; implement `pushVoid` using `QuickBooksClient::voidEntity()` shipped 2026-05-25 in S-QBO-11-POSTVERIFY-FIXES. Respects D14 immutability for sent invoice fields. Closes Phase QBO-5.
+**Estimated start:** 2026-05-27 (this session arc).
+**Effort:** L | **Model:** Opus.
+**Per inventory doc top-5 recommendations (FLEETFORGE_QBO_REMAINING_WORK_2026-05-26.md §0):** S-QBO-12 → S-VENDOR-CURRENCY-COLUMN (debt paydown) → S-QBO-18 (bill push) → S-QBO-13 (payment pull webhook) → S-QBO-14 (payment push).
 
-**Next FF session overall (not QBO):** **S-ACCT-FIX-AP** (Phase A — orphan AP-payment JE resolution + dedicated AP-payments page).
+**Next FF session overall (not QBO):** **S-ACCT-FIX-AP** (Phase A — orphan AP-payment JE resolution + dedicated AP-payments page) — still 🟡 QUEUED per [ROADMAP v1.1 §11](FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md); Phase A is parallel to QBO work, not blocking.
 
 ---
 
 ## 12. PHASE QBO RIGOROUS TESTING FINDINGS
+
+### §12.0 Arc status (as of 2026-05-27)
+
+**Arc PAUSED per operator pivot 2026-05-26** pending build-out completion. Operator will resume after build sessions ship (likely after S-QBO-21 JE push or as part of S-QBO-30 cutover gating). Per-phase status:
+
+| Phase | Status | Closure source |
+|---|---|---|
+| **Phase 1** — RO contract audit (K-22 trap sweep) | ✅ CLOSED 2026-05-26 | S-QBO-PHASE-1-TRAP-SWEEP + S-PORTAL-INVOICE-TAX-DISPLAY-FIX (combined commit). 1 CRITICAL surfaced + fixed (portal `gst_amount`/`pst_amount` → `tax_*_amount` keys). 11 other patterns clean. Details §12.1. |
+| **Phase 2** — Conformance audit (§6.8/§6.9 contracts) | ✅ CLOSED 2026-05-26 | S-QBO-PHASE-2-CONTRACT-AUDIT + S-QBO-PUSHER-CONTRACT-PAYDOWN. 0 CRITICAL / 2 MEDIUM closed (C6 return-shape parity + C9 FIXPACK-10 backport to InvoicePusher) / 5 LOW remain as documented intentional deviations. Details §12.2 + §12.3. |
+| **Phase 3** — Validator gate audit (`assertReadyFor*Push()` × 6 gates × 5 states) | ✅ CLOSED 2026-05-26 with 3 LOWs DEFERRED | S-QBO-PHASE-3-VALIDATOR-GATE-AUDIT + S-QBO-VALIDATOR-GATE-SMOKE-COVERAGE. 1 CRITICAL + 6 MEDIUM closed via smoke additions (C30-C42; `_smoke_qbo_account_mapping.php` 29→42). 3 LOWs deferred: **F-P3-08** (FullCompliance × S1 pass-state untested), **F-P3-09** (FullCompliance × S2 singular inflection untested), **F-P3-10** (BillPush × S4 + JournalEntryPush × S4 empty-cat path). Revisit after Phase 4 results. Details §12.5. |
+| **Phase 4** — Pre-flight Gate Audit | 📋 NOT STARTED (PAUSED) | Purpose: audit `InvoicePreflightGate` (6 gates) for ordering, idempotency, currency-mismatch coverage, field-length validation. Mirror Phase 3 matrix approach. Estimated value pre-cutover: HIGH. |
+| **Phase 5** — Idempotency + Replay | 📋 NOT STARTED (PAUSED) | Purpose: comprehensive replay/idempotency testing (re-enqueue, double-dispatch, simultaneous workers). D-QBO-FIXPACK-10 mismatch warning is the existing defence. Estimated value pre-cutover: HIGH. |
+| **Phase 6** — Schema Integrity | 📋 NOT STARTED (likely **REDUNDANT** per planning notes) | D131 parity + DATABASE_MASTER discipline + per-session migration verification covers most concerns. Operator-confirm whether unique value remains beyond D131. |
+| **Phase 7** — Adversarial Inputs | 📋 NOT STARTED (PAUSED) | Purpose: inject malformed payloads (oversized, embedded HTML, null bytes, Unicode, truncated) at every Pusher entry. |
+| **Phase 8** — Chaos / Network | 📋 NOT STARTED (PAUSED) | Purpose: network failure injection (HTTP 5xx storms, partial reads, timeouts, rate-limit triggers, retry exhaustion). Validates `QuickBooksClient` retry orchestration. |
+| **Phase 9** — Cross-Pusher Integration | 📋 NOT STARTED (premature per planning notes) | Defer until at least S-QBO-21 (JE push) ships. Only 3 Pushers operational today. |
+| **Phase 10** — Live E2E | 📋 NOT STARTED (PAUSED) | Purpose: systematize live E2E into repeatable pre-cutover validation. Replaces ad-hoc S-QBO-LIVE-VERIFY-RERUN-style verifications. Estimated value pre-cutover: CRITICAL. |
+
+**Resume cadence:** TBD per operator. Inventory doc ([FLEETFORGE_QBO_REMAINING_WORK_2026-05-26.md §9.5](FLEETFORGE_QBO_REMAINING_WORK_2026-05-26.md)) flags this as one of 5 items needing planning chat before scheduling.
 
 ### Phase 1 trap sweep findings (S-QBO-PHASE-1-TRAP-SWEEP, 2026-05-26)
 
