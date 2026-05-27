@@ -102,6 +102,17 @@ require_once FF_ROOT . '/includes/header.php';
             <div style="font-size:2rem;font-weight:600;margin:4px 0;color:#6b7280;" x-text="kpis ? kpis.ignored : '—'"></div>
             <div class="text-secondary text-sm">intentionally unmapped</div>
         </div>
+        <!-- ── Push-state tiles (S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA) ── -->
+        <div class="stat-card" style="padding:18px;">
+            <div class="text-secondary text-sm">Mode-Skipped</div>
+            <div style="font-size:2rem;font-weight:600;margin:4px 0;color:#6b7280;" x-text="kpis && kpis.push_kpis ? kpis.push_kpis.skipped_by_mode : '—'"></div>
+            <div class="text-secondary text-sm">sync_mode refused push</div>
+        </div>
+        <div class="stat-card" style="padding:18px;">
+            <div class="text-secondary text-sm">Soft-Deleted</div>
+            <div style="font-size:2rem;font-weight:600;margin:4px 0;color:#6b7280;" x-text="kpis && kpis.push_kpis ? kpis.push_kpis.skipped_soft_deleted : '—'"></div>
+            <div class="text-secondary text-sm">FF deleted; QBO untouched</div>
+        </div>
     </div>
 
     <!-- ── Filters bar ─────────────────────────────────────────── -->

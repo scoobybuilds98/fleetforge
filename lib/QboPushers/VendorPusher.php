@@ -133,6 +133,10 @@ class VendorPusher
         //    mode mid-queue gets the new behavior on the next dispatch.
         $mode = (string) settings_get('quickbooks.sync_mode.vendor', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record skip in
+            // both map row + sync_log. FK guard inside recordSkipped.
+            $ffForSkip = db_row("SELECT id FROM vendors WHERE id = ?", [$ffVendorId]) ?? ['id' => $ffVendorId];
+            self::recordSkipped($ffVendorId, $ffForSkip, 'skipped_by_mode', $operation);
             return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
         }
 
@@ -154,6 +158,11 @@ class VendorPusher
             // to QBO. Reaching here means the queue row was enqueued
             // before the vendor was soft-deleted (or via an out-of-band
             // path).
+            //
+            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record the skip
+            // in both map row + sync_log so the operator-facing admin
+            // view + audit trail surface every dispatch attempt.
+            self::recordSkipped($ffVendorId, $ff, 'skipped_soft_deleted', $operation);
             return ['success' => true, 'status' => 'skipped_soft_deleted', 'outcome' => 'skipped'] + self::RESULT_BASE;
         }
 
@@ -247,6 +256,10 @@ class VendorPusher
                 $response = $client->createEntity('vendor', $qboPayload);
             }
         } catch (QuickBooksException $e) {
+            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record HTTP failure
+            // in map row. HTTP-level sync_log is written by QuickBooksClient.
+            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            self::recordPushFailure($ffVendorId, $e->getMessage(), $httpCode);
             return [
                 'success'    => false,
                 'status'     => 'qbo_error',
@@ -260,6 +273,7 @@ class VendorPusher
         //    create and update operations.
         $qboVendor = $response['Vendor'] ?? null;
         if (!is_array($qboVendor) || empty($qboVendor['Id'])) {
+            self::recordPushFailure($ffVendorId, 'QBO response missing Vendor.Id', 0);
             return [
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
@@ -268,49 +282,12 @@ class VendorPusher
             ] + self::RESULT_BASE;
         }
 
-        // 9. Persist the mapping. Snapshot QBO-side fields so drift
-        //    detection (future S-QBO-24) has a baseline to compare
-        //    against. last_push_at gets bumped on every successful
-        //    round-trip.
-        $now = date('Y-m-d H:i:s');
-        $snapshot = [
-            'qbo_vendor_id'    => (string) $qboVendor['Id'],
-            'qbo_sync_token'   => (string) ($qboVendor['SyncToken']                ?? '0'),
-            'qbo_display_name' => (string) ($qboVendor['DisplayName']              ?? $ff['name']),
-            'qbo_company_name' => (string) ($qboVendor['CompanyName']              ?? ''),
-            'qbo_given_name'   => (string) ($qboVendor['GivenName']                ?? ''),
-            'qbo_family_name'  => (string) ($qboVendor['FamilyName']               ?? ''),
-            'qbo_email'        => (string) ($qboVendor['PrimaryEmailAddr']['Address']    ?? ''),
-            'qbo_phone'        => (string) ($qboVendor['PrimaryPhone']['FreeFormNumber'] ?? ''),
-            'qbo_active'       => !empty($qboVendor['Active']) ? 1 : 0,
-            'qbo_v4v_status'   => (string) ($qboVendor['V4VStatus']                ?? ''),
-            'mapping_status'   => 'mapped',
-            'last_synced_at'   => $now,
-            'last_push_at'     => $now,
-        ];
-
-        if ($mapping === null) {
-            // First time — INSERT with match_confidence='manual' (the
-            // FF vendor is operator-confirmed via the Create form).
-            db_insert('acc_qbo_vendor_map', $snapshot + [
-                'ff_vendor_id'    => $ffVendorId,
-                'match_confidence'=> 'manual',
-            ]);
-        } else {
-            // Existing mapping — UPDATE in place. match_confidence is
-            // intentionally NOT touched (preserves operator overrides).
-            $setSql = [];
-            $params = [];
-            foreach ($snapshot as $col => $val) {
-                $setSql[] = "{$col} = ?";
-                $params[] = $val;
-            }
-            $params[] = (int) $mapping['id'];
-            db_execute(
-                "UPDATE acc_qbo_vendor_map SET " . implode(', ', $setSql) . " WHERE id = ?",
-                $params
-            );
-        }
+        // 9. Persist the mapping via recordSuccessfulPush helper.
+        // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: extracted the inline
+        // snapshot write into a dedicated helper that also stamps
+        // push_status='pushed', push_error=null, pushed_at=NOW. Mirrors
+        // CustomerPusher::recordSuccessfulPush().
+        self::recordSuccessfulPush($ffVendorId, $ff, $qboVendor, $mapping);
 
         return [
             'success'    => true,
@@ -413,5 +390,198 @@ class VendorPusher
         }
 
         return $payload;
+    }
+
+    // ============================================================
+    // RECORD HELPERS (S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA)
+    // Mirror CustomerPusher's 4-helper pattern + InvoicePusher template.
+    // D-CV-PUSH-STATE-COLUMN-PATH + D-CV-RECORD-HELPERS-MIRROR + D-CV-ENUM-SCOPE.
+    // ============================================================
+
+    /**
+     * Upsert mapping row with success state. Stamps push_status='pushed',
+     * push_error=null, pushed_at=NOW alongside the QBO-side field snapshot.
+     */
+    private static function recordSuccessfulPush(
+        int $ffVendorId,
+        array $ff,
+        array $qboVendor,
+        ?array $existingMapping
+    ): void {
+        $now = date('Y-m-d H:i:s');
+        $snapshot = [
+            'qbo_vendor_id'    => (string) $qboVendor['Id'],
+            'qbo_sync_token'   => (string) ($qboVendor['SyncToken']                ?? '0'),
+            'qbo_display_name' => (string) ($qboVendor['DisplayName']              ?? $ff['name'] ?? ''),
+            'qbo_company_name' => (string) ($qboVendor['CompanyName']              ?? ''),
+            'qbo_given_name'   => (string) ($qboVendor['GivenName']                ?? ''),
+            'qbo_family_name'  => (string) ($qboVendor['FamilyName']               ?? ''),
+            'qbo_email'        => (string) ($qboVendor['PrimaryEmailAddr']['Address']    ?? ''),
+            'qbo_phone'        => (string) ($qboVendor['PrimaryPhone']['FreeFormNumber'] ?? ''),
+            'qbo_active'       => !empty($qboVendor['Active']) ? 1 : 0,
+            'qbo_v4v_status'   => (string) ($qboVendor['V4VStatus']                ?? ''),
+            'mapping_status'   => 'mapped',
+            'push_status'      => 'pushed',
+            'push_error'       => null,
+            'pushed_at'        => $now,
+            'last_synced_at'   => $now,
+            'last_push_at'     => $now,
+        ];
+
+        if ($existingMapping === null) {
+            db_insert('acc_qbo_vendor_map', $snapshot + [
+                'ff_vendor_id'    => $ffVendorId,
+                'match_confidence'=> 'manual',
+            ]);
+        } else {
+            $setSql = [];
+            $params = [];
+            foreach ($snapshot as $col => $val) {
+                $setSql[] = "{$col} = ?";
+                $params[] = $val;
+            }
+            $params[] = (int) $existingMapping['id'];
+            db_execute(
+                "UPDATE acc_qbo_vendor_map SET " . implode(', ', $setSql) . " WHERE id = ?",
+                $params
+            );
+        }
+    }
+
+    /**
+     * Record push failure (QBO HTTP error or malformed response).
+     */
+    private static function recordPushFailure(int $ffVendorId, string $error, int $httpCode): void
+    {
+        $exists = db_row("SELECT 1 AS x FROM vendors WHERE id = ?", [$ffVendorId]) !== null;
+        if (!$exists) {
+            return;
+        }
+
+        $existing = db_row(
+            "SELECT id FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
+            [$ffVendorId]
+        );
+        $now = date('Y-m-d H:i:s');
+        $errorWithCode = $httpCode > 0 ? "HTTP {$httpCode}: {$error}" : $error;
+
+        if ($existing === null) {
+            db_insert('acc_qbo_vendor_map', [
+                'ff_vendor_id'   => $ffVendorId,
+                'push_status'    => 'failed',
+                'push_error'     => $errorWithCode,
+                'last_synced_at' => $now,
+            ]);
+        } else {
+            db_execute(
+                "UPDATE acc_qbo_vendor_map
+                    SET push_status    = 'failed',
+                        push_error     = ?,
+                        last_synced_at = ?
+                  WHERE id = ?",
+                [$errorWithCode, $now, (int) $existing['id']]
+            );
+        }
+    }
+
+    /**
+     * Record failed_preflight state. Forward-compatible per D-CV-ENUM-SCOPE
+     * — VendorPusher has no preflight gate today.
+     */
+    private static function recordFailedPreflight(
+        int    $ffVendorId,
+        string $reason,
+        string $status = 'failed_preflight'
+    ): void {
+        $exists = db_row("SELECT 1 AS x FROM vendors WHERE id = ?", [$ffVendorId]) !== null;
+        if (!$exists) {
+            return;
+        }
+
+        $existing = db_row(
+            "SELECT id FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
+            [$ffVendorId]
+        );
+        $now = date('Y-m-d H:i:s');
+
+        if ($existing === null) {
+            db_insert('acc_qbo_vendor_map', [
+                'ff_vendor_id'   => $ffVendorId,
+                'push_status'    => $status,
+                'push_error'     => $reason,
+                'last_synced_at' => $now,
+            ]);
+        } else {
+            db_execute(
+                "UPDATE acc_qbo_vendor_map
+                    SET push_status    = ?,
+                        push_error     = ?,
+                        last_synced_at = ?
+                  WHERE id = ?",
+                [$status, $reason, $now, (int) $existing['id']]
+            );
+        }
+    }
+
+    /**
+     * Record skipped state. Writes both map row push_status AND a
+     * non-HTTP sync_log row. FK-guarded for ghost ids.
+     */
+    private static function recordSkipped(int $ffVendorId, array $ff, string $skippedStatus, string $operation = 'create'): void
+    {
+        $exists = db_row("SELECT 1 AS x FROM vendors WHERE id = ?", [$ffVendorId]) !== null;
+        if (!$exists) {
+            return;
+        }
+
+        $existing = db_row(
+            "SELECT id FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
+            [$ffVendorId]
+        );
+        $now = date('Y-m-d H:i:s');
+
+        if ($existing === null) {
+            db_insert('acc_qbo_vendor_map', [
+                'ff_vendor_id'   => $ffVendorId,
+                'push_status'    => $skippedStatus,
+                'last_synced_at' => $now,
+            ]);
+        } else {
+            db_execute(
+                "UPDATE acc_qbo_vendor_map
+                    SET push_status    = ?,
+                        last_synced_at = ?
+                  WHERE id = ?",
+                [$skippedStatus, $now, (int) $existing['id']]
+            );
+        }
+
+        try {
+            $messages = [
+                'skipped_by_mode'      => 'sync_mode.vendor refuses FF→QBO direction; skip recorded without QBO push attempt.',
+                'skipped_soft_deleted' => 'Vendor soft-deleted in FF; skip recorded without QBO push attempt.',
+            ];
+            $msg = $messages[$skippedStatus] ?? "Skipped: {$skippedStatus}";
+
+            db_insert('acc_qbo_sync_log', [
+                'direction'       => 'push',
+                'entity_type'     => 'vendor',
+                'entity_id'       => $ffVendorId,
+                'operation'       => $operation,
+                'http_method'     => 'SKIP',
+                'endpoint'        => '',
+                'response_status' => null,
+                'error_code'      => $skippedStatus,
+                'error_message'   => $msg,
+                'queue_id'        => QuickBooksClient::workerQueueId(),
+                'realm_id'        => (string) settings_get('quickbooks.realm_id', 'unknown'),
+                'environment'     => (string) settings_get('quickbooks.environment', 'sandbox'),
+            ]);
+        } catch (\Throwable $e) {
+            error_log(
+                "VendorPusher::recordSkipped sync_log insert failed for ff_vendor_id={$ffVendorId} "
+                . "status={$skippedStatus}: " . $e->getMessage()
+            );
+        }
     }
 }

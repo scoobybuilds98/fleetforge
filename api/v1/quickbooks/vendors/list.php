@@ -98,6 +98,26 @@ try {
         $kpis[$r['mapping_status']] = (int) $r['n'];
     }
 
+    // ── Push-state KPI counts (S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA) ──
+    // Sourced from the new push_status column added in 202605270100
+    // migration. Surfaced as nested push_kpis to keep flat keys clean.
+    $pushKpiRows = db_select(
+        "SELECT push_status, COUNT(*) AS n FROM acc_qbo_vendor_map GROUP BY push_status"
+    );
+    $pushKpis = [
+        'pending'                         => 0,
+        'pushed'                          => 0,
+        'failed'                          => 0,
+        'skipped_by_mode'                 => 0,
+        'skipped_soft_deleted'            => 0,
+        'failed_preflight'                => 0,
+        'failed_preflight_field_too_long' => 0,
+    ];
+    foreach ($pushKpiRows as $r) {
+        $pushKpis[$r['push_status']] = (int) $r['n'];
+    }
+    $kpis['push_kpis'] = $pushKpis;
+
     $lastPulled = db_row(
         "SELECT MAX(last_pull_at) AS t FROM acc_qbo_vendor_map WHERE last_pull_at IS NOT NULL"
     );

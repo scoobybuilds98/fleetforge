@@ -128,6 +128,12 @@ class CustomerPusher
         //    next dispatch without restarting the worker.
         $mode = (string) settings_get('quickbooks.sync_mode.customer', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record the skip in
+            // both map row (push_status='skipped_by_mode') + sync_log.
+            // FK guard inside recordSkipped handles the case where
+            // $ffCustomerId doesn't exist (gate fires before customer load).
+            $ffForSkip = db_row("SELECT id FROM customers WHERE id = ?", [$ffCustomerId]) ?? ['id' => $ffCustomerId];
+            self::recordSkipped($ffCustomerId, $ffForSkip, 'skipped_by_mode', $operation);
             return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
         }
 
@@ -148,6 +154,12 @@ class CustomerPusher
             // Per D-QBO-6-1: FF soft-delete does NOT propagate to QBO.
             // Reaching here means the queue row was enqueued before
             // the customer was soft-deleted (or via an out-of-band path).
+            //
+            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record the skip in
+            // both map row (push_status='skipped_soft_deleted') + sync_log
+            // so the operator-facing admin view + audit trail surface
+            // every dispatch attempt instead of silently no-op'ing.
+            self::recordSkipped($ffCustomerId, $ff, 'skipped_soft_deleted', $operation);
             return ['success' => true, 'status' => 'skipped_soft_deleted', 'outcome' => 'skipped'] + self::RESULT_BASE;
         }
 
@@ -244,6 +256,12 @@ class CustomerPusher
                 $response = $client->createEntity('customer', $qboPayload);
             }
         } catch (QuickBooksException $e) {
+            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record HTTP failure
+            // in map row (push_status='failed' + push_error). HTTP-level
+            // sync_log is written by QuickBooksClient itself on the failed
+            // request, so no separate sync_log write needed here.
+            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            self::recordPushFailure($ffCustomerId, $e->getMessage(), $httpCode);
             return [
                 'success'    => false,
                 'status'     => 'qbo_error',
@@ -257,6 +275,7 @@ class CustomerPusher
         //    create and update operations.
         $qboCustomer = $response['Customer'] ?? null;
         if (!is_array($qboCustomer) || empty($qboCustomer['Id'])) {
+            self::recordPushFailure($ffCustomerId, 'QBO response missing Customer.Id', 0);
             return [
                 'success' => false,
                 'status'  => 'qbo_malformed_response',
@@ -265,46 +284,13 @@ class CustomerPusher
             ] + self::RESULT_BASE;
         }
 
-        // 9. Persist the mapping. Snapshot QBO-side fields so drift
-        //    detection (S-QBO-24) has a baseline to compare against.
-        //    last_push_at gets bumped on every successful round-trip.
-        $now = date('Y-m-d H:i:s');
-        $snapshot = [
-            'qbo_customer_id'  => (string) $qboCustomer['Id'],
-            'qbo_sync_token'   => (string) ($qboCustomer['SyncToken']                ?? '0'),
-            'qbo_display_name' => (string) ($qboCustomer['DisplayName']              ?? $ff['company_name']),
-            'qbo_company_name' => (string) ($qboCustomer['CompanyName']              ?? ''),
-            'qbo_email'        => (string) ($qboCustomer['PrimaryEmailAddr']['Address']    ?? ''),
-            'qbo_phone'        => (string) ($qboCustomer['PrimaryPhone']['FreeFormNumber'] ?? ''),
-            'qbo_active'       => !empty($qboCustomer['Active']) ? 1 : 0,
-            'mapping_status'   => 'mapped',
-            'last_synced_at'   => $now,
-            'last_push_at'     => $now,
-        ];
-
-        if ($mapping === null) {
-            // First time — INSERT with match_confidence='manual' (the
-            // FF customer is operator-confirmed via the Create form,
-            // matches D-QBO-6-6-style reasoning from earlier sessions).
-            db_insert('acc_qbo_customer_map', $snapshot + [
-                'ff_customer_id'   => $ffCustomerId,
-                'match_confidence' => 'manual',
-            ]);
-        } else {
-            // Existing mapping — UPDATE in place. match_confidence is
-            // intentionally NOT touched (preserves operator overrides).
-            $setSql = [];
-            $params = [];
-            foreach ($snapshot as $col => $val) {
-                $setSql[] = "{$col} = ?";
-                $params[] = $val;
-            }
-            $params[] = (int) $mapping['id'];
-            db_execute(
-                "UPDATE acc_qbo_customer_map SET " . implode(', ', $setSql) . " WHERE id = ?",
-                $params
-            );
-        }
+        // 9. Persist the mapping via recordSuccessfulPush helper.
+        // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: extracted the inline
+        // snapshot write into a dedicated helper that also stamps
+        // push_status='pushed', push_error=null, pushed_at=NOW so the
+        // operator-facing admin view + Push State queries surface the
+        // success state. Mirrors InvoicePusher::recordSuccessfulPush().
+        self::recordSuccessfulPush($ffCustomerId, $ff, $qboCustomer, $mapping);
 
         return [
             'success'    => true,
@@ -397,5 +383,224 @@ class CustomerPusher
         }
 
         return $payload;
+    }
+
+    // ============================================================
+    // RECORD HELPERS (S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA)
+    // Mirror InvoicePusher's 4-helper pattern for the customer push
+    // path. Decisions D-CV-PUSH-STATE-COLUMN-PATH + D-CV-RECORD-HELPERS-
+    // MIRROR + D-CV-ENUM-SCOPE. See db_migrations/202605270100_S-QBO-
+    // CUSTOMER-VENDOR-PUSH-STATE-INFRA.sql for the schema additions.
+    // ============================================================
+
+    /**
+     * Upsert mapping row with success state. Stamps push_status='pushed',
+     * push_error=null, pushed_at=NOW alongside the QBO-side field snapshot.
+     * Mirrors InvoicePusher::recordSuccessfulPush().
+     */
+    private static function recordSuccessfulPush(
+        int $ffCustomerId,
+        array $ff,
+        array $qboCustomer,
+        ?array $existingMapping
+    ): void {
+        $now = date('Y-m-d H:i:s');
+        $snapshot = [
+            'qbo_customer_id'  => (string) $qboCustomer['Id'],
+            'qbo_sync_token'   => (string) ($qboCustomer['SyncToken']                ?? '0'),
+            'qbo_display_name' => (string) ($qboCustomer['DisplayName']              ?? $ff['company_name'] ?? ''),
+            'qbo_company_name' => (string) ($qboCustomer['CompanyName']              ?? ''),
+            'qbo_email'        => (string) ($qboCustomer['PrimaryEmailAddr']['Address']    ?? ''),
+            'qbo_phone'        => (string) ($qboCustomer['PrimaryPhone']['FreeFormNumber'] ?? ''),
+            'qbo_active'       => !empty($qboCustomer['Active']) ? 1 : 0,
+            'mapping_status'   => 'mapped',
+            'push_status'      => 'pushed',
+            'push_error'       => null,
+            'pushed_at'        => $now,
+            'last_synced_at'   => $now,
+            'last_push_at'     => $now,
+        ];
+
+        if ($existingMapping === null) {
+            // First time — INSERT with match_confidence='manual' (the
+            // FF customer is operator-confirmed via the Create form).
+            db_insert('acc_qbo_customer_map', $snapshot + [
+                'ff_customer_id'   => $ffCustomerId,
+                'match_confidence' => 'manual',
+            ]);
+        } else {
+            // Existing mapping — UPDATE in place. match_confidence is
+            // intentionally NOT touched (preserves operator overrides).
+            $setSql = [];
+            $params = [];
+            foreach ($snapshot as $col => $val) {
+                $setSql[] = "{$col} = ?";
+                $params[] = $val;
+            }
+            $params[] = (int) $existingMapping['id'];
+            db_execute(
+                "UPDATE acc_qbo_customer_map SET " . implode(', ', $setSql) . " WHERE id = ?",
+                $params
+            );
+        }
+    }
+
+    /**
+     * Record push failure (QBO HTTP error or malformed response). Creates
+     * mapping row if absent so the operator can see the failure state in
+     * the admin UI. Mirrors InvoicePusher::recordPushFailure().
+     */
+    private static function recordPushFailure(int $ffCustomerId, string $error, int $httpCode): void
+    {
+        // FK guard: customers.id is the FK target; ghost ids during smoke
+        // (e.g. pushCreate(0) early-gate tests) would FK-violate.
+        $exists = db_row("SELECT 1 AS x FROM customers WHERE id = ?", [$ffCustomerId]) !== null;
+        if (!$exists) {
+            return;
+        }
+
+        $existing = db_row(
+            "SELECT id FROM acc_qbo_customer_map WHERE ff_customer_id = ?",
+            [$ffCustomerId]
+        );
+        $now = date('Y-m-d H:i:s');
+        $errorWithCode = $httpCode > 0 ? "HTTP {$httpCode}: {$error}" : $error;
+
+        if ($existing === null) {
+            db_insert('acc_qbo_customer_map', [
+                'ff_customer_id' => $ffCustomerId,
+                'push_status'    => 'failed',
+                'push_error'     => $errorWithCode,
+                'last_synced_at' => $now,
+            ]);
+        } else {
+            db_execute(
+                "UPDATE acc_qbo_customer_map
+                    SET push_status    = 'failed',
+                        push_error     = ?,
+                        last_synced_at = ?
+                  WHERE id = ?",
+                [$errorWithCode, $now, (int) $existing['id']]
+            );
+        }
+    }
+
+    /**
+     * Record failed_preflight state. Forward-compatible per D-CV-ENUM-SCOPE
+     * — CustomerPusher has no preflight gate today, but the ENUM admits
+     * failed_preflight + failed_preflight_field_too_long; helper exists so
+     * future preflight work can wire in without re-touching the recording
+     * layer. Mirrors InvoicePusher::recordFailedPreflight().
+     */
+    private static function recordFailedPreflight(
+        int    $ffCustomerId,
+        string $reason,
+        string $status = 'failed_preflight'
+    ): void {
+        $exists = db_row("SELECT 1 AS x FROM customers WHERE id = ?", [$ffCustomerId]) !== null;
+        if (!$exists) {
+            return;
+        }
+
+        $existing = db_row(
+            "SELECT id FROM acc_qbo_customer_map WHERE ff_customer_id = ?",
+            [$ffCustomerId]
+        );
+        $now = date('Y-m-d H:i:s');
+
+        if ($existing === null) {
+            db_insert('acc_qbo_customer_map', [
+                'ff_customer_id' => $ffCustomerId,
+                'push_status'    => $status,
+                'push_error'     => $reason,
+                'last_synced_at' => $now,
+            ]);
+        } else {
+            db_execute(
+                "UPDATE acc_qbo_customer_map
+                    SET push_status    = ?,
+                        push_error     = ?,
+                        last_synced_at = ?
+                  WHERE id = ?",
+                [$status, $reason, $now, (int) $existing['id']]
+            );
+        }
+    }
+
+    /**
+     * Record skipped state. Writes both the map row push_status AND a
+     * non-HTTP sync_log row so the operator-facing admin view + audit
+     * trail surface every dispatch attempt. Mirrors
+     * InvoicePusher::recordSkipped() including the FK guard.
+     *
+     * @param string $skippedStatus one of: skipped_by_mode | skipped_soft_deleted
+     *                              (D-CV-ENUM-SCOPE — no skipped_voided)
+     * @param string $operation     the queue operation ('create'|'update')
+     */
+    private static function recordSkipped(int $ffCustomerId, array $ff, string $skippedStatus, string $operation = 'create'): void
+    {
+        // FK guard — recordSkipped fires from the sync_mode gate before
+        // the customer load, so $ffCustomerId may be a ghost id (smoke
+        // tests use pushCreate(0); orphan queue rows pre-S-QBO-ENQUEUER-
+        // ELIGIBILITY-GATE could point at hard-deleted customers).
+        $exists = db_row("SELECT 1 AS x FROM customers WHERE id = ?", [$ffCustomerId]) !== null;
+        if (!$exists) {
+            return;
+        }
+
+        // ── Map row write ─────────────────────────────────────────
+        $existing = db_row(
+            "SELECT id FROM acc_qbo_customer_map WHERE ff_customer_id = ?",
+            [$ffCustomerId]
+        );
+        $now = date('Y-m-d H:i:s');
+
+        if ($existing === null) {
+            db_insert('acc_qbo_customer_map', [
+                'ff_customer_id' => $ffCustomerId,
+                'push_status'    => $skippedStatus,
+                'last_synced_at' => $now,
+            ]);
+        } else {
+            db_execute(
+                "UPDATE acc_qbo_customer_map
+                    SET push_status    = ?,
+                        last_synced_at = ?
+                  WHERE id = ?",
+                [$skippedStatus, $now, (int) $existing['id']]
+            );
+        }
+
+        // ── Sync log row (D-SYNC-LOG-NON-HTTP-INVOICE-4 carry-over) ─
+        // Records the non-HTTP skip event for forensic visibility.
+        // Best-effort: any error logged + swallowed so a sync_log
+        // failure never blocks the map row write.
+        try {
+            $messages = [
+                'skipped_by_mode'      => 'sync_mode.customer refuses FF→QBO direction; skip recorded without QBO push attempt.',
+                'skipped_soft_deleted' => 'Customer soft-deleted in FF; skip recorded without QBO push attempt.',
+            ];
+            $msg = $messages[$skippedStatus] ?? "Skipped: {$skippedStatus}";
+
+            db_insert('acc_qbo_sync_log', [
+                'direction'       => 'push',
+                'entity_type'     => 'customer',
+                'entity_id'       => $ffCustomerId,
+                'operation'       => $operation,
+                'http_method'     => 'SKIP',
+                'endpoint'        => '',
+                'response_status' => null,
+                'error_code'      => $skippedStatus,
+                'error_message'   => $msg,
+                'queue_id'        => QuickBooksClient::workerQueueId(),
+                'realm_id'        => (string) settings_get('quickbooks.realm_id', 'unknown'),
+                'environment'     => (string) settings_get('quickbooks.environment', 'sandbox'),
+            ]);
+        } catch (\Throwable $e) {
+            error_log(
+                "CustomerPusher::recordSkipped sync_log insert failed for ff_customer_id={$ffCustomerId} "
+                . "status={$skippedStatus}: " . $e->getMessage()
+            );
+        }
     }
 }

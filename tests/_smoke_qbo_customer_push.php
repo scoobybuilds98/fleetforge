@@ -75,7 +75,7 @@ use FleetForge\QboPushers\CustomerEnqueuer;
 
 $failures = [];
 $pass     = 0;
-$total    = 18;
+$total    = 20;
 
 /** Sentinel customer ids we inserted for synthetic testing. */
 $sentinelCustomerIds = [];
@@ -650,6 +650,117 @@ if (empty($c16Errors)) {
     $failures[] = 'C16';
 }
 
+// ── C17: S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA — skipped_by_mode persists ──
+// pushCreate against a sync_mode='qbo_to_ff' fixture should now write
+// map row push_status='skipped_by_mode' AND a non-HTTP sync_log row
+// (http_method='SKIP' sentinel, response_status=NULL).
+$c17Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = 999996");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='customer' AND entity_id = 999996");
+    db_execute("DELETE FROM customers WHERE id = 999996");
+    db_execute(
+        "INSERT INTO customers (id, company_name) VALUES (999996, ?)",
+        ['SMOKE C17 Customer']
+    );
+    $sentinelCustomerIds[] = 999996;
+    ff_smoke_set_setting('quickbooks.sync_mode.customer', 'qbo_to_ff');
+
+    $r = CustomerPusher::pushCreate(999996);
+
+    if (($r['status'] ?? null) !== 'skipped_by_mode') {
+        $c17Errors[] = "expected status='skipped_by_mode', got '" . ($r['status'] ?? 'NULL') . "'";
+    }
+    if (($r['outcome'] ?? null) !== 'skipped') {
+        $c17Errors[] = "expected outcome='skipped', got '" . ($r['outcome'] ?? 'NULL') . "'";
+    }
+
+    $mapRow = db_row("SELECT push_status FROM acc_qbo_customer_map WHERE ff_customer_id = ?", [999996]);
+    if ($mapRow === null) {
+        $c17Errors[] = "expected acc_qbo_customer_map row for ff_customer_id=999996 (none found)";
+    } elseif (($mapRow['push_status'] ?? null) !== 'skipped_by_mode') {
+        $c17Errors[] = "expected map.push_status='skipped_by_mode', got '" . ($mapRow['push_status'] ?? 'NULL') . "'";
+    }
+
+    $logRow = db_row(
+        "SELECT error_code, response_status, http_method FROM acc_qbo_sync_log
+          WHERE entity_type='customer' AND entity_id=? AND error_code='skipped_by_mode'
+          ORDER BY id DESC LIMIT 1",
+        [999996]
+    );
+    if ($logRow === null) {
+        $c17Errors[] = "expected acc_qbo_sync_log row with error_code='skipped_by_mode' for entity_id=999996 (none found)";
+    } else {
+        if ($logRow['response_status'] !== null) {
+            $c17Errors[] = "expected sync_log.response_status=NULL (non-HTTP skip), got " . var_export($logRow['response_status'], true);
+        }
+        if ($logRow['http_method'] !== 'SKIP') {
+            $c17Errors[] = "expected sync_log.http_method='SKIP' sentinel, got '" . ($logRow['http_method'] ?? 'NULL') . "'";
+        }
+    }
+} catch (Throwable $e) {
+    $c17Errors[] = 'C17 threw: ' . $e->getMessage();
+} finally {
+    ff_smoke_set_setting('quickbooks.sync_mode.customer', 'sync');
+}
+if (empty($c17Errors)) {
+    echo "PASS C17 CustomerPusher skipped_by_mode persists map row + sync_log (S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA)\n";
+    $pass++;
+} else {
+    echo "FAIL C17 " . implode('; ', $c17Errors) . "\n";
+    $failures[] = 'C17';
+}
+
+// ── C18: S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA — skipped_soft_deleted persists ──
+$c18Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = 999997");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='customer' AND entity_id = 999997");
+    db_execute("DELETE FROM customers WHERE id = 999997");
+    db_execute(
+        "INSERT INTO customers (id, company_name, deleted_at) VALUES (999997, ?, NOW())",
+        ['SMOKE C18 Customer (soft-deleted)']
+    );
+    $sentinelCustomerIds[] = 999997;
+
+    $r = CustomerPusher::pushCreate(999997);
+
+    if (($r['status'] ?? null) !== 'skipped_soft_deleted') {
+        $c18Errors[] = "expected status='skipped_soft_deleted', got '" . ($r['status'] ?? 'NULL') . "'";
+    }
+    if (($r['outcome'] ?? null) !== 'skipped') {
+        $c18Errors[] = "expected outcome='skipped', got '" . ($r['outcome'] ?? 'NULL') . "'";
+    }
+
+    $mapRow = db_row("SELECT push_status FROM acc_qbo_customer_map WHERE ff_customer_id = ?", [999997]);
+    if ($mapRow === null) {
+        $c18Errors[] = "expected acc_qbo_customer_map row for ff_customer_id=999997 (none found)";
+    } elseif (($mapRow['push_status'] ?? null) !== 'skipped_soft_deleted') {
+        $c18Errors[] = "expected map.push_status='skipped_soft_deleted', got '" . ($mapRow['push_status'] ?? 'NULL') . "'";
+    }
+
+    $logRow = db_row(
+        "SELECT error_code, response_status, http_method FROM acc_qbo_sync_log
+          WHERE entity_type='customer' AND entity_id=? AND error_code='skipped_soft_deleted'
+          ORDER BY id DESC LIMIT 1",
+        [999997]
+    );
+    if ($logRow === null) {
+        $c18Errors[] = "expected acc_qbo_sync_log row with error_code='skipped_soft_deleted' for entity_id=999997 (none found)";
+    } elseif ($logRow['response_status'] !== null) {
+        $c18Errors[] = "expected sync_log.response_status=NULL (non-HTTP skip), got " . var_export($logRow['response_status'], true);
+    }
+} catch (Throwable $e) {
+    $c18Errors[] = 'C18 threw: ' . $e->getMessage();
+}
+if (empty($c18Errors)) {
+    echo "PASS C18 CustomerPusher skipped_soft_deleted persists map row + sync_log (S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA)\n";
+    $pass++;
+} else {
+    echo "FAIL C18 " . implode('; ', $c18Errors) . "\n";
+    $failures[] = 'C18';
+}
+
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────
     // Delete in FK-aware order: queue + mapping rows depend on customers.
@@ -684,6 +795,15 @@ if (empty($c16Errors)) {
     try {
         db_execute(
             "DELETE FROM acc_qbo_customer_map WHERE ff_customer_id BETWEEN 999990 AND 999999"
+        );
+    } catch (Throwable $e) {
+        // shadowed by lower catch
+    }
+    // Defensive sync_log cleanup (S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA
+    // added C17/C18 which write sync_log rows for skip events).
+    try {
+        db_execute(
+            "DELETE FROM acc_qbo_sync_log WHERE entity_type='customer' AND entity_id BETWEEN 999990 AND 999999"
         );
     } catch (Throwable $e) {
         echo "WARN  defensive mapping cleanup failed: " . $e->getMessage() . "\n";

@@ -1079,6 +1079,9 @@ CREATE TABLE `acc_qbo_customer_map` (
   `qbo_active` tinyint(1) DEFAULT NULL COMMENT 'Mirror of QBO Customer.Active flag',
   `qbo_balance` decimal(15,2) DEFAULT NULL COMMENT 'QBO AR balance at last pull (display only — FF AR is canonical)',
   `mapping_status` enum('mapped','ff_only','qbo_only','ignored') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'qbo_only',
+  `push_status` enum('pending','pushed','failed','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'D-QBO-11-1-pattern lifecycle states for customer push; D-CV-ENUM-SCOPE excludes skipped_voided + failed_preflight_currency_mismatch',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error message for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
   `match_confidence` enum('exact','high','medium','low','manual') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'How the link was determined (exact=normalized name, high=Levenshtein≤3, medium=email, low=phone, manual=operator override)',
   `match_notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
   `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent successful round-trip with QBO',
@@ -1093,6 +1096,7 @@ CREATE TABLE `acc_qbo_customer_map` (
   KEY `idx_status` (`mapping_status`),
   KEY `idx_last_synced` (`last_synced_at`),
   KEY `fk_qbo_cust_map_user` (`created_by_user_id`),
+  KEY `idx_push_status` (`push_status`),
   CONSTRAINT `fk_qbo_cust_map_ff` FOREIGN KEY (`ff_customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_qbo_cust_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1137,6 +1141,9 @@ CREATE TABLE `acc_qbo_vendor_map` (
   `qbo_active` tinyint(1) DEFAULT NULL COMMENT 'Mirror of QBO Vendor.Active flag',
   `qbo_v4v_status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'D-QBO-7-1: QBO Vendor.V4VStatus (1099 status) — informational only, not used for routing',
   `mapping_status` enum('mapped','ff_only','qbo_only','ignored') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'qbo_only',
+  `push_status` enum('pending','pushed','failed','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'D-QBO-11-1-pattern lifecycle states for vendor push; D-CV-ENUM-SCOPE excludes skipped_voided + failed_preflight_currency_mismatch',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error message for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
   `match_confidence` enum('exact','high','medium','low','manual') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'How the link was determined (exact=normalized name, high=Levenshtein≤3, medium=email, low=phone, manual=operator override)',
   `match_notes` text COLLATE utf8mb4_unicode_ci,
   `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent successful round-trip with QBO',
@@ -1151,6 +1158,7 @@ CREATE TABLE `acc_qbo_vendor_map` (
   KEY `idx_status` (`mapping_status`),
   KEY `idx_last_synced` (`last_synced_at`),
   KEY `fk_qbo_vend_map_user` (`created_by_user_id`),
+  KEY `idx_push_status` (`push_status`),
   CONSTRAINT `fk_qbo_vend_map_ff` FOREIGN KEY (`ff_vendor_id`) REFERENCES `vendors` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_qbo_vend_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
