@@ -41,6 +41,19 @@ $vendorId        = clean_int($input['vendor_id'] ?? null);
 $billDate        = clean_date($input['bill_date'] ?? null);
 $dueDate         = clean_date($input['due_date'] ?? null);
 $vendorBillNum   = clean_string($input['vendor_bill_number'] ?? null);
+
+// S-QBO-BILL-GOTCHAS-PAYDOWN D-QBO-BILL-GOTCHAS-2: enforce 21-char limit at
+// INPUT time so the operator catches the issue before approve.php fires the
+// QBO push and the preflight gate 7 (failed_preflight_field_too_long)
+// rejects it post-approve. Constant is QboFieldLimits::INVOICE_DOC_NUMBER_MAX
+// (same applies to Invoice + Bill DocNumber per QBO API).
+if ($vendorBillNum !== null && strlen($vendorBillNum) > \FleetForge\QboPushers\QboFieldLimits::INVOICE_DOC_NUMBER_MAX) {
+    $fields['vendor_bill_number'] = sprintf(
+        "Vendor bill number must be %d characters or fewer (currently %d). QBO Bill.DocNumber limit.",
+        \FleetForge\QboPushers\QboFieldLimits::INVOICE_DOC_NUMBER_MAX,
+        strlen($vendorBillNum)
+    );
+}
 $workOrderId     = clean_int($input['work_order_id'] ?? null);
 $equipmentUnitId = clean_int($input['equipment_unit_id'] ?? null);
 $notes           = clean_string($input['notes'] ?? null, 2000);

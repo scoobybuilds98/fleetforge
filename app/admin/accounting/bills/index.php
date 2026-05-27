@@ -210,7 +210,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Vendor Invoice #</label>
-                        <input type="text" x-model="form.vendor_bill_number" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;" placeholder="Vendor's own invoice number">
+                        <input type="text" x-model="form.vendor_bill_number" class="form-input" maxlength="21" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;" placeholder="Vendor's invoice # (max 21 chars — QBO limit)">
+                        <div class="text-xs text-secondary" style="margin-top:2px;" x-show="form.vendor_bill_number"><span x-text="(form.vendor_bill_number || '').length"></span>/21 chars</div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Notes</label>

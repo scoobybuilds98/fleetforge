@@ -229,15 +229,34 @@ class BillPusher
 
         // 7. Pre-flight gates — vendor mapping + chart-of-accounts +
         //    per-line account mapping + tax-override target + connection
-        //    status + field length.
+        //    status + field length + currency-mismatch (S-QBO-BILL-GOTCHAS).
+        //
+        // Return shape: null on pass; string (legacy) or
+        // array{reason: string, status_code: string} for typed states
+        // (D-QBO-BILL-GOTCHAS-1/-2). Map both shapes to the same return
+        // contract here so all 8 gates funnel through one branch.
         $preflightError = self::runPreflight($ff);
         if ($preflightError !== null) {
-            self::recordFailedPreflight($ffBillId, $preflightError);
+            if (is_array($preflightError)) {
+                $reason     = (string) ($preflightError['reason'] ?? 'preflight failed');
+                $statusCode = (string) ($preflightError['status_code'] ?? 'failed_preflight');
+            } else {
+                $reason     = (string) $preflightError;
+                $statusCode = 'failed_preflight';
+            }
+            // recordFailedPreflight always writes push_status='failed_preflight'
+            // — the typed sub-state is recorded via a separate helper when
+            // the status_code is more specific.
+            if ($statusCode !== 'failed_preflight') {
+                self::recordTypedPreflight($ffBillId, $statusCode, $reason);
+            } else {
+                self::recordFailedPreflight($ffBillId, $reason);
+            }
             return [
                 'success' => false,
-                'status'  => 'failed_preflight',
+                'status'  => $statusCode,
                 'outcome' => 'failed',
-                'error'   => $preflightError,
+                'error'   => $reason,
             ] + self::RESULT_BASE;
         }
 
@@ -330,7 +349,15 @@ class BillPusher
      *   7. Field-length: DocNumber ≤21 chars (QBO Bill.DocNumber limit
      *      per D-QBO-FIXPACK-4 QboFieldLimits constant).
      */
-    private static function runPreflight(array $ff): ?string
+    /**
+     * Inline pre-flight gates. Returns NULL on pass; legacy string on
+     * generic-failed_preflight; array{reason,status_code} on typed
+     * preflight failures (gates 7-8 currently — field-too-long +
+     * currency-mismatch). Caller funnels both shapes through one branch.
+     *
+     * @return null|string|array{reason: string, status_code: string}
+     */
+    private static function runPreflight(array $ff)
     {
         // Gate 1: Vendor mapping.
         $vendorMap = db_row(
@@ -390,6 +417,8 @@ class BillPusher
         }
 
         // Gate 7: Field-length — DocNumber per D-QBO-FIXPACK-4 QboFieldLimits.
+        // Status code returned: failed_preflight_field_too_long (D-QBO-BILL-
+        // GOTCHAS-2, mirrors D-QBO-FIXPACK-5 for invoices).
         $docNumber = trim((string) ($ff['vendor_bill_number'] ?? ''));
         if ($docNumber === '') {
             $docNumber = (string) $ff['bill_number'];
@@ -397,7 +426,62 @@ class BillPusher
         if (strlen($docNumber) > QboFieldLimits::INVOICE_DOC_NUMBER_MAX) {
             $len = strlen($docNumber);
             $max = QboFieldLimits::INVOICE_DOC_NUMBER_MAX;
-            return "DocNumber '{$docNumber}' exceeds QBO Bill.DocNumber limit of {$max} characters (actual: {$len}). Shorten the vendor_bill_number or bill_number.";
+            return [
+                'reason'      => "DocNumber '{$docNumber}' exceeds QBO Bill.DocNumber limit of {$max} characters (actual: {$len}). Shorten the vendor_bill_number or bill_number.",
+                'status_code' => 'failed_preflight_field_too_long',
+            ];
+        }
+
+        // Gate 8: Currency-mismatch (D-QBO-BILL-GOTCHAS-1, mirrors D-QBO-
+        // FIXPACK-3 for invoices). When multi-currency is enabled and FF bill
+        // currency differs from the mapped QBO vendor's currency, the push
+        // would create a corrupted AP entry (QBO accepts the bill but the
+        // vendor's AR/AP ledger ends up in the wrong currency). Catch
+        // pre-flight so operator can re-map vendor or fix bill currency
+        // BEFORE the wasted HTTP round-trip.
+        //
+        // SKIP when multi-currency disabled: BillPusher omits CurrencyRef
+        // entirely in single-currency mode (D-QBO-FIXPACK-12), so QBO uses
+        // its home currency — no mismatch is possible (the FF currency intent
+        // is lost regardless; that's a separate concern that needs operator
+        // awareness, not a per-bill gate).
+        //
+        // FALLTHROUGH: any QBO API transient error swallowed — pre-flight
+        // should never block a push on a read-only connectivity issue.
+        if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
+            try {
+                $client = new QuickBooksClient();
+                $qboVendorResp = $client->getEntity('vendor', (string) $vendorMap['qbo_vendor_id']);
+                $qboVendor = $qboVendorResp['Vendor'] ?? null;
+
+                if ($qboVendor === null) {
+                    // Mapping points to a QBO vendor that no longer exists.
+                    return [
+                        'reason'      => "QBO vendor (id={$vendorMap['qbo_vendor_id']}) not found in sandbox/production; "
+                                       . "the mapping may be stale. Re-pull vendors via /quickbooks/vendors to refresh.",
+                        'status_code' => 'failed_preflight',
+                    ];
+                }
+
+                $qboCurrency = strtoupper((string) ($qboVendor['CurrencyRef']['value'] ?? ''));
+                $ffCurrency  = strtoupper((string) ($ff['currency'] ?? ''));
+
+                if ($qboCurrency !== '' && $ffCurrency !== '' && $qboCurrency !== $ffCurrency) {
+                    $qboName = (string) ($qboVendor['DisplayName'] ?? '(unnamed)');
+                    return [
+                        'reason'      => "Currency mismatch: FF bill is {$ffCurrency} but QBO vendor "
+                                       . "(id={$vendorMap['qbo_vendor_id']}, name='{$qboName}') is {$qboCurrency}. "
+                                       . "Either re-map FF vendor {$ff['vendor_id']} to a QBO vendor with "
+                                       . "matching currency, or change FF bill.currency to match. "
+                                       . "(QBO forbids vendor currency change after create; you may need a new QBO vendor.)",
+                        'status_code' => 'failed_preflight_currency_mismatch',
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // Transient QBO API issue — fall through gracefully.
+                // The actual createEntity call will surface real connectivity issues.
+                error_log("BillPusher gate 8 (currency-mismatch) probe failed for ff_bill={$ff['id']}: " . $e->getMessage());
+            }
         }
 
         return null;
@@ -672,6 +756,30 @@ class BillPusher
         $now = date('Y-m-d H:i:s');
         self::upsertMappingRow($ffBillId, [
             'push_status'    => 'failed_preflight',
+            'push_error'     => substr($errorMessage, 0, 65535),
+            'last_synced_at' => $now,
+        ]);
+    }
+
+    /**
+     * Record a typed pre-flight failure (S-QBO-BILL-GOTCHAS-PAYDOWN).
+     * Lets the map row carry the specific sub-state — failed_preflight_
+     * currency_mismatch OR failed_preflight_field_too_long — so the
+     * operator can filter/retry the precise class via the admin UI.
+     * Falls back to recordFailedPreflight if the status code isn't a
+     * recognized typed state (defensive).
+     */
+    private static function recordTypedPreflight(int $ffBillId, string $statusCode, string $errorMessage): void
+    {
+        if (!self::ffBillExists($ffBillId)) {
+            return;
+        }
+        $typedStates = ['failed_preflight_currency_mismatch', 'failed_preflight_field_too_long'];
+        $persistedStatus = in_array($statusCode, $typedStates, true) ? $statusCode : 'failed_preflight';
+
+        $now = date('Y-m-d H:i:s');
+        self::upsertMappingRow($ffBillId, [
+            'push_status'    => $persistedStatus,
             'push_error'     => substr($errorMessage, 0, 65535),
             'last_synced_at' => $now,
         ]);

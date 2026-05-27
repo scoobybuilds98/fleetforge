@@ -404,7 +404,11 @@ class AccountValidator
             $rows = $unmappedByCat[$cat] ?? [];
             $allRows = $allCriticalByCat[$cat] ?? [];
             if (empty($allRows)) {
-                $parts[] = "{$cat} (no FF account tagged with this category — operator must add + tag one before push)";
+                // S-QBO-BILL-GOTCHAS-PAYDOWN: extended hint to mention Pull
+                // first (recurring operator pain point — the QBO sandbox AP
+                // account wasn't pulled in initial S-QBO-LIVE-VERIFY-RERUN,
+                // requiring manual mapping during S-QBO-18 live test).
+                $parts[] = "{$cat} (no FF account tagged with this category — if you don't see a matching QBO account in /quickbooks/accounts, click Pull to refresh from QBO first, then Auto-Match or Save Mapping; tag via critical_category column)";
                 continue;
             }
             $names = array_map(

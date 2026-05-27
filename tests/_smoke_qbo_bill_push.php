@@ -57,7 +57,7 @@ use FleetForge\QboPushers\BillEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 20;
+$total = 23;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -113,6 +113,20 @@ function ff_smoke_b_seed_fixtures(): array
     db_execute(
         "INSERT INTO acc_qbo_account_map (ff_account_id, qbo_account_id, mapping_status)
          VALUES (999990, 'A-7777', 'mapped')"
+    );
+    // S-QBO-BILL-GOTCHAS-PAYDOWN: seed a synthetic ap_clearing-tagged account
+    // so AccountValidator::assertReadyForBillPush passes during smoke (gate 2
+    // of runPreflight). Without this, C21+ tests that exercise the deeper
+    // gates can't reach gate 7/8 because gate 2 short-circuits when no
+    // ap_clearing FF account is mapped. Sentinel FF#999991 + qbo_id A-9991.
+    // Cleaned up in ff_smoke_b_cleanup via the 999990-999999 range DELETE.
+    db_execute(
+        "INSERT INTO acc_accounts (id, code, name, account_type, account_subtype, is_system, is_active)
+         VALUES (999991, '2010-SMOKE', 'Smoke AP Clearing', 'liability', 'current_liability', 0, 1)"
+    );
+    db_execute(
+        "INSERT INTO acc_qbo_account_map (ff_account_id, qbo_account_id, mapping_status, is_critical, critical_category)
+         VALUES (999991, 'A-9991', 'mapped', 1, 'ap_clearing')"
     );
     return ['vendor_id' => 999990, 'qbo_vendor_id' => 'V-9999', 'account_id' => 999990, 'qbo_account_id' => 'A-7777'];
 }
@@ -681,6 +695,85 @@ try {
     } else {
         echo "FAIL C20 " . implode('; ', $c20Errors) . "\n";
         $failures[] = 'C20';
+    }
+
+    // ── C21: gate 7 typed status — failed_preflight_field_too_long ──────
+    // S-QBO-BILL-GOTCHAS-PAYDOWN D-QBO-BILL-GOTCHAS-2.
+    // Set vendor_bill_number > 21 chars; gate 7 fires; map row records
+    // typed sub-state (not the generic failed_preflight).
+    ff_smoke_b_set_setting('quickbooks.sync_enabled', '0');  // back to default
+    ff_smoke_b_set_setting('quickbooks.sync_mode.bill', 'queue');
+    db_execute("UPDATE acc_bills SET vendor_bill_number='THIS-IS-A-WAY-TOO-LONG-VENDOR-BILL-NUMBER-FOR-QBO' WHERE id = 999990");
+    db_execute("DELETE FROM acc_qbo_bill_map WHERE ff_bill_id = 999990");
+    $c21Errors = [];
+    $r21 = BillPusher::pushCreate(999990);
+    if (($r21['status'] ?? null) !== 'failed_preflight_field_too_long') {
+        $c21Errors[] = "status: got " . json_encode($r21['status'] ?? null) . ", want 'failed_preflight_field_too_long'";
+    }
+    if (strpos((string) ($r21['error'] ?? ''), 'exceeds QBO Bill.DocNumber limit') === false) {
+        $c21Errors[] = "error should mention 'exceeds QBO Bill.DocNumber limit'; got: " . json_encode($r21['error'] ?? null);
+    }
+    $mapRow21 = db_row("SELECT push_status FROM acc_qbo_bill_map WHERE ff_bill_id = 999990");
+    if ($mapRow21 === null || $mapRow21['push_status'] !== 'failed_preflight_field_too_long') {
+        $c21Errors[] = "map row push_status: got " . json_encode($mapRow21['push_status'] ?? null) . " (expected typed sub-state)";
+    }
+    // Restore for downstream
+    db_execute("UPDATE acc_bills SET vendor_bill_number='VENDOR-INV-12345' WHERE id = 999990");
+    db_execute("DELETE FROM acc_qbo_bill_map WHERE ff_bill_id = 999990");
+    if (empty($c21Errors)) {
+        echo "PASS C21 gate 7 returns failed_preflight_field_too_long typed sub-state + map row records it (D-QBO-BILL-GOTCHAS-2)\n";
+        $pass++;
+    } else {
+        echo "FAIL C21 " . implode('; ', $c21Errors) . "\n";
+        $failures[] = 'C21';
+    }
+
+    // ── C22: gate 8 SKIPS when multi_currency_enabled='0' (D-QBO-FIXPACK-12) ──
+    // The currency-mismatch gate only fires when QBO is multi-currency
+    // enabled. With multi-currency disabled, BillPusher omits CurrencyRef
+    // entirely and there's nothing to mismatch against — gate must skip
+    // (no wasted HTTP probe to QBO).
+    ff_smoke_b_set_setting('quickbooks.multi_currency_enabled', '0');
+    $c22Errors = [];
+    // Use the standard happy-path bill (currency='CAD', vendor mapped CAD)
+    // and verify gate 8 doesn't cause a preflight failure. Push will fail
+    // at HTTP boundary (no real QBO) but should fail with QBO error, NOT
+    // failed_preflight_currency_mismatch.
+    $r22 = BillPusher::pushCreate(999990);
+    if (($r22['status'] ?? null) === 'failed_preflight_currency_mismatch') {
+        $c22Errors[] = "gate 8 should SKIP when multi_currency_enabled='0'; got status=failed_preflight_currency_mismatch";
+    }
+    db_execute("DELETE FROM acc_qbo_bill_map WHERE ff_bill_id = 999990");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='bill' AND entity_id=999990");
+    if (empty($c22Errors)) {
+        echo "PASS C22 gate 8 (currency-mismatch) SKIPS when multi_currency_enabled='0' (D-QBO-FIXPACK-12 gate)\n";
+        $pass++;
+    } else {
+        echo "FAIL C22 " . implode('; ', $c22Errors) . "\n";
+        $failures[] = 'C22';
+    }
+
+    // ── C23: ENUM verification — new typed sub-states present ──────────
+    // S-QBO-BILL-GOTCHAS-PAYDOWN migration adds 2 new ENUM values.
+    // Guards against migration revert + ensures BillPusher's typed
+    // sub-state writes won't truncate.
+    $c23Errors = [];
+    $col23 = db_row("SHOW COLUMNS FROM acc_qbo_bill_map WHERE Field = 'push_status'");
+    if (!$col23 || !isset($col23['Type'])) {
+        $c23Errors[] = "acc_qbo_bill_map.push_status column not found";
+    } else {
+        foreach (['failed_preflight_currency_mismatch', 'failed_preflight_field_too_long'] as $newEnum) {
+            if (strpos((string) $col23['Type'], "'{$newEnum}'") === false) {
+                $c23Errors[] = "push_status ENUM missing '{$newEnum}' (migration S-QBO-BILL-GOTCHAS-PAYDOWN not applied?)";
+            }
+        }
+    }
+    if (empty($c23Errors)) {
+        echo "PASS C23 acc_qbo_bill_map.push_status ENUM includes failed_preflight_currency_mismatch + failed_preflight_field_too_long (S-QBO-BILL-GOTCHAS-PAYDOWN migration)\n";
+        $pass++;
+    } else {
+        echo "FAIL C23 " . implode('; ', $c23Errors) . "\n";
+        $failures[] = 'C23';
     }
 } finally {
     ff_smoke_b_cleanup();

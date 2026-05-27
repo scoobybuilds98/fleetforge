@@ -1366,7 +1366,7 @@ _58 tables._
 | `qbo_currency` | varchar(3) |  | YES |
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
 | `ff_bill_snapshot_total` | decimal(15,2) |  | YES |
-| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight') | MUL | NO |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
 | `last_synced_at` | datetime |  | YES |

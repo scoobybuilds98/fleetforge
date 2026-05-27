@@ -64,6 +64,17 @@ $vendorId        = clean_int($input['vendor_id'] ?? null) ?? (int)$bill['vendor_
 $billDate        = clean_date($input['bill_date'] ?? null) ?? $bill['bill_date'];
 $dueDate         = clean_date($input['due_date'] ?? null) ?? $bill['due_date'];
 $vendorBillNum   = clean_string($input['vendor_bill_number'] ?? null);
+
+// S-QBO-BILL-GOTCHAS-PAYDOWN D-QBO-BILL-GOTCHAS-2: enforce 21-char limit at
+// INPUT time — same as bills/create.php. Catches edits where operator
+// extends vendor_bill_number past the QBO Bill.DocNumber limit.
+if ($vendorBillNum !== null && strlen($vendorBillNum) > \FleetForge\QboPushers\QboFieldLimits::INVOICE_DOC_NUMBER_MAX) {
+    json_error('VALIDATION_ERROR', sprintf(
+        "vendor_bill_number must be %d characters or fewer (currently %d). QBO Bill.DocNumber limit.",
+        \FleetForge\QboPushers\QboFieldLimits::INVOICE_DOC_NUMBER_MAX,
+        strlen($vendorBillNum)
+    ), 422);
+}
 $workOrderId     = clean_int($input['work_order_id'] ?? null);
 $equipmentUnitId = clean_int($input['equipment_unit_id'] ?? null);
 $notes           = clean_string($input['notes'] ?? null, 2000);
