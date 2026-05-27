@@ -343,6 +343,333 @@ if (!is_readable($currentSessionsPath)) {
 echo "\n";
 
 // ────────────────────────────────────────────────────────────────────────────
+// CLASS 5 — Recent SESSION LOG → CURRENT_SESSIONS.md reverse cross-check
+//
+// CLASS 2 checks: SHIPPED in CURRENT_SESSIONS appears in PROGRESS.
+// CLASS 5 checks: every row in PROGRESS.md SESSION LOG appears in
+// CURRENT_SESSIONS.md (any section — SHIPPED, IN-FLIGHT, QUEUED).
+//
+// Catches the failure mode where a session row gets added to PROGRESS.md
+// SESSION LOG but the CURRENT_SESSIONS.md entry is forgotten — the operator
+// then loses the high-level "what shipped recently" trail.
+//
+// SCOPE: last DOC_FRESHNESS_SESSION_TAIL session-log rows (deliberately
+// bounded — older rows correctly archive out of CURRENT_SESSIONS per its
+// rolling-archive convention).
+// ────────────────────────────────────────────────────────────────────────────
+
+const DOC_FRESHNESS_SESSION_TAIL = 10;
+
+echo "Class 5 — recent SESSION LOG rows → CURRENT_SESSIONS.md presence\n";
+echo str_repeat('─', 78) . "\n";
+
+if ($currentSessionsRaw === false || $progressRaw === false) {
+    record('C5: source files readable', false, 'reused state from CLASS 2 — unreadable');
+} else {
+    // Match SESSION LOG rows: | S-LABEL | YYYY-MM-DD | ...
+    // Capture label and date in parallel arrays.
+    $labels = [];
+    $dates  = [];
+    if (preg_match_all(
+        '/^\|\s+(S-[A-Z0-9][A-Z0-9\-]*)\s+\|\s+(\d{4}-\d{2}-\d{2})\s+\|/m',
+        $progressRaw,
+        $m
+    )) {
+        $labels = $m[1];
+        $dates  = $m[2];
+    }
+
+    if (count($labels) === 0) {
+        record(
+            'C5: SESSION LOG rows extractable from PROGRESS',
+            false,
+            'Zero | S-LABEL | YYYY-MM-DD | rows matched — regex may be broken or log empty.'
+        );
+    } else {
+        record('C5: SESSION LOG rows extractable from PROGRESS', true);
+
+        $tail = array_slice($labels, -DOC_FRESHNESS_SESSION_TAIL);
+        $tailDates = array_slice($dates, -DOC_FRESHNESS_SESSION_TAIL);
+
+        $missing = [];
+        foreach ($tail as $i => $label) {
+            if (strpos($currentSessionsRaw, $label) === false) {
+                $missing[] = "{$label} (" . $tailDates[$i] . ')';
+            }
+        }
+
+        $n = count($tail);
+        if (count($missing) === 0) {
+            record(
+                "C5: last {$n} SESSION LOG entries present in CURRENT_SESSIONS.md",
+                true
+            );
+        } else {
+            record(
+                "C5: last {$n} SESSION LOG entries present in CURRENT_SESSIONS.md",
+                false,
+                'Missing from CURRENT_SESSIONS.md: ' . implode(', ', $missing)
+            );
+        }
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLASS 6 — Recent QBO sessions → QUICKBOOKS_PROGRESS.md SESSION LOG presence
+//
+// For every session in PROGRESS.md SESSION LOG (last N) whose ROW TEXT
+// references QBO (S-QBO-*, quickbooks/, D-QBO-*, acc_qbo_*), verify the
+// session label also appears in QUICKBOOKS_PROGRESS.md (any section — most
+// importantly §2 SESSION LOG, but presence anywhere counts).
+//
+// Catches the failure mode where a QBO-relevant session ships its PROGRESS.md
+// row + CURRENT_SESSIONS.md entry but forgets to update QUICKBOOKS_PROGRESS.md
+// (which lost track of S-VENDOR-CURRENCY-COLUMN initially on 2026-05-27).
+//
+// HEURISTIC: session is QBO-relevant if its full row text in PROGRESS contains
+// "S-QBO-", "quickbooks/", "D-QBO-", "acc_qbo_", or starts with "S-VENDOR-"
+// (the FIXPACK-8 backlog item naming convention).
+// ────────────────────────────────────────────────────────────────────────────
+
+$qboProgressPath = REPO_ROOT . '/docs/FLEETFORGE_QUICKBOOKS_PROGRESS.md';
+$qboProgressRaw  = @file_get_contents($qboProgressPath);
+
+echo "Class 6 — recent QBO-relevant sessions → QUICKBOOKS_PROGRESS.md presence\n";
+echo str_repeat('─', 78) . "\n";
+
+if ($qboProgressRaw === false) {
+    record('C6: QUICKBOOKS_PROGRESS.md readable', false, "missing or unreadable: {$qboProgressPath}");
+} elseif (count($labels) === 0) {
+    record('C6: SESSION LOG rows available', false, 'CLASS 5 found no rows; skipping cross-check.');
+} else {
+    record('C6: QUICKBOOKS_PROGRESS.md readable', true);
+
+    // Re-parse PROGRESS to capture full row text per label (need the whole row
+    // body to apply the QBO-relevance heuristic). Each row spans from the
+    // | S-LABEL | YYYY-MM-DD | start to the next row start or end of table.
+    $rowPattern = '/^\|\s+(S-[A-Z0-9][A-Z0-9\-]*)\s+\|\s+\d{4}-\d{2}-\d{2}\s+\|.*$/m';
+    if (preg_match_all($rowPattern, $progressRaw, $rowMatches)) {
+        $rows = array_combine(array_slice($rowMatches[1], -DOC_FRESHNESS_SESSION_TAIL), array_slice($rowMatches[0], -DOC_FRESHNESS_SESSION_TAIL));
+
+        // QBO-relevance heuristic: LABEL prefix only (not body text). Body-text
+        // matching over-fires for meta-sessions that discuss QBO without being
+        // QBO sessions themselves (e.g. S-DOC-FRESHNESS-EXPAND, S-D131-BASELINE-
+        // RESTORE — both mention QBO sessions in their narrative but aren't
+        // themselves QBO build/paydown sessions and don't belong in the QBO
+        // log). False-negative possible for vendor-side work not prefixed
+        // S-VENDOR-* but those would surface in operator review.
+        $qboRelevant = [];
+        foreach ($rows as $label => $rowText) {
+            $isQbo = strpos($label, 'S-QBO-') === 0
+                  || strpos($label, 'S-VENDOR-') === 0;
+            if ($isQbo) {
+                $qboRelevant[$label] = $rowText;
+            }
+        }
+
+        if (count($qboRelevant) === 0) {
+            record('C6: recent SESSION LOG has no QBO-relevant rows (skipped)', true);
+        } else {
+            $missing = [];
+            foreach ($qboRelevant as $label => $_) {
+                if (strpos($qboProgressRaw, $label) === false) {
+                    $missing[] = $label;
+                }
+            }
+
+            $n = count($qboRelevant);
+            if (count($missing) === 0) {
+                record("C6: all {$n} recent QBO-relevant labels appear in QUICKBOOKS_PROGRESS.md", true);
+            } else {
+                record(
+                    "C6: all {$n} recent QBO-relevant labels appear in QUICKBOOKS_PROGRESS.md",
+                    false,
+                    'Missing from QUICKBOOKS_PROGRESS.md: ' . implode(', ', $missing)
+                );
+            }
+        }
+    } else {
+        record('C6: row extraction', false, 'regex match failed');
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLASS 7 — D-* DECISIONS with "via S-LABEL" attribution (ADVISORY)
+//
+// For every row in PROGRESS.md DECISIONS table containing "via S-LABEL"
+// attribution, verify the referenced session label appears somewhere in
+// PROGRESS.md SESSION LOG.
+//
+// ADVISORY: this check always PASSES — it surfaces orphan attributions for
+// operator awareness but does not hard-fail because the SESSION LOG has a
+// rolling-archive convention and older attributed sessions legitimately age
+// out of the in-table log (without losing their docs trail elsewhere).
+//
+// Catches: a D-* decision documented as locked via a session whose SESSION
+// LOG row was forgotten in the same commit. Orphans flagged but smoke passes.
+// ────────────────────────────────────────────────────────────────────────────
+
+echo "Class 7 — D-* attribution links → SESSION LOG presence (advisory)\n";
+echo str_repeat('─', 78) . "\n";
+
+if ($progressRaw === false) {
+    record('C7: PROGRESS.md readable', false, 'reused state — unreadable');
+} else {
+    if (preg_match_all(
+        '/\bvia\s+(S-[A-Z0-9][A-Z0-9\-]*)\b/',
+        $progressRaw,
+        $vm
+    )) {
+        $attributedSessions = array_values(array_unique($vm[1]));
+        $sessionLogLabels   = array_values(array_unique($labels ?? []));
+
+        $orphans = [];
+        foreach ($attributedSessions as $label) {
+            if (!in_array($label, $sessionLogLabels, true)) {
+                $orphans[] = $label;
+            }
+        }
+
+        $n = count($attributedSessions);
+        $resolved = $n - count($orphans);
+        // ALWAYS PASS — advisory only. Detail line shows orphan count for
+        // operator awareness. Operator can investigate when convenient.
+        $detail = count($orphans) === 0
+            ? "all {$n} attribution links resolved"
+            : "{$resolved}/{$n} resolved; " . count($orphans) . " orphans (likely archived): " . implode(', ', $orphans);
+        record("C7: D-* attribution advisory ({$detail})", true);
+    } else {
+        record('C7: D-* attribution advisory (0 links found)', true);
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLASS 8 — QUICKBOOKS_PROGRESS.md "Next session up" sanity check
+//
+// The §1 header has a "**Next session up:**" line that names the next session
+// to fire. After that session ships, the §1 header must be flipped to name a
+// new "next up" — otherwise readers tomorrow see a stale claim that the
+// already-shipped session is "next."
+//
+// CHECK: parse the "**Next session up:** **S-LABEL**" pattern from
+// QUICKBOOKS_PROGRESS.md §1. Verify S-LABEL does NOT appear as a shipped
+// row in PROGRESS.md SESSION LOG. (If it does, the §1 header is stale.)
+// ────────────────────────────────────────────────────────────────────────────
+
+echo "Class 8 — QUICKBOOKS_PROGRESS.md §1 'Next session up' freshness\n";
+echo str_repeat('─', 78) . "\n";
+
+if ($qboProgressRaw === false) {
+    record('C8: QUICKBOOKS_PROGRESS.md readable', false, 'reused state — unreadable');
+} else {
+    // Match: "**Next session up:** **S-LABEL**" or "**Next session up:**\n\n**S-LABEL**"
+    // The label is bold-wrapped; allow optional surrounding markdown.
+    if (preg_match(
+        '/\*\*Next session up:\*\*[^*]*\*\*(S-[A-Z0-9][A-Z0-9\-]*)\*\*/',
+        $qboProgressRaw,
+        $nm
+    )) {
+        $nextUp = $nm[1];
+
+        // Stale if this label appears as a SESSION LOG row in PROGRESS.
+        $sessionLogLabels = array_values(array_unique($labels ?? []));
+        $isShipped = in_array($nextUp, $sessionLogLabels, true);
+
+        if (!$isShipped) {
+            record("C8: 'Next session up' ({$nextUp}) is NOT already shipped", true);
+        } else {
+            record(
+                "C8: 'Next session up' ({$nextUp}) is NOT already shipped",
+                false,
+                "QUICKBOOKS_PROGRESS.md §1 names {$nextUp} as next-up, but it appears in PROGRESS.md SESSION LOG as DONE. Flip §1 to a new next-up."
+            );
+        }
+    } else {
+        record('C8: Next session up pattern locatable in QUICKBOOKS_PROGRESS', false, "regex didn't match — §1 header may have changed format");
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLASS 9 — K-22 Trap catalog entries (Trap #50+) have session attribution
+//
+// Every "### Trap #N: <title>" block in REFERENCE.md §11 with N ≥ 50 should
+// have "Detected:" / "via S-" / similar session attribution somewhere in the
+// block body, so future readers can find the originating session.
+//
+// CUTOFF: Trap #1-49 predate the attribution discipline (D-K22-CATALOG-2
+// formalized the catalog at Trap #52 in S-QBO-1 docs-lock 2026-05-20).
+// Older traps lack attribution by design — checking them produces noise.
+//
+// Catches: a new Trap added in REFERENCE.md without naming the session that
+// surfaced it, breaking the docs-trail for future planning chats.
+// ────────────────────────────────────────────────────────────────────────────
+
+const DOC_FRESHNESS_TRAP_ATTRIBUTION_CUTOFF = 50;
+
+$referencePath = REPO_ROOT . '/docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md';
+$referenceRaw  = @file_get_contents($referencePath);
+
+echo "Class 9 — K-22 Trap catalog (#" . DOC_FRESHNESS_TRAP_ATTRIBUTION_CUTOFF . "+) → session attribution\n";
+echo str_repeat('─', 78) . "\n";
+
+if ($referenceRaw === false) {
+    record('C9: REFERENCE.md readable', false, "missing or unreadable: {$referencePath}");
+} else {
+    if (preg_match_all(
+        '/^### Trap #?(\d+)(?::[^\n]*)?\n(.*?)(?=^###\s|^##\s|\z)/ms',
+        $referenceRaw,
+        $tm
+    )) {
+        $orphans = [];
+        $checked = 0;
+        $skipped = 0;
+        foreach ($tm[1] as $i => $trapNum) {
+            $num = (int) $trapNum;
+            if ($num < DOC_FRESHNESS_TRAP_ATTRIBUTION_CUTOFF) {
+                $skipped++;
+                continue;
+            }
+            $body = $tm[2][$i];
+            $checked++;
+
+            $hasAttribution =
+                preg_match('/\bDetected[:\s]/i', $body) === 1
+                || preg_match('/\bSurfaced\b/i', $body) === 1
+                || preg_match('/\bvia\s+S-[A-Z0-9]/', $body) === 1
+                || preg_match('/\bS-[A-Z0-9][A-Z0-9\-]*\b/', $body) === 1;
+
+            if (!$hasAttribution) {
+                $orphans[] = "#{$trapNum}";
+            }
+        }
+
+        if ($checked === 0 && $skipped > 0) {
+            record("C9: 0 Trap entries ≥#" . DOC_FRESHNESS_TRAP_ATTRIBUTION_CUTOFF . " ({$skipped} pre-cutoff legacy traps skipped)", true);
+        } elseif (count($orphans) === 0) {
+            record("C9: all {$checked} recent Traps (#" . DOC_FRESHNESS_TRAP_ATTRIBUTION_CUTOFF . "+) have session attribution ({$skipped} pre-cutoff legacy traps skipped)", true);
+        } else {
+            record(
+                "C9: all {$checked} recent Traps (#" . DOC_FRESHNESS_TRAP_ATTRIBUTION_CUTOFF . "+) have session attribution",
+                false,
+                'Traps without session attribution: ' . implode(', ', $orphans) . " ({$skipped} pre-cutoff legacy traps skipped)"
+            );
+        }
+    } else {
+        record('C9: Trap catalog regex matched', false, "no 'Trap #N' blocks found");
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
 // Summary + exit
 // ────────────────────────────────────────────────────────────────────────────
 

@@ -1109,7 +1109,9 @@ public function build(int $customerId): array
 
 ### 8.2 Vendor
 
-Same pattern as customer. Fewer fields. Map: `acc_qbo_vendor_map`. Pusher: `lib/Integrations/QboVendorPusher.php`.
+Same pattern as customer. Fewer fields. Map: `acc_qbo_vendor_map`. Pusher: `lib/QboPushers/VendorPusher.php`.
+
+**Per-row currency (S-VENDOR-CURRENCY-COLUMN, 2026-05-27):** `vendors.currency` ENUM('CAD','USD') NOT NULL DEFAULT 'CAD' mirrors `customers.currency` — the column was added in S-VENDOR-CURRENCY-COLUMN to close the D-QBO-FIXPACK-8 backlog (D-VENDOR-CURRENCY-COLUMN-1 supersedes D-QBO-FIXPACK-8). `VendorPusher::buildQboPayload` reads `strtoupper((string) ($ff['currency'] ?? 'CAD'))` and emits `CurrencyRef` (gated on `quickbooks.multi_currency_enabled='1'` per D-QBO-FIXPACK-12). `api/v1/vendors/create.php` + `update.php` accept `currency` as ENUM input (validates, defaults 'CAD' on omit for create, preserves existing on omit for update via array_key_exists pattern). Admin UI vendor forms do NOT yet expose currency (deferred to S-VENDOR-UI-CURRENCY-SELECTOR per D-VENDOR-CURRENCY-COLUMN-4); operators set per-vendor currency via the API or direct DB UPDATE in the interim.
 
 ### 8.3 Item / Product / Service
 

@@ -5,6 +5,13 @@
 **Purpose:** Single navigation doc for the remaining QBO integration build-out + paused testing arc, sequenced so the operator can fire the next 5-10 sessions without first re-deriving status from [FLEETFORGE_QUICKBOOKS_PROGRESS.md](FLEETFORGE_QUICKBOOKS_PROGRESS.md), [FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md](FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md), [FLEETFORGE_QUICKBOOKS_SPEC.md](FLEETFORGE_QUICKBOOKS_SPEC.md), and [FLEETFORGE_CURRENT_SESSIONS.md](FLEETFORGE_CURRENT_SESSIONS.md).
 **Scope:** Factual inventory + neutral recommendations. Cross-links to canonical docs; does not duplicate their content. No new architectural decisions are made here — items requiring a decision are flagged for a planning chat.
 
+**Progress markers added 2026-05-27** (point-in-time deltas since the 2026-05-26 inventory snapshot):
+- ✅ **S-QBO-12** SHIPPED 2026-05-27 (Phase QBO-5 COMPLETE; pushUpdate + pushVoid; D-QBO-12-1/2/3/4/5)
+- ✅ **S-VENDOR-CURRENCY-COLUMN** SHIPPED 2026-05-27 (closes D-QBO-FIXPACK-8 backlog; D-VENDOR-CURRENCY-COLUMN-1/4)
+- Top-5 progress: 2 of 5 done (S-QBO-12 + S-VENDOR-CURRENCY-COLUMN); next-up **S-QBO-18** (M Sonnet bill push, opens Phase QBO-8)
+- Phase QBO numbered total: 11/30 → **12/30** (S-QBO-12 advances the counter)
+- Debt-paydown/infra total: 27 → **28** (S-VENDOR-CURRENCY-COLUMN registered)
+
 ---
 
 ## 0. Top 5 recommended next sessions (read this first)
@@ -13,8 +20,8 @@ Tomorrow-actionable picks, ordered to maximize forward progress on the build-out
 
 | # | Session | Class | Size | Model | Rationale |
 |---|---|---|---|---|---|
-| 1 | **S-QBO-12** | BUILD | L | Opus | Closes Phase QBO-5 by implementing `pushUpdate` (stubbed in S-QBO-11 per D-QBO-11-4) + the void operation. Uses the `QuickBooksClient::voidEntity()` already shipped in S-QBO-11-POSTVERIFY-FIXES (proactive infrastructure paid down 2026-05-25). Unblocks every downstream "drift detected — re-push the FF state" workflow. Single entity; familiar territory; no new cross-cutting concerns. |
-| 2 | **S-VENDOR-CURRENCY-COLUMN** | DEBT | XS | Sonnet | Closes D-QBO-FIXPACK-8 backlog. Adds `vendors.currency ENUM('CAD','USD') NOT NULL DEFAULT 'CAD'` migration + updates `VendorPusher::buildQboPayload()` to read it (currently hardcodes 'CAD'). Updates `_smoke_qbo_vendor_push.php` C12 to verify per-row currency. Small surgical session that retires a registered debt item before further Pusher work multiplies the surface. |
+| 1 | ✅ **S-QBO-12** SHIPPED 2026-05-27 | BUILD | L | Opus | Closes Phase QBO-5 by implementing `pushUpdate` (was stubbed in S-QBO-11 per D-QBO-11-4) + the void operation. Uses the `QuickBooksClient::voidEntity()` already shipped in S-QBO-11-POSTVERIFY-FIXES (proactive infrastructure paid down 2026-05-25). Unblocks every downstream "drift detected — re-push the FF state" workflow. **Outcome:** D-QBO-12-1/2/3/4/5 locked; smoke 52→61; migration 66→67/0/0 (push_status ENUM +voided); D131 22/22 PASS. |
+| 2 | ✅ **S-VENDOR-CURRENCY-COLUMN** SHIPPED 2026-05-27 | DEBT | XS | Sonnet | Closes D-QBO-FIXPACK-8 backlog. Migration adds `vendors.currency ENUM('CAD','USD') NOT NULL DEFAULT 'CAD'` (67→68/0/0; mirrors customers.currency). VendorPusher reads per-row currency via `strtoupper((string) ($ff['currency'] ?? 'CAD'))`. API endpoints accept currency. **Outcome:** D-VENDOR-CURRENCY-COLUMN-1/4 locked; D-QBO-FIXPACK-8 SUPERSEDED; smoke 18→20 (C11 reworded, C12 flipped, C12b/C12c new); D131 22/22 PASS. K-22 catch surfaced: MySQL ALTER COLUMN syntax — COMMENT must precede AFTER (now Trap #69 in REFERENCE.md). |
 | 3 | **S-QBO-18** | BUILD | M | Sonnet | Bill push (FF → QBO). Highest *workflow-shift* value session — Phase QBO-8 is the first time bill entry moves from QBO to FF (D-CPA-5 conversation deliverable). Smaller scope than payment work; reuses Pusher contract pattern (§6.8). Pulls forward an accountant-visible change. Depends on vendor mapping (DONE) and `assertReadyForBillPush()` validator (DONE per S-QBO-VALIDATOR-SCOPE-SPLIT). |
 | 4 | **S-QBO-13** | BUILD | L | Opus | Payment pull from QBO via webhook (Exception #1 per D-QBO-CORE-2). Foundation for both S-QBO-14 (payment push) and S-QBO-15 (portal embed). Reuses the [SES webhook pattern](FLEETFORGE_QUICKBOOKS_SPEC.md#L1737) from S-PROD-2 (D75-D78) — signature verification, idempotency, Sentry instrumentation. Touches `acc_qbo_webhook_events` schema. |
 | 5 | **S-QBO-14** | BUILD | M | Sonnet | Payment push (FF → QBO). Pairs naturally with S-QBO-13. Completes the payment surface so cutover blockers around AR/UF clearing are unblocked. Requires `assertReadyForPaymentPush()` (DONE) + customer mapping (DONE). |
@@ -289,7 +296,7 @@ Source: [FLEETFORGE_CURRENT_SESSIONS.md §BACKLOG lines 97-107](FLEETFORGE_CURRE
 - **S-QBO-MATCHER-PRIORITY-ORDER** | Sonnet XS | `AccountMatcher::matchAll()` iteration currently sorts by `id ASC` (insertion order). Future: rank by priority — critical accounts first (`is_critical=1`), then exact_code candidates, then high-confidence partials. Companion to D-MATCHER-CLAIMED-SET. Applies symmetrically to Customer/Vendor/TaxCode/Item matchers when their domains grow.
 - **S-ROADMAP-V1-2-ITEM-TYPE-RECONCILE** | Sonnet XS | Reconcile [ROADMAP v1.1 §9.4](FLEETFORGE_ACCOUNTING_QBO_ROADMAP_v1.1.md) hypothetical `item_type` list against the actual ENUM (7 of 17 values diverged at S-QBO-10 ship; see K-22 Trap #67). Either edit roadmap inline or bump to v1.2 with brief changelog entry.
 - **S-QBO-CUSTOMER-MAPPING-RE-EVALUATE** | Sonnet XS — UI-driven | Pre-S-QBO-MATCHER-GREEDY-FIX, ~20 medium-confidence rows in `acc_qbo_account_map` were created with the buggy greedy-claim + non-subtype-aware matcher. New logic applies when operator re-runs auto_match from UI. Mark SHIPPED with a one-line note if operator handles via UI.
-- **S-VENDOR-CURRENCY-COLUMN** | Sonnet XS | Add `vendors.currency ENUM('CAD','USD') NOT NULL DEFAULT 'CAD'` column + update `VendorPusher::buildQboPayload()` to read it (currently hardcodes 'CAD' per D-QBO-FIXPACK-8 Option A). Update `_smoke_qbo_vendor_push.php` C12 to verify per-row currency. Closes D-QBO-FIXPACK-8 backlog. **Registered in [PROGRESS.md DECISIONS D-QBO-FIXPACK-8](FLEETFORGE_PROGRESS.md) and [QUICKBOOKS_PROGRESS.md S-QBO-FIXPACK-2 row](FLEETFORGE_QUICKBOOKS_PROGRESS.md).**
+- ✅ **S-VENDOR-CURRENCY-COLUMN** SHIPPED 2026-05-27 | Sonnet XS | Closed D-QBO-FIXPACK-8 backlog. Migration added `vendors.currency ENUM('CAD','USD') NOT NULL DEFAULT 'CAD'` mirroring customers.currency. VendorPusher refactored to read per-row currency; API endpoints accept currency input. D-VENDOR-CURRENCY-COLUMN-1 supersedes D-QBO-FIXPACK-8. Admin UI deferred to follow-up S-VENDOR-UI-CURRENCY-SELECTOR (D-VENDOR-CURRENCY-COLUMN-4).
 
 ### 5.2 Mentioned-but-unregistered debt items
 
