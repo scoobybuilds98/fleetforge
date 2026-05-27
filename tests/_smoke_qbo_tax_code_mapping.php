@@ -50,7 +50,7 @@ use FleetForge\QboPushers\TaxCodeMatcher;
 
 $failures = [];
 $pass     = 0;
-$total    = 14;
+$total    = 16;
 
 /** Sentinel ids we'll clean up. */
 $sentinelMappingIds = [];
@@ -537,6 +537,99 @@ if (empty($c14Errors)) {
 } else {
     echo "FAIL C14 " . implode('; ', $c14Errors) . "\n";
     $failures[] = 'C14';
+}
+
+// ── C15: S-QBO-MATCHER-WEDGE-RECOVERY — tax code wedge rescue (by qbo_name) ──
+$c15Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_tax_code_map WHERE qbo_tax_code_id = ? OR ff_tax_rate_id = ?", ['TEST-SMOKE-T-WEDGE15', 999993]);
+    db_execute("DELETE FROM tax_rates WHERE id = 999993");
+    db_execute("INSERT INTO tax_rates (id, name, gst_rate, pst_rate, hst_rate, effective_from, is_active) VALUES (999993, ?, 0, 0, 0, '2026-01-01', 1)", ['SMOKE C15 Wedge Rate']);
+
+    db_insert('acc_qbo_tax_code_map', [
+        'ff_tax_rate_id'   => 999993,
+        'qbo_tax_code_id'  => null,
+        'mapping_status'   => 'ff_only',
+        'qbo_name'         => 'Wedge Tax Code',
+        'last_synced_at'   => date('Y-m-d H:i:s'),
+    ]);
+    db_insert('acc_qbo_tax_code_map', [
+        'ff_tax_rate_id'   => null,
+        'qbo_tax_code_id'  => 'TEST-SMOKE-T-WEDGE15',
+        'qbo_sync_token'   => '0',
+        'mapping_status'   => 'qbo_only',
+        'qbo_name'         => 'Wedge Tax Code',
+        'last_synced_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    TaxCodeMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_tax_code_id, mapping_status, match_notes FROM acc_qbo_tax_code_map WHERE ff_tax_rate_id = ?", [999993]);
+    if ($wedged === null) {
+        $c15Errors[] = 'wedge row gone';
+    } else {
+        if ($wedged['qbo_tax_code_id'] !== 'TEST-SMOKE-T-WEDGE15') {
+            $c15Errors[] = "expected absorbed qbo_tax_code_id, got '" . ($wedged['qbo_tax_code_id'] ?? 'NULL') . "'";
+        }
+        if ($wedged['mapping_status'] !== 'mapped') {
+            $c15Errors[] = "expected mapped, got '" . $wedged['mapping_status'] . "'";
+        }
+        if (!str_contains((string) $wedged['match_notes'], 'wedge_recovery')) {
+            $c15Errors[] = "expected wedge_recovery in notes";
+        }
+    }
+    $candidate = db_row("SELECT id FROM acc_qbo_tax_code_map WHERE qbo_tax_code_id = ? AND mapping_status = 'qbo_only'", ['TEST-SMOKE-T-WEDGE15']);
+    if ($candidate !== null) {
+        $c15Errors[] = "expected qbo_only candidate deleted";
+    }
+} catch (Throwable $e) {
+    $c15Errors[] = 'C15 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_tax_code_map WHERE qbo_tax_code_id = ? OR ff_tax_rate_id = ?", ['TEST-SMOKE-T-WEDGE15', 999993]);
+    db_execute("DELETE FROM tax_rates WHERE id = 999993");
+}
+if (empty($c15Errors)) {
+    echo "PASS C15 TaxCodeMatcher rescueHalfStateRows absorbs wedge by qbo_name (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C15 " . implode('; ', $c15Errors) . "\n";
+    $failures[] = 'C15';
+}
+
+// ── C16: S-QBO-MATCHER-WEDGE-RECOVERY — tax code no-op when no match ──
+$c16Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_tax_code_map WHERE ff_tax_rate_id = 999994");
+    db_execute("DELETE FROM tax_rates WHERE id = 999994");
+    db_execute("INSERT INTO tax_rates (id, name, gst_rate, pst_rate, hst_rate, effective_from, is_active) VALUES (999994, ?, 0, 0, 0, '2026-01-01', 1)", ['SMOKE C16 Lone']);
+    db_insert('acc_qbo_tax_code_map', [
+        'ff_tax_rate_id'   => 999994,
+        'qbo_tax_code_id'  => null,
+        'mapping_status'   => 'ff_only',
+        'qbo_name'         => 'Lone Tax Wedge ' . substr((string) time(), -6),
+        'last_synced_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    TaxCodeMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_tax_code_id, mapping_status FROM acc_qbo_tax_code_map WHERE ff_tax_rate_id = ?", [999994]);
+    if ($wedged === null) {
+        $c16Errors[] = 'wedge row gone (false positive)';
+    } elseif ($wedged['qbo_tax_code_id'] !== null) {
+        $c16Errors[] = "no-op expected, got qbo_tax_code_id='" . $wedged['qbo_tax_code_id'] . "'";
+    }
+} catch (Throwable $e) {
+    $c16Errors[] = 'C16 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_tax_code_map WHERE ff_tax_rate_id = 999994");
+    db_execute("DELETE FROM tax_rates WHERE id = 999994");
+}
+if (empty($c16Errors)) {
+    echo "PASS C16 TaxCodeMatcher rescueHalfStateRows no-ops when no match (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C16 " . implode('; ', $c16Errors) . "\n";
+    $failures[] = 'C16';
 }
 
 } finally {

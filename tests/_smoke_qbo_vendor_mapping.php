@@ -47,7 +47,7 @@ use FleetForge\QboPushers\VendorMatcher;
 
 $failures = [];
 $pass     = 0;
-$total    = 12;
+$total    = 14;
 
 /** Sentinel-tagged rows we'll clean up at the end. */
 $sentinelFfIds       = [];
@@ -441,6 +441,101 @@ if (empty($c12Errors)) {
 } else {
     echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";
     $failures[] = 'C12';
+}
+
+// ── C13: S-QBO-MATCHER-WEDGE-RECOVERY — vendor wedge rescue ──
+$c13Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_vendor_map WHERE qbo_vendor_id = ? OR ff_vendor_id = ?", ['TEST-SMOKE-V-WEDGE13', 999993]);
+    db_execute("DELETE FROM vendors WHERE id = 999993");
+    db_execute("INSERT INTO vendors (id, name, vendor_type) VALUES (999993, ?, 'other')", ['SMOKE C13 Wedge Vendor']);
+
+    db_insert('acc_qbo_vendor_map', [
+        'ff_vendor_id'      => 999993,
+        'qbo_vendor_id'     => null,
+        'mapping_status'    => 'ff_only',
+        'qbo_display_name'  => 'Wedge Vendor Display',
+        'qbo_company_name'  => 'Wedge Vendor Display',
+        'last_synced_at'    => date('Y-m-d H:i:s'),
+    ]);
+    db_insert('acc_qbo_vendor_map', [
+        'ff_vendor_id'      => null,
+        'qbo_vendor_id'     => 'TEST-SMOKE-V-WEDGE13',
+        'qbo_sync_token'    => '0',
+        'mapping_status'    => 'qbo_only',
+        'qbo_display_name'  => 'Wedge Vendor Display',
+        'qbo_company_name'  => 'Wedge Vendor Display',
+        'last_synced_at'    => date('Y-m-d H:i:s'),
+    ]);
+
+    VendorMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_vendor_id, mapping_status, match_notes FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?", [999993]);
+    if ($wedged === null) {
+        $c13Errors[] = 'wedge row gone';
+    } else {
+        if ($wedged['qbo_vendor_id'] !== 'TEST-SMOKE-V-WEDGE13') {
+            $c13Errors[] = "expected absorbed qbo_vendor_id, got '" . ($wedged['qbo_vendor_id'] ?? 'NULL') . "'";
+        }
+        if ($wedged['mapping_status'] !== 'mapped') {
+            $c13Errors[] = "expected mapped, got '" . $wedged['mapping_status'] . "'";
+        }
+        if (!str_contains((string) $wedged['match_notes'], 'wedge_recovery')) {
+            $c13Errors[] = "expected wedge_recovery in notes";
+        }
+    }
+    $candidate = db_row("SELECT id FROM acc_qbo_vendor_map WHERE qbo_vendor_id = ? AND mapping_status = 'qbo_only'", ['TEST-SMOKE-V-WEDGE13']);
+    if ($candidate !== null) {
+        $c13Errors[] = "expected qbo_only candidate deleted";
+    }
+} catch (Throwable $e) {
+    $c13Errors[] = 'C13 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_vendor_map WHERE qbo_vendor_id = ? OR ff_vendor_id = ?", ['TEST-SMOKE-V-WEDGE13', 999993]);
+    db_execute("DELETE FROM vendors WHERE id = 999993");
+}
+if (empty($c13Errors)) {
+    echo "PASS C13 VendorMatcher rescueHalfStateRows absorbs wedge by qbo_display_name (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C13 " . implode('; ', $c13Errors) . "\n";
+    $failures[] = 'C13';
+}
+
+// ── C14: S-QBO-MATCHER-WEDGE-RECOVERY — no-op when no match ──
+$c14Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_vendor_map WHERE ff_vendor_id = 999994");
+    db_execute("DELETE FROM vendors WHERE id = 999994");
+    db_execute("INSERT INTO vendors (id, name, vendor_type) VALUES (999994, ?, 'other')", ['SMOKE C14 Lone']);
+    db_insert('acc_qbo_vendor_map', [
+        'ff_vendor_id'      => 999994,
+        'qbo_vendor_id'     => null,
+        'mapping_status'    => 'ff_only',
+        'qbo_display_name'  => 'Lone Vendor Wedge ' . substr((string) time(), -6),
+        'last_synced_at'    => date('Y-m-d H:i:s'),
+    ]);
+
+    VendorMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_vendor_id, mapping_status FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?", [999994]);
+    if ($wedged === null) {
+        $c14Errors[] = 'wedge row gone (false positive)';
+    } elseif ($wedged['qbo_vendor_id'] !== null) {
+        $c14Errors[] = "no-op expected, got qbo_vendor_id='" . $wedged['qbo_vendor_id'] . "'";
+    }
+} catch (Throwable $e) {
+    $c14Errors[] = 'C14 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_vendor_map WHERE ff_vendor_id = 999994");
+    db_execute("DELETE FROM vendors WHERE id = 999994");
+}
+if (empty($c14Errors)) {
+    echo "PASS C14 VendorMatcher rescueHalfStateRows no-ops when no match (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C14 " . implode('; ', $c14Errors) . "\n";
+    $failures[] = 'C14';
 }
 
 } finally {

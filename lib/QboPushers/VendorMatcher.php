@@ -162,6 +162,11 @@ class VendorMatcher
         $decisions     = [];
         $matchedQboIds = [];
 
+        // Pass 0: wedge half-state rescue (D-MATCHER-WEDGE-RESCUE).
+        // See AccountMatcher::rescueHalfStateRows for full rationale.
+        // Vendor rescue matches on qbo_display_name then qbo_company_name.
+        $matchedQboIds = self::rescueHalfStateRows($matchedQboIds);
+
         foreach ($ffVendors as $ff) {
             // Claimed-set tracking (D-QBO-MATCHER-1).
             $match = self::findBestMatch($ff, $qboVendors, $matchedQboIds);
@@ -197,5 +202,118 @@ class VendorMatcher
         }
 
         return $decisions;
+    }
+
+    /**
+     * Pass 0 of matchAll(): rescue wedged half-state rows in
+     * acc_qbo_vendor_map. Mirrors AccountMatcher::rescueHalfStateRows
+     * with vendor-specific breadcrumb fields. See AccountMatcher for
+     * full rationale + D-MATCHER-WEDGE-RESCUE.
+     */
+    private static function rescueHalfStateRows(array $existingClaimedQboIds): array
+    {
+        $wedged = db_select(
+            "SELECT id, ff_vendor_id, qbo_display_name, qbo_company_name
+               FROM acc_qbo_vendor_map
+              WHERE mapping_status = 'ff_only'
+                AND qbo_vendor_id IS NULL
+                AND (qbo_display_name IS NOT NULL OR qbo_company_name IS NOT NULL)"
+        );
+
+        $claimedQboIds = $existingClaimedQboIds;
+        $rescuedCount  = 0;
+        $now           = date('Y-m-d H:i:s');
+
+        foreach ($wedged as $w) {
+            $candidate = null;
+            $matchedBy = null;
+
+            if (!empty($w['qbo_display_name'])) {
+                $candidate = db_row(
+                    "SELECT id, qbo_vendor_id, qbo_sync_token, qbo_display_name, qbo_company_name,
+                            qbo_given_name, qbo_family_name, qbo_email, qbo_phone, qbo_v4v_status
+                       FROM acc_qbo_vendor_map
+                      WHERE mapping_status = 'qbo_only'
+                        AND qbo_vendor_id IS NOT NULL
+                        AND qbo_display_name = ?
+                      ORDER BY id ASC
+                      LIMIT 1",
+                    [(string) $w['qbo_display_name']]
+                );
+                if ($candidate !== null) { $matchedBy = 'qbo_display_name'; }
+            }
+
+            if ($candidate === null && !empty($w['qbo_company_name'])) {
+                $candidate = db_row(
+                    "SELECT id, qbo_vendor_id, qbo_sync_token, qbo_display_name, qbo_company_name,
+                            qbo_given_name, qbo_family_name, qbo_email, qbo_phone, qbo_v4v_status
+                       FROM acc_qbo_vendor_map
+                      WHERE mapping_status = 'qbo_only'
+                        AND qbo_vendor_id IS NOT NULL
+                        AND qbo_company_name = ?
+                      ORDER BY id ASC
+                      LIMIT 1",
+                    [(string) $w['qbo_company_name']]
+                );
+                if ($candidate !== null) { $matchedBy = 'qbo_company_name'; }
+            }
+
+            if ($candidate === null) {
+                continue;
+            }
+
+            $candidateQboId = (string) $candidate['qbo_vendor_id'];
+            if (isset($claimedQboIds[$candidateQboId])) {
+                continue;
+            }
+
+            $matchedValue = $matchedBy === 'qbo_display_name'
+                ? (string) $w['qbo_display_name']
+                : (string) $w['qbo_company_name'];
+            $note = "wedge_recovery: linked by {$matchedBy}='{$matchedValue}'";
+
+            // DELETE candidate first to clear uq_qbo_vendor before UPDATE.
+            db_execute("DELETE FROM acc_qbo_vendor_map WHERE id = ?", [(int) $candidate['id']]);
+            db_execute(
+                "UPDATE acc_qbo_vendor_map
+                    SET qbo_vendor_id    = ?,
+                        qbo_sync_token   = ?,
+                        qbo_display_name = COALESCE(?, qbo_display_name),
+                        qbo_company_name = COALESCE(?, qbo_company_name),
+                        qbo_given_name   = COALESCE(?, qbo_given_name),
+                        qbo_family_name  = COALESCE(?, qbo_family_name),
+                        qbo_email        = COALESCE(?, qbo_email),
+                        qbo_phone        = COALESCE(?, qbo_phone),
+                        qbo_v4v_status   = COALESCE(?, qbo_v4v_status),
+                        mapping_status   = 'mapped',
+                        match_confidence = 'high',
+                        match_notes      = ?,
+                        last_synced_at   = ?
+                  WHERE id = ?",
+                [
+                    $candidateQboId,
+                    (string) ($candidate['qbo_sync_token'] ?? '0'),
+                    $candidate['qbo_display_name'] ?? null,
+                    $candidate['qbo_company_name'] ?? null,
+                    $candidate['qbo_given_name'] ?? null,
+                    $candidate['qbo_family_name'] ?? null,
+                    $candidate['qbo_email'] ?? null,
+                    $candidate['qbo_phone'] ?? null,
+                    $candidate['qbo_v4v_status'] ?? null,
+                    $note,
+                    $now,
+                    (int) $w['id'],
+                ]
+            );
+
+            $claimedQboIds[$candidateQboId] = true;
+            $rescuedCount++;
+        }
+
+        if ($rescuedCount > 0) {
+            error_log("[VendorMatcher] rescued {$rescuedCount} wedged half-state row(s) (S-QBO-MATCHER-WEDGE-RECOVERY)");
+        }
+
+        return $claimedQboIds;
     }
 }

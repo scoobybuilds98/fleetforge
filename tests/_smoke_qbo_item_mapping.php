@@ -75,7 +75,7 @@ use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 18;
+$total    = 20;
 
 /** Sentinel qbo_ids we'll clean up. */
 $sentinelQboIds = ['TEST-SMOKE-I-001', 'TEST-SMOKE-I-002', 'TEST-SMOKE-I-003'];
@@ -596,6 +596,102 @@ foreach ($enumTypes as $t) {
 }
 if (empty($c18Errors)) { echo "PASS C18 UI_CATEGORIES covers all 17 ENUM values exactly once\n"; $pass++; }
 else { echo "FAIL C18 " . implode('; ', $c18Errors) . "\n"; $failures[] = 'C18'; }
+
+// ── C19: S-QBO-MATCHER-WEDGE-RECOVERY — item wedge rescue ──
+// Item map has no FK on ff_item_type (ENUM column; MySQL doesn't FK ENUMs),
+// so we use an existing valid ff_item_type value + variant pairing that
+// won't collide with the live 18 tuples. base_rental with a unique variant
+// (smoke-only sentinel) is safe.
+$c19Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_item_map WHERE qbo_item_id = ? OR (ff_item_type = ? AND ff_item_type_variant = ?)", ['TEST-SMOKE-I-WEDGE19', 'base_rental', 'wedge19']);
+
+    db_insert('acc_qbo_item_map', [
+        'ff_item_type'             => 'base_rental',
+        'ff_item_type_variant'     => 'wedge19',
+        'qbo_item_id'              => null,
+        'mapping_status'           => 'ff_only',
+        'qbo_name'                 => 'Wedge Item Service',
+        'qbo_fully_qualified_name' => 'Wedge Item Service',
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+    db_insert('acc_qbo_item_map', [
+        'ff_item_type'             => null,
+        'ff_item_type_variant'     => null,
+        'qbo_item_id'              => 'TEST-SMOKE-I-WEDGE19',
+        'qbo_sync_token'           => '0',
+        'mapping_status'           => 'qbo_only',
+        'qbo_name'                 => 'Wedge Item Service',
+        'qbo_fully_qualified_name' => 'Wedge Item Service',
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+
+    ItemMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_item_id, mapping_status, match_notes FROM acc_qbo_item_map WHERE ff_item_type = ? AND ff_item_type_variant = ?", ['base_rental', 'wedge19']);
+    if ($wedged === null) {
+        $c19Errors[] = 'wedge row gone';
+    } else {
+        if ($wedged['qbo_item_id'] !== 'TEST-SMOKE-I-WEDGE19') {
+            $c19Errors[] = "expected absorbed qbo_item_id, got '" . ($wedged['qbo_item_id'] ?? 'NULL') . "'";
+        }
+        if ($wedged['mapping_status'] !== 'mapped') {
+            $c19Errors[] = "expected mapped, got '" . $wedged['mapping_status'] . "'";
+        }
+        if (!str_contains((string) $wedged['match_notes'], 'wedge_recovery')) {
+            $c19Errors[] = "expected wedge_recovery in notes";
+        }
+    }
+    $candidate = db_row("SELECT id FROM acc_qbo_item_map WHERE qbo_item_id = ? AND mapping_status = 'qbo_only'", ['TEST-SMOKE-I-WEDGE19']);
+    if ($candidate !== null) {
+        $c19Errors[] = "expected qbo_only candidate deleted";
+    }
+} catch (Throwable $e) {
+    $c19Errors[] = 'C19 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_item_map WHERE qbo_item_id = ? OR (ff_item_type = ? AND ff_item_type_variant = ?)", ['TEST-SMOKE-I-WEDGE19', 'base_rental', 'wedge19']);
+}
+if (empty($c19Errors)) {
+    echo "PASS C19 ItemMatcher rescueHalfStateRows absorbs wedge by qbo_fully_qualified_name (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C19 " . implode('; ', $c19Errors) . "\n";
+    $failures[] = 'C19';
+}
+
+// ── C20: S-QBO-MATCHER-WEDGE-RECOVERY — item no-op when no match ──
+$c20Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_item_map WHERE ff_item_type = ? AND ff_item_type_variant = ?", ['base_rental', 'wedge20']);
+    db_insert('acc_qbo_item_map', [
+        'ff_item_type'             => 'base_rental',
+        'ff_item_type_variant'     => 'wedge20',
+        'qbo_item_id'              => null,
+        'mapping_status'           => 'ff_only',
+        'qbo_fully_qualified_name' => 'Lone Item Wedge ' . substr((string) time(), -6),
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+
+    ItemMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_item_id, mapping_status FROM acc_qbo_item_map WHERE ff_item_type = ? AND ff_item_type_variant = ?", ['base_rental', 'wedge20']);
+    if ($wedged === null) {
+        $c20Errors[] = 'wedge row gone (false positive)';
+    } elseif ($wedged['qbo_item_id'] !== null) {
+        $c20Errors[] = "no-op expected, got qbo_item_id='" . $wedged['qbo_item_id'] . "'";
+    }
+} catch (Throwable $e) {
+    $c20Errors[] = 'C20 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_item_map WHERE ff_item_type = ? AND ff_item_type_variant = ?", ['base_rental', 'wedge20']);
+}
+if (empty($c20Errors)) {
+    echo "PASS C20 ItemMatcher rescueHalfStateRows no-ops when no match (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C20 " . implode('; ', $c20Errors) . "\n";
+    $failures[] = 'C20';
+}
 
 } catch (Throwable $e) {
     echo "CRASH: " . $e->getMessage() . "\n  at " . $e->getFile() . ':' . $e->getLine() . "\n";

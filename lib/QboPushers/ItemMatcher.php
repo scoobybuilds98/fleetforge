@@ -290,6 +290,11 @@ class ItemMatcher
         $decisions      = [];
         $matchedQboIds  = [];
 
+        // Pass 0: wedge half-state rescue (D-MATCHER-WEDGE-RESCUE).
+        // See AccountMatcher::rescueHalfStateRows for full rationale.
+        // Item rescue matches on qbo_fully_qualified_name then qbo_name.
+        $matchedQboIds = self::rescueHalfStateRows($matchedQboIds);
+
         foreach ($tuples as $tuple) {
             $itemType    = $tuple['ff_item_type'];
             $variant     = $tuple['variant'];
@@ -357,5 +362,126 @@ class ItemMatcher
             $tokens,
             static fn($t) => strlen((string) $t) >= self::MIN_TOKEN_LENGTH
         ));
+    }
+
+    /**
+     * Pass 0 of matchAll(): rescue wedged half-state rows in
+     * acc_qbo_item_map. Mirrors AccountMatcher::rescueHalfStateRows
+     * with item-specific breadcrumb fields. See AccountMatcher for full
+     * rationale + D-MATCHER-WEDGE-RESCUE.
+     */
+    private static function rescueHalfStateRows(array $existingClaimedQboIds): array
+    {
+        $wedged = db_select(
+            "SELECT id, ff_item_type, ff_item_type_variant, qbo_name, qbo_fully_qualified_name
+               FROM acc_qbo_item_map
+              WHERE mapping_status = 'ff_only'
+                AND qbo_item_id IS NULL
+                AND (qbo_name IS NOT NULL OR qbo_fully_qualified_name IS NOT NULL)"
+        );
+
+        $claimedQboIds = $existingClaimedQboIds;
+        $rescuedCount  = 0;
+        $now           = date('Y-m-d H:i:s');
+
+        foreach ($wedged as $w) {
+            $candidate = null;
+            $matchedBy = null;
+
+            if (!empty($w['qbo_fully_qualified_name'])) {
+                $candidate = db_row(
+                    "SELECT id, qbo_item_id, qbo_sync_token, qbo_name, qbo_fully_qualified_name,
+                            qbo_description, qbo_type, qbo_active,
+                            qbo_income_account_id, qbo_income_account_name,
+                            qbo_expense_account_id, qbo_expense_account_name
+                       FROM acc_qbo_item_map
+                      WHERE mapping_status = 'qbo_only'
+                        AND qbo_item_id IS NOT NULL
+                        AND qbo_fully_qualified_name = ?
+                      ORDER BY id ASC
+                      LIMIT 1",
+                    [(string) $w['qbo_fully_qualified_name']]
+                );
+                if ($candidate !== null) { $matchedBy = 'qbo_fully_qualified_name'; }
+            }
+
+            if ($candidate === null && !empty($w['qbo_name'])) {
+                $candidate = db_row(
+                    "SELECT id, qbo_item_id, qbo_sync_token, qbo_name, qbo_fully_qualified_name,
+                            qbo_description, qbo_type, qbo_active,
+                            qbo_income_account_id, qbo_income_account_name,
+                            qbo_expense_account_id, qbo_expense_account_name
+                       FROM acc_qbo_item_map
+                      WHERE mapping_status = 'qbo_only'
+                        AND qbo_item_id IS NOT NULL
+                        AND qbo_name = ?
+                      ORDER BY id ASC
+                      LIMIT 1",
+                    [(string) $w['qbo_name']]
+                );
+                if ($candidate !== null) { $matchedBy = 'qbo_name'; }
+            }
+
+            if ($candidate === null) {
+                continue;
+            }
+
+            $candidateQboId = (string) $candidate['qbo_item_id'];
+            if (isset($claimedQboIds[$candidateQboId])) {
+                continue;
+            }
+
+            $matchedValue = $matchedBy === 'qbo_fully_qualified_name'
+                ? (string) $w['qbo_fully_qualified_name']
+                : (string) $w['qbo_name'];
+            $note = "wedge_recovery: linked by {$matchedBy}='{$matchedValue}'";
+
+            // DELETE candidate first to clear uq_qbo_item before UPDATE.
+            db_execute("DELETE FROM acc_qbo_item_map WHERE id = ?", [(int) $candidate['id']]);
+            db_execute(
+                "UPDATE acc_qbo_item_map
+                    SET qbo_item_id              = ?,
+                        qbo_sync_token           = ?,
+                        qbo_name                 = COALESCE(?, qbo_name),
+                        qbo_fully_qualified_name = COALESCE(?, qbo_fully_qualified_name),
+                        qbo_description          = COALESCE(?, qbo_description),
+                        qbo_type                 = COALESCE(?, qbo_type),
+                        qbo_active               = COALESCE(?, qbo_active),
+                        qbo_income_account_id    = COALESCE(?, qbo_income_account_id),
+                        qbo_income_account_name  = COALESCE(?, qbo_income_account_name),
+                        qbo_expense_account_id   = COALESCE(?, qbo_expense_account_id),
+                        qbo_expense_account_name = COALESCE(?, qbo_expense_account_name),
+                        mapping_status           = 'mapped',
+                        match_confidence         = 'high',
+                        match_notes              = ?,
+                        last_synced_at           = ?
+                  WHERE id = ?",
+                [
+                    $candidateQboId,
+                    (string) ($candidate['qbo_sync_token'] ?? '0'),
+                    $candidate['qbo_name'] ?? null,
+                    $candidate['qbo_fully_qualified_name'] ?? null,
+                    $candidate['qbo_description'] ?? null,
+                    $candidate['qbo_type'] ?? null,
+                    $candidate['qbo_active'] ?? null,
+                    $candidate['qbo_income_account_id'] ?? null,
+                    $candidate['qbo_income_account_name'] ?? null,
+                    $candidate['qbo_expense_account_id'] ?? null,
+                    $candidate['qbo_expense_account_name'] ?? null,
+                    $note,
+                    $now,
+                    (int) $w['id'],
+                ]
+            );
+
+            $claimedQboIds[$candidateQboId] = true;
+            $rescuedCount++;
+        }
+
+        if ($rescuedCount > 0) {
+            error_log("[ItemMatcher] rescued {$rescuedCount} wedged half-state row(s) (S-QBO-MATCHER-WEDGE-RECOVERY)");
+        }
+
+        return $claimedQboIds;
     }
 }

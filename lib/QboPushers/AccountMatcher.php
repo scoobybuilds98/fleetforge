@@ -375,6 +375,25 @@ class AccountMatcher
         $decisions     = [];
         $matchedQboIds = [];
 
+        // Pass 0: wedge half-state rescue (D-MATCHER-WEDGE-RESCUE).
+        // Detects acc_qbo_account_map rows in the "wedged half-state"
+        // surfaced by S-QBO-LIVE-VERIFY-RERUN-2026-05-26 (row 4302):
+        // mapping_status='ff_only' + qbo_account_id IS NULL but QBO
+        // breadcrumb columns populated (residue from a prior pull cycle
+        // that an operator unlinked, leaving FF→QBO type-info but no
+        // claimable qbo_only counterpart). The standard cascade's UPDATE
+        // is WHERE qbo_account_id=? which can't reach NULL, so wedged
+        // rows are otherwise invisible until manual SQL intervention.
+        //
+        // Rescue strategy: look up matching qbo_only rows by exact
+        // qbo_fully_qualified_name (preferred — most unique) then
+        // qbo_name (fallback). When a match is found, the wedged row
+        // absorbs the qbo_only row's qbo_account_id + sync_token and
+        // the redundant qbo_only row is deleted. Claimed qbo_ids feed
+        // into the standard $matchedQboIds set so the subsequent
+        // cascade doesn't double-claim (D-MATCHER-CLAIMED-SET).
+        $matchedQboIds = self::rescueHalfStateRows($matchedQboIds);
+
         foreach ($ffAccounts as $ff) {
             // Pass $matchedQboIds so findBestMatch skips QBO candidates
             // already claimed by an earlier FF row (D-QBO-MATCHER-1).
@@ -473,5 +492,151 @@ class AccountMatcher
             $tokens,
             static fn($t) => strlen((string) $t) >= self::MIN_TOKEN_LENGTH
         ));
+    }
+
+    /**
+     * Pass 0 of matchAll(): rescue wedged half-state rows in
+     * acc_qbo_account_map.
+     *
+     * Wedge definition: mapping_status='ff_only' + qbo_account_id IS NULL
+     * + at least one populated QBO breadcrumb column (qbo_name OR
+     * qbo_fully_qualified_name). This is leftover residue from a prior
+     * pull→unlink cycle: the operator unlinked the FF↔QBO pair via
+     * save_mapping's unlink action which sets ff_only + nulls
+     * qbo_account_id but preserves the QBO breadcrumb metadata as a
+     * forensic trail. The standard cascade can't reach these (its UPDATE
+     * uses WHERE qbo_account_id=?, which NULL never matches), so they
+     * stay wedged until manual SQL intervention.
+     *
+     * For each wedged row, look for a matching qbo_only candidate by
+     * exact qbo_fully_qualified_name (preferred — usually unique in the
+     * COA) then qbo_name (fallback). When matched, the wedged row
+     * absorbs the candidate's qbo_account_id + qbo_sync_token, flips
+     * to mapping_status='mapped' with match_confidence='high' +
+     * match_notes='wedge_recovery: linked by <breadcrumb>'; the
+     * redundant qbo_only candidate row is deleted (data is now carried
+     * by the wedged row, which has the FF link).
+     *
+     * Claimed qbo_account_ids returned so the outer matchAll() cascade
+     * doesn't try to re-match them (D-MATCHER-CLAIMED-SET discipline).
+     *
+     * @session  S-QBO-MATCHER-WEDGE-RECOVERY
+     * @decision D-MATCHER-WEDGE-RESCUE
+     *
+     * @param  array<string, bool> $existingClaimedQboIds  any qbo_ids
+     *         already claimed before this pass (currently empty; the
+     *         param exists to keep the signature future-compatible).
+     * @return array<string, bool>  Updated claimed-set keyed by qbo_id.
+     */
+    private static function rescueHalfStateRows(array $existingClaimedQboIds): array
+    {
+        $wedged = db_select(
+            "SELECT id, ff_account_id, qbo_name, qbo_fully_qualified_name
+               FROM acc_qbo_account_map
+              WHERE mapping_status = 'ff_only'
+                AND qbo_account_id IS NULL
+                AND (qbo_name IS NOT NULL OR qbo_fully_qualified_name IS NOT NULL)"
+        );
+
+        $claimedQboIds = $existingClaimedQboIds;
+        $rescuedCount  = 0;
+        $now           = date('Y-m-d H:i:s');
+
+        foreach ($wedged as $w) {
+            // Prefer qbo_fully_qualified_name (more unique — disambiguates
+            // sub-accounts like 'Sales:Service Income' vs 'Sales:Product
+            // Income'). Fall back to qbo_name when fully-qualified is null.
+            $candidate = null;
+            $matchedBy = null;
+
+            if (!empty($w['qbo_fully_qualified_name'])) {
+                $candidate = db_row(
+                    "SELECT id, qbo_account_id, qbo_sync_token, qbo_name, qbo_fully_qualified_name
+                       FROM acc_qbo_account_map
+                      WHERE mapping_status = 'qbo_only'
+                        AND qbo_account_id IS NOT NULL
+                        AND qbo_fully_qualified_name = ?
+                      ORDER BY id ASC
+                      LIMIT 1",
+                    [(string) $w['qbo_fully_qualified_name']]
+                );
+                if ($candidate !== null) { $matchedBy = 'qbo_fully_qualified_name'; }
+            }
+
+            if ($candidate === null && !empty($w['qbo_name'])) {
+                $candidate = db_row(
+                    "SELECT id, qbo_account_id, qbo_sync_token, qbo_name, qbo_fully_qualified_name
+                       FROM acc_qbo_account_map
+                      WHERE mapping_status = 'qbo_only'
+                        AND qbo_account_id IS NOT NULL
+                        AND qbo_name = ?
+                      ORDER BY id ASC
+                      LIMIT 1",
+                    [(string) $w['qbo_name']]
+                );
+                if ($candidate !== null) { $matchedBy = 'qbo_name'; }
+            }
+
+            if ($candidate === null) {
+                continue;  // No match — leave wedged row alone (no false positives).
+            }
+
+            // Claimed-set discipline: if this candidate's qbo_account_id was
+            // already claimed by an earlier wedge in this same rescue pass,
+            // skip — first wedge wins. Defensive; rare in practice (would
+            // require two wedged rows pointing at the same breadcrumb).
+            $candidateQboId = (string) $candidate['qbo_account_id'];
+            if (isset($claimedQboIds[$candidateQboId])) {
+                continue;
+            }
+
+            $note = "wedge_recovery: linked by {$matchedBy}='" .
+                    ($matchedBy === 'qbo_fully_qualified_name'
+                        ? (string) $w['qbo_fully_qualified_name']
+                        : (string) $w['qbo_name']) . "'";
+
+            // ORDER MATTERS: DELETE the qbo_only candidate FIRST, then
+            // UPDATE the wedge to absorb its qbo_account_id. If we did
+            // UPDATE → DELETE, the UPDATE would briefly create two rows
+            // with the same qbo_account_id, violating the UNIQUE
+            // constraint `uq_qbo_account`. The DELETE→UPDATE order is
+            // the only path through the UNIQUE constraint short of a
+            // transaction with DEFERRABLE constraints (which MySQL
+            // doesn't support).
+            db_execute(
+                "DELETE FROM acc_qbo_account_map WHERE id = ?",
+                [(int) $candidate['id']]
+            );
+            db_execute(
+                "UPDATE acc_qbo_account_map
+                    SET qbo_account_id   = ?,
+                        qbo_sync_token   = ?,
+                        qbo_name         = COALESCE(?, qbo_name),
+                        qbo_fully_qualified_name = COALESCE(?, qbo_fully_qualified_name),
+                        mapping_status   = 'mapped',
+                        match_confidence = 'high',
+                        match_notes      = ?,
+                        last_synced_at   = ?
+                  WHERE id = ?",
+                [
+                    $candidateQboId,
+                    (string) ($candidate['qbo_sync_token'] ?? '0'),
+                    $candidate['qbo_name'] ?? null,
+                    $candidate['qbo_fully_qualified_name'] ?? null,
+                    $note,
+                    $now,
+                    (int) $w['id'],
+                ]
+            );
+
+            $claimedQboIds[$candidateQboId] = true;
+            $rescuedCount++;
+        }
+
+        if ($rescuedCount > 0) {
+            error_log("[AccountMatcher] rescued {$rescuedCount} wedged half-state row(s) (S-QBO-MATCHER-WEDGE-RECOVERY)");
+        }
+
+        return $claimedQboIds;
     }
 }

@@ -137,7 +137,7 @@ use FleetForge\Exceptions\QuickBooksException;
 
 $failures = [];
 $pass     = 0;
-$total    = 42;
+$total    = 45;
 
 /** Sentinel ids we'll clean up. */
 $sentinelFfIds       = [];
@@ -1945,6 +1945,205 @@ if (empty($c42Errors)) {
 } else {
     echo "FAIL C42 " . implode('; ', $c42Errors) . "\n";
     $failures[] = 'C42';
+}
+
+// ── C43: S-QBO-MATCHER-WEDGE-RECOVERY — rescue wedge with matching qbo_only ──
+// Fixture: synthetic FF account 999993 (acc_accounts row); wedged
+// acc_qbo_account_map row with mapping_status='ff_only', qbo_account_id=NULL,
+// qbo_fully_qualified_name='Wedge Test Account'; separate qbo_only row
+// with the same qbo_fully_qualified_name AND qbo_account_id='TEST-SMOKE-A-WEDGE43'.
+// Call AccountMatcher::matchAll([]) — empty $qboAccounts is fine because
+// rescue reads existing DB rows directly. Assert wedge row now has the
+// qbo_account_id absorbed, mapping_status='mapped', match_notes contains
+// 'wedge_recovery'. Assert the qbo_only candidate row was DELETED.
+$c43Errors = [];
+try {
+    // Clean any prior wedge fixture
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id = 999993 OR qbo_account_id LIKE 'TEST-SMOKE-A-WEDGE43%'");
+    db_execute("DELETE FROM acc_accounts WHERE id = 999993");
+
+    db_insert('acc_accounts', [
+        'id' => 999993, 'code' => 'SMK43',
+        'name' => 'SMOKE C43 Wedge Account',
+        'account_type' => 'asset', 'is_active' => 1, 'is_system' => 0,
+    ]);
+
+    // Wedged row: ff_only, qbo_account_id=NULL, breadcrumbs present
+    db_insert('acc_qbo_account_map', [
+        'ff_account_id'            => 999993,
+        'qbo_account_id'           => null,
+        'mapping_status'           => 'ff_only',
+        'qbo_name'                 => 'Wedge Test Account',
+        'qbo_fully_qualified_name' => 'Wedge Test Account',
+        'qbo_account_type'         => 'Asset',
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+
+    // qbo_only candidate with matching qbo_fully_qualified_name
+    db_insert('acc_qbo_account_map', [
+        'ff_account_id'            => null,
+        'qbo_account_id'           => 'TEST-SMOKE-A-WEDGE43',
+        'qbo_sync_token'           => '0',
+        'mapping_status'           => 'qbo_only',
+        'qbo_name'                 => 'Wedge Test Account',
+        'qbo_fully_qualified_name' => 'Wedge Test Account',
+        'qbo_account_type'         => 'Asset',
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+
+    AccountMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_account_id, mapping_status, match_confidence, match_notes FROM acc_qbo_account_map WHERE ff_account_id = ?", [999993]);
+    if ($wedged === null) {
+        $c43Errors[] = 'wedge row gone after matchAll';
+    } else {
+        if ($wedged['qbo_account_id'] !== 'TEST-SMOKE-A-WEDGE43') {
+            $c43Errors[] = "expected qbo_account_id='TEST-SMOKE-A-WEDGE43', got '" . ($wedged['qbo_account_id'] ?? 'NULL') . "'";
+        }
+        if ($wedged['mapping_status'] !== 'mapped') {
+            $c43Errors[] = "expected mapping_status='mapped', got '" . ($wedged['mapping_status'] ?? 'NULL') . "'";
+        }
+        if ($wedged['match_confidence'] !== 'high') {
+            $c43Errors[] = "expected match_confidence='high', got '" . ($wedged['match_confidence'] ?? 'NULL') . "'";
+        }
+        if (!str_contains((string) $wedged['match_notes'], 'wedge_recovery')) {
+            $c43Errors[] = "expected match_notes to contain 'wedge_recovery', got '" . ($wedged['match_notes'] ?? 'NULL') . "'";
+        }
+    }
+
+    // Candidate qbo_only row should be deleted (data consolidated into wedge row)
+    $candidate = db_row("SELECT id FROM acc_qbo_account_map WHERE qbo_account_id = ? AND mapping_status = 'qbo_only'", ['TEST-SMOKE-A-WEDGE43']);
+    if ($candidate !== null) {
+        $c43Errors[] = "expected qbo_only candidate row to be deleted; still exists at id={$candidate['id']}";
+    }
+} catch (Throwable $e) {
+    $c43Errors[] = 'C43 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id = 999993 OR qbo_account_id LIKE 'TEST-SMOKE-A-WEDGE43%'");
+    db_execute("DELETE FROM acc_accounts WHERE id = 999993");
+}
+if (empty($c43Errors)) {
+    echo "PASS C43 AccountMatcher rescueHalfStateRows absorbs wedged ff_only into matching qbo_only (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C43 " . implode('; ', $c43Errors) . "\n";
+    $failures[] = 'C43';
+}
+
+// ── C44: S-QBO-MATCHER-WEDGE-RECOVERY — wedge with no matching qbo_only → no-op ──
+$c44Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id = 999994");
+    db_execute("DELETE FROM acc_accounts WHERE id = 999994");
+
+    db_insert('acc_accounts', [
+        'id' => 999994, 'code' => 'SMK44',
+        'name' => 'SMOKE C44 Lone Wedge Account',
+        'account_type' => 'asset', 'is_active' => 1, 'is_system' => 0,
+    ]);
+    db_insert('acc_qbo_account_map', [
+        'ff_account_id'            => 999994,
+        'qbo_account_id'           => null,
+        'mapping_status'           => 'ff_only',
+        'qbo_fully_qualified_name' => 'Unmatched Lone Wedge ' . substr((string) time(), -6),
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+
+    AccountMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_account_id, mapping_status FROM acc_qbo_account_map WHERE ff_account_id = ?", [999994]);
+    if ($wedged === null) {
+        $c44Errors[] = 'wedge row gone after matchAll (false positive)';
+    } else {
+        if ($wedged['qbo_account_id'] !== null) {
+            $c44Errors[] = "no-op expected — qbo_account_id should remain NULL, got '" . $wedged['qbo_account_id'] . "'";
+        }
+        if ($wedged['mapping_status'] !== 'ff_only') {
+            $c44Errors[] = "no-op expected — mapping_status should remain 'ff_only', got '" . ($wedged['mapping_status'] ?? 'NULL') . "'";
+        }
+    }
+} catch (Throwable $e) {
+    $c44Errors[] = 'C44 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id = 999994");
+    db_execute("DELETE FROM acc_accounts WHERE id = 999994");
+}
+if (empty($c44Errors)) {
+    echo "PASS C44 AccountMatcher rescueHalfStateRows no-ops when no matching qbo_only (no false positives) (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C44 " . implode('; ', $c44Errors) . "\n";
+    $failures[] = 'C44';
+}
+
+// ── C45: S-QBO-MATCHER-WEDGE-RECOVERY — claimed-set discipline (first wedge wins) ──
+// Two wedges pointing at the same qbo_fully_qualified_name + one qbo_only
+// candidate. First wedge (lower id) absorbs the candidate; second wedge
+// remains wedged.
+$c45Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id IN (999995, 999996) OR qbo_account_id LIKE 'TEST-SMOKE-A-WEDGE45%'");
+    db_execute("DELETE FROM acc_accounts WHERE id IN (999995, 999996)");
+
+    db_insert('acc_accounts', [
+        'id' => 999995, 'code' => 'SMK45A',
+        'name' => 'SMOKE C45 Wedge A',
+        'account_type' => 'asset', 'is_active' => 1, 'is_system' => 0,
+    ]);
+    db_insert('acc_accounts', [
+        'id' => 999996, 'code' => 'SMK45B',
+        'name' => 'SMOKE C45 Wedge B',
+        'account_type' => 'asset', 'is_active' => 1, 'is_system' => 0,
+    ]);
+
+    db_insert('acc_qbo_account_map', [
+        'ff_account_id'            => 999995,
+        'qbo_account_id'           => null,
+        'mapping_status'           => 'ff_only',
+        'qbo_fully_qualified_name' => 'Claimed-Set Test Account',
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+    db_insert('acc_qbo_account_map', [
+        'ff_account_id'            => 999996,
+        'qbo_account_id'           => null,
+        'mapping_status'           => 'ff_only',
+        'qbo_fully_qualified_name' => 'Claimed-Set Test Account',
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+    db_insert('acc_qbo_account_map', [
+        'ff_account_id'            => null,
+        'qbo_account_id'           => 'TEST-SMOKE-A-WEDGE45',
+        'qbo_sync_token'           => '0',
+        'mapping_status'           => 'qbo_only',
+        'qbo_fully_qualified_name' => 'Claimed-Set Test Account',
+        'last_synced_at'           => date('Y-m-d H:i:s'),
+    ]);
+
+    AccountMatcher::matchAll([]);
+
+    $first  = db_row("SELECT qbo_account_id, mapping_status FROM acc_qbo_account_map WHERE ff_account_id = ?", [999995]);
+    $second = db_row("SELECT qbo_account_id, mapping_status FROM acc_qbo_account_map WHERE ff_account_id = ?", [999996]);
+
+    if ($first === null || ($first['qbo_account_id'] ?? null) !== 'TEST-SMOKE-A-WEDGE45') {
+        $c45Errors[] = "expected first wedge (999995) to absorb candidate, got " . json_encode($first);
+    }
+    if ($second === null) {
+        $c45Errors[] = "second wedge (999996) row missing";
+    } elseif ($second['qbo_account_id'] !== null) {
+        $c45Errors[] = "expected second wedge (999996) to remain wedged (qbo_account_id NULL), got '" . $second['qbo_account_id'] . "'";
+    }
+} catch (Throwable $e) {
+    $c45Errors[] = 'C45 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id IN (999995, 999996) OR qbo_account_id LIKE 'TEST-SMOKE-A-WEDGE45%'");
+    db_execute("DELETE FROM acc_accounts WHERE id IN (999995, 999996)");
+}
+if (empty($c45Errors)) {
+    echo "PASS C45 AccountMatcher rescueHalfStateRows claimed-set discipline (first wedge wins) (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C45 " . implode('; ', $c45Errors) . "\n";
+    $failures[] = 'C45';
 }
 
 } finally {

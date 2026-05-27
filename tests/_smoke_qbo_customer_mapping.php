@@ -47,7 +47,7 @@ use FleetForge\QboPushers\CustomerMatcher;
 
 $failures = [];
 $pass     = 0;
-$total    = 12;
+$total    = 14;
 
 /** Sentinel-tagged rows we'll clean up at the end. */
 $sentinelFfIds       = [];
@@ -433,6 +433,107 @@ if (empty($c12Errors)) {
 } else {
     echo "FAIL C12 " . implode('; ', $c12Errors) . "\n";
     $failures[] = 'C12';
+}
+
+// ── C13: S-QBO-MATCHER-WEDGE-RECOVERY — wedge rescue ──
+// Wedged ff_only customer_map row with breadcrumbs + qbo_customer_id=NULL
+// gets linked to a matching qbo_only row by qbo_display_name. The qbo_only
+// candidate is deleted; the wedge row absorbs qbo_customer_id + token.
+$c13Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE qbo_customer_id = ? OR ff_customer_id = ?", ['TEST-SMOKE-C-WEDGE13', 999993]);
+    db_execute("DELETE FROM customers WHERE id = 999993");
+
+    db_execute("INSERT INTO customers (id, company_name) VALUES (999993, ?)", ['SMOKE C13 Wedge Customer']);
+
+    db_insert('acc_qbo_customer_map', [
+        'ff_customer_id'    => 999993,
+        'qbo_customer_id'   => null,
+        'mapping_status'    => 'ff_only',
+        'qbo_display_name'  => 'Wedge Customer Display',
+        'qbo_company_name'  => 'Wedge Customer Display',
+        'last_synced_at'    => date('Y-m-d H:i:s'),
+    ]);
+    db_insert('acc_qbo_customer_map', [
+        'ff_customer_id'    => null,
+        'qbo_customer_id'   => 'TEST-SMOKE-C-WEDGE13',
+        'qbo_sync_token'    => '0',
+        'mapping_status'    => 'qbo_only',
+        'qbo_display_name'  => 'Wedge Customer Display',
+        'qbo_company_name'  => 'Wedge Customer Display',
+        'last_synced_at'    => date('Y-m-d H:i:s'),
+    ]);
+
+    CustomerMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_customer_id, mapping_status, match_confidence, match_notes FROM acc_qbo_customer_map WHERE ff_customer_id = ?", [999993]);
+    if ($wedged === null) {
+        $c13Errors[] = 'wedge row gone after matchAll';
+    } else {
+        if ($wedged['qbo_customer_id'] !== 'TEST-SMOKE-C-WEDGE13') {
+            $c13Errors[] = "expected qbo_customer_id='TEST-SMOKE-C-WEDGE13', got '" . ($wedged['qbo_customer_id'] ?? 'NULL') . "'";
+        }
+        if ($wedged['mapping_status'] !== 'mapped') {
+            $c13Errors[] = "expected mapping_status='mapped', got '" . ($wedged['mapping_status'] ?? 'NULL') . "'";
+        }
+        if (!str_contains((string) $wedged['match_notes'], 'wedge_recovery')) {
+            $c13Errors[] = "expected match_notes to contain 'wedge_recovery'";
+        }
+    }
+    $candidate = db_row("SELECT id FROM acc_qbo_customer_map WHERE qbo_customer_id = ? AND mapping_status = 'qbo_only'", ['TEST-SMOKE-C-WEDGE13']);
+    if ($candidate !== null) {
+        $c13Errors[] = "expected qbo_only candidate to be deleted; still exists at id={$candidate['id']}";
+    }
+} catch (Throwable $e) {
+    $c13Errors[] = 'C13 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE qbo_customer_id = ? OR ff_customer_id = ?", ['TEST-SMOKE-C-WEDGE13', 999993]);
+    db_execute("DELETE FROM customers WHERE id = 999993");
+}
+if (empty($c13Errors)) {
+    echo "PASS C13 CustomerMatcher rescueHalfStateRows absorbs wedge by qbo_display_name (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C13 " . implode('; ', $c13Errors) . "\n";
+    $failures[] = 'C13';
+}
+
+// ── C14: S-QBO-MATCHER-WEDGE-RECOVERY — no-op when no matching qbo_only ──
+$c14Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = 999994");
+    db_execute("DELETE FROM customers WHERE id = 999994");
+    db_execute("INSERT INTO customers (id, company_name) VALUES (999994, ?)", ['SMOKE C14 Lone Wedge']);
+    db_insert('acc_qbo_customer_map', [
+        'ff_customer_id'    => 999994,
+        'qbo_customer_id'   => null,
+        'mapping_status'    => 'ff_only',
+        'qbo_display_name'  => 'Lone Customer Wedge ' . substr((string) time(), -6),
+        'last_synced_at'    => date('Y-m-d H:i:s'),
+    ]);
+
+    CustomerMatcher::matchAll([]);
+
+    $wedged = db_row("SELECT qbo_customer_id, mapping_status FROM acc_qbo_customer_map WHERE ff_customer_id = ?", [999994]);
+    if ($wedged === null) {
+        $c14Errors[] = 'wedge row gone after matchAll (false positive)';
+    } elseif ($wedged['qbo_customer_id'] !== null) {
+        $c14Errors[] = "no-op expected — qbo_customer_id should remain NULL, got '" . $wedged['qbo_customer_id'] . "'";
+    } elseif ($wedged['mapping_status'] !== 'ff_only') {
+        $c14Errors[] = "no-op expected — mapping_status should remain 'ff_only', got '" . $wedged['mapping_status'] . "'";
+    }
+} catch (Throwable $e) {
+    $c14Errors[] = 'C14 threw: ' . $e->getMessage();
+} finally {
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = 999994");
+    db_execute("DELETE FROM customers WHERE id = 999994");
+}
+if (empty($c14Errors)) {
+    echo "PASS C14 CustomerMatcher rescueHalfStateRows no-ops when no matching qbo_only (S-QBO-MATCHER-WEDGE-RECOVERY)\n";
+    $pass++;
+} else {
+    echo "FAIL C14 " . implode('; ', $c14Errors) . "\n";
+    $failures[] = 'C14';
 }
 
 } finally {
