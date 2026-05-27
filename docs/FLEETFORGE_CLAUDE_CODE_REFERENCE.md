@@ -2052,6 +2052,40 @@ foreach ($blocking as $cat) {
 
 ---
 
+### Trap 69: MySQL ALTER COLUMN — COMMENT must precede AFTER positional clause
+
+**Wrong**: `ALTER TABLE t ADD COLUMN col ENUM(...) NOT NULL DEFAULT 'X' AFTER other_col COMMENT 'docs'` — MySQL parse error 1064 at the `COMMENT` keyword. The column definition (NOT NULL / DEFAULT / COMMENT / CHARACTER SET / COLLATE) and the position specifier (AFTER / FIRST) are syntactically distinct: column_definition comes first, position specifier comes last.
+
+**Right**:
+
+```sql
+✅ Right (column_definition ends with COMMENT; AFTER is the trailing position specifier)
+ALTER TABLE `vendors`
+  ADD COLUMN `currency` ENUM('CAD','USD')
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    NOT NULL DEFAULT 'CAD'
+    COMMENT 'Vendor billing currency (mirrors customers.currency)'
+    AFTER `notes`;
+
+❌ Wrong (AFTER appears mid-definition; MySQL errors at COMMENT)
+ALTER TABLE `vendors`
+  ADD COLUMN `currency` ENUM('CAD','USD')
+    NOT NULL DEFAULT 'CAD'
+    AFTER `notes`
+    COMMENT 'Vendor billing currency';
+-- ERROR 1064 (42000): syntax error near 'COMMENT'
+```
+
+**Why it's a trap**: the MODIFY COLUMN syntax (used for ENUM extensions in past migrations like S-QBO-PUSHER-SKIP-RECORD-FIX-INVOICE) doesn't have a position specifier, so the column_definition can end with COMMENT without ambiguity. Authors copy-pasting from MODIFY to ADD COLUMN naturally trail COMMENT after the last definition clause and forget AFTER must come last. The error message points at COMMENT not the misplaced AFTER, which obscures the cause.
+
+**Recovery**: MySQL DDL auto-commits but **parse errors do not leave partial state** — the column is not partially added. Verify via `SHOW COLUMNS FROM t LIKE 'col'` returning 0 rows post-failure, then fix the SQL ordering and re-run.
+
+**Detected**: S-VENDOR-CURRENCY-COLUMN 2026-05-27 — initial migration attempt failed at parse time; verified no partial state via SHOW COLUMNS; reordered COMMENT before AFTER; second attempt applied successfully (67→68/0/0).
+
+**Applies to**: every future migration adding a column with both COMMENT and positional placement. MODIFY COLUMN is unaffected (no positional clause possible).
+
+---
+
 ## 12. PERMISSION MATRIX (quick reference)
 
 ```
