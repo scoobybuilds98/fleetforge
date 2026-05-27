@@ -126,4 +126,14 @@ db_transaction(function () use ($id, $invoice, $voidReason) {
     }
 });
 
+// ── S-QBO-12: enqueue void to QBO ─────────────────────────────
+// Pattern matches api/v1/invoices/send.php (S-QBO-11 D-QBO-11-1):
+// best-effort enqueue AFTER the db_transaction commits so void
+// state is durably persisted before the QBO sync attempt fires.
+// InvoiceEnqueuer gate-0 (D-ENQUEUER-GATE-0-ELIGIBILITY, S-QBO-
+// ENQUEUER-ELIGIBILITY-GATE) verifies status='void' which is now
+// the case post-commit. Worker dispatches to InvoicePusher::pushVoid
+// per dispatcher convention (D-QBO-3-2).
+\FleetForge\QboPushers\InvoiceEnqueuer::enqueue((int) $id, 'void');
+
 json_success(['id' => $id, 'status' => 'void']);

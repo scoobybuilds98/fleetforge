@@ -1745,6 +1745,248 @@ if (empty($c52Errors)) {
     $failures[] = 'C52';
 }
 
+// ════════════════════════════════════════════════════════════════
+// S-QBO-12 — Invoice modification + void semantics
+// ════════════════════════════════════════════════════════════════
+
+// ── C53: STRUCTURAL — pushUpdate stub replaced; delegates to pushImpl ──
+// Verifies the D-QBO-11-4 stub return literal 'unsupported_in_session' is
+// gone from InvoicePusher source AND that pushUpdate body delegates to
+// pushImpl with operation='update' (D-QBO-12-2 demote-to-create path).
+$total++;
+$c53Errors = [];
+$src = file_get_contents(__DIR__ . '/../lib/QboPushers/InvoicePusher.php');
+if ($src === false) {
+    $c53Errors[] = "could not read InvoicePusher.php";
+} else {
+    if (str_contains($src, "'unsupported_in_session'")) {
+        $c53Errors[] = "InvoicePusher still contains the S-QBO-11 stub literal 'unsupported_in_session' (D-QBO-11-4 stub) — expected S-QBO-12 to remove it";
+    }
+    if (!preg_match("/public static function pushUpdate.*?\\n.*?pushImpl\\(\\\$ffInvoiceId, 'update', \\\$payloadSnapshot\\)/s", $src)) {
+        $c53Errors[] = "pushUpdate body should delegate to self::pushImpl(\$ffInvoiceId, 'update', \$payloadSnapshot) per S-QBO-12";
+    }
+    if (!str_contains($src, "self::pushImpl(\$ffInvoiceId, 'create', \$payloadSnapshot)")) {
+        $c53Errors[] = "pushImpl should contain the demote-to-create branch (operation='update' with no mapping → re-dispatch as 'create')";
+    }
+}
+if (empty($c53Errors)) { echo "PASS C53 InvoicePusher::pushUpdate stub replaced + delegates to pushImpl + demote-to-create branch present (S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C53 " . implode('; ', $c53Errors) . "\n"; $failures[] = 'C53'; }
+
+// ── C54: pushUpdate with status='void' → skipped_voided (gate 3 same as create) ──
+// Operation-aware: both pushCreate AND pushUpdate must skip a voided invoice
+// via the gate 3 check. Confirms pushImpl gate 3 doesn't gate on operation.
+$total++;
+$c54Errors = [];
+try {
+    // Reuse the 999990 fixture set up at the top of the smoke (lines 534-557).
+    // UPDATE its state to 'void' + clear any pre-existing mapping/sync_log;
+    // mirrors the C21 pattern (line 696-697).
+    db_execute("UPDATE invoices SET status='void', deleted_at=NULL WHERE id=999990");
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='invoice' AND entity_id=999990");
+    $result = InvoicePusher::pushUpdate(999990);
+    if (($result['status'] ?? null) !== 'skipped_voided') {
+        $c54Errors[] = "expected status='skipped_voided' from pushUpdate on status='void' invoice, got " . json_encode($result['status'] ?? null);
+    }
+    if (($result['outcome'] ?? null) !== 'skipped') {
+        $c54Errors[] = "expected outcome='skipped', got " . json_encode($result['outcome'] ?? null);
+    }
+    if (($result['success'] ?? null) !== true) {
+        $c54Errors[] = "expected success=true (skip is a successful outcome), got " . json_encode($result['success'] ?? null);
+    }
+} catch (Throwable $e) {
+    $c54Errors[] = "exception: " . $e->getMessage();
+}
+if (empty($c54Errors)) { echo "PASS C54 pushUpdate with status='void' returns skipped_voided (gate 3 operation-agnostic; S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C54 " . implode('; ', $c54Errors) . "\n"; $failures[] = 'C54'; }
+
+// ── C55: pushVoid with status != 'void' → void_status_mismatch ──
+// INVERTED status invariant per D-QBO-12-3: pushVoidImpl rejects anything
+// that isn't 'void'. Confirms the gate is in place.
+$total++;
+$c55Errors = [];
+try {
+    db_execute("UPDATE invoices SET status='sent' WHERE id=999990");
+    $result = InvoicePusher::pushVoid(999990);
+    if (($result['status'] ?? null) !== 'void_status_mismatch') {
+        $c55Errors[] = "expected status='void_status_mismatch' for status='sent' invoice, got " . json_encode($result['status'] ?? null);
+    }
+    if (($result['success'] ?? null) !== false) {
+        $c55Errors[] = "expected success=false (mismatch is a failure), got " . json_encode($result['success'] ?? null);
+    }
+    if (($result['outcome'] ?? null) !== 'failed') {
+        $c55Errors[] = "expected outcome='failed', got " . json_encode($result['outcome'] ?? null);
+    }
+    if (empty($result['error'])) {
+        $c55Errors[] = "expected non-empty error message describing the status mismatch";
+    }
+} catch (Throwable $e) {
+    $c55Errors[] = "exception: " . $e->getMessage();
+}
+if (empty($c55Errors)) { echo "PASS C55 pushVoid rejects status!='void' with void_status_mismatch (D-QBO-12-3 inverted invariant; S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C55 " . implode('; ', $c55Errors) . "\n"; $failures[] = 'C55'; }
+
+// ── C56: pushVoid with no mapping → skipped_unmapped_void (D-QBO-12-5) ──
+// FF invoice voided before ever being pushed to QBO. No QBO entity to
+// void; pushVoid returns success without HTTP call AND without writing
+// a mapping row.
+$total++;
+$c56Errors = [];
+try {
+    db_execute("UPDATE invoices SET status='void' WHERE id=999990");
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");  // no mapping
+    $result = InvoicePusher::pushVoid(999990);
+    if (($result['status'] ?? null) !== 'skipped_unmapped_void') {
+        $c56Errors[] = "expected status='skipped_unmapped_void', got " . json_encode($result['status'] ?? null);
+    }
+    if (($result['success'] ?? null) !== true) {
+        $c56Errors[] = "expected success=true (FF-only void is a successful outcome), got " . json_encode($result['success'] ?? null);
+    }
+    if (($result['outcome'] ?? null) !== 'skipped') {
+        $c56Errors[] = "expected outcome='skipped', got " . json_encode($result['outcome'] ?? null);
+    }
+    // Verify NO mapping row was inserted (per D-QBO-12-5: silent skip, no map)
+    $mapRow = db_row("SELECT id FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+    if ($mapRow !== null) {
+        $c56Errors[] = "expected no mapping row insert for skipped_unmapped_void, but found id=" . $mapRow['id'];
+    }
+} catch (Throwable $e) {
+    $c56Errors[] = "exception: " . $e->getMessage();
+}
+if (empty($c56Errors)) { echo "PASS C56 pushVoid skips silently when no mapping exists (D-QBO-12-5; no map row written; S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C56 " . implode('; ', $c56Errors) . "\n"; $failures[] = 'C56'; }
+
+// ── C57: pushVoid with mapping push_status='voided' → already_voided (D-QBO-12-4) ──
+// Idempotent replay — re-dispatching a void operation on an already-voided
+// invoice returns success without HTTP call.
+$total++;
+$c57Errors = [];
+try {
+    db_execute("UPDATE invoices SET status='void' WHERE id=999990");
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+    db_execute(
+        "INSERT INTO acc_qbo_invoice_map (ff_invoice_id, qbo_invoice_id, qbo_sync_token, push_status, ff_engine_version, last_synced_at)
+         VALUES (999990, 'TEST-S12-C57-QBO', '5', 'voided', 'unknown', NOW())"
+    );
+    $result = InvoicePusher::pushVoid(999990);
+    if (($result['status'] ?? null) !== 'already_voided') {
+        $c57Errors[] = "expected status='already_voided', got " . json_encode($result['status'] ?? null);
+    }
+    if (($result['success'] ?? null) !== true) {
+        $c57Errors[] = "expected success=true (idempotent replay), got " . json_encode($result['success'] ?? null);
+    }
+    if (($result['outcome'] ?? null) !== 'voided') {
+        $c57Errors[] = "expected outcome='voided', got " . json_encode($result['outcome'] ?? null);
+    }
+    if (($result['qbo_id'] ?? null) !== 'TEST-S12-C57-QBO') {
+        $c57Errors[] = "expected qbo_id from existing mapping, got " . json_encode($result['qbo_id'] ?? null);
+    }
+    if (($result['sync_token'] ?? null) !== '5') {
+        $c57Errors[] = "expected sync_token from existing mapping ('5'), got " . json_encode($result['sync_token'] ?? null);
+    }
+} catch (Throwable $e) {
+    $c57Errors[] = "exception: " . $e->getMessage();
+}
+if (empty($c57Errors)) { echo "PASS C57 pushVoid is idempotent on push_status='voided' (D-QBO-12-4; no HTTP call; S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C57 " . implode('; ', $c57Errors) . "\n"; $failures[] = 'C57'; }
+
+// ── C58: pushVoid with soft-deleted invoice → skipped_soft_deleted ──
+// Same soft-deleted skip as pushImpl gate 4 — voided + soft-deleted
+// shouldn't propagate either; treat as lifecycle-skipped.
+$total++;
+$c58Errors = [];
+try {
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='invoice' AND entity_id=999990");
+    db_execute("UPDATE invoices SET status='void', deleted_at='2026-05-26 00:00:00' WHERE id=999990");
+    $result = InvoicePusher::pushVoid(999990);
+    if (($result['status'] ?? null) !== 'skipped_soft_deleted') {
+        $c58Errors[] = "expected status='skipped_soft_deleted' for soft-deleted void, got " . json_encode($result['status'] ?? null);
+    }
+    if (($result['outcome'] ?? null) !== 'skipped') {
+        $c58Errors[] = "expected outcome='skipped', got " . json_encode($result['outcome'] ?? null);
+    }
+    // recordSkipped writes a mapping row + sync_log entry for soft-deleted skip
+    $mapRow = db_row("SELECT push_status FROM acc_qbo_invoice_map WHERE ff_invoice_id=999990");
+    if (!$mapRow || ($mapRow['push_status'] ?? null) !== 'skipped_soft_deleted') {
+        $c58Errors[] = "expected mapping row with push_status='skipped_soft_deleted', got " . json_encode($mapRow['push_status'] ?? null);
+    }
+    // Restore deleted_at for downstream cleanup
+    db_execute("UPDATE invoices SET deleted_at=NULL WHERE id=999990");
+} catch (Throwable $e) {
+    $c58Errors[] = "exception: " . $e->getMessage();
+}
+if (empty($c58Errors)) { echo "PASS C58 pushVoid skips soft-deleted invoice with skipped_soft_deleted (gate 4 mirrors pushImpl; S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C58 " . implode('; ', $c58Errors) . "\n"; $failures[] = 'C58'; }
+
+// ── C59: Migration applied — push_status ENUM includes 'voided' ──
+// Verifies db_migrations/202605270200_S-QBO-12.sql is applied.
+$total++;
+$c59Errors = [];
+try {
+    $col = db_row("SHOW COLUMNS FROM acc_qbo_invoice_map WHERE Field='push_status'");
+    if (!$col) {
+        $c59Errors[] = "acc_qbo_invoice_map.push_status column not found";
+    } else {
+        $type = (string) ($col['Type'] ?? '');
+        if (!str_contains($type, "'voided'")) {
+            $c59Errors[] = "push_status ENUM should include 'voided'; got: " . $type;
+        }
+    }
+} catch (Throwable $e) {
+    $c59Errors[] = "exception: " . $e->getMessage();
+}
+if (empty($c59Errors)) { echo "PASS C59 acc_qbo_invoice_map.push_status ENUM includes 'voided' (S-QBO-12 migration 202605270200)\n"; $pass++; }
+else { echo "FAIL C59 " . implode('; ', $c59Errors) . "\n"; $failures[] = 'C59'; }
+
+// ── C60: STRUCTURAL — InvoicePusher has pushVoid + pushVoidImpl + recordVoid ──
+// Confirms the new method surface for S-QBO-12.
+$total++;
+$c60Errors = [];
+$src = $src ?? file_get_contents(__DIR__ . '/../lib/QboPushers/InvoicePusher.php');
+if ($src === false) {
+    $c60Errors[] = "could not read InvoicePusher.php";
+} else {
+    if (!preg_match("/public static function pushVoid\\(int \\\$ffInvoiceId\\): array/", $src)) {
+        $c60Errors[] = "missing public static function pushVoid(int \$ffInvoiceId): array";
+    }
+    if (!str_contains($src, "private static function pushVoidImpl(int \$ffInvoiceId): array")) {
+        $c60Errors[] = "missing private static function pushVoidImpl(int \$ffInvoiceId): array";
+    }
+    if (!str_contains($src, "private static function recordVoid(")) {
+        $c60Errors[] = "missing private static function recordVoid(...)";
+    }
+    if (!str_contains($src, "\$client->voidEntity(")) {
+        $c60Errors[] = "pushVoidImpl should call QuickBooksClient::voidEntity";
+    }
+}
+if (empty($c60Errors)) { echo "PASS C60 InvoicePusher has pushVoid + pushVoidImpl + recordVoid + voidEntity call (S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C60 " . implode('; ', $c60Errors) . "\n"; $failures[] = 'C60'; }
+
+// ── C61: void.php enqueues 'void' operation after db_transaction ──
+// Verifies the FF-side trigger wiring — api/v1/invoices/void.php must
+// fire InvoiceEnqueuer::enqueue(..., 'void') AFTER db_transaction so
+// the void state is durably persisted before QBO sync attempts.
+$total++;
+$c61Errors = [];
+$voidSrc = file_get_contents(__DIR__ . '/../api/v1/invoices/void.php');
+if ($voidSrc === false) {
+    $c61Errors[] = "could not read api/v1/invoices/void.php";
+} else {
+    if (!str_contains($voidSrc, "InvoiceEnqueuer::enqueue((int) \$id, 'void')")) {
+        $c61Errors[] = "void.php should call InvoiceEnqueuer::enqueue((int) \$id, 'void')";
+    }
+    // Verify enqueue is AFTER the db_transaction closure (not inside it).
+    // db_transaction closes with `});` followed by enqueue call + json_success.
+    $enqueuePos = strpos($voidSrc, "InvoiceEnqueuer::enqueue");
+    $txnEndPos  = strrpos($voidSrc, "});");
+    if ($enqueuePos !== false && $txnEndPos !== false && $enqueuePos < $txnEndPos) {
+        $c61Errors[] = "InvoiceEnqueuer::enqueue should fire AFTER the db_transaction(...) closure, not inside it (pattern matches send.php)";
+    }
+}
+if (empty($c61Errors)) { echo "PASS C61 api/v1/invoices/void.php enqueues 'void' after db_transaction commits (S-QBO-12)\n"; $pass++; }
+else { echo "FAIL C61 " . implode('; ', $c61Errors) . "\n"; $failures[] = 'C61'; }
+
 } finally {
     // ── Self-cleaning ──────────────────────────────────────────
     // Restore settings to pre-smoke values

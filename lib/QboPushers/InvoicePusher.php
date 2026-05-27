@@ -4,14 +4,15 @@ declare(strict_types=1);
 /**
  * lib/QboPushers/InvoicePusher.php
  *
- * First FF → QBO invoice push class (S-QBO-11). Handles CREATE only;
- * UPDATE/VOID stubbed for S-QBO-12.
+ * First FF → QBO invoice push class (S-QBO-11). Handles CREATE + UPDATE
+ * via shared pushImpl pipeline; VOID via separate pushVoidImpl (S-QBO-12).
  *
  * Method-per-operation contract (D-QBO-3-2 + D-PUSHER-CONTRACT):
  *   create → pushCreate(int $entityId, ?array $payloadSnapshot = null): array
- *   update → pushUpdate stubbed; returns 'unsupported_in_session'
+ *   update → pushUpdate(int $entityId, ?array $payloadSnapshot = null): array  (S-QBO-12)
+ *   void   → pushVoid(int $entityId): array                                    (S-QBO-12)
  *
- * Pipeline (pushImpl, 10 steps):
+ * Pipeline (pushImpl handles create + update, 10 steps):
  *   1. Sync mode gate (D-QBO-11-1)
  *   2. Load FF invoice (404 → fail with ff_not_found)
  *   3. Voided check (status='void' per FF status ENUM; D-QBO-11-9 skip)
@@ -53,19 +54,36 @@ declare(strict_types=1);
  *           snapshot mismatch warning to already_mapped branch
  *           (MEDIUM-C9 fix; uses acc_qbo_invoice_map.qbo_currency column,
  *           no HTTP call needed).
+ * @updated  S-QBO-12 — pushUpdate real implementation + pushVoid new
+ *           method. pushImpl extended to handle 'update' operation:
+ *           gate 5 (mapping check) demotes 'update' with no mapping
+ *           to 'create' per §6.8; gate 9 branches on operation —
+ *           createEntity vs updateEntity. pushVoidImpl is separate
+ *           (status='void' invariant inverts gate 3; voidEntity HTTP
+ *           call uses QuickBooksClient::voidEntity shipped in
+ *           S-QBO-11-POSTVERIFY-FIXES). New recordVoid helper writes
+ *           push_status='voided' (new ENUM value via migration
+ *           202605270200_S-QBO-12.sql). api/v1/invoices/void.php +1
+ *           enqueue call so FF void operator action propagates to QBO
+ *           (pattern matches send.php enqueue).
  * @decision D-QBO-11-1 (queued path; sync_mode gate),
  *           D-QBO-11-2 (tax-override at line + header),
  *           D-QBO-11-3 (FX rate via exchange_rate_to_cad),
- *           D-QBO-11-4 (UPDATE stubbed for S-QBO-12),
+ *           D-QBO-11-4 (UPDATE stubbed — superseded by S-QBO-12 implementation),
  *           D-QBO-11-5 (engine-version dispatch),
  *           D-QBO-11-6 (PrivateNote JSON audit),
  *           D-QBO-11-7 (customer mapping gate),
  *           D-QBO-11-8 (item mapping gate),
- *           D-QBO-11-9 (voided-invoice skip),
+ *           D-QBO-11-9 (voided-invoice skip for create/update path; opposite for void path),
  *           D-QBO-11-10 (D12 immutability + post-push freeze),
  *           D-QBO-FIXPACK-1 (always emit CurrencyRef),
  *           D-QBO-FIXPACK-2 (always emit ExchangeRate; throw on non-CAD missing rate),
- *           D-QBO-FIXPACK-5 (typed preflight status codes)
+ *           D-QBO-FIXPACK-5 (typed preflight status codes),
+ *           D-QBO-12-1 (pushUpdate full payload re-send via updateEntity; no sparse-diff),
+ *           D-QBO-12-2 (pushUpdate demote to create when mapping absent per §6.8),
+ *           D-QBO-12-3 (pushVoid separate impl — status='void' invariant inverts gate 3),
+ *           D-QBO-12-4 (pushVoid idempotent when push_status='voided' already),
+ *           D-QBO-12-5 (FF-voided-but-never-pushed: skip silently with status='skipped_unmapped_void')
  */
 
 namespace FleetForge\QboPushers;
@@ -100,18 +118,48 @@ class InvoicePusher
     }
 
     /**
-     * Update path stubbed per D-QBO-11-4. Deferred to S-QBO-12.
-     * Returns success=false with status='unsupported_in_session' so the
-     * worker dead-letters the queue row rather than retrying forever.
+     * Push an UPDATE to an existing QBO invoice (S-QBO-12).
+     *
+     * Delegates to the shared pushImpl pipeline with operation='update'.
+     * Per §6.8 demotion rule (D-QBO-12-2): if no mapping exists,
+     * pushImpl demotes to create automatically (re-dispatches as 'create').
+     *
+     * Full payload re-send via QuickBooksClient::updateEntity — not sparse
+     * diff (D-QBO-12-1). FF is canonical (D-QBO-CORE-1); QBO accepts the
+     * complete payload + current SyncToken and replaces.
+     *
+     * @return array  Canonical §6.8 5-key return shape; status='updated' on
+     *                successful update, 'created' if demoted, plus skip /
+     *                failure status codes inherited from pushImpl.
      */
     public static function pushUpdate(int $ffInvoiceId, ?array $payloadSnapshot = null): array
     {
-        return [
-            'success' => false,
-            'status'  => 'unsupported_in_session',
-            'outcome' => 'failed',
-            'error'   => 'InvoicePusher::pushUpdate deferred to S-QBO-12 (Invoice Modification & Void Semantics).',
-        ] + self::RESULT_BASE;
+        return self::pushImpl($ffInvoiceId, 'update', $payloadSnapshot);
+    }
+
+    /**
+     * Push a VOID to an existing QBO invoice (S-QBO-12).
+     *
+     * Separate pipeline from pushImpl (D-QBO-12-3): the void operation
+     * inverts the gate 3 invariant — pushImpl requires status != 'void'
+     * (skips voided invoices), pushVoidImpl requires status == 'void'
+     * (rejects non-voided invoices). Payload is minimal (Id + SyncToken
+     * + sparse=true); skips gates 4-6 (currency / item / field length)
+     * because QBO void doesn't validate them.
+     *
+     * Idempotent: if mapping already shows push_status='voided', returns
+     * success without HTTP call (D-QBO-12-4). If no mapping exists
+     * (FF voided before ever pushing), returns success with status=
+     * 'skipped_unmapped_void' — no QBO entity to void (D-QBO-12-5).
+     *
+     * @return array  Canonical §6.8 5-key return shape; status='voided'
+     *                on successful void, 'already_voided' on idempotent
+     *                replay, 'skipped_unmapped_void' for never-pushed
+     *                invoices.
+     */
+    public static function pushVoid(int $ffInvoiceId): array
+    {
+        return self::pushVoidImpl($ffInvoiceId);
     }
 
     /**
@@ -198,6 +246,21 @@ class InvoicePusher
             ] + self::RESULT_BASE;
         }
 
+        // S-QBO-12: 'update' operation demotion per §6.8 Pusher Contract +
+        // D-QBO-12-2. If operation='update' but no existing mapping (or
+        // mapping has no qbo_invoice_id — e.g. previous push failed at gate
+        // 6 and stored a failed_preflight row with qbo_invoice_id=NULL),
+        // demote to 'create' by re-dispatching. Avoids the §6.8 anti-pattern
+        // of "UPDATE on entity QBO doesn't know about" which would 404.
+        if ($operation === 'update' && ($mapping === null || empty($mapping['qbo_invoice_id']))) {
+            return self::pushImpl($ffInvoiceId, 'create', $payloadSnapshot);
+        }
+        // For 'update' WITH mapping: fall through to gates 6-10. We re-evaluate
+        // pre-flight every time (the FF state may have changed since the
+        // initial push, e.g. customer mapping changed, item mapping changed,
+        // currency mismatch surfaced). Then re-build payload and POST via
+        // updateEntity at step 9.
+
         // 6. Pre-flight gates (via InvoicePreflightGate; see gate docblock for full list).
         // WHY: gate returns optional typed status_code (D-QBO-FIXPACK-5) so the
         // mapping row uses the most specific status available — operator sees
@@ -242,10 +305,22 @@ class InvoicePusher
             ] + self::RESULT_BASE;
         }
 
-        // 9. HTTP call.
+        // 9. HTTP call. Branches on operation per S-QBO-12 (D-QBO-12-1):
+        //    create → createEntity (POST /v3/company/{realm}/invoice)
+        //    update → updateEntity (POST /v3/company/{realm}/invoice?operation=update
+        //             with Id + SyncToken merged into payload)
         $client = new QuickBooksClient();
         try {
-            $response = $client->createEntity('invoice', $qboPayload);
+            if ($operation === 'update') {
+                $response = $client->updateEntity(
+                    'invoice',
+                    (string) $mapping['qbo_invoice_id'],
+                    (string) ($mapping['qbo_sync_token'] ?? '0'),
+                    $qboPayload
+                );
+            } else {
+                $response = $client->createEntity('invoice', $qboPayload);
+            }
         } catch (QuickBooksException $e) {
             $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
             self::recordPushFailure($ffInvoiceId, $invoice, $e->getMessage(), $httpCode);
@@ -259,8 +334,8 @@ class InvoicePusher
             ] + self::RESULT_BASE;
         }
 
-        $createdInvoice = $response['Invoice'] ?? null;
-        if (!is_array($createdInvoice) || empty($createdInvoice['Id'])) {
+        $qboInvoice = $response['Invoice'] ?? null;
+        if (!is_array($qboInvoice) || empty($qboInvoice['Id'])) {
             self::recordPushFailure($ffInvoiceId, $invoice, 'QBO response missing Invoice.Id', 0);
             return [
                 'success' => false,
@@ -270,15 +345,19 @@ class InvoicePusher
             ] + self::RESULT_BASE;
         }
 
-        // 10. Persist mapping with success state. SyncToken pinned per D-QBO-11-4.
-        self::recordSuccessfulPush($ffInvoiceId, $invoice, $createdInvoice, $mapping);
+        // 10. Persist mapping with success state. SyncToken refreshed from QBO
+        //     response (QBO increments on every update; D-QBO-11-10 freeze
+        //     applies post-create but pushUpdate intentionally moves it).
+        self::recordSuccessfulPush($ffInvoiceId, $invoice, $qboInvoice, $mapping);
+
+        $returnStatus = $operation === 'update' ? 'updated' : 'created';
 
         return [
             'success'    => true,
-            'status'     => 'created',
-            'outcome'    => 'created',
-            'qbo_id'     => (string) $createdInvoice['Id'],
-            'sync_token' => (string) ($createdInvoice['SyncToken'] ?? '0'),
+            'status'     => $returnStatus,
+            'outcome'    => $returnStatus,
+            'qbo_id'     => (string) $qboInvoice['Id'],
+            'sync_token' => (string) ($qboInvoice['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;
     }
 
@@ -608,5 +687,194 @@ class InvoicePusher
                 . "status={$skippedStatus}: " . $e->getMessage()
             );
         }
+    }
+
+    /**
+     * Separate pipeline for VOID operation (S-QBO-12, D-QBO-12-3).
+     *
+     * Differs from pushImpl in 3 critical ways:
+     *   1. Status invariant INVERTS — pushImpl rejects status='void' as
+     *      skipped_voided; pushVoidImpl rejects status!='void' as
+     *      void_status_mismatch.
+     *   2. Skips gates 4-6 (currency / item / field length) — void payload
+     *      is minimal (Id + SyncToken + sparse=true via QuickBooksClient::
+     *      voidEntity); QBO's void operation doesn't validate the omitted
+     *      fields.
+     *   3. Idempotent on push_status='voided' (D-QBO-12-4) instead of on
+     *      qbo_invoice_id presence (D-QBO-CORE-6 pattern). The void
+     *      operation can be safely re-attempted on an already-voided QBO
+     *      invoice; QBO returns the voided entity unchanged.
+     *
+     * Returns success=true status='skipped_unmapped_void' when no mapping
+     * exists (D-QBO-12-5) — FF voided an invoice before ever pushing it;
+     * no QBO entity to void. Doesn't write a mapping row for this case
+     * (no QBO state to mirror).
+     */
+    private static function pushVoidImpl(int $ffInvoiceId): array
+    {
+        // 1. Sync mode gate (same as pushImpl step 1).
+        $mode = (string) settings_get('quickbooks.sync_mode.invoice', 'sync');
+        if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+            $invoiceForSkip = db_row("SELECT * FROM invoices WHERE id = ?", [$ffInvoiceId]) ?? ['id' => $ffInvoiceId];
+            self::recordSkipped($ffInvoiceId, $invoiceForSkip, 'skipped_by_mode', 'void');
+            return [
+                'success' => true,
+                'status'  => 'skipped_by_mode',
+                'outcome' => 'skipped',
+                'mode'    => $mode,
+            ] + self::RESULT_BASE;
+        }
+
+        // 2. Load FF invoice.
+        $invoice = db_row("SELECT * FROM invoices WHERE id = ?", [$ffInvoiceId]);
+        if ($invoice === null) {
+            return [
+                'success' => false,
+                'status'  => 'ff_not_found',
+                'outcome' => 'failed',
+                'error'   => "FF invoice {$ffInvoiceId} not found",
+            ] + self::RESULT_BASE;
+        }
+
+        // 3. INVERTED status invariant (D-QBO-12-3): must be 'void'. The
+        //    canonical FF→QBO void trigger is api/v1/invoices/void.php after
+        //    the db_transaction commits — status is guaranteed 'void' at
+        //    that point. This check catches programmatic mis-dispatch
+        //    (manual CLI, dispatcher race, replay of a stale queue row that
+        //    has since been un-voided — though FF has no un-void operation).
+        if ($invoice['status'] !== 'void') {
+            return [
+                'success' => false,
+                'status'  => 'void_status_mismatch',
+                'outcome' => 'failed',
+                'error'   => "Cannot push void for FF invoice {$ffInvoiceId}: status='{$invoice['status']}', expected 'void'",
+            ] + self::RESULT_BASE;
+        }
+
+        // 4. Soft-deleted check (mirrors pushImpl step 4). An invoice that
+        //    was voided + then soft-deleted shouldn't propagate the void
+        //    either; treat as already-skipped lifecycle.
+        if (($invoice['deleted_at'] ?? null) !== null) {
+            self::recordSkipped($ffInvoiceId, $invoice, 'skipped_soft_deleted', 'void');
+            return [
+                'success' => true,
+                'status'  => 'skipped_soft_deleted',
+                'outcome' => 'skipped',
+            ] + self::RESULT_BASE;
+        }
+
+        // 5. Mapping lookup. Void requires an existing QBO entity to void.
+        $mapping = db_row(
+            "SELECT id, qbo_invoice_id, qbo_sync_token, push_status
+               FROM acc_qbo_invoice_map
+              WHERE ff_invoice_id = ?",
+            [$ffInvoiceId]
+        );
+
+        // 5a. No mapping → FF voided before ever pushing (D-QBO-12-5).
+        //     No QBO entity to void. Skip silently with status='skipped_unmapped_void'.
+        //     Don't INSERT a row for an invoice that never existed in QBO —
+        //     less noise on the admin invoice-show page.
+        if ($mapping === null || empty($mapping['qbo_invoice_id'])) {
+            return [
+                'success' => true,
+                'status'  => 'skipped_unmapped_void',
+                'outcome' => 'skipped',
+            ] + self::RESULT_BASE;
+        }
+
+        // 5b. Already voided in QBO → idempotent no-op (D-QBO-12-4).
+        //     QBO would accept a repeat void without error, but skipping
+        //     here saves the HTTP round-trip + clarifies the worker tally.
+        if ($mapping['push_status'] === 'voided') {
+            return [
+                'success'    => true,
+                'status'     => 'already_voided',
+                'outcome'    => 'voided',
+                'qbo_id'     => (string) $mapping['qbo_invoice_id'],
+                'sync_token' => (string) ($mapping['qbo_sync_token'] ?? '0'),
+            ] + self::RESULT_BASE;
+        }
+
+        // 6. HTTP void call via QuickBooksClient::voidEntity (S-QBO-11-POSTVERIFY-FIXES).
+        //    QBO endpoint: POST /v3/company/{realm}/invoice?operation=void
+        //    Payload: { Id, SyncToken, sparse: true }
+        //    Response: { Invoice: {... voided state ...} }
+        $client = new QuickBooksClient();
+        try {
+            $response = $client->voidEntity(
+                'invoice',
+                (string) $mapping['qbo_invoice_id'],
+                (string) ($mapping['qbo_sync_token'] ?? '0')
+            );
+        } catch (QuickBooksException $e) {
+            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            self::recordPushFailure($ffInvoiceId, $invoice, "Void failed: " . $e->getMessage(), $httpCode);
+            return [
+                'success'    => false,
+                'status'     => 'qbo_error',
+                'outcome'    => 'failed',
+                'error'      => "Void failed: " . $e->getMessage(),
+                'http_code'  => $httpCode,
+                'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
+            ] + self::RESULT_BASE;
+        }
+
+        $voidedInvoice = $response['Invoice'] ?? null;
+        if (!is_array($voidedInvoice) || empty($voidedInvoice['Id'])) {
+            self::recordPushFailure($ffInvoiceId, $invoice, 'QBO void response missing Invoice.Id', 0);
+            return [
+                'success' => false,
+                'status'  => 'qbo_malformed_response',
+                'outcome' => 'failed',
+                'error'   => 'QBO void response missing Invoice.Id',
+            ] + self::RESULT_BASE;
+        }
+
+        // 7. Persist voided state. sync_log row written by
+        //    QuickBooksClient::dispatch — recordVoid only handles
+        //    the FF-side mapping table.
+        self::recordVoid($ffInvoiceId, $voidedInvoice, $mapping);
+
+        return [
+            'success'    => true,
+            'status'     => 'voided',
+            'outcome'    => 'voided',
+            'qbo_id'     => (string) $voidedInvoice['Id'],
+            'sync_token' => (string) ($voidedInvoice['SyncToken'] ?? '0'),
+        ] + self::RESULT_BASE;
+    }
+
+    /**
+     * Update an existing mapping row to voided state (S-QBO-12).
+     *
+     * Always operates on an existing mapping — pushVoidImpl gate 5a
+     * early-returns if no mapping exists. Refreshes the SyncToken from
+     * QBO's void response (QBO increments on void) so any future
+     * already_voided idempotent replay has the correct token (though
+     * the replay path doesn't actually use it).
+     */
+    private static function recordVoid(int $ffInvoiceId, array $qboVoidedInvoice, array $existingMapping): void
+    {
+        $now = date('Y-m-d H:i:s');
+        db_execute(
+            "UPDATE acc_qbo_invoice_map
+                SET push_status     = 'voided',
+                    push_error      = NULL,
+                    qbo_sync_token  = ?,
+                    qbo_balance     = ?,
+                    qbo_total_amt   = ?,
+                    pushed_at       = ?,
+                    last_synced_at  = ?
+              WHERE id = ?",
+            [
+                (string) ($qboVoidedInvoice['SyncToken'] ?? '0'),
+                (string) ($qboVoidedInvoice['Balance'] ?? '0'),
+                (string) ($qboVoidedInvoice['TotalAmt'] ?? '0'),
+                $now,
+                $now,
+                (int) $existingMapping['id'],
+            ]
+        );
     }
 }

@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-23
-**Tables:** 139 total · **Columns:** 2202
+**Generated:** 2026-05-27
+**Tables:** 139 total · **Columns:** 2208
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -1364,6 +1364,9 @@ _57 tables._
 | `qbo_active` | tinyint(1) |  | YES |
 | `qbo_balance` | decimal(15,2) |  | YES |
 | `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
+| `push_status` | enum('pending','pushed','failed','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime |  | YES |
 | `match_confidence` | enum('exact','high','medium','low','manual') |  | YES |
 | `match_notes` | text |  | YES |
 | `last_synced_at` | datetime | MUL | YES |
@@ -1411,7 +1414,7 @@ _57 tables._
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
 | `ff_invoice_snapshot_total` | decimal(15,2) |  | YES |
 | `ff_engine_version` | varchar(30) | MUL | YES |
-| `push_status` | enum('pending','pushed','failed','skipped_voided','skipped_by_mode','failed_preflight') | MUL | NO |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
 | `last_synced_at` | datetime |  | YES |
@@ -1536,6 +1539,9 @@ _57 tables._
 | `qbo_active` | tinyint(1) |  | YES |
 | `qbo_v4v_status` | varchar(20) |  | YES |
 | `mapping_status` | enum('mapped','ff_only','qbo_only','ignored') | MUL | NO |
+| `push_status` | enum('pending','pushed','failed','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime |  | YES |
 | `match_confidence` | enum('exact','high','medium','low','manual') |  | YES |
 | `match_notes` | text |  | YES |
 | `last_synced_at` | datetime | MUL | YES |
@@ -1783,7 +1789,7 @@ _70 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `user_id` | int unsigned | MUL | YES |
 | `user_name` | varchar(255) |  | NO |
-| `action` | enum('create','update','delete','restore','login','logout','export','status_change','view','bulk_action','payment_recorded','invoice_sent','invoice_voided','lease_closed','cron') | MUL | NO |
+| `action` | enum('create','update','delete','restore','login','logout','export','status_change','view','bulk_action','payment_recorded','invoice_sent','invoice_voided','lease_closed','cron','manual_trigger') | MUL | NO |
 | `module` | varchar(100) | MUL | NO |
 | `entity_type` | varchar(100) | MUL | NO |
 | `entity_id` | int unsigned |  | YES |
