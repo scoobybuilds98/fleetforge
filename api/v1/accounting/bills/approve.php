@@ -216,4 +216,10 @@ if (!empty($result['uncategorized_count'])) {
 // the bridge can be invoked from a future damage_claims workflow page
 // (or from the operational damage_claims/show.php "Link Bill" action).
 
+// S-QBO-18: enqueue FF→QBO bill push on draft→approved transition
+// (D-QBO-18-1). Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws;
+// silent reject when sync_enabled=0 (D-CPA-5 default) or any gate fails.
+// No-op when bill push is disabled; doesn't break the approve flow.
+\FleetForge\QboPushers\BillEnqueuer::enqueue($id, 'create');
+
 json_success($result);

@@ -8,9 +8,13 @@
 **Progress markers added 2026-05-27** (point-in-time deltas since the 2026-05-26 inventory snapshot):
 - ✅ **S-QBO-12** SHIPPED 2026-05-27 (Phase QBO-5 COMPLETE; pushUpdate + pushVoid; D-QBO-12-1/2/3/4/5)
 - ✅ **S-VENDOR-CURRENCY-COLUMN** SHIPPED 2026-05-27 (closes D-QBO-FIXPACK-8 backlog; D-VENDOR-CURRENCY-COLUMN-1/4)
-- Top-5 progress: 2 of 5 done (S-QBO-12 + S-VENDOR-CURRENCY-COLUMN); next-up **S-QBO-18** (M Sonnet bill push, opens Phase QBO-8)
-- Phase QBO numbered total: 11/30 → **12/30** (S-QBO-12 advances the counter)
-- Debt-paydown/infra total: 27 → **28** (S-VENDOR-CURRENCY-COLUMN registered)
+- ✅ **S-DOC-FRESHNESS-EXPAND** SHIPPED 2026-05-27 (infrastructure paydown — `_smoke_doc_freshness.php` +5 classes; D-DOC-FRESHNESS-EXPAND-1)
+- ✅ **S-QBO-18** SHIPPED 2026-05-27 (Phase QBO-8 / 1 of 2 — bill push; first AP-direction Pusher; D-QBO-18-1/2/3/4/5/6/7)
+- Top-5 progress: 3 of 5 done (S-QBO-12 + S-VENDOR-CURRENCY-COLUMN + S-QBO-18); next-up **S-QBO-13** (L Opus payment pull webhook, Exception #1)
+- Phase QBO numbered total: 11/30 → **13/30** (S-QBO-12 + S-QBO-18 advance the counter)
+- Debt-paydown/infra total: 27 → **28** (S-VENDOR-CURRENCY-COLUMN registered; S-DOC-FRESHNESS-EXPAND not counted as QBO paydown — it's project infrastructure)
+- D131 smoke count: 22 → **23** (S-QBO-18 added qbo_bill_push smoke file)
+- Migrate count: 65 → **69** (4 migrations in 2026-05-27 burst: S-QBO-12 push_status ENUM ext / S-CV-PUSH-STATE-INFRA / S-VENDOR-CURRENCY-COLUMN / S-QBO-18 acc_qbo_bill_map)
 
 ---
 
@@ -22,7 +26,7 @@ Tomorrow-actionable picks, ordered to maximize forward progress on the build-out
 |---|---|---|---|---|---|
 | 1 | ✅ **S-QBO-12** SHIPPED 2026-05-27 | BUILD | L | Opus | Closes Phase QBO-5 by implementing `pushUpdate` (was stubbed in S-QBO-11 per D-QBO-11-4) + the void operation. Uses the `QuickBooksClient::voidEntity()` already shipped in S-QBO-11-POSTVERIFY-FIXES (proactive infrastructure paid down 2026-05-25). Unblocks every downstream "drift detected — re-push the FF state" workflow. **Outcome:** D-QBO-12-1/2/3/4/5 locked; smoke 52→61; migration 66→67/0/0 (push_status ENUM +voided); D131 22/22 PASS. |
 | 2 | ✅ **S-VENDOR-CURRENCY-COLUMN** SHIPPED 2026-05-27 | DEBT | XS | Sonnet | Closes D-QBO-FIXPACK-8 backlog. Migration adds `vendors.currency ENUM('CAD','USD') NOT NULL DEFAULT 'CAD'` (67→68/0/0; mirrors customers.currency). VendorPusher reads per-row currency via `strtoupper((string) ($ff['currency'] ?? 'CAD'))`. API endpoints accept currency. **Outcome:** D-VENDOR-CURRENCY-COLUMN-1/4 locked; D-QBO-FIXPACK-8 SUPERSEDED; smoke 18→20 (C11 reworded, C12 flipped, C12b/C12c new); D131 22/22 PASS. K-22 catch surfaced: MySQL ALTER COLUMN syntax — COMMENT must precede AFTER (now Trap #69 in REFERENCE.md). |
-| 3 | **S-QBO-18** | BUILD | M | Sonnet | Bill push (FF → QBO). Highest *workflow-shift* value session — Phase QBO-8 is the first time bill entry moves from QBO to FF (D-CPA-5 conversation deliverable). Smaller scope than payment work; reuses Pusher contract pattern (§6.8). Pulls forward an accountant-visible change. Depends on vendor mapping (DONE) and `assertReadyForBillPush()` validator (DONE per S-QBO-VALIDATOR-SCOPE-SPLIT). |
+| 3 | ✅ **S-QBO-18** SHIPPED 2026-05-27 | BUILD | M | Sonnet | Bill push (FF → QBO). Highest *workflow-shift* value session — Phase QBO-8 is the first time bill entry moves from QBO to FF (D-CPA-5 conversation deliverable). **Outcome:** Migration acc_qbo_bill_map (18 cols mirroring invoice_map with bill-specific deltas); BillPusher + BillEnqueuer with 7 preflight gates + AccountBasedExpenseLineDetail per D-QBO-18-3 + tax-override per D-QBO-18-2 + DocNumber = vendor_bill_number ?? bill_number per D-QBO-18-7; pushUpdate stubbed → S-QBO-19 (D-QBO-18-5). approve.php +enqueue. 3 K-22 catches mid-session (account_type ENUM, sync_log column names, sync_queue no last_error). Smoke 20/20 NEW; D131 22→23. 7 decisions locked. ITC tax-rate mapping per QBO_SPEC §8.8 deferred to S-QBO-BILL-ITC-TAX-RATE-MAPPING follow-up because S-QBO-9 only maps tax CODES, not RATES. |
 | 4 | **S-QBO-13** | BUILD | L | Opus | Payment pull from QBO via webhook (Exception #1 per D-QBO-CORE-2). Foundation for both S-QBO-14 (payment push) and S-QBO-15 (portal embed). Reuses the [SES webhook pattern](FLEETFORGE_QUICKBOOKS_SPEC.md#L1737) from S-PROD-2 (D75-D78) — signature verification, idempotency, Sentry instrumentation. Touches `acc_qbo_webhook_events` schema. |
 | 5 | **S-QBO-14** | BUILD | M | Sonnet | Payment push (FF → QBO). Pairs naturally with S-QBO-13. Completes the payment surface so cutover blockers around AR/UF clearing are unblocked. Requires `assertReadyForPaymentPush()` (DONE) + customer mapping (DONE). |
 

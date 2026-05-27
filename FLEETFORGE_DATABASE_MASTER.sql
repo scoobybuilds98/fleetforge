@@ -1067,6 +1067,32 @@ CREATE TABLE `acc_qbo_account_map` (
   CONSTRAINT `fk_qbo_acct_map_ff` FOREIGN KEY (`ff_account_id`) REFERENCES `acc_accounts` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_qbo_acct_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_qbo_bill_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_bill_id` int unsigned NOT NULL COMMENT 'NOT NULL: bills originate in FF only in S-QBO-18 (D-CPA-5 workflow shift — bill entry moves QBO→FF). QBO-authored bills (rare) handled via S-QBO-26 manual sync.',
+  `qbo_bill_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit Bill.Id; NULL until first successful push',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token; refreshed on every push/update',
+  `qbo_doc_number` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO DocNumber snapshot — vendor''s bill number (vendor_bill_number) when set, else FF bill_number per D-QBO-18-7',
+  `qbo_vendor_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO VendorRef.value snapshot — drift detection across vendor remapping',
+  `qbo_total_amt` decimal(15,2) DEFAULT NULL COMMENT 'QBO TotalAmt snapshot — for drift comparison',
+  `qbo_balance` decimal(15,2) DEFAULT NULL COMMENT 'QBO Balance snapshot at last sync',
+  `qbo_status` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Bill status snapshot (open/paid/etc)',
+  `qbo_currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CurrencyRef.value (e.g. CAD/USD)',
+  `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
+  `ff_bill_snapshot_total` decimal(15,2) DEFAULT NULL COMMENT 'FF total_amount snapshot at push time — drift baseline',
+  `push_status` enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'D-QBO-18-* lifecycle states. skipped_voided fires when bill status=void and push attempted (D-QBO-18-4). skipped_unmapped_void mirrors InvoicePusher (D-QBO-12-5) when FF voided before first push. failed_preflight covers all preflight gate failures in v1; typed sub-states can be added via ALTER ENUM in follow-up sessions if needed.',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error message for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_bill` (`ff_bill_id`) COMMENT 'One mapping row per FF bill; enforces idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_bill` (`qbo_bill_id`) COMMENT 'No two FF bills share a QBO Bill.Id; NULL-multi-OK per InnoDB',
+  KEY `idx_status` (`push_status`),
+  KEY `idx_pushed_at` (`pushed_at`),
+  CONSTRAINT `fk_qbo_bill_map_ff` FOREIGN KEY (`ff_bill_id`) REFERENCES `acc_bills` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-8 S-QBO-18: FF→QBO bill push state tracking. Mirrors acc_qbo_invoice_map (S-QBO-11) shape with bill-specific deltas (vendor instead of customer; no engine_version; reduced ENUM for absent preflight sub-states in v1).';
 CREATE TABLE `acc_qbo_customer_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_customer_id` int unsigned DEFAULT NULL COMMENT 'NULL = qbo_only state (QBO customer with no FF link)',

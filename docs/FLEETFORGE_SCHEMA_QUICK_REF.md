@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-27
-**Tables:** 139 total · **Columns:** 2209
+**Tables:** 140 total · **Columns:** 2227
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -540,7 +540,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_57 tables._
+_58 tables._
 
 ## `acc_accounts`
 
@@ -1349,6 +1349,29 @@ _57 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `created_by_user_id` | int unsigned | MUL | YES |
+
+## `acc_qbo_bill_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_bill_id` | int unsigned | UNI | NO |
+| `qbo_bill_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_doc_number` | varchar(100) |  | YES |
+| `qbo_vendor_id` | varchar(50) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_balance` | decimal(15,2) |  | YES |
+| `qbo_status` | varchar(30) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_exchange_rate` | decimal(10,6) |  | YES |
+| `ff_bill_snapshot_total` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `acc_qbo_customer_map`
 
