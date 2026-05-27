@@ -100,6 +100,11 @@ $_qboNavGroups = [
         'icon'  => 'document-text',
     ],
     [
+        'label' => 'Bills',
+        'url'   => '/quickbooks/bills',
+        'icon'  => 'clipboard-document',
+    ],
+    [
         'label' => 'Settings',
         'url'   => '/quickbooks/settings',
         'icon'  => 'cog-6-tooth',

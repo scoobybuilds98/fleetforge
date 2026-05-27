@@ -514,7 +514,7 @@ if (!is_file($uiPath)) {
 if (empty($c15Errors)) { echo "PASS C15 items.php exists + lints + Alpine factory + view gate\n"; $pass++; }
 else { echo "FAIL C15 " . implode('; ', $c15Errors) . "\n"; $failures[] = 'C15'; }
 
-// ── C16: nav config has 10 QBO children incl. Items ─────────
+// ── C16: nav config has 12 QBO children incl. Items + Bills (S-QBO-BILL-SYNC-UI) ─────────
 $c16Errors = [];
 $navConfig = require FF_ROOT . '/config/navigation.php';
 $qboParent = null;
@@ -528,12 +528,13 @@ if ($qboParent === null) {
     $c16Errors[] = 'QuickBooks parent entry with children not found';
 } else {
     $labels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Settings'];
+    // S-QBO-BILL-SYNC-UI 2026-05-27: +Bills between Invoices and Settings.
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Bills', 'Settings'];
     if ($labels !== $expected) {
         $c16Errors[] = 'expected ' . json_encode($expected) . ' got ' . json_encode($labels);
     }
 }
-if (empty($c16Errors)) { echo "PASS C16 nav has 11 QuickBooks children with Items between Tax Codes and Invoices/Settings\n"; $pass++; }
+if (empty($c16Errors)) { echo "PASS C16 nav has 12 QuickBooks children with Bills between Invoices and Settings (S-QBO-BILL-SYNC-UI)\n"; $pass++; }
 else { echo "FAIL C16 " . implode('; ', $c16Errors) . "\n"; $failures[] = 'C16'; }
 
 // ── C17: ItemPuller::normalize maps representative JSON ──────

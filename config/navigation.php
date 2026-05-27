@@ -274,6 +274,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Bills',
+                'icon'   => 'clipboard-document',
+                'url'    => '/quickbooks/bills',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',
