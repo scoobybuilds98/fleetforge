@@ -231,8 +231,14 @@ $statusBadge = match ($req['status']) {
                             { id: this.requestId, response: this.response, status: this.status }
                         );
                         if (r.success) {
-                            this.flash = { type: 'success', message: 'Saved. Reloading…' };
-                            setTimeout(() => window.location.reload(), 600);
+                            const customerNotified = r.data?.customer_notified === true;
+                            this.flash = {
+                                type: 'success',
+                                message: customerNotified
+                                    ? 'Saved. Customer notified. Reloading…'
+                                    : 'Saved (no response text + no status change → customer not notified). Reloading…'
+                            };
+                            setTimeout(() => window.location.reload(), 1200);
                         } else {
                             this.flash = { type: 'danger', message: r.error?.message || 'Save failed.' };
                         }

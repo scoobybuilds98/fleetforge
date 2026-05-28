@@ -77,25 +77,37 @@ try {
     ]);
 
     // Notify the portal user(s) — best-effort, never throws.
-    // Fires when admin adds a response OR flips status. Silent admin-edits
-    // (e.g. saving the same form without changes) don't fire.
+    // Fires when admin saves a non-empty response OR flips status.
+    // Operator-intent semantics: re-saving the same response IS intentional
+    // (they want to re-ping the customer); only skip the truly-empty no-op
+    // case (no response text + no status flip). This matches Slack/messenger
+    // mental model: clicking Save IS the "notify" action.
     $statusChanged   = $oldStatus !== $status;
     $responseChanged = $response !== '' && $response !== $oldResponse;
+    $responseSubmitted = $response !== '';  // admin explicitly typed something
+    $shouldNotify = $statusChanged || $responseSubmitted;
 
-    if ($statusChanged || $responseChanged) {
+    if ($shouldNotify) {
         try {
             $typeLabel = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABELS[$req['request_type']]
                        ?? 'Service request';
 
             $titleParts = [];
-            if ($responseChanged) $titleParts[] = 'Response added';
-            if ($statusChanged)   $titleParts[] = "Status: {$oldStatus} → {$status}";
+            // Distinguish "Response added" (new text) vs "Response re-sent"
+            // (admin re-saved the same text intentionally to re-ping).
+            if ($responseChanged) {
+                $titleParts[] = 'Response added';
+            } elseif ($responseSubmitted) {
+                $titleParts[] = 'Response re-sent';
+            }
+            if ($statusChanged) $titleParts[] = "Status: {$oldStatus} → {$status}";
             $title = "{$typeLabel} #{$id}: " . implode(' · ', $titleParts);
 
             $msgParts = ["Your request \"{$req['subject']}\" has an update."];
-            if ($responseChanged) {
+            if ($responseSubmitted) {
                 $excerpt = mb_substr($response, 0, 280);
-                $msgParts[] = "Reply from support:\n{$excerpt}" . (mb_strlen($response) > 280 ? '…' : '');
+                $label = $responseChanged ? 'Reply from support' : 'Reply from support (re-sent)';
+                $msgParts[] = "{$label}:\n{$excerpt}" . (mb_strlen($response) > 280 ? '…' : '');
             }
             if ($statusChanged) {
                 $msgParts[] = "Status changed from '{$oldStatus}' to '{$status}'.";
@@ -125,8 +137,13 @@ try {
 
     // Always returns JSON. The view.php form submits via Alpine + FF_Api.post()
     // which expects JSON + injects the X-CSRF-Token header that the bootstrap.php
-    // CSRF gate verifies.
-    json_success(['id' => $id, 'status' => $status]);
+    // CSRF gate verifies. The customer_notified flag drives the admin-side
+    // flash message ("Saved. Customer notified." vs "Saved.").
+    json_success([
+        'id'                 => $id,
+        'status'             => $status,
+        'customer_notified'  => $shouldNotify,
+    ]);
 } catch (\Throwable $e) {
     json_error('INTERNAL_ERROR', 'Respond failed: ' . $e->getMessage(), 500);
 }

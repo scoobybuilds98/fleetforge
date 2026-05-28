@@ -634,11 +634,13 @@ try {
     if (strpos($respondSrc, 'notifyPortal') === false) {
         $c28Errors[] = "respond.php missing NotificationService::notifyPortal call";
     }
-    if (strpos($respondSrc, '$statusChanged') === false || strpos($respondSrc, '$responseChanged') === false) {
-        $c28Errors[] = "respond.php missing change-tracking flags ($statusChanged + $responseChanged)";
+    if (strpos($respondSrc, '$statusChanged') === false
+        || strpos($respondSrc, '$responseSubmitted') === false
+        || strpos($respondSrc, '$shouldNotify') === false) {
+        $c28Errors[] = "respond.php missing change-tracking flags (\$statusChanged + \$responseSubmitted + \$shouldNotify)";
     }
-    if (strpos($respondSrc, 'if ($statusChanged || $responseChanged)') === false) {
-        $c28Errors[] = "respond.php missing union-gate guarding the portal notify";
+    if (strpos($respondSrc, 'if ($shouldNotify)') === false) {
+        $c28Errors[] = "respond.php missing union-gate guarding the portal notify (\$shouldNotify)";
     }
     if (strpos($respondSrc, 'service_request.reply.') === false) {
         $c28Errors[] = "respond.php missing 'service_request.reply.' type prefix";
@@ -652,30 +654,40 @@ try {
     if (empty($c28Errors)) { echo "PASS C28 respond.php source has change-tracking + best-effort notifyPortal + portal drill-down URL\n"; $pass++; }
     else { echo "FAIL C28 " . implode('; ', $c28Errors) . "\n"; $failures[] = 'C28'; }
 
-    // ── C29: silent admin-edit (no response, no status change) → no notify ─
-    // If admin opens form + clicks Save without changing anything, no portal
-    // notification should fire (avoid notification spam).
+    // ── C29: truly-empty save (no response text + no status change) → no notify ─
+    // Skips when admin opens form + clicks Save without typing anything new
+    // AND not flipping status. Re-saving the SAME response text (responseChanged=false
+    // but responseSubmitted=true) DOES notify — operator-intent semantics, matches
+    // Slack/messenger mental model where clicking Save IS the "notify" action.
     db_execute("DELETE FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996");
     $c29Errors = [];
 
-    // Replicate the change-detection logic from respond.php
+    // Case A: truly empty save → no notify
     $oldStatusNoOp = 'open';
     $newStatusNoOp = 'open';     // unchanged
     $responseNoOp  = '';         // empty
-    $oldResponseNoOp = '';
-
-    $statusChanged   = $oldStatusNoOp !== $newStatusNoOp;
-    $responseChanged = $responseNoOp !== '' && $responseNoOp !== $oldResponseNoOp;
-
-    if ($statusChanged || $responseChanged) {
-        // Would notify here in the endpoint — but the guards should prevent it
-        $c29Errors[] = "guards should reject no-op edit but allowed it";
+    $statusChanged     = $oldStatusNoOp !== $newStatusNoOp;
+    $responseSubmitted = $responseNoOp !== '';
+    $shouldNotifyA = $statusChanged || $responseSubmitted;
+    if ($shouldNotifyA) {
+        $c29Errors[] = "case A: truly-empty save should NOT notify; got shouldNotify=true";
     }
-    $rowsAfterNoOp = db_select("SELECT id FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996");
-    if (count($rowsAfterNoOp) !== 0) {
-        $c29Errors[] = "expected 0 notifications for no-op edit; found " . count($rowsAfterNoOp);
+
+    // Case B: re-sending same response (responseSubmitted=true, responseChanged=false)
+    // SHOULD notify per operator-intent semantics.
+    $oldStatusReSend = 'open';
+    $newStatusReSend = 'open';
+    $responseReSend  = 'bvbv';    // same as old
+    $oldResponseReSend = 'bvbv';
+    $statusChangedB   = $oldStatusReSend !== $newStatusReSend;
+    $responseChangedB = $responseReSend !== '' && $responseReSend !== $oldResponseReSend; // false
+    $responseSubmittedB = $responseReSend !== '';                                          // true
+    $shouldNotifyB = $statusChangedB || $responseSubmittedB;
+    if (!$shouldNotifyB) {
+        $c29Errors[] = "case B: re-sending same response should STILL notify (operator intent); got shouldNotify=false";
     }
-    if (empty($c29Errors)) { echo "PASS C29 silent admin-edit (no response, no status change) does NOT fire portal notification\n"; $pass++; }
+
+    if (empty($c29Errors)) { echo "PASS C29 notify gate — truly-empty save skips; re-sending same response still notifies (operator-intent semantics)\n"; $pass++; }
     else { echo "FAIL C29 " . implode('; ', $c29Errors) . "\n"; $failures[] = 'C29'; }
 
     // ── C30: re-open from closed → 'warning' severity ─────────────────
