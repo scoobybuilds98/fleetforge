@@ -670,6 +670,152 @@ if ($referenceRaw === false) {
 echo "\n";
 
 // ────────────────────────────────────────────────────────────────────────────
+// CLASS 10 — Recent git commits → PROGRESS.md SESSION LOG anchor check
+//
+// CLASSES 5/6 check from SESSION LOG outward. They have an anchor blind
+// spot: if a session ships with NO SESSION LOG row, there's nothing to
+// anchor on — those classes silently pass.
+//
+// CLASS 10 closes the blind spot by reading recent git commit subjects,
+// extracting S-XXX session labels, and verifying each appears in
+// PROGRESS.md SESSION LOG. Catches S-QBO-BILL-SYNC-UI class (committed
+// but no SESSION LOG row was added in the original commit; operator
+// caught it manually in audit).
+//
+// SCOPE: last DOC_FRESHNESS_GIT_COMMIT_TAIL commits. Tuned to roughly
+// match the SESSION_TAIL window for CLASSES 5/6 — a session that's
+// older than this window legitimately may have moved out of in-table
+// SESSION LOG retention.
+// ────────────────────────────────────────────────────────────────────────────
+
+const DOC_FRESHNESS_GIT_COMMIT_TAIL = 30;
+
+echo "Class 10 — recent git commits → SESSION LOG anchor check\n";
+echo str_repeat('─', 78) . "\n";
+
+if ($progressRaw === false) {
+    record('C10: PROGRESS.md readable', false, 'reused state — unreadable');
+} else {
+    $commitsOutput = @shell_exec(
+        sprintf('cd %s && git log --pretty=format:%%s -%d 2>/dev/null',
+            escapeshellarg(REPO_ROOT),
+            DOC_FRESHNESS_GIT_COMMIT_TAIL
+        )
+    );
+
+    if ($commitsOutput === null || $commitsOutput === '') {
+        record('C10: git log readable (skipped if no git)', true, 'git log returned empty — non-repo environment');
+    } else {
+        // Extract S-XXX tokens. Session names follow S-[A-Z0-9][A-Z0-9-]+
+        // pattern. The K-22 pattern (Kxx) and decision (D-XXX) are NOT
+        // session names — only S- prefix counts.
+        preg_match_all('/\bS-[A-Z][A-Z0-9][A-Z0-9-]*\b/', $commitsOutput, $cm);
+        $commitSessions = array_values(array_unique($cm[0] ?? []));
+
+        // Filter: drop tokens that are obviously NOT session names (e.g.
+        // S-3 alone, S-X just generic placeholders). Real session names
+        // have ≥6 chars (e.g. S-QBO-7 = 7 chars; shortest real is roughly
+        // S-FIX-2 = 7 chars).
+        $commitSessions = array_filter($commitSessions, static fn($s) => strlen($s) >= 6);
+        $commitSessions = array_values($commitSessions);
+
+        // Anchor check: each session in commit log should appear in
+        // PROGRESS.md (either as a SESSION LOG row OR referenced in
+        // another row's body — strpos is sufficient because cross-
+        // references ALSO satisfy the "this session is documented"
+        // requirement, just from the other direction).
+        $orphans = [];
+        foreach ($commitSessions as $label) {
+            if (strpos($progressRaw, $label) === false) {
+                $orphans[] = $label;
+            }
+        }
+
+        $n = count($commitSessions);
+        if (count($orphans) === 0) {
+            record(
+                "C10: all {$n} sessions from last " . DOC_FRESHNESS_GIT_COMMIT_TAIL . " commits appear in PROGRESS.md",
+                true
+            );
+        } else {
+            record(
+                "C10: all {$n} sessions from last " . DOC_FRESHNESS_GIT_COMMIT_TAIL . " commits appear in PROGRESS.md",
+                false,
+                'Missing from PROGRESS.md (committed but no SESSION LOG row): ' . implode(', ', $orphans)
+            );
+        }
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLASS 11 — Recent SESSION LOG rows → REFERENCE.md + INVENTORY presence
+//
+// Extends the cross-presence check to two more canonical docs:
+//   - CLAUDE_CODE_REFERENCE.md — D131 extension notes for sessions that
+//     bump smoke count or add sub-checks
+//   - QBO_REMAINING_WORK_2026-05-26.md — progress markers for any
+//     QBO-relevant session shipped after the inventory snapshot
+//
+// ADVISORY: lists orphans but always passes. False-positive risk is
+// real because not every session NEEDS to be in REFERENCE.md (only
+// D131-affecting + K-22-trap-adding sessions). Operator awareness is
+// the value here, not hard enforcement.
+// ────────────────────────────────────────────────────────────────────────────
+
+echo "Class 11 — recent SESSION LOG rows → REFERENCE.md + INVENTORY presence (advisory)\n";
+echo str_repeat('─', 78) . "\n";
+
+$inventoryPath = REPO_ROOT . '/docs/FLEETFORGE_QBO_REMAINING_WORK_2026-05-26.md';
+$inventoryRaw  = @file_get_contents($inventoryPath);
+
+if ($referenceRaw === false || $inventoryRaw === false) {
+    record('C11: REFERENCE.md + INVENTORY doc readable', false, 'one or both unreadable');
+} elseif (count($labels ?? []) === 0) {
+    record('C11: SESSION LOG rows available', false, 'CLASS 5 found no rows; skipping cross-check.');
+} else {
+    $tail = array_slice($labels, -DOC_FRESHNESS_SESSION_TAIL);
+
+    // Heuristic from CLASS 6: label-prefix-only for QBO-relevance.
+    $qboLabels = array_values(array_filter($tail, static function ($l) {
+        return strpos($l, 'S-QBO-') === 0 || strpos($l, 'S-VENDOR-') === 0;
+    }));
+
+    $refOrphans = [];
+    foreach ($tail as $label) {
+        if (strpos($referenceRaw, $label) === false) {
+            $refOrphans[] = $label;
+        }
+    }
+
+    $invOrphans = [];
+    foreach ($qboLabels as $label) {
+        if (strpos($inventoryRaw, $label) === false) {
+            $invOrphans[] = $label;
+        }
+    }
+
+    $refResolved = count($tail) - count($refOrphans);
+    $invResolved = count($qboLabels) - count($invOrphans);
+
+    $refDetail = count($refOrphans) === 0
+        ? "all {$refResolved}/{$refResolved} in REFERENCE"
+        : "{$refResolved}/" . count($tail) . " in REFERENCE; missing: " . implode(', ', $refOrphans);
+    $invDetail = count($invOrphans) === 0
+        ? "all {$invResolved}/{$invResolved} QBO labels in inventory"
+        : "{$invResolved}/" . count($qboLabels) . " QBO labels in inventory; missing: " . implode(', ', $invOrphans);
+
+    // ALWAYS PASS — advisory only. Not every session needs to be in
+    // REFERENCE.md (only D131-affecting/trap-adding); but operator
+    // awareness of the gap is the value.
+    record("C11a: REFERENCE.md cross-presence advisory ({$refDetail})", true);
+    record("C11b: INVENTORY doc cross-presence advisory ({$invDetail})", true);
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
 // Summary + exit
 // ────────────────────────────────────────────────────────────────────────────
 
