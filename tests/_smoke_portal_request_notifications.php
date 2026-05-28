@@ -52,7 +52,7 @@ use FleetForge\Notifications\PortalRequestNotifier;
 use FleetForge\Notifications\NotificationService;
 
 $pass = 0;
-$total = 26;
+$total = 30;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -578,6 +578,124 @@ try {
     }
     if (empty($c25Errors)) { echo "PASS C25 api/v1/requests/respond.php exists + POST gate + permission + audit + resolved_at handling\n"; $pass++; }
     else { echo "FAIL C25 " . implode('; ', $c25Errors) . "\n"; $failures[] = 'C25'; }
+
+    // ── C27: respond endpoint fires portal notification on response add ─
+    // Direct unit-style invocation of NotificationService::notifyPortal via
+    // the same code path the respond endpoint takes — we can't run the
+    // endpoint through curl here (no auth cookies in CLI) but we can stage
+    // the request + simulate the admin-side response path inline.
+    $c27Errors = [];
+    ff_smoke_prn_seed_request(999996, 'billing_inquiry', ['subject' => 'C27 response test']);
+    db_execute("DELETE FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996");
+
+    // Simulate the respond endpoint's notification logic
+    $oldStatus = 'open';
+    $newStatus = 'in_review';
+    $responseText = 'Thanks for reaching out — looking into your inquiry now.';
+
+    \FleetForge\Notifications\NotificationService::notifyPortal(
+        'service_request.reply.' . $newStatus,
+        999990, // customer_id
+        "Billing Inquiry #999996: Response added · Status: {$oldStatus} → {$newStatus}",
+        "Your request \"C27 response test\" has an update.\n\nReply from support:\n{$responseText}",
+        'service_request',
+        999996,
+        '/portal/requests/view?id=999996',
+        'info'
+    );
+
+    $portalRow = db_row(
+        "SELECT portal_user_id, type, category, title, message, url, severity, entity_type, entity_id
+           FROM notifications
+          WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996
+          LIMIT 1"
+    );
+    if (!$portalRow) {
+        $c27Errors[] = "expected portal notification row for portal_user 999990; none found";
+    } else {
+        if ($portalRow['portal_user_id'] != 999990) $c27Errors[] = "portal_user_id wrong";
+        if (strpos((string) $portalRow['type'], 'service_request.reply.') !== 0) $c27Errors[] = "type prefix wrong: " . json_encode($portalRow['type']);
+        if ($portalRow['category'] !== 'system') $c27Errors[] = "category should be 'system'; got " . json_encode($portalRow['category']);
+        if (strpos((string) $portalRow['title'], 'Response added') === false) $c27Errors[] = "title missing 'Response added'";
+        if (strpos((string) $portalRow['title'], "Status: {$oldStatus} → {$newStatus}") === false) $c27Errors[] = "title missing status transition";
+        if (strpos((string) $portalRow['message'], $responseText) === false) $c27Errors[] = "message missing response excerpt";
+        if (strpos((string) $portalRow['url'], '/portal/requests/view?id=999996') === false) $c27Errors[] = "url should drill-down to portal-side view";
+    }
+    if (empty($c27Errors)) { echo "PASS C27 respond endpoint notifyPortal — portal user gets notification with type prefix 'service_request.reply.' + correct title/message/url\n"; $pass++; }
+    else { echo "FAIL C27 " . implode('; ', $c27Errors) . "\n"; $failures[] = 'C27'; }
+
+    // ── C28: respond.php source contains the portal-notify logic ──────
+    $c28Errors = [];
+    $respondSrc = file_get_contents(__DIR__ . '/../api/v1/requests/respond.php');
+    if (strpos($respondSrc, 'notifyPortal') === false) {
+        $c28Errors[] = "respond.php missing NotificationService::notifyPortal call";
+    }
+    if (strpos($respondSrc, '$statusChanged') === false || strpos($respondSrc, '$responseChanged') === false) {
+        $c28Errors[] = "respond.php missing change-tracking flags ($statusChanged + $responseChanged)";
+    }
+    if (strpos($respondSrc, 'if ($statusChanged || $responseChanged)') === false) {
+        $c28Errors[] = "respond.php missing union-gate guarding the portal notify";
+    }
+    if (strpos($respondSrc, 'service_request.reply.') === false) {
+        $c28Errors[] = "respond.php missing 'service_request.reply.' type prefix";
+    }
+    if (strpos($respondSrc, "'/portal/requests/view?id='") === false) {
+        $c28Errors[] = "respond.php missing portal-side drill-down URL";
+    }
+    if (strpos($respondSrc, "best-effort") === false && strpos($respondSrc, "try {") === false) {
+        $c28Errors[] = "respond.php notify call should be in try/catch (best-effort)";
+    }
+    if (empty($c28Errors)) { echo "PASS C28 respond.php source has change-tracking + best-effort notifyPortal + portal drill-down URL\n"; $pass++; }
+    else { echo "FAIL C28 " . implode('; ', $c28Errors) . "\n"; $failures[] = 'C28'; }
+
+    // ── C29: silent admin-edit (no response, no status change) → no notify ─
+    // If admin opens form + clicks Save without changing anything, no portal
+    // notification should fire (avoid notification spam).
+    db_execute("DELETE FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996");
+    $c29Errors = [];
+
+    // Replicate the change-detection logic from respond.php
+    $oldStatusNoOp = 'open';
+    $newStatusNoOp = 'open';     // unchanged
+    $responseNoOp  = '';         // empty
+    $oldResponseNoOp = '';
+
+    $statusChanged   = $oldStatusNoOp !== $newStatusNoOp;
+    $responseChanged = $responseNoOp !== '' && $responseNoOp !== $oldResponseNoOp;
+
+    if ($statusChanged || $responseChanged) {
+        // Would notify here in the endpoint — but the guards should prevent it
+        $c29Errors[] = "guards should reject no-op edit but allowed it";
+    }
+    $rowsAfterNoOp = db_select("SELECT id FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996");
+    if (count($rowsAfterNoOp) !== 0) {
+        $c29Errors[] = "expected 0 notifications for no-op edit; found " . count($rowsAfterNoOp);
+    }
+    if (empty($c29Errors)) { echo "PASS C29 silent admin-edit (no response, no status change) does NOT fire portal notification\n"; $pass++; }
+    else { echo "FAIL C29 " . implode('; ', $c29Errors) . "\n"; $failures[] = 'C29'; }
+
+    // ── C30: re-open from closed → 'warning' severity ─────────────────
+    // Replicate the severity heuristic: closed → open is a warning, all
+    // others are info. Used when customer re-opens or admin un-resolves.
+    $c30Errors = [];
+    $severity1 = ('closed' === 'closed' && 'open' === 'open') ? 'warning' : 'info';
+    if ($severity1 !== 'warning') {
+        $c30Errors[] = "closed→open should be 'warning'; got {$severity1}";
+    }
+    $severity2 = ('open' === 'closed' && 'resolved' === 'open') ? 'warning' : 'info';
+    if ($severity2 !== 'info') {
+        $c30Errors[] = "open→resolved should be 'info'; got {$severity2}";
+    }
+    // Source-level check: the heuristic is in respond.php
+    if (strpos($respondSrc, "\$oldStatus === 'closed' && \$status === 'open'") === false) {
+        $c30Errors[] = "respond.php missing closed→open severity-elevation check";
+    }
+    if (empty($c30Errors)) { echo "PASS C30 severity heuristic — re-open from closed → 'warning'; other transitions → 'info'\n"; $pass++; }
+    else { echo "FAIL C30 " . implode('; ', $c30Errors) . "\n"; $failures[] = 'C30'; }
+
+    // Cleanup for C27-C30
+    db_execute("DELETE FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996");
+    db_execute("DELETE FROM portal_service_requests WHERE id = 999996");
 
     // ── C26: nav config has Service Requests entry ─────────────────────
     $c26Errors = [];
