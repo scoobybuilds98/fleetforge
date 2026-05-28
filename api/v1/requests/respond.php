@@ -70,12 +70,9 @@ try {
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
-    // If this is a form POST (not XHR), redirect back to the view page.
-    if (empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-        header('Location: ' . base_url('requests/view?id=' . $id));
-        exit;
-    }
-
+    // Always returns JSON. The view.php form submits via Alpine + FF_Api.post()
+    // which expects JSON + injects the X-CSRF-Token header that the bootstrap.php
+    // CSRF gate verifies.
     json_success(['id' => $id, 'status' => $status]);
 } catch (\Throwable $e) {
     json_error('INTERNAL_ERROR', 'Respond failed: ' . $e->getMessage(), 500);

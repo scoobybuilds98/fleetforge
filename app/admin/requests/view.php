@@ -172,40 +172,79 @@ $statusBadge = match ($req['status']) {
         <?php endif; ?>
 
         <?php if ($canRespond && in_array($req['status'], ['open', 'in_review'], true)): ?>
-            <form id="respondForm" method="POST" action="<?= base_url('api/v1/requests/respond') ?>" data-ff-form>
-                <input type="hidden" name="id" value="<?= (int) $req['id'] ?>">
-                <input type="hidden" name="csrf_token" value="<?= e(generate_csrf_token()) ?>">
+            <!-- Alpine submission via FF_Api.post() — bootstrap.php CSRF gate checks
+                 the X-CSRF-Token header which FF_Api injects automatically; plain
+                 form POST would fail the gate. -->
+            <div x-data="respondForm(<?= (int) $req['id'] ?>, '<?= e($req['response'] ?? '') ?>', '<?= e($req['status']) ?>')">
+
+                <div x-show="flash.message" x-cloak
+                     :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
+                     style="margin-bottom:12px;"
+                     x-text="flash.message"></div>
 
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label" for="response">Your response (optional — leave blank to just flip status)</label>
-                    <textarea id="response" name="response" class="form-control" rows="5"
-                              placeholder="Reply to the customer..."><?= e($req['response'] ?? '') ?></textarea>
+                    <textarea id="response" x-model="response" class="form-control" rows="5"
+                              placeholder="Reply to the customer..."></textarea>
                 </div>
 
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label" for="status">Status</label>
-                    <select id="status" name="status" class="form-control" style="max-width:240px;">
-                        <option value="open"      <?= $req['status'] === 'open'      ? 'selected' : '' ?>>Open</option>
-                        <option value="in_review" <?= $req['status'] === 'in_review' ? 'selected' : '' ?>>In Review</option>
-                        <option value="resolved"  <?= $req['status'] === 'resolved'  ? 'selected' : '' ?>>Resolved</option>
-                        <option value="closed"    <?= $req['status'] === 'closed'    ? 'selected' : '' ?>>Closed</option>
+                    <select id="status" x-model="status" class="form-control" style="max-width:240px;">
+                        <option value="open">Open</option>
+                        <option value="in_review">In Review</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="closed">Closed</option>
                     </select>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-md">Save Response</button>
+                <button type="button" class="btn btn-primary btn-md" @click="save()" :disabled="saving">
+                    <span x-show="!saving">Save Response</span>
+                    <span x-show="saving" x-cloak>Saving…</span>
+                </button>
                 <a href="<?= base_url('requests') ?>" class="btn btn-secondary btn-md">Back to list</a>
-            </form>
+            </div>
         <?php elseif ($req['status'] === 'resolved' || $req['status'] === 'closed'): ?>
-            <div class="text-sm text-secondary">Request is <?= e($req['status']) ?>; re-open it from the form below to edit the response.</div>
+            <div class="text-sm text-secondary">Request is <?= e($req['status']) ?>; re-open it below to edit the response.</div>
             <?php if ($canRespond): ?>
-                <form method="POST" action="<?= base_url('api/v1/requests/respond') ?>" data-ff-form style="margin-top:8px;">
-                    <input type="hidden" name="id" value="<?= (int) $req['id'] ?>">
-                    <input type="hidden" name="csrf_token" value="<?= e(generate_csrf_token()) ?>">
-                    <input type="hidden" name="status" value="open">
-                    <button type="submit" class="btn btn-secondary btn-sm">Re-open</button>
-                </form>
+                <div x-data="respondForm(<?= (int) $req['id'] ?>, '<?= e($req['response'] ?? '') ?>', 'open')" style="margin-top:8px;">
+                    <button type="button" class="btn btn-secondary btn-sm" @click="save()" :disabled="saving">
+                        <span x-show="!saving">Re-open</span>
+                        <span x-show="saving" x-cloak>…</span>
+                    </button>
+                </div>
             <?php endif; ?>
         <?php endif; ?>
+
+        <script>
+        function respondForm(requestId, initialResponse, initialStatus) {
+            return {
+                requestId, response: initialResponse, status: initialStatus,
+                saving: false,
+                flash: { type: '', message: '' },
+                async save() {
+                    this.saving = true;
+                    this.flash = { type: '', message: '' };
+                    try {
+                        const r = await FF_Api.post(
+                            FF_Api.url('/api/v1/requests/respond.php'),
+                            { id: this.requestId, response: this.response, status: this.status }
+                        );
+                        if (r.success) {
+                            this.flash = { type: 'success', message: 'Saved. Reloading…' };
+                            setTimeout(() => window.location.reload(), 600);
+                        } else {
+                            this.flash = { type: 'danger', message: r.error?.message || 'Save failed.' };
+                        }
+                    } catch (e) {
+                        this.flash = { type: 'danger', message: 'Save failed: ' + (e.message || e) };
+                    } finally {
+                        this.saving = false;
+                    }
+                }
+            };
+        }
+        </script>
     </div>
 </div>
 
