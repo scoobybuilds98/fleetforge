@@ -52,7 +52,7 @@ use FleetForge\Notifications\PortalRequestNotifier;
 use FleetForge\Notifications\NotificationService;
 
 $pass = 0;
-$total = 30;
+$total = 38;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -628,30 +628,22 @@ try {
     if (empty($c27Errors)) { echo "PASS C27 respond endpoint notifyPortal — portal user gets notification with type prefix 'service_request.reply.' + correct title/message/url\n"; $pass++; }
     else { echo "FAIL C27 " . implode('; ', $c27Errors) . "\n"; $failures[] = 'C27'; }
 
-    // ── C28: respond.php source contains the portal-notify logic ──────
+    // ── C28: respond.php delegates to RequestMessageService::appendAdminMessage ─
+    // The notify logic moved into the service (C32 verifies). respond.php
+    // now validates the input + returns json. Source checks must reference
+    // the new delegation surface.
     $c28Errors = [];
     $respondSrc = file_get_contents(__DIR__ . '/../api/v1/requests/respond.php');
-    if (strpos($respondSrc, 'notifyPortal') === false) {
-        $c28Errors[] = "respond.php missing NotificationService::notifyPortal call";
+    if (strpos($respondSrc, 'RequestMessageService::appendAdminMessage') === false) {
+        $c28Errors[] = "respond.php should delegate to RequestMessageService::appendAdminMessage";
     }
-    if (strpos($respondSrc, '$statusChanged') === false
-        || strpos($respondSrc, '$responseSubmitted') === false
-        || strpos($respondSrc, '$shouldNotify') === false) {
-        $c28Errors[] = "respond.php missing change-tracking flags (\$statusChanged + \$responseSubmitted + \$shouldNotify)";
+    if (strpos($respondSrc, "'NO_CHANGE'") === false) {
+        $c28Errors[] = "respond.php should reject empty save with no status flip (NO_CHANGE 422)";
     }
-    if (strpos($respondSrc, 'if ($shouldNotify)') === false) {
-        $c28Errors[] = "respond.php missing union-gate guarding the portal notify (\$shouldNotify)";
+    if (strpos($respondSrc, 'customer_notified') === false) {
+        $c28Errors[] = "respond.php should surface customer_notified flag in JSON response";
     }
-    if (strpos($respondSrc, 'service_request.reply.') === false) {
-        $c28Errors[] = "respond.php missing 'service_request.reply.' type prefix";
-    }
-    if (strpos($respondSrc, "base_url('portal/requests/view?id='") === false) {
-        $c28Errors[] = "respond.php missing base_url('portal/requests/view?id=...') for /fleetforge subpath prefix";
-    }
-    if (strpos($respondSrc, "best-effort") === false && strpos($respondSrc, "try {") === false) {
-        $c28Errors[] = "respond.php notify call should be in try/catch (best-effort)";
-    }
-    if (empty($c28Errors)) { echo "PASS C28 respond.php source has change-tracking + best-effort notifyPortal + portal drill-down URL\n"; $pass++; }
+    if (empty($c28Errors)) { echo "PASS C28 respond.php delegates to RequestMessageService + NO_CHANGE guard + customer_notified flag\n"; $pass++; }
     else { echo "FAIL C28 " . implode('; ', $c28Errors) . "\n"; $failures[] = 'C28'; }
 
     // ── C29: truly-empty save (no response text + no status change) → no notify ─
@@ -690,27 +682,191 @@ try {
     if (empty($c29Errors)) { echo "PASS C29 notify gate — truly-empty save skips; re-sending same response still notifies (operator-intent semantics)\n"; $pass++; }
     else { echo "FAIL C29 " . implode('; ', $c29Errors) . "\n"; $failures[] = 'C29'; }
 
-    // ── C30: re-open from closed → 'warning' severity ─────────────────
-    // Replicate the severity heuristic: closed → open is a warning, all
-    // others are info. Used when customer re-opens or admin un-resolves.
+    // ── C30: severity heuristic lives in RequestMessageService now ────
+    // closed → open elevates to 'warning'; other transitions → 'info'.
     $c30Errors = [];
-    $severity1 = ('closed' === 'closed' && 'open' === 'open') ? 'warning' : 'info';
-    if ($severity1 !== 'warning') {
-        $c30Errors[] = "closed→open should be 'warning'; got {$severity1}";
+    $svcSrc = file_get_contents(__DIR__ . '/../lib/Requests/RequestMessageService.php');
+    if (strpos($svcSrc, "\$oldStatus === 'closed' && \$newStatus === 'open'") === false) {
+        $c30Errors[] = "RequestMessageService missing closed→open severity-elevation in notifyPortalSide";
     }
-    $severity2 = ('open' === 'closed' && 'resolved' === 'open') ? 'warning' : 'info';
-    if ($severity2 !== 'info') {
-        $c30Errors[] = "open→resolved should be 'info'; got {$severity2}";
-    }
-    // Source-level check: the heuristic is in respond.php
-    if (strpos($respondSrc, "\$oldStatus === 'closed' && \$status === 'open'") === false) {
-        $c30Errors[] = "respond.php missing closed→open severity-elevation check";
-    }
-    if (empty($c30Errors)) { echo "PASS C30 severity heuristic — re-open from closed → 'warning'; other transitions → 'info'\n"; $pass++; }
+    if (empty($c30Errors)) { echo "PASS C30 severity heuristic — closed→open → 'warning' (RequestMessageService::notifyPortalSide)\n"; $pass++; }
     else { echo "FAIL C30 " . implode('; ', $c30Errors) . "\n"; $failures[] = 'C30'; }
 
     // Cleanup for C27-C30
     db_execute("DELETE FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996");
+    db_execute("DELETE FROM portal_service_requests WHERE id = 999996");
+
+    // ── C31: RequestMessageService class surfaces ──────────────────────
+    $c31Errors = [];
+    if (!class_exists(\FleetForge\Requests\RequestMessageService::class)) {
+        $c31Errors[] = 'RequestMessageService class missing';
+    } else {
+        foreach (['appendAdminMessage', 'appendPortalMessage', 'fetchThread'] as $m) {
+            if (!method_exists(\FleetForge\Requests\RequestMessageService::class, $m)) {
+                $c31Errors[] = "method missing: {$m}";
+            }
+        }
+    }
+    if (empty($c31Errors)) { echo "PASS C31 RequestMessageService class surfaces (appendAdminMessage + appendPortalMessage + fetchThread)\n"; $pass++; }
+    else { echo "FAIL C31 " . implode('; ', $c31Errors) . "\n"; $failures[] = 'C31'; }
+
+    // ── C32: appendAdminMessage inserts message + updates response field + notifies portal ─
+    db_execute("DELETE FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id BETWEEN 999990 AND 999999");
+    ff_smoke_prn_seed_request(999996, 'billing_inquiry', ['subject' => 'C32 thread test']);
+    $c32Errors = [];
+    $msgId = \FleetForge\Requests\RequestMessageService::appendAdminMessage(999996, $activeId, 'First admin reply');
+    if ($msgId <= 0) $c32Errors[] = "expected positive message_id; got {$msgId}";
+
+    $row = db_row("SELECT request_id, sender_type, sender_user_id, body FROM portal_service_request_messages WHERE id = ?", [$msgId]);
+    if (!$row) $c32Errors[] = "message row not found";
+    elseif ($row['sender_type'] !== 'admin') $c32Errors[] = "sender_type wrong: " . json_encode($row['sender_type']);
+    elseif ((int) $row['sender_user_id'] !== $activeId) $c32Errors[] = "sender_user_id wrong: " . json_encode($row['sender_user_id']);
+    elseif ($row['body'] !== 'First admin reply') $c32Errors[] = "body wrong";
+
+    // Legacy field updated
+    $reqAfter = db_row("SELECT response FROM portal_service_requests WHERE id = 999996");
+    if (($reqAfter['response'] ?? '') !== 'First admin reply') {
+        $c32Errors[] = "legacy response field not updated; got " . json_encode($reqAfter['response'] ?? null);
+    }
+
+    // Portal notification fired
+    $portal = db_row("SELECT title FROM notifications WHERE portal_user_id = 999990 AND entity_type='service_request' AND entity_id = 999996 LIMIT 1");
+    if (!$portal) $c32Errors[] = "portal notification not created";
+    elseif (strpos((string) $portal['title'], 'New reply') === false) $c32Errors[] = "title missing 'New reply': " . json_encode($portal['title']);
+    if (empty($c32Errors)) { echo "PASS C32 appendAdminMessage — inserts message + updates legacy response + notifies portal user\n"; $pass++; }
+    else { echo "FAIL C32 " . implode('; ', $c32Errors) . "\n"; $failures[] = 'C32'; }
+
+    // ── C33: appendPortalMessage Trap-8 — wrong customer rejected ──────
+    // Create a second customer + portal_user so we can attempt cross-customer access.
+    db_execute(
+        "INSERT INTO customers (id, company_name, contact_name, email, status, currency)
+         VALUES (999991, 'Smoke PRN Other Inc.', 'Other Contact', 'other@example.com', 'active', 'CAD')
+         ON DUPLICATE KEY UPDATE company_name=VALUES(company_name)"
+    );
+    db_execute(
+        "INSERT INTO portal_users (id, customer_id, name, email, password_hash, status)
+         VALUES (999991, 999991, 'Smoke Other Portal User', 'smoke-other@example.com', 'x', 'active')
+         ON DUPLICATE KEY UPDATE customer_id=VALUES(customer_id)"
+    );
+
+    $c33Errors = [];
+    // Portal user 999991 belongs to customer 999991; request 999996 belongs to customer 999990.
+    $badAttempt = \FleetForge\Requests\RequestMessageService::appendPortalMessage(999996, 999991, 'cross-customer probe');
+    if ($badAttempt !== 0) $c33Errors[] = "expected 0 (rejected); got {$badAttempt}";
+
+    db_execute("DELETE FROM portal_users WHERE id = 999991");
+    db_execute("DELETE FROM customers WHERE id = 999991");
+    if (empty($c33Errors)) { echo "PASS C33 appendPortalMessage Trap-8 — portal_user from different customer rejected\n"; $pass++; }
+    else { echo "FAIL C33 " . implode('; ', $c33Errors) . "\n"; $failures[] = 'C33'; }
+
+    // ── C34: appendPortalMessage notifies routed admins + re-opens resolved ─
+    db_execute("UPDATE portal_service_requests SET status='resolved', resolved_at=NOW() WHERE id = 999996");
+    db_execute("DELETE FROM notifications WHERE user_id IS NOT NULL AND entity_type='service_request' AND entity_id = 999996");
+
+    ff_smoke_prn_set_setting('portal_requests.routing.always_include_super_admin', '0');
+    ff_smoke_prn_set_setting('portal_requests.routing.billing_inquiry.role_slugs', '[]');
+    ff_smoke_prn_set_setting('portal_requests.routing.billing_inquiry.user_ids', json_encode([$activeId]));
+
+    $c34Errors = [];
+    $portalMsgId = \FleetForge\Requests\RequestMessageService::appendPortalMessage(999996, 999990, 'Customer follow-up');
+    if ($portalMsgId <= 0) $c34Errors[] = "expected positive id; got {$portalMsgId}";
+
+    // Re-opened
+    $reqReopened = db_row("SELECT status, resolved_at FROM portal_service_requests WHERE id = 999996");
+    if (($reqReopened['status'] ?? '') !== 'open') {
+        $c34Errors[] = "request should be re-opened to 'open'; got " . json_encode($reqReopened['status'] ?? null);
+    }
+    if (!empty($reqReopened['resolved_at'])) {
+        $c34Errors[] = "resolved_at should be cleared on re-open";
+    }
+
+    // Admin notified per routing config (activeId via user_ids)
+    $adminNotif = db_row("SELECT title, severity, url FROM notifications WHERE user_id = ? AND entity_type='service_request' AND entity_id = 999996 LIMIT 1", [$activeId]);
+    if (!$adminNotif) $c34Errors[] = "expected admin notification for routed user {$activeId}";
+    elseif (strpos((string) $adminNotif['title'], 'Customer reply') === false) {
+        $c34Errors[] = "title missing 'Customer reply': " . json_encode($adminNotif['title']);
+    }
+    if ($adminNotif && strpos((string) $adminNotif['url'], '/fleetforge/') === false) {
+        $c34Errors[] = "url should include /fleetforge subpath; got " . json_encode($adminNotif['url']);
+    }
+    if (empty($c34Errors)) { echo "PASS C34 appendPortalMessage — routed admin notified + resolved/closed request re-opens on portal reply\n"; $pass++; }
+    else { echo "FAIL C34 " . implode('; ', $c34Errors) . "\n"; $failures[] = 'C34'; }
+
+    // ── C35: fetchThread chronological order + sender_label resolution ─
+    db_execute("DELETE FROM portal_service_request_messages WHERE request_id = 999996");
+    \FleetForge\Requests\RequestMessageService::appendAdminMessage(999996, $activeId, 'msg1 admin');
+    sleep(1); // ensure ordering by created_at is deterministic
+    \FleetForge\Requests\RequestMessageService::appendPortalMessage(999996, 999990, 'msg2 portal');
+    sleep(1);
+    \FleetForge\Requests\RequestMessageService::appendAdminMessage(999996, $activeId, 'msg3 admin');
+
+    $thread = \FleetForge\Requests\RequestMessageService::fetchThread(999996, true);
+    $c35Errors = [];
+    if (count($thread) !== 3) $c35Errors[] = "expected 3 messages; got " . count($thread);
+    if (($thread[0]['body'] ?? '') !== 'msg1 admin' || ($thread[0]['sender_type'] ?? '') !== 'admin') {
+        $c35Errors[] = "msg[0] wrong: " . json_encode($thread[0] ?? null);
+    }
+    if (($thread[1]['body'] ?? '') !== 'msg2 portal' || ($thread[1]['sender_type'] ?? '') !== 'portal') {
+        $c35Errors[] = "msg[1] wrong: " . json_encode($thread[1] ?? null);
+    }
+    if (($thread[2]['body'] ?? '') !== 'msg3 admin' || ($thread[2]['sender_type'] ?? '') !== 'admin') {
+        $c35Errors[] = "msg[2] wrong: " . json_encode($thread[2] ?? null);
+    }
+    // sender_label resolution
+    if (!empty($thread) && (strpos($thread[0]['sender_label'] ?? '', 'Smoke') === false)) {
+        $c35Errors[] = "sender_label not resolved for admin; got " . json_encode($thread[0]['sender_label'] ?? null);
+    }
+    if (empty($c35Errors)) { echo "PASS C35 fetchThread chronological + sender_label resolution (admin user.name; portal portal_user.name)\n"; $pass++; }
+    else { echo "FAIL C35 " . implode('; ', $c35Errors) . "\n"; $failures[] = 'C35'; }
+
+    // ── C36: fetchThread filters internal messages for non-admin viewers ─
+    db_execute("DELETE FROM portal_service_request_messages WHERE request_id = 999996");
+    \FleetForge\Requests\RequestMessageService::appendAdminMessage(999996, $activeId, 'public reply', null, false);
+    \FleetForge\Requests\RequestMessageService::appendAdminMessage(999996, $activeId, 'internal note', null, true);
+
+    $threadAdmin = \FleetForge\Requests\RequestMessageService::fetchThread(999996, true);
+    $threadPortal = \FleetForge\Requests\RequestMessageService::fetchThread(999996, false);
+    $c36Errors = [];
+    if (count($threadAdmin) !== 2) $c36Errors[] = "admin should see 2 messages; got " . count($threadAdmin);
+    if (count($threadPortal) !== 1) $c36Errors[] = "portal should see 1 (public only); got " . count($threadPortal);
+    if (!empty($threadPortal) && $threadPortal[0]['body'] !== 'public reply') {
+        $c36Errors[] = "portal-visible message body wrong: " . json_encode($threadPortal[0]['body'] ?? null);
+    }
+    if (empty($c36Errors)) { echo "PASS C36 fetchThread is_internal filter — admin sees internal notes; portal does not\n"; $pass++; }
+    else { echo "FAIL C36 " . implode('; ', $c36Errors) . "\n"; $failures[] = 'C36'; }
+
+    // ── C37: portal reply endpoint exists + Trap-8 + body validation ───
+    $c37Errors = [];
+    $replyPath = __DIR__ . '/../api/v1/portal/requests/reply.php';
+    if (!is_file($replyPath)) {
+        $c37Errors[] = "api/v1/portal/requests/reply.php does not exist";
+    } else {
+        $replySrc = file_get_contents($replyPath);
+        if (strpos($replySrc, 'require_portal_auth()') === false) $c37Errors[] = "missing require_portal_auth() gate";
+        if (strpos($replySrc, 'appendPortalMessage') === false) $c37Errors[] = "missing appendPortalMessage call";
+        if (strpos($replySrc, 'json_error') === false) $c37Errors[] = "missing error handling";
+        if (strpos($replySrc, "'MISSING_REQUIRED'") === false) $c37Errors[] = "missing body validation";
+    }
+    if (empty($c37Errors)) { echo "PASS C37 portal reply endpoint — portal auth + appendPortalMessage delegation + body validation\n"; $pass++; }
+    else { echo "FAIL C37 " . implode('; ', $c37Errors) . "\n"; $failures[] = 'C37'; }
+
+    // ── C38: admin + portal view source — thread render + reply form ───
+    $c38Errors = [];
+    $adminViewSrc = file_get_contents(__DIR__ . '/../app/admin/requests/view.php');
+    $portalViewSrc = file_get_contents(__DIR__ . '/../app/portal/requests/view.php');
+
+    foreach (['adminReplyForm', 'fetchThread', 'requests/respond.php', '/api/v1/requests/respond.php'] as $needle) {
+        if (strpos($adminViewSrc, $needle) === false) $c38Errors[] = "admin view missing: {$needle}";
+    }
+    foreach (['portalReplyForm', 'fetchThread', '/api/v1/portal/requests/reply.php'] as $needle) {
+        if (strpos($portalViewSrc, $needle) === false) $c38Errors[] = "portal view missing: {$needle}";
+    }
+    if (empty($c38Errors)) { echo "PASS C38 admin + portal view source — fetchThread render + Alpine reply form referencing correct endpoints\n"; $pass++; }
+    else { echo "FAIL C38 " . implode('; ', $c38Errors) . "\n"; $failures[] = 'C38'; }
+
+    // Cleanup C31-C38
+    db_execute("DELETE FROM portal_service_request_messages WHERE request_id = 999996");
+    db_execute("DELETE FROM notifications WHERE entity_type='service_request' AND entity_id = 999996");
     db_execute("DELETE FROM portal_service_requests WHERE id = 999996");
 
     // ── C26: nav config has Service Requests entry ─────────────────────

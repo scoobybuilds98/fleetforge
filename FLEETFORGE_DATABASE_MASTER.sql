@@ -3273,6 +3273,23 @@ CREATE TABLE `portal_service_requests` (
   CONSTRAINT `portal_service_requests_ibfk_4` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE SET NULL,
   CONSTRAINT `portal_service_requests_ibfk_5` FOREIGN KEY (`assigned_to`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `portal_service_request_messages` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `request_id` int unsigned NOT NULL COMMENT 'FK to portal_service_requests.id',
+  `sender_type` enum('admin','portal') COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'admin = response from staff (sender_user_id non-NULL); portal = reply from customer-side portal user (sender_portal_user_id non-NULL)',
+  `sender_user_id` int unsigned DEFAULT NULL COMMENT 'NOT NULL when sender_type=admin; FK SET NULL on user delete to preserve thread history',
+  `sender_portal_user_id` int unsigned DEFAULT NULL COMMENT 'NOT NULL when sender_type=portal; FK SET NULL on portal_user delete to preserve thread history',
+  `body` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Message body (max 65535 chars). Plain text; no markdown rendering v1.',
+  `is_internal` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'D-PORTAL-REQUEST-THREAD-3: reserved for future internal-admin-note feature; v1 always 0',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_request_thread` (`request_id`,`created_at`) COMMENT 'Thread fetch ordering',
+  KEY `idx_sender_user` (`sender_user_id`),
+  KEY `idx_sender_portal` (`sender_portal_user_id`),
+  CONSTRAINT `fk_psrm_request` FOREIGN KEY (`request_id`) REFERENCES `portal_service_requests` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_psrm_user` FOREIGN KEY (`sender_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_psrm_portal` FOREIGN KEY (`sender_portal_user_id`) REFERENCES `portal_users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-PORTAL-REQUEST-THREAD: multi-message reply chain. One row per message. portal_service_requests.response field RETAINED for backward compat — every admin message updates it to the latest admin body.';
 CREATE TABLE `portal_users` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `customer_id` int unsigned NOT NULL,

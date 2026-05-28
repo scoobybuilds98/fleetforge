@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-28
-**Tables:** 145 total · **Columns:** 2309
+**Tables:** 146 total · **Columns:** 2317
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -1839,7 +1839,7 @@ _63 tables._
 
 # Other tables
 
-_70 tables._
+_71 tables._
 
 ## `ai_anomaly_alerts`
 
@@ -2801,6 +2801,19 @@ _70 tables._
 | `allocation_type` | enum('auto','manual') |  | NO |
 | `notes` | text |  | YES |
 | `allocated_by` | int unsigned | MUL | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `portal_service_request_messages`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `request_id` | int unsigned | MUL | NO |
+| `sender_type` | enum('admin','portal') |  | NO |
+| `sender_user_id` | int unsigned | MUL | YES |
+| `sender_portal_user_id` | int unsigned | MUL | YES |
+| `body` | text |  | NO |
+| `is_internal` | tinyint(1) |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 
 ## `portal_service_requests`

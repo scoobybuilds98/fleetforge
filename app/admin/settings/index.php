@@ -472,7 +472,7 @@ if ($defaultTab === 'design' && !$isSuperAdmin) $defaultTab = 'general';
     <?php if ($isSuperAdmin): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'portal_users' }"
             @click="activeTab = 'portal_users'" role="tab">
-        Portal Users <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$portalUserCount) ?></span>
+        Portal &amp; Requests <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$portalUserCount) ?></span>
     </button>
     <?php endif; ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'audit' }"
@@ -711,7 +711,7 @@ if (!empty($grouped['currency'])) {
     $portalReqAlwaysSuper = (string) settings_get('portal_requests.routing.always_include_super_admin', '1') === '1';
     ?>
 
-    <div class="card" style="margin-bottom:20px;">
+    <div id="service-request-routing" class="card" style="margin-bottom:20px;scroll-margin-top:80px;">
         <div class="card-header" style="font-weight:600;">Service Request Notification Routing</div>
         <div class="card-body">
             <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">

@@ -119,13 +119,17 @@ require_once dirname(__DIR__) . '/includes/header.php';
 <div class="portal-detail-grid" style="grid-template-columns: 1fr 300px;">
 
     <!-- Thread -->
+    <?php
+    // Portal viewers never see internal-flagged messages.
+    $thread = \FleetForge\Requests\RequestMessageService::fetchThread((int) $req['id'], false);
+    ?>
     <div class="portal-section">
         <div class="portal-section-header">
             <h2 class="portal-section-title">Conversation</h2>
         </div>
         <div class="portal-thread">
 
-            <!-- Original message -->
+            <!-- Original message (the customer's first submission) -->
             <div class="portal-thread-message portal-thread-message--customer">
                 <div class="portal-thread-author">
                     <?= e($req['submitter_name']) ?>
@@ -134,28 +138,91 @@ require_once dirname(__DIR__) . '/includes/header.php';
                 <div style="white-space:pre-wrap;"><?= e($req['message']) ?></div>
             </div>
 
-            <!-- Admin response (if any) -->
-            <?php if ($req['response']): ?>
-            <div class="portal-thread-message portal-thread-message--admin">
+            <!-- Thread of replies (admin + customer alternating) -->
+            <?php foreach ($thread as $msg):
+                $isAdmin = $msg['sender_type'] === 'admin';
+            ?>
+            <div class="portal-thread-message portal-thread-message--<?= $isAdmin ? 'admin' : 'customer' ?>">
                 <div class="portal-thread-author">
-                    <?= e($req['assigned_name'] ?? 'Support Team') ?>
-                    <span class="badge badge-info" style="font-size:0.6rem;padding:1px 6px;">Staff</span>
-                    <?php if ($req['resolved_at']): ?>
-                        <span class="portal-thread-time"><?= e(format_datetime($req['resolved_at'])) ?></span>
+                    <?= e($msg['sender_label']) ?>
+                    <?php if ($isAdmin): ?>
+                        <span class="badge badge-info" style="font-size:0.6rem;padding:1px 6px;">Staff</span>
                     <?php endif; ?>
+                    <span class="portal-thread-time"><?= e(format_datetime($msg['created_at'])) ?></span>
                 </div>
-                <div style="white-space:pre-wrap;"><?= e($req['response']) ?></div>
+                <div style="white-space:pre-wrap;"><?= e($msg['body']) ?></div>
             </div>
-            <?php endif; ?>
+            <?php endforeach; ?>
 
-            <?php if (!$req['response'] && in_array($req['status'], ['open', 'in_review'], true)): ?>
-            <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:0.8125rem;">
+            <?php if (empty($thread) && in_array($req['status'], ['open', 'in_review'], true)): ?>
+            <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:0.8125rem;">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:24px;height:24px;margin-bottom:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
                 <p>Awaiting response from our team. We typically respond within 1 business day.</p>
             </div>
             <?php endif; ?>
 
         </div>
+
+        <!-- ── Portal-side reply form (Alpine + FF_Api so CSRF header injects) ── -->
+        <?php if (in_array($req['status'], ['open', 'in_review', 'resolved', 'closed'], true)): ?>
+        <div x-data="portalReplyForm(<?= (int) $req['id'] ?>)" style="margin-top:16px;border-top:1px solid var(--border-color);padding-top:16px;">
+
+            <div x-show="flash.message" x-cloak
+                 :class="flash.type === 'success' ? 'portal-login-success' : 'portal-login-error'"
+                 style="margin-bottom:12px;"
+                 x-text="flash.message"></div>
+
+            <div class="portal-form-group" style="margin-bottom:10px;">
+                <label class="portal-form-label" for="portal-reply-body">Reply</label>
+                <textarea id="portal-reply-body" x-model="body"
+                          class="portal-form-input portal-form-textarea"
+                          placeholder="Type your reply..."
+                          rows="4"></textarea>
+            </div>
+            <button type="button" class="btn btn-primary btn-md"
+                    @click="send()" :disabled="sending || !body.trim()">
+                <span x-show="!sending">Send Reply</span>
+                <span x-show="sending" x-cloak>Sending…</span>
+            </button>
+            <?php if (in_array($req['status'], ['resolved', 'closed'], true)): ?>
+                <span class="text-xs text-muted" style="margin-left:10px;">
+                    Your reply will re-open this request.
+                </span>
+            <?php endif; ?>
+        </div>
+
+        <script>
+        function portalReplyForm(requestId) {
+            return {
+                requestId,
+                body: '',
+                sending: false,
+                flash: { type: '', message: '' },
+                async send() {
+                    if (!this.body.trim()) return;
+                    this.sending = true;
+                    this.flash = { type: '', message: '' };
+                    try {
+                        const r = await FF_Api.post(
+                            FF_Api.url('/api/v1/portal/requests/reply.php'),
+                            { request_id: this.requestId, body: this.body }
+                        );
+                        if (r.success) {
+                            this.flash = { type: 'success', message: 'Reply sent. Reloading…' };
+                            setTimeout(() => window.location.reload(), 900);
+                        } else {
+                            this.flash = { type: 'danger', message: r.error?.message || 'Send failed.' };
+                        }
+                    } catch (e) {
+                        this.flash = { type: 'danger', message: 'Send failed: ' + (e.message || e) };
+                    } finally {
+                        this.sending = false;
+                    }
+                }
+            };
+        }
+        </script>
+        <?php endif; ?>
     </div>
 
     <!-- Sidebar Info -->

@@ -4,14 +4,19 @@ declare(strict_types=1);
 /**
  * api/v1/requests/respond.php
  *
- * Respond to a portal service request + flip status. Stamps assigned_to
- * to the responder + resolved_at when status flips to resolved/closed.
+ * Admin-side append a reply to a portal service request thread + optionally
+ * flip status. Delegates to RequestMessageService::appendAdminMessage which:
+ *   - inserts a new portal_service_request_messages row
+ *   - updates legacy portal_service_requests.response with latest admin body
+ *   - stamps assigned_to + resolved_at as needed
+ *   - audit_logs
+ *   - notifies the customer's portal user(s) (best-effort)
  *
  * @method  POST
  * @auth    require_permission('customers', 'edit')
  * @body    { id: int, response: string, status: 'open'|'in_review'|'resolved'|'closed' }
  *
- * @session S-PORTAL-REQUEST-ROUTING
+ * @session S-PORTAL-REQUEST-THREAD (succeeds S-PORTAL-REQUEST-ROUTING)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -22,127 +27,47 @@ require_permission('customers', 'edit');
 
 $id       = (int) ($_POST['id'] ?? 0);
 $response = trim((string) ($_POST['response'] ?? ''));
-$status   = (string) ($_POST['status'] ?? 'in_review');
+$status   = (string) ($_POST['status'] ?? '');
 
 if ($id <= 0) {
     json_error('MISSING_REQUIRED', 'id is required', 422);
 }
 
 $validStatuses = ['open', 'in_review', 'resolved', 'closed'];
-if (!in_array($status, $validStatuses, true)) {
+if ($status !== '' && !in_array($status, $validStatuses, true)) {
     json_error('INVALID_STATUS', "status must be one of: " . implode(', ', $validStatuses), 422);
 }
 
-try {
-    $req = db_row(
-        "SELECT id, customer_id, request_type, subject, status, response, resolved_at
-           FROM portal_service_requests WHERE id = ?",
-        [$id]
+// Operator intent: at least one of (new message body, status flip) must be present
+$req = db_row("SELECT id, status FROM portal_service_requests WHERE id = ?", [$id]);
+if (!$req) {
+    json_error('NOT_FOUND', "Service request #{$id} not found", 404);
+}
+
+$statusChanged = $status !== '' && $status !== (string) $req['status'];
+if ($response === '' && !$statusChanged) {
+    json_error(
+        'NO_CHANGE',
+        "Type a reply or change the status before saving. Empty saves with no status flip are ignored to prevent silent no-op operations.",
+        422
     );
-    if (!$req) {
-        json_error('NOT_FOUND', "Service request #{$id} not found", 404);
-    }
+}
 
-    $now = date('Y-m-d H:i:s');
-    $userId = current_user_id();
-    $oldStatus   = (string) $req['status'];
-    $oldResponse = (string) ($req['response'] ?? '');
+try {
+    $messageId = \FleetForge\Requests\RequestMessageService::appendAdminMessage(
+        $id,
+        (int) current_user_id(),
+        $response,
+        $status !== '' ? $status : null
+    );
 
-    $fields = [
-        'status'      => $status,
-        'assigned_to' => $userId,
-    ];
-
-    if ($response !== '') {
-        $fields['response'] = $response;
-    }
-
-    if (in_array($status, ['resolved', 'closed'], true) && empty($req['resolved_at'])) {
-        $fields['resolved_at'] = $now;
-    } elseif ($status === 'open') {
-        $fields['resolved_at'] = null;
-    }
-
-    db_update('portal_service_requests', $fields, 'id = ?', [$id]);
-
-    db_insert('audit_log', [
-        'user_id'      => $userId,
-        'action'       => 'update',
-        'module'       => 'customers',
-        'entity_type'  => 'portal_service_request',
-        'entity_id'    => $id,
-        'entity_label' => "Service request #{$id}",
-        'notes'        => "Status: {$oldStatus} → {$status}" . ($response !== '' ? '; response added' : ''),
-        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-    ]);
-
-    // Notify the portal user(s) — best-effort, never throws.
-    // Fires when admin saves a non-empty response OR flips status.
-    // Operator-intent semantics: re-saving the same response IS intentional
-    // (they want to re-ping the customer); only skip the truly-empty no-op
-    // case (no response text + no status flip). This matches Slack/messenger
-    // mental model: clicking Save IS the "notify" action.
-    $statusChanged   = $oldStatus !== $status;
-    $responseChanged = $response !== '' && $response !== $oldResponse;
-    $responseSubmitted = $response !== '';  // admin explicitly typed something
-    $shouldNotify = $statusChanged || $responseSubmitted;
-
-    if ($shouldNotify) {
-        try {
-            $typeLabel = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABELS[$req['request_type']]
-                       ?? 'Service request';
-
-            $titleParts = [];
-            // Distinguish "Response added" (new text) vs "Response re-sent"
-            // (admin re-saved the same text intentionally to re-ping).
-            if ($responseChanged) {
-                $titleParts[] = 'Response added';
-            } elseif ($responseSubmitted) {
-                $titleParts[] = 'Response re-sent';
-            }
-            if ($statusChanged) $titleParts[] = "Status: {$oldStatus} → {$status}";
-            $title = "{$typeLabel} #{$id}: " . implode(' · ', $titleParts);
-
-            $msgParts = ["Your request \"{$req['subject']}\" has an update."];
-            if ($responseSubmitted) {
-                $excerpt = mb_substr($response, 0, 280);
-                $label = $responseChanged ? 'Reply from support' : 'Reply from support (re-sent)';
-                $msgParts[] = "{$label}:\n{$excerpt}" . (mb_strlen($response) > 280 ? '…' : '');
-            }
-            if ($statusChanged) {
-                $msgParts[] = "Status changed from '{$oldStatus}' to '{$status}'.";
-            }
-            $message = implode("\n\n", $msgParts);
-
-            // Severity: response or final state → info; re-open after closed → warning
-            $severity = ($oldStatus === 'closed' && $status === 'open') ? 'warning' : 'info';
-
-            // base_url() prefixes the /fleetforge subpath (D7) so the bell's
-            // Alpine :href is a fully-qualified absolute path — clicking from
-            // any page resolves correctly.
-            \FleetForge\Notifications\NotificationService::notifyPortal(
-                'service_request.reply.' . $status,
-                (int) $req['customer_id'],
-                $title,
-                $message,
-                'service_request',
-                $id,
-                base_url('portal/requests/view?id=' . $id),
-                $severity
-            );
-        } catch (\Throwable $e) {
-            error_log("[requests/respond] portal notify failed for request {$id}: " . $e->getMessage());
-        }
-    }
-
-    // Always returns JSON. The view.php form submits via Alpine + FF_Api.post()
-    // which expects JSON + injects the X-CSRF-Token header that the bootstrap.php
-    // CSRF gate verifies. The customer_notified flag drives the admin-side
-    // flash message ("Saved. Customer notified." vs "Saved.").
     json_success([
-        'id'                 => $id,
-        'status'             => $status,
-        'customer_notified'  => $shouldNotify,
+        'id'                => $id,
+        'message_id'        => $messageId,
+        'status'            => $status !== '' ? $status : $req['status'],
+        // RequestMessageService always notifies on non-empty body or status flip
+        // (no internal-note path in v1) — surface for the admin flash.
+        'customer_notified' => true,
     ]);
 } catch (\Throwable $e) {
     json_error('INTERNAL_ERROR', 'Respond failed: ' . $e->getMessage(), 500);

@@ -86,14 +86,23 @@ $typeLabels = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABE
     <span class="breadcrumb-current">Service Requests</span>
 </nav>
 
-<div class="page-header">
-    <h1 class="page-header-title h4">Customer Service Requests</h1>
-    <div class="text-secondary text-sm" style="margin-top:4px;">
-        Read-only list of service requests submitted via the customer portal.
-        Routing for new requests is configured in
-        <a href="<?= base_url('settings') ?>?tab=portal_users">Settings &rarr; Portal Users tab</a>.
-        Each notification you received in the bell links here.
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;">
+    <div>
+        <h1 class="page-header-title h4">Customer Service Requests</h1>
+        <div class="text-secondary text-sm" style="margin-top:4px;">
+            List of service requests submitted via the customer portal.
+            Click into a row to read the full thread and reply. The customer
+            also gets notified when you respond or change status.
+        </div>
     </div>
+    <?php if (can('settings', 'edit')): ?>
+    <a href="<?= base_url('settings') ?>?tab=portal_users#service-request-routing"
+       class="btn btn-secondary btn-sm"
+       style="white-space:nowrap;align-self:center;">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>
+        Configure routing
+    </a>
+    <?php endif; ?>
 </div>
 
 <!-- ── 4 KPI tiles ────────────────────────────────────────────── -->

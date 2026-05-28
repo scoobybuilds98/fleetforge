@@ -153,97 +153,138 @@ $statusBadge = match ($req['status']) {
     </div>
 </div>
 
-<!-- ── Response thread + respond form ─────────────────────────── -->
+<!-- ── Reply thread (S-PORTAL-REQUEST-THREAD) ──────────────────────── -->
+<?php
+$thread = \FleetForge\Requests\RequestMessageService::fetchThread((int) $req['id'], true);
+?>
 <div class="card" style="margin-bottom:18px;">
-    <div class="card-header" style="font-weight:600;">Response</div>
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+        <span>Conversation</span>
+        <span class="text-xs text-secondary" style="font-weight:400;"><?= count($thread) ?> message<?= count($thread) === 1 ? '' : 's' ?></span>
+    </div>
     <div class="card-body">
-        <?php if (!empty($req['response'])): ?>
-            <div style="background:var(--bg-secondary);padding:12px 14px;border-radius:6px;white-space:pre-wrap;line-height:1.55;margin-bottom:14px;">
-                <?= e($req['response']) ?>
-            </div>
-            <?php if (!empty($req['resolved_at'])): ?>
-                <div class="text-xs text-secondary">
-                    Resolved <?= e(substr($req['resolved_at'], 0, 16)) ?>
-                    <?php if ($req['assigned_to_name']): ?> by <?= e($req['assigned_to_name']) ?><?php endif; ?>
-                </div>
-            <?php endif; ?>
-        <?php else: ?>
-            <div class="text-sm text-secondary" style="margin-bottom:14px;">No response yet.</div>
-        <?php endif; ?>
 
-        <?php if ($canRespond && in_array($req['status'], ['open', 'in_review'], true)): ?>
-            <!-- Alpine submission via FF_Api.post() — bootstrap.php CSRF gate checks
-                 the X-CSRF-Token header which FF_Api injects automatically; plain
-                 form POST would fail the gate. -->
-            <div x-data="respondForm(<?= (int) $req['id'] ?>, '<?= e($req['response'] ?? '') ?>', '<?= e($req['status']) ?>')">
+        <!-- ── Original request as first thread item ──────────────────── -->
+        <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;">
+            <div style="flex:0 0 auto;width:36px;height:36px;border-radius:50%;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;font-weight:600;color:var(--text-secondary);font-size:0.825rem;">
+                <?= e(strtoupper(substr((string) ($req['submitted_by_name'] ?? 'C'), 0, 1))) ?>
+            </div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:0.825rem;color:var(--text-secondary);margin-bottom:4px;">
+                    <strong><?= e($req['submitted_by_name'] ?? 'Customer') ?></strong>
+                    <span class="badge badge-info" style="margin-left:6px;font-size:0.7rem;">Customer</span>
+                    <span style="margin-left:8px;"><?= e(substr($req['created_at'] ?? '', 0, 16)) ?></span>
+                </div>
+                <div style="background:var(--bg-secondary);padding:10px 14px;border-radius:8px;white-space:pre-wrap;line-height:1.55;font-size:0.9rem;">
+                    <?= e($req['message']) ?>
+                </div>
+            </div>
+        </div>
+
+        <?php if (empty($thread)): ?>
+            <div class="text-sm text-secondary" style="text-align:center;padding:14px 0;">No replies yet. Type below to start the conversation.</div>
+        <?php else: foreach ($thread as $msg):
+            $isAdmin = $msg['sender_type'] === 'admin';
+            $align = $isAdmin ? 'row-reverse' : 'row';
+            $bg = $isAdmin ? 'var(--accent-color, #2563eb)' : 'var(--bg-secondary)';
+            $color = $isAdmin ? '#fff' : 'inherit';
+            $initial = strtoupper(substr($msg['sender_label'], 0, 1));
+        ?>
+        <div style="display:flex;flex-direction:<?= $align ?>;gap:10px;align-items:flex-start;margin-bottom:12px;">
+            <div style="flex:0 0 auto;width:36px;height:36px;border-radius:50%;background:<?= $isAdmin ? '#2563eb' : 'var(--bg-secondary)' ?>;color:<?= $isAdmin ? '#fff' : 'var(--text-secondary)' ?>;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.825rem;">
+                <?= e($initial) ?>
+            </div>
+            <div style="flex:1;min-width:0;<?= $isAdmin ? 'text-align:right;' : '' ?>">
+                <div style="font-size:0.825rem;color:var(--text-secondary);margin-bottom:4px;">
+                    <strong><?= e($msg['sender_label']) ?></strong>
+                    <span class="badge <?= $isAdmin ? 'badge-primary' : 'badge-info' ?>" style="margin-left:6px;font-size:0.7rem;">
+                        <?= $isAdmin ? 'Staff' : 'Customer' ?>
+                    </span>
+                    <?php if ($msg['is_internal']): ?>
+                        <span class="badge badge-warning" style="margin-left:4px;font-size:0.7rem;">Internal</span>
+                    <?php endif; ?>
+                    <span style="margin-left:8px;"><?= e(substr($msg['created_at'], 0, 16)) ?></span>
+                </div>
+                <div style="background:<?= $bg ?>;color:<?= $color ?>;padding:10px 14px;border-radius:8px;white-space:pre-wrap;line-height:1.55;font-size:0.9rem;display:inline-block;max-width:100%;text-align:left;">
+                    <?= e($msg['body']) ?>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; endif; ?>
+
+        <!-- ── Reply form (Alpine + FF_Api so X-CSRF-Token injects) ───── -->
+        <?php if ($canRespond): ?>
+            <hr style="margin:18px 0 14px;border:none;border-top:1px solid var(--border-color);">
+            <div x-data="adminReplyForm(<?= (int) $req['id'] ?>, '<?= e($req['status']) ?>')">
 
                 <div x-show="flash.message" x-cloak
                      :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
                      style="margin-bottom:12px;"
                      x-text="flash.message"></div>
 
-                <div class="form-group" style="margin-bottom:12px;">
-                    <label class="form-label" for="response">Your response (optional — leave blank to just flip status)</label>
-                    <textarea id="response" x-model="response" class="form-control" rows="5"
-                              placeholder="Reply to the customer..."></textarea>
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label class="form-label" for="reply-body">Your reply</label>
+                    <textarea id="reply-body" x-model="body" class="form-control" rows="4"
+                              placeholder="Type your reply to the customer..."></textarea>
                 </div>
 
-                <div class="form-group" style="margin-bottom:12px;">
-                    <label class="form-label" for="status">Status</label>
-                    <select id="status" x-model="status" class="form-control" style="max-width:240px;">
-                        <option value="open">Open</option>
-                        <option value="in_review">In Review</option>
-                        <option value="resolved">Resolved</option>
-                        <option value="closed">Closed</option>
-                    </select>
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label" for="reply-status" style="margin-bottom:4px;">Status after send</label>
+                        <select id="reply-status" x-model="status" class="form-control" style="max-width:200px;">
+                            <option value="open">Open</option>
+                            <option value="in_review">In Review</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="closed">Closed</option>
+                        </select>
+                    </div>
                 </div>
 
-                <button type="button" class="btn btn-primary btn-md" @click="save()" :disabled="saving">
-                    <span x-show="!saving">Save Response</span>
-                    <span x-show="saving" x-cloak>Saving…</span>
+                <button type="button" class="btn btn-primary btn-md" @click="save()" :disabled="saving || (!body.trim() && status === initialStatus)">
+                    <span x-show="!saving">Send Reply</span>
+                    <span x-show="saving" x-cloak>Sending…</span>
                 </button>
                 <a href="<?= base_url('requests') ?>" class="btn btn-secondary btn-md">Back to list</a>
+                <span class="text-xs text-secondary" style="margin-left:8px;" x-show="!body.trim() && status === initialStatus" x-cloak>
+                    Type a reply or change the status to enable.
+                </span>
             </div>
-        <?php elseif ($req['status'] === 'resolved' || $req['status'] === 'closed'): ?>
-            <div class="text-sm text-secondary">Request is <?= e($req['status']) ?>; re-open it below to edit the response.</div>
-            <?php if ($canRespond): ?>
-                <div x-data="respondForm(<?= (int) $req['id'] ?>, '<?= e($req['response'] ?? '') ?>', 'open')" style="margin-top:8px;">
-                    <button type="button" class="btn btn-secondary btn-sm" @click="save()" :disabled="saving">
-                        <span x-show="!saving">Re-open</span>
-                        <span x-show="saving" x-cloak>…</span>
-                    </button>
-                </div>
-            <?php endif; ?>
         <?php endif; ?>
 
         <script>
-        function respondForm(requestId, initialResponse, initialStatus) {
+        function adminReplyForm(requestId, initialStatus) {
             return {
-                requestId, response: initialResponse, status: initialStatus,
+                requestId,
+                body: '',
+                status: initialStatus,
+                initialStatus,
                 saving: false,
                 flash: { type: '', message: '' },
                 async save() {
+                    if (!this.body.trim() && this.status === this.initialStatus) {
+                        this.flash = { type: 'danger', message: 'Type a reply or change the status before sending.' };
+                        return;
+                    }
                     this.saving = true;
                     this.flash = { type: '', message: '' };
                     try {
                         const r = await FF_Api.post(
                             FF_Api.url('/api/v1/requests/respond.php'),
-                            { id: this.requestId, response: this.response, status: this.status }
+                            { id: this.requestId, response: this.body, status: this.status }
                         );
                         if (r.success) {
-                            const customerNotified = r.data?.customer_notified === true;
                             this.flash = {
                                 type: 'success',
-                                message: customerNotified
-                                    ? 'Saved. Customer notified. Reloading…'
-                                    : 'Saved (no response text + no status change → customer not notified). Reloading…'
+                                message: r.data?.customer_notified === true
+                                    ? 'Reply sent. Customer notified. Reloading…'
+                                    : 'Saved. Reloading…'
                             };
-                            setTimeout(() => window.location.reload(), 1200);
+                            setTimeout(() => window.location.reload(), 1000);
                         } else {
-                            this.flash = { type: 'danger', message: r.error?.message || 'Save failed.' };
+                            this.flash = { type: 'danger', message: r.error?.message || 'Send failed.' };
                         }
                     } catch (e) {
-                        this.flash = { type: 'danger', message: 'Save failed: ' + (e.message || e) };
+                        this.flash = { type: 'danger', message: 'Send failed: ' + (e.message || e) };
                     } finally {
                         this.saving = false;
                     }
