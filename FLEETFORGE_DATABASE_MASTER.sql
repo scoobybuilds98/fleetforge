@@ -1121,6 +1121,34 @@ CREATE TABLE `acc_qbo_payment_map` (
   KEY `idx_pulled_at` (`pulled_at`),
   CONSTRAINT `fk_qbo_payment_map_ff` FOREIGN KEY (`ff_payment_id`) REFERENCES `payments` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-6 S-QBO-13: bidirectional FF↔QBO payment sync state. ff_payment_id NULLABLE because webhooks can arrive before FF match resolves. origin column tags provenance per D-QBO-13-1. pulled_from_qbo push_status state unique to this map (webhooks skip push pipeline).';
+CREATE TABLE `acc_qbo_payment_initiations` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_invoice_id` int unsigned NOT NULL COMMENT 'FF invoice this URL was generated for',
+  `ff_portal_user_id` int unsigned DEFAULT NULL COMMENT 'Portal user who clicked Pay Online; FK SET NULL on user delete',
+  `qbo_invoice_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'QBO Invoice.Id (denormalized from acc_qbo_invoice_map at generation time for webhook lookup)',
+  `qbo_hosted_url` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Intuit-generated hosted-page URL for this initiation',
+  `initiation_token` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '32-byte hex token for return-URL state matching (?initiation_id=X)',
+  `amount` decimal(12,2) NOT NULL COMMENT 'Invoice balance_due at generation time (audit; QBO may charge less if partial)',
+  `currency` enum('CAD','USD') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'CAD' COMMENT 'Frozen at generation time; matches invoice.currency',
+  `realm_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'QBO realm at generation time',
+  `generated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When URL was generated (and link sent to customer)',
+  `expires_at` datetime NOT NULL COMMENT 'Computed from generated_at + url_ttl_minutes setting; past this point, URL is dead and a new one must be generated',
+  `status` enum('pending','completed','cancelled','expired','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Lifecycle: pending (URL live) → completed (webhook handshook) | cancelled (customer cancelled at QBO) | expired (TTL exceeded; cleared by cron or next initiation attempt) | failed (URL generation failed at Intuit)',
+  `qbo_payment_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Filled when webhook handshook successfully; cross-reference to acc_qbo_payment_map.qbo_payment_id',
+  `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'When status=failed, the Intuit error response',
+  `completed_at` datetime DEFAULT NULL COMMENT 'When webhook handshook (status=completed) OR when URL was cancelled/expired',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_initiation_token` (`initiation_token`) COMMENT 'Return URL carries this token; lookup must be O(1) + collision-free',
+  KEY `idx_ff_invoice_pending` (`ff_invoice_id`,`status`) COMMENT 'PaymentInitiator::generate looks up existing pending row by ff_invoice_id',
+  KEY `idx_qbo_invoice_pending` (`qbo_invoice_id`,`status`) COMMENT 'Webhook handshake lookup: WHERE qbo_invoice_id=? AND status=pending ORDER BY generated_at DESC LIMIT 1 (D-QBO-15-1)',
+  KEY `idx_status` (`status`) COMMENT 'Admin UI filter + cron expiry sweep',
+  KEY `idx_portal_user` (`ff_portal_user_id`) COMMENT 'Admin UI Initiated By column',
+  KEY `idx_expires_at` (`expires_at`) COMMENT 'Cron expiry sweep',
+  CONSTRAINT `fk_qbo_payment_init_invoice` FOREIGN KEY (`ff_invoice_id`) REFERENCES `invoices` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_qbo_payment_init_user` FOREIGN KEY (`ff_portal_user_id`) REFERENCES `portal_users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-6 S-QBO-15: outbound QBO Payments hosted-page initiation tracking. Each row = one Pay Online click. Match-back via qbo_invoice_id + latest pending (D-QBO-15-1; UNIQUE pending constraint enforced at app layer via expire-before-insert because MySQL lacks partial unique indexes).';
 CREATE TABLE `acc_qbo_webhook_events` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `webhook_event_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Intuit-Webhook-Event-Id header value (or synthesized random hex when header missing); UNIQUE for idempotency',

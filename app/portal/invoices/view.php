@@ -61,6 +61,21 @@ $bankName    = settings_get('company.bank_name', '');
 $bankAccount = settings_get('company.bank_account', '');
 $checkPayable = settings_get('company.check_payable_to', '');
 
+// S-QBO-15 Pay Online button visibility per D-QBO-15-3.
+// Gates: feature enabled + invoice payable + has QBO mapping + balance > 0
+$qboPaymentsEnabled = (string) settings_get('quickbooks.payments_enabled', '0') === '1';
+$invoicePayable = in_array($inv['status'], ['sent', 'overdue', 'partially_paid'], true);
+$hasBalance = bccomp($inv['balance_due'] ?? '0', '0.00', 2) > 0;
+$qboInvMapped = false;
+if ($qboPaymentsEnabled && $invoicePayable && $hasBalance) {
+    $qboInvCheck = db_row(
+        "SELECT qbo_invoice_id FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?",
+        [$invoiceId]
+    );
+    $qboInvMapped = $qboInvCheck && !empty($qboInvCheck['qbo_invoice_id']);
+}
+$showPayOnline = $qboPaymentsEnabled && $invoicePayable && $hasBalance && $qboInvMapped;
+
 $statusBadge = match($inv['status']) {
     'paid'           => 'badge-success',
     'overdue'        => 'badge-danger',
@@ -93,7 +108,15 @@ require_once dirname(__DIR__) . '/includes/header.php';
             <?php endif; ?>
         </p>
     </div>
-    <div class="portal-detail-actions">
+    <div class="portal-detail-actions" x-data="payOnlineButton(<?= (int) $invoiceId ?>, <?= $showPayOnline ? 'true' : 'false' ?>)">
+        <?php if ($showPayOnline): ?>
+            <!-- S-QBO-15 Pay Online — generates Intuit Payments hosted URL + redirects -->
+            <button class="btn btn-success btn-sm" @click="payOnline()" :disabled="loading">
+                <span x-show="!loading">Pay Online</span>
+                <span x-show="loading" x-cloak>Generating payment link…</span>
+            </button>
+            <div x-show="error" x-cloak class="text-danger text-xs" style="margin-top:4px;max-width:240px;" x-text="error"></div>
+        <?php endif; ?>
         <?php if ($inv['pdf_path']): ?>
             <a href="<?= e(base_url('api/v1/invoices/download.php?id=' . $invoiceId)) ?>" class="btn btn-primary btn-sm" target="_blank">
                 Download PDF
@@ -101,6 +124,35 @@ require_once dirname(__DIR__) . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($showPayOnline): ?>
+<script>
+function payOnlineButton(invoiceId, enabled) {
+    return {
+        loading: false,
+        error: '',
+        async payOnline() {
+            this.loading = true;
+            this.error = '';
+            try {
+                const r = await FF_Api.post('<?= e(base_url('api/v1/portal/invoices/initiate_qbo_payment')) ?>', {
+                    invoice_id: invoiceId,
+                });
+                if (r.success) {
+                    window.location.href = r.url;
+                } else {
+                    this.error = r.error || ('Unable to start payment: ' + (r.status || 'unknown error'));
+                    this.loading = false;
+                }
+            } catch (e) {
+                this.error = 'Network error: ' + (e.message || e);
+                this.loading = false;
+            }
+        },
+    };
+}
+</script>
+<?php endif; ?>
 
 <!-- Balance Due (large) -->
 <?php if (bccomp($inv['balance_due'], '0.00', 2) > 0): ?>

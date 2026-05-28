@@ -231,6 +231,198 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     </div>
 </div>
 
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<!-- S-QBO-15 Payment Initiations sub-view (per D-UI-COMPLETENESS-1 + operator -->
+<!-- AskUserQuestion answer: extend existing /quickbooks/payments rather than -->
+<!-- ship dedicated /quickbooks/payment_initiations page). Tracks outbound -->
+<!-- QBO Payments hosted-URL initiations (portal "Pay Online" clicks). -->
+<!-- ─────────────────────────────────────────────────────────────────────── -->
+<div class="page-header" style="margin-top:32px;">
+    <h2 class="page-header-title h5">Payment Initiations (Portal "Pay Online")</h2>
+    <div class="text-secondary text-sm" style="margin-top:4px;">
+        Outbound QBO Payments hosted-page URLs generated when portal customers click "Pay Online" on an invoice (Phase QBO-6 / S-QBO-15). Each row = one click. Pending rows have a live URL; completed rows mean the webhook handshook back to FF; cancelled/expired/failed rows are visible for operator follow-up. The bidirectional dedup invariant (D-QBO-14-1) means completed initiations are linked to acc_qbo_payment_map rows above with origin='qbo_payments_webhook'.
+    </div>
+</div>
+
+<div x-data="qboPaymentInitiationsAdmin()" x-init="init()">
+    <!-- 5 KPI tiles for initiations -->
+    <div class="kpi-grid kpi-grid--qbo" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px;">
+        <div class="kpi-tile">
+            <div class="kpi-label">Pending</div>
+            <div class="kpi-value text-info" x-text="initKpis.pending">0</div>
+            <template x-if="initKpis.live_expired_pending > 0">
+                <div class="text-xs text-warning" style="margin-top:2px;">
+                    (<span x-text="initKpis.live_expired_pending"></span> past TTL)
+                </div>
+            </template>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-label">Completed</div>
+            <div class="kpi-value text-success" x-text="initKpis.completed">0</div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-label">Cancelled</div>
+            <div class="kpi-value text-secondary" x-text="initKpis.cancelled">0</div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-label">Expired</div>
+            <div class="kpi-value text-secondary" x-text="initKpis.expired">0</div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-label">Failed</div>
+            <div class="kpi-value text-danger" x-text="initKpis.failed">0</div>
+        </div>
+    </div>
+
+    <!-- Filter -->
+    <div class="card" style="padding:10px 16px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <div class="text-sm text-secondary">Status:</div>
+        <template x-for="s in ['pending','completed','cancelled','expired','failed']" :key="s">
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
+                <input type="checkbox" :value="s" x-model="initFilters.statuses" @change="initPage=1; reloadInit()">
+                <span x-text="s"></span>
+            </label>
+        </template>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto;"
+                @click="initFilters.statuses = []; initPage=1; reloadInit()">Clear</button>
+    </div>
+
+    <!-- Initiations table -->
+    <div class="card" style="padding:0;">
+        <table class="table table-striped" style="margin:0;">
+            <thead>
+                <tr>
+                    <th>FF Invoice</th>
+                    <th>Customer</th>
+                    <th class="text-right">Amount</th>
+                    <th>Initiated By</th>
+                    <th>Generated</th>
+                    <th>Expires</th>
+                    <th>Status</th>
+                    <th>QBO Payment</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-if="initLoading">
+                    <tr><td colspan="8" class="text-center text-secondary" style="padding:20px;">Loading…</td></tr>
+                </template>
+                <template x-if="!initLoading && initRows.length === 0">
+                    <tr><td colspan="8" class="text-center text-secondary" style="padding:20px;">
+                        No initiation activity yet. Portal customers haven't clicked "Pay Online" or QBO Payments is not enabled in settings.
+                    </td></tr>
+                </template>
+                <template x-for="row in initRows" :key="row.id">
+                    <tr>
+                        <td>
+                            <a :href="ffInvoiceUrl(row.ff_invoice_id)" x-text="row.invoice_number || ('#' + row.ff_invoice_id)"></a>
+                        </td>
+                        <td><span x-text="row.customer_name || '—'"></span></td>
+                        <td class="text-right font-mono" x-text="formatMoney(row.amount, row.currency)"></td>
+                        <td class="text-sm">
+                            <span x-text="row.portal_user_name || '—'"></span>
+                            <template x-if="row.portal_user_email">
+                                <div class="text-xs text-secondary" x-text="row.portal_user_email"></div>
+                            </template>
+                        </td>
+                        <td class="text-sm text-secondary font-mono" x-text="formatTs(row.generated_at)"></td>
+                        <td class="text-sm text-secondary font-mono">
+                            <span x-text="formatTs(row.expires_at)"></span>
+                            <template x-if="row.live_expired == 1">
+                                <span class="badge badge-warning" style="margin-left:4px;font-size:0.7rem;">past TTL</span>
+                            </template>
+                        </td>
+                        <td>
+                            <span class="badge" :class="initStatusBadgeClass(row.status)" x-text="row.status"></span>
+                            <template x-if="row.error_message">
+                                <div class="text-xs text-danger" style="margin-top:4px;cursor:help;" :title="row.error_message">
+                                    <span x-text="truncate(row.error_message, 60)"></span>
+                                </div>
+                            </template>
+                        </td>
+                        <td class="font-mono text-sm" x-text="row.qbo_payment_id || '—'"></td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;">
+        <div class="text-sm text-secondary">
+            Showing <span x-text="initRows.length"></span> of <span x-text="initTotal"></span>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary btn-sm" @click="initPage = Math.max(1, initPage-1); reloadInit()" :disabled="initPage <= 1">Prev</button>
+            <span class="text-sm text-secondary" style="align-self:center;">Page <span x-text="initPage"></span></span>
+            <button class="btn btn-secondary btn-sm" @click="initPage++; reloadInit()" :disabled="initRows.length < initPerPage">Next</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function qboPaymentInitiationsAdmin() {
+    return {
+        initLoading: false,
+        initRows: [],
+        initKpis: { pending: 0, completed: 0, cancelled: 0, expired: 0, failed: 0, live_expired_pending: 0 },
+        initPage: 1,
+        initPerPage: 25,
+        initTotal: 0,
+        initFilters: { statuses: [] },
+
+        async init() { await this.reloadInit(); },
+
+        async reloadInit() {
+            this.initLoading = true;
+            try {
+                const params = new URLSearchParams({ page: this.initPage, per_page: this.initPerPage });
+                if (this.initFilters.statuses.length > 0) {
+                    params.set('status', this.initFilters.statuses.join(','));
+                }
+                const r = await FF_Api.get('<?= base_url('api/v1/quickbooks/payments/initiations') ?>?' + params.toString());
+                if (r.success) {
+                    this.initRows  = r.rows  || [];
+                    this.initKpis  = r.kpis  || this.initKpis;
+                    this.initTotal = r.total || 0;
+                }
+            } catch (e) {
+                console.error('Failed to load initiations:', e);
+            } finally {
+                this.initLoading = false;
+            }
+        },
+
+        ffInvoiceUrl(id) { return '<?= base_url('invoices/show?id=') ?>' + id; },
+
+        initStatusBadgeClass(s) {
+            return {
+                'pending':   'badge-info',
+                'completed': 'badge-success',
+                'cancelled': 'badge-secondary',
+                'expired':   'badge-secondary',
+                'failed':    'badge-danger',
+            }[s] || 'badge-secondary';
+        },
+
+        formatMoney(amt, ccy) {
+            if (amt == null) return '—';
+            const sym = (ccy === 'USD') ? 'US$' : '$';
+            return sym + parseFloat(amt).toFixed(2);
+        },
+
+        formatTs(ts) {
+            if (!ts) return '—';
+            return ts.replace('T', ' ').substring(0, 16);
+        },
+
+        truncate(s, n) {
+            if (!s) return '';
+            return s.length > n ? s.substring(0, n) + '…' : s;
+        },
+    };
+}
+</script>
+
 <script>
 function qboPaymentsAdmin(canEdit) {
     return {

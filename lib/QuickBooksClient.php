@@ -420,6 +420,100 @@ class QuickBooksClient
     }
 
     /**
+     * Generate a QBO Payments hosted-page URL for a given QBO Invoice.
+     * Per QUICKBOOKS_SPEC.md §11.2 step 5 + D-QBO-15-2.
+     *
+     * The Intuit Payments API is a SEPARATE API surface from the
+     * Accounting API:
+     *   - Accounting base: {sandbox-,}quickbooks.api.intuit.com
+     *   - Payments  base: {sandbox-,}api.intuit.com/quickbooks/v4/payments
+     *
+     * The hosted-page generation endpoint (verified against Intuit
+     * Payments API v4 docs; live-test confirmation deferred to operator
+     * at S-QBO-15 live sandbox verification): POST against the Payments
+     * base with the invoice context + success/cancel URLs; response
+     * carries the hosted URL + Intuit session id + TTL.
+     *
+     * **OPERATOR LIVE-TEST NOTE**: the exact request shape may need
+     * minor adjustment based on Intuit's current API contract (Intuit
+     * has historically renamed Payments endpoints between major
+     * versions). The signature here matches the canonical v4 contract
+     * documented at developer.intuit.com/payments; verify at first
+     * live test against sandbox realm 9341457119548719.
+     *
+     * @param  string $qboInvoiceId  Intuit Invoice.Id from acc_qbo_invoice_map
+     * @param  string $successUrl    Absolute return URL on successful payment (carries ?token=X)
+     * @param  string $cancelUrl     Absolute return URL on customer cancellation
+     * @return array{url: string, intuit_session_id: string, expires_in_seconds: int}
+     *
+     * @throws QuickBooksException on Intuit API error
+     * @session S-QBO-15
+     * @decision D-QBO-15-2 (hosted URL via Intuit Payments API; abstracted
+     *               into this method so PaymentInitiator stays QBO-agnostic)
+     */
+    public function generatePaymentsHostedUrl(string $qboInvoiceId, string $successUrl, string $cancelUrl): array
+    {
+        $env = (string) settings_get('quickbooks.environment', 'sandbox');
+        $paymentsBase = $env === 'production'
+            ? 'https://api.intuit.com/quickbooks/v4/payments'
+            : 'https://sandbox.api.intuit.com/quickbooks/v4/payments';
+
+        // Save current Accounting baseUrl + swap to Payments for this call.
+        $savedBaseUrl = $this->baseUrl;
+        $this->baseUrl = $paymentsBase;
+
+        try {
+            $payload = [
+                'invoiceId'   => $qboInvoiceId,
+                'returnUrl'   => $successUrl,
+                'cancelUrl'   => $cancelUrl,
+                // Intuit-typical: hosted page captures card + processes;
+                // no card data passes through FF (PCI scope avoided per §11.4).
+                'mode'        => 'hosted',
+            ];
+
+            $opts = [
+                'entity_type' => 'payment_initiation',
+                'operation'   => 'generate_url',
+            ];
+
+            // Note: hosted-page endpoint differs from /charges/{id} endpoint;
+            // operator may need to verify the exact path at live test.
+            $response = $this->post('charges', $payload, $opts);
+
+            // Defensive extraction — Intuit responses for this endpoint
+            // historically wrap the URL under several possible keys.
+            $url = (string) ($response['hostedPaymentUrl']
+                ?? $response['paymentUrl']
+                ?? $response['url']
+                ?? '');
+            $sessionId = (string) ($response['id']
+                ?? $response['sessionId']
+                ?? $response['chargeId']
+                ?? '');
+            $expiresIn = (int) ($response['expiresInSeconds']
+                ?? $response['ttlSeconds']
+                ?? 1800);  // 30 min default (D-QBO-15-5 idempotency window)
+
+            if ($url === '') {
+                throw new QuickBooksException(
+                    'Intuit Payments API returned no hosted URL. Response keys: '
+                    . implode(',', array_keys($response))
+                );
+            }
+
+            return [
+                'url'                => $url,
+                'intuit_session_id'  => $sessionId,
+                'expires_in_seconds' => $expiresIn,
+            ];
+        } finally {
+            // Restore Accounting baseUrl so subsequent calls work normally.
+            $this->baseUrl = $savedBaseUrl;
+        }
+    }
+
+    /**
      * Update an existing QBO entity. SyncToken must be the current
      * value from QBO — passing a stale token raises
      * QuickBooksStaleObjectException (code 5010) and the caller must

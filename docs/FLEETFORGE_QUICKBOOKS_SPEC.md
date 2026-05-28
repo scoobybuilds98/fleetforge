@@ -1643,6 +1643,8 @@ Per §22.1 of accounting spec, monthly FX revaluation revalues USD AR/AP/Cash at
 
 ## 11. QBO PAYMENTS EMBED IN CUSTOMER PORTAL
 
+> **✅ SHIPPED 2026-05-29 via S-QBO-15.** PaymentInitiator + QuickBooksClient::generatePaymentsHostedUrl + PaymentWebhookHandler initiation handshake + portal Pay Online button + portal success/cancel pages + admin /quickbooks/payments Initiations sub-view + acc_qbo_payment_initiations table (17 cols + UNIQUE token + 5 indexes + 2 FKs CASCADE/SET NULL). 5 decisions locked D-QBO-15-1/2/3/4/5. **Operator live-test follow-ups**: webhook_verifier_token still empty + webhook URL not registered in Intuit Developer dashboard + Intuit Payments API endpoint path may need minor adjustment at first sandbox verification (documented in QuickBooksClient::generatePaymentsHostedUrl docblock). See PROGRESS.md SESSION LOG row for full implementation trace.
+
 One of the most operationally important features. Enables customers to pay invoices online with money going directly to QBO Payments and AR clearing automatically in both systems.
 
 ### 11.1 Why we use the hosted-page pattern

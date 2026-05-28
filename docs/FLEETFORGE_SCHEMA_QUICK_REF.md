@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-27
-**Tables:** 140 total · **Columns:** 2227
+**Generated:** 2026-05-28
+**Tables:** 143 total · **Columns:** 2273
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -373,6 +373,7 @@ _12 tables._
 | `currency_markup_pct` | decimal(6,4) |  | NO |
 | `amount_in_cad` | decimal(12,2) |  | YES |
 | `payment_method` | enum('check','ach','wire','credit_card','cash','e_transfer','account_credit','other') |  | NO |
+| `origin` | enum('ff_native','qbo_payments_webhook','qbo_other') |  | NO |
 | `reference_number` | varchar(100) |  | YES |
 | `bank_name` | varchar(100) |  | YES |
 | `check_number` | varchar(50) |  | YES |
@@ -540,7 +541,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_58 tables._
+_61 tables._
 
 ## `acc_accounts`
 
@@ -1474,6 +1475,51 @@ _58 tables._
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `created_by_user_id` | int unsigned | MUL | YES |
 
+## `acc_qbo_payment_initiations`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_invoice_id` | int unsigned | MUL | NO |
+| `ff_portal_user_id` | int unsigned | MUL | YES |
+| `qbo_invoice_id` | varchar(50) | MUL | NO |
+| `qbo_hosted_url` | text |  | NO |
+| `initiation_token` | varchar(64) | UNI | NO |
+| `amount` | decimal(12,2) |  | NO |
+| `currency` | enum('CAD','USD') |  | NO |
+| `realm_id` | varchar(50) |  | NO |
+| `generated_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `expires_at` | datetime | MUL | NO |
+| `status` | enum('pending','completed','cancelled','expired','failed') | MUL | NO |
+| `qbo_payment_id` | varchar(50) |  | YES |
+| `error_message` | text |  | YES |
+| `completed_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_payment_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_payment_id` | int unsigned | UNI | YES |
+| `qbo_payment_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_txn_date` | date |  | YES |
+| `qbo_linked_invoice_id` | varchar(50) |  | YES |
+| `origin` | enum('ff_native','qbo_payments_webhook','qbo_other') | MUL | NO |
+| `webhook_event_id` | varchar(100) | MUL | YES |
+| `realm_id` | varchar(50) |  | YES |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','failed_preflight','pulled_from_qbo') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime |  | YES |
+| `pulled_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `acc_qbo_sync_log`
 
 | Column | Type | Key | Nullable |
@@ -1574,6 +1620,21 @@ _58 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `created_by_user_id` | int unsigned | MUL | YES |
+
+## `acc_qbo_webhook_events`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `webhook_event_id` | varchar(100) | UNI | NO |
+| `event_type` | varchar(50) | MUL | NO |
+| `realm_id` | varchar(50) | MUL | YES |
+| `payload` | longtext |  | NO |
+| `signature_verified` | tinyint(1) |  | NO |
+| `received_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
+| `processed_at` | datetime | MUL | YES |
+| `processing_result` | varchar(50) |  | YES |
+| `error_message` | text |  | YES |
 
 ## `acc_recurring_entries`
 

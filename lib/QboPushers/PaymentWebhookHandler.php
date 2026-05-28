@@ -150,6 +150,22 @@ class PaymentWebhookHandler
             ];
         }
 
+        // 6.5. S-QBO-15 initiation handshake per D-QBO-15-4.
+        //     If this payment was initiated via the portal "Pay Online"
+        //     button, an acc_qbo_payment_initiations row will exist with
+        //     matching qbo_invoice_id + status='pending'. Match by latest
+        //     pending row per D-QBO-15-1; mark complete + cross-reference
+        //     qbo_payment_id BEFORE creating the FF payment row.
+        //
+        //     If no match, the payment likely originated outside the FF
+        //     portal flow (e.g., direct QBO Payments email link, or
+        //     accountant-recorded payment) — webhook continues with
+        //     existing flow per the canonical S-QBO-13 design.
+        $initiationMatch = PaymentInitiator::matchByQboInvoice(
+            (string) $qboInvoiceId,
+            $qboPaymentId
+        );
+
         // 7. Create FF payment + allocation + map row + JE post — all in
         //    one db_transaction for atomicity (D-QBO-13-4).
         try {
@@ -162,6 +178,11 @@ class PaymentWebhookHandler
                     $realmId
                 );
             });
+            // Annotate result with initiation match info for forensic trace.
+            if ($initiationMatch !== null && is_array($result)) {
+                $result['initiation_id'] = (int) $initiationMatch['id'];
+                $result['initiation_handshook'] = true;
+            }
             return $result;
         } catch (\Throwable $e) {
             error_log("[PaymentWebhookHandler] transaction threw for qbo_payment={$qboPaymentId}: " . $e->getMessage());
