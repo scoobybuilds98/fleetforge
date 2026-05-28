@@ -382,7 +382,10 @@ try {
     if (strpos((string) $r15Row['title'], 'Smoke PRN Customer Inc.') === false) $c15Errors[] = "title should mention customer company; got " . json_encode($r15Row['title']);
     if (strpos((string) $r15Row['message'], 'C14 smoke subject') === false) $c15Errors[] = "message should include subject; got " . json_encode($r15Row['message']);
     if (strpos((string) $r15Row['message'], 'Smoke Portal User') === false) $c15Errors[] = "message should include submitted-by name; got " . json_encode($r15Row['message']);
-    if (strpos((string) $r15Row['url'], '/requests/view?id=999990') === false) $c15Errors[] = "url should drill-down to request; got " . json_encode($r15Row['url']);
+    // URL must include the /fleetforge subpath prefix (D7) so the bell's
+    // raw :href renders work cross-page. base_url() injects it.
+    if (strpos((string) $r15Row['url'], 'requests/view?id=999990') === false) $c15Errors[] = "url should drill-down to request; got " . json_encode($r15Row['url']);
+    if (strpos((string) $r15Row['url'], '/fleetforge/') === false) $c15Errors[] = "url should include /fleetforge/ subpath prefix (base_url) so cross-page bell clicks resolve; got " . json_encode($r15Row['url']);
     if (empty($c15Errors)) { echo "PASS C15 notify() title + message + url include customer + submitted-by + subject + drill-down link\n"; $pass++; }
     else { echo "FAIL C15 " . implode('; ', $c15Errors) . "\n"; $failures[] = 'C15'; }
 
@@ -600,7 +603,7 @@ try {
         "Your request \"C27 response test\" has an update.\n\nReply from support:\n{$responseText}",
         'service_request',
         999996,
-        '/portal/requests/view?id=999996',
+        base_url('portal/requests/view?id=999996'),
         'info'
     );
 
@@ -619,7 +622,8 @@ try {
         if (strpos((string) $portalRow['title'], 'Response added') === false) $c27Errors[] = "title missing 'Response added'";
         if (strpos((string) $portalRow['title'], "Status: {$oldStatus} → {$newStatus}") === false) $c27Errors[] = "title missing status transition";
         if (strpos((string) $portalRow['message'], $responseText) === false) $c27Errors[] = "message missing response excerpt";
-        if (strpos((string) $portalRow['url'], '/portal/requests/view?id=999996') === false) $c27Errors[] = "url should drill-down to portal-side view";
+        if (strpos((string) $portalRow['url'], 'portal/requests/view?id=999996') === false) $c27Errors[] = "url should drill-down to portal-side view";
+        if (strpos((string) $portalRow['url'], '/fleetforge/') === false) $c27Errors[] = "url should include /fleetforge/ subpath prefix (base_url) so portal bell click resolves";
     }
     if (empty($c27Errors)) { echo "PASS C27 respond endpoint notifyPortal — portal user gets notification with type prefix 'service_request.reply.' + correct title/message/url\n"; $pass++; }
     else { echo "FAIL C27 " . implode('; ', $c27Errors) . "\n"; $failures[] = 'C27'; }
@@ -639,8 +643,8 @@ try {
     if (strpos($respondSrc, 'service_request.reply.') === false) {
         $c28Errors[] = "respond.php missing 'service_request.reply.' type prefix";
     }
-    if (strpos($respondSrc, "'/portal/requests/view?id='") === false) {
-        $c28Errors[] = "respond.php missing portal-side drill-down URL";
+    if (strpos($respondSrc, "base_url('portal/requests/view?id='") === false) {
+        $c28Errors[] = "respond.php missing base_url('portal/requests/view?id=...') for /fleetforge subpath prefix";
     }
     if (strpos($respondSrc, "best-effort") === false && strpos($respondSrc, "try {") === false) {
         $c28Errors[] = "respond.php notify call should be in try/catch (best-effort)";

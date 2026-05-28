@@ -116,8 +116,11 @@ class PortalRequestNotifier
             // Drill-down URL — admin-side viewer at /requests/view
             // (built in same commit per scope answer). The router maps any
             // path not matching /api, /portal, /auth, /webhooks, /legal
-            // directly to app/admin/, so /requests/view → app/admin/requests/view.php
-            $url = '/requests/view?id=' . $requestId;
+            // directly to app/admin/, so /requests/view → app/admin/requests/view.php.
+            // Use base_url() so the /fleetforge subpath prefix (D7) is included —
+            // the bell renders this raw via Alpine :href so the URL must be
+            // resolvable from the root domain, not relative to the current page.
+            $url = \base_url('requests/view?id=' . $requestId);
 
             $severity = self::severityForType((string) $req['request_type']);
 

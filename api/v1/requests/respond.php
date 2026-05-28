@@ -105,6 +105,9 @@ try {
             // Severity: response or final state → info; re-open after closed → warning
             $severity = ($oldStatus === 'closed' && $status === 'open') ? 'warning' : 'info';
 
+            // base_url() prefixes the /fleetforge subpath (D7) so the bell's
+            // Alpine :href is a fully-qualified absolute path — clicking from
+            // any page resolves correctly.
             \FleetForge\Notifications\NotificationService::notifyPortal(
                 'service_request.reply.' . $status,
                 (int) $req['customer_id'],
@@ -112,7 +115,7 @@ try {
                 $message,
                 'service_request',
                 $id,
-                '/portal/requests/view?id=' . $id,
+                base_url('portal/requests/view?id=' . $id),
                 $severity
             );
         } catch (\Throwable $e) {
