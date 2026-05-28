@@ -909,6 +909,85 @@ if (!is_dir($pushersDir)) {
 echo "\n";
 
 // ────────────────────────────────────────────────────────────────────────────
+// CLASS 13 — Operator follow-ups freshness check (advisory)
+//
+// When recent SESSION LOG rows mention "Operator follow-ups" or
+// "follow-ups noted" in their prose, OPERATOR_FOLLOWUPS.md should
+// have a matching "Last updated" date within the same recent SESSION
+// LOG window. Advisory (not strict) because:
+//   (a) Some follow-ups get re-architected into proper session labels
+//       between surfacing and tracking (e.g. F5 → S-QBO-14-UPDATE-FOLLOWUP)
+//   (b) Catalog reflects discretion — strict-fail would create noise
+//
+// Surfaces orphans: SESSION LOG rows mention follow-ups but
+// OPERATOR_FOLLOWUPS.md "Last updated" predates the row's date.
+//
+// Locked 2026-05-29 via S-OPERATOR-FOLLOWUPS-TRACKING in response to
+// operator escalation that follow-ups in SESSION LOG prose get lost
+// across context wipes. Companion to feedback_operator_followups_
+// tracking.md memory file (the discipline narrative).
+// ────────────────────────────────────────────────────────────────────────────
+
+echo "Class 13 — Operator follow-ups freshness (advisory)\n";
+echo str_repeat('─', 78) . "\n";
+
+$followupsPath = REPO_ROOT . '/docs/FLEETFORGE_OPERATOR_FOLLOWUPS.md';
+$followupsRaw  = @file_get_contents($followupsPath);
+
+if ($followupsRaw === false) {
+    record('C13: OPERATOR_FOLLOWUPS.md exists', false, "missing at {$followupsPath}");
+} else {
+    // Extract Last updated date from OPERATOR_FOLLOWUPS.md
+    preg_match('/\*\*Last updated:\*\*\s*(\d{4}-\d{2}-\d{2})/', $followupsRaw, $luMatch);
+    $followupsLastUpdated = $luMatch[1] ?? null;
+
+    if ($followupsLastUpdated === null) {
+        record('C13: OPERATOR_FOLLOWUPS.md has "Last updated" date', false, "missing '**Last updated:** YYYY-MM-DD' marker");
+    } else {
+        // Scan tail of SESSION LOG for follow-up mentions; check date >= followupsLastUpdated
+        if (!isset($labels)) {
+            record("C13: OPERATOR_FOLLOWUPS.md current (last updated {$followupsLastUpdated}; SESSION LOG rows scanned: 0)", true);
+        } else {
+            $tail = array_slice($labels, -DOC_FRESHNESS_SESSION_TAIL);
+            $followupKeywords = ['Operator follow-ups', 'operator follow-ups', 'follow-ups noted', 'Operator follow-up'];
+            $orphanSessions = [];
+            // For each recent labeled session, scan its SESSION LOG row for follow-up mentions.
+            // If found, the OPERATOR_FOLLOWUPS.md "Last updated" should be ≥ the session's date.
+            // We use approximate matching against PROGRESS.md rather than parsing the table — simpler.
+            foreach ($tail as $label) {
+                $rowStart = strpos($progressRaw, "| {$label} |");
+                if ($rowStart === false) {
+                    continue;  // session not in PROGRESS (CLASS 5/10 catches that separately)
+                }
+                $rowEnd = strpos($progressRaw, "\n", $rowStart);
+                $row = substr($progressRaw, $rowStart, $rowEnd - $rowStart);
+                // Extract date from second column of the row
+                preg_match('/\|\s*(\d{4}-\d{2}-\d{2})\s*\|/', $row, $dateMatch);
+                $sessionDate = $dateMatch[1] ?? null;
+                $hasFollowups = false;
+                foreach ($followupKeywords as $kw) {
+                    if (strpos($row, $kw) !== false) {
+                        $hasFollowups = true;
+                        break;
+                    }
+                }
+                if ($hasFollowups && $sessionDate !== null && $sessionDate > $followupsLastUpdated) {
+                    $orphanSessions[] = "{$label} (dated {$sessionDate})";
+                }
+            }
+            if (empty($orphanSessions)) {
+                record("C13: OPERATOR_FOLLOWUPS.md current (last updated {$followupsLastUpdated}; SESSION LOG rows scanned: " . count($tail) . ")", true);
+            } else {
+                // Advisory — always pass, just list orphans
+                record("C13: OPERATOR_FOLLOWUPS.md may need refresh — sessions mention follow-ups but doc 'Last updated' is older", true, 'Orphan sessions: ' . implode(', ', $orphanSessions) . " (OPERATOR_FOLLOWUPS.md last updated {$followupsLastUpdated})");
+            }
+        }
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
 // Summary + exit
 // ────────────────────────────────────────────────────────────────────────────
 
