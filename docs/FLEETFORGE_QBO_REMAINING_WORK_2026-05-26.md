@@ -10,11 +10,14 @@
 - ✅ **S-VENDOR-CURRENCY-COLUMN** SHIPPED 2026-05-27 (closes D-QBO-FIXPACK-8 backlog; D-VENDOR-CURRENCY-COLUMN-1/4)
 - ✅ **S-DOC-FRESHNESS-EXPAND** SHIPPED 2026-05-27 (infrastructure paydown — `_smoke_doc_freshness.php` +5 classes; D-DOC-FRESHNESS-EXPAND-1)
 - ✅ **S-QBO-18** SHIPPED 2026-05-27 (Phase QBO-8 / 1 of 2 — bill push; first AP-direction Pusher; D-QBO-18-1/2/3/4/5/6/7)
+- ✅ **S-QBO-BILL-SYNC-UI** SHIPPED 2026-05-27 (admin surface mirror of /quickbooks/invoices for bills; no D-* lock — pattern-mirror)
+- ✅ **S-QBO-BILL-GOTCHAS-PAYDOWN** SHIPPED 2026-05-27 (closes 4 gotchas from S-QBO-18 live test: currency-mismatch gate 8, typed field_too_long status, input-time DocNumber validation, AccountValidator empty-cat hint improvement; D-QBO-BILL-GOTCHAS-1/2)
 - Top-5 progress: 3 of 5 done (S-QBO-12 + S-VENDOR-CURRENCY-COLUMN + S-QBO-18); next-up **S-QBO-13** (L Opus payment pull webhook, Exception #1)
-- Phase QBO numbered total: 11/30 → **13/30** (S-QBO-12 + S-QBO-18 advance the counter)
-- Debt-paydown/infra total: 27 → **28** (S-VENDOR-CURRENCY-COLUMN registered; S-DOC-FRESHNESS-EXPAND not counted as QBO paydown — it's project infrastructure)
-- D131 smoke count: 22 → **23** (S-QBO-18 added qbo_bill_push smoke file)
-- Migrate count: 65 → **69** (4 migrations in 2026-05-27 burst: S-QBO-12 push_status ENUM ext / S-CV-PUSH-STATE-INFRA / S-VENDOR-CURRENCY-COLUMN / S-QBO-18 acc_qbo_bill_map)
+- Phase QBO numbered total: 11/30 → **13/30** (S-QBO-12 + S-QBO-18 advance the counter; SYNC-UI + GOTCHAS-PAYDOWN are debt-paydowns)
+- Debt-paydown/infra total: 27 → **30** (S-VENDOR-CURRENCY-COLUMN + S-QBO-BILL-SYNC-UI + S-QBO-BILL-GOTCHAS-PAYDOWN registered as QBO paydowns; S-DOC-FRESHNESS-EXPAND not counted as QBO paydown — project infrastructure)
+- D131 smoke count: 22 → **23** (S-QBO-18 added qbo_bill_push smoke file; SYNC-UI + GOTCHAS-PAYDOWN extend existing smokes in-place)
+- Migrate count: 65 → **70** (5 migrations in 2026-05-27 burst: S-QBO-12 push_status ENUM ext / S-CV-PUSH-STATE-INFRA / S-VENDOR-CURRENCY-COLUMN / S-QBO-18 acc_qbo_bill_map / S-QBO-BILL-GOTCHAS-PAYDOWN bill_map ENUM ext)
+- QBO live verification: **2nd real FF→QBO push on record** — Bill #148 (LIVETEST-BILL-20260527-162957 / FF#999992, $262.50 CAD) pushed to sandbox realm 9341457119548719 during S-QBO-18 live test 2026-05-27 16:29:59. 1st was Invoice #147 from S-QBO-LIVE-VERIFY-RERUN-2026-05-26.
 
 ---
 
