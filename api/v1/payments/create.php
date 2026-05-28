@@ -517,4 +517,15 @@ db_transaction(function () use (
     }
 });
 
+// ── QBO sync enqueue (S-QBO-14 / Phase QBO-6 / 2 of 3) ──────────────────
+// Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws; silent reject
+// when sync_enabled=0 or origin != 'ff_native'. Defense-in-depth with
+// PaymentPusher::pushImpl origin filter (D-QBO-14-1; closes D-QBO-13-1/2
+// bidirectional dedup invariant). Mirrors send.php (S-QBO-11) and
+// bills/approve.php (S-QBO-18) hook pattern: AFTER db_transaction commits,
+// BEFORE json_success — failure here must not break the FF payment flow.
+if (!empty($result['id'])) {
+    \FleetForge\QboPushers\PaymentEnqueuer::enqueue((int) $result['id'], 'create');
+}
+
 json_success($result, 201);

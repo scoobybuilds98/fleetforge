@@ -1,0 +1,166 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * lib/QboPushers/PaymentEnqueuer.php
+ *
+ * Phase QBO-6 / 2 of 3 (S-QBO-14) — paired with PaymentPusher.
+ *
+ * Best-effort enqueuer for FF payment push events. Mirrors BillEnqueuer
+ * + S-QBO-ENQUEUER-ELIGIBILITY-GATE gate-0 discipline with payment-
+ * specific eligibility rules.
+ *
+ * CRITICAL — bidirectional dedup gate 0 per D-QBO-14-1 (closing
+ * D-QBO-13-1/2 invariant at the enqueue layer):
+ *   - payment.origin = 'ff_native' required
+ *   - origin='qbo_payments_webhook' rows are already in QBO (received
+ *     via S-QBO-13 webhook handler); pushing them back creates a
+ *     DUPLICATE QBO Payment with auto-discriminated id
+ *   - origin='qbo_other' rows are accountant-created in QBO directly
+ *     (pulled by a future S-QBO-26 path); same skip semantics
+ *
+ * Defense-in-depth: PaymentPusher::pushImpl ALSO performs this check
+ * (catches CLI invocations + races + manual queue inserts).
+ *
+ * Per §6.9 D-ENQUEUER-CONTRACT: silent reject + error_log diagnostics;
+ * never throws. Production canonical caller is api/v1/payments/create.php
+ * (mirrors S-QBO-11 send.php / S-QBO-18 approve.php hook pattern).
+ *
+ * @session  S-QBO-14
+ * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.9 (Enqueuer Contract)
+ * @decision D-QBO-14-1 (origin='ff_native' filter; closes D-QBO-13-1/2
+ *               invariant at enqueue layer),
+ *           D-QBO-14-2 (payment.status='cleared' eligibility),
+ *           D-QBO-14-5 (pushUpdate stubbed → S-QBO-14-UPDATE-FOLLOWUP;
+ *               gate-3 v1 allowlist = ['create'] only),
+ *           D-ENQUEUER-CONTRACT (best-effort discipline),
+ *           D-ENQUEUER-GATE-0-ELIGIBILITY (eligibility gate-0 before
+ *               existing 4-step gating)
+ */
+
+namespace FleetForge\QboPushers;
+
+class PaymentEnqueuer
+{
+    /**
+     * Eligible payment statuses for push per operation. 'create' requires
+     * status='cleared' (default for FF payments). pending/failed/voided/
+     * refunded/returned payments do not push.
+     */
+    private const OPERATION_STATUS_REQUIREMENTS = [
+        'create' => ['cleared'],
+        // 'update' would also accept 'cleared' but pushUpdate is stubbed
+        // for v1 per D-QBO-14-5 — listed here so gate-0 still validates
+        // payment exists + status='cleared' before gate-3 rejects op.
+        'update' => ['cleared'],
+    ];
+
+    /**
+     * Eligible payment origins. Only ff_native payments are pushed —
+     * webhook-originated and qbo_other are already in QBO. This is the
+     * D-QBO-14-1 invariant at gate 0.
+     */
+    private const ALLOWED_ORIGINS = ['ff_native'];
+
+    /**
+     * Best-effort enqueue. Returns true on successful queue insert,
+     * false on any rejection (silent — error_log captures the reason
+     * but never throws).
+     *
+     * Per §6.9 best-effort contract: a sync failure must never break
+     * the calling FF flow (payment create must succeed even if QBO
+     * enqueue rejects).
+     *
+     * @param int    $paymentId FF payments.id
+     * @param string $operation 'create' (S-QBO-14 v1; 'update' deferred)
+     * @return bool             true on enqueue success
+     */
+    public static function enqueue(int $paymentId, string $operation): bool
+    {
+        try {
+            // ────────────────────────────────────────────────────────
+            // Gate 0: Eligibility check.
+            //
+            // Verifies payment exists + status='cleared' + origin='ff_native'.
+            // The origin check is CRITICAL — it closes the bidirectional
+            // dedup loop with D-QBO-13. Without it, webhook-originated
+            // payments (origin='qbo_payments_webhook') would be re-pushed
+            // and create duplicate QBO Payments.
+            // ────────────────────────────────────────────────────────
+            $ff = db_row(
+                "SELECT id, status, origin FROM payments WHERE id = ?",
+                [$paymentId]
+            );
+            if ($ff === null) {
+                error_log("[PaymentEnqueuer] gate-0 reject: payment id {$paymentId} not found");
+                return false;
+            }
+
+            // origin gate (D-QBO-14-1) — fail fast before status check
+            // because origin mismatch is a stronger signal than status.
+            if (!in_array($ff['origin'], self::ALLOWED_ORIGINS, true)) {
+                error_log(
+                    "[PaymentEnqueuer] gate-0 reject: payment {$paymentId} origin='{$ff['origin']}' " .
+                    "not in allowlist [" . implode(',', self::ALLOWED_ORIGINS) . "] " .
+                    "(D-QBO-14-1 bidirectional dedup with D-QBO-13)"
+                );
+                return false;
+            }
+
+            $allowedStatuses = self::OPERATION_STATUS_REQUIREMENTS[$operation] ?? null;
+            if ($allowedStatuses === null) {
+                error_log("[PaymentEnqueuer] gate-0 reject: unknown operation '{$operation}' for payment {$paymentId}");
+                return false;
+            }
+            if (!in_array($ff['status'], $allowedStatuses, true)) {
+                error_log(
+                    "[PaymentEnqueuer] gate-0 reject: payment {$paymentId} status='{$ff['status']}' not in allowlist " .
+                    "[" . implode(',', $allowedStatuses) . "] for operation='{$operation}' (D-QBO-14-2)"
+                );
+                return false;
+            }
+
+            // ────────────────────────────────────────────────────────
+            // Gate 1: Master sync kill-switch (D-CPA-5).
+            // ────────────────────────────────────────────────────────
+            $syncEnabled = (string) settings_get('quickbooks.sync_enabled', '0');
+            if ($syncEnabled !== '1') {
+                return false;  // silent — master switch off is the default state
+            }
+
+            // ────────────────────────────────────────────────────────
+            // Gate 2: Per-entity sync mode kill.
+            // ────────────────────────────────────────────────────────
+            $mode = (string) settings_get('quickbooks.sync_mode.payment', 'queue');
+            if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+                return false;  // silent
+            }
+
+            // ────────────────────────────────────────────────────────
+            // Gate 3: Operation allowlist. update + void NOT in v1 per
+            // D-QBO-14-5 stub-then-implement pattern.
+            // ────────────────────────────────────────────────────────
+            if (!in_array($operation, ['create'], true)) {
+                error_log("[PaymentEnqueuer] gate-3 reject: operation '{$operation}' not in S-QBO-14 v1 allowlist (create only; update + void deferred to S-QBO-14-UPDATE-FOLLOWUP)");
+                return false;
+            }
+
+            // ────────────────────────────────────────────────────────
+            // Gate 4: INSERT queue row.
+            // ────────────────────────────────────────────────────────
+            db_insert('acc_qbo_sync_queue', [
+                'entity_type' => 'payment',
+                'entity_id'   => $paymentId,
+                'operation'   => $operation,
+                'status'      => 'queued',
+                'priority'    => 100,    // matches BillEnqueuer / InvoiceEnqueuer default
+                'retry_count' => 0,
+                'max_retries' => 3,
+            ]);
+            return true;
+        } catch (\Throwable $e) {
+            error_log("[PaymentEnqueuer] enqueue failed for payment {$paymentId} op={$operation}: " . $e->getMessage());
+            return false;
+        }
+    }
+}

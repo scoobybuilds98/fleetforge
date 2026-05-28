@@ -35,6 +35,11 @@ class QboFieldLimits
     // Line Description: QBO API spec 4000 chars
     public const INVOICE_LINE_DESCRIPTION_MAX = 4000;
 
+    // ── Payment entity ────────────────────────────────────────────────────
+    // PaymentRefNum: QBO API spec 21 chars (matches Invoice/Bill DocNumber per Intuit docs)
+    // Added 2026-05-28 by S-QBO-14 D-QBO-14-6.
+    public const PAYMENT_REF_NUM_MAX = 21;
+
     // ── Future gates (placeholder comments; fill in when ported) ─────────
     // CustomerPusher / VendorPusher field limits will be added here per
     // D-QBO-FIXPACK-4: single-source policy.

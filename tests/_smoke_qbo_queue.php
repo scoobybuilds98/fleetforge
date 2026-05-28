@@ -195,8 +195,12 @@ $check('C7  cron/qbo_sync_worker.php exists and lints clean', $c7Errs);
 //            a stub returning 'unsupported_in_session' per D-QBO-11-4
 //            but method_exists() returns true — dispatcher considers it
 //            "implemented"; the stub dead-letters the queue row cleanly).
+// 'bill'     shipped at S-QBO-18 (BillPusher exists; pushUpdate stub
+//            per D-QBO-18-5 — same stub-then-implement pattern).
+// 'payment'  shipped at S-QBO-14 (PaymentPusher exists; pushUpdate
+//            stub per D-QBO-14-5 — same pattern).
 // Remaining entity types in the dispatcher's convention map are still
-// pre-implementation as of S-QBO-11.
+// pre-implementation as of S-QBO-14.
 $c8Errs = [];
 foreach ([
     ['customer', 'create'],
@@ -205,17 +209,21 @@ foreach ([
     ['vendor',   'update'],
     ['invoice',  'create'],
     ['invoice',  'update'],
+    ['bill',     'create'],
+    ['bill',     'update'],
+    ['payment',  'create'],
+    ['payment',  'update'],
 ] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== true) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be true post-shipped";
     }
 }
-foreach ([['payment','create'], ['journal_entry','void'], ['item','create']] as $pair) {
+foreach ([['credit_memo','create'], ['journal_entry','void'], ['item','create']] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== false) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-Pusher-session";
     }
 }
-$check('C8  hasImplementation true for customer+vendor+invoice (S-QBO-6/7/11 shipped), false for unbuilt Pushers', $c8Errs);
+$check('C8  hasImplementation true for customer+vendor+invoice+bill+payment (S-QBO-6/7/11/18/14 shipped), false for unbuilt Pushers', $c8Errs);
 
 // ── C9: worker pusher_not_implemented pathway (SELF-CLEANING) ──
 // CRITICAL: every artifact created in this check MUST be reverted
@@ -233,11 +241,12 @@ try {
     $notifBefore = (int) db_count("SELECT COUNT(*) FROM notifications WHERE type LIKE 'quickbooks.%'", []);
 
     // Insert a fake queue row for an entity type with NO Pusher yet.
-    // 'payment' is the next-up unbuilt Pusher (S-QBO-13/14 future).
+    // 'credit_memo' is the next-up unbuilt Pusher (S-QBO-15 future).
     // Migrated through 'customer' (S-QBO-3 ship) → 'invoice' (S-QBO-11
-    // ship) → 'payment' (current) as each prior entity got a Pusher.
+    // ship) → 'payment' (S-QBO-14 ship 2026-05-28) → 'credit_memo'
+    // (current) as each prior entity got a Pusher.
     $createdQueue = db_insert('acc_qbo_sync_queue', [
-        'entity_type' => 'payment',
+        'entity_type' => 'credit_memo',
         'entity_id'   => 999999, // sentinel ID — no real entity
         'operation'   => 'create',
         'status'      => 'queued',
