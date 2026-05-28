@@ -816,6 +816,99 @@ if ($referenceRaw === false || $inventoryRaw === false) {
 echo "\n";
 
 // ────────────────────────────────────────────────────────────────────────────
+// CLASS 12 — Pusher ↔ admin UI presence check
+//
+// Every QBO Pusher class (lib/QboPushers/{Entity}Pusher.php) MUST have a
+// matching admin UI surface (app/admin/quickbooks/{entity}.php) shipped
+// in the same commit. Backend-only ships create operator-babysitting
+// cleanup arcs (S-QBO-18 → S-QBO-BILL-SYNC-UI, S-QBO-14 →
+// S-QBO-PAYMENT-SYNC-UI — both operator-caught).
+//
+// Locked 2026-05-29 via S-QBO-PAYMENT-SYNC-UI / D-UI-COMPLETENESS-1
+// after operator escalation: "why are you forgetting about stuff?"
+//
+// Pattern: Pusher class basename → admin page slug (plural form). Hard-
+// coded mapping table since plural rules are irregular (Bill→bills,
+// Invoice→invoices, Payment→payments — all naive +s, but future
+// CreditMemo→credit_memos and RefundReceipt→refund_receipts will need
+// the snake_case conversion + pluralization explicitly).
+//
+// Allowlist: some Pushers share an admin UI surface with their
+// counterpart Puller/Handler (e.g. PaymentWebhookHandler shares
+// payments.php with PaymentPusher — the surface is bidirectional by
+// design). Document each allowlist entry inline.
+//
+// Companion: memory/feedback_ui_completeness_with_backend.md (the
+// discipline narrative; survives context wipes).
+// ────────────────────────────────────────────────────────────────────────────
+
+echo "Class 12 — Pusher ↔ admin UI presence check\n";
+echo str_repeat('─', 78) . "\n";
+
+// Hardcoded mapping: Pusher class basename → admin page filename.
+// Update when a new Pusher ships. NULL = exempted (allowlist with reason).
+$pusherToAdminPage = [
+    'CustomerPusher'  => 'customers.php',
+    'VendorPusher'    => 'vendors.php',
+    'InvoicePusher'   => 'invoices.php',
+    'BillPusher'      => 'bills.php',
+    'PaymentPusher'   => 'payments.php',
+    // Future: CreditMemoPusher → credit_memos.php (S-QBO-16)
+    //         RefundReceiptPusher → refund_receipts.php (S-QBO-17)
+    //         BillPaymentPusher → bill_payments.php (S-QBO-19)
+    //         JournalEntryPusher → journal_entries.php (S-QBO-21)
+];
+
+$pushersDir = REPO_ROOT . '/lib/QboPushers';
+if (!is_dir($pushersDir)) {
+    record('C12: Pushers dir readable', false, "lib/QboPushers missing");
+} else {
+    $pusherFiles = glob($pushersDir . '/*Pusher.php');
+    $missingUi   = [];
+    $unmapped    = [];
+
+    foreach ($pusherFiles as $file) {
+        $basename = basename($file, '.php');  // e.g. "PaymentPusher"
+
+        if (!isset($pusherToAdminPage[$basename])) {
+            // New Pusher shipped without updating the mapping table.
+            // Strict-fail — operator needs to choose: add to mapping OR
+            // explicitly allowlist with reason.
+            $unmapped[] = $basename;
+            continue;
+        }
+
+        $adminPageFile = $pusherToAdminPage[$basename];
+        if ($adminPageFile === null) {
+            // Allowlisted (shared admin surface) — pass.
+            continue;
+        }
+
+        $adminPagePath = REPO_ROOT . '/app/admin/quickbooks/' . $adminPageFile;
+        if (!is_file($adminPagePath)) {
+            $missingUi[] = "{$basename} → app/admin/quickbooks/{$adminPageFile}";
+        }
+    }
+
+    $errors = [];
+    if (!empty($missingUi)) {
+        $errors[] = 'Backend-only Pusher(s) — admin UI missing: ' . implode('; ', $missingUi);
+    }
+    if (!empty($unmapped)) {
+        $errors[] = 'Pusher(s) not in mapping table (update CLASS 12 or add allowlist entry): ' . implode(', ', $unmapped);
+    }
+
+    if (empty($errors)) {
+        $n = count($pusherFiles);
+        record("C12: all {$n} QBO Pushers have matching admin UI surfaces", true);
+    } else {
+        record('C12: all QBO Pushers have matching admin UI surfaces', false, implode(' | ', $errors));
+    }
+}
+
+echo "\n";
+
+// ────────────────────────────────────────────────────────────────────────────
 // Summary + exit
 // ────────────────────────────────────────────────────────────────────────────
 

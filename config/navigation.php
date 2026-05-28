@@ -281,6 +281,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Payments',
+                'icon'   => 'banknotes',
+                'url'    => '/quickbooks/payments',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',

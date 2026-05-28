@@ -529,12 +529,12 @@ if ($qboParent === null) {
 } else {
     $labels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
     // S-QBO-BILL-SYNC-UI 2026-05-27: +Bills between Invoices and Settings.
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Bills', 'Settings'];
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Bills', 'Payments', 'Settings'];
     if ($labels !== $expected) {
         $c16Errors[] = 'expected ' . json_encode($expected) . ' got ' . json_encode($labels);
     }
 }
-if (empty($c16Errors)) { echo "PASS C16 nav has 12 QuickBooks children with Bills between Invoices and Settings (S-QBO-BILL-SYNC-UI)\n"; $pass++; }
+if (empty($c16Errors)) { echo "PASS C16 nav has 13 QuickBooks children with Bills between Invoices and Settings (S-QBO-BILL-SYNC-UI)\n"; $pass++; }
 else { echo "FAIL C16 " . implode('; ', $c16Errors) . "\n"; $failures[] = 'C16'; }
 
 // ── C17: ItemPuller::normalize maps representative JSON ──────
