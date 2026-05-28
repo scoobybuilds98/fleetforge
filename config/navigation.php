@@ -295,6 +295,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Journal Entries',
+                'icon'   => 'document-text',
+                'url'    => '/quickbooks/journal_entries',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Settings',
                 'icon'   => 'cog-6-tooth',
                 'url'    => '/quickbooks/settings',

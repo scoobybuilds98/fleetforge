@@ -854,9 +854,9 @@ $pusherToAdminPage = [
     'BillPusher'        => 'bills.php',
     'PaymentPusher'     => 'payments.php',
     'BillPaymentPusher' => 'bill_payments.php',
+    'JournalEntryPusher' => 'journal_entries.php',
     // Future: CreditMemoPusher → credit_memos.php (S-QBO-16)
     //         RefundReceiptPusher → refund_receipts.php (S-QBO-17)
-    //         JournalEntryPusher → journal_entries.php (S-QBO-21)
 ];
 
 $pushersDir = REPO_ROOT . '/lib/QboPushers';

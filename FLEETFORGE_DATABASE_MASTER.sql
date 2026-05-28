@@ -1120,6 +1120,31 @@ CREATE TABLE `acc_qbo_bill_payment_map` (
   KEY `idx_pushed_at` (`pushed_at`),
   CONSTRAINT `fk_qbo_bill_payment_map_ff` FOREIGN KEY (`ff_ap_payment_id`) REFERENCES `acc_ap_payments` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-8 S-QBO-19: FF→QBO bill payment push state tracking. Mirrors acc_qbo_bill_map (S-QBO-18) shape with bill-payment-specific deltas (bank_account snapshot + pay_type + no doc_number column — BillPayment has no DocNumber in QBO API).';
+CREATE TABLE `acc_qbo_journal_entry_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_journal_entry_id` int unsigned NOT NULL COMMENT 'NOT NULL: JE pushes are FF-origin only in S-QBO-21 v1 (Phase QBO-10). QBO-authored JEs handled via S-QBO-26 manual sync or bank-CDC pull (§8.12 for bank-transaction-typed JEs).',
+  `qbo_journal_entry_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit JournalEntry.Id; NULL until first successful push',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token; refreshed on every push',
+  `qbo_doc_number` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO DocNumber snapshot from FF entry_number (JE-YYYY-NNNNN)',
+  `qbo_total_amt` decimal(15,2) DEFAULT NULL COMMENT 'QBO TotalAmt snapshot (sum of debits = sum of credits; balanced) — drift comparison baseline',
+  `qbo_currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CurrencyRef.value (e.g. CAD/USD) snapshot',
+  `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
+  `qbo_txn_date` date DEFAULT NULL COMMENT 'QBO TxnDate snapshot (mirrors FF entry_date)',
+  `qbo_private_note` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'QBO PrivateNote snapshot (FF entry_number + source attribution per D-QBO-21-7)',
+  `ff_je_snapshot_total` decimal(15,2) DEFAULT NULL COMMENT 'FF balanced-total snapshot at push time (debit sum = credit sum) — drift baseline',
+  `push_status` enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Mirrors acc_qbo_bill_payment_map.push_status (S-QBO-19) — typed sub-states for currency_mismatch + field_too_long applicable here too. Bridge-derived skips use the no-map-row pattern (mirror BillPusher skipped_unmapped_void / PaymentPusher skipped_non_ff_origin) — sync_log captures via error_code; NO map row written per D-QBO-21-1 defense-in-depth.',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_journal_entry` (`ff_journal_entry_id`) COMMENT 'One mapping per FF JE; enforces idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_journal_entry` (`qbo_journal_entry_id`) COMMENT 'No two FF JEs share a QBO JournalEntry.Id; NULL-multi-OK per InnoDB',
+  KEY `idx_status` (`push_status`),
+  KEY `idx_pushed_at` (`pushed_at`),
+  CONSTRAINT `fk_qbo_je_map_ff` FOREIGN KEY (`ff_journal_entry_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-10 S-QBO-21: FF→QBO journal entry push state tracking. Mirrors acc_qbo_bill_payment_map (S-QBO-19) shape with JE-specific deltas (no doc_number column; PrivateNote snapshot for audit drill-down; balanced-total snapshot). Bridge-derived JEs (source_type IN invoice/payment/credit_note/ap_bill/ap_payment per spec §8.10) skip BOTH Enqueuer gate-0 AND Pusher pushImpl step 2 — no map row written for bridge skips per D-QBO-21-1.';
 CREATE TABLE `acc_qbo_payment_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_payment_id` int unsigned DEFAULT NULL COMMENT 'NULLABLE: QBO webhook may arrive before FF payment exists (e.g. invoice not mapped yet). Different from acc_qbo_invoice_map where ff_invoice_id is NOT NULL.',

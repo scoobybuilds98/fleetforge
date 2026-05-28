@@ -115,6 +115,11 @@ $_qboNavGroups = [
         'icon'  => 'banknotes',
     ],
     [
+        'label' => 'Journal Entries',
+        'url'   => '/quickbooks/journal_entries',
+        'icon'  => 'document-text',
+    ],
+    [
         'label' => 'Settings',
         'url'   => '/quickbooks/settings',
         'icon'  => 'cog-6-tooth',

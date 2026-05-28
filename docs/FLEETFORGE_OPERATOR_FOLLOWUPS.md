@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-05-29 via S-OPERATOR-FOLLOWUPS-TRACKING.
+**Last updated:** 2026-05-29 via S-QBO-21 (added F12 + F13).
 
 ---
 
@@ -89,6 +89,26 @@
 
 ---
 
+### F12 — `tax_receivable` + `tax_payable` critical_category mappings required for JE push
+
+**Surfaced by:** S-QBO-21 (2026-05-29) — D-QBO-VALIDATOR-3 + JournalEntryPusher::runPreflight gate 1
+**Affects:** S-QBO-21 (JournalEntryPusher::pushCreate live test); future Phase QBO-11 sessions S-QBO-22 (depreciation JE) + S-QBO-23 (tax remittance JE) that flow through this Pusher.
+**Operator action:**
+1. Identify FF Asset account(s) representing tax receivable (e.g. GST/HST Input Tax Credits — typical codes 1310 / 1320 region)
+2. In `/quickbooks/accounts` admin UI: tag each FF account's `critical_category='tax_receivable'`
+3. Identify FF Liability account(s) representing tax payable (e.g. GST/HST collected — typical codes 2310 / 2320 region)
+4. In `/quickbooks/accounts` admin UI: tag each FF account's `critical_category='tax_payable'`
+5. Map each tagged account to the corresponding QBO account via the Save Mapping action
+6. Verify: `AccountValidator::assertReadyForJournalEntryPush()` no longer throws (test via CLI: `php -r "require 'api/bootstrap.php'; \FleetForge\QboPushers\AccountValidator::assertReadyForJournalEntryPush(); echo 'OK';"`)
+
+**Why blocking** (for S-QBO-21 live test only): JournalEntryPusher::runPreflight gate 1 calls AccountValidator::assertReadyForJournalEntryPush which throws ChartOfAccountsIncompleteException when either category is unmapped. First live FF→QBO JE push (depreciation, tax remittance, year-end, recurring, manual, AJE) will fail at preflight with actionable error directing operator to /quickbooks/accounts.
+
+**Without this:** S-QBO-21 JournalEntryPusher returns `failed_preflight` status on every push attempt; admin UI surfaces the actionable error. Bridge-derived JEs (source_type IN invoice/payment/credit_note/ap_bill/ap_payment) still skip cleanly without map row write per D-QBO-21-1 — only the non-bridge-derived JEs need these categories mapped.
+
+**Note:** This gate is per-session per D-QBO-VALIDATOR-3 (S-QBO-VALIDATOR-SCOPE-SPLIT). Other Pushers have their own category requirements: InvoicePusher needs ar_clearing + sales_revenue; PaymentPusher needs ar_clearing + undeposited_funds; BillPusher needs ap_clearing; BillPaymentPusher needs ap_clearing + undeposited_funds.
+
+---
+
 ## 🟢 DEFERRED — queued for follow-up sessions
 
 ### F5 — S-QBO-14-UPDATE-FOLLOWUP — PaymentPusher::pushUpdate impl
@@ -153,6 +173,15 @@ Each follows the 6-state badge + identifiers row + Push History table pattern fr
 **Operator action:** queue a session to extend `app/admin/vendors/{create,edit}.php` Alpine forms with currency selector. Currently the API accepts `currency` ENUM input but admin UI form doesn't expose it.
 
 **Why deferred:** S-VENDOR-CURRENCY-COLUMN was scoped XS — column + Pusher read + API endpoints. UI extension was explicitly deferred. Operators can set currency via API call or DB UPDATE in the interim.
+
+---
+
+### F13 — S-QBO-21-UPDATE-FOLLOWUP — JournalEntryPusher::pushUpdate impl
+
+**Surfaced by:** S-QBO-21 (2026-05-29) — D-QBO-21-5 stub-then-implement pattern
+**Operator action:** queue a future session to implement JournalEntryPusher::pushUpdate. Currently returns `unsupported_in_session` per the stub pattern (matches S-QBO-11 D-QBO-11-4 + S-QBO-14 D-QBO-14-5 + S-QBO-18 D-QBO-18-5 + S-QBO-19 D-QBO-19-5).
+
+**Why deferred:** v1 ships pushCreate; pushUpdate semantics for posted JEs are non-trivial — QBO's JournalEntry update model is restrictive (sparse=true + Active=false approximates void; full-line edits often require void-and-recreate for cleanliness). Posted-period validation adds complexity. Pairs naturally with F5 (S-QBO-14-UPDATE-FOLLOWUP) + F6 (S-QBO-19-UPDATE-FOLLOWUP) since the patterns are similar — could be combined as `S-QBO-PUSHER-UPDATE-FOLLOWUPS-PAYDOWN`.
 
 ---
 

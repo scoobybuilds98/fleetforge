@@ -184,6 +184,19 @@ class JournalEntryService
             return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$entryId]);
         });
 
+        // S-QBO-21: enqueue QBO push for posted JEs (post_immediately path).
+        // Best-effort per D-ENQUEUER-CONTRACT — never throws. Enqueuer
+        // gate-0 filters bridge-derived source_types (D-QBO-21-1), so calls
+        // from FxRevaluationService / YearEndService / LeaseNiReclassService
+        // / etc. reject automatically without manual filtering here.
+        if (($result['status'] ?? null) === 'posted') {
+            try {
+                \FleetForge\QboPushers\JournalEntryEnqueuer::enqueue((int) $result['id'], 'create');
+            } catch (\Throwable $e) {
+                error_log("JournalEntryService::create: JournalEntryEnqueuer threw despite best-effort discipline: " . $e->getMessage());
+            }
+        }
+
         return $result;
     }
 
@@ -198,7 +211,7 @@ class JournalEntryService
      */
     public static function post(int $entryId, ?int $userId = null): array
     {
-        return \db_transaction(function () use ($entryId, $userId) {
+        $result = \db_transaction(function () use ($entryId, $userId) {
             // FOR UPDATE to prevent race condition on double-post
             $entry = \db_row(
                 "SELECT * FROM acc_journal_entries WHERE id = ? FOR UPDATE",
@@ -269,6 +282,21 @@ class JournalEntryService
 
             return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$entryId]);
         });
+
+        // S-QBO-21: enqueue QBO push after draft→posted transition.
+        // Best-effort per D-ENQUEUER-CONTRACT — never throws. Covers
+        // both direct post.php API calls AND approveAndPost() (which
+        // calls self::post() at line 515; db_transaction nesting means
+        // the enqueue rolls back with outer rollback for consistency).
+        if (($result['status'] ?? null) === 'posted') {
+            try {
+                \FleetForge\QboPushers\JournalEntryEnqueuer::enqueue((int) $result['id'], 'create');
+            } catch (\Throwable $e) {
+                error_log("JournalEntryService::post: JournalEntryEnqueuer threw despite best-effort discipline: " . $e->getMessage());
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -286,7 +314,7 @@ class JournalEntryService
     {
         $reversalDate = $reversalDate ?? date('Y-m-d');
 
-        return \db_transaction(function () use ($entryId, $reversalDate, $userId) {
+        $result = \db_transaction(function () use ($entryId, $reversalDate, $userId) {
             $original = \db_row(
                 "SELECT * FROM acc_journal_entries WHERE id = ? FOR UPDATE",
                 [$entryId]
@@ -381,6 +409,21 @@ class JournalEntryService
 
             return \db_row("SELECT * FROM acc_journal_entries WHERE id = ?", [$reversalId]);
         });
+
+        // S-QBO-21: enqueue QBO push for the reversal companion JE.
+        // The reversal entry is inserted with status='posted' (line ~325)
+        // so it pushes the same way as any other posted manual JE.
+        // Enqueuer gate-0 propagates the original JE's source_type — if
+        // original was bridge-derived, reversal is too, and gate-0 rejects.
+        if (($result['status'] ?? null) === 'posted') {
+            try {
+                \FleetForge\QboPushers\JournalEntryEnqueuer::enqueue((int) $result['id'], 'create');
+            } catch (\Throwable $e) {
+                error_log("JournalEntryService::reverse: JournalEntryEnqueuer threw despite best-effort discipline: " . $e->getMessage());
+            }
+        }
+
+        return $result;
     }
 
     /**
