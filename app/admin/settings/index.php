@@ -211,6 +211,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                         } else {
                             $val = '[0.5,0.8,1.0]';
                         }
+                    } elseif (preg_match('/^portal_requests\.routing\.[a-z_]+\.role_slugs$/', $key)) {
+                        // S-PORTAL-REQUEST-ROUTING: multi-checkbox over user_roles.
+                        // JSON array of role slugs; empty selection => '[]' which
+                        // means no role applies and the default fallback bucket
+                        // kicks in (D-PORTAL-REQUEST-ROUTING-4).
+                        $rolesArr = is_array($raw) ? array_values(array_filter(array_map('strval', $raw))) : [];
+                        $val = json_encode($rolesArr, JSON_UNESCAPED_SLASHES);
+                    } elseif (preg_match('/^portal_requests\.routing\.[a-z_]+\.user_ids$/', $key)) {
+                        // S-PORTAL-REQUEST-ROUTING: multi-checkbox over active
+                        // admin users. JSON array of ints (additive to role-
+                        // derived users at dispatch time).
+                        $idsArr = is_array($raw) ? array_values(array_filter(array_map('intval', $raw))) : [];
+                        $val = json_encode($idsArr, JSON_UNESCAPED_SLASHES);
                     } else {
                         $val = $raw !== null ? (string)$raw : '';
                     }
@@ -642,24 +655,167 @@ if (!empty($grouped['currency'])) {
          bookmarks to ?tab=portal_users still resolve. The settings/portal_users.php
          file remains on disk with a deprecation comment per D-D. */ ?>
 <div x-show="activeTab === 'portal_users'" x-transition:enter class="ff-tab-enter">
+
+    <!-- ── Portal user management redirect notice ─────────────────────────── -->
     <div class="card" style="margin-bottom:20px;">
-        <div class="card-body" style="text-align:center;padding:48px 32px;">
-            <div style="font-size:0.875rem;color:var(--text-secondary);margin-bottom:8px;">
-                Portal user management has moved
+        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 24px;">
+            <div>
+                <div style="font-weight:600;margin-bottom:2px;">Portal user management</div>
+                <div style="font-size:0.8125rem;color:var(--text-secondary);">
+                    Portal users (customer-side logins) are managed in the Users module.
+                </div>
             </div>
-            <h2 style="font-size:1.125rem;font-weight:600;margin:0 0 8px;">Manage portal users in the Users module</h2>
-            <p style="font-size:0.875rem;color:var(--text-tertiary);max-width:560px;margin:0 auto 24px;">
-                Portal users (customer-side logins) are now managed alongside admin users in the
-                dedicated Users module. The new Portal Users tab offers a richer surface — sortable
-                list with company column, status / Email Off badges, per-user detail page with
-                login history, and a Re-enable Email action for SES-bounce recoveries.
-            </p>
-            <?php /* S-PERM-USERS-SUPERADMIN-ONLY — gate hardcoded /users link to super_admin only. */ ?>
             <?php if (can('users', 'view')): ?>
-            <a href="<?= base_url('users') ?>?tab=portal" class="btn btn-primary">
-                Go to Users &rarr; Portal Users &rarr;
+            <a href="<?= base_url('users') ?>?tab=portal" class="btn btn-secondary btn-sm" style="white-space:nowrap;">
+                Go to Users &rarr; Portal &rarr;
             </a>
             <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- ── Portal Service Request Routing (S-PORTAL-REQUEST-ROUTING) ──────── -->
+    <?php
+    // Build the lookup data for the routing matrix.
+    $portalReqRoles = db_select("SELECT slug, name FROM user_roles ORDER BY id ASC");
+    $portalReqUsers = db_select(
+        "SELECT u.id, u.name, u.email, ur.slug AS role_slug
+           FROM users u
+           JOIN user_roles ur ON ur.id = u.role_id
+          WHERE u.deleted_at IS NULL AND u.status = 'active'
+          ORDER BY ur.id, u.name"
+    );
+
+    $portalReqTypes = [
+        'lease_extension'   => 'Lease Extension Request',
+        'early_return'      => 'Early Return Notice',
+        'damage_report'     => 'Damage Report',
+        'billing_inquiry'   => 'Billing Inquiry',
+        'document_request'  => 'Document Request',
+        'new_lease_inquiry' => 'New Lease Inquiry',
+        'general'           => 'General Question',
+        'default'           => 'Default fallback (used when type-specific routing empty)',
+    ];
+
+    // Pre-decode current settings values per type.
+    $portalReqCurrent = [];
+    foreach (array_keys($portalReqTypes) as $type) {
+        $rolesJson = (string) settings_get("portal_requests.routing.{$type}.role_slugs", '[]');
+        $usersJson = (string) settings_get("portal_requests.routing.{$type}.user_ids",   '[]');
+        $rolesArr  = json_decode($rolesJson, true);
+        $usersArr  = json_decode($usersJson, true);
+        $portalReqCurrent[$type] = [
+            'role_slugs' => is_array($rolesArr) ? array_flip(array_map('strval', $rolesArr)) : [],
+            'user_ids'   => is_array($usersArr) ? array_flip(array_map('intval', $usersArr)) : [],
+        ];
+    }
+    $portalReqAlwaysSuper = (string) settings_get('portal_requests.routing.always_include_super_admin', '1') === '1';
+    ?>
+
+    <div class="card" style="margin-bottom:20px;">
+        <div class="card-header" style="font-weight:600;">Service Request Notification Routing</div>
+        <div class="card-body">
+            <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+                Customers submit service requests via the portal (lease extension, damage report, billing
+                inquiry, etc.). Configure which roles or specific users receive each request type below.
+                Routing is union (roles + users); when a request type has empty routing, the
+                <strong>Default fallback</strong> bucket applies.
+                When <code>Always include super_admin</code> is on, super_admins are notified for every
+                request regardless of per-type config (safety net to prevent silent-drops if routing is
+                misconfigured).
+            </p>
+
+            <form method="POST" action="">
+                <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+                <input type="hidden" name="_group"     value="portal_requests">
+                <input type="hidden" name="_form_keys[]" value="portal_requests.routing.always_include_super_admin">
+                <?php foreach (array_keys($portalReqTypes) as $type): ?>
+                    <input type="hidden" name="_form_keys[]" value="portal_requests.routing.<?= e($type) ?>.role_slugs">
+                    <input type="hidden" name="_form_keys[]" value="portal_requests.routing.<?= e($type) ?>.user_ids">
+                <?php endforeach; ?>
+
+                <!-- ── Safety net toggle ────────────────────────────────── -->
+                <div style="padding:12px 14px;background:var(--bg-secondary);border-radius:6px;margin-bottom:16px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;">
+                        <input type="checkbox"
+                               name="portal_requests.routing.always_include_super_admin"
+                               value="1"
+                               <?= $portalReqAlwaysSuper ? 'checked' : '' ?>
+                               <?= !$canEdit ? 'disabled' : '' ?>>
+                        <span>Always include super_admin users <span style="font-weight:400;color:var(--text-muted);font-size:0.8125rem;">(recommended — safety net)</span></span>
+                    </label>
+                </div>
+
+                <!-- ── Per-request-type routing matrix ─────────────────── -->
+                <?php foreach ($portalReqTypes as $type => $label):
+                    $isDefault = $type === 'default';
+                    $rolesSel = $portalReqCurrent[$type]['role_slugs'];
+                    $usersSel = $portalReqCurrent[$type]['user_ids'];
+                ?>
+                <div style="border:1px solid var(--border-color);border-radius:6px;padding:16px;margin-bottom:14px;<?= $isDefault ? 'background:var(--bg-secondary);' : '' ?>">
+                    <div style="font-weight:600;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+                        <span>
+                            <?= e($label) ?>
+                            <?php if (!$isDefault): ?>
+                                <code style="margin-left:8px;font-size:0.75rem;color:var(--text-muted);"><?= e($type) ?></code>
+                            <?php endif; ?>
+                        </span>
+                        <?php if ($isDefault): ?>
+                            <span class="badge badge-info" style="font-size:0.7rem;">Fallback</span>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Roles -->
+                    <div style="margin-bottom:12px;">
+                        <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Roles</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:14px;">
+                            <?php foreach ($portalReqRoles as $role):
+                                $checked = isset($rolesSel[$role['slug']]);
+                            ?>
+                            <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:0.875rem;">
+                                <input type="checkbox"
+                                       name="portal_requests.routing.<?= e($type) ?>.role_slugs[]"
+                                       value="<?= e($role['slug']) ?>"
+                                       <?= $checked ? 'checked' : '' ?>
+                                       <?= !$canEdit ? 'disabled' : '' ?>>
+                                <span><?= e($role['name']) ?> <code style="font-size:0.7rem;color:var(--text-muted);"><?= e($role['slug']) ?></code></span>
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <!-- Specific users (collapsed by default; expand on click) -->
+                    <details>
+                        <summary style="cursor:pointer;font-size:0.8125rem;color:var(--text-secondary);user-select:none;">
+                            Specific users (in addition to roles)
+                            <?php $userCount = count($usersSel); if ($userCount > 0): ?>
+                                <span class="badge badge-secondary" style="margin-left:6px;font-size:0.7rem;"><?= $userCount ?> selected</span>
+                            <?php endif; ?>
+                        </summary>
+                        <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:10px;">
+                            <?php foreach ($portalReqUsers as $u):
+                                $checked = isset($usersSel[(int) $u['id']]);
+                            ?>
+                            <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:0.8125rem;">
+                                <input type="checkbox"
+                                       name="portal_requests.routing.<?= e($type) ?>.user_ids[]"
+                                       value="<?= (int) $u['id'] ?>"
+                                       <?= $checked ? 'checked' : '' ?>
+                                       <?= !$canEdit ? 'disabled' : '' ?>>
+                                <span><?= e($u['name']) ?> <span style="color:var(--text-muted);font-size:0.75rem;">(<?= e($u['role_slug']) ?>)</span></span>
+                            </label>
+                            <?php endforeach; ?>
+                            <?php if (empty($portalReqUsers)): ?>
+                                <span style="color:var(--text-muted);font-size:0.8125rem;">No active admin users found.</span>
+                            <?php endif; ?>
+                        </div>
+                    </details>
+                </div>
+                <?php endforeach; ?>
+
+                <?php if ($canEdit): ?>
+                <button type="submit" class="btn btn-primary btn-md" style="margin-top:8px;">Save Routing Configuration</button>
+                <?php endif; ?>
+            </form>
         </div>
     </div>
 </div>

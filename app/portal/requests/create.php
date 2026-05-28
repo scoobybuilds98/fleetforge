@@ -95,6 +95,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'status'            => 'open',
             ]);
 
+            // S-PORTAL-REQUEST-ROUTING: dispatch admin notification.
+            // Best-effort per D-PORTAL-REQUEST-ROUTING-CONTRACT — never throws,
+            // never blocks the redirect to the success page. Routing config
+            // lives in settings (portal_requests.routing.*).
+            try {
+                \FleetForge\Notifications\PortalRequestNotifier::notify((int) $newId);
+            } catch (\Throwable $e) {
+                error_log("[portal/requests/create] PortalRequestNotifier threw despite best-effort contract: " . $e->getMessage());
+            }
+
             header('Location: ' . base_url('portal/requests/view?id=' . $newId . '&created=1'));
             exit;
         }

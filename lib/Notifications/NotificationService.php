@@ -75,6 +75,7 @@ class NotificationService
         'samsara'     => 'samsara',
         'accounting'  => 'accounting',
         'quickbooks'  => 'quickbooks',   // S-QBO-3: dedicated UI category for QBO sync notifications (push_failed, etc.)
+        'service_request' => 'system',   // S-PORTAL-REQUEST-ROUTING: portal-side customer requests; always targeted via $specificUserIds resolved by PortalRequestNotifier
         'system'      => 'system',
         'chat'        => 'system',       // CHAT-1: chat notifications use system icon
     ];

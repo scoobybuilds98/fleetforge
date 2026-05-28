@@ -42,6 +42,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'Service Requests',
+        'icon'   => 'envelope-open',
+        'url'    => '/requests',
+        'module' => 'customers',
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Equipment',
         'icon'   => 'truck',
         'url'    => '/equipment',
