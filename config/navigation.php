@@ -281,6 +281,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Bill Payments',
+                'icon'   => 'currency-dollar',
+                'url'    => '/quickbooks/bill_payments',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Payments',
                 'icon'   => 'banknotes',
                 'url'    => '/quickbooks/payments',

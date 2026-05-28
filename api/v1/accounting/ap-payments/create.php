@@ -259,4 +259,14 @@ $result = db_transaction(function () use (
     ];
 });
 
+// ── QBO sync enqueue (S-QBO-19 / Phase QBO-8 / 2 of 2) ──────────────────
+// Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws; silent reject
+// when sync_enabled=0 or status != 'cleared'. Mirrors send.php (S-QBO-11)
+// + bills/approve.php (S-QBO-18) + payments/create.php (S-QBO-14) hook
+// pattern: AFTER db_transaction commits, BEFORE json_success — failure
+// here must not break the FF AP payment flow.
+if (!empty($result['id'])) {
+    \FleetForge\QboPushers\BillPaymentEnqueuer::enqueue((int) $result['id'], 'create');
+}
+
 json_success($result, 201);

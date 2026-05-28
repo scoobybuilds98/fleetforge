@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-05-28
-**Tables:** 143 total · **Columns:** 2273
+**Tables:** 144 total · **Columns:** 2292
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -541,7 +541,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_61 tables._
+_62 tables._
 
 ## `acc_accounts`
 
@@ -1367,6 +1367,30 @@ _61 tables._
 | `qbo_currency` | varchar(3) |  | YES |
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
 | `ff_bill_snapshot_total` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_bill_payment_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_ap_payment_id` | int unsigned | UNI | NO |
+| `qbo_bill_payment_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_vendor_id` | varchar(50) |  | YES |
+| `qbo_bank_account_id` | varchar(50) |  | YES |
+| `qbo_pay_type` | varchar(20) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_exchange_rate` | decimal(10,6) |  | YES |
+| `qbo_txn_date` | date |  | YES |
+| `qbo_doc_number` | varchar(100) |  | YES |
+| `ff_payment_snapshot_total` | decimal(15,2) |  | YES |
 | `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |

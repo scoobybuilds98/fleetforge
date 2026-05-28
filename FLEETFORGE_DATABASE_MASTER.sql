@@ -1093,6 +1093,33 @@ CREATE TABLE `acc_qbo_bill_map` (
   KEY `idx_pushed_at` (`pushed_at`),
   CONSTRAINT `fk_qbo_bill_map_ff` FOREIGN KEY (`ff_bill_id`) REFERENCES `acc_bills` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-8 S-QBO-18: FF→QBO bill push state tracking. Mirrors acc_qbo_invoice_map (S-QBO-11) shape with bill-specific deltas (vendor instead of customer; no engine_version; reduced ENUM for absent preflight sub-states in v1).';
+CREATE TABLE `acc_qbo_bill_payment_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_ap_payment_id` int unsigned NOT NULL COMMENT 'NOT NULL: bill payments originate in FF only in S-QBO-19 v1 (D-QBO-19-1 mirrors D-QBO-18-6). QBO-authored bill payments handled via S-QBO-26 manual sync.',
+  `qbo_bill_payment_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit BillPayment.Id; NULL until first successful push',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token',
+  `qbo_vendor_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO VendorRef.value snapshot — drift detection across vendor remapping',
+  `qbo_bank_account_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO BankAccountRef.value snapshot (D-QBO-19-3 lookup via acc_qbo_account_map)',
+  `qbo_pay_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO PayType snapshot (Check / CreditCard) — D-QBO-19-2 mapping',
+  `qbo_total_amt` decimal(15,2) DEFAULT NULL COMMENT 'QBO TotalAmt snapshot — drift comparison baseline',
+  `qbo_currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CurrencyRef.value (e.g. CAD/USD)',
+  `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
+  `qbo_txn_date` date DEFAULT NULL COMMENT 'QBO TxnDate snapshot',
+  `qbo_doc_number` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO PrivateNote or PaymentRefNum equivalent (Intuit varies by API version)',
+  `ff_payment_snapshot_total` decimal(15,2) DEFAULT NULL COMMENT 'FF amount snapshot at push time — drift baseline',
+  `push_status` enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Mirrors acc_qbo_bill_map.push_status (S-QBO-18 + S-QBO-BILL-GOTCHAS-PAYDOWN) — typed sub-states for currency_mismatch + field_too_long applicable here too.',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_ap_payment` (`ff_ap_payment_id`) COMMENT 'One mapping per FF ap_payment; enforces idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_bill_payment` (`qbo_bill_payment_id`) COMMENT 'No two FF ap_payments share a QBO BillPayment.Id; NULL-multi-OK per InnoDB',
+  KEY `idx_status` (`push_status`),
+  KEY `idx_pushed_at` (`pushed_at`),
+  CONSTRAINT `fk_qbo_bill_payment_map_ff` FOREIGN KEY (`ff_ap_payment_id`) REFERENCES `acc_ap_payments` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-8 S-QBO-19: FF→QBO bill payment push state tracking. Mirrors acc_qbo_bill_map (S-QBO-18) shape with bill-payment-specific deltas (bank_account snapshot + pay_type + no doc_number column — BillPayment has no DocNumber in QBO API).';
 CREATE TABLE `acc_qbo_payment_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_payment_id` int unsigned DEFAULT NULL COMMENT 'NULLABLE: QBO webhook may arrive before FF payment exists (e.g. invoice not mapped yet). Different from acc_qbo_invoice_map where ff_invoice_id is NOT NULL.',

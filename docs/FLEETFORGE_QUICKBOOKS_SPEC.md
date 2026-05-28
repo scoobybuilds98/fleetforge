@@ -1372,6 +1372,8 @@ The tax line represents recoverable GST/HST (Input Tax Credit). Mapping to QBO I
 
 ### 8.9 Bill Payment
 
+> **✅ SHIPPED 2026-05-29 via S-QBO-19. COMPLETES PHASE QBO-8 (2/2 with S-QBO-18 BillPusher).** BillPaymentPusher + BillPaymentEnqueuer + admin UI `/quickbooks/bill_payments` + new acc_qbo_bill_payment_map table. PayType mapping per D-QBO-19-2 (check/eft/wire→Check, credit_card→CreditCard, cash/other→Check fallback). BankAccountRef resolved via 3-step chain lookup per D-QBO-19-3 (ap_payment.bank_account_id → acc_bank_accounts.id → gl_account_id → acc_qbo_account_map.qbo_account_id). 7 decisions locked D-QBO-19-1/2/3/4/5/6/7. See PROGRESS.md SESSION LOG row for full implementation trace.
+
 **Trigger:** FF `api/v1/accounting/ap-payments/create.php` (after S-ACCT-FIX-AP builds the dedicated page).
 
 **Payload:**

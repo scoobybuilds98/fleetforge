@@ -105,6 +105,11 @@ $_qboNavGroups = [
         'icon'  => 'clipboard-document',
     ],
     [
+        'label' => 'Bill Payments',
+        'url'   => '/quickbooks/bill_payments',
+        'icon'  => 'currency-dollar',
+    ],
+    [
         'label' => 'Payments',
         'url'   => '/quickbooks/payments',
         'icon'  => 'banknotes',

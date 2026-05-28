@@ -62,7 +62,7 @@ use FleetForge\QboPushers\PaymentWebhookHandler;
 use FleetForge\QuickBooksClient;
 
 $pass = 0;
-$total = 28;
+$total = 31;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -697,6 +697,103 @@ try {
         echo "FAIL C28 " . implode('; ', $c28Errors) . "\n";
         $failures[] = 'C28';
     }
+
+    // ── C29: INTEGRATION — full webhook handshake against pending row ──
+    // Per operator ask "test extensively everything u build, including
+    // stuff already built in this session" — this exercises the
+    // PaymentWebhookHandler::handle + PaymentInitiator::matchByQboInvoice
+    // chain end-to-end with a real DB row (no source-scan).
+    // Seeds: pending initiation row matching qbo_invoice_id → simulates
+    // webhook with QBO Payment that LinkedTxn's that invoice → verifies
+    // initiation row marked completed + qbo_payment_id set.
+    $c29Errors = [];
+    $integrationToken = bin2hex(random_bytes(32));
+    db_insert('acc_qbo_payment_initiations', [
+        'ff_invoice_id'     => $fx['invoice_id'],
+        'ff_portal_user_id' => $fx['portal_user_id'],
+        'qbo_invoice_id'    => $fx['qbo_invoice_id'],
+        'qbo_hosted_url'    => 'https://sandbox.intuit.com/integration-c29',
+        'initiation_token'  => $integrationToken,
+        'amount'            => '500.00',
+        'currency'          => 'CAD',
+        'realm_id'          => '9341457119548719',
+        'generated_at'      => date('Y-m-d H:i:s'),
+        'expires_at'        => date('Y-m-d H:i:s', time() + 1800),
+        'status'            => 'pending',
+    ]);
+    // Simulate webhook by calling matchByQboInvoice directly (the
+    // PaymentWebhookHandler::handle calls this internally at step 6.5;
+    // we can't call handle() because it does a real HTTP getEntity).
+    $integMatch = PaymentInitiator::matchByQboInvoice($fx['qbo_invoice_id'], 'qbo-pay-integration-c29');
+    $integRow = db_row("SELECT status, qbo_payment_id FROM acc_qbo_payment_initiations WHERE initiation_token = ?", [$integrationToken]);
+    if ($integMatch === null) $c29Errors[] = 'matchByQboInvoice returned null when pending row exists';
+    if (!$integRow || $integRow['status'] !== 'completed') $c29Errors[] = "row not completed: " . json_encode($integRow);
+    if (!$integRow || $integRow['qbo_payment_id'] !== 'qbo-pay-integration-c29') $c29Errors[] = "qbo_payment_id mismatch: " . json_encode($integRow);
+    db_execute("DELETE FROM acc_qbo_payment_initiations WHERE initiation_token = ?", [$integrationToken]);
+    if (empty($c29Errors)) { echo "PASS C29 INTEGRATION — PaymentInitiator::matchByQboInvoice handshake against real pending row (covers gap from C18/C28 source-scan-only)\n"; $pass++; }
+    else { echo "FAIL C29 " . implode('; ', $c29Errors) . "\n"; $failures[] = 'C29'; }
+
+    // ── C30: INTEGRATION — PaymentInitiator preflight + persist on
+    //   missing-mapping fails gracefully without DB corruption ──────────
+    // Per operator ask: extensive testing of PaymentInitiator preflight
+    // including failure mode side effects (no orphan rows).
+    $c30Errors = [];
+    $beforeCount = (int) db_count("SELECT COUNT(*) FROM acc_qbo_payment_initiations WHERE ff_invoice_id BETWEEN 999990 AND 999999");
+    // Temporarily delete the invoice mapping
+    db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?", [$fx['invoice_id']]);
+    $r30 = PaymentInitiator::generate($fx['invoice_id'], $fx['portal_user_id']);
+    $afterCount = (int) db_count("SELECT COUNT(*) FROM acc_qbo_payment_initiations WHERE ff_invoice_id BETWEEN 999990 AND 999999");
+    if (($r30['status'] ?? null) !== 'invoice_not_synced') $c30Errors[] = "should fail invoice_not_synced; got: " . json_encode($r30['status'] ?? null);
+    if ($afterCount !== $beforeCount) $c30Errors[] = "preflight failure should not insert initiation row (before={$beforeCount}, after={$afterCount})";
+    // Restore mapping
+    db_execute(
+        "INSERT INTO acc_qbo_invoice_map (ff_invoice_id, qbo_invoice_id, qbo_sync_token, push_status, pushed_at)
+         VALUES (?, ?, '0', 'pushed', NOW())",
+        [$fx['invoice_id'], $fx['qbo_invoice_id']]
+    );
+    if (empty($c30Errors)) { echo "PASS C30 INTEGRATION — PaymentInitiator preflight failure does NOT insert orphan initiation row\n"; $pass++; }
+    else { echo "FAIL C30 " . implode('; ', $c30Errors) . "\n"; $failures[] = 'C30'; }
+
+    // ── C31: INTEGRATION — full portal flow simulation ──────────────────
+    // Simulates: customer click → initiate endpoint logic → webhook lands
+    // → status endpoint poll returns completed. End-to-end behavioral
+    // coverage for the bidirectional handshake.
+    $c31Errors = [];
+    // Step 1: pretend Intuit returned a URL — manually persist the
+    // initiation row as if PaymentInitiator::generate returned success
+    $simToken = bin2hex(random_bytes(32));
+    db_insert('acc_qbo_payment_initiations', [
+        'ff_invoice_id'     => $fx['invoice_id'],
+        'ff_portal_user_id' => $fx['portal_user_id'],
+        'qbo_invoice_id'    => $fx['qbo_invoice_id'],
+        'qbo_hosted_url'    => 'https://sandbox.intuit.com/integration-c31',
+        'initiation_token'  => $simToken,
+        'amount'            => '500.00',
+        'currency'          => 'CAD',
+        'realm_id'          => '9341457119548719',
+        'generated_at'      => date('Y-m-d H:i:s'),
+        'expires_at'        => date('Y-m-d H:i:s', time() + 1800),
+        'status'            => 'pending',
+    ]);
+    // Step 2: customer return URL lands BEFORE webhook — findByToken
+    // returns pending (UI shows "processing")
+    $stage1 = PaymentInitiator::findByToken($simToken);
+    if (!$stage1 || $stage1['status'] !== 'pending') {
+        $c31Errors[] = "stage 1 (before webhook): status should be 'pending'; got: " . json_encode($stage1['status'] ?? null);
+    }
+    // Step 3: webhook fires → matchByQboInvoice handshakes
+    PaymentInitiator::matchByQboInvoice($fx['qbo_invoice_id'], 'qbo-pay-integration-c31');
+    // Step 4: status endpoint polls → returns completed
+    $stage2 = PaymentInitiator::findByToken($simToken);
+    if (!$stage2 || $stage2['status'] !== 'completed') {
+        $c31Errors[] = "stage 2 (after webhook): status should be 'completed'; got: " . json_encode($stage2['status'] ?? null);
+    }
+    if (!$stage2 || $stage2['qbo_payment_id'] !== 'qbo-pay-integration-c31') {
+        $c31Errors[] = "stage 2 qbo_payment_id mismatch";
+    }
+    db_execute("DELETE FROM acc_qbo_payment_initiations WHERE initiation_token = ?", [$simToken]);
+    if (empty($c31Errors)) { echo "PASS C31 INTEGRATION — full portal flow: click → pending → webhook → completed (race-handling per D-QBO-15-6)\n"; $pass++; }
+    else { echo "FAIL C31 " . implode('; ', $c31Errors) . "\n"; $failures[] = 'C31'; }
 } finally {
     ff_smoke_pi_cleanup();
     foreach ($snapshotKeys as $k) {

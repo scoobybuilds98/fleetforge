@@ -848,14 +848,14 @@ echo str_repeat('─', 78) . "\n";
 // Hardcoded mapping: Pusher class basename → admin page filename.
 // Update when a new Pusher ships. NULL = exempted (allowlist with reason).
 $pusherToAdminPage = [
-    'CustomerPusher'  => 'customers.php',
-    'VendorPusher'    => 'vendors.php',
-    'InvoicePusher'   => 'invoices.php',
-    'BillPusher'      => 'bills.php',
-    'PaymentPusher'   => 'payments.php',
+    'CustomerPusher'    => 'customers.php',
+    'VendorPusher'      => 'vendors.php',
+    'InvoicePusher'     => 'invoices.php',
+    'BillPusher'        => 'bills.php',
+    'PaymentPusher'     => 'payments.php',
+    'BillPaymentPusher' => 'bill_payments.php',
     // Future: CreditMemoPusher → credit_memos.php (S-QBO-16)
     //         RefundReceiptPusher → refund_receipts.php (S-QBO-17)
-    //         BillPaymentPusher → bill_payments.php (S-QBO-19)
     //         JournalEntryPusher → journal_entries.php (S-QBO-21)
 ];
 

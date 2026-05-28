@@ -109,7 +109,7 @@ foreach ($apiEndpoints as $endpoint => $spec) {
 }
 $check('C3  endpoints gate with require_permission(quickbooks, <action>)', $c3Errs);
 
-// ── C4: navigation has 13 QuickBooks children ─────────────────
+// ── C4: navigation has 14 QuickBooks children ─────────────────
 // Grew 5→6 in S-QBO-5 (Customers), 6→7 in S-QBO-7 (Vendors), 7→8 in
 // S-QBO-8 (Accounts), 8→9 in S-QBO-9 (Tax Codes between Accounts and
 // Settings), 9→10 in S-QBO-10 with the addition of Items (between
@@ -130,12 +130,12 @@ if ($qboParent === null) {
     $c4Errs[] = 'QuickBooks parent entry with children not found in config/navigation.php';
 } else {
     $childLabels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Bills', 'Payments', 'Settings'];
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Bills', 'Bill Payments', 'Payments', 'Settings'];
     if ($childLabels !== $expected) {
         $c4Errs[] = 'expected children ' . json_encode($expected) . ' got ' . json_encode($childLabels);
     }
 }
-$check('C4  config/navigation.php has 13 QuickBooks children (incl. Bills between Invoices and Settings)', $c4Errs);
+$check('C4  config/navigation.php has 14 QuickBooks children (incl. Bills between Invoices and Settings)', $c4Errs);
 
 // ── C5 + C6: empty + synthetic render (combined for cleanup symmetry)
 // We don't actually render pages over HTTP — that requires the test
