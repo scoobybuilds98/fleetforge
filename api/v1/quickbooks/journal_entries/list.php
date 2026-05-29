@@ -34,13 +34,15 @@ $statusFilter = isset($_GET['status']) && $_GET['status'] !== ''
     ? array_values(array_intersect(explode(',', (string) $_GET['status']), $validStatuses))
     : [];
 
-// S-QBO-22 / D-QBO-22-3: Fixed Asset source-type filter.
-//   When source_filter='fa', restrict to JEs whose acc_journal_entries.source_type
-//   IN FA_SOURCE_TYPES (depreciation / asset_disposal / impairment). FA values
-//   come from the canonical JournalEntryPusher::FA_SOURCE_TYPES constant via
-//   PHP reflection (no string duplication risk).
-$sourceFilter = isset($_GET['source_filter']) ? (string) $_GET['source_filter'] : '';
-$faSourceTypes = \FleetForge\QboPushers\JournalEntryPusher::FA_SOURCE_TYPES;
+// S-QBO-22 / D-QBO-22-3 + S-QBO-23 / D-QBO-23-3: source-type chip group.
+//   source_filter='fa'             → FA_SOURCE_TYPES (depreciation/asset_disposal/impairment)
+//   source_filter='tax_remittance' → TAX_REMITTANCE_SOURCE_TYPES (tax_remittance)
+//   source_filter=''               → no source-type scoping (All)
+//   Source-type lists come from the canonical JournalEntryPusher constants
+//   (no string duplication risk; smoke asserts constant alignment).
+$sourceFilter      = isset($_GET['source_filter']) ? (string) $_GET['source_filter'] : '';
+$faSourceTypes     = \FleetForge\QboPushers\JournalEntryPusher::FA_SOURCE_TYPES;
+$taxRemitTypes     = \FleetForge\QboPushers\JournalEntryPusher::TAX_REMITTANCE_SOURCE_TYPES;
 
 $where  = '1=1';
 $params = [];
@@ -53,6 +55,10 @@ if ($sourceFilter === 'fa') {
     $faPlaceholders = implode(',', array_fill(0, count($faSourceTypes), '?'));
     $where .= " AND je.source_type IN ({$faPlaceholders})";
     $params = array_merge($params, $faSourceTypes);
+} elseif ($sourceFilter === 'tax_remittance') {
+    $trPlaceholders = implode(',', array_fill(0, count($taxRemitTypes), '?'));
+    $where .= " AND je.source_type IN ({$trPlaceholders})";
+    $params = array_merge($params, $taxRemitTypes);
 }
 
 try {
@@ -107,6 +113,28 @@ try {
     );
     $kpis['fa_total']  = (int) ($faTotal['c'] ?? 0);
     $kpis['fa_pushed'] = (int) ($faPushed['c'] ?? 0);
+
+    // S-QBO-23 / D-QBO-23-3: Tax-Remittance KPI cross-cuts (sibling of FA).
+    //   tax_remittance_total = all tax-remittance map rows; *_pushed = those
+    //   with push_status='pushed'. Always computed regardless of source_filter.
+    $trPlaceholders = implode(',', array_fill(0, count($taxRemitTypes), '?'));
+    $trTotal = db_row(
+        "SELECT COUNT(*) AS c
+           FROM acc_qbo_journal_entry_map m
+      LEFT JOIN acc_journal_entries je ON je.id = m.ff_journal_entry_id
+          WHERE je.source_type IN ({$trPlaceholders})",
+        $taxRemitTypes
+    );
+    $trPushed = db_row(
+        "SELECT COUNT(*) AS c
+           FROM acc_qbo_journal_entry_map m
+      LEFT JOIN acc_journal_entries je ON je.id = m.ff_journal_entry_id
+          WHERE je.source_type IN ({$trPlaceholders})
+            AND m.push_status = 'pushed'",
+        $taxRemitTypes
+    );
+    $kpis['tax_remittance_total']  = (int) ($trTotal['c'] ?? 0);
+    $kpis['tax_remittance_pushed'] = (int) ($trPushed['c'] ?? 0);
 
     $total = (int) db_count(
         "SELECT COUNT(*)

@@ -1558,7 +1558,40 @@ Read at S-QBO-9. FF doesn't update QBO tax codes (accountant manages tax codes i
 
 ### 8.15 Tax Remittance
 
-When FF posts a tax remittance JE (via TaxFilingService in S035), the JE pushes via §8.10. Accountant files the actual GST34 return through QBO's NETFILE workflow — FF doesn't file directly, just supplies the data and remittance JE.
+> **✅ SHIPPED 2026-05-29 via S-QBO-23. Phase QBO-11 / 2 of 2 — CLOSES PHASE QBO-11.** No new Pusher class — `tax_remittance` JEs route through the existing JournalEntryPusher (S-QBO-21), the sibling pattern to S-QBO-22 Fixed Asset JE sync. NO migration ENUM ALTER (`tax_remittance` already in `acc_journal_entries.source_type` ENUM + already excluded from `BRIDGE_DERIVED_SOURCE_TYPES`). Migration seeds `quickbooks.sync_mode.tax_remittance='inherit_je'` marker only. The S-QBO-22 FA-only PrivateNote block was generalized into a `buildSourceNoteSection` dispatcher (D-QBO-23-1) routing FA + tax-remittance. Admin UI generalized to a source-type chip group (All / Fixed Asset / Tax Remittance) + a "By source type" KPI strip (D-QBO-23-3). Smoke 19/19 PASS incl. regression checks that the dispatcher refactor didn't break S-QBO-22 FA enrichment. 4 D-QBO-23-* locked.
+
+When FF posts a tax remittance JE (via `TaxFilingService::recordRemittance`), the JE pushes via §8.10. Accountant files the actual GST34 return through QBO's NETFILE workflow — FF doesn't file directly, just supplies the data and remittance JE.
+
+**JE origin** (verified at S-QBO-23 pre-flight — K-22 clear):
+
+`TaxFilingService::recordRemittance(periodId, data, userId)` posts a 2-line JE inside its `db_transaction`:
+
+```
+DR  <tax payable GL>   [amount]    (2030 GST/HST payable, or 2040 PST)
+  CR  <bank GL>         [amount]    (selected bank's gl_account_id, or 1010 Cash)
+```
+
+with `source_type='tax_remittance'`, `source_id=acc_tax_remittances.id`, `post_immediately=true`. The `post_immediately` path auto-enqueues to QBO via the `JournalEntryService::create` → `JournalEntryEnqueuer::enqueue` hook (S-QBO-21). No separate tax-remittance enqueue plumbing needed.
+
+**PrivateNote enrichment** (D-QBO-23-1):
+
+`JournalEntryPusher::buildSourceNoteSection` (the dispatcher) routes `tax_remittance` → `buildTaxRemittanceNoteSection`, which joins `acc_tax_remittances` + `acc_tax_filing_periods` for audit attribution. Best-effort DB lookup (single try/catch in step 6; never blocks push). Format:
+
+```
+FF JE JE-2026-00140 | source=tax_remittance#5 | TAX-REMIT remit#5 type=gst_hst period=2026-01-01..2026-03-31 amount=$12500.00 method=online_banking | Tax remittance — GST/HST 2026-01-01 to 2026-03-31
+```
+
+**Sync mode** (D-QBO-23-2 marker):
+
+`quickbooks.sync_mode.tax_remittance='inherit_je'` — tax-remittance JEs inherit sync mode from `quickbooks.sync_mode.journal_entry` (no independent pipeline). Operator-visible in `/admin/quickbooks/settings` Card 4 (Per-Entity Sync Modes).
+
+**Bridge-derived defense-in-depth** (D-QBO-23-4):
+
+`JournalEntryPusher::TAX_REMITTANCE_SOURCE_TYPES` ∩ `BRIDGE_DERIVED_SOURCE_TYPES` = ∅, asserted by smoke C2 (Pusher) + C3 (Enqueuer). Same regression-guard pattern as D-QBO-22-4.
+
+**Admin UI** (D-QBO-23-3):
+
+The S-QBO-22 single "Show FA only" chip generalized into a source-type chip group on `/admin/quickbooks/journal_entries`: **All / Fixed Asset / Tax Remittance** (mutually exclusive; sets `source_filter=fa|tax_remittance`). The FA KPI strip generalized to a "By source type" strip showing FA + Tax-Remittance pushed/total/% side by side. Smoke C18 + C19 cover the API contract.
 
 ---
 

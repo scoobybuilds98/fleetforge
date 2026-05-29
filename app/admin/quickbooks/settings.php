@@ -418,6 +418,7 @@ require_once FF_ROOT . '/includes/header.php';
                     'bill_payment'    => ['Bill payment push', null],
                     'journal_entry'   => ['Journal entry push', 'catch-all per spec §8.10'],
                     'fixed_asset'     => ['Fixed asset (depreciation/disposal/impairment)', 'D-QBO-22-3 marker — actual gating via journal_entry mode above'],
+                    'tax_remittance'  => ['Tax remittance (GST34 JE)', 'D-QBO-23-3 marker — actual gating via journal_entry mode above'],
                     'item'            => ['Item push', 'operator-confirmed authoring per D-QBO-10-4'],
                 ];
                 foreach ($syncModeEntities as $key => [$label, $note]):

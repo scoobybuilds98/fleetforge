@@ -117,6 +117,40 @@ class JournalEntryPusher
     ];
 
     /**
+     * Tax-remittance source_type values that get PrivateNote enrichment
+     * per D-QBO-23-1 (S-QBO-23). Like FA_SOURCE_TYPES these are EXPLICITLY
+     * NOT bridge-derived — tax remittance JEs originate in FF via
+     * TaxFilingService::recordRemittance and push to QBO as standard JEs
+     * (spec §8.15: accountant files GST34 through QBO NETFILE using
+     * FF-supplied remittance JEs).
+     *
+     * Smoke regression guard asserts intersection with
+     * BRIDGE_DERIVED_SOURCE_TYPES is empty (D-QBO-23-4, sibling of
+     * D-QBO-22-4).
+     *
+     * @session  S-QBO-23
+     * @decision D-QBO-23-1 (tax-remittance PrivateNote enrichment),
+     *           D-QBO-23-4 (tax_remittance never bridge-derived)
+     */
+    public const TAX_REMITTANCE_SOURCE_TYPES = [
+        'tax_remittance',
+    ];
+
+    /**
+     * All source_type values that receive a PrivateNote enrichment section
+     * via buildSourceNoteSection (D-QBO-23-1 dispatcher). Union of the
+     * per-domain constants. Future enriched source types (lease_inception,
+     * year_end, recurring) add their constant + a buildXNoteSection helper
+     * + a case in the dispatcher + an entry here.
+     *
+     * @return list<string>
+     */
+    public static function enrichedSourceTypes(): array
+    {
+        return array_merge(self::FA_SOURCE_TYPES, self::TAX_REMITTANCE_SOURCE_TYPES);
+    }
+
+    /**
      * Push a new FF JE into QBO as a JournalEntry. Idempotent — if the
      * JE is already mapped (qbo_journal_entry_id), returns
      * ['status' => 'already_mapped'] without re-POSTing.
@@ -546,31 +580,34 @@ class JournalEntryPusher
         //    for QBO-side audit drill-down. Truncates JE description (which
         //    can run long) to keep PrivateNote under QBO's 4000-char limit.
         //
-        //    S-QBO-22 / D-QBO-22-1 extension: for FA-derived JEs (source_type
-        //    IN self::FA_SOURCE_TYPES), append a short FA-specific section
-        //    looked up best-effort from acc_depreciation_runs /
-        //    acc_asset_disposals / acc_asset_impairments. Lookup never
-        //    blocks the push — try/catch + error_log on miss so a deleted
-        //    FA source row degrades gracefully to the generic PrivateNote.
+        //    Source-type enrichment dispatcher (D-QBO-23-1, generalizes the
+        //    S-QBO-22 D-QBO-22-1 FA-only block): for source types in
+        //    self::enrichedSourceTypes(), append a short domain-specific
+        //    section via buildSourceNoteSection. Lookup is best-effort —
+        //    ONE try/catch wraps the dispatcher so any deleted/missing
+        //    source row degrades gracefully to the generic PrivateNote
+        //    without blocking the push. Currently routes FA (depreciation /
+        //    asset_disposal / impairment per D-QBO-22-1) + tax_remittance
+        //    (per D-QBO-23-1).
         $noteParts = ["FF JE {$ff['entry_number']}"];
         if (!empty($ff['source_type'])) {
             $srcId = $ff['source_id'] ?? '';
             $noteParts[] = "source={$ff['source_type']}" . ($srcId !== '' ? "#{$srcId}" : '');
 
-            // D-QBO-22-1: FA-specific PrivateNote enrichment.
-            if ($srcId !== '' && in_array((string) $ff['source_type'], self::FA_SOURCE_TYPES, true)) {
+            // D-QBO-23-1: source-type-aware PrivateNote enrichment dispatcher.
+            if ($srcId !== '' && in_array((string) $ff['source_type'], self::enrichedSourceTypes(), true)) {
                 try {
-                    $faSection = self::buildFixedAssetNoteSection(
+                    $section = self::buildSourceNoteSection(
                         (string) $ff['source_type'],
                         (int) $srcId
                     );
-                    if ($faSection !== '') {
-                        $noteParts[] = $faSection;
+                    if ($section !== '') {
+                        $noteParts[] = $section;
                     }
                 } catch (\Throwable $e) {
                     // Best-effort enrichment — never block push on lookup failure.
                     error_log(
-                        "[JournalEntryPusher] FA PrivateNote enrichment failed for JE id={$ff['id']} " .
+                        "[JournalEntryPusher] PrivateNote enrichment failed for JE id={$ff['id']} " .
                         "source={$ff['source_type']}#{$srcId}: " . $e->getMessage()
                     );
                 }
@@ -609,6 +646,108 @@ class JournalEntryPusher
         }
 
         return $payload;
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // PrivateNote enrichment dispatcher (S-QBO-23 / D-QBO-23-1)
+    // ────────────────────────────────────────────────────────────────────
+
+    /**
+     * Dispatch a source_type to its domain-specific PrivateNote enrichment
+     * helper. Generalizes the S-QBO-22 FA-only inline block (D-QBO-22-1)
+     * into a single routing point so future enriched source types
+     * (lease_inception, year_end, recurring) add one case here + one helper
+     * + one constant + one enrichedSourceTypes() entry.
+     *
+     * Returns '' when the source type has no enrichment helper OR the
+     * underlying source row is gone. Caller (buildQboPayload step 6) wraps
+     * this in a single try/catch so any failure degrades gracefully to the
+     * generic "source={type}#{id}" attribution without blocking the push.
+     *
+     * Routing:
+     *   FA_SOURCE_TYPES (depreciation/asset_disposal/impairment)
+     *       → buildFixedAssetNoteSection (D-QBO-22-1)
+     *   TAX_REMITTANCE_SOURCE_TYPES (tax_remittance)
+     *       → buildTaxRemittanceNoteSection (D-QBO-23-1)
+     *
+     * @param  string $sourceType  FF acc_journal_entries.source_type
+     * @param  int    $sourceId    FF acc_journal_entries.source_id
+     * @return string              enrichment section or '' if none
+     *
+     * @session  S-QBO-23
+     * @decision D-QBO-23-1 (PrivateNote enrichment dispatcher generalizing
+     *                       the S-QBO-22 FA-only block)
+     */
+    public static function buildSourceNoteSection(string $sourceType, int $sourceId): string
+    {
+        if ($sourceId <= 0) {
+            return '';
+        }
+        if (in_array($sourceType, self::FA_SOURCE_TYPES, true)) {
+            return self::buildFixedAssetNoteSection($sourceType, $sourceId);
+        }
+        if (in_array($sourceType, self::TAX_REMITTANCE_SOURCE_TYPES, true)) {
+            return self::buildTaxRemittanceNoteSection($sourceId);
+        }
+        return '';
+    }
+
+    /**
+     * Build the tax-remittance PrivateNote section for tax_remittance JEs
+     * (D-QBO-23-1). Joins acc_tax_remittances + acc_tax_filing_periods for
+     * audit attribution. Returns '' when the remittance row is gone (caller
+     * tolerates empty — generic source attribution stays).
+     *
+     * Source-id mapping:
+     *   tax_remittance → acc_tax_remittances (source_id = remittance.id),
+     *   FK filing_period_id → acc_tax_filing_periods for type + period span.
+     *
+     * Section format (under ~120 chars to keep PrivateNote well under QBO's
+     * 4000-char limit even with header + description + reversal pointer):
+     *   "TAX-REMIT remit#5 type=gst_hst period=2026-01-01..2026-03-31 amount=$12500.00 method=online_banking"
+     *
+     * @param  int $sourceId  acc_tax_remittances.id
+     * @return string         section or '' if lookup yielded nothing
+     *
+     * @session  S-QBO-23
+     * @decision D-QBO-23-1 (tax-remittance PrivateNote enrichment;
+     *                       best-effort lookup; never blocks push)
+     */
+    public static function buildTaxRemittanceNoteSection(int $sourceId): string
+    {
+        if ($sourceId <= 0) {
+            return '';
+        }
+
+        $remit = db_row(
+            "SELECT r.id, r.amount, r.payment_method, r.remittance_date,
+                    p.tax_type, p.period_start, p.period_end
+               FROM acc_tax_remittances r
+               LEFT JOIN acc_tax_filing_periods p ON p.id = r.filing_period_id
+              WHERE r.id = ?",
+            [$sourceId]
+        );
+        if (!$remit) {
+            return '';
+        }
+
+        $parts  = ["TAX-REMIT remit#{$sourceId}"];
+        $taxType = trim((string) ($remit['tax_type'] ?? ''));
+        if ($taxType !== '') {
+            $parts[] = "type={$taxType}";
+        }
+        $pStart = trim((string) ($remit['period_start'] ?? ''));
+        $pEnd   = trim((string) ($remit['period_end'] ?? ''));
+        if ($pStart !== '' && $pEnd !== '') {
+            $parts[] = "period={$pStart}..{$pEnd}";
+        }
+        $amount = number_format((float) ($remit['amount'] ?? 0), 2, '.', '');
+        $parts[] = "amount=\${$amount}";
+        $method = trim((string) ($remit['payment_method'] ?? ''));
+        if ($method !== '') {
+            $parts[] = "method={$method}";
+        }
+        return implode(' ', $parts);
     }
 
     // ────────────────────────────────────────────────────────────────────
