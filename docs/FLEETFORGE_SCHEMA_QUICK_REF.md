@@ -747,7 +747,9 @@ _63 tables._
 | `reference` | varchar(255) |  | YES |
 | `amount` | decimal(15,2) |  | NO |
 | `transaction_type` | enum('deposit','withdrawal','transfer','bank_charge','interest','nsf','other') |  | NO |
-| `source` | enum('manual','import','system') |  | NO |
+| `source` | enum('manual','import','system','qbo_cdc') |  | NO |
+| `is_readonly` | tinyint(1) |  | NO |
+| `qbo_bank_txn_id` | varchar(64) | MUL | YES |
 | `status` | enum('unmatched','matched','excluded') | MUL | NO |
 | `matched_type` | enum('payment','ap_payment','journal_entry','bank_transfer','other') |  | YES |
 | `matched_id` | int unsigned |  | YES |
@@ -1350,6 +1352,46 @@ _63 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `created_by_user_id` | int unsigned | MUL | YES |
+
+## `acc_qbo_bank_account_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_bank_account_id` | int unsigned | UNI | NO |
+| `qbo_bank_account_id` | varchar(50) | UNI | NO |
+| `qbo_account_name_snapshot` | varchar(255) |  | YES |
+| `qbo_currency_snapshot` | enum('CAD','USD') |  | YES |
+| `qbo_active_snapshot` | tinyint(1) |  | YES |
+| `qbo_account_type_snapshot` | varchar(20) |  | YES |
+| `mapping_status` | enum('mapped','unmapped','conflict') | MUL | NO |
+| `last_synced_at` | datetime |  | YES |
+| `mapped_by` | int unsigned | MUL | YES |
+| `mapped_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_bank_transaction_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_bank_transaction_id` | int unsigned | MUL | NO |
+| `qbo_bank_txn_id` | varchar(64) | UNI | NO |
+| `qbo_entity_type` | enum('Purchase','Deposit','Transfer','JournalEntry') | MUL | NO |
+| `qbo_entity_id` | varchar(50) |  | NO |
+| `qbo_account_id` | varchar(50) |  | NO |
+| `qbo_txn_date` | date | MUL | NO |
+| `qbo_amount` | decimal(15,2) |  | NO |
+| `qbo_currency_snapshot` | varchar(3) |  | YES |
+| `qbo_exchange_rate_snapshot` | decimal(10,6) |  | YES |
+| `qbo_description_snapshot` | varchar(500) |  | YES |
+| `pull_status` | enum('pending','pulled','superseded','failed','skipped_unmapped_account','skipped_zero_amount') | MUL | NO |
+| `pull_error` | text |  | YES |
+| `last_pulled_at` | datetime |  | NO |
+| `first_seen_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `acc_qbo_bill_map`
 

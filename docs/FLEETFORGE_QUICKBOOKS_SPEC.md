@@ -164,7 +164,7 @@ See §12 for full webhook implementation detail.
 
 **Pattern:**
 
-1. Daily cron `qbo_bank_cdc.php` at 02:00 server time queries QBO API for any bank transactions modified since last successful pull (CDC = Change Data Capture).
+1. Daily cron `qbo_bank_cdc.php` at 02:30 server time queries QBO API for any bank transactions modified since last successful pull (CDC = Change Data Capture).
 2. New/modified transactions are inserted/updated in `acc_bank_transactions` as **read-only mirror** rows. They carry `source='qbo_cdc'` and `qbo_bank_txn_id` for round-trip identification.
 3. FF displays the transactions in the bank module so operators can see them, but **cannot edit or delete** them in FF.
 4. **Reconciliation actions remain in QBO.** Matching transactions to invoices/bills, categorizing untagged transactions, marking reconciled — all happens in QBO. FF just shows what QBO knows.
@@ -1473,17 +1473,21 @@ public function shouldPushJe(int $jeId): bool
 
 ### 8.11 Bank Account
 
-Mapped at S-QBO-20. FF `acc_bank_accounts` rows match QBO bank accounts. After mapping, used by:
+**Mapped at S-QBO-20 (✅ SHIPPED 2026-05-29).** FF `acc_bank_accounts` rows match QBO bank accounts via `acc_qbo_bank_account_map` — direct 1:1 mapping (UNIQUE on both ff_bank_account_id + qbo_bank_account_id). QBO side filter: AccountType IN ('Bank', 'CreditCard'). After mapping, used by:
 
 - Payment push (DepositToAccountRef).
-- Bill payment push (BankAccountRef).
-- Bank transaction CDC pull (to find which FF bank account a QBO transaction belongs to).
+- Bill payment push (BankAccountRef) — currently uses the alternative gl_account_id chain pivot through acc_qbo_account_map per D-QBO-19-3; can migrate to the direct map once S-QBO-19/14 are updated (deferred follow-up — both paths coexist).
+- Bank transaction CDC pull (§8.12) — to find which FF bank account a QBO transaction belongs to.
+
+Mapping engine: `lib/QboPushers/BankAccountMatcher.php` (one-time-import pattern mirroring AccountMatcher S-QBO-8). `pullFromQbo` issues two Query calls (AccountType='Bank' + 'CreditCard') and merges. `getCandidates` returns top 10 ranked by currency match → type compatibility (checking/savings/line_of_credit → Bank; credit_card → CreditCard; line_of_credit can also map to CreditCard) → Levenshtein name distance → active-first. `assignMapping` UPSERTs with snapshot columns (qbo_account_name_snapshot + qbo_currency_snapshot ENUM('CAD','USD') + qbo_active_snapshot + qbo_account_type_snapshot) for drift detection; UNIQUE constraint on qbo_bank_account_id surfaces a typed `already mapped` RuntimeException. `verifyMappingStillValid` iterates mapped rows + flags name_drift / currency_drift / became_inactive / type_drift + transitions `mapping_status` to 'conflict' on drift. Per D-QBO-20-1.
+
+Admin UI: `/quickbooks/bank_accounts` (per D-UI-COMPLETENESS-1) with 4 KPI tiles (mapped / unmapped / conflict / mirror_rows) + 3-button action bar (Pull QBO accounts / Verify mappings / Run CDC now) + table with FF account + QBO snapshot + Link modal with ranked candidates (★ marker for currency match).
 
 ### 8.12 Bank Transaction (read-only mirror)
 
 **Direction:** QBO → FF only. Exception #2.
 
-**Trigger:** daily CDC cron `qbo_bank_cdc.php` at 02:00 server time.
+**Trigger:** daily CDC cron `qbo_bank_cdc.php` at 02:30 server time (per §SCHEDULED CRONS table — earlier spec drafts said 02:00; canonical value is 02:30 per S-QBO-20 K-22 resolution).
 
 **Pull logic:**
 

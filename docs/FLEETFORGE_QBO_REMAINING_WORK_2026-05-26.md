@@ -143,7 +143,7 @@ Counted from [FLEETFORGE_PROGRESS.md SESSION LOG](FLEETFORGE_PROGRESS.md) rows t
 | `ItemPuller` / `ItemMatcher` / `ItemCreator` | S-QBO-10 | ✅ DONE (Creator pattern per D-QBO-10-3/4, not §6.8 Pusher) |
 | `CompanyInfoSync` | S-QBO-FIXPACK-3 | ✅ DONE (multi_currency_enabled gate source) |
 | `PaymentPuller` (webhook handler) | S-QBO-13 | 📋 PLANNED |
-| Bank CDC | S-QBO-20 | 📋 PLANNED |
+| `BankAccountMatcher` / `BankTransactionPuller` (Bank CDC) | S-QBO-20 | ✅ DONE 2026-05-29 |
 
 ### 1.5 Full-compliance gate status
 
@@ -186,7 +186,7 @@ D131 discipline locked: [D-D131-DISCIPLINE](FLEETFORGE_PROGRESS.md) requires SES
 | **S-QBO-17** | Refund receipt push | QBO-7 | M | Sonnet | S-QBO-16 | 📋 PLANNED ⚠️ | **CPA-blocked** on S-MILEAGE-3-ACCT-SPEC resolution (D-I (A) / D176; CPA-blocked on 5 questions); can defer if S-MILEAGE-3 unresolved at scheduling time |
 | **S-QBO-18** | Bill push | QBO-8 | M | Sonnet | S-QBO-7 ✅ + `assertReadyForBillPush` ✅ | 📋 PLANNED | `BillPusher`; ITC tax handling; account-based expense lines; new `acc_qbo_bill_map` table |
 | **S-QBO-19** | Bill payment push | QBO-8 | M | Sonnet | S-QBO-18 + S-QBO-20 BankAccountRef | 📋 PLANNED | `BillPaymentPusher`; check/EFT pay types; `BankAccountRef` from `acc_qbo_bank_account_map` (S-QBO-20) |
-| **S-QBO-20** | Bank account mapping + read-only CDC mirror | QBO-9 | M | Sonnet | None new | 📋 PLANNED | Exception #2 per D-QBO-CORE-2; `acc_qbo_bank_account_map` + `acc_qbo_bank_transaction_map`; `qbo_bank_cdc.php` daily cron; Bank Mirror page |
+| **S-QBO-20** | Bank account mapping + read-only CDC mirror | QBO-9 | M | Sonnet | None new | ✅ DONE 2026-05-29 | Exception #2 per D-QBO-CORE-2. `acc_qbo_bank_account_map` (13 cols + 2 UNIQUE; one-time-import per S-QBO-8 pattern) + `acc_qbo_bank_transaction_map` (composite {entity}:{id} UNIQUE per D-QBO-20-2). ALTER acc_bank_transactions (source ENUM +qbo_cdc, is_readonly invariant D-QBO-20-4, qbo_bank_txn_id cross-ref). 4 quickbooks.banking.* settings. BankAccountMatcher + BankTransactionPuller + cron/qbo_bank_cdc.php @ 02:30 (K-22 catch resolved 02:00→02:30). Admin UI /quickbooks/bank_accounts + 6 endpoints per D-UI-COMPLETENESS-1. 2 NEW smokes 14/14 + 16/16. 7 D-QBO-20-* locked. F14+F15 added to OPERATOR_FOLLOWUPS.md. 76→77/0/0. **Phase QBO-9 COMPLETE.** |
 | **S-QBO-21** | Journal Entry push (FF → QBO) | QBO-10 | L | Opus | S-QBO-20 + `assertReadyForJournalEntryPush` ✅ | ✅ DONE 2026-05-29 | JournalEntryPusher + JournalEntryEnqueuer + JournalEntryService::create/post/reverse hooks + admin UI. Bridge-derived filter per spec §8.10 5-item FF-ENUM canonical list at BOTH Enqueuer gate-0 AND Pusher pushImpl step 4 (defense-in-depth; no-map-row pattern). 7 D-QBO-21-* locked. CLASS 12 → 7/7 Pushers mapped. D131 28→29. **Phase QBO-10 COMPLETE.** |
 | **S-QBO-22** | Fixed asset JE sync | QBO-11 | M | Sonnet | S-QBO-21 | 📋 PLANNED | Depreciation + disposal JEs only (asset records stay FF-only per D-QBO-CORE-3) |
 | **S-QBO-23** | Tax remittance JE sync | QBO-11 | M | Sonnet | S-QBO-21 | 📋 PLANNED | Supports accountant filing GST34 through QBO NETFILE |

@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-05-29 via S-QBO-21 (added F12 + F13).
+**Last updated:** 2026-05-29 via S-QBO-20 (added F14 + F15).
 
 ---
 
@@ -173,6 +173,41 @@ Each follows the 6-state badge + identifiers row + Push History table pattern fr
 **Operator action:** queue a session to extend `app/admin/vendors/{create,edit}.php` Alpine forms with currency selector. Currently the API accepts `currency` ENUM input but admin UI form doesn't expose it.
 
 **Why deferred:** S-VENDOR-CURRENCY-COLUMN was scoped XS — column + Pusher read + API endpoints. UI extension was explicitly deferred. Operators can set currency via API call or DB UPDATE in the interim.
+
+---
+
+### F14 — Crontab install for `cron/qbo_bank_cdc.php`
+
+**Surfaced by:** S-QBO-20 (2026-05-29) — D-QBO-20 cron pattern
+**Affects:** S-QBO-20 (daily bank-CDC pull)
+**Operator action:**
+1. At S-QBO-30 production cutover, install crontab entry:
+   ```
+   30 2 * * * php /var/www/fleetforge/cron/qbo_bank_cdc.php >> /var/log/fleetforge/qbo_bank_cdc.log 2>&1
+   ```
+2. Verify via: `crontab -l | grep qbo_bank_cdc`
+3. First-run test (operator can run manually before crontab install): `php cron/qbo_bank_cdc.php` — should print starting + completion summary + write audit_log row.
+4. Verify the audit_log shows: `SELECT * FROM audit_log WHERE module='quickbooks' AND entity_type='qbo_bank_cdc' ORDER BY created_at DESC LIMIT 5;`
+
+**Why deferred** (until S-QBO-30 cutover): the cron pattern matches the 3 existing QBO crons (qbo_token_refresh, qbo_sync_worker, qbo_drift_check — the last is also deferred to S-QBO-24/30); operator wires them all together at production cutover per S-QBO-30 alongside DNS/SSL/secrets per K-14. Pre-cutover the operator can run the cron manually via the admin UI's "Run CDC now" button on `/quickbooks/bank_accounts`.
+
+**Without this:** the daily mirror pull won't run unattended. Operator can still manually trigger via admin UI button.
+
+---
+
+### F15 — FX revaluation for multi-currency mirror rows (`S-QBO-FX-RECON-FOLLOWUP`)
+
+**Surfaced by:** S-QBO-20 (2026-05-29) — D-QBO-20 multi-currency design note
+**Affects:** S-QBO-20 mirror rows for QBO bank accounts denominated in USD (or any non-CAD currency)
+**Operator action:** queue a future session `S-QBO-FX-RECON-FOLLOWUP` (or roll into S-QBO-24 drift-check cron) to handle:
+1. FF acc_bank_transactions.amount is currently stored as the QBO-emitted home-currency value (typically the foreign currency, e.g. USD for a USD-denominated bank account).
+2. acc_qbo_bank_transaction_map snapshots `qbo_currency_snapshot` + `qbo_exchange_rate_snapshot` at pull time for forensic trail.
+3. v1 does NOT convert to FF home currency (CAD) — the mirror row shows USD amounts in a CAD-context FF list, which may confuse operators reading the bank transactions page.
+4. The follow-up should: (a) decide whether to convert at pull time (lossy — historical rate frozen) or display-time (live — needs ongoing FX feed) and (b) implement the chosen path with operator-visible currency badge per mirror row.
+
+**Why deferred:** v1 covers the canonical 99% CAD-bank-account-with-CAD-transactions case cleanly. Multi-currency banking is a Mainland-future concern (no USD bank accounts on the live chart as of 2026-05-29). Defer until a USD bank account is mapped, OR roll into the S-QBO-24 drift-check pass which would naturally need to revalue mirror rows for drift comparison anyway.
+
+**Without this:** USD bank account mirror rows display the USD value without conversion — visually wrong on a CAD-context page but accounting-neutral (QBO is canonical for reconciliation; FF mirror is observational).
 
 ---
 
