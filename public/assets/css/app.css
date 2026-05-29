@@ -2980,13 +2980,25 @@ textarea.form-input {
     padding: 16px;
 }
 
+/*
+ * .modal-backdrop serves double-duty: dark overlay + flex centering
+ * container for the .modal child. Most accounting pages use this class
+ * directly without a wrapping .modal-overlay. Bumping z-index from 0
+ * → var(--z-modal) ensures it sits above sidebar (40) + topbar (30);
+ * flex centering keeps the modal in viewport regardless of viewport
+ * width or sidebar state.
+ */
 .modal-backdrop {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.70);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
-    z-index: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
 }
 
 .modal {
