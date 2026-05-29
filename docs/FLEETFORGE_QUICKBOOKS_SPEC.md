@@ -1509,13 +1509,48 @@ GET /v3/company/{realmId}/cdc?entities=Purchase,Deposit,Transfer,JournalEntry&ch
 
 ### 8.13 Fixed Asset
 
+> **✅ SHIPPED 2026-05-29 via S-QBO-22. Phase QBO-11 / 1 of 2.** No new Pusher class — FA-derived JEs route through the existing JournalEntryPusher (S-QBO-21) per spec §8.10. Migration adds `impairment` to `acc_journal_entries.source_type` ENUM (D-QBO-22-2) + seeds `quickbooks.sync_mode.fixed_asset='inherit_je'` marker setting. JournalEntryPusher gains `FA_SOURCE_TYPES` constant + `buildFixedAssetNoteSection` helper that enriches PrivateNote with FA-specific audit attribution (D-QBO-22-1). Admin UI: filter chip + 2 FA KPI tiles on `/admin/quickbooks/journal_entries` (D-QBO-22-3) — no separate `/fixed_assets` page. Smoke 24/24 PASS covering per-function happy + edge + invariants. 4 D-QBO-22-* locked.
+
 FF is canonical. QBO doesn't have a full fixed-asset module (Plus tier has limited tracking). Sync surface:
 
-- Depreciation JEs push as standard JE (§8.10).
-- Disposal JEs push as standard JE.
+- Depreciation JEs push as standard JE (§8.10) via `JournalEntryService::create` → `JournalEntryEnqueuer::enqueue` (auto-enqueued on `post_immediately`=true).
+- Disposal JEs push as standard JE — same auto-enqueue path from `FixedAssetService::dispose`.
+- Impairment JEs push as standard JE — same auto-enqueue path from `FixedAssetService::impair`.
 - Asset records themselves (cost, accumulated depreciation, useful life, etc.) DON'T sync — they live only in FF.
 
 This is because FF has CCA Schedule 8 continuity (§23.3 of accounting spec) which QBO can't represent. The accountant pulls CCA data from FF; QBO sees only the book depreciation JEs.
+
+**Source-type taxonomy** (acc_journal_entries.source_type ENUM, post-S-QBO-22):
+
+| Source type | Origin | Pushable | Notes |
+|---|---|---|---|
+| `depreciation` | `FixedAssetService::postRun` | ✅ Yes (not bridge-derived) | source_id = acc_depreciation_runs.id |
+| `asset_disposal` | `FixedAssetService::dispose` | ✅ Yes | source_id = acc_asset_disposals.id |
+| `impairment` | `FixedAssetService::impair` (S-QBO-22 D-QBO-22-2) | ✅ Yes | source_id = acc_asset_impairments.id. Pre-S-QBO-22 impairments used source_type='asset_disposal' as "closest enum match" — NOT backfilled (audit-trail preservation lock D-QBO-22-2). |
+
+**PrivateNote enrichment for FA JEs** (D-QBO-22-1):
+
+`JournalEntryPusher::buildQboPayload` step 6 detects `source_type IN FA_SOURCE_TYPES` and appends an FA section via `buildFixedAssetNoteSection` — best-effort DB lookup (try/catch + error_log on miss; never blocks push). Format examples:
+
+```
+FF JE JE-2026-00128 | source=depreciation#5 | FA-DEP run#5 period='2026-04 Monthly' assets=12 total=$4250.00 | Monthly depreciation
+FF JE JE-2026-00132 | source=asset_disposal#7 | FA-DISP asset=FA-0042 type=sale proceeds=$5000.00 gain_loss=$1200.00 | Disposal of FA-0042
+FF JE JE-2026-00135 | source=impairment#3 | FA-IMP asset=FA-0042 reason='market crash' loss=$2500.00 | Impairment of FA-0042
+```
+
+Reason text is sanitized (single quotes + `|` separators stripped) so PrivateNote's `|`-separated structure isn't broken. Section is capped (~120 chars each) to leave room for header + description + reversal pointer while staying well under QBO's 4000-char PrivateNote limit.
+
+**Sync mode** (D-QBO-22-3 marker):
+
+FA JEs inherit sync mode from `quickbooks.sync_mode.journal_entry` — there is NO independent FA sync pipeline. The setting `quickbooks.sync_mode.fixed_asset='inherit_je'` is a documentation marker (not consumed by Enqueuer/Pusher) so operators see the inheritance in `/admin/quickbooks/settings` without having to read this spec.
+
+**Bridge-derived defense-in-depth** (D-QBO-22-4):
+
+`JournalEntryPusher::FA_SOURCE_TYPES` ∩ `JournalEntryPusher::BRIDGE_DERIVED_SOURCE_TYPES` = ∅, asserted by smoke test C2 + C3 (also against `JournalEntryEnqueuer::BRIDGE_DERIVED_SOURCE_TYPES`). Regression guard — if a future session ever adds an FA source type to the bridge-skip list, the smoke fails and the gap is caught at commit time before drift accumulates.
+
+**Admin UI** (D-QBO-22-3):
+
+Filter chip "Show FA only" on `/admin/quickbooks/journal_entries` toggles `source_filter=fa` query param → scopes the table to `source_type IN ('depreciation','asset_disposal','impairment')`. Plus FA-specific KPI strip (always rendered regardless of filter): FA Pushed / FA Total mapped / % synced. Smoke C23 + C24 cover the API contract.
 
 ### 8.14 Tax Code
 

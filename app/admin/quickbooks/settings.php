@@ -383,6 +383,66 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
 
+    <!-- ============================================================
+         CARD 4 — Sync Modes (read-only entity-by-entity)
+         ============================================================
+         S-QBO-22 / D-QBO-22-3 — surfaces the per-entity sync_mode.*
+         settings so operator can see which entity types are queued,
+         synced live, or disabled — including the FA marker that
+         documents Fixed Asset JEs inherit from journal_entry sync_mode.
+         No edit UI here yet — operator changes via DB or future
+         dedicated settings session. Pure documentation/visibility tile.
+         ============================================================ -->
+    <div class="card" style="padding:20px;margin-bottom:16px;">
+        <h3 class="h6" style="margin:0 0 4px;">Per-Entity Sync Modes (read-only)</h3>
+        <p class="text-secondary text-sm" style="margin:0 0 14px;">
+            How each entity type behaves when the master sync kill-switch is ON. `queue` = enqueued for the worker; `sync` = immediate; `qbo_to_ff` = pull-only direction; `disabled` = skip; `inherit_je` = follows journal_entry mode (S-QBO-22 marker for FA-derived JEs per spec §8.13).
+        </p>
+        <table class="table table-striped" style="margin:0;font-size:0.875rem;">
+            <thead>
+                <tr>
+                    <th>Entity</th>
+                    <th>Mode</th>
+                    <th class="text-secondary">Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php
+                $syncModeEntities = [
+                    'customer'        => ['Customer push', null],
+                    'vendor'          => ['Vendor push', null],
+                    'invoice'         => ['Invoice push', 'tax-override per D-QBO-CORE-6'],
+                    'payment'         => ['Payment push (FF → QBO)', 'bidirectional with webhook puller'],
+                    'credit_memo'     => ['Credit memo push', 'Phase QBO-7 pending'],
+                    'bill'            => ['Bill push', 'D-CPA-5 workflow shift'],
+                    'bill_payment'    => ['Bill payment push', null],
+                    'journal_entry'   => ['Journal entry push', 'catch-all per spec §8.10'],
+                    'fixed_asset'     => ['Fixed asset (depreciation/disposal/impairment)', 'D-QBO-22-3 marker — actual gating via journal_entry mode above'],
+                    'item'            => ['Item push', 'operator-confirmed authoring per D-QBO-10-4'],
+                ];
+                foreach ($syncModeEntities as $key => [$label, $note]):
+                    $mode = $qbo['sync_mode.' . $key] ?? '—';
+                    $modeColor = match ($mode) {
+                        'queue', 'sync'  => 'badge-success',
+                        'qbo_to_ff'      => 'badge-info',
+                        'disabled'       => 'badge-secondary',
+                        'inherit_je'     => 'badge-info',
+                        default          => 'badge-secondary',
+                    };
+                ?>
+                <tr>
+                    <td><strong><?= e($label) ?></strong></td>
+                    <td><span class="badge <?= $modeColor ?>"><?= e($mode) ?></span></td>
+                    <td class="text-secondary text-sm"><?= $note ? e($note) : '—' ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <p class="text-secondary text-xs" style="margin:14px 0 0;">
+            To change a mode, update <code>quickbooks.sync_mode.&lt;entity&gt;</code> in the settings table directly. Dedicated edit UI deferred to a future session.
+        </p>
+    </div>
+
 </div>
 
 <script>

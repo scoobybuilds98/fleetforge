@@ -894,7 +894,7 @@ CREATE TABLE `acc_journal_entries` (
   `approved_at` datetime DEFAULT NULL,
   `description` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `reference` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `source_type` enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_type` enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','impairment','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S-QBO-22: extended with impairment per D-QBO-22-2. NOT bridge-derived per spec §8.10 — FA-typed values flow through to QBO via standard JE push.',
   `source_id` int unsigned DEFAULT NULL,
   `is_reversal` tinyint(1) NOT NULL DEFAULT '0',
   `reversal_of_id` int unsigned DEFAULT NULL,

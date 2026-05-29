@@ -95,6 +95,28 @@ class JournalEntryPusher
     ];
 
     /**
+     * Fixed-Asset source_type values that get PrivateNote enrichment in
+     * buildQboPayload step 6 per D-QBO-22-1 (S-QBO-22). These source types
+     * are EXPLICITLY NOT bridge-derived — they push through to QBO as
+     * standard JEs per spec §8.13 (FA depreciation + disposal + impairment
+     * are all FF-canonical because QBO has no fixed-asset module that can
+     * represent FF's CCA Schedule 8 continuity).
+     *
+     * Smoke regression guard C8 asserts the intersection with
+     * BRIDGE_DERIVED_SOURCE_TYPES is empty (D-QBO-22-4 defense-in-depth).
+     *
+     * @session  S-QBO-22
+     * @decision D-QBO-22-1 (PrivateNote FA-specific enrichment),
+     *           D-QBO-22-4 (FA source types never bridge-derived;
+     *                       smoke regression guard)
+     */
+    public const FA_SOURCE_TYPES = [
+        'depreciation',
+        'asset_disposal',
+        'impairment',
+    ];
+
+    /**
      * Push a new FF JE into QBO as a JournalEntry. Idempotent — if the
      * JE is already mapped (qbo_journal_entry_id), returns
      * ['status' => 'already_mapped'] without re-POSTing.
@@ -523,10 +545,36 @@ class JournalEntryPusher
         // 6. PrivateNote per D-QBO-21-7 — FF entry_number + source attribution
         //    for QBO-side audit drill-down. Truncates JE description (which
         //    can run long) to keep PrivateNote under QBO's 4000-char limit.
+        //
+        //    S-QBO-22 / D-QBO-22-1 extension: for FA-derived JEs (source_type
+        //    IN self::FA_SOURCE_TYPES), append a short FA-specific section
+        //    looked up best-effort from acc_depreciation_runs /
+        //    acc_asset_disposals / acc_asset_impairments. Lookup never
+        //    blocks the push — try/catch + error_log on miss so a deleted
+        //    FA source row degrades gracefully to the generic PrivateNote.
         $noteParts = ["FF JE {$ff['entry_number']}"];
         if (!empty($ff['source_type'])) {
             $srcId = $ff['source_id'] ?? '';
             $noteParts[] = "source={$ff['source_type']}" . ($srcId !== '' ? "#{$srcId}" : '');
+
+            // D-QBO-22-1: FA-specific PrivateNote enrichment.
+            if ($srcId !== '' && in_array((string) $ff['source_type'], self::FA_SOURCE_TYPES, true)) {
+                try {
+                    $faSection = self::buildFixedAssetNoteSection(
+                        (string) $ff['source_type'],
+                        (int) $srcId
+                    );
+                    if ($faSection !== '') {
+                        $noteParts[] = $faSection;
+                    }
+                } catch (\Throwable $e) {
+                    // Best-effort enrichment — never block push on lookup failure.
+                    error_log(
+                        "[JournalEntryPusher] FA PrivateNote enrichment failed for JE id={$ff['id']} " .
+                        "source={$ff['source_type']}#{$srcId}: " . $e->getMessage()
+                    );
+                }
+            }
         } else {
             $noteParts[] = "source=manual";
         }
@@ -561,6 +609,137 @@ class JournalEntryPusher
         }
 
         return $payload;
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Fixed-Asset PrivateNote enrichment (S-QBO-22 / D-QBO-22-1)
+    // ────────────────────────────────────────────────────────────────────
+
+    /**
+     * Build the FA-specific PrivateNote section for FA-derived JEs.
+     *
+     * Returns a short string suitable for appending as one '|'-separated
+     * segment in JournalEntryPusher::buildQboPayload PrivateNote builder.
+     * Returns empty string when the FA source row is gone or shape is
+     * unrecognized — caller MUST tolerate empty return (the PrivateNote
+     * still gets the generic source attribution).
+     *
+     * Source-type → table mapping:
+     *   depreciation    → acc_depreciation_runs       (source_id = run.id)
+     *   asset_disposal  → acc_asset_disposals         (source_id = disposal.id)
+     *   impairment      → acc_asset_impairments       (source_id = impairment.id)
+     *
+     * Section formats (designed to stay under ~120 chars each so the
+     * PrivateNote stays well under QBO's 4000-char limit even when
+     * description + reversal pointer also present):
+     *   "FA-DEP run#5 period='2026-04 Monthly' assets=12 total=$4250.00"
+     *   "FA-DISP asset=FA-0042 type=sale proceeds=$5000.00 gain_loss=$1200.00"
+     *   "FA-IMP asset=FA-0042 reason='market_crash' loss=$2500.00"
+     *
+     * @param  string $sourceType  One of FA_SOURCE_TYPES
+     * @param  int    $sourceId    FF row id in the appropriate FA subledger
+     * @return string              FA section or '' if lookup yielded nothing
+     *
+     * @session  S-QBO-22
+     * @decision D-QBO-22-1 (FA-specific PrivateNote enrichment;
+     *                       best-effort lookup; never blocks push)
+     */
+    public static function buildFixedAssetNoteSection(string $sourceType, int $sourceId): string
+    {
+        if ($sourceId <= 0) {
+            return '';
+        }
+
+        switch ($sourceType) {
+            case 'depreciation':
+                // Lookup acc_depreciation_runs + join acc_periods for the
+                // period name. asset count = row count in acc_depreciation_run_lines.
+                $run = db_row(
+                    "SELECT r.id, r.total_depreciation, p.name AS period_name
+                       FROM acc_depreciation_runs r
+                       LEFT JOIN acc_periods p ON p.id = r.period_id
+                      WHERE r.id = ?",
+                    [$sourceId]
+                );
+                if (!$run) {
+                    return '';
+                }
+                $assetCountRow = db_row(
+                    "SELECT COUNT(*) AS c FROM acc_depreciation_run_lines WHERE run_id = ?",
+                    [$sourceId]
+                );
+                $assetCount = (int) ($assetCountRow['c'] ?? 0);
+                $period = trim((string) ($run['period_name'] ?? ''));
+                $total  = number_format((float) ($run['total_depreciation'] ?? 0), 2, '.', '');
+                $parts  = ["FA-DEP run#{$sourceId}"];
+                if ($period !== '') {
+                    // Cap period name at 40 chars defensively.
+                    $parts[] = "period='" . (strlen($period) > 40 ? substr($period, 0, 40) . '…' : $period) . "'";
+                }
+                $parts[] = "assets={$assetCount}";
+                $parts[] = "total=\${$total}";
+                return implode(' ', $parts);
+
+            case 'asset_disposal':
+                // Lookup acc_asset_disposals + join acc_fixed_assets for asset_number.
+                $disp = db_row(
+                    "SELECT d.id, d.disposal_type, d.proceeds, d.gain_loss, a.asset_number
+                       FROM acc_asset_disposals d
+                       LEFT JOIN acc_fixed_assets a ON a.id = d.asset_id
+                      WHERE d.id = ?",
+                    [$sourceId]
+                );
+                if (!$disp) {
+                    return '';
+                }
+                $assetNum = trim((string) ($disp['asset_number'] ?? ''));
+                $type     = trim((string) ($disp['disposal_type'] ?? ''));
+                $proceeds = number_format((float) ($disp['proceeds'] ?? 0), 2, '.', '');
+                $gainLoss = number_format((float) ($disp['gain_loss'] ?? 0), 2, '.', '');
+                $parts    = ['FA-DISP'];
+                if ($assetNum !== '') {
+                    $parts[] = "asset={$assetNum}";
+                }
+                if ($type !== '') {
+                    $parts[] = "type={$type}";
+                }
+                $parts[] = "proceeds=\${$proceeds}";
+                $parts[] = "gain_loss=\${$gainLoss}";
+                return implode(' ', $parts);
+
+            case 'impairment':
+                // Lookup acc_asset_impairments + join acc_fixed_assets.
+                $imp = db_row(
+                    "SELECT i.id, i.impairment_loss, i.reason, a.asset_number
+                       FROM acc_asset_impairments i
+                       LEFT JOIN acc_fixed_assets a ON a.id = i.asset_id
+                      WHERE i.id = ?",
+                    [$sourceId]
+                );
+                if (!$imp) {
+                    return '';
+                }
+                $assetNum = trim((string) ($imp['asset_number'] ?? ''));
+                $reason   = trim((string) ($imp['reason'] ?? ''));
+                $loss     = number_format((float) ($imp['impairment_loss'] ?? 0), 2, '.', '');
+                $parts    = ['FA-IMP'];
+                if ($assetNum !== '') {
+                    $parts[] = "asset={$assetNum}";
+                }
+                if ($reason !== '') {
+                    // Cap reason at 60 chars + slugify quotes that would
+                    // break the '|'-separated PrivateNote structure.
+                    $reason = str_replace(["'", '|'], ['', '/'], $reason);
+                    $parts[] = "reason='" . (strlen($reason) > 60 ? substr($reason, 0, 60) . '…' : $reason) . "'";
+                }
+                $parts[] = "loss=\${$loss}";
+                return implode(' ', $parts);
+
+            default:
+                // Defensive — unknown FA source type. Caller already filtered
+                // via FA_SOURCE_TYPES check, so this is a regression net.
+                return '';
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────

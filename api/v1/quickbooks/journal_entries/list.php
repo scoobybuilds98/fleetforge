@@ -34,12 +34,25 @@ $statusFilter = isset($_GET['status']) && $_GET['status'] !== ''
     ? array_values(array_intersect(explode(',', (string) $_GET['status']), $validStatuses))
     : [];
 
+// S-QBO-22 / D-QBO-22-3: Fixed Asset source-type filter.
+//   When source_filter='fa', restrict to JEs whose acc_journal_entries.source_type
+//   IN FA_SOURCE_TYPES (depreciation / asset_disposal / impairment). FA values
+//   come from the canonical JournalEntryPusher::FA_SOURCE_TYPES constant via
+//   PHP reflection (no string duplication risk).
+$sourceFilter = isset($_GET['source_filter']) ? (string) $_GET['source_filter'] : '';
+$faSourceTypes = \FleetForge\QboPushers\JournalEntryPusher::FA_SOURCE_TYPES;
+
 $where  = '1=1';
 $params = [];
 if (!empty($statusFilter)) {
     $placeholders = implode(',', array_fill(0, count($statusFilter), '?'));
     $where .= " AND m.push_status IN ({$placeholders})";
     $params = array_merge($params, $statusFilter);
+}
+if ($sourceFilter === 'fa') {
+    $faPlaceholders = implode(',', array_fill(0, count($faSourceTypes), '?'));
+    $where .= " AND je.source_type IN ({$faPlaceholders})";
+    $params = array_merge($params, $faSourceTypes);
 }
 
 try {
@@ -72,8 +85,34 @@ try {
     );
     $kpis['bridge_derived_sync_log'] = (int) ($bridgeCount['c'] ?? 0);
 
+    // S-QBO-22 / D-QBO-22-3: Fixed-Asset KPI cross-cuts. fa_total = all
+    //   FA-derived map rows; fa_pushed = FA rows with push_status='pushed'.
+    //   Counts always computed regardless of source_filter — the tiles
+    //   give at-a-glance FA sync health independent of the active filter.
+    $faPlaceholders = implode(',', array_fill(0, count($faSourceTypes), '?'));
+    $faTotal = db_row(
+        "SELECT COUNT(*) AS c
+           FROM acc_qbo_journal_entry_map m
+      LEFT JOIN acc_journal_entries je ON je.id = m.ff_journal_entry_id
+          WHERE je.source_type IN ({$faPlaceholders})",
+        $faSourceTypes
+    );
+    $faPushed = db_row(
+        "SELECT COUNT(*) AS c
+           FROM acc_qbo_journal_entry_map m
+      LEFT JOIN acc_journal_entries je ON je.id = m.ff_journal_entry_id
+          WHERE je.source_type IN ({$faPlaceholders})
+            AND m.push_status = 'pushed'",
+        $faSourceTypes
+    );
+    $kpis['fa_total']  = (int) ($faTotal['c'] ?? 0);
+    $kpis['fa_pushed'] = (int) ($faPushed['c'] ?? 0);
+
     $total = (int) db_count(
-        "SELECT COUNT(*) FROM acc_qbo_journal_entry_map m WHERE {$where}",
+        "SELECT COUNT(*)
+           FROM acc_qbo_journal_entry_map m
+      LEFT JOIN acc_journal_entries je ON je.id = m.ff_journal_entry_id
+          WHERE {$where}",
         $params
     );
 

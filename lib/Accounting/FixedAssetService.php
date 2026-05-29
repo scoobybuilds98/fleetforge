@@ -1081,7 +1081,15 @@ class FixedAssetService
                 'entry_date'      => $data['impairment_date'],
                 'description'     => "Impairment of {$asset['asset_number']} — {$asset['name']}",
                 'entry_type'      => 'system',
-                'source_type'     => 'asset_disposal',  // closest enum match
+                // S-QBO-22 / D-QBO-22-2: dedicated 'impairment' ENUM value
+                //   added to acc_journal_entries.source_type via
+                //   202605302200_S-QBO-22.sql. Replaces prior "closest enum
+                //   match" workaround of asset_disposal. Existing pre-S-QBO-22
+                //   impairment JEs keep source_type='asset_disposal' for
+                //   audit-trail preservation (NOT backfilled). NEW
+                //   impairments use the clean value. Flows through
+                //   JournalEntryPusher as a non-bridge-derived push.
+                'source_type'     => 'impairment',
                 'reference'       => "IMP-{$asset['asset_number']}",
                 'post_immediately'=> true,
             ], $lines, $userId);

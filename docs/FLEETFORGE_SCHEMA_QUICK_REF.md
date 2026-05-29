@@ -1169,7 +1169,7 @@ _63 tables._
 | `approved_at` | datetime |  | YES |
 | `description` | varchar(500) |  | NO |
 | `reference` | varchar(255) |  | YES |
-| `source_type` | enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment') | MUL | YES |
+| `source_type` | enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','impairment','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment') | MUL | YES |
 | `source_id` | int unsigned |  | YES |
 | `is_reversal` | tinyint(1) |  | NO |
 | `reversal_of_id` | int unsigned | MUL | YES |

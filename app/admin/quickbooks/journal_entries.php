@@ -111,6 +111,35 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
         </div>
     </div>
 
+    <!-- ── S-QBO-22 Fixed-Asset KPI cross-cuts (D-QBO-22-3) ────── -->
+    <!-- Two tiles always rendered (regardless of active filter) so operator
+         has at-a-glance FA sync health independent of the status filter.
+         Click the "FA only" chip in the filter bar to scope the table. -->
+    <div class="card" style="padding:10px 16px;margin-bottom:14px;display:flex;gap:24px;align-items:center;background:#f8fafc;border-left:3px solid #0ea5e9;">
+        <div class="text-sm text-secondary" style="font-weight:600;">Fixed Asset JEs</div>
+        <div style="display:flex;gap:18px;flex:1;">
+            <div>
+                <div class="text-xs text-secondary">Pushed</div>
+                <div class="font-mono text-lg text-success" x-text="kpis.fa_pushed">0</div>
+            </div>
+            <div>
+                <div class="text-xs text-secondary">Total mapped</div>
+                <div class="font-mono text-lg" x-text="kpis.fa_total">0</div>
+            </div>
+            <div>
+                <div class="text-xs text-secondary">% synced</div>
+                <div class="font-mono text-lg" x-text="(kpis.fa_total > 0 ? Math.round((kpis.fa_pushed / kpis.fa_total) * 100) : 0) + '%'">0%</div>
+            </div>
+        </div>
+        <button
+            class="btn btn-sm"
+            :class="filters.faOnly ? 'btn-primary' : 'btn-secondary'"
+            @click="filters.faOnly = !filters.faOnly; page=1; reload()">
+            <span x-show="!filters.faOnly">Show FA only</span>
+            <span x-show="filters.faOnly" x-cloak>Showing FA only — clear</span>
+        </button>
+    </div>
+
     <!-- ── Filter bar ──────────────────────────────────────────── -->
     <div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
         <div class="text-sm text-secondary">Filter by status:</div>
@@ -120,7 +149,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
                 <span x-text="s"></span>
             </label>
         </template>
-        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" @click="filters.statuses = []; page=1; reload()">
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" @click="filters.statuses = []; filters.faOnly = false; page=1; reload()">
             Clear filters
         </button>
     </div>
@@ -227,11 +256,15 @@ function qboJournalEntriesAdmin(canEdit) {
             skipped_voided: 0,
             skipped_by_mode: 0,
             bridge_derived_sync_log: 0,
+            // S-QBO-22 / D-QBO-22-3: Fixed-Asset cross-cuts.
+            fa_pushed: 0,
+            fa_total: 0,
         },
         page: 1,
         perPage: 25,
         total: 0,
-        filters: { statuses: [] },
+        // S-QBO-22 / D-QBO-22-3: faOnly toggle = source_filter=fa param.
+        filters: { statuses: [], faOnly: false },
         retrying: {},
         flash: { type: '', message: '' },
 
@@ -243,6 +276,11 @@ function qboJournalEntriesAdmin(canEdit) {
                 const params = new URLSearchParams({ page: this.page, per_page: this.perPage });
                 if (this.filters.statuses.length > 0) {
                     params.set('status', this.filters.statuses.join(','));
+                }
+                // S-QBO-22 / D-QBO-22-3: source_filter=fa scopes table to FA
+                //   source types (depreciation / asset_disposal / impairment).
+                if (this.filters.faOnly) {
+                    params.set('source_filter', 'fa');
                 }
                 const r = await FF_Api.get('<?= base_url('api/v1/quickbooks/journal_entries/list') ?>?' + params.toString());
                 if (r.success) {
