@@ -437,24 +437,53 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
 
                 <h3 class="h6" style="margin-top:14px;">GL Accounts</h3>
-                <div class="form-group"><label>Asset Account ID *</label>
-                    <input type="number" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.asset_account_id"
-                           :class="capitalizeErrors.asset_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.asset_account_id = ''"
-                           placeholder="e.g. 12 = 1210 Fleet Equipment">
-                    <div class="field-error" x-show="capitalizeErrors.asset_account_id" x-cloak x-text="capitalizeErrors.asset_account_id"></div>
-                </div>
-                <div class="form-group"><label>Accumulated Depreciation Account ID *</label>
-                    <input type="number" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.accum_depr_account_id"
-                           :class="capitalizeErrors.accum_depr_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.accum_depr_account_id = ''"
-                           placeholder="e.g. 13 = 1220">
-                    <div class="field-error" x-show="capitalizeErrors.accum_depr_account_id" x-cloak x-text="capitalizeErrors.accum_depr_account_id"></div>
-                </div>
-                <div class="form-group"><label>Depreciation Expense Account ID *</label>
-                    <input type="number" min="0" class="form-control form-control-sm" x-model="capitalizeForm.asset_data.depr_expense_account_id"
-                           :class="capitalizeErrors.depr_expense_account_id ? 'is-invalid' : ''" @input="capitalizeErrors.depr_expense_account_id = ''"
-                           placeholder="e.g. 50 = 5010">
-                    <div class="field-error" x-show="capitalizeErrors.depr_expense_account_id" x-cloak x-text="capitalizeErrors.depr_expense_account_id"></div>
-                </div>
+                <?php
+                $pickerId       = 'capex_cap_asset_account_id';
+                $pickerLabel    = 'Asset Account';
+                $pickerRequired = true;
+                $pickerPlaceholder = 'Search code or name…';
+                $pickerLabelHint = 'e.g. code 1210 — Fleet Equipment';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'capitalizeForm.asset_data.asset_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
+                <?php
+                $pickerId       = 'capex_cap_accum_depr_account_id';
+                $pickerLabel    = 'Accumulated Depreciation Account';
+                $pickerLabelHint = 'e.g. code 1220 — Accumulated Depr';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'capitalizeForm.asset_data.accum_depr_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
+                <?php
+                $pickerId       = 'capex_cap_depr_expense_account_id';
+                $pickerLabel    = 'Depreciation Expense Account';
+                $pickerLabelHint = 'e.g. code 5010 — Depreciation Expense';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'capitalizeForm.asset_data.depr_expense_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="capitalizeOpen = false">Cancel</button>
@@ -562,21 +591,51 @@ require_once FF_ROOT . '/includes/header.php';
                            :class="completeErrors.total_expected_units ? 'is-invalid' : ''" @input="completeErrors.total_expected_units = ''">
                     <div class="field-error" x-show="completeErrors.total_expected_units" x-cloak x-text="completeErrors.total_expected_units"></div>
                 </div>
-                <div class="form-group"><label>Asset Account ID *</label>
-                    <input type="number" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.asset_account_id"
-                           :class="completeErrors.asset_account_id ? 'is-invalid' : ''" @input="completeErrors.asset_account_id = ''">
-                    <div class="field-error" x-show="completeErrors.asset_account_id" x-cloak x-text="completeErrors.asset_account_id"></div>
-                </div>
-                <div class="form-group"><label>Accum Depr Account ID *</label>
-                    <input type="number" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.accum_depr_account_id"
-                           :class="completeErrors.accum_depr_account_id ? 'is-invalid' : ''" @input="completeErrors.accum_depr_account_id = ''">
-                    <div class="field-error" x-show="completeErrors.accum_depr_account_id" x-cloak x-text="completeErrors.accum_depr_account_id"></div>
-                </div>
-                <div class="form-group"><label>Depreciation Expense Account ID *</label>
-                    <input type="number" min="0" class="form-control form-control-sm" x-model="completeForm.asset_data.depr_expense_account_id"
-                           :class="completeErrors.depr_expense_account_id ? 'is-invalid' : ''" @input="completeErrors.depr_expense_account_id = ''">
-                    <div class="field-error" x-show="completeErrors.depr_expense_account_id" x-cloak x-text="completeErrors.depr_expense_account_id"></div>
-                </div>
+                <?php
+                $pickerId       = 'capex_done_asset_account_id';
+                $pickerLabel    = 'Asset Account';
+                $pickerRequired = true;
+                $pickerPlaceholder = 'Search code or name…';
+                $pickerLabelHint = '';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'completeForm.asset_data.asset_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
+                <?php
+                $pickerId       = 'capex_done_accum_depr_account_id';
+                $pickerLabel    = 'Accum Depr Account';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'completeForm.asset_data.accum_depr_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
+                <?php
+                $pickerId       = 'capex_done_depr_expense_account_id';
+                $pickerLabel    = 'Depreciation Expense Account';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'completeForm.asset_data.depr_expense_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
                 <div class="form-group"><label>Location</label>
                     <input type="text" class="form-control form-control-sm" x-model="completeForm.asset_data.location"
                            :class="completeErrors.location ? 'is-invalid' : ''" @input="completeErrors.location = ''">

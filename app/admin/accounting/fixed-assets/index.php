@@ -894,27 +894,56 @@ require_once FF_ROOT . '/includes/header.php';
                     <span class="section-hint">Required for journal entries</span>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px;">
-                    <div class="form-group">
-                        <label>Asset Acct *</label>
-                        <input type="number" min="0" class="form-control form-control-sm"
-                               :class="createErrors.asset_account_id ? 'is-invalid' : ''"
-                               x-model="createForm.asset_account_id" placeholder="e.g. 1210">
-                        <div class="field-error" x-show="createErrors.asset_account_id" x-text="createErrors.asset_account_id" x-cloak></div>
-                    </div>
-                    <div class="form-group">
-                        <label>Accum Depr Acct *</label>
-                        <input type="number" min="0" class="form-control form-control-sm"
-                               :class="createErrors.accum_depr_account_id ? 'is-invalid' : ''"
-                               x-model="createForm.accum_depr_account_id" placeholder="e.g. 1220">
-                        <div class="field-error" x-show="createErrors.accum_depr_account_id" x-text="createErrors.accum_depr_account_id" x-cloak></div>
-                    </div>
-                    <div class="form-group">
-                        <label>Depr Expense Acct *</label>
-                        <input type="number" min="0" class="form-control form-control-sm"
-                               :class="createErrors.depr_expense_account_id ? 'is-invalid' : ''"
-                               x-model="createForm.depr_expense_account_id" placeholder="e.g. 5010">
-                        <div class="field-error" x-show="createErrors.depr_expense_account_id" x-text="createErrors.depr_expense_account_id" x-cloak></div>
-                    </div>
+                    <?php
+                    // ── Asset GL Account picker ─────────────────────────
+                    $pickerId       = 'create_asset_account_id';
+                    $pickerLabel    = 'Asset Acct';
+                    $pickerRequired = true;
+                    $pickerPlaceholder = 'Search code or name…';
+                    $pickerLabelHint = 'e.g. code 1210 — Fleet Assets';
+                    $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'createForm.asset_account_id'
+}
+JS;
+                    include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                    ?>
+                    <?php
+                    $pickerId       = 'create_accum_depr_account_id';
+                    $pickerLabel    = 'Accum Depr Acct';
+                    $pickerPlaceholder = 'Search code or name…';
+                    $pickerLabelHint = 'e.g. code 1220 — Accumulated Depr';
+                    $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'createForm.accum_depr_account_id'
+}
+JS;
+                    include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                    ?>
+                    <?php
+                    $pickerId       = 'create_depr_expense_account_id';
+                    $pickerLabel    = 'Depr Expense Acct';
+                    $pickerPlaceholder = 'Search code or name…';
+                    $pickerLabelHint = 'e.g. code 5010 — Depreciation Expense';
+                    $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'createForm.depr_expense_account_id'
+}
+JS;
+                    include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                    ?>
                 </div>
 
                 <!-- ── Identification ───────────────────────────── -->
@@ -922,7 +951,24 @@ require_once FF_ROOT . '/includes/header.php';
                     <h3 class="section-title">Identification</h3>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
-                    <div class="form-group"><label>Equipment Unit ID</label><input type="number" min="0" class="form-control form-control-sm" x-model="createForm.equipment_unit_id" placeholder="Enables Payoff Analysis"></div>
+                    <?php
+                    // ── Equipment Unit picker ───────────────────────────
+                    $pickerId       = 'create_equipment_unit_id';
+                    $pickerLabel    = 'Equipment Unit';
+                    $pickerRequired = false;
+                    $pickerPlaceholder = 'Search unit # or VIN…';
+                    $pickerLabelHint = 'Enables Payoff Analysis';
+                    $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/equipment/units/index.php',
+    extraParams: { per_page: 25 },
+    format: r => (r.unit_number || '#'+r.id) + (r.vin ? ' — VIN ' + r.vin.slice(-6) : ''),
+    initialId: '',
+    targetPath: 'createForm.equipment_unit_id'
+}
+JS;
+                    include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                    ?>
                     <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="createForm.serial_number"></div>
                     <div class="form-group" style="grid-column:1/-1;"><label>Location</label><input type="text" class="form-control form-control-sm" x-model="createForm.location"></div>
                 </div>
@@ -1031,10 +1077,23 @@ require_once FF_ROOT . '/includes/header.php';
                     <span class="section-hint">Link a unit to enable Payoff Analysis</span>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
-                    <div class="form-group"><label>Equipment Unit ID</label>
-                        <input type="number" min="0" class="form-control form-control-sm" x-model="editForm.equipment_unit_id"
-                               placeholder="Numeric ID of the equipment_units row">
-                    </div>
+                    <?php
+                    $pickerId       = 'edit_equipment_unit_id';
+                    $pickerLabel    = 'Equipment Unit';
+                    $pickerRequired = false;
+                    $pickerPlaceholder = 'Search unit # or VIN…';
+                    $pickerLabelHint = 'Link a unit to enable Payoff Analysis';
+                    $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/equipment/units/index.php',
+    extraParams: { per_page: 25 },
+    format: r => (r.unit_number || '#'+r.id) + (r.vin ? ' — VIN ' + r.vin.slice(-6) : ''),
+    initialId: '',
+    targetPath: 'editForm.equipment_unit_id'
+}
+JS;
+                    include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                    ?>
                     <div class="form-group"><label>Serial Number</label><input type="text" class="form-control form-control-sm" x-model="editForm.serial_number"></div>
                 </div>
 

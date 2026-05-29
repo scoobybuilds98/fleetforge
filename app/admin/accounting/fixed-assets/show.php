@@ -322,18 +322,51 @@ require_once FF_ROOT . '/includes/header.php';
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Salvage Value</label>
                     <input type="number" step="0.01" min="0" x-model="form.salvage_value" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
                 </div>
-                <div>
-                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Asset GL Acct ID *</label>
-                    <input type="number" min="1" x-model="form.asset_account_id" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
-                </div>
-                <div>
-                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Accum Depr Acct ID *</label>
-                    <input type="number" min="1" x-model="form.accum_depr_account_id" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
-                </div>
-                <div>
-                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Depr Expense Acct ID *</label>
-                    <input type="number" min="1" x-model="form.depr_expense_account_id" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-family:var(--font-mono);">
-                </div>
+                <?php
+                $pickerId       = 'show_asset_account_id';
+                $pickerLabel    = 'Asset GL Acct';
+                $pickerRequired = true;
+                $pickerPlaceholder = 'Search code or name…';
+                $pickerLabelHint = '';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'form.asset_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
+                <?php
+                $pickerId       = 'show_accum_depr_account_id';
+                $pickerLabel    = 'Accum Depr Acct';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'form.accum_depr_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
+                <?php
+                $pickerId       = 'show_depr_expense_account_id';
+                $pickerLabel    = 'Depr Expense Acct';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'form.depr_expense_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
                 <div style="grid-column:span 2;">
                     <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;">Notes</label>
                     <textarea x-model="form.notes" rows="2" class="form-input" style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;"></textarea>

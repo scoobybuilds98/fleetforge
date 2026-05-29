@@ -245,6 +245,218 @@ window.FF_Api = FF_Api;
 
 
 // ============================================================
+// 03b. FF_LookupPicker — reusable search-as-you-type dropdown
+// ----------------------------------------------------------------
+// Operator-caught 2026-05-29: forms across accounting (Fixed Assets,
+// CapEx, etc.) had raw `number` inputs for GL account IDs + equipment
+// unit IDs. Users couldn't search by name/code — they had to know
+// the numeric ID by heart. This Alpine factory provides:
+//   • a type-to-search input that hits an API endpoint
+//   • a dropdown of results with primary label (e.g. account code +
+//     name; unit number + VIN)
+//   • a "Manual entry" toggle that swaps to a raw numeric input
+//     for power users who already know the ID
+//   • two-way binding via x-model on the wrapper's `selectedId`
+//
+// Usage in any modal/form:
+//
+//   <div x-data="FF_LookupPicker({
+//          endpoint: '/api/v1/accounting/accounts/index.php',
+//          searchParam: 'search',
+//          extraParams: { flat: 1, active: 1 },
+//          minChars: 0,
+//          format: r => r.code + ' — ' + r.name,
+//          initialId: createForm.asset_account_id,
+//          onSelect: id => createForm.asset_account_id = id
+//        })">
+//     ... renders the picker ...
+//   </div>
+//
+// Endpoint contract: GET returns { success: true, data: { items: [...] } }
+// where each item has at minimum {id, ...whatever the format fn needs}.
+// Most FF endpoints return data.items or data.units or data.accounts —
+// the factory tries common shapes.
+// ============================================================
+function FF_LookupPicker(opts) {
+    const o = {
+        endpoint: '',
+        searchParam: 'search',
+        extraParams: {},
+        minChars: 0,
+        debounceMs: 250,
+        format: r => r.name || r.label || ('#' + r.id),
+        initialId: '',
+        initialLabel: '',
+        placeholder: 'Search…',
+        manualPlaceholder: 'Enter ID',
+        onSelect: () => {},
+        // targetPath: dot-path into the nearest ancestor Alpine component
+        // (e.g. "createForm.asset_account_id"). Lets the picker write the
+        // selected ID into the parent form without the parent needing
+        // event wiring. Used by accounting modals where the picker is
+        // a nested x-data inside the modal's main Alpine component.
+        targetPath: '',
+        ...opts,
+    };
+
+    // Helper: walk up from picker DOM root to the nearest ANCESTOR
+    // Alpine component (skip self). Returns its data stack [0] or null.
+    function findParentAlpine(el) {
+        let p = el?.parentElement;
+        while (p) {
+            if (p._x_dataStack && p._x_dataStack.length) {
+                return p._x_dataStack[0];
+            }
+            p = p.parentElement;
+        }
+        return null;
+    }
+
+    function applyTargetPath(rootEl, value) {
+        if (!o.targetPath) return;
+        const parent = findParentAlpine(rootEl);
+        if (!parent) return;
+        const parts = o.targetPath.split('.');
+        let obj = parent;
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (obj[parts[i]] === undefined) return;
+            obj = obj[parts[i]];
+        }
+        obj[parts[parts.length - 1]] = value;
+    }
+
+    return {
+        // State
+        manualMode: false,
+        selectedId: o.initialId || '',
+        selectedLabel: o.initialLabel || '',
+        query: '',
+        results: [],
+        open: false,
+        loading: false,
+        highlightIndex: -1,
+        _debounceTimer: null,
+
+        // Lifecycle
+        init() {
+            // If we have an initial ID but no label, fetch it once to populate.
+            if (this.selectedId && !this.selectedLabel) {
+                this.hydrateLabel();
+            }
+        },
+
+        async hydrateLabel() {
+            try {
+                const params = new URLSearchParams({...o.extraParams, [o.searchParam]: ''});
+                const r = await FF_Api.get(FF_Api.url(o.endpoint) + '?' + params.toString());
+                const items = this._extractItems(r);
+                const hit = items.find(it => String(it.id) === String(this.selectedId));
+                if (hit) this.selectedLabel = o.format(hit);
+            } catch (_) { /* silent */ }
+        },
+
+        toggleManual() {
+            this.manualMode = !this.manualMode;
+            if (this.manualMode) {
+                this.open = false;
+            } else {
+                this.query = '';
+                this.results = [];
+            }
+        },
+
+        openDropdown() {
+            this.open = true;
+            if (this.query.length >= o.minChars) this.search();
+        },
+
+        closeDropdown() {
+            // Delay so click events on items still register.
+            setTimeout(() => { this.open = false; this.highlightIndex = -1; }, 150);
+        },
+
+        onInput() {
+            this.open = true;
+            this.highlightIndex = -1;
+            clearTimeout(this._debounceTimer);
+            this._debounceTimer = setTimeout(() => {
+                if (this.query.length >= o.minChars) this.search();
+            }, o.debounceMs);
+        },
+
+        async search() {
+            this.loading = true;
+            try {
+                const params = new URLSearchParams({...o.extraParams, [o.searchParam]: this.query});
+                const r = await FF_Api.get(FF_Api.url(o.endpoint) + '?' + params.toString());
+                this.results = this._extractItems(r).slice(0, 50);
+            } catch (_) {
+                this.results = [];
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        _extractItems(r) {
+            if (!r) return [];
+            const d = r.data || r;
+            return d.items || d.units || d.accounts || d.results
+                || (Array.isArray(d) ? d : []);
+        },
+
+        choose(item) {
+            this.selectedId = item.id;
+            this.selectedLabel = o.format(item);
+            this.query = this.selectedLabel;
+            this.open = false;
+            this.highlightIndex = -1;
+            applyTargetPath(this.$root || this.$el, item.id);
+            o.onSelect(item.id, item);
+        },
+
+        clear() {
+            this.selectedId = '';
+            this.selectedLabel = '';
+            this.query = '';
+            this.results = [];
+            this.open = false;
+            applyTargetPath(this.$root || this.$el, '');
+            o.onSelect('', null);
+        },
+
+        setManualId(value) {
+            this.selectedId = value;
+            this.selectedLabel = value ? ('#' + value) : '';
+            applyTargetPath(this.$root || this.$el, value);
+            o.onSelect(value, null);
+        },
+
+        onKeyDown(e) {
+            if (!this.open || !this.results.length) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.highlightIndex = Math.min(this.highlightIndex + 1, this.results.length - 1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.highlightIndex = Math.max(this.highlightIndex - 1, 0);
+            } else if (e.key === 'Enter' && this.highlightIndex >= 0) {
+                e.preventDefault();
+                this.choose(this.results[this.highlightIndex]);
+            } else if (e.key === 'Escape') {
+                this.open = false;
+            }
+        },
+
+        // Expose format helper for the template to render result labels.
+        formatItem(item) {
+            return o.format(item);
+        },
+    };
+}
+window.FF_LookupPicker = FF_LookupPicker;
+
+
+// ============================================================
 // 04. FF_Theme — dark / light toggle
 // ============================================================
 
