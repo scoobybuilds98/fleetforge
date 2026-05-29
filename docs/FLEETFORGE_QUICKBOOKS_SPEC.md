@@ -2271,6 +2271,8 @@ If a sudden batch of FF events generates many QBO pushes (e.g., monthly invoice 
 
 ## 15. DRIFT DETECTION AND RECONCILIATION
 
+> **✅ DETECTION SHIPPED 2026-05-30 via S-QBO-24 (Phase QBO-12 / 1 of 3).** `lib/QboPushers/DriftChecker.php` + `cron/qbo_drift_check.php` (03:30, lock `ff_qbo_drift_check`) + "Run drift check now" button on `/quickbooks/drift` + `api/v1/quickbooks/drift_run.php`. **Hybrid model (D-QBO-24-1):** a SNAPSHOT layer always runs (no QBO API — push_failed on failed map rows + FF-side amount_drift where FF current total ≠ the qbo_total_amt snapshot beyond per-entity tolerance) + a LIVE layer (missing_in_ff / live amount drift) that activates only when `sync_enabled='1'` + connected (S-QBO-30 cutover). 8 entity maps checked (invoice/payment/bill/bill_payment/credit_memo/journal_entry/customer/vendor). Idempotent via open-event refresh on (entity_type, entity_id, category). Per-entity tolerances + notify threshold seeded (§15.5). 15/15 smoke. **Resolution workflows (§15.4 + §15.6) are S-QBO-25; GL-account-balance drift (§15.2 step 4) is S-QBO-24-GL-BALANCE-FOLLOWUP per D-QBO-24-3.** 4 D-QBO-24-* locked.
+
 The drift detection system is the safety net that ensures FF and QBO stay aligned. Even with perfect push logic, transient failures, manual edits in QBO, or undetected bugs can cause drift. Daily drift detection surfaces it.
 
 ### 15.1 The drift dashboard
@@ -2313,30 +2315,34 @@ Logic:
 
 ### 15.3 The drift event table
 
+> **K-22 corrected 2026-05-30 (S-QBO-24, D-QBO-24-2):** the sketch below was the original Part-3 design; the AS-BUILT `acc_qbo_drift_events` (created S-QBO-3, consumed by `drift.php` + `drift_list.php` since S-QBO-4) DIVERGED and is canonical. Differences: column is `entity_id` (not `ff_entity_id`); `category` (not `drift_category`) with a richer 9-value ENUM (`count_mismatch`, `field_mismatch`, `missing_in_qbo`, `missing_in_ff`, `amount_drift`, `balance_drift`, `push_failed`, `pull_failed`, `stale_object_unresolved`); a `detection_source` ENUM (`drift_cron`/`push_failure`/`pull_failure`/`manual`); resolution tracked via `resolved_at IS NULL` = open + `resolved_by_user_id` + `resolution_note` (no `status` ENUM); plus `queue_id`, `description`, and `environment`. DriftChecker writes the as-built columns; "open" = `resolved_at IS NULL`.
+
+As-built schema (canonical — `SHOW CREATE TABLE acc_qbo_drift_events`):
+
 ```sql
 CREATE TABLE acc_qbo_drift_events (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  detection_source ENUM('drift_cron','push_failure','pull_failure','manual') NOT NULL,
+  category ENUM('count_mismatch','field_mismatch','missing_in_qbo','missing_in_ff',
+                'amount_drift','balance_drift','push_failed','pull_failed','stale_object_unresolved') NOT NULL,
   entity_type VARCHAR(50) NOT NULL,
-  ff_entity_id INT UNSIGNED NULL,
+  entity_id INT UNSIGNED NULL,
   qbo_entity_id VARCHAR(50) NULL,
-  drift_category ENUM(
-    'missing_in_qbo', 'missing_in_ff', 'amount_drift',
-    'status_drift', 'field_drift', 'push_failed', 'sync_token_stale'
-  ) NOT NULL,
   ff_value TEXT NULL,
   qbo_value TEXT NULL,
   drift_amount DECIMAL(15,2) NULL,
-  status ENUM('open','resolved','accepted','suppressed') NOT NULL DEFAULT 'open',
+  description TEXT NULL,
+  queue_id INT UNSIGNED NULL,
   resolved_at DATETIME NULL,
-  resolved_by INT UNSIGNED NULL,
-  resolution_notes TEXT NULL,
+  resolved_by_user_id INT UNSIGNED NULL,
+  resolution_note TEXT NULL,
   realm_id VARCHAR(50) NOT NULL,
-  INDEX idx_status (status, detected_at),
-  INDEX idx_entity (entity_type, ff_entity_id),
-  CONSTRAINT fk_drift_resolved_by FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL
+  environment ENUM('sandbox','production') NOT NULL
 );
 ```
+
+DriftChecker (S-QBO-24) writes `detection_source='drift_cron'` + the relevant `category` (snapshot layer: `push_failed`, `amount_drift`; live layer: `missing_in_ff`). The worker's push-failure path (S-QBO-3) writes `detection_source='push_failure'`. recordDrift() is idempotent: an existing OPEN event (`resolved_at IS NULL`) for the same (entity_type, entity_id, category) is refreshed, not duplicated.
 
 ### 15.4 Drift resolution workflows
 

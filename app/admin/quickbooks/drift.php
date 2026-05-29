@@ -39,8 +39,24 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/quickbooks-nav.php'; ?>
 
-<div class="page-header">
-    <h1 class="page-header-title h4">QuickBooks — Drift Detection</h1>
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+    <div>
+        <h1 class="page-header-title h4">QuickBooks — Drift Detection</h1>
+        <div class="text-secondary text-sm" style="margin-top:4px;">
+            FF↔QBO divergence safety net (S-QBO-24). Nightly cron <code>qbo_drift_check.php</code> at 03:30 +
+            on-demand via the button. Snapshot layer (push-failed + FF-side amount drift) runs pre-cutover with no
+            QBO calls; the live layer (missing-in-FF / live amount drift) activates when sync is enabled at S-QBO-30.
+        </div>
+    </div>
+    <?php if (can('quickbooks', 'edit_credentials')): ?>
+    <div x-data="qboDriftRunNow()" style="text-align:right;">
+        <button class="btn btn-primary btn-sm" @click="run()" :disabled="running">
+            <span x-show="!running">Run drift check now</span>
+            <span x-show="running" x-cloak>Running…</span>
+        </button>
+        <div class="text-xs text-secondary" style="margin-top:6px;" x-show="lastResult" x-cloak x-text="lastResult"></div>
+    </div>
+    <?php endif; ?>
 </div>
 
 <div x-data="qboDrift()" x-init="init()">
@@ -320,6 +336,35 @@ function qboDrift() {
             } catch (e) {
                 this.resolveError = e.message || 'Network error';
             } finally { this.resolving = false; }
+        },
+    };
+}
+
+// S-QBO-24: "Run drift check now" — POSTs to drift_run.php which invokes
+// DriftChecker::runCheck() synchronously + returns the run stats. Reloads
+// the page so the dashboard reflects any newly-recorded drift events.
+function qboDriftRunNow() {
+    return {
+        running: false,
+        lastResult: '',
+        async run() {
+            this.running = true;
+            this.lastResult = '';
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/drift_run.php'), {});
+                if (j && j.success) {
+                    const r = j.data || j;
+                    this.lastResult = 'Checked ' + (r.checked ?? 0) + ' entity types · '
+                        + (r.drift_events ?? 0) + ' drift events · mode=' + (r.live ? 'live+snapshot' : 'snapshot-only');
+                    setTimeout(() => window.location.reload(), 900);
+                } else {
+                    this.lastResult = 'Failed: ' + ((j && j.error && j.error.message) || 'unknown error');
+                }
+            } catch (e) {
+                this.lastResult = 'Failed: ' + (e.message || e);
+            } finally {
+                this.running = false;
+            }
         },
     };
 }

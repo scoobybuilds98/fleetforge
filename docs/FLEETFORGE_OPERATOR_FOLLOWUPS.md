@@ -327,6 +327,37 @@ Each follows the 6-state badge + identifiers row + Push History table pattern fr
 
 ---
 
+### F22 — Crontab install for `cron/qbo_drift_check.php`
+
+**Surfaced by:** S-QBO-24 (2026-05-30)
+**Operator action:** during S-QBO-30 cutover, add the drift cron to the server crontab alongside the other QBO crons:
+```
+30 3 * * * php /var/www/fleetforge/cron/qbo_drift_check.php
+```
+Runs nightly at 03:30 (after token refresh 02:00 + bank CDC 02:30) per spec §15.2. Until installed, drift detection only runs when an operator clicks "Run drift check now" on `/quickbooks/drift`.
+
+**Why deferred:** NOT installed by the session (same discipline as qbo_bank_cdc F14 — crons are wired during cutover, not by build sessions). Pre-cutover the cron is harmless (snapshot-only, no QBO calls) but there's no value running it nightly until sync is live.
+
+---
+
+### F23 — S-QBO-24-GL-BALANCE-FOLLOWUP — GL-account-balance drift check
+
+**Surfaced by:** S-QBO-24 (2026-05-30) — D-QBO-24-3 scope deferral
+**Operator action:** queue a follow-up to add the GL-account-balance drift check (spec §15.2 step 4 + §15.5 GL row) to DriftChecker: for each mapped `acc_qbo_account_map` row, compare the FF account running balance vs the live QBO `Account.CurrentBalance`; if `|delta| > $1.00` (configurable tolerance) → `category='balance_drift'` drift event.
+
+**Why deferred:** distinct sub-system from the 8 entity-map checks — it compares balances (not entity counts/totals), `acc_qbo_account_map` is Puller-only (accountant owns COA), and it needs a per-account live QBO balance API call. Only meaningful post-cutover (sync_enabled='1'). Keeps S-QBO-24 v1 focused on the entity-drift bulk.
+
+---
+
+### F24 — Live-HTTP drift layer verification at cutover
+
+**Surfaced by:** S-QBO-24 (2026-05-30)
+**Operator action:** after S-QBO-30 flips `sync_enabled='1'` + connects QBO, verify the DriftChecker LIVE layer end-to-end: run "Run drift check now" → confirm it issues per-entity QBO queries (Invoice/Payment/Bill/…) + records `missing_in_ff` drift events for any QBO entity with no FF mapping (e.g. a manually-created QBO invoice). Pre-cutover this path is unreachable (sync_enabled='0' → `liveModeAvailable()` false → snapshot-only) + there is NO fixture/mock HTTP layer, so the live layer is unit-tested only at the gate-decision level (smoke C15); the actual QBO query + missing_in_ff recording must be verified against the live sandbox.
+
+**Why deferred:** structurally cannot run pre-cutover; no offline fixture for QBO HTTP. The snapshot layer (push_failed + FF-side amount_drift) IS fully tested + runs now.
+
+---
+
 ## ✅ CLOSED — moved to archive after operator confirmation
 
 *(empty — track here when operator confirms completion + provides verification timestamp)*
