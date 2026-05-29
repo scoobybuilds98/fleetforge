@@ -281,6 +281,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Credit Memos',
+                'icon'   => 'receipt-percent',
+                'url'    => '/quickbooks/credit_memos',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Bills',
                 'icon'   => 'clipboard-document',
                 'url'    => '/quickbooks/bills',

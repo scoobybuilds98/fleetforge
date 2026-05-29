@@ -147,6 +147,8 @@
 - `app/admin/accounting/bills/show.php` — add panel for bill push state (acc_qbo_bill_map)
 - `app/admin/payments/show.php` — add panel for payment push state (acc_qbo_payment_map; bidirectional surface)
 - `app/admin/accounting/ap-payments/show.php` — add panel for bill_payment push state (acc_qbo_bill_payment_map)
+- `app/admin/accounting/journal-entries/show.php` (or equivalent) — JE push state (acc_qbo_journal_entry_map) [S-QBO-21]
+- `app/admin/credit_notes/show.php` — credit memo push state (acc_qbo_credit_memo_map) [added S-QBO-16: this FF show page has ZERO QBO mentions today vs invoices/show.php's rich panel]
 
 Each follows the 6-state badge + identifiers row + Push History table pattern from S-QBO-INVOICE-SHOW-RICH-PANEL.
 
@@ -302,6 +304,26 @@ Each follows the 6-state badge + identifiers row + Push History table pattern fr
 **Why deferred:** S-QBO-23 ships with 19/19 smoke PASS proving unit + integration behavior offline (incl. dispatcher-refactor regression guards). Live verification needs a real filing period + remittance + sandbox/prod QBO realm + the master sync_enabled='1' flip locked behind D-CPA-5 until S-QBO-30 cutover. Same pattern as F16 (S-QBO-22 live verify) + F12 (S-QBO-21 live verify) — covered by the cutover sequence, not blocking now.
 
 **Companion:** the `/admin/quickbooks/journal_entries` "Tax Remittance" source-type chip + "By source type" KPI strip (D-QBO-23-3) gives operator at-a-glance tax-remittance sync health post-cutover.
+
+---
+
+### F20 — S-QBO-16-UPDATE-FOLLOWUP — CreditMemoPusher apply→LinkedTxn + void
+
+**Surfaced by:** S-QBO-16 (2026-05-29) — D-QBO-16-2 stub-then-implement pattern
+**Operator action:** queue a future session to implement `CreditMemoPusher::pushUpdate` (the apply→LinkedTxn flow: when an FF credit is applied to an invoice via `api/v1/credit_notes/apply.php`, update the QBO CreditMemo to link it to the QBO Invoice via `LinkedTxn`) + `pushVoid` (when a credit note is voided via `void.php`). Both currently return `unsupported_in_session` per the stub pattern (matches S-QBO-11 D-QBO-11-4 → S-QBO-12 / S-QBO-14 D-QBO-14-5 / S-QBO-18 / S-QBO-19 / S-QBO-21 D-QBO-21-5).
+
+**Why deferred:** v1 ships pushCreate (the dominant flow). The apply→LinkedTxn update needs the QBO Invoice to already be mapped (acc_qbo_invoice_map) + a SyncToken round-trip on the CreditMemo; void needs CreditMemo void semantics. **Strongly recommend combining with the existing pushUpdate stubs** — F5 (S-QBO-14-UPDATE-FOLLOWUP) + F6 (S-QBO-19-UPDATE-FOLLOWUP) + F13 (S-QBO-21-UPDATE-FOLLOWUP) — into ONE `S-QBO-PUSHER-UPDATE-FOLLOWUPS-PAYDOWN` session (now 4 Pushers' update paths). The patterns are near-identical (SyncToken load → merge → updateEntity).
+
+---
+
+### F21 — `config/navigation.php` is MISSING the Bank Accounts QuickBooks child
+
+**Surfaced by:** S-QBO-16 (2026-05-29) nav audit — caught while adding Credit Memos to the nav.
+**Affects:** the live admin sidebar may not render the "Bank Accounts" link (S-QBO-20's `/quickbooks/bank_accounts` page) depending on which nav source the layout reads.
+**Root cause:** S-QBO-20 added "Bank Accounts" to `includes/partials/quickbooks-nav.php` (the breadcrumb/tab partial) but NOT to `config/navigation.php` (the sidebar config the nav-asserting smokes read). The two nav definitions have drifted: the partial has 16 QBO children (+ Bank Accounts + Credit Memos), config/navigation.php has 15 (Credit Memos added by S-QBO-16, but still no Bank Accounts).
+**Operator action:** queue a tiny fix session (XS) to add the `Bank Accounts` entry to `config/navigation.php` (between Tax Codes and Items, matching the partial's position) + bump the 6 nav-asserting smokes' expected child count 16→17 + add 'Bank Accounts' to their `$expected` label arrays. Verify the live sidebar renders it.
+
+**Why not fixed in S-QBO-16:** out of scope (S-QBO-20's drift, not credit-memo work) + would expand this commit's diff into 6 more smoke files for an unrelated reason. Flagged here so it's tracked rather than silently carried. Low urgency — Bank Accounts is still reachable via direct URL + the breadcrumb partial; only the sidebar config entry is missing.
 
 ---
 

@@ -213,17 +213,21 @@ foreach ([
     ['bill',     'update'],
     ['payment',  'create'],
     ['payment',  'update'],
+    ['credit_memo', 'create'],   // S-QBO-16: CreditMemoPusher shipped (pushCreate)
+    ['credit_memo', 'update'],   // S-QBO-16: pushUpdate stub method exists (→ F20)
 ] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== true) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be true post-shipped";
     }
 }
-foreach ([['credit_memo','create'], ['journal_entry','void'], ['item','create']] as $pair) {
+// item has no Pusher (S-QBO-10 was Puller+Creator only); journal_entry has
+// no pushVoid (S-QBO-21 create+update only). Both remain false.
+foreach ([['journal_entry','void'], ['item','create']] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== false) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-Pusher-session";
     }
 }
-$check('C8  hasImplementation true for customer+vendor+invoice+bill+payment (S-QBO-6/7/11/18/14 shipped), false for unbuilt Pushers', $c8Errs);
+$check('C8  hasImplementation true for customer+vendor+invoice+bill+payment+credit_memo (S-QBO-6/7/11/18/14/16 shipped), false for item + journal_entry-void', $c8Errs);
 
 // ── C9: worker pusher_not_implemented pathway (SELF-CLEANING) ──
 // CRITICAL: every artifact created in this check MUST be reverted
@@ -241,12 +245,13 @@ try {
     $notifBefore = (int) db_count("SELECT COUNT(*) FROM notifications WHERE type LIKE 'quickbooks.%'", []);
 
     // Insert a fake queue row for an entity type with NO Pusher yet.
-    // 'credit_memo' is the next-up unbuilt Pusher (S-QBO-15 future).
-    // Migrated through 'customer' (S-QBO-3 ship) → 'invoice' (S-QBO-11
-    // ship) → 'payment' (S-QBO-14 ship 2026-05-28) → 'credit_memo'
-    // (current) as each prior entity got a Pusher.
+    // 'item' is an unbuilt Pusher (S-QBO-10 shipped ItemPuller + ItemCreator
+    // but NO ItemPusher — items are operator-authored, not queue-pushed).
+    // Migration history of this fixture as each prior entity got a Pusher:
+    // 'customer' (S-QBO-3) → 'invoice' (S-QBO-11) → 'payment' (S-QBO-14)
+    // → 'credit_memo' (S-QBO-16 shipped it 2026-05-29) → 'item' (current).
     $createdQueue = db_insert('acc_qbo_sync_queue', [
-        'entity_type' => 'credit_memo',
+        'entity_type' => 'item',
         'entity_id'   => 999999, // sentinel ID — no real entity
         'operation'   => 'create',
         'status'      => 'queued',

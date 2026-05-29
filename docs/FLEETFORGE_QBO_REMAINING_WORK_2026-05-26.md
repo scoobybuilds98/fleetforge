@@ -126,7 +126,7 @@ Counted from [FLEETFORGE_PROGRESS.md SESSION LOG](FLEETFORGE_PROGRESS.md) rows t
 | `VendorPusher` (S-QBO-7) | §6.8 dispatcher | ✅ DONE | pushCreate + pushUpdate live; CurrencyRef hardcoded 'CAD' (D-QBO-FIXPACK-8); push-state infra mirrored |
 | `InvoicePusher` (S-QBO-11) | §6.8 dispatcher | ✅ DONE (pushCreate) / 🟡 STUB (pushUpdate per D-QBO-11-4 → S-QBO-12); pushVoid absent (→ S-QBO-12); tax-override + FX + engine-version dispatch + 6 pre-flight gates live |
 | `PaymentPusher` (S-QBO-14) | §6.8 dispatcher | 📋 PLANNED | Sync_mode default 'sync' per S-QBO-3 |
-| `CreditMemoPusher` (S-QBO-16) | §6.8 dispatcher | 📋 PLANNED | |
+| `CreditMemoPusher` (S-QBO-16) | §6.8 dispatcher | ✅ SHIPPED 2026-05-29 | pushCreate live; apply/void → F20 |
 | `RefundReceiptPusher` (S-QBO-17) | §6.8 dispatcher | 📋 PLANNED | CPA-blocked on [D-I (A)](FLEETFORGE_PROGRESS.md) / D176 / S-MILEAGE-3-ACCT-SPEC |
 | `BillPusher` (S-QBO-18) | §6.8 dispatcher | 📋 PLANNED | Default sync_mode 'queue' |
 | `BillPaymentPusher` (S-QBO-19) | §6.8 dispatcher | 📋 PLANNED | Default sync_mode 'queue' |
@@ -182,7 +182,7 @@ D131 discipline locked: [D-D131-DISCIPLINE](FLEETFORGE_PROGRESS.md) requires SES
 | **S-QBO-13** | Payment pull (QBO → FF) via webhook | QBO-6 | L | Opus | S-QBO-12 | ✅ DONE 2026-05-27 | Exception #1 per D-QBO-CORE-2; new `acc_qbo_webhook_events` table; HMAC-SHA256 signature verification per Intuit spec; reuses S-PROD-2 webhook pattern (D75-D78); idempotent handler. D-QBO-13-1/2/3/4/5/6 locked. |
 | **S-QBO-14** | Payment push (FF → QBO) | QBO-6 | M | Sonnet | S-QBO-13 | ✅ DONE 2026-05-28 | `PaymentPusher` allocates to invoice via LinkedTxn (TxnType='Invoice' per D-QBO-14-3); D-QBO-14-1 closes D-QBO-13-1/2 bidirectional dedup at push layer; requires `assertReadyForPaymentPush()` (UF + AR clearing — DONE). NO migration — reuses acc_qbo_payment_map from S-QBO-13. D-QBO-14-1/2/3/4/5/6/7 locked. |
 | **S-QBO-15** | QBO Payments embed in customer portal | QBO-6 | XL | Opus | S-QBO-14 | 📋 PLANNED | "Pay Online" button on portal invoice show; hosted-page redirect; webhook back to FF on success; 4 D-QBO-15-* decisions anticipated |
-| **S-QBO-16** | Credit memo push | QBO-7 | M | Sonnet | S-QBO-15 | 📋 PLANNED | `CreditMemoPusher`; two-step JE bridge (creation + application); LinkedTxn to QBO Invoice |
+| **S-QBO-16** | Credit memo push | QBO-7 | M | Sonnet | S-QBO-15 | ✅ SHIPPED 2026-05-29 | `CreditMemoPusher` + `CreditMemoEnqueuer` + acc_qbo_credit_memo_map + admin UI /quickbooks/credit_memos (79→80/0/0). Header-only credit_notes → single QBO CreditMemo line; D-QBO-16-1 SOURCE_TO_ITEM_TYPE map (9 sources→item_types). pushCreate only; apply→LinkedTxn + void stubbed → S-QBO-16-UPDATE-FOLLOWUP (F20). Tax-override TotalTax=0 (D-QBO-CORE-6). 26/26 smoke. 3 D-QBO-16-* locked. |
 | **S-QBO-17** | Refund receipt push | QBO-7 | M | Sonnet | S-QBO-16 | 📋 PLANNED ⚠️ | **CPA-blocked** on S-MILEAGE-3-ACCT-SPEC resolution (D-I (A) / D176; CPA-blocked on 5 questions); can defer if S-MILEAGE-3 unresolved at scheduling time |
 | **S-QBO-18** | Bill push | QBO-8 | M | Sonnet | S-QBO-7 ✅ + `assertReadyForBillPush` ✅ | 📋 PLANNED | `BillPusher`; ITC tax handling; account-based expense lines; new `acc_qbo_bill_map` table |
 | **S-QBO-19** | Bill payment push | QBO-8 | M | Sonnet | S-QBO-18 + S-QBO-20 BankAccountRef | 📋 PLANNED | `BillPaymentPusher`; check/EFT pay types; `BankAccountRef` from `acc_qbo_bank_account_map` (S-QBO-20) |

@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-28
-**Tables:** 146 total · **Columns:** 2317
+**Generated:** 2026-05-29
+**Tables:** 149 total · **Columns:** 2367
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -541,7 +541,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_63 tables._
+_66 tables._
 
 ## `acc_accounts`
 
@@ -1434,6 +1434,29 @@ _63 tables._
 | `qbo_doc_number` | varchar(100) |  | YES |
 | `ff_payment_snapshot_total` | decimal(15,2) |  | YES |
 | `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_credit_memo_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_credit_note_id` | int unsigned | UNI | NO |
+| `qbo_credit_memo_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_doc_number` | varchar(100) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_balance` | decimal(15,2) |  | YES |
+| `qbo_status` | varchar(30) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_exchange_rate` | decimal(10,6) |  | YES |
+| `qbo_item_type_used` | varchar(60) |  | YES |
+| `ff_credit_note_snapshot_total` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
 | `last_synced_at` | datetime |  | YES |

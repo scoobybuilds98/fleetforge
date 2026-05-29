@@ -371,19 +371,19 @@ if ($qbo === null) {
 } else {
     $children = $qbo['children'] ?? [];
     $labels = array_map(fn($c) => $c['label'] ?? '', $children);
-    if (count($children) !== 15) {
-        $c11Errors[] = 'expected 15 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
+    if (count($children) !== 16) {
+        $c11Errors[] = 'expected 16 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
     }
     if (!in_array('Vendors', $labels, true)) {
         $c11Errors[] = "no 'Vendors' child in QuickBooks nav";
     }
-    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
+    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Credit Memos', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
     if ($labels !== $expectedOrder) {
         $c11Errors[] = 'nav order mismatch — got [' . implode(', ', $labels) . '], expected [' . implode(', ', $expectedOrder) . ']';
     }
 }
 if (empty($c11Errors)) {
-    echo "PASS C11 nav has 15 QuickBooks children with Vendors in expected position\n";
+    echo "PASS C11 nav has 16 QuickBooks children with Vendors in expected position\n";
     $pass++;
 } else {
     echo "FAIL C11 " . implode('; ', $c11Errors) . "\n";

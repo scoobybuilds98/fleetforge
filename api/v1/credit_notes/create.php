@@ -207,4 +207,16 @@ db_transaction(function () use (
     ];
 });
 
+// S-QBO-16: enqueue QBO CreditMemo push after the credit-note insert commits.
+// Best-effort per D-ENQUEUER-CONTRACT — never throws; gate-0/1/2/3 inside the
+// enqueuer reject when ineligible (sync_enabled='0' default per D-CPA-5 means
+// this is a silent no-op until S-QBO-30 cutover). Mirrors send.php (S-QBO-11).
+if (is_array($result) && !empty($result['id'])) {
+    try {
+        \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $result['id'], 'create');
+    } catch (\Throwable $e) {
+        error_log("credit_notes/create.php: CreditMemoEnqueuer threw despite best-effort discipline: " . $e->getMessage());
+    }
+}
+
 json_success($result, 201);

@@ -529,7 +529,7 @@ if ($qboParent === null) {
 } else {
     $labels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
     // S-QBO-BILL-SYNC-UI 2026-05-27: +Bills between Invoices and Settings.
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Credit Memos', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
     if ($labels !== $expected) {
         $c16Errors[] = 'expected ' . json_encode($expected) . ' got ' . json_encode($labels);
     }

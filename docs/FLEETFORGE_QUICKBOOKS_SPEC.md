@@ -1270,7 +1270,25 @@ Edge case: if QBO Invoice has been paid (via QBO Payments or accountant action i
 
 ### 8.6 Credit Memo
 
-**Trigger:** FF `api/v1/credit_notes/create.php` → AutoEntryBridge posts the two-step credit JE (DR Revenue / CR 2060 Customer Credits Liability at creation; DR 2060 / CR AR at application).
+> **✅ SHIPPED 2026-05-29 via S-QBO-16. Phase QBO-7 / 1 of 2.** First entity Pusher since S-QBO-19; sibling of S-QBO-11 invoice push. NEW `lib/QboPushers/CreditMemoPusher.php` + `CreditMemoEnqueuer.php` + `acc_qbo_credit_memo_map` table + admin UI `/quickbooks/credit_memos` (per D-UI-COMPLETENESS-1) + enqueue hook in `api/v1/credit_notes/create.php`. **K-22:** `credit_notes` is HEADER-ONLY (no line-items table) → the QBO CreditMemo gets a SINGLE line with `SalesItemLineDetail`, whose `ItemRef` resolves from `credit_notes.source` via the `SOURCE_TO_ITEM_TYPE` map (D-QBO-16-1) → `acc_qbo_item_map` lookup. The DB `source` ENUM has 9 values but `create.php` validates only 6 (3 are internal-flow-created); the map covers all 9. pushCreate only in v1 — apply→LinkedTxn + void stubbed → S-QBO-16-UPDATE-FOLLOWUP (F20) per D-QBO-16-2. Tax-override per D-QBO-CORE-6: `TotalTax=0` (credit notes carry no tax); line `TaxCodeRef`=override code. Smoke 26/26 PASS with per-function coverage. 3 D-QBO-16-* locked.
+
+**Trigger:** FF `api/v1/credit_notes/create.php` (on creation, `status='active'`) → `CreditMemoEnqueuer::enqueue` queues the CreditMemo push. Separately, `AutoEntryBridge::onCreditNoteIssued` posts the two-step credit JE (DR Revenue / CR 2060 Customer Credits Liability at creation; DR 2060 / CR AR at application) — those bridge JEs do NOT double-push as raw JEs because `source_type='credit_note'` is in `JournalEntryPusher::BRIDGE_DERIVED_SOURCE_TYPES` (D-QBO-21-1); QBO derives the credit JE from the CreditMemo entity itself.
+
+**Item mapping** (D-QBO-16-1): the single line's `ItemRef` is resolved per `credit_notes.source`:
+
+| credit_notes.source | → item_type | (created by) |
+|---|---|---|
+| `mileage_overpayment` | `mileage_credit` | public API |
+| `invoice_adjustment` | `manual_adjustment` | public API |
+| `damage_resolution` | `damage` | public API |
+| `goodwill` | `discount` | public API |
+| `payment_returned` | `other` | public API |
+| `other` | `other` | public API |
+| `overpayment` | `account_credit_applied` | internal (InvoiceGenerator) |
+| `precharge_refund` | `mileage_drawdown_credit` | internal |
+| `base_rental_reconciliation_overflow` | `base_rental_reconciliation_credit` | internal |
+
+Unknown source → `other` (defensive). The resolved item_type must have a mapped `acc_qbo_item_map` row (preflight gate 3); the resolved item_type is snapshotted in `acc_qbo_credit_memo_map.qbo_item_type_used` for the forensic trail.
 
 **Payload:**
 

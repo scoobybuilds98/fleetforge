@@ -1171,6 +1171,32 @@ CREATE TABLE `acc_qbo_bill_payment_map` (
   KEY `idx_pushed_at` (`pushed_at`),
   CONSTRAINT `fk_qbo_bill_payment_map_ff` FOREIGN KEY (`ff_ap_payment_id`) REFERENCES `acc_ap_payments` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-8 S-QBO-19: FF→QBO bill payment push state tracking. Mirrors acc_qbo_bill_map (S-QBO-18) shape with bill-payment-specific deltas (bank_account snapshot + pay_type + no doc_number column — BillPayment has no DocNumber in QBO API).';
+CREATE TABLE `acc_qbo_credit_memo_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_credit_note_id` int unsigned NOT NULL COMMENT 'credit_notes.id; NOT NULL — credit memos are FF-origin only in S-QBO-16 v1. QBO-authored credit memos handled via S-QBO-26 manual sync.',
+  `qbo_credit_memo_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit CreditMemo.Id; NULL until first successful push',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token; refreshed on every push (apply/void in S-QBO-16-UPDATE-FOLLOWUP)',
+  `qbo_doc_number` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO DocNumber snapshot from FF credit_note_number (CN-CR-YYYY-NNNNN)',
+  `qbo_total_amt` decimal(15,2) DEFAULT NULL COMMENT 'QBO TotalAmt snapshot — drift comparison baseline',
+  `qbo_balance` decimal(15,2) DEFAULT NULL COMMENT 'QBO Balance snapshot (unapplied credit remaining) at last sync',
+  `qbo_status` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO status snapshot',
+  `qbo_currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CurrencyRef.value (CAD/USD) snapshot',
+  `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
+  `qbo_item_type_used` varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'item_type resolved via SOURCE_TO_ITEM_TYPE map (D-QBO-16-1) for the single line ItemRef — forensic trail',
+  `ff_credit_note_snapshot_total` decimal(15,2) DEFAULT NULL COMMENT 'FF credit_notes.amount snapshot at push time — drift baseline',
+  `push_status` enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Mirrors acc_qbo_invoice_map.push_status (S-QBO-12 shape) — typed preflight codes per D-QBO-FIXPACK-5. voided + skipped_voided reserved for S-QBO-16-UPDATE-FOLLOWUP apply/void path.',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_credit_note` (`ff_credit_note_id`) COMMENT 'One mapping row per FF credit note; enforces idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_credit_memo` (`qbo_credit_memo_id`) COMMENT 'No two FF credit notes share a QBO CreditMemo.Id; NULL-multi-OK per InnoDB',
+  KEY `idx_status` (`push_status`),
+  KEY `idx_pushed_at` (`pushed_at`),
+  CONSTRAINT `fk_qbo_credit_memo_map_ff` FOREIGN KEY (`ff_credit_note_id`) REFERENCES `credit_notes` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-7 S-QBO-16: FF→QBO credit memo push state. Mirrors acc_qbo_invoice_map shape with credit-memo deltas (qbo_item_type_used forensic column for the SOURCE_TO_ITEM_TYPE resolution per D-QBO-16-1). sync_mode.credit_memo already seeded S-QBO-3.';
 CREATE TABLE `acc_qbo_journal_entry_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_journal_entry_id` int unsigned NOT NULL COMMENT 'NOT NULL: JE pushes are FF-origin only in S-QBO-21 v1 (Phase QBO-10). QBO-authored JEs handled via S-QBO-26 manual sync or bank-CDC pull (§8.12 for bank-transaction-typed JEs).',

@@ -105,6 +105,11 @@ $_qboNavGroups = [
         'icon'  => 'document-text',
     ],
     [
+        'label' => 'Credit Memos',
+        'url'   => '/quickbooks/credit_memos',
+        'icon'  => 'receipt-percent',
+    ],
+    [
         'label' => 'Bills',
         'url'   => '/quickbooks/bills',
         'icon'  => 'clipboard-document',
