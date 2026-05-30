@@ -213,9 +213,15 @@ Each follows the 6-state badge + identifiers row + Push History table pattern fr
 
 ---
 
+### F-PAYDOWN-PROGRESS — S-QBO-PUSHER-UPDATE-FOLLOWUPS-PAYDOWN started
+
+**Surfaced by:** S-QBO-BILL-UPDATE (2026-05-31) — first slice of the umbrella paydown
+
+The umbrella paydown (F5 payment / F6 bill_payment / F13 JE / F20 credit_memo update stubs + the pushVoid trio in F7) is being worked one Pusher at a time. **BillPusher::pushUpdate SHIPPED 2026-05-31 (S-QBO-BILL-UPDATE)** as the proven template: routes through `pushImpl` with `operation='update'` → full-payload re-send via `QuickBooksClient::updateEntity` + SyncToken round-trip; demote-to-create when unmapped (D-PUSHER-DEMOTION-RULE); `BillEnqueuer` gate-3 widened to accept `'update'`; `enqueue('update')` wired into `api/v1/accounting/bills/update.php`. **Remaining update stubs** (each follows the bill template — SyncToken load → merge → updateEntity): PaymentPusher (F5), BillPaymentPusher (F6), CreditMemoPusher apply→LinkedTxn (F20), JournalEntryPusher (F13). **Remaining void stubs** (F7 + credit_memo void): PaymentPusher / BillPaymentPusher / CreditMemoPusher `pushVoid` — separate follow-on slice (mirror InvoicePusher `pushVoidImpl`). **NO migration** needed for the update slices — `push_status` ENUM + `qbo_sync_token` columns already exist on every map table.
+
 ### F13 — S-QBO-21-UPDATE-FOLLOWUP — JournalEntryPusher::pushUpdate impl
 
-**Surfaced by:** S-QBO-21 (2026-05-29) — D-QBO-21-5 stub-then-implement pattern
+**Surfaced by:** S-QBO-21 (2026-05-29) — D-QBO-21-5 stub-then-implement pattern (template now available — see F-PAYDOWN-PROGRESS)
 **Operator action:** queue a future session to implement JournalEntryPusher::pushUpdate. Currently returns `unsupported_in_session` per the stub pattern (matches S-QBO-11 D-QBO-11-4 + S-QBO-14 D-QBO-14-5 + S-QBO-18 D-QBO-18-5 + S-QBO-19 D-QBO-19-5).
 
 **Why deferred:** v1 ships pushCreate; pushUpdate semantics for posted JEs are non-trivial — QBO's JournalEntry update model is restrictive (sparse=true + Active=false approximates void; full-line edits often require void-and-recreate for cleanliness). Posted-period validation adds complexity. Pairs naturally with F5 (S-QBO-14-UPDATE-FOLLOWUP) + F6 (S-QBO-19-UPDATE-FOLLOWUP) since the patterns are similar — could be combined as `S-QBO-PUSHER-UPDATE-FOLLOWUPS-PAYDOWN`.
