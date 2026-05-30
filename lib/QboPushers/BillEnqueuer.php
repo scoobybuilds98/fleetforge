@@ -12,11 +12,12 @@ declare(strict_types=1);
  *   - create operation: bill must exist AND status='approved' or later
  *     (NOT 'draft'). Bills in draft aren't yet committed accounting
  *     documents and shouldn't push.
- *   - update operation: stubbed — BillPusher::pushUpdate returns
- *     unsupported_in_session per D-QBO-18-5; gate-0 still validates
- *     bill exists + non-draft to mirror Invoice path.
- *   - void operation: not supported in v1 (pushVoid absent per D-QBO-
- *     18 scope); operation allowlist rejects.
+ *   - update operation: SUPPORTED since S-QBO-BILL-UPDATE — gate-3
+ *     allowlist accepts 'update'; BillPusher::pushUpdate full-payload
+ *     re-sends via updateEntity + SyncToken round-trip (demote-to-create
+ *     when unmapped). gate-0 validates bill exists + non-draft.
+ *   - void operation: not yet supported (pushVoid absent — see
+ *     OPERATOR_FOLLOWUPS F7); gate-3 allowlist rejects it.
  *
  * Per §6.9 D-ENQUEUER-CONTRACT: silent reject + error_log diagnostics;
  * never throws. Production canonical caller is api/v1/accounting/bills/
@@ -25,7 +26,8 @@ declare(strict_types=1);
  * @session  S-QBO-18
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.9 (Enqueuer Contract)
  * @decision D-QBO-18-1 (trigger: draft→approved via approve.php),
- *           D-QBO-18-5 (pushUpdate stubbed → S-QBO-19),
+ *           D-QBO-18-5 (pushUpdate stub — CLOSED by S-QBO-BILL-UPDATE /
+ *               D-QBO-BILL-UPDATE-1; gate-3 now allows 'update'),
  *           D-ENQUEUER-CONTRACT (best-effort discipline),
  *           D-ENQUEUER-GATE-0-ELIGIBILITY (eligibility gate-0 before
  *               existing 4-step gating)
@@ -109,7 +111,8 @@ class BillEnqueuer
             }
 
             // ────────────────────────────────────────────────────────
-            // Gate 3: Operation allowlist. update + void are NOT in v1.
+            // Gate 3: Operation allowlist. create + update supported
+            // (update added in S-QBO-BILL-UPDATE); void deferred (F7).
             // ────────────────────────────────────────────────────────
             if (!in_array($operation, ['create', 'update'], true)) {
                 error_log("[BillEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist (create + update per S-QBO-BILL-UPDATE; void deferred)");
