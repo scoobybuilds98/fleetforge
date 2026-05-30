@@ -112,6 +112,12 @@ try {
         if (strpos($pageSrc, 'function qboManualSync()') === false) $c2[] = 'missing qboManualSync Alpine factory';
         if (strpos($pageSrc, "require_permission('quickbooks', 'view')") === false) $c2[] = 'missing view gate';
         if (strpos($pageSrc, "can('quickbooks', 'force_full_resync')") === false) $c2[] = 'missing force_full_resync capability check';
+        // The page opens the layout via header.php; it MUST close it via
+        // footer.php — without the footer the HTML doc never closes and
+        // app.js/Alpine never load, so x-data renders nothing (the page
+        // looks blank). Regression guard for the S-QBO-26 blank-page bug.
+        if (strpos($pageSrc, "includes/header.php") === false) $c2[] = 'missing header.php include';
+        if (strpos($pageSrc, "includes/footer.php") === false) $c2[] = 'missing footer.php include (page would render blank — Alpine never loads)';
     }
     if (empty($c2)) { echo "PASS C2 admin page exists + lints + Alpine factory + gates\n"; $pass++; }
     else { echo "FAIL C2 " . implode('; ', $c2) . "\n"; $failures[] = 'C2'; }

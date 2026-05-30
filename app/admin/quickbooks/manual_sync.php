@@ -251,3 +251,5 @@ function qboManualSync() {
 </script>
 
 <?php endif; ?>
+
+<?php require_once FF_ROOT . '/includes/footer.php'; ?>
