@@ -13,18 +13,27 @@ declare(strict_types=1);
  *     step 4 also filters; double-gate prevents queue churn from
  *     bridge-derived inserts that would land in failed_preflight
  *     terminal state).
- *   - update: stubbed (D-QBO-21-5 mirrors S-QBO-11/14/18/19); gate-0
- *     still validates eligibility.
- *   - void: not in v1 (deferred to S-QBO-21-VOID-FOLLOWUP per F7-style
- *     deferral pattern).
+ *   - update: SUPPORTED since S-QBO-JE-UPDATE (D-QBO-21-5 stub CLOSED);
+ *     gate-3 allowlist accepts 'update'; JournalEntryPusher::pushUpdate
+ *     full-payload re-send via QuickBooksClient::updateEntity. NOTE: no
+ *     enqueue('update') hook is wired into any FF endpoint — JEs are
+ *     immutable post-posting (they reverse via a companion JE, not edit;
+ *     there is no journal_entries/update.php). The mechanical update rides
+ *     manual-sync force_resync / drift resync. The bridge-derived gate-0b
+ *     filter below still applies to 'update' (covers the UPDATE verb).
+ *   - void: NOT a JE concept (JEs reverse via a companion posted JE that
+ *     pushes as its own create); gate-3 allowlist rejects it.
  *
  * Bridge-derived source_type filter list per QBO_SPEC §8.10 verbatim:
  *   ['invoice','payment','credit_note','ap_bill','ap_payment']
  *
- * @session  S-QBO-21
+ * @session  S-QBO-21 (create) + S-QBO-JE-UPDATE (update)
  * @decision D-QBO-21-1 (bridge-derived filter — defense-in-depth at
  *               Enqueuer gate-0 AND Pusher pushImpl step 4),
- *           D-QBO-21-5 (pushUpdate stubbed → S-QBO-21-UPDATE-FOLLOWUP),
+ *           D-QBO-21-5 (pushUpdate stub CLOSED by S-QBO-JE-UPDATE; gate-3
+ *               now allows 'update'),
+ *           D-QBO-JE-UPDATE-1 (mechanical update; no endpoint hook — JEs
+ *               are immutable post-posting; rides manual-sync),
  *           D-ENQUEUER-CONTRACT (best-effort discipline),
  *           D-ENQUEUER-GATE-0-ELIGIBILITY (eligibility gate-0)
  */
@@ -40,7 +49,9 @@ class JournalEntryEnqueuer
      */
     private const OPERATION_STATUS_REQUIREMENTS = [
         'create' => ['posted'],
-        'update' => ['posted'],  // pushUpdate stubbed per D-QBO-21-5 but gate-0 still checks
+        // 'update' now SUPPORTED — D-QBO-21-5 stub closed by S-QBO-JE-UPDATE.
+        // Same eligibility as create (pushUpdate is a full-payload re-send).
+        'update' => ['posted'],
     ];
 
     /**
@@ -60,7 +71,8 @@ class JournalEntryEnqueuer
      * Best-effort enqueue. Returns true on success, false on rejection.
      *
      * @param int    $jeId      FF acc_journal_entries.id
-     * @param string $operation 'create' (S-QBO-21 v1)
+     * @param string $operation 'create' or 'update' (S-QBO-JE-UPDATE widened
+     *                          gate-3); 'void' rejected (not a JE concept)
      * @return bool             true on enqueue success
      */
     public static function enqueue(int $jeId, string $operation): bool
@@ -113,9 +125,12 @@ class JournalEntryEnqueuer
                 return false;
             }
 
-            // Gate 3: operation allowlist (v1 = create only).
-            if (!in_array($operation, ['create'], true)) {
-                error_log("[JournalEntryEnqueuer] gate-3 reject: operation '{$operation}' not in S-QBO-21 v1 allowlist (create only; update + void deferred to S-QBO-21-UPDATE-FOLLOWUP per D-QBO-21-5)");
+            // Gate 3: operation allowlist. 'create' + 'update' supported since
+            // S-QBO-JE-UPDATE (D-QBO-21-5 stub closed). 'void' rejected — not a
+            // JE concept (JEs reverse via a companion posted JE, pushed as its
+            // own create).
+            if (!in_array($operation, ['create', 'update'], true)) {
+                error_log("[JournalEntryEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist [create,update] (JEs reverse via a companion JE, not void)");
                 return false;
             }
 

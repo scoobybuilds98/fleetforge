@@ -39,9 +39,22 @@ declare(strict_types=1);
  *   - No counterparty currency comparison (no customer/vendor to fetch);
  *     currency-mismatch typed sub-state used only when multi_currency_enabled='1'
  *     AND header currency is empty/invalid
- *   - pushUpdate stubbed → S-QBO-21-UPDATE-FOLLOWUP per D-QBO-21-5
+ *   - pushUpdate IMPLEMENTED in S-QBO-JE-UPDATE (5th + FINAL slice of the
+ *     pusher-update paydown; closes D-QBO-21-5): MECHANICAL full-payload
+ *     re-send via QuickBooksClient::updateEntity('journalentry', ...) +
+ *     SyncToken round-trip (mirrors InvoicePusher D-QBO-12-1 + the Bill /
+ *     Payment / BillPayment / CreditMemo slices), demote-to-create when
+ *     unmapped at pushImpl step 5b. CRITICAL: step 5b sits AFTER the
+ *     bridge-derived gate (step 4), so an 'update' of a bridge-derived JE
+ *     is still rejected as skipped_bridge_derived before the operation
+ *     branch — the D-QBO-21-1 double-accounting guard covers the UPDATE
+ *     verb too without extra code (analog of PaymentPusher's origin-gate
+ *     placement). NO enqueue hook is wired into any FF endpoint because
+ *     JEs are immutable post-posting (they REVERSE via a companion JE that
+ *     pushes as its own create — there is no journal_entries/update.php);
+ *     the mechanical update rides manual-sync force_resync / drift resync.
  *
- * @session  S-QBO-21
+ * @session  S-QBO-21 (create) + S-QBO-JE-UPDATE (pushUpdate)
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §8.10 (Journal Entry),
  *           §6.8 (Pusher Contract), §7.* acc_qbo_journal_entry_map
  * @decision D-QBO-21-1 (bridge-derived filter per spec §8.10:
@@ -49,9 +62,14 @@ declare(strict_types=1);
  *           D-QBO-21-2 (PostingType mapping debit/credit columns),
  *           D-QBO-21-3 (per-line AccountRef via acc_qbo_account_map),
  *           D-QBO-21-4 (DocNumber from entry_number; 21-char gate),
- *           D-QBO-21-5 (pushUpdate stubbed → S-QBO-21-UPDATE-FOLLOWUP),
+ *           D-QBO-21-5 (pushUpdate stub — CLOSED by S-QBO-JE-UPDATE /
+ *               D-QBO-JE-UPDATE-1),
  *           D-QBO-21-6 (header currency + D-QBO-FIXPACK-12 gating),
- *           D-QBO-21-7 (PrivateNote source attribution for audit)
+ *           D-QBO-21-7 (PrivateNote source attribution for audit),
+ *           D-QBO-JE-UPDATE-1 (mechanical pushUpdate via updateEntity
+ *               full-payload re-send; demote-to-create at step 5b AFTER the
+ *               bridge-derived gate so D-QBO-21-1 covers the update verb),
+ *           D-PUSHER-DEMOTION-RULE (update→create demotion at pushImpl step 5b)
  */
 
 namespace FleetForge\QboPushers;
@@ -161,18 +179,33 @@ class JournalEntryPusher
     }
 
     /**
-     * S-QBO-21 v1 stub per D-QBO-21-5 — pushUpdate will be implemented
-     * in S-QBO-21-UPDATE-FOLLOWUP. Returns success=false with
-     * status='unsupported_in_session'.
+     * Push an UPDATE to an existing QBO JournalEntry (S-QBO-JE-UPDATE,
+     * closing the D-QBO-21-5 stub). MECHANICAL full-payload re-send via
+     * QuickBooksClient::updateEntity — not a sparse diff (mirrors
+     * InvoicePusher D-QBO-12-1 + the four prior update slices). FF is
+     * canonical (D-QBO-CORE-1); QBO accepts the complete payload + current
+     * SyncToken and replaces.
+     *
+     * Demotion (D-PUSHER-DEMOTION-RULE): if the JE was never pushed (no map
+     * row / null qbo_journal_entry_id), pushImpl auto-demotes to 'create' at
+     * step 5b and re-POSTs.
+     *
+     * Bridge-derived safety (D-QBO-21-1): pushImpl step 4 rejects any JE with
+     * a bridge-derived source_type (invoice/payment/credit_note/ap_bill/
+     * ap_payment) BEFORE the step-5b operation branch — so an update of a
+     * bridge-derived JE is rejected as skipped_bridge_derived, never reaching
+     * updateEntity. QBO derives those JEs from the parent entity sync;
+     * pushing them (create OR update) would double-count.
+     *
+     * @return array  §6.8 5-key return shape; status='pushed' on success
+     *                (acc_qbo_journal_entry_map.push_status ENUM has no
+     *                'updated' value, so we reuse 'pushed'; no migration),
+     *                outcome='updated' (or 'created' when demoted). Plus the
+     *                skip / failure status codes inherited from pushImpl.
      */
     public static function pushUpdate(int $entityId, ?array $payloadSnapshot = null): array
     {
-        return [
-            'success' => false,
-            'status'  => 'unsupported_in_session',
-            'outcome' => 'failed',
-            'error'   => 'JournalEntryPusher::pushUpdate is not implemented in S-QBO-21 v1 (D-QBO-21-5). Queue this for S-QBO-21-UPDATE-FOLLOWUP.',
-        ] + self::RESULT_BASE;
+        return self::pushImpl($entityId, 'update', $payloadSnapshot);
     }
 
     /**
@@ -262,6 +295,20 @@ class JournalEntryPusher
             ] + self::RESULT_BASE;
         }
 
+        // 5b. Update demotion (D-PUSHER-DEMOTION-RULE, mirrors InvoicePusher
+        //     D-QBO-12-1 + the four prior update slices). An 'update' of a JE
+        //     that was never pushed (no map row OR null qbo_journal_entry_id)
+        //     is just a first push — demote to 'create' so the HTTP dispatch
+        //     in step 9 calls createEntity. CRITICAL placement: this sits
+        //     AFTER the bridge-derived gate (step 4) + the create-idempotency
+        //     block (step 5), so a bridge-derived JE update is already
+        //     rejected as skipped_bridge_derived above — the D-QBO-21-1
+        //     double-accounting guard covers the UPDATE verb without extra
+        //     code (analog of PaymentPusher's step-7b-after-origin placement).
+        if ($operation === 'update' && ($mapping === null || empty($mapping['qbo_journal_entry_id']))) {
+            $operation = 'create';
+        }
+
         // 6. entry_status='posted' gate per spec §8.10 + AskUserQuestion answer.
         //    Drafts + submitted + approved (AJE workflow mid-flight) skip
         //    with failed_preflight. Reversed JEs are excluded too — only
@@ -325,10 +372,23 @@ class JournalEntryPusher
             ] + self::RESULT_BASE;
         }
 
-        // 9. HTTP call.
+        // 9. HTTP call. createEntity for a new JE, updateEntity for an existing
+        //    one (full-payload re-send per D-QBO-12-1; updateEntity merges Id +
+        //    SyncToken into the payload). SyncToken comes from the mapping row
+        //    (selected in step 3). Demotion in step 5b guarantees $mapping has
+        //    a qbo_journal_entry_id whenever $operation is still 'update' here.
         $client = new QuickBooksClient();
         try {
-            $response = $client->createEntity('journalentry', $qboPayload);
+            if ($operation === 'update') {
+                $response = $client->updateEntity(
+                    'journalentry',
+                    (string) $mapping['qbo_journal_entry_id'],
+                    (string) ($mapping['qbo_sync_token'] ?? '0'),
+                    $qboPayload
+                );
+            } else {
+                $response = $client->createEntity('journalentry', $qboPayload);
+            }
         } catch (QuickBooksException $e) {
             self::recordPushFailure($ffJeId, $e->getMessage());
             return [
@@ -356,7 +416,11 @@ class JournalEntryPusher
         return [
             'success'    => true,
             'status'     => 'pushed',
-            'outcome'    => 'created',
+            // acc_qbo_journal_entry_map.push_status ENUM has no 'updated' value
+            // — the map row stays 'pushed' for both create + update. The
+            // transient outcome field distinguishes them for the worker tally
+            // / smoke assertions.
+            'outcome'    => $operation === 'update' ? 'updated' : 'created',
             'qbo_id'     => (string) $qboJe['Id'],
             'sync_token' => (string) ($qboJe['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;

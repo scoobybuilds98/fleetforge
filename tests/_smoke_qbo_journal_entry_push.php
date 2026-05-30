@@ -6,7 +6,7 @@ declare(strict_types=1);
  *
  * Smoke test for S-QBO-21 Journal Entry Push (Phase QBO-10 / 1 of 1).
  *
- * Sub-checks (C1-C31):
+ * Sub-checks (C1-C33; C14 + C25 repurposed + C32/C33 added by S-QBO-JE-UPDATE):
  *  C1: class surfaces (JournalEntryPusher + JournalEntryEnqueuer +
  *      RESULT_BASE + key methods)
  *  C2: acc_qbo_journal_entry_map schema (18 cols + 2 UNIQUE + 2 indexes + FK)
@@ -27,7 +27,9 @@ declare(strict_types=1);
  *      non-HTTP sync_log SKIP
  * C12: pushImpl already_mapped → outcome='created' (idempotency)
  * C13: pushImpl missing FF JE → ff_not_found
- * C14: pushUpdate stub → unsupported_in_session pointing to
+ * C14: REPURPOSED (S-QBO-JE-UPDATE) — pushUpdate delegates to pushImpl
+ *      (skipped_by_mode via sync_mode='disabled' proves no-longer-a-stub).
+ * C14 (historical): pushUpdate stub → unsupported_in_session pointing to
  *      S-QBO-21-UPDATE-FOLLOWUP (D-QBO-21-5)
  * C15: multi_currency='1' → CurrencyRef + ExchangeRate emitted (D-QBO-FIXPACK-12)
  * C16: multi_currency='0' → CurrencyRef + ExchangeRate absent (D-QBO-FIXPACK-12)
@@ -41,7 +43,8 @@ declare(strict_types=1);
  * C22: JournalEntryEnqueuer gate-0 rejects missing JE
  * C23: JournalEntryEnqueuer gate-0 rejects non-posted entry_status
  * C24: JournalEntryEnqueuer gate-0 rejects bridge-derived (defense-in-depth)
- * C25: JournalEntryEnqueuer gate-3 rejects 'update' op (v1 allowlist; D-QBO-21-5)
+ * C25: REPURPOSED (S-QBO-JE-UPDATE) — JournalEntryEnqueuer gate-3 now
+ *      ACCEPTS 'update' op + inserts queue row (D-QBO-21-5 stub closed)
  * C26: JournalEntryEnqueuer happy path queue insert (entity_type='journal_entry',
  *      op='create', status='queued')
  * C27: AccountValidator::assertReadyForJournalEntryPush gate at preflight
@@ -53,6 +56,11 @@ declare(strict_types=1);
  * C30: integration — bridge-derived JE auto-skip end-to-end
  *      (Enqueuer rejects at gate-0 AND Pusher rejects at step 4 — no
  *      map row at either layer; sync_log SKIP at Pusher layer)
+ * C32: NEW (S-QBO-JE-UPDATE) — pushUpdate on an UNMAPPED JE demotes to
+ *      create → failed_preflight at account-mapping gate BEFORE HTTP; no
+ *      qbo_journal_entry_id persisted (D-PUSHER-DEMOTION-RULE).
+ * C33: NEW (S-QBO-JE-UPDATE) — JournalEntryEnqueuer gate-3 rejects 'void'
+ *      (JEs reverse via a companion JE, not void).
  * C31: per-line AccountRef sourced from acc_qbo_account_map (D-QBO-21-3
  *      explicit assertion)
  *
@@ -69,7 +77,7 @@ use FleetForge\QboPushers\JournalEntryEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 31;
+$total = 33;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -494,12 +502,28 @@ try {
     if (empty($c13Errors)) { echo "PASS C13 missing FF JE → ff_not_found\n"; $pass++; }
     else { echo "FAIL C13 " . implode('; ', $c13Errors) . "\n"; $failures[] = 'C13'; }
 
-    // ── C14: pushUpdate stub ───────────────────────────────────────────
+    // ── C14: pushUpdate delegates to pushImpl (S-QBO-JE-UPDATE) ─────────
+    // The old stub returned 'unsupported_in_session' regardless of state.
+    // pushUpdate now routes through pushImpl; 999990 is seeded + mapped here,
+    // so sync_mode='disabled' is REQUIRED to short-circuit at step 1
+    // (skipped_by_mode) — otherwise the demoted-or-mapped path would reach a
+    // real updateEntity/createEntity HTTP call (404 in smoke; the HTTP trap).
+    // skipped_by_mode definitively proves delegation (NOT the old stub).
     $c14Errors = [];
+    ff_smoke_je_seed_je(999990);
+    db_execute("INSERT INTO acc_qbo_journal_entry_map (ff_journal_entry_id, qbo_journal_entry_id, qbo_sync_token, push_status) VALUES (999990, 'QBO-JE-EXISTING', '3', 'pushed')");
+    $prevMode14 = ff_smoke_je_get_setting('quickbooks.sync_mode.journal_entry');
+    ff_smoke_je_set_setting('quickbooks.sync_mode.journal_entry', 'disabled');
     $r14 = JournalEntryPusher::pushUpdate(999990);
-    if (($r14['status'] ?? null) !== 'unsupported_in_session') $c14Errors[] = "status: " . json_encode($r14['status'] ?? null);
-    if (strpos((string) ($r14['error'] ?? ''), 'S-QBO-21-UPDATE-FOLLOWUP') === false) $c14Errors[] = "error should mention S-QBO-21-UPDATE-FOLLOWUP";
-    if (empty($c14Errors)) { echo "PASS C14 pushUpdate stub → unsupported_in_session pointing to S-QBO-21-UPDATE-FOLLOWUP (D-QBO-21-5)\n"; $pass++; }
+    if (($r14['status'] ?? null) === 'unsupported_in_session') $c14Errors[] = "pushUpdate still a stub — returned unsupported_in_session";
+    if (($r14['status'] ?? null) !== 'skipped_by_mode') $c14Errors[] = "expected skipped_by_mode (delegation proof), got " . json_encode($r14['status'] ?? null);
+    if (($r14['outcome'] ?? null) !== 'skipped') $c14Errors[] = "outcome: " . json_encode($r14['outcome'] ?? null);
+    ff_smoke_je_set_setting('quickbooks.sync_mode.journal_entry', $prevMode14 ?? 'queue');
+    db_execute("DELETE FROM acc_qbo_journal_entry_map WHERE ff_journal_entry_id = 999990");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='journal_entry' AND entity_id=999990");
+    db_execute("DELETE FROM acc_journal_entry_lines WHERE journal_entry_id = 999990");
+    db_execute("DELETE FROM acc_journal_entries     WHERE id = 999990");
+    if (empty($c14Errors)) { echo "PASS C14 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-JE-UPDATE; D-QBO-21-5 closed)\n"; $pass++; }
     else { echo "FAIL C14 " . implode('; ', $c14Errors) . "\n"; $failures[] = 'C14'; }
 
     // ── C15: multi_currency='1' → CurrencyRef + ExchangeRate emitted ──
@@ -705,12 +729,23 @@ try {
     if (empty($c24Errors)) { echo "PASS C24 Enqueuer gate-0 rejects all 5 bridge-derived source_types (defense-in-depth; D-QBO-21-1)\n"; $pass++; }
     else { echo "FAIL C24 " . implode('; ', $c24Errors) . "\n"; $failures[] = 'C24'; }
 
-    // ── C25: Enqueuer gate-3 rejects 'update' op ──────────────────────
+    // ── C25: Enqueuer gate-3 ACCEPTS 'update' op (S-QBO-JE-UPDATE) ─────
+    // gate-3 allowlist widened ['create']→['create','update'] (D-QBO-21-5
+    // stub closed). 999990 (seeded here, left in place for C26) is posted +
+    // non-bridge-derived + sync_enabled=1 → enqueue('update') succeeds +
+    // writes a queue row with op='update'. The update queue row is cleaned
+    // before C26 so C26's create-row assertion stays unambiguous.
     ff_smoke_je_seed_je(999990);
+    ff_smoke_je_set_setting('quickbooks.sync_mode.journal_entry', 'queue');
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='journal_entry' AND entity_id=999990");
     $c25Errors = [];
     $r25 = JournalEntryEnqueuer::enqueue(999990, 'update');
-    if ($r25 !== false) $c25Errors[] = "enqueue should reject 'update' op in v1";
-    if (empty($c25Errors)) { echo "PASS C25 Enqueuer gate-3 rejects 'update' op (S-QBO-21 v1 allowlist; D-QBO-21-5)\n"; $pass++; }
+    $q25 = db_row("SELECT operation, status FROM acc_qbo_sync_queue WHERE entity_type='journal_entry' AND entity_id=999990 AND operation='update'");
+    if ($r25 !== true) $c25Errors[] = "enqueue should accept 'update' now; got " . json_encode($r25);
+    if ($q25 === null) $c25Errors[] = "an 'update' queue row should be written; none found";
+    elseif ($q25['operation'] !== 'update' || $q25['status'] !== 'queued') $c25Errors[] = "queue row shape: " . json_encode($q25);
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='journal_entry' AND entity_id=999990");
+    if (empty($c25Errors)) { echo "PASS C25 Enqueuer gate-3 accepts 'update' op + inserts queue row (S-QBO-JE-UPDATE; D-QBO-21-5 closed)\n"; $pass++; }
     else { echo "FAIL C25 " . implode('; ', $c25Errors) . "\n"; $failures[] = 'C25'; }
 
     // ── C26: Enqueuer happy path ──────────────────────────────────────
@@ -849,6 +884,51 @@ try {
     }
     if (empty($c31Errors)) { echo "PASS C31 per-line AccountRef sourced from acc_qbo_account_map via line.account_id (D-QBO-21-3)\n"; $pass++; }
     else { echo "FAIL C31 " . implode('; ', $c31Errors) . "\n"; $failures[] = 'C31'; }
+    db_execute("DELETE FROM acc_journal_entry_lines WHERE journal_entry_id = 999990");
+    db_execute("DELETE FROM acc_journal_entries     WHERE id = 999990");
+
+    // ── C32: pushUpdate on UNMAPPED JE demotes to create (S-QBO-JE-UPDATE) ─
+    // No map row → pushImpl step 5b flips operation to 'create' → runs the
+    // create pipeline. With the per-line account mapping removed, preflight
+    // gate 2 fails → failed_preflight (returns BEFORE the HTTP boundary, so
+    // no real updateEntity/createEntity is attempted). Proves the demotion
+    // ran the create path rather than attempting an UPDATE on an entity QBO
+    // doesn't know about (which would 404). Account mapping restored after.
+    $c32Errors = [];
+    ff_smoke_je_seed_je(999990);
+    db_execute("DELETE FROM acc_qbo_journal_entry_map WHERE ff_journal_entry_id = 999990");
+    db_execute("DELETE FROM acc_qbo_account_map WHERE ff_account_id = 999990");
+    ff_smoke_je_set_setting('quickbooks.sync_mode.journal_entry', 'queue');
+    $r32 = JournalEntryPusher::pushUpdate(999990);
+    $map32 = db_row("SELECT qbo_journal_entry_id, push_status FROM acc_qbo_journal_entry_map WHERE ff_journal_entry_id = 999990");
+    if (($r32['status'] ?? null) === 'unsupported_in_session') $c32Errors[] = "pushUpdate still a stub";
+    if (($r32['status'] ?? null) !== 'failed_preflight') $c32Errors[] = "expected failed_preflight (demoted-create at account-mapping gate), got " . json_encode($r32['status'] ?? null);
+    if (!empty($map32['qbo_journal_entry_id'])) $c32Errors[] = "no qbo_journal_entry_id should be persisted on a failed demoted-create; got " . json_encode($map32['qbo_journal_entry_id']);
+    // Restore account mapping for hermetic state.
+    db_execute("INSERT INTO acc_qbo_account_map (ff_account_id, qbo_account_id, mapping_status) VALUES (999990, 'A-EXP-9000', 'mapped')");
+    db_execute("DELETE FROM acc_qbo_journal_entry_map WHERE ff_journal_entry_id = 999990");
+    db_execute("DELETE FROM acc_journal_entry_lines WHERE journal_entry_id = 999990");
+    db_execute("DELETE FROM acc_journal_entries     WHERE id = 999990");
+    if (empty($c32Errors)) { echo "PASS C32 pushUpdate on unmapped JE demotes to create (failed_preflight at account-mapping gate; no qbo_id; D-PUSHER-DEMOTION-RULE)\n"; $pass++; }
+    else { echo "FAIL C32 " . implode('; ', $c32Errors) . "\n"; $failures[] = 'C32'; }
+
+    // ── C33: Enqueuer gate-3 rejects 'void' op (S-QBO-JE-UPDATE) ───────
+    // gate-3 allowlist = ['create','update']; 'void' is not a JE concept
+    // (JEs reverse via a companion posted JE that pushes as its own create).
+    $c33Errors = [];
+    ff_smoke_je_seed_je(999990);
+    ff_smoke_je_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_je_set_setting('quickbooks.sync_mode.journal_entry', 'queue');
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='journal_entry' AND entity_id=999990");
+    $r33 = JournalEntryEnqueuer::enqueue(999990, 'void');
+    $q33 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='journal_entry' AND entity_id=999990 AND operation='void'");
+    if ($r33 !== false) $c33Errors[] = "enqueue should reject 'void'; got " . json_encode($r33);
+    if ($q33 !== null) $c33Errors[] = "no 'void' queue row should be inserted; found id=" . $q33['id'];
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='journal_entry' AND entity_id=999990");
+    db_execute("DELETE FROM acc_journal_entry_lines WHERE journal_entry_id = 999990");
+    db_execute("DELETE FROM acc_journal_entries     WHERE id = 999990");
+    if (empty($c33Errors)) { echo "PASS C33 Enqueuer gate-3 rejects 'void' op (allowlist = create+update only; JEs reverse not void)\n"; $pass++; }
+    else { echo "FAIL C33 " . implode('; ', $c33Errors) . "\n"; $failures[] = 'C33'; }
 
 } finally {
     ff_smoke_je_cleanup();
