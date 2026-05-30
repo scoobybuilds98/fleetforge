@@ -111,8 +111,8 @@ class BillEnqueuer
             // ────────────────────────────────────────────────────────
             // Gate 3: Operation allowlist. update + void are NOT in v1.
             // ────────────────────────────────────────────────────────
-            if (!in_array($operation, ['create'], true)) {
-                error_log("[BillEnqueuer] gate-3 reject: operation '{$operation}' not in S-QBO-18 v1 allowlist (create only; update + void deferred to S-QBO-19)");
+            if (!in_array($operation, ['create', 'update'], true)) {
+                error_log("[BillEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist (create + update per S-QBO-BILL-UPDATE; void deferred)");
                 return false;
             }
 

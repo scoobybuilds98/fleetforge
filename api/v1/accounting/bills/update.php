@@ -237,4 +237,19 @@ $result = db_transaction(function () use (
     return ['id' => $id, 'bill_number' => $bill['bill_number']];
 });
 
+// S-QBO-BILL-UPDATE: enqueue FF→QBO bill push on edit (closes D-QBO-18-5).
+// Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws; silent reject
+// when sync_enabled=0 (D-CPA-5 default) or any gate fails. Only draft bills
+// reach this endpoint (the status!='draft' guard above), so in practice the
+// Enqueuer's gate-0 status check (approved-or-later) will reject most edits
+// here — but a bill edited then approved re-enqueues correctly via the
+// approve.php 'create' hook, and BillPusher::pushUpdate demotes to create
+// when unmapped. Wired symmetrically with approve.php's create hook so any
+// future "edit approved bills" flow gets QBO sync for free.
+try {
+    \FleetForge\QboPushers\BillEnqueuer::enqueue($id, 'update');
+} catch (\Throwable $e) {
+    error_log('[bills/update] QBO enqueue hook failed: ' . $e->getMessage());
+}
+
 json_success($result);

@@ -37,12 +37,14 @@ declare(strict_types=1);
  *      error message about approve-first
  * C14: pushImpl already_mapped — returns 'created' outcome
  * C15: pushImpl missing FF bill — ff_not_found
- * C16: pushUpdate stub — returns unsupported_in_session per D-QBO-18-5
+ * C16: pushUpdate delegates to pushImpl (no longer a stub) — S-QBO-BILL-UPDATE
  * C17: BillEnqueuer gate-0 — rejects missing bill
  * C18: BillEnqueuer gate-0 — rejects draft bill for 'create' op
- * C19: BillEnqueuer gate-3 — rejects 'update' op (not in v1 allowlist)
+ * C19: BillEnqueuer gate-3 — ACCEPTS 'update' op (S-QBO-BILL-UPDATE) + queue row
  * C20: BillEnqueuer happy path — approved bill + sync_enabled='1'
  *      writes queue row
+ * C24: pushUpdate on unmapped bill demotes to create (S-QBO-BILL-UPDATE)
+ * C25: BillEnqueuer still rejects 'void' (allowlist = create+update only)
  *
  * Fixtures use sentinel IDs in 999990-999999 range, cleaned up in finally.
  *
@@ -57,7 +59,7 @@ use FleetForge\QboPushers\BillEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 23;
+$total = 25;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -599,20 +601,27 @@ try {
         $failures[] = 'C15';
     }
 
-    // ── C16: pushUpdate stub — unsupported_in_session ──────────────────
+    // ── C16: pushUpdate delegates to pushImpl (S-QBO-BILL-UPDATE, closes D-QBO-18-5) ─
+    // The old stub returned 'unsupported_in_session' regardless of state.
+    // pushUpdate now routes through pushImpl; with sync_mode='disabled' it
+    // returns skipped_by_mode at step 1 — proving delegation (definitively
+    // NOT the stub). Uses a fresh sentinel (999992) to avoid the mapped
+    // 999990 from C14 (which would attempt a real updateEntity → HTTP). The
+    // prior sync_mode is restored after.
     $c16Errors = [];
-    $r16 = BillPusher::pushUpdate(999990);
-    if (($r16['status'] ?? null) !== 'unsupported_in_session') {
-        $c16Errors[] = "status: got " . json_encode($r16['status'] ?? null);
+    ff_smoke_b_seed_bill(999992, 'approved', $fx);
+    $prevModeC16 = ff_smoke_b_get_setting('quickbooks.sync_mode.bill');
+    ff_smoke_b_set_setting('quickbooks.sync_mode.bill', 'disabled');
+    $r16 = BillPusher::pushUpdate(999992);
+    if (($r16['status'] ?? null) === 'unsupported_in_session') {
+        $c16Errors[] = "pushUpdate still a stub — returned unsupported_in_session";
     }
-    if (($r16['success'] ?? null) !== false) {
-        $c16Errors[] = "success should be false; got " . json_encode($r16['success'] ?? null);
+    if (($r16['status'] ?? null) !== 'skipped_by_mode') {
+        $c16Errors[] = "expected skipped_by_mode (delegation proof), got " . json_encode($r16['status'] ?? null);
     }
-    if (strpos((string) ($r16['error'] ?? ''), 'S-QBO-19') === false) {
-        $c16Errors[] = "error should mention S-QBO-19 follow-up; got: " . json_encode($r16['error'] ?? null);
-    }
+    ff_smoke_b_set_setting('quickbooks.sync_mode.bill', $prevModeC16 ?? 'queue');
     if (empty($c16Errors)) {
-        echo "PASS C16 pushUpdate stub returns unsupported_in_session pointing to S-QBO-19 (D-QBO-18-5)\n";
+        echo "PASS C16 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-BILL-UPDATE)\n";
         $pass++;
     } else {
         echo "FAIL C16 " . implode('; ', $c16Errors) . "\n";
@@ -658,18 +667,25 @@ try {
         $failures[] = 'C18';
     }
 
-    // ── C19: BillEnqueuer gate-3 — rejects 'update' op ─────────────────
+    // ── C19: BillEnqueuer gate-3 ACCEPTS 'update' op (S-QBO-BILL-UPDATE) ─
+    // gate-3 allowlist widened ['create']→['create','update']. 999990 is
+    // approved + sync_enabled=1 + sync_mode.bill=queue → enqueue('update')
+    // succeeds + inserts a queue row with operation='update'.
     $c19Errors = [];
+    ff_smoke_b_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_b_set_setting('quickbooks.sync_mode.bill', 'queue');
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type = 'bill' AND entity_id = 999990");
     $r19 = BillEnqueuer::enqueue(999990, 'update');
-    if ($r19 !== false) {
-        $c19Errors[] = "enqueue should reject 'update' op in v1; got " . json_encode($r19);
-    }
     $queued19 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type = 'bill' AND entity_id = 999990 AND operation = 'update'");
-    if ($queued19 !== null) {
-        $c19Errors[] = "no queue row should be written for rejected op; found id=" . $queued19['id'];
+    if ($r19 !== true) {
+        $c19Errors[] = "enqueue should accept 'update' now; got " . json_encode($r19);
     }
+    if ($queued19 === null) {
+        $c19Errors[] = "an 'update' queue row should be written; none found";
+    }
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type = 'bill' AND entity_id = 999990");
     if (empty($c19Errors)) {
-        echo "PASS C19 BillEnqueuer gate-3 rejects 'update' op (S-QBO-18 v1 allowlist; deferred to S-QBO-19)\n";
+        echo "PASS C19 BillEnqueuer gate-3 accepts 'update' op + inserts queue row (S-QBO-BILL-UPDATE)\n";
         $pass++;
     } else {
         echo "FAIL C19 " . implode('; ', $c19Errors) . "\n";
@@ -695,6 +711,62 @@ try {
     } else {
         echo "FAIL C20 " . implode('; ', $c20Errors) . "\n";
         $failures[] = 'C20';
+    }
+
+    // ── C24: pushUpdate on UNMAPPED bill demotes to create (S-QBO-BILL-UPDATE) ─
+    // No map row → pushImpl step 5b flips operation to 'create' → runs the
+    // create pipeline. With the vendor mapping removed, preflight gate 1
+    // fails → failed_preflight (returns BEFORE the HTTP boundary). Proves
+    // the demotion ran the create path rather than attempting an UPDATE on
+    // an entity QBO doesn't know about (which would 404). Vendor mapping is
+    // restored afterward so later checks are unaffected.
+    $c24Errors = [];
+    ff_smoke_b_seed_bill(999993, 'approved', $fx);
+    db_execute("DELETE FROM acc_qbo_bill_map WHERE ff_bill_id = 999993");
+    db_execute("DELETE FROM acc_qbo_vendor_map WHERE ff_vendor_id = 999990");
+    ff_smoke_b_set_setting('quickbooks.sync_mode.bill', 'queue');
+    $r24 = BillPusher::pushUpdate(999993);
+    $map24 = db_row("SELECT qbo_bill_id FROM acc_qbo_bill_map WHERE ff_bill_id = 999993");
+    if (($r24['status'] ?? null) === 'unsupported_in_session') {
+        $c24Errors[] = "pushUpdate still a stub";
+    }
+    if (($r24['status'] ?? null) !== 'failed_preflight') {
+        $c24Errors[] = "expected failed_preflight (demoted-create at vendor gate), got " . json_encode($r24['status'] ?? null);
+    }
+    if (!empty($map24['qbo_bill_id'])) {
+        $c24Errors[] = "no qbo_bill_id should be persisted on a failed demoted-create";
+    }
+    db_execute(
+        "INSERT INTO acc_qbo_vendor_map (ff_vendor_id, qbo_vendor_id, mapping_status, qbo_display_name)
+         VALUES (999990, 'V-9999', 'mapped', 'Smoke Vendor #1')"
+    );
+    if (empty($c24Errors)) {
+        echo "PASS C24 pushUpdate on unmapped bill demotes to create (failed_preflight at vendor gate; no qbo_id)\n";
+        $pass++;
+    } else {
+        echo "FAIL C24 " . implode('; ', $c24Errors) . "\n";
+        $failures[] = 'C24';
+    }
+
+    // ── C25: BillEnqueuer still REJECTS 'void' (allowlist = create+update) ─
+    $c25Errors = [];
+    ff_smoke_b_seed_bill(999994, 'approved', $fx);
+    ff_smoke_b_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_b_set_setting('quickbooks.sync_mode.bill', 'queue');
+    $r25 = BillEnqueuer::enqueue(999994, 'void');
+    $q25 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type = 'bill' AND entity_id = 999994 AND operation = 'void'");
+    if ($r25 !== false) {
+        $c25Errors[] = "expected false (void not in allowlist), got " . json_encode($r25);
+    }
+    if ($q25 !== null) {
+        $c25Errors[] = "no 'void' queue row should be inserted";
+    }
+    if (empty($c25Errors)) {
+        echo "PASS C25 BillEnqueuer rejects 'void' (gate-3 allowlist = create+update only)\n";
+        $pass++;
+    } else {
+        echo "FAIL C25 " . implode('; ', $c25Errors) . "\n";
+        $failures[] = 'C25';
     }
 
     // ── C21: gate 7 typed status — failed_preflight_field_too_long ──────
