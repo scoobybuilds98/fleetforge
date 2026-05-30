@@ -13,7 +13,7 @@ declare(strict_types=1);
  * bidirectional dedup gate (origin='ff_native' only) at both Enqueuer
  * gate 0 AND Pusher pushImpl step 5 (defense-in-depth per D-QBO-14-1).
  *
- * Sub-checks (C1-C20):
+ * Sub-checks (C1-C23, extended by S-QBO-PAYMENT-UPDATE):
  *  C1: class surfaces — PaymentPusher + PaymentEnqueuer + RESULT_BASE
  *      + key methods
  *  C2: acc_qbo_payment_map schema verified (shipped S-QBO-13 — asserts
@@ -43,16 +43,29 @@ declare(strict_types=1);
  * C16: PaymentEnqueuer gate-0 rejects payment.origin='qbo_payments_webhook'
  *      (CRITICAL — closes D-QBO-13-1/2 loop at the enqueue layer too)
  * C17: PaymentEnqueuer gate-0 rejects payment.status='pending'
- * C18: PaymentEnqueuer gate-3 rejects 'update' op (v1 allowlist; D-QBO-14-5)
+ * C18: REPURPOSED (S-QBO-PAYMENT-UPDATE) — PaymentEnqueuer gate-3 ACCEPTS
+ *      'update' op + inserts queue row (D-QBO-14-5 stub closed)
  * C19: PaymentEnqueuer happy path queue insert (status='cleared' +
  *      origin='ff_native' + sync_enabled='1')
- * C20: pushUpdate stub returns unsupported_in_session pointing to
- *      S-QBO-14-UPDATE-FOLLOWUP (D-QBO-14-5)
+ * C20: REPURPOSED (S-QBO-PAYMENT-UPDATE) — pushUpdate delegates to pushImpl
+ *      (no longer a stub); sync_mode='disabled' proves the delegation
+ *      (skipped_by_mode return rather than unsupported_in_session)
+ * C21: NEW (S-QBO-PAYMENT-UPDATE) — pushUpdate on an UNMAPPED payment
+ *      demotes to create → runs create pipeline → fails at customer-
+ *      mapping preflight gate (BEFORE HTTP); no qbo_payment_id persisted.
+ *      Proves D-PUSHER-DEMOTION-RULE active for payment.
+ * C22: NEW (S-QBO-PAYMENT-UPDATE) — PaymentEnqueuer still REJECTS 'void'
+ *      (allowlist = create+update only; pushVoid is a separate F7 slice)
+ * C23: NEW (S-QBO-PAYMENT-UPDATE) — pushUpdate of a webhook-originated
+ *      payment (origin='qbo_payments_webhook') still returns
+ *      skipped_non_ff_origin. CRITICAL — proves D-QBO-14-1 dedup guard
+ *      covers the update verb too (steps 5+6 run BEFORE the operation
+ *      branch). Bidirectional dedup invariant survives update path.
  *
  * Fixtures use sentinel IDs in 999990-999999 range, cleaned up in finally.
  *
- * @session  S-QBO-14
- * @decision D-QBO-14-1..7
+ * @session  S-QBO-14 (original) + S-QBO-PAYMENT-UPDATE (extension)
+ * @decision D-QBO-14-1..7, D-QBO-PAYMENT-UPDATE-1, D-PUSHER-DEMOTION-RULE
  */
 
 require_once __DIR__ . '/../api/bootstrap.php';
@@ -62,7 +75,7 @@ use FleetForge\QboPushers\PaymentEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 20;
+$total = 23;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -673,18 +686,29 @@ try {
         $failures[] = 'C17';
     }
 
-    // ── C18: PaymentEnqueuer gate-3 rejects 'update' op ─────────────────
+    // ── C18: PaymentEnqueuer gate-3 ACCEPTS 'update' op (S-QBO-PAYMENT-UPDATE) ─
+    // gate-3 allowlist widened ['create'] → ['create','update'] in
+    // S-QBO-PAYMENT-UPDATE (D-QBO-14-5 stub closed). 999990 is cleared +
+    // ff_native + sync_enabled='1' + sync_mode.payment='queue' →
+    // enqueue('update') now succeeds + writes a queue row with
+    // operation='update'.
     $c18Errors = [];
+    ff_smoke_pp_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_pp_set_setting('quickbooks.sync_mode.payment', 'queue');
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type = 'payment' AND entity_id = 999990");
     $r18 = PaymentEnqueuer::enqueue(999990, 'update');
-    if ($r18 !== false) {
-        $c18Errors[] = "enqueue should reject 'update' op in v1; got " . json_encode($r18);
+    $queued18 = db_row("SELECT operation, status FROM acc_qbo_sync_queue WHERE entity_type = 'payment' AND entity_id = 999990 AND operation = 'update'");
+    if ($r18 !== true) {
+        $c18Errors[] = "enqueue should accept 'update' now; got " . json_encode($r18);
     }
-    $queued18 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type = 'payment' AND entity_id = 999990 AND operation = 'update'");
-    if ($queued18 !== null) {
-        $c18Errors[] = "no queue row should be written for rejected op; found id=" . $queued18['id'];
+    if ($queued18 === null) {
+        $c18Errors[] = "an 'update' queue row should be written; none found";
+    } elseif ($queued18['operation'] !== 'update' || $queued18['status'] !== 'queued') {
+        $c18Errors[] = "queue row shape: got " . json_encode($queued18);
     }
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type = 'payment' AND entity_id = 999990");
     if (empty($c18Errors)) {
-        echo "PASS C18 PaymentEnqueuer gate-3 rejects 'update' op (S-QBO-14 v1 allowlist; D-QBO-14-5)\n";
+        echo "PASS C18 PaymentEnqueuer gate-3 accepts 'update' op + inserts queue row (S-QBO-PAYMENT-UPDATE; D-QBO-14-5 closed)\n";
         $pass++;
     } else {
         echo "FAIL C18 " . implode('; ', $c18Errors) . "\n";
@@ -712,24 +736,132 @@ try {
         $failures[] = 'C19';
     }
 
-    // ── C20: pushUpdate stub — unsupported_in_session ───────────────────
+    // ── C20: pushUpdate delegates to pushImpl (S-QBO-PAYMENT-UPDATE) ────
+    // The old stub returned 'unsupported_in_session' regardless of state.
+    // pushUpdate now routes through pushImpl; with sync_mode='disabled' it
+    // returns skipped_by_mode at step 1 — proving delegation (definitively
+    // NOT the stub). Uses a fresh sentinel (999991) to avoid the existing
+    // 999990 fixture (which would otherwise reach the HTTP call boundary
+    // when no map row exists and the demotion-to-create path is taken).
+    // The prior sync_mode is restored after the assertion.
     $c20Errors = [];
-    $r20 = PaymentPusher::pushUpdate(999990);
-    if (($r20['status'] ?? null) !== 'unsupported_in_session') {
-        $c20Errors[] = "status: got " . json_encode($r20['status'] ?? null);
+    ff_smoke_pp_seed_payment(999991, $fx);
+    $prevModeC20 = ff_smoke_pp_get_setting('quickbooks.sync_mode.payment');
+    ff_smoke_pp_set_setting('quickbooks.sync_mode.payment', 'disabled');
+    $r20 = PaymentPusher::pushUpdate(999991);
+    if (($r20['status'] ?? null) === 'unsupported_in_session') {
+        $c20Errors[] = "pushUpdate still a stub — returned unsupported_in_session";
     }
-    if (($r20['success'] ?? null) !== false) {
-        $c20Errors[] = "success should be false; got " . json_encode($r20['success'] ?? null);
+    if (($r20['status'] ?? null) !== 'skipped_by_mode') {
+        $c20Errors[] = "expected skipped_by_mode (delegation proof), got " . json_encode($r20['status'] ?? null);
     }
-    if (strpos((string) ($r20['error'] ?? ''), 'S-QBO-14-UPDATE-FOLLOWUP') === false) {
-        $c20Errors[] = "error should mention S-QBO-14-UPDATE-FOLLOWUP; got: " . json_encode($r20['error'] ?? null);
+    if (($r20['outcome'] ?? null) !== 'skipped') {
+        $c20Errors[] = "outcome: got " . json_encode($r20['outcome'] ?? null);
     }
+    ff_smoke_pp_set_setting('quickbooks.sync_mode.payment', $prevModeC20 ?? 'queue');
     if (empty($c20Errors)) {
-        echo "PASS C20 pushUpdate stub returns unsupported_in_session pointing to S-QBO-14-UPDATE-FOLLOWUP (D-QBO-14-5)\n";
+        echo "PASS C20 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-PAYMENT-UPDATE; D-QBO-14-5 closed)\n";
         $pass++;
     } else {
         echo "FAIL C20 " . implode('; ', $c20Errors) . "\n";
         $failures[] = 'C20';
+    }
+
+    // ── C21: pushUpdate on UNMAPPED payment demotes to create (S-QBO-PAYMENT-UPDATE) ─
+    // No map row → pushImpl step 7b flips operation to 'create' → runs the
+    // create pipeline. With the customer mapping removed, preflight gate 1
+    // (customer mapping) fails → failed_preflight (returns BEFORE the HTTP
+    // boundary, so no real updateEntity/createEntity call is attempted).
+    // Proves the demotion ran the create path rather than attempting an
+    // UPDATE on an entity QBO doesn't know about (which would 404).
+    // Customer mapping is restored afterward so later checks are unaffected.
+    $c21Errors = [];
+    ff_smoke_pp_seed_payment(999992, $fx);
+    db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id = 999992");
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = 999990");
+    ff_smoke_pp_set_setting('quickbooks.sync_mode.payment', 'queue');
+    $r21 = PaymentPusher::pushUpdate(999992);
+    $map21 = db_row("SELECT qbo_payment_id, push_status FROM acc_qbo_payment_map WHERE ff_payment_id = 999992");
+    if (($r21['status'] ?? null) === 'unsupported_in_session') {
+        $c21Errors[] = "pushUpdate still a stub";
+    }
+    if (($r21['status'] ?? null) !== 'failed_preflight') {
+        $c21Errors[] = "expected failed_preflight (demoted-create at customer gate), got " . json_encode($r21['status'] ?? null);
+    }
+    if (!empty($map21['qbo_payment_id'])) {
+        $c21Errors[] = "no qbo_payment_id should be persisted on a failed demoted-create; got " . json_encode($map21['qbo_payment_id']);
+    }
+    // Restore customer mapping for any downstream assertions.
+    db_execute(
+        "INSERT INTO acc_qbo_customer_map (ff_customer_id, qbo_customer_id, mapping_status, qbo_display_name)
+         VALUES (999990, 'C-9999', 'mapped', 'Smoke PP Customer Inc.')"
+    );
+    if (empty($c21Errors)) {
+        echo "PASS C21 pushUpdate on unmapped payment demotes to create (failed_preflight at customer gate; no qbo_id; D-PUSHER-DEMOTION-RULE)\n";
+        $pass++;
+    } else {
+        echo "FAIL C21 " . implode('; ', $c21Errors) . "\n";
+        $failures[] = 'C21';
+    }
+
+    // ── C22: PaymentEnqueuer still REJECTS 'void' (S-QBO-PAYMENT-UPDATE) ──
+    // gate-3 allowlist is now ['create','update'] — 'void' remains
+    // unsupported (separate F7 pushVoid trio slice).
+    $c22Errors = [];
+    ff_smoke_pp_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_pp_set_setting('quickbooks.sync_mode.payment', 'queue');
+    $r22 = PaymentEnqueuer::enqueue(999990, 'void');
+    $queued22 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type = 'payment' AND entity_id = 999990 AND operation = 'void'");
+    if ($r22 !== false) {
+        $c22Errors[] = "expected false (void not in allowlist), got " . json_encode($r22);
+    }
+    if ($queued22 !== null) {
+        $c22Errors[] = "no 'void' queue row should be inserted; found id=" . $queued22['id'];
+    }
+    if (empty($c22Errors)) {
+        echo "PASS C22 PaymentEnqueuer rejects 'void' op (gate-3 allowlist = create+update only; pushVoid → F7)\n";
+        $pass++;
+    } else {
+        echo "FAIL C22 " . implode('; ', $c22Errors) . "\n";
+        $failures[] = 'C22';
+    }
+
+    // ── C23: pushUpdate of webhook-originated payment → skipped_non_ff_origin ──
+    // CRITICAL — proves the D-QBO-14-1 bidirectional dedup invariant covers
+    // the UPDATE verb too, not just CREATE. pushImpl steps 5+6 (origin and
+    // pulled_from_qbo gates) run BEFORE the operation branch, so an update
+    // of a webhook-originated payment is rejected exactly like a create
+    // would be. Uses sentinel 999993 with origin='qbo_payments_webhook'
+    // and NO map row — ensures we're hitting the origin gate, not the
+    // pulled_from_qbo defensive gate (those are distinct code paths).
+    $c23Errors = [];
+    ff_smoke_pp_seed_payment(999993, $fx, ['origin' => 'qbo_payments_webhook']);
+    $r23 = PaymentPusher::pushUpdate(999993);
+    if (($r23['status'] ?? null) !== 'skipped_non_ff_origin') {
+        $c23Errors[] = "status: got " . json_encode($r23['status'] ?? null) . ", want 'skipped_non_ff_origin'";
+    }
+    if (($r23['outcome'] ?? null) !== 'skipped') {
+        $c23Errors[] = "outcome: got " . json_encode($r23['outcome'] ?? null);
+    }
+    if (strpos((string) ($r23['error'] ?? ''), 'qbo_payments_webhook') === false) {
+        $c23Errors[] = "error should mention 'qbo_payments_webhook'; got: " . json_encode($r23['error'] ?? null);
+    }
+    // No map row should be written for skipped_non_ff_origin (mirrors C10).
+    $map23 = db_row("SELECT id FROM acc_qbo_payment_map WHERE ff_payment_id = 999993");
+    if ($map23 !== null) {
+        $c23Errors[] = "no map row should be written for skipped_non_ff_origin; found id=" . $map23['id'];
+    }
+    // sync_log SKIP sentinel with error_code='skipped_non_ff_origin'.
+    $log23 = db_row("SELECT http_method, error_code FROM acc_qbo_sync_log WHERE entity_type = 'payment' AND entity_id = 999993 AND operation = 'update' ORDER BY id DESC LIMIT 1");
+    if ($log23 === null || $log23['http_method'] !== 'SKIP' || $log23['error_code'] !== 'skipped_non_ff_origin') {
+        $c23Errors[] = "sync_log SKIP sentinel (operation=update): got " . json_encode($log23);
+    }
+    if (empty($c23Errors)) {
+        echo "PASS C23 pushUpdate of webhook-originated payment → skipped_non_ff_origin (CRITICAL — D-QBO-14-1 covers update verb too; smoke for S-QBO-PAYMENT-UPDATE risk surface)\n";
+        $pass++;
+    } else {
+        echo "FAIL C23 " . implode('; ', $c23Errors) . "\n";
+        $failures[] = 'C23';
     }
 } finally {
     ff_smoke_pp_cleanup();

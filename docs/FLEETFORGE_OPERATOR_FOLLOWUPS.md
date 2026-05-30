@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-05-29 via S-QBO-20 (added F14 + F15).
+**Last updated:** 2026-05-31 via S-QBO-PAYMENT-UPDATE (closed F5 PaymentPusher::pushUpdate; updated F-PAYDOWN-PROGRESS — 2/5 update slices shipped).
 
 ---
 
@@ -111,12 +111,12 @@
 
 ## 🟢 DEFERRED — queued for follow-up sessions
 
-### F5 — S-QBO-14-UPDATE-FOLLOWUP — PaymentPusher::pushUpdate impl
+### F5 — S-QBO-14-UPDATE-FOLLOWUP — PaymentPusher::pushUpdate impl ✅ CLOSED 2026-05-31
 
 **Surfaced by:** S-QBO-14 (2026-05-28) — D-QBO-14-5 stub-then-implement pattern
-**Operator action:** queue a future session to implement PaymentPusher::pushUpdate. Currently returns `unsupported_in_session` per the stub pattern (matches S-QBO-11 D-QBO-11-4 + S-QBO-18 D-QBO-18-5).
+**Closed by:** S-QBO-PAYMENT-UPDATE (2026-05-31) — D-QBO-PAYMENT-UPDATE-1 locked. PaymentPusher::pushUpdate now routes through the shared pushImpl with operation='update' → full-payload re-send via QuickBooksClient::updateEntity + SyncToken refresh (mirrors InvoicePusher D-QBO-12-1 + BillPusher D-QBO-BILL-UPDATE-1). Demote-to-create when unmapped per D-PUSHER-DEMOTION-RULE at pushImpl step 7b. PaymentEnqueuer gate-3 widened ['create']→['create','update']. **NO enqueue hook in api/v1/payments/update.php (D2 decision)** — only reference_number→PaymentRefNum is QBO-pushable among the 5 editable metadata fields; reference_number sync rides the manual-sync path via /quickbooks/manual_sync → Force re-sync (payments) (S-QBO-26 force_resync). Smoke _smoke_qbo_payment_push 20→23 (incl. C23 CRITICAL proving D-QBO-14-1 dedup covers the update verb). NO migration. See FLEETFORGE_PROGRESS.md SESSION LOG row.
 
-**Why deferred:** v1 ships pushCreate; pushUpdate semantics for payments are non-trivial (LinkedTxn[] mutations, void+recreate vs sparse update tradeoffs, FX rate snapshot rules). Warrant their own session pass.
+**Why deferred originally:** v1 ships pushCreate; pushUpdate semantics for payments are non-trivial (LinkedTxn[] mutations, void+recreate vs sparse update tradeoffs, FX rate snapshot rules). Resolved by the full-payload re-send pattern proven by InvoicePusher D-QBO-12-1.
 
 ---
 
@@ -213,11 +213,12 @@ Each follows the 6-state badge + identifiers row + Push History table pattern fr
 
 ---
 
-### F-PAYDOWN-PROGRESS — S-QBO-PUSHER-UPDATE-FOLLOWUPS-PAYDOWN started
+### F-PAYDOWN-PROGRESS — S-QBO-PUSHER-UPDATE-FOLLOWUPS-PAYDOWN in progress (2/5 update slices shipped)
 
 **Surfaced by:** S-QBO-BILL-UPDATE (2026-05-31) — first slice of the umbrella paydown
+**Updated:** 2026-05-31 — S-QBO-PAYMENT-UPDATE shipped (2nd slice; F5 closed)
 
-The umbrella paydown (F5 payment / F6 bill_payment / F13 JE / F20 credit_memo update stubs + the pushVoid trio in F7) is being worked one Pusher at a time. **BillPusher::pushUpdate SHIPPED 2026-05-31 (S-QBO-BILL-UPDATE)** as the proven template: routes through `pushImpl` with `operation='update'` → full-payload re-send via `QuickBooksClient::updateEntity` + SyncToken round-trip; demote-to-create when unmapped (D-PUSHER-DEMOTION-RULE); `BillEnqueuer` gate-3 widened to accept `'update'`; `enqueue('update')` wired into `api/v1/accounting/bills/update.php`. **Remaining update stubs** (each follows the bill template — SyncToken load → merge → updateEntity): PaymentPusher (F5), BillPaymentPusher (F6), CreditMemoPusher apply→LinkedTxn (F20), JournalEntryPusher (F13). **Remaining void stubs** (F7 + credit_memo void): PaymentPusher / BillPaymentPusher / CreditMemoPusher `pushVoid` — separate follow-on slice (mirror InvoicePusher `pushVoidImpl`). **NO migration** needed for the update slices — `push_status` ENUM + `qbo_sync_token` columns already exist on every map table.
+The umbrella paydown (F5 payment / F6 bill_payment / F13 JE / F20 credit_memo update stubs + the pushVoid trio in F7) is being worked one Pusher at a time. **BillPusher::pushUpdate SHIPPED 2026-05-31 (S-QBO-BILL-UPDATE)** as the proven template: routes through `pushImpl` with `operation='update'` → full-payload re-send via `QuickBooksClient::updateEntity` + SyncToken round-trip; demote-to-create when unmapped (D-PUSHER-DEMOTION-RULE); `BillEnqueuer` gate-3 widened to accept `'update'`; `enqueue('update')` wired into `api/v1/accounting/bills/update.php`. **PaymentPusher::pushUpdate SHIPPED 2026-05-31 (S-QBO-PAYMENT-UPDATE — F5 closed)** as the 2nd slice (mechanical mirror of the bill template): demote-to-create at pushImpl step 7b sits AFTER the origin/pulled_from_qbo dedup gates (steps 5+6) so the D-QBO-14-1 bidirectional dedup invariant covers the UPDATE verb too without extra code — locked by C23 smoke. PaymentEnqueuer gate-3 widened ['create']→['create','update']. **D2 divergence vs Bill template: NO enqueue hook in api/v1/payments/update.php** — of the 5 editable metadata fields, only reference_number→PaymentRefNum is QBO-pushable; reference_number sync rides the manual-sync path via /quickbooks/manual_sync → Force re-sync (payments) (S-QBO-26 force_resync). **Remaining update stubs** (each follows the proven template — SyncToken load → merge → updateEntity → demote-to-create when unmapped): BillPaymentPusher (F6), CreditMemoPusher apply→LinkedTxn (F20), JournalEntryPusher (F13). **Remaining void stubs** (F7 + credit_memo void): PaymentPusher / BillPaymentPusher / CreditMemoPusher `pushVoid` — separate follow-on slice (mirror InvoicePusher `pushVoidImpl`). **NO migration** needed for the update slices — `push_status` ENUM + `qbo_sync_token` columns already exist on every map table.
 
 ### F13 — S-QBO-21-UPDATE-FOLLOWUP — JournalEntryPusher::pushUpdate impl
 

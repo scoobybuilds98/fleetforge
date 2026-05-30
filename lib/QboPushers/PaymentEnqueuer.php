@@ -31,8 +31,9 @@ declare(strict_types=1);
  * @decision D-QBO-14-1 (origin='ff_native' filter; closes D-QBO-13-1/2
  *               invariant at enqueue layer),
  *           D-QBO-14-2 (payment.status='cleared' eligibility),
- *           D-QBO-14-5 (pushUpdate stubbed → S-QBO-14-UPDATE-FOLLOWUP;
- *               gate-3 v1 allowlist = ['create'] only),
+ *           D-QBO-14-5 (pushUpdate stub — CLOSED by S-QBO-PAYMENT-UPDATE;
+ *               gate-3 allowlist now ['create','update']; 'void' still
+ *               deferred to a separate pushVoid slice — see OPERATOR_FOLLOWUPS F7),
  *           D-ENQUEUER-CONTRACT (best-effort discipline),
  *           D-ENQUEUER-GATE-0-ELIGIBILITY (eligibility gate-0 before
  *               existing 4-step gating)
@@ -49,9 +50,9 @@ class PaymentEnqueuer
      */
     private const OPERATION_STATUS_REQUIREMENTS = [
         'create' => ['cleared'],
-        // 'update' would also accept 'cleared' but pushUpdate is stubbed
-        // for v1 per D-QBO-14-5 — listed here so gate-0 still validates
-        // payment exists + status='cleared' before gate-3 rejects op.
+        // 'update' now SUPPORTED — D-QBO-14-5 stub closed by S-QBO-PAYMENT-UPDATE.
+        // Same status requirement as create (pushUpdate is just a full-
+        // payload re-send via QuickBooksClient::updateEntity).
         'update' => ['cleared'],
     ];
 
@@ -72,7 +73,8 @@ class PaymentEnqueuer
      * enqueue rejects).
      *
      * @param int    $paymentId FF payments.id
-     * @param string $operation 'create' (S-QBO-14 v1; 'update' deferred)
+     * @param string $operation 'create' or 'update' (S-QBO-PAYMENT-UPDATE
+     *                          widened gate-3); 'void' still deferred (F7)
      * @return bool             true on enqueue success
      */
     public static function enqueue(int $paymentId, string $operation): bool
@@ -137,11 +139,12 @@ class PaymentEnqueuer
             }
 
             // ────────────────────────────────────────────────────────
-            // Gate 3: Operation allowlist. update + void NOT in v1 per
-            // D-QBO-14-5 stub-then-implement pattern.
+            // Gate 3: Operation allowlist. 'create' + 'update' supported
+            // since S-QBO-PAYMENT-UPDATE (D-QBO-14-5 closed). 'void' still
+            // deferred to the separate pushVoid trio slice (OPERATOR_FOLLOWUPS F7).
             // ────────────────────────────────────────────────────────
-            if (!in_array($operation, ['create'], true)) {
-                error_log("[PaymentEnqueuer] gate-3 reject: operation '{$operation}' not in S-QBO-14 v1 allowlist (create only; update + void deferred to S-QBO-14-UPDATE-FOLLOWUP)");
+            if (!in_array($operation, ['create', 'update'], true)) {
+                error_log("[PaymentEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist [create,update] (void deferred to pushVoid trio — F7)");
                 return false;
             }
 

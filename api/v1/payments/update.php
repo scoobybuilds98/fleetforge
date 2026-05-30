@@ -107,4 +107,16 @@ db_transaction(function () use ($id, $updates, $payment) {
     ]);
 });
 
+// NOTE (S-QBO-PAYMENT-UPDATE / D-QBO-PAYMENT-UPDATE-1, decision D2):
+// PaymentPusher::pushUpdate is now implemented and PaymentEnqueuer accepts
+// 'update', but this endpoint deliberately does NOT auto-enqueue a QBO
+// push. Of the 5 editable fields above, only `reference_number` maps to a
+// QBO payload field (`PaymentRefNum`); the other 4 are FF-only. Auto-
+// enqueuing on every metadata edit would queue near-noop QBO re-pushes for
+// the common case (bank_name/check_number/notes/internal_notes). Operators
+// who need to propagate a `reference_number` change to QBO trigger it
+// explicitly via /quickbooks/manual_sync → Force re-sync (payments)
+// (S-QBO-26 force_resync path). Re-evaluate if a ticket asks for automatic
+// PaymentRefNum sync.
+
 json_success(['id' => $id, 'updated_at' => $updates['updated_at']]);
