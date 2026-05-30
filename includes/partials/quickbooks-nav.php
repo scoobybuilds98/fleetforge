@@ -70,6 +70,11 @@ $_qboNavGroups = [
         'icon'  => 'exclamation-triangle',
     ],
     [
+        'label' => 'Manual Sync',
+        'url'   => '/quickbooks/manual_sync',
+        'icon'  => 'arrow-path',
+    ],
+    [
         'label' => 'Customers',
         'url'   => '/quickbooks/customers',
         'icon'  => 'users',

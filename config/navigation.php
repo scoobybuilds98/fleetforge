@@ -239,6 +239,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Manual Sync',
+                'icon'   => 'arrow-path',
+                'url'    => '/quickbooks/manual_sync',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Customers',
                 'icon'   => 'users',
                 'url'    => '/quickbooks/customers',
