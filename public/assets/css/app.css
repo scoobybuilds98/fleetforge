@@ -3114,7 +3114,17 @@ textarea.form-input {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    z-index: 2;
+    /* Must sit ABOVE a sibling .modal-backdrop. Commit d43649d raised
+       .modal-backdrop from z-index:0 to var(--z-modal) (60) to center the
+       child-pattern accounting modals (.modal-backdrop > .modal). But the
+       sibling-pattern modals (.modal-overlay > [.modal-backdrop, .modal] —
+       the global email-compose modal + the footer confirm modal) then had
+       the blurred backdrop (60) painting OVER the panel (old z-index:2),
+       so the whole modal rendered blurred. calc(var(--z-modal) + 1) lifts
+       the panel above the backdrop in the sibling case; child-pattern
+       modals are unaffected (a child always paints above its parent's
+       backdrop-filter regardless of z-index). */
+    z-index: calc(var(--z-modal) + 1);
 }
 
 .modal-sm   { max-width: 420px; }
