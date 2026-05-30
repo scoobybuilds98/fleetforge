@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-29
-**Tables:** 149 total · **Columns:** 2367
+**Generated:** 2026-05-30
+**Tables:** 149 total · **Columns:** 2368
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -1507,6 +1507,7 @@ _66 tables._
 | `description` | text |  | YES |
 | `queue_id` | int unsigned | MUL | YES |
 | `resolved_at` | datetime | MUL | YES |
+| `resolution_type` | enum('resolved','accepted','suppressed') | MUL | YES |
 | `resolved_by_user_id` | int unsigned | MUL | YES |
 | `resolution_note` | text |  | YES |
 | `realm_id` | varchar(50) |  | NO |

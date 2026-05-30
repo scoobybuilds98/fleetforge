@@ -2271,7 +2271,9 @@ If a sudden batch of FF events generates many QBO pushes (e.g., monthly invoice 
 
 ## 15. DRIFT DETECTION AND RECONCILIATION
 
-> **✅ DETECTION SHIPPED 2026-05-30 via S-QBO-24 (Phase QBO-12 / 1 of 3).** `lib/QboPushers/DriftChecker.php` + `cron/qbo_drift_check.php` (03:30, lock `ff_qbo_drift_check`) + "Run drift check now" button on `/quickbooks/drift` + `api/v1/quickbooks/drift_run.php`. **Hybrid model (D-QBO-24-1):** a SNAPSHOT layer always runs (no QBO API — push_failed on failed map rows + FF-side amount_drift where FF current total ≠ the qbo_total_amt snapshot beyond per-entity tolerance) + a LIVE layer (missing_in_ff / live amount drift) that activates only when `sync_enabled='1'` + connected (S-QBO-30 cutover). 8 entity maps checked (invoice/payment/bill/bill_payment/credit_memo/journal_entry/customer/vendor). Idempotent via open-event refresh on (entity_type, entity_id, category). Per-entity tolerances + notify threshold seeded (§15.5). 15/15 smoke. **Resolution workflows (§15.4 + §15.6) are S-QBO-25; GL-account-balance drift (§15.2 step 4) is S-QBO-24-GL-BALANCE-FOLLOWUP per D-QBO-24-3.** 4 D-QBO-24-* locked.
+> **✅ DETECTION SHIPPED 2026-05-30 via S-QBO-24 (Phase QBO-12 / 1 of 3).** `lib/QboPushers/DriftChecker.php` + `cron/qbo_drift_check.php` (03:30, lock `ff_qbo_drift_check`) + "Run drift check now" button on `/quickbooks/drift` + `api/v1/quickbooks/drift_run.php`. **Hybrid model (D-QBO-24-1):** a SNAPSHOT layer always runs (no QBO API — push_failed on failed map rows + FF-side amount_drift where FF current total ≠ the qbo_total_amt snapshot beyond per-entity tolerance) + a LIVE layer (missing_in_ff / live amount drift) that activates only when `sync_enabled='1'` + connected (S-QBO-30 cutover). 8 entity maps checked (invoice/payment/bill/bill_payment/credit_memo/journal_entry/customer/vendor). Idempotent via open-event refresh on (entity_type, entity_id, category). Per-entity tolerances + notify threshold seeded (§15.5). 15/15 smoke. **GL-account-balance drift (§15.2 step 4) is S-QBO-24-GL-BALANCE-FOLLOWUP per D-QBO-24-3.** 4 D-QBO-24-* locked.
+>
+> **✅ RESOLUTION SHIPPED 2026-05-30 via S-QBO-25 (Phase QBO-12 / 2 of 3).** Per-event resolve/accept/suppress/reopen/resync (`api/v1/quickbooks/drift_resolve.php` extended) + bulk-accept/bulk-suppress by category (`api/v1/quickbooks/drift_bulk_resolve.php` NEW) + DriftChecker auto-resolve-on-parity at end of `runCheck`. Migration 81→82/0/0 ALTER `acc_qbo_drift_events` ADD `resolution_type` ENUM('resolved','accepted','suppressed') NULL AFTER resolved_at + `idx_resolution` + backfill resolved_at NOT NULL → 'resolved'. State machine (D-QBO-25-1): both NULL = OPEN; resolved_at SET + 'resolved' = resolved (may re-open via fresh event if drift recurs); 'accepted'/'suppressed' = TERMINAL (recordDrift's existing-row lookup matches `resolved_at IS NULL OR resolution_type IN ('accepted','suppressed')` so the operator's accept/suppress decision persists across cron runs — CRITICAL invariant tested in C20+C21). Auto-resolve scoped (D-QBO-25-2): detection_source='drift_cron' only (push_failure events resolve via operator's retry — tested C23); only categories actually scanned this run (per-entity_type `$checkedCategories` accumulator: push_failed always; amount_drift when ff_total!==null; missing_in_ff only when live layer completed without exception). 28/28 smoke (15 S-QBO-24 + 13 new). 4 D-QBO-25-* locked. **Bulk-action scope split (D-QBO-25-3):** S-QBO-25 owns per-event verbs + bulk-by-category accept/suppress (the §15.6 "mark all drifts of category X" slice) + per-event resync. S-QBO-26 (Manual Sync page) owns bulk force-resync + force-pull + SyncToken rewrite.
 
 The drift detection system is the safety net that ensures FF and QBO stay aligned. Even with perfect push logic, transient failures, manual edits in QBO, or undetected bugs can cause drift. Daily drift detection surfaces it.
 
@@ -2346,12 +2348,17 @@ DriftChecker (S-QBO-24) writes `detection_source='drift_cron'` + the relevant `c
 
 ### 15.4 Drift resolution workflows
 
-Per drift event, operator can:
+> **K-22 corrected 2026-05-30 (S-QBO-25, D-QBO-25-1):** the prose below originally referenced a `status='accepted'`/`status='suppressed'` column that doesn't exist on the AS-BUILT `acc_qbo_drift_events` (§15.3 was already K-22-corrected in S-QBO-24/D-QBO-24-2 to remove the never-built status ENUM). S-QBO-25 added a new `resolution_type` ENUM('resolved','accepted','suppressed') NULL column AFTER resolved_at to make accept/suppress distinct persistent states without re-introducing a redundant status ENUM. State machine: resolved_at IS NULL + resolution_type IS NULL = OPEN; resolved_at SET + 'resolved' = resolved (may re-open via a fresh event if drift recurs); = 'accepted' or 'suppressed' = TERMINAL (`DriftChecker::recordDrift` never re-flags; suppressed also hidden from default drift view per K-22 #4). Prose below reads correctly against the AS-BUILT column.
 
-- **Resolve via FF action.** If the drift is fixable in FF (e.g., re-sync after a transient failure), click "Re-sync" — enqueues a fresh push. Drift event auto-marks resolved when next drift check confirms parity.
-- **Resolve via QBO action.** If the drift requires accountant action in QBO (e.g., a QBO-originated payment that should be deleted), notes are captured and operator marks resolved manually.
-- **Accept divergence.** Some divergences are intentional (e.g., FF has a customer that the accountant doesn't want in QBO for tax reasons). Mark `status='accepted'` with notes.
-- **Suppress.** For false-positive drifts (e.g., known sub-cent tax-rounding that we accept), mark `status='suppressed'`. Suppressed events are hidden from drift dashboard but logged.
+Per drift event, operator can (all 5 verbs land on `api/v1/quickbooks/drift_resolve.php` via the `action` parameter):
+
+- **Resolve via FF action — "Re-sync".** If the drift is fixable in FF (e.g., re-sync after a transient push failure), click "Re-sync" — `action=resync` maps `entity_type` → the right Enqueuer (Invoice/Payment/Bill/BillPayment/CreditMemo/JournalEntry/Customer/Vendor) and calls `enqueue($entity_id, 'create')`. Returns the gate-refusal reason ladder (sync_enabled → sync_mode.{entity} → entity-state) when sync isn't allowed; payment-specific D-QBO-14-1 origin guard rejects webhook-originated payments. Does NOT mutate the drift row — the event auto-marks resolved when the next parity check confirms parity (D-QBO-25-2 `autoResolveParity` at end of `runCheck`).
+- **Resolve via QBO action — "Resolve".** If the drift requires accountant action in QBO (e.g., a QBO-originated payment that should be deleted), the operator fixes it in QBO and clicks "Resolve" — `action=resolve` sets `resolved_at = NOW`, `resolution_type='resolved'`, plus a required note. Drift will re-flag if it recurs.
+- **Accept divergence — "Accept".** Some divergences are intentional (e.g., FF has a customer that the accountant doesn't want in QBO for tax reasons). `action=accept` sets `resolution_type='accepted'` (TERMINAL — `recordDrift` will never re-flag this event) plus a required note.
+- **Suppress — "Suppress".** For false-positive drifts (e.g., known sub-cent tax-rounding that we accept), `action=suppress` sets `resolution_type='suppressed'` (TERMINAL + hidden from the default unresolved view per K-22 #4; explicitly reachable via the "Suppressed" status filter) plus a required note.
+- **Reopen (D-QBO-25-4) — "Reopen".** Operator-undo for accept/suppress/resolved. `action=reopen` clears resolved_at + resolution_type + resolution_note + resolved_by_user_id; the row re-enters the OPEN pool. The next parity check either refreshes it (if drift is still present) or auto-resolves it (if drift is gone).
+
+Permission model: `resolve` stays gated on `quickbooks/view` (the S-QBO-4 locked decision — resolve is an accountant-level annotation, NOT an extended action). `accept`/`suppress`/`reopen`/`resync` require `quickbooks/edit_credentials` (policy + operational). Defense-in-depth at endpoint matches admin-UI button visibility.
 
 ### 15.5 Tolerance configuration
 
@@ -2371,13 +2378,15 @@ Drift below tolerance is logged but doesn't trigger notification. Drift above to
 
 ### 15.6 Manual reconciliation actions
 
-In addition to per-event resolutions, operators can trigger bulk reconciliation:
+> **S-QBO-25 / S-QBO-26 scope split (D-QBO-25-3, codified here 2026-05-30):** the three bulk actions below split across two sessions. **S-QBO-25 (SHIPPED 2026-05-30)** owns the "Mark all drifts of category X" bulk-accept/bulk-suppress slice via `api/v1/quickbooks/drift_bulk_resolve.php` (transactional; 9-value category whitelist + 8-entity entity_type whitelist + action whitelist {accept,suppress}; per-event resolution_note carries bulk context; single audit_log summary). **S-QBO-26 (Manual Sync page; Phase QBO-12 / 3 of 3)** owns the bulk SYNC actions: "Force full re-sync of entity type" + "Force pull from QBO" + SyncToken rewrite. The one sync action S-QBO-25 owns is the per-event "Resolve via FF re-sync" (single-row convenience routing to the entity's Enqueuer — see §15.4); bulk re-sync is intentionally out-of-scope for S-QBO-25.
 
-- **"Force full re-sync of entity type"** — enqueues a push for every mapped entity of that type. Used after a known data issue or after the accountant manually edited many QBO records.
-- **"Force pull from QBO"** — pulls the current state of every mapped entity from QBO and writes the SyncToken (used after realm migration or after a long disconnection).
-- **"Mark all drifts of category X as accepted"** — bulk-accept (used when known acceptable divergence exists across many entities).
+In addition to per-event resolutions (§15.4), operators can trigger bulk reconciliation:
 
-Each action logged to `audit_log` and `acc_qbo_drift_events.resolution_notes`.
+- **"Force full re-sync of entity type"** *(S-QBO-26)* — enqueues a push for every mapped entity of that type. Used after a known data issue or after the accountant manually edited many QBO records.
+- **"Force pull from QBO"** *(S-QBO-26)* — pulls the current state of every mapped entity from QBO and writes the SyncToken (used after realm migration or after a long disconnection).
+- **"Mark all drifts of category X as accepted (or suppressed)"** *(S-QBO-25 SHIPPED)* — bulk-accept (used when known acceptable divergence exists across many entities) or bulk-suppress (used to clear noisy categories in one move). Optional entity_type filter narrows the bulk action to a single Pusher's events.
+
+Each action logged to `audit_log` and `acc_qbo_drift_events.resolution_note` (singular — was incorrectly pluralized in earlier prose; AS-BUILT column per §15.3 is `resolution_note`).
 
 ---
 

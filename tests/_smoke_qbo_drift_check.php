@@ -4,7 +4,8 @@ declare(strict_types=1);
 /**
  * tests/_smoke_qbo_drift_check.php
  *
- * Smoke test for S-QBO-24 Drift Detection (Phase QBO-12 / 1 of 3).
+ * Smoke test for S-QBO-24 Drift Detection (Phase QBO-12 / 1 of 3) +
+ * S-QBO-25 Drift Resolution Workflows (Phase QBO-12 / 2 of 3).
  *
  * Per [[extensive-test-and-full-report]]: PER-FUNCTION coverage — each
  * public method on DriftChecker gets named sub-checks for happy path +
@@ -44,9 +45,48 @@ declare(strict_types=1);
  *         without a real QBO call; the live HTTP path itself is operator-verified
  *         at S-QBO-30 cutover per F22, since no fixture/mock HTTP layer exists)
  *
- * @session  S-QBO-24
+ *   Module G — S-QBO-25 resolution-state column + backfill
+ *     C16 resolution_type ENUM column exists with 3 expected values + idx_resolution +
+ *         backfill: every row with resolved_at NOT NULL has resolution_type NOT NULL
+ *
+ *   Module H — S-QBO-25 single-event state transitions (UPDATE simulates endpoint)
+ *     C17 resolve: sets resolved_at + resolution_type='resolved' + note + user_id
+ *     C18 accept: sets resolution_type='accepted'
+ *     C19 suppress: sets resolution_type='suppressed'
+ *     C24 reopen: clears resolved_at + resolution_type + resolution_note + user_id
+ *
+ *   Module I — S-QBO-25 CRITICAL terminal-state survival across runCheck
+ *     C20 suppressed event survives a runCheck re-run (recordDrift does NOT
+ *         create a duplicate OPEN row for the same key) — the whole point of suppress
+ *     C21 accepted event survives a runCheck re-run (same invariant for accept)
+ *
+ *   Module J — S-QBO-25 auto-resolve-on-parity (D-QBO-25-2)
+ *     C22 a previously-OPEN drift_cron event whose drift is now gone is
+ *         auto-resolved (resolution_type='resolved', note 'auto-resolved%') and
+ *         runCheck()['resolved'] >= 1
+ *     C23 a push_failure-sourced event is NOT auto-resolved by the cron
+ *         (auto-resolve scope is detection_source='drift_cron' only)
+ *
+ *   Module K — S-QBO-25 endpoint surfaces (file metadata)
+ *     C25 drift_resolve.php contains entity_type → Enqueuer FQCN map covering
+ *         all 8 ENTITY_CHECKS entity types
+ *     C26 drift_bulk_resolve.php exists with category + action + entity_type whitelist
+ *
+ *   Module L — S-QBO-25 bulk-by-category mutation semantics
+ *     C27 bulk-accept of (category=X) affects all OPEN events of that category
+ *         and leaves other-category events untouched
+ *
+ *   Module M — S-QBO-25 drift_list visibility filter (D-QBO-25-1 K-22 #4)
+ *     C28 default 'unresolved' filter hides suppressed events; explicit
+ *         'suppressed' filter shows only suppressed
+ *
+ * @session  S-QBO-24 (detection), S-QBO-25 (resolution)
  * @decision D-QBO-24-1 (hybrid), D-QBO-24-2 (live drift_events schema),
- *           D-QBO-24-3 (GL deferred), D-QBO-24-4 (tolerances)
+ *           D-QBO-24-3 (GL deferred), D-QBO-24-4 (tolerances),
+ *           D-QBO-25-1 (resolution_type ENUM + terminal-state guard),
+ *           D-QBO-25-2 (auto-resolve-on-parity for drift_cron events),
+ *           D-QBO-25-3 (bulk-accept/suppress scope; force-resync → S-QBO-26),
+ *           D-QBO-25-4 (reopen action for operator-undo)
  */
 
 require_once __DIR__ . '/../api/bootstrap.php';
@@ -54,7 +94,7 @@ require_once __DIR__ . '/../api/bootstrap.php';
 use FleetForge\QboPushers\DriftChecker;
 
 $pass = 0;
-$total = 15;
+$total = 28;
 $failures = [];
 
 function ff_smoke_drift_set(string $k, string $v): void
@@ -77,6 +117,8 @@ function ff_smoke_drift_cleanup(): void
     // smoke could produce a sentinel-range drift event under any entity_type.
     // The 999990-999999 range is reserved for tests, so this is safe.
     db_execute("DELETE FROM acc_qbo_drift_events     WHERE entity_id BETWEEN 999990 AND 999999 OR qbo_entity_id LIKE 'QBO-CM-DRIFT%'");
+    // S-QBO-25 C25 may have enqueued a queue row via CreditMemoEnqueuer.
+    db_execute("DELETE FROM acc_qbo_sync_queue       WHERE entity_id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM acc_qbo_credit_memo_map  WHERE ff_credit_note_id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM credit_notes             WHERE id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM customers                WHERE id BETWEEN 999990 AND 999999");
@@ -104,7 +146,7 @@ foreach ($snapKeys as $k) { $snap[$k] = ff_smoke_drift_get($k); }
 $CM = DriftChecker::ENTITY_CHECKS['credit_memo'];
 
 echo "═══════════════════════════════════════════════════════════\n";
-echo "S-QBO-24 Drift Detection Smoke (15 sub-checks)\n";
+echo "S-QBO-24 Drift Detection + S-QBO-25 Resolution Smoke (28 sub-checks)\n";
 echo "═══════════════════════════════════════════════════════════\n";
 
 try {
@@ -245,6 +287,296 @@ try {
     if (DriftChecker::liveModeAvailable() !== false) $c15[] = 'gate should be false when sync_enabled=0';
     if (empty($c15)) { echo "PASS C15 liveModeAvailable() gate: true iff sync_enabled=1 + connected (live HTTP path → F22 cutover verify)\n"; $pass++; }
     else { echo "FAIL C15 " . implode('; ', $c15) . "\n"; $failures[] = 'C15'; }
+
+    // ════════════════════════════════════════════════════════════════
+    // S-QBO-25 — Drift Resolution Workflows (Phase QBO-12 / 2 of 3)
+    // ════════════════════════════════════════════════════════════════
+
+    // ── C16: resolution_type column + backfill ──────────────────────
+    $c16 = [];
+    $col = db_row("SHOW COLUMNS FROM acc_qbo_drift_events LIKE 'resolution_type'");
+    if (!$col) {
+        $c16[] = 'resolution_type column missing';
+    } else {
+        foreach (['resolved', 'accepted', 'suppressed'] as $v) {
+            if (strpos((string) $col['Type'], "'{$v}'") === false) $c16[] = "ENUM missing value '{$v}'";
+        }
+        if (strtoupper((string) $col['Null']) !== 'YES') $c16[] = 'resolution_type should be NULLable';
+    }
+    $idx = db_row("SHOW INDEX FROM acc_qbo_drift_events WHERE Key_name='idx_resolution'");
+    if (!$idx) $c16[] = 'idx_resolution index missing';
+    $missingBackfill = (int) (db_row("SELECT COUNT(*) c FROM acc_qbo_drift_events WHERE resolved_at IS NOT NULL AND resolution_type IS NULL")['c'] ?? 0);
+    if ($missingBackfill > 0) $c16[] = "backfill incomplete: {$missingBackfill} resolved-but-untyped rows";
+    if (empty($c16)) { echo "PASS C16 resolution_type ENUM + idx_resolution + backfill (resolved_at→'resolved')\n"; $pass++; }
+    else { echo "FAIL C16 " . implode('; ', $c16) . "\n"; $failures[] = 'C16'; }
+
+    // Reset settings for resolution-workflow tests (C15 left sync_enabled=0).
+    ff_smoke_drift_set('quickbooks.sync_enabled', '0');
+    ff_smoke_drift_set('quickbooks.connection_status', 'disconnected');
+
+    // Helper: simulate the endpoint's UPDATE for a single-event resolution.
+    $applyResolution = function (int $id, string $type, string $note): int {
+        return (int) db_execute(
+            "UPDATE acc_qbo_drift_events
+                SET resolved_at = NOW(),
+                    resolution_type = ?,
+                    resolved_by_user_id = 1,
+                    resolution_note = ?
+              WHERE id = ?
+                AND resolved_at IS NULL",
+            [$type, $note, $id]
+        );
+    };
+
+    // ── C17: resolve action sets resolved_at + resolution_type='resolved' ──
+    $ev = db_row("SELECT id FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999991 AND category='amount_drift' AND resolved_at IS NULL");
+    $c17 = [];
+    if (!$ev) { $c17[] = 'no OPEN amount_drift event for 999991 (C8/C11 should have created one)'; }
+    else {
+        $aff = $applyResolution((int) $ev['id'], 'resolved', 'C17 smoke fix');
+        $r17 = db_row("SELECT resolved_at, resolution_type, resolution_note, resolved_by_user_id FROM acc_qbo_drift_events WHERE id=?", [(int) $ev['id']]);
+        if ($aff !== 1)                                    $c17[] = "affected={$aff} (want 1)";
+        if (!$r17 || $r17['resolved_at'] === null)         $c17[] = 'resolved_at not set';
+        if (($r17['resolution_type'] ?? '') !== 'resolved') $c17[] = "resolution_type=" . ($r17['resolution_type'] ?? 'null');
+        if (($r17['resolution_note'] ?? '') !== 'C17 smoke fix') $c17[] = 'note not saved';
+        if ((int) ($r17['resolved_by_user_id'] ?? 0) !== 1) $c17[] = 'user_id not saved';
+    }
+    if (empty($c17)) { echo "PASS C17 resolve action sets resolved_at + resolution_type='resolved' + note + user_id\n"; $pass++; }
+    else { echo "FAIL C17 " . implode('; ', $c17) . "\n"; $failures[] = 'C17'; }
+
+    // ── C18: accept action sets resolution_type='accepted' ──────────
+    $ev = db_row("SELECT id FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999993 AND category='push_failed' AND resolved_at IS NULL");
+    $c18 = [];
+    if (!$ev) { $c18[] = 'no OPEN push_failed event for 999993'; }
+    else {
+        $applyResolution((int) $ev['id'], 'accepted', 'C18 smoke accept');
+        $r18 = db_row("SELECT resolution_type FROM acc_qbo_drift_events WHERE id=?", [(int) $ev['id']]);
+        if (($r18['resolution_type'] ?? '') !== 'accepted') $c18[] = "got " . ($r18['resolution_type'] ?? 'null');
+    }
+    if (empty($c18)) { echo "PASS C18 accept action sets resolution_type='accepted'\n"; $pass++; }
+    else { echo "FAIL C18 " . implode('; ', $c18) . "\n"; $failures[] = 'C18'; }
+
+    // ── C19: suppress action sets resolution_type='suppressed' ──────
+    $ev = db_row("SELECT id FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND qbo_entity_id='QBO-CM-DRIFT-MISSING' AND category='missing_in_ff' AND resolved_at IS NULL");
+    $c19 = [];
+    if (!$ev) { $c19[] = 'no OPEN missing_in_ff event for QBO-CM-DRIFT-MISSING'; }
+    else {
+        $applyResolution((int) $ev['id'], 'suppressed', 'C19 smoke suppress');
+        $r19 = db_row("SELECT resolution_type FROM acc_qbo_drift_events WHERE id=?", [(int) $ev['id']]);
+        if (($r19['resolution_type'] ?? '') !== 'suppressed') $c19[] = "got " . ($r19['resolution_type'] ?? 'null');
+    }
+    if (empty($c19)) { echo "PASS C19 suppress action sets resolution_type='suppressed'\n"; $pass++; }
+    else { echo "FAIL C19 " . implode('; ', $c19) . "\n"; $failures[] = 'C19'; }
+
+    // ── C20 (CRITICAL): suppressed event SURVIVES a recordDrift re-run ──
+    db_execute("DELETE FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999991 AND category='amount_drift'");
+    DriftChecker::recordDrift(['entity_type'=>'credit_memo','entity_id'=>999991,'qbo_entity_id'=>'QBO-CM-DRIFT-B','category'=>'amount_drift','ff_value'=>'100.00','qbo_value'=>'90.00','drift_amount'=>'10.00','description'=>'C20 seed']);
+    $evNew = db_row("SELECT id FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999991 AND category='amount_drift' AND resolved_at IS NULL");
+    $applyResolution((int) $evNew['id'], 'suppressed', 'C20 suppress');
+    DriftChecker::recordDrift(['entity_type'=>'credit_memo','entity_id'=>999991,'qbo_entity_id'=>'QBO-CM-DRIFT-B','category'=>'amount_drift','ff_value'=>'100.00','qbo_value'=>'90.00','drift_amount'=>'10.00','description'=>'C20 re-run']);
+    $allRows = db_select("SELECT id, resolved_at, resolution_type FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999991 AND category='amount_drift' ORDER BY id");
+    $openCount = 0; $suppressedCount = 0;
+    foreach ($allRows as $r) {
+        if ($r['resolved_at'] === null) $openCount++;
+        if ($r['resolution_type'] === 'suppressed') $suppressedCount++;
+    }
+    if (count($allRows) === 1 && $openCount === 0 && $suppressedCount === 1) {
+        echo "PASS C20 (CRITICAL) suppressed event SURVIVES recordDrift re-run — no duplicate OPEN\n"; $pass++;
+    } else {
+        echo "FAIL C20 rows=" . count($allRows) . " open={$openCount} suppressed={$suppressedCount}\n"; $failures[] = 'C20';
+    }
+
+    // ── C21 (CRITICAL): accepted event SURVIVES a recordDrift re-run ──
+    db_execute("DELETE FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999993 AND category='push_failed'");
+    DriftChecker::recordDrift(['entity_type'=>'credit_memo','entity_id'=>999993,'qbo_entity_id'=>null,'category'=>'push_failed','ff_value'=>'push_status=failed','qbo_value'=>null,'drift_amount'=>null,'description'=>'C21 seed']);
+    $evNew = db_row("SELECT id FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999993 AND category='push_failed' AND resolved_at IS NULL");
+    $applyResolution((int) $evNew['id'], 'accepted', 'C21 accept');
+    DriftChecker::recordDrift(['entity_type'=>'credit_memo','entity_id'=>999993,'qbo_entity_id'=>null,'category'=>'push_failed','ff_value'=>'push_status=failed','qbo_value'=>null,'drift_amount'=>null,'description'=>'C21 re-run']);
+    $allRows = db_select("SELECT id, resolved_at, resolution_type FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999993 AND category='push_failed' ORDER BY id");
+    $openCount = 0; $acceptedCount = 0;
+    foreach ($allRows as $r) {
+        if ($r['resolved_at'] === null) $openCount++;
+        if ($r['resolution_type'] === 'accepted') $acceptedCount++;
+    }
+    if (count($allRows) === 1 && $openCount === 0 && $acceptedCount === 1) {
+        echo "PASS C21 (CRITICAL) accepted event SURVIVES recordDrift re-run — no duplicate OPEN\n"; $pass++;
+    } else {
+        echo "FAIL C21 rows=" . count($allRows) . " open={$openCount} accepted={$acceptedCount}\n"; $failures[] = 'C21';
+    }
+
+    // ── C22: auto-resolve-on-parity ─────────────────────────────────
+    // Seed sentinel 999994 with NO drift (FF==snapshot). Insert an OPEN
+    // drift_cron amount_drift event manually (simulating prior detection
+    // that has since been fixed). runCheck should auto-resolve it.
+    db_execute("DELETE FROM acc_qbo_drift_events WHERE entity_id=999994");
+    ff_smoke_drift_seed_cn(999994, '200.00', 'QBO-CM-DRIFT-D', 'pushed', '200.00');
+    db_insert('acc_qbo_drift_events', [
+        'detection_source' => 'drift_cron',
+        'category'         => 'amount_drift',
+        'entity_type'      => 'credit_memo',
+        'entity_id'        => 999994,
+        'qbo_entity_id'    => 'QBO-CM-DRIFT-D',
+        'ff_value'         => '180.00',
+        'qbo_value'        => '200.00',
+        'drift_amount'     => '-20.00',
+        'description'      => 'C22 prior drift (now fixed)',
+        'realm_id'         => 'SMOKE-REALM',
+        'environment'      => 'sandbox',
+    ]);
+    $priorId = (int) db_pdo()->lastInsertId();
+    $r = DriftChecker::runCheck();
+    $after = db_row("SELECT resolved_at, resolution_type, resolution_note FROM acc_qbo_drift_events WHERE id=?", [$priorId]);
+    $c22 = [];
+    if (($r['resolved'] ?? 0) < 1)                                    $c22[] = "runCheck.resolved={$r['resolved']} (want >=1)";
+    if (!$after || $after['resolved_at'] === null)                    $c22[] = 'prior event not auto-resolved';
+    if (($after['resolution_type'] ?? '') !== 'resolved')             $c22[] = "type=" . ($after['resolution_type'] ?? 'null');
+    if (strpos((string) ($after['resolution_note'] ?? ''), 'auto-resolved') !== 0) $c22[] = "note=" . ($after['resolution_note'] ?? 'null');
+    if (empty($c22)) { echo "PASS C22 auto-resolve-on-parity: fixed drift_cron event flips to resolved (runCheck.resolved counter)\n"; $pass++; }
+    else { echo "FAIL C22 " . implode('; ', $c22) . "\n"; $failures[] = 'C22'; }
+
+    // ── C23: push_failure event NOT auto-resolved ───────────────────
+    db_insert('acc_qbo_drift_events', [
+        'detection_source' => 'push_failure',
+        'category'         => 'push_failed',
+        'entity_type'      => 'credit_memo',
+        'entity_id'        => 999994,
+        'qbo_entity_id'    => 'QBO-CM-DRIFT-D',
+        'ff_value'         => 'push_status=failed_legacy',
+        'qbo_value'        => null,
+        'drift_amount'     => null,
+        'description'      => 'C23 push_failure-sourced event',
+        'realm_id'         => 'SMOKE-REALM',
+        'environment'      => 'sandbox',
+    ]);
+    $pfId = (int) db_pdo()->lastInsertId();
+    DriftChecker::runCheck();
+    $afterPf = db_row("SELECT resolved_at, detection_source FROM acc_qbo_drift_events WHERE id=?", [$pfId]);
+    if ($afterPf && $afterPf['resolved_at'] === null && $afterPf['detection_source'] === 'push_failure') {
+        echo "PASS C23 push_failure-sourced event NOT auto-resolved (cron auto-resolve scope = drift_cron only)\n"; $pass++;
+    } else {
+        echo "FAIL C23 " . json_encode($afterPf) . "\n"; $failures[] = 'C23';
+    }
+
+    // ── C24: reopen clears resolved_at + resolution_type ────────────
+    $ev = db_row("SELECT id FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND entity_id=999991 AND category='amount_drift' AND resolution_type='suppressed'");
+    $c24 = [];
+    if (!$ev) { $c24[] = 'no suppressed 999991 event from C20'; }
+    else {
+        $aff = (int) db_execute(
+            "UPDATE acc_qbo_drift_events
+                SET resolved_at = NULL, resolution_type = NULL, resolution_note = NULL, resolved_by_user_id = NULL
+              WHERE id = ? AND resolved_at IS NOT NULL",
+            [(int) $ev['id']]
+        );
+        $r24 = db_row("SELECT resolved_at, resolution_type, resolution_note, resolved_by_user_id FROM acc_qbo_drift_events WHERE id=?", [(int) $ev['id']]);
+        if ($aff !== 1) $c24[] = "affected={$aff} (want 1)";
+        foreach (['resolved_at','resolution_type','resolution_note','resolved_by_user_id'] as $f) {
+            if ($r24[$f] !== null) $c24[] = "{$f} not cleared (={$r24[$f]})";
+        }
+    }
+    if (empty($c24)) { echo "PASS C24 reopen clears resolved_at + resolution_type + note + user_id\n"; $pass++; }
+    else { echo "FAIL C24 " . implode('; ', $c24) . "\n"; $failures[] = 'C24'; }
+
+    // ── C25: drift_resolve.php has 8-entity Enqueuer FQCN map ───────
+    $rsv = (string) file_get_contents(__DIR__ . '/../api/v1/quickbooks/drift_resolve.php');
+    $c25 = [];
+    $expectedEnqueuers = [
+        'invoice'       => 'InvoiceEnqueuer',
+        'payment'       => 'PaymentEnqueuer',
+        'bill'          => 'BillEnqueuer',
+        'bill_payment'  => 'BillPaymentEnqueuer',
+        'credit_memo'   => 'CreditMemoEnqueuer',
+        'journal_entry' => 'JournalEntryEnqueuer',
+        'customer'      => 'CustomerEnqueuer',
+        'vendor'        => 'VendorEnqueuer',
+    ];
+    foreach ($expectedEnqueuers as $et => $cls) {
+        if (strpos($rsv, "'{$et}'") === false)             $c25[] = "missing entity_type '{$et}'";
+        if (strpos($rsv, "QboPushers\\\\{$cls}") === false) $c25[] = "missing Enqueuer class {$cls}";
+    }
+    if (strpos($rsv, "'resync'") === false)   $c25[] = "missing 'resync' action";
+    if (strpos($rsv, "'reopen'") === false)   $c25[] = "missing 'reopen' action";
+    if (strpos($rsv, "'accept'") === false)   $c25[] = "missing 'accept' action";
+    if (strpos($rsv, "'suppress'") === false) $c25[] = "missing 'suppress' action";
+    if (empty($c25)) { echo "PASS C25 drift_resolve.php has 8-entity Enqueuer map + 5 action verbs\n"; $pass++; }
+    else { echo "FAIL C25 " . implode('; ', $c25) . "\n"; $failures[] = 'C25'; }
+
+    // ── C26: drift_bulk_resolve.php exists with whitelist guards ────
+    $bulk = (string) file_get_contents(__DIR__ . '/../api/v1/quickbooks/drift_bulk_resolve.php');
+    $c26 = [];
+    if ($bulk === '')                                                                            $c26[] = 'drift_bulk_resolve.php missing';
+    if (strpos($bulk, "require_permission('quickbooks', 'edit_credentials')") === false)         $c26[] = 'edit_credentials gate missing';
+    if (strpos($bulk, 'allowedActions')    === false)                                            $c26[] = 'action whitelist missing';
+    if (strpos($bulk, 'allowedCategories') === false)                                            $c26[] = 'category whitelist missing';
+    if (strpos($bulk, 'db_transaction')    === false)                                            $c26[] = 'transaction wrap missing';
+    if (empty($c26)) { echo "PASS C26 drift_bulk_resolve.php exists with edit_credentials + whitelist + transaction\n"; $pass++; }
+    else { echo "FAIL C26 " . implode('; ', $c26) . "\n"; $failures[] = 'C26'; }
+
+    // ── C27: bulk-accept by category mutation ───────────────────────
+    db_execute("DELETE FROM acc_qbo_drift_events WHERE entity_id BETWEEN 999990 AND 999999 OR qbo_entity_id LIKE 'QBO-CM-DRIFT%'");
+    foreach ([999990, 999991] as $id) {
+        db_insert('acc_qbo_drift_events', [
+            'detection_source' => 'drift_cron', 'category' => 'amount_drift',
+            'entity_type' => 'credit_memo', 'entity_id' => $id,
+            'qbo_entity_id' => "QBO-CM-DRIFT-{$id}", 'ff_value' => '100', 'qbo_value' => '90',
+            'drift_amount' => '10', 'description' => 'C27 bulk seed',
+            'realm_id' => 'SMOKE-REALM', 'environment' => 'sandbox',
+        ]);
+    }
+    db_insert('acc_qbo_drift_events', [
+        'detection_source' => 'drift_cron', 'category' => 'push_failed',
+        'entity_type' => 'credit_memo', 'entity_id' => 999993,
+        'qbo_entity_id' => null, 'ff_value' => 'push_status=failed', 'qbo_value' => null,
+        'drift_amount' => null, 'description' => 'C27 bulk seed other-category',
+        'realm_id' => 'SMOKE-REALM', 'environment' => 'sandbox',
+    ]);
+    $affected = (int) db_execute(
+        "UPDATE acc_qbo_drift_events
+            SET resolved_at = NOW(), resolution_type = 'accepted', resolved_by_user_id = 1, resolution_note = ?
+          WHERE resolved_at IS NULL AND resolution_type IS NULL
+            AND category = ? AND entity_type = ?",
+        ['C27 bulk smoke', 'amount_drift', 'credit_memo']
+    );
+    $acceptedCnt = (int) (db_row("SELECT COUNT(*) c FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND category='amount_drift' AND resolution_type='accepted' AND entity_id BETWEEN 999990 AND 999999")['c'] ?? 0);
+    $untouched   = (int) (db_row("SELECT COUNT(*) c FROM acc_qbo_drift_events WHERE entity_type='credit_memo' AND category='push_failed' AND entity_id=999993 AND resolved_at IS NULL")['c'] ?? 0);
+    $c27 = [];
+    if ($affected !== 2)    $c27[] = "bulk affected={$affected} (want 2)";
+    if ($acceptedCnt !== 2) $c27[] = "accepted amount_drift count={$acceptedCnt} (want 2)";
+    if ($untouched !== 1)   $c27[] = "untouched push_failed count={$untouched} (want 1)";
+    if (empty($c27)) { echo "PASS C27 bulk-accept by category affects matching events; other-category untouched\n"; $pass++; }
+    else { echo "FAIL C27 " . implode('; ', $c27) . "\n"; $failures[] = 'C27'; }
+
+    // ── C28: drift_list status filter — suppressed hidden by default ──
+    db_execute("DELETE FROM acc_qbo_drift_events WHERE entity_id=999990 AND category='balance_drift'");
+    db_insert('acc_qbo_drift_events', [
+        'detection_source' => 'drift_cron', 'category' => 'balance_drift',
+        'entity_type' => 'credit_memo', 'entity_id' => 999990,
+        'qbo_entity_id' => 'QBO-CM-DRIFT-A', 'ff_value' => '100', 'qbo_value' => '90',
+        'drift_amount' => '10', 'description' => 'C28 suppress visibility seed',
+        'resolved_at' => date('Y-m-d H:i:s'),
+        'resolution_type' => 'suppressed',
+        'resolved_by_user_id' => 1, 'resolution_note' => 'C28 suppressed',
+        'realm_id' => 'SMOKE-REALM', 'environment' => 'sandbox',
+    ]);
+    $unresolvedHit = (int) (db_row(
+        "SELECT COUNT(*) c FROM acc_qbo_drift_events
+          WHERE entity_id=999990 AND category='balance_drift'
+            AND resolved_at IS NULL AND resolution_type IS NULL"
+    )['c'] ?? 0);
+    $suppressedHit = (int) (db_row(
+        "SELECT COUNT(*) c FROM acc_qbo_drift_events
+          WHERE entity_id=999990 AND category='balance_drift'
+            AND resolution_type='suppressed'"
+    )['c'] ?? 0);
+    $listSrc = (string) file_get_contents(__DIR__ . '/../api/v1/quickbooks/drift_list.php');
+    $c28 = [];
+    if ($unresolvedHit !== 0)                                          $c28[] = "default unresolved filter wrongly includes suppressed (hits={$unresolvedHit})";
+    if ($suppressedHit !== 1)                                          $c28[] = "explicit suppressed filter wrongly hides suppressed (hits={$suppressedHit})";
+    if (strpos($listSrc, "resolution_type IS NULL") === false)         $c28[] = "drift_list.php missing resolution_type IS NULL guard on default view";
+    if (strpos($listSrc, "resolution_type = 'suppressed'") === false)  $c28[] = "drift_list.php missing explicit suppressed filter branch";
+    if (strpos($listSrc, "resolution_type = 'accepted'") === false)    $c28[] = "drift_list.php missing explicit accepted filter branch";
+    if (empty($c28)) { echo "PASS C28 drift_list: 'unresolved' default hides suppressed; 'suppressed' shows them (K-22 #4)\n"; $pass++; }
+    else { echo "FAIL C28 " . implode('; ', $c28) . "\n"; $failures[] = 'C28'; }
 
 } finally {
     ff_smoke_drift_cleanup();

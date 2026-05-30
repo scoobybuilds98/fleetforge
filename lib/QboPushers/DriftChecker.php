@@ -26,20 +26,43 @@ declare(strict_types=1);
  *     • missing_in_qbo— an eligible FF entity with no successful map row.
  *     • live amount_drift — live QBO total vs FF current total (authoritative).
  *
- * Idempotency: recordDrift() upserts on (entity_type, entity_id, category) —
- * an existing OPEN event (resolved_at IS NULL) is refreshed (detected_at +
- * values), never duplicated. So re-running the cron daily doesn't pile up
- * rows; a resolved event re-opens only if the drift recurs.
+ * Idempotency: recordDrift() upserts on (entity_type, entity_id, category):
+ *   • existing OPEN event (resolved_at IS NULL + resolution_type IS NULL) →
+ *     refreshed (detected_at + values), never duplicated;
+ *   • existing TERMINAL event (resolution_type IN ('accepted','suppressed'))
+ *     → return early — operator's accept/suppress decision persists across
+ *     cron runs (S-QBO-25, D-QBO-25-1). Without this guard, a suppressed
+ *     event would be re-created as a fresh OPEN row on the next cron run
+ *     because resolved_at is SET → no OPEN match → INSERT — defeating
+ *     suppress entirely. Tested explicitly in _smoke_qbo_drift_check.php.
+ *   • 'resolved' rows (manual or auto-resolved) do NOT block — drift
+ *     recurring is a new event worth surfacing.
+ *
+ * Auto-resolve-on-parity (S-QBO-25, D-QBO-25-2): at the end of runCheck(),
+ * any OPEN drift_cron event whose (entity_type, entity_id, category) was
+ * NOT re-detected this run is auto-resolved with
+ * resolution_type='resolved' + note 'auto-resolved: parity confirmed on
+ * <date>'. Scope = detection_source='drift_cron' only (push_failure events
+ * resolve via the operator's retry, not the parity cron) AND only
+ * categories actually scanned this run (snapshot layer always covers
+ * push_failed + amount_drift-where-ff_total-defined; missing_in_ff
+ * auto-resolve only when the live layer ran successfully — a live-layer
+ * exception for an entity_type leaves its missing_in_ff events alone).
  *
  * Scope boundary: S-QBO-24 = DETECTION + notification + Run-now. Resolution
  * workflows (resolve/accept/suppress, bulk actions — spec §15.4/§15.6) are
- * S-QBO-25. GL-account-balance drift (§15.2 step 4) is S-QBO-24-GL-BALANCE-
- * FOLLOWUP per D-QBO-24-3.
+ * S-QBO-25 (per-event + bulk-by-category accept/suppress + auto-resolve-
+ * on-parity, this session). Bulk force-resync/force-pull are S-QBO-26
+ * (Manual Sync page). GL-account-balance drift (§15.2 step 4) is
+ * S-QBO-24-GL-BALANCE-FOLLOWUP per D-QBO-24-3.
  *
- * @session  S-QBO-24
+ * @session  S-QBO-24 (detection), S-QBO-25 (resolution-state interactions)
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §15
  * @decision D-QBO-24-1 (hybrid snapshot + live), D-QBO-24-2 (live drift_events
- *           schema), D-QBO-24-3 (GL-balance deferred), D-QBO-24-4 (tolerances)
+ *           schema), D-QBO-24-3 (GL-balance deferred), D-QBO-24-4 (tolerances),
+ *           D-QBO-25-1 (resolution_type terminal-state guard in recordDrift),
+ *           D-QBO-25-2 (auto-resolve-on-parity scoped to drift_cron + categories
+ *           actually scanned this run)
  */
 
 namespace FleetForge\QboPushers;
@@ -58,6 +81,29 @@ class DriftChecker
         'failed_preflight_currency_mismatch',
         'failed_preflight_field_too_long',
     ];
+
+    /**
+     * Per-run accumulator of (entity_type → set of "ENTITY:{id}|{category}"
+     * or "QBO:{qbo_id}|{category}" keys) for events detected this run.
+     * Reset at the start of runCheck(); read by autoResolveParity() at end
+     * to identify open drift_cron events whose drift is gone. Static so
+     * recordDrift() can append without threading state through the call
+     * chain. S-QBO-25 / D-QBO-25-2.
+     *
+     * @var array<string, array<string, true>>
+     */
+    private static array $detectedKeys = [];
+
+    /**
+     * Per-run set of (entity_type → list of categories that were actually
+     * scanned this run). Auto-resolve only fires for categories in scope:
+     * a missing_in_ff event must NOT auto-resolve if the live layer didn't
+     * run (or threw) for its entity_type, because we don't have a complete
+     * picture to compare against. S-QBO-25 / D-QBO-25-2.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private static array $checkedCategories = [];
 
     /**
      * Per-entity drift-check configuration. Each entry:
@@ -126,13 +172,19 @@ class DriftChecker
      *
      * @param  bool|null $forceLive  null = auto-detect (connected + sync_enabled
      *                   + not fixture); true/false override (smoke/testing).
-     * @return array{skipped?:string, checked:int, drift_events:int, by_entity:array, notified:int, live:bool}
+     * @return array{skipped?:string, checked:int, drift_events:int, by_entity:array, notified:int, live:bool, resolved:int}
      */
     public static function runCheck(?bool $forceLive = null): array
     {
         if ((string) settings_get('quickbooks.drift.enabled', '1') !== '1') {
-            return ['skipped' => 'disabled', 'checked' => 0, 'drift_events' => 0, 'by_entity' => [], 'notified' => 0, 'live' => false];
+            return ['skipped' => 'disabled', 'checked' => 0, 'drift_events' => 0, 'by_entity' => [], 'notified' => 0, 'live' => false, 'resolved' => 0];
         }
+
+        // Reset per-run state for auto-resolve-on-parity (D-QBO-25-2). Static
+        // accumulators are populated by recordDrift() during the scan; read
+        // by autoResolveParity() after the scan completes.
+        self::$detectedKeys      = [];
+        self::$checkedCategories = [];
 
         $live = $forceLive ?? self::liveModeAvailable();
 
@@ -151,14 +203,21 @@ class DriftChecker
 
             // ── SNAPSHOT layer (always) ──────────────────────────────
             self::checkPushFailed($entityType, $cfg, $stats);
+            self::$checkedCategories[$entityType] = ['push_failed'];
+
             if ($cfg['ff_total'] !== null) {
                 self::checkSnapshotAmountDrift($entityType, $cfg, $stats);
+                self::$checkedCategories[$entityType][] = 'amount_drift';
             }
 
             // ── LIVE layer (connected only) ──────────────────────────
             if ($live) {
                 try {
                     self::checkLive($entityType, $cfg, $stats);
+                    // Only mark missing_in_ff as "scanned this run" if the
+                    // live scan completed without exception — otherwise
+                    // we'd auto-resolve missing_in_ff events on partial data.
+                    self::$checkedCategories[$entityType][] = 'missing_in_ff';
                 } catch (\Throwable $e) {
                     // Best-effort — a live-layer failure for one entity must not
                     // abort the whole run or the snapshot-layer findings.
@@ -178,6 +237,14 @@ class DriftChecker
             $totalDrift += $stats['push_failed'] + $stats['amount_drift'] + $stats['missing_in_qbo'] + $stats['missing_in_ff'];
         }
 
+        // ── Auto-resolve-on-parity (D-QBO-25-2) ──────────────────────
+        // After all entities scanned, close any OPEN drift_cron events whose
+        // (entity_type, entity_id, category) was NOT re-detected — drift is
+        // gone, mark resolved automatically. Scoped to categories actually
+        // scanned this run (push_failure-sourced events untouched; missing_in_ff
+        // only auto-resolves when the live layer ran successfully).
+        $autoResolved = self::autoResolveParity();
+
         // Stamp last-check timestamp (whole-run level). Direct upsert —
         // matches BankTransactionPuller::runCdc's last_bank_cdc_at pattern
         // (no settings_set helper exists in this codebase).
@@ -194,6 +261,7 @@ class DriftChecker
             'by_entity'    => $byEntity,
             'notified'     => $notified,
             'live'         => $live,
+            'resolved'     => $autoResolved,
         ];
     }
 
@@ -334,8 +402,19 @@ class DriftChecker
 
     /**
      * Idempotent upsert into acc_qbo_drift_events keyed on
-     * (entity_type, entity_id, category, open). An existing OPEN event is
-     * refreshed (detected_at + values); otherwise a new row is inserted.
+     * (entity_type, entity_id, category). State machine (S-QBO-25):
+     *   • existing TERMINAL row (resolution_type IN ('accepted','suppressed'))
+     *     → return early. Operator's accept/suppress decision persists
+     *     across cron runs; we never re-flag the same drift.
+     *   • existing OPEN row (resolved_at IS NULL + resolution_type IS NULL)
+     *     → refresh (detected_at + values).
+     *   • otherwise (no row, or only 'resolved' rows) → insert new.
+     *
+     * Always tracks the detected key (S-QBO-25 D-QBO-25-2 auto-resolve) so
+     * autoResolveParity() at the end of runCheck() knows not to auto-resolve
+     * this key (even if it was the terminal-suppress branch — the operator
+     * has already decided this event is handled).
+     *
      * Never throws (best-effort, like the Pushers' recording helpers).
      *
      * @param array<string,mixed> $d
@@ -346,25 +425,42 @@ class DriftChecker
             $realmId     = (string) settings_get('quickbooks.realm_id', '');
             $environment = (string) settings_get('quickbooks.environment', 'sandbox');
 
-            // Find an existing OPEN event for this key (resolved_at IS NULL).
+            // Track this key for auto-resolve scope BEFORE any early-return —
+            // we don't want autoResolveParity to touch a key the cron detected
+            // this run regardless of whether the row is OPEN, terminal, or new.
+            self::trackDetectedKey($d);
+
+            // Find an existing event for this key. Match either an OPEN row
+            // (resolved_at IS NULL) OR a TERMINAL row (accept/suppress) so we
+            // can both refresh the OPEN case and short-circuit the terminal
+            // case. 'resolved' rows do NOT match — drift recurring after a
+            // resolve creates a fresh event. ORDER BY id DESC picks the most
+            // recent if both an OPEN and a terminal exist (data anomaly).
             // entity_id may be NULL (missing_in_ff) — match on qbo_entity_id then.
             if ($d['entity_id'] !== null) {
                 $existing = db_row(
-                    "SELECT id FROM acc_qbo_drift_events
-                      WHERE entity_type = ? AND entity_id = ? AND category = ? AND resolved_at IS NULL
+                    "SELECT id, resolution_type FROM acc_qbo_drift_events
+                      WHERE entity_type = ? AND entity_id = ? AND category = ?
+                        AND (resolved_at IS NULL OR resolution_type IN ('accepted','suppressed'))
                       ORDER BY id DESC LIMIT 1",
                     [$d['entity_type'], (int) $d['entity_id'], $d['category']]
                 );
             } else {
                 $existing = db_row(
-                    "SELECT id FROM acc_qbo_drift_events
-                      WHERE entity_type = ? AND qbo_entity_id = ? AND category = ? AND resolved_at IS NULL
+                    "SELECT id, resolution_type FROM acc_qbo_drift_events
+                      WHERE entity_type = ? AND qbo_entity_id = ? AND category = ?
+                        AND (resolved_at IS NULL OR resolution_type IN ('accepted','suppressed'))
                       ORDER BY id DESC LIMIT 1",
                     [$d['entity_type'], (string) ($d['qbo_entity_id'] ?? ''), $d['category']]
                 );
             }
 
             if ($existing) {
+                // Terminal — operator has already decided; do nothing.
+                if (in_array($existing['resolution_type'], ['accepted', 'suppressed'], true)) {
+                    return;
+                }
+                // Open — refresh.
                 db_update('acc_qbo_drift_events', [
                     'detected_at'  => date('Y-m-d H:i:s'),
                     'ff_value'     => $d['ff_value'] ?? null,
@@ -391,6 +487,105 @@ class DriftChecker
         } catch (\Throwable $e) {
             error_log("[DriftChecker] recordDrift failed for {$d['entity_type']}#" . ($d['entity_id'] ?? '?') . ": " . $e->getMessage());
         }
+    }
+
+    /**
+     * Track a drift key in the per-run detected-set so autoResolveParity()
+     * knows it's still active. Key format: "ENTITY:{entity_id}|{category}"
+     * when entity_id is set (push_failed/amount_drift), or
+     * "QBO:{qbo_entity_id}|{category}" for missing_in_ff (entity_id null).
+     * S-QBO-25 / D-QBO-25-2.
+     */
+    private static function trackDetectedKey(array $d): void
+    {
+        $et  = (string) $d['entity_type'];
+        $cat = (string) $d['category'];
+        $key = $d['entity_id'] !== null
+            ? 'ENTITY:' . (int) $d['entity_id'] . '|' . $cat
+            : 'QBO:'    . (string) ($d['qbo_entity_id'] ?? '') . '|' . $cat;
+        if (!isset(self::$detectedKeys[$et])) {
+            self::$detectedKeys[$et] = [];
+        }
+        self::$detectedKeys[$et][$key] = true;
+    }
+
+    /**
+     * Close OPEN drift_cron events whose drift is no longer detected this
+     * run. Scoped to (entity_type, category) pairs that were actually
+     * scanned (self::$checkedCategories) — a missing_in_ff event must NOT
+     * auto-resolve if the live layer didn't run (or threw) for its
+     * entity_type, because we don't have a complete picture to compare.
+     *
+     * Best-effort/no-throw — caller is non-recoverable.
+     *
+     * S-QBO-25 / D-QBO-25-2. Spec §15.4 "auto-marks resolved when next
+     * drift check confirms parity".
+     *
+     * @return int  count of events auto-resolved
+     */
+    private static function autoResolveParity(): int
+    {
+        $resolved = 0;
+        try {
+            foreach (self::$checkedCategories as $entityType => $categoriesInScope) {
+                if (empty($categoriesInScope)) {
+                    continue;
+                }
+                $detected = self::$detectedKeys[$entityType] ?? [];
+
+                // Pull OPEN drift_cron events for this entity_type +
+                // category-in-scope. Limit by category WHERE so we don't
+                // even read events outside scope (push_failure-sourced is
+                // already filtered by detection_source).
+                $catPlaceholders = implode(',', array_fill(0, count($categoriesInScope), '?'));
+                $rows = db_select(
+                    "SELECT id, entity_id, qbo_entity_id, category
+                       FROM acc_qbo_drift_events
+                      WHERE entity_type = ?
+                        AND detection_source = 'drift_cron'
+                        AND resolved_at IS NULL
+                        AND resolution_type IS NULL
+                        AND category IN ({$catPlaceholders})",
+                    array_merge([$entityType], $categoriesInScope)
+                );
+
+                $toResolveIds = [];
+                foreach ($rows as $r) {
+                    $key = $r['entity_id'] !== null
+                        ? 'ENTITY:' . (int) $r['entity_id'] . '|' . (string) $r['category']
+                        : 'QBO:'    . (string) ($r['qbo_entity_id'] ?? '') . '|' . (string) $r['category'];
+                    if (!isset($detected[$key])) {
+                        $toResolveIds[] = (int) $r['id'];
+                    }
+                }
+
+                if ($toResolveIds === []) {
+                    continue;
+                }
+
+                $note = 'auto-resolved: parity confirmed on ' . date('Y-m-d');
+                $idPlaceholders = implode(',', array_fill(0, count($toResolveIds), '?'));
+                // Re-check the gate in the UPDATE WHERE — defends against
+                // a concurrent operator click landing between SELECT and
+                // UPDATE (defensive; cron runs serially under GET_LOCK but
+                // an admin "Run drift check now" could overlap).
+                $affected = (int) db_execute(
+                    "UPDATE acc_qbo_drift_events
+                        SET resolved_at     = NOW(),
+                            resolution_type = 'resolved',
+                            resolution_note = ?
+                      WHERE id IN ({$idPlaceholders})
+                        AND resolved_at IS NULL
+                        AND resolution_type IS NULL
+                        AND detection_source = 'drift_cron'",
+                    array_merge([$note], $toResolveIds)
+                );
+                $resolved += $affected;
+            }
+        } catch (\Throwable $e) {
+            error_log('[DriftChecker] autoResolveParity failed: ' . $e->getMessage());
+        }
+        return $resolved;
     }
 
     /**

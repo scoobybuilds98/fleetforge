@@ -1405,6 +1405,7 @@ CREATE TABLE `acc_qbo_drift_events` (
   `description` text COLLATE utf8mb4_unicode_ci,
   `queue_id` int unsigned DEFAULT NULL,
   `resolved_at` datetime DEFAULT NULL,
+  `resolution_type` enum('resolved','accepted','suppressed') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S-QBO-25 resolution-state machine. NULL + resolved_at NULL = OPEN. resolved_at SET + ''resolved'' = resolved (may re-open via new event if drift recurs). ''accepted'' / ''suppressed'' = terminal — DriftChecker::recordDrift never re-flags these (per-event operator decision persists across cron runs).',
   `resolved_by_user_id` int unsigned DEFAULT NULL,
   `resolution_note` text COLLATE utf8mb4_unicode_ci,
   `realm_id` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -1415,6 +1416,7 @@ CREATE TABLE `acc_qbo_drift_events` (
   KEY `idx_unresolved` (`resolved_at`,`category`,`detected_at`),
   KEY `idx_queue` (`queue_id`),
   KEY `idx_resolver` (`resolved_by_user_id`),
+  KEY `idx_resolution` (`resolution_type`),
   CONSTRAINT `fk_qbo_drift_events_queue` FOREIGN KEY (`queue_id`) REFERENCES `acc_qbo_sync_queue` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_qbo_drift_events_resolver` FOREIGN KEY (`resolved_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
