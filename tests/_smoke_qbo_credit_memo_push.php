@@ -43,15 +43,21 @@ declare(strict_types=1);
  *     C19 already_mapped (existing qbo_credit_memo_id) → already_mapped
  *     C20 ff_not_found
  *
- *   Module F — update/void stubs (D-QBO-16-2)
- *     C21 pushUpdate → unsupported_in_session
- *     C22 pushVoid → unsupported_in_session
+ *   Module F — update delegation + void stub (S-QBO-CREDIT-MEMO-UPDATE)
+ *     C21 REPURPOSED — pushUpdate delegates to pushImpl (skipped_by_mode
+ *         proves no-longer-a-stub; D-QBO-16-2 update stub closed)
+ *     C22 pushVoid STILL stub → unsupported_in_session (rides F7 trio)
  *
  *   Module G — Enqueuer gates
  *     C23 gate-0 rejects missing credit note
  *     C24 gate-0 rejects non-active status
- *     C25 gate-3 rejects 'update' op
+ *     C25 REPURPOSED — gate-3 ACCEPTS 'update' op + inserts queue row
  *     C26 happy-path queue insert (entity_type='credit_memo', op='create')
+ *
+ *   Module I — demotion + void rejection (S-QBO-CREDIT-MEMO-UPDATE)
+ *     C27 pushUpdate on unmapped credit note demotes to create →
+ *         failed_preflight at customer gate (no HTTP); D-PUSHER-DEMOTION-RULE
+ *     C28 Enqueuer gate-3 still rejects 'void' op (pushVoid → F7)
  *
  * Fixtures use sentinel IDs 999990-999999, cleaned in finally. The 'other'
  * item mapping is captured + ensured + restored (hermetic across envs).
@@ -69,7 +75,7 @@ use FleetForge\QboPushers\CreditMemoEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 26;
+$total = 28;
 $failures = [];
 
 function ff_smoke_cm_set(string $key, string $value): void
@@ -132,7 +138,7 @@ foreach ($snapshotKeys as $k) { $snapshot[$k] = ff_smoke_cm_get($k); }
 $otherItemPre = db_row("SELECT id, qbo_item_id, mapping_status FROM acc_qbo_item_map WHERE ff_item_type = 'other' ORDER BY id ASC LIMIT 1");
 
 echo "═══════════════════════════════════════════════════════════\n";
-echo "S-QBO-16 Credit Memo Push Smoke (26 sub-checks)\n";
+echo "S-QBO-16 Credit Memo Push Smoke (28 sub-checks; +S-QBO-CREDIT-MEMO-UPDATE)\n";
 echo "═══════════════════════════════════════════════════════════\n";
 
 try {
@@ -313,14 +319,33 @@ try {
     if ($r['status'] === 'ff_not_found') { echo "PASS C20 pushCreate missing credit note → ff_not_found\n"; $pass++; }
     else { echo "FAIL C20 got " . json_encode($r) . "\n"; $failures[] = 'C20'; }
 
-    // ══ Module F — stubs ══════════════════════════════════════════════
+    // ══ Module F — update delegation (S-QBO-CREDIT-MEMO-UPDATE) + void stub ══
+    // C21 REPURPOSED: pushUpdate now delegates to pushImpl (no longer a stub).
+    // 999990 is active + fully mapped here, so sync_mode='disabled' is REQUIRED
+    // to short-circuit at step 1 (skipped_by_mode) — otherwise the demoted
+    // create would reach a real createEntity HTTP call (404 in smoke; the
+    // HTTP trap). skipped_by_mode definitively proves delegation (NOT the old
+    // unsupported_in_session stub). sync_mode restored to 'sync' after.
+    $c21 = [];
+    $prevMode21 = ff_smoke_cm_get('quickbooks.sync_mode.credit_memo');
+    ff_smoke_cm_set('quickbooks.sync_mode.credit_memo', 'disabled');
     $r = CreditMemoPusher::pushUpdate(999990);
-    if ($r['status'] === 'unsupported_in_session') { echo "PASS C21 pushUpdate stub → unsupported_in_session (F20)\n"; $pass++; }
-    else { echo "FAIL C21 got " . json_encode($r) . "\n"; $failures[] = 'C21'; }
+    if (($r['status'] ?? null) === 'unsupported_in_session') { $c21[] = "pushUpdate still a stub"; }
+    if (($r['status'] ?? null) !== 'skipped_by_mode') { $c21[] = "expected skipped_by_mode (delegation proof), got " . json_encode($r['status'] ?? null); }
+    if (($r['outcome'] ?? null) !== 'skipped') { $c21[] = "outcome: " . json_encode($r['outcome'] ?? null); }
+    ff_smoke_cm_set('quickbooks.sync_mode.credit_memo', $prevMode21 ?? 'sync');
+    db_execute("DELETE FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id=999990");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='credit_memo' AND entity_id=999990");
+    if (empty($c21)) { echo "PASS C21 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-CREDIT-MEMO-UPDATE; D-QBO-16-2 update stub closed)\n"; $pass++; }
+    else { echo "FAIL C21 " . implode('; ', $c21) . "\n"; $failures[] = 'C21'; }
 
+    // C22 — pushVoid STILL a stub (rides the F7 pushVoid trio; NOT this slice).
+    $c22 = [];
     $r = CreditMemoPusher::pushVoid(999990);
-    if ($r['status'] === 'unsupported_in_session') { echo "PASS C22 pushVoid stub → unsupported_in_session (F20)\n"; $pass++; }
-    else { echo "FAIL C22 got " . json_encode($r) . "\n"; $failures[] = 'C22'; }
+    if (($r['status'] ?? null) !== 'unsupported_in_session') { $c22[] = "status: " . json_encode($r['status'] ?? null); }
+    if (strpos((string) ($r['error'] ?? ''), 'F7') === false) { $c22[] = "error should mention F7 pushVoid trio; got " . json_encode($r['error'] ?? null); }
+    if (empty($c22)) { echo "PASS C22 pushVoid STILL stub → unsupported_in_session (D-QBO-16-2; rides F7 trio, not this slice)\n"; $pass++; }
+    else { echo "FAIL C22 " . implode('; ', $c22) . "\n"; $failures[] = 'C22'; }
 
     // ══ Module G — Enqueuer gates ═════════════════════════════════════
     db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id BETWEEN 999990 AND 999999");
@@ -333,13 +358,59 @@ try {
     else { echo "FAIL C24 expected false for non-active status\n"; $failures[] = 'C24'; }
     db_execute("UPDATE credit_notes SET status='active' WHERE id=999990");
 
-    if (CreditMemoEnqueuer::enqueue(999990, 'update') === false) { echo "PASS C25 Enqueuer gate-3 rejects 'update' op (v1 create only)\n"; $pass++; }
-    else { echo "FAIL C25 expected false for update op\n"; $failures[] = 'C25'; }
+    // C25 REPURPOSED — Enqueuer gate-3 now ACCEPTS 'update' (S-QBO-CREDIT-MEMO-UPDATE).
+    // Allowlist widened ['create']→['create','update']. 999990 active +
+    // sync_enabled='1' + sync_mode.credit_memo='sync' → enqueue('update')
+    // succeeds + writes a queue row with operation='update'.
+    $c25 = [];
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990");
+    $r25 = CreditMemoEnqueuer::enqueue(999990, 'update');
+    $q25 = db_row("SELECT operation, status FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990 AND operation='update'");
+    if ($r25 !== true) { $c25[] = "enqueue should accept 'update' now; got " . json_encode($r25); }
+    if ($q25 === null) { $c25[] = "an 'update' queue row should be written; none found"; }
+    elseif ($q25['operation'] !== 'update' || $q25['status'] !== 'queued') { $c25[] = "queue row shape: " . json_encode($q25); }
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990");
+    if (empty($c25)) { echo "PASS C25 Enqueuer gate-3 accepts 'update' op + inserts queue row (S-QBO-CREDIT-MEMO-UPDATE; D-QBO-16-2 update stub closed)\n"; $pass++; }
+    else { echo "FAIL C25 " . implode('; ', $c25) . "\n"; $failures[] = 'C25'; }
 
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990");
     $ok = CreditMemoEnqueuer::enqueue(999990, 'create');
-    $q = db_row("SELECT COUNT(*) AS c FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990 AND status='queued'");
+    $q = db_row("SELECT COUNT(*) AS c FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990 AND operation='create' AND status='queued'");
     if ($ok === true && (int)($q['c'] ?? 0) === 1) { echo "PASS C26 Enqueuer happy-path queue insert\n"; $pass++; }
     else { echo "FAIL C26 ok=" . var_export($ok, true) . " queued=" . ($q['c'] ?? 0) . "\n"; $failures[] = 'C26'; }
+
+    // ══ Module I — pushUpdate demotion + void rejection (S-QBO-CREDIT-MEMO-UPDATE) ══
+    // C27: pushUpdate on an UNMAPPED credit note demotes to create (step 5b)
+    // → runs the create pipeline → fails at the customer-mapping preflight
+    // gate BEFORE the HTTP boundary (no real updateEntity/createEntity call,
+    // which would 404). Proves D-PUSHER-DEMOTION-RULE. Customer mapping is
+    // removed to force the gate-2 failure, then restored. sync_mode must be
+    // 'sync' here (NOT disabled) so the pipeline runs past step 1.
+    $c27 = [];
+    ff_smoke_cm_set('quickbooks.sync_mode.credit_memo', 'sync');
+    ff_smoke_cm_seed_cn(999992, ['source'=>'other', 'status'=>'active']);
+    db_execute("DELETE FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id=999992");
+    db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id=999990");
+    $r27 = CreditMemoPusher::pushUpdate(999992);
+    $map27 = db_row("SELECT qbo_credit_memo_id, push_status FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id=999992");
+    if (($r27['status'] ?? null) === 'unsupported_in_session') { $c27[] = "pushUpdate still a stub"; }
+    if (($r27['status'] ?? null) !== 'failed_preflight') { $c27[] = "expected failed_preflight (demoted-create at customer gate), got " . json_encode($r27['status'] ?? null); }
+    if (!empty($map27['qbo_credit_memo_id'])) { $c27[] = "no qbo_credit_memo_id should be persisted on a failed demoted-create; got " . json_encode($map27['qbo_credit_memo_id']); }
+    // Restore customer mapping for hermetic state.
+    db_execute("INSERT INTO acc_qbo_customer_map (ff_customer_id, qbo_customer_id, mapping_status) VALUES (999990, 'QBO-CUST-9990', 'mapped')");
+    if (empty($c27)) { echo "PASS C27 pushUpdate on unmapped credit note demotes to create (failed_preflight at customer gate; no qbo_id; D-PUSHER-DEMOTION-RULE)\n"; $pass++; }
+    else { echo "FAIL C27 " . implode('; ', $c27) . "\n"; $failures[] = 'C27'; }
+
+    // C28: Enqueuer gate-3 still REJECTS 'void' (allowlist = create+update only;
+    // pushVoid rides the F7 trio).
+    $c28 = [];
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990");
+    $r28 = CreditMemoEnqueuer::enqueue(999990, 'void');
+    $q28 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990 AND operation='void'");
+    if ($r28 !== false) { $c28[] = "enqueue should reject 'void'; got " . json_encode($r28); }
+    if ($q28 !== null) { $c28[] = "no 'void' queue row should be inserted; found id=" . $q28['id']; }
+    if (empty($c28)) { echo "PASS C28 Enqueuer gate-3 rejects 'void' op (allowlist = create+update only; pushVoid → F7)\n"; $pass++; }
+    else { echo "FAIL C28 " . implode('; ', $c28) . "\n"; $failures[] = 'C28'; }
 
 } finally {
     ff_smoke_cm_cleanup();

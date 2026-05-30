@@ -13,10 +13,13 @@ declare(strict_types=1);
  *
  * Method-per-operation contract (D-QBO-3-2 + D-PUSHER-CONTRACT):
  *   create → pushCreate(int $ffCreditNoteId): array
- *   update → pushUpdate(int): array   (STUB → S-QBO-16-UPDATE-FOLLOWUP / F20)
- *   void   → pushVoid(int): array     (STUB → S-QBO-16-UPDATE-FOLLOWUP / F20)
+ *   update → pushUpdate(int): array   (IMPLEMENTED in S-QBO-CREDIT-MEMO-UPDATE
+ *            — MECHANICAL full-payload re-send via updateEntity + demote-to-
+ *            create; the apply→LinkedTxn application flow is carved out to a
+ *            dedicated follow-up — see D-QBO-CREDIT-MEMO-UPDATE-1)
+ *   void   → pushVoid(int): array     (STILL STUB → pushVoid trio / F7)
  *
- * pushImpl pipeline (create only in v1):
+ * pushImpl pipeline (create + update; pushVoid still stubbed):
  *   1. Sync mode gate (quickbooks.sync_mode.credit_memo; 'sync' default)
  *   2. Load FF credit_notes row (404 → ff_not_found)
  *   3. Voided check (status='void' → skipped_voided)
@@ -41,7 +44,15 @@ declare(strict_types=1);
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §8.6 (Credit Memo), §9 (tax-override)
  * @decision D-QBO-16-1 (SOURCE_TO_ITEM_TYPE map → acc_qbo_item_map lookup
  *                       for the single line ItemRef),
- *           D-QBO-16-2 (pushCreate only; apply→LinkedTxn + void stubbed → F20),
+ *           D-QBO-16-2 (S-QBO-16 shipped pushCreate only; pushUpdate CLOSED by
+ *                       S-QBO-CREDIT-MEMO-UPDATE; pushVoid still stubbed → F7),
+ *           D-QBO-CREDIT-MEMO-UPDATE-1 (mechanical pushUpdate via updateEntity
+ *                       full-payload re-send + demote-to-create at step 5b;
+ *                       credit notes have no editable header so it's a
+ *                       SyncToken/qbo_balance refresh — the apply→LinkedTxn
+ *                       credit-APPLICATION propagation is carved out to a
+ *                       dedicated follow-up, NOT handled here),
+ *           D-PUSHER-DEMOTION-RULE (update→create demotion at pushImpl step 5b),
  *           D-QBO-16-3 (acc_qbo_credit_memo_map mirrors invoice map shape),
  *           D-QBO-CORE-6 (tax-override: TotalTax=0 — credit notes carry no
  *                       tax; line TaxCodeRef = tax_override_code_id)
@@ -112,23 +123,38 @@ class CreditMemoPusher
     }
 
     /**
-     * UPDATE stub per D-QBO-16-2. The apply→LinkedTxn flow (linking the
-     * QBO CreditMemo to a QBO Invoice when an FF credit is applied) is
-     * deferred to S-QBO-16-UPDATE-FOLLOWUP (F20). Matches the stub-then-
-     * implement pattern of S-QBO-11/14/18/19/21.
+     * Push an UPDATE to an existing QBO CreditMemo (S-QBO-CREDIT-MEMO-UPDATE,
+     * closing the literal pushUpdate stub from D-QBO-16-2). MECHANICAL
+     * full-payload re-send via QuickBooksClient::updateEntity — not a sparse
+     * diff (mirrors InvoicePusher D-QBO-12-1 + the prior three update slices:
+     * Bill / Payment / BillPayment). FF is canonical (D-QBO-CORE-1); QBO
+     * accepts the complete payload + current SyncToken and replaces.
+     *
+     * Demotion (D-PUSHER-DEMOTION-RULE): if the credit memo was never pushed
+     * (no map row / null qbo_credit_memo_id), pushImpl auto-demotes to
+     * 'create' at step 5b and re-POSTs.
+     *
+     * IMPORTANT SCOPE NOTE (D-QBO-CREDIT-MEMO-UPDATE-1): credit notes have no
+     * editable header (amount/source/customer are immutable post-issuance —
+     * credit_notes/update.php only edits reason/internal_notes/expires_at,
+     * none of which change the QBO payload materially), so this mechanical
+     * pushUpdate effectively just refreshes the QBO entity + SyncToken +
+     * qbo_balance snapshot. The credit-APPLICATION propagation (apply→LinkedTxn
+     * — when an FF credit is applied to an invoice) is a DIFFERENT QBO
+     * operation (a zero-dollar Payment entity with CreditMemo + Invoice
+     * LinkedTxns, needing a migration + apply.php hook) and is CARVED OUT to
+     * a dedicated follow-up (OPERATOR_FOLLOWUPS F25); it is NOT handled here.
      */
     public static function pushUpdate(int $ffCreditNoteId): array
     {
-        return [
-            'success' => false,
-            'status'  => 'unsupported_in_session',
-            'outcome' => 'skipped',
-            'error'   => 'CreditMemoPusher::pushUpdate (apply→LinkedTxn) is stubbed in S-QBO-16 v1; deferred to S-QBO-16-UPDATE-FOLLOWUP (F20) per D-QBO-16-2.',
-        ] + self::RESULT_BASE;
+        return self::pushImpl($ffCreditNoteId, 'update');
     }
 
     /**
-     * VOID stub per D-QBO-16-2. Deferred to S-QBO-16-UPDATE-FOLLOWUP (F20).
+     * VOID still STUBBED per D-QBO-16-2 — pushVoid rides the pushVoid trio
+     * follow-up (OPERATOR_FOLLOWUPS F7: PaymentPusher / BillPaymentPusher /
+     * CreditMemoPusher pushVoid, mirroring InvoicePusher pushVoidImpl). NOT
+     * in scope for S-QBO-CREDIT-MEMO-UPDATE (which only closes pushUpdate).
      */
     public static function pushVoid(int $ffCreditNoteId): array
     {
@@ -136,12 +162,15 @@ class CreditMemoPusher
             'success' => false,
             'status'  => 'unsupported_in_session',
             'outcome' => 'skipped',
-            'error'   => 'CreditMemoPusher::pushVoid is stubbed in S-QBO-16 v1; deferred to S-QBO-16-UPDATE-FOLLOWUP (F20) per D-QBO-16-2.',
+            'error'   => 'CreditMemoPusher::pushVoid is stubbed (D-QBO-16-2). Queue this for the pushVoid trio follow-up (OPERATOR_FOLLOWUPS F7).',
         ] + self::RESULT_BASE;
     }
 
     /**
-     * Create pipeline (10 steps; see class docblock).
+     * Create + update pipeline (10 steps; see class docblock). pushVoid still
+     * delegates to its standalone stub above (F7). For 'update', step 5b
+     * demotes to 'create' when the credit memo is unmapped, and step 9
+     * branches to updateEntity (full-payload re-send) when mapped.
      */
     private static function pushImpl(int $ffCreditNoteId, string $operation): array
     {
@@ -176,20 +205,37 @@ class CreditMemoPusher
             return ['success' => true, 'status' => 'skipped_soft_deleted', 'outcome' => 'skipped'] + self::RESULT_BASE;
         }
 
-        // 5. Idempotency (existing mapping with qbo_credit_memo_id → no-op).
+        // 5. Idempotency on CREATE (existing mapping with qbo_credit_memo_id
+        //    → no-op). Guarded on operation==='create': an 'update' of a
+        //    mapped credit memo must FALL THROUGH to the updateEntity dispatch
+        //    in step 9, not short-circuit here. qbo_sync_token is selected for
+        //    the update round-trip.
         $mapping = db_row(
-            "SELECT id, qbo_credit_memo_id, qbo_currency
+            "SELECT id, qbo_credit_memo_id, qbo_sync_token, qbo_currency
                FROM acc_qbo_credit_memo_map
               WHERE ff_credit_note_id = ?",
             [$ffCreditNoteId]
         );
-        if ($mapping !== null && !empty($mapping['qbo_credit_memo_id'])) {
+        if ($operation === 'create' && $mapping !== null && !empty($mapping['qbo_credit_memo_id'])) {
             return [
                 'success' => true,
                 'status'  => 'already_mapped',
                 'outcome' => 'created',
                 'qbo_id'  => (string) $mapping['qbo_credit_memo_id'],
             ] + self::RESULT_BASE;
+        }
+
+        // 5b. Update demotion (D-PUSHER-DEMOTION-RULE, mirrors InvoicePusher
+        //     D-QBO-12-1 + the prior three update slices). An 'update' of a
+        //     credit memo that was never pushed (no map row OR null
+        //     qbo_credit_memo_id) is just a first push — demote to 'create' so
+        //     the HTTP dispatch in step 9 calls createEntity. Credit notes are
+        //     FF-origin only (no QBO-side credit-memo webhook intake), so there
+        //     is no payment-style origin/dedup gate to navigate — placement
+        //     after create-idempotency, before the status gate, matches the
+        //     Bill template.
+        if ($operation === 'update' && ($mapping === null || empty($mapping['qbo_credit_memo_id']))) {
+            $operation = 'create';
         }
 
         // 6. Pre-flight gates.
@@ -232,10 +278,24 @@ class CreditMemoPusher
             ] + self::RESULT_BASE;
         }
 
-        // 9. HTTP create.
+        // 9. HTTP create/update. createEntity for a new credit memo,
+        //    updateEntity for an existing one (full-payload re-send per
+        //    D-QBO-12-1; updateEntity merges Id + SyncToken into the payload).
+        //    SyncToken comes from the mapping row. Demotion in step 5b
+        //    guarantees $mapping has a qbo_credit_memo_id whenever $operation
+        //    is still 'update' here.
         $client = new QuickBooksClient();
         try {
-            $response = $client->createEntity('creditmemo', $payload);
+            if ($operation === 'update') {
+                $response = $client->updateEntity(
+                    'creditmemo',
+                    (string) $mapping['qbo_credit_memo_id'],
+                    (string) ($mapping['qbo_sync_token'] ?? '0'),
+                    $payload
+                );
+            } else {
+                $response = $client->createEntity('creditmemo', $payload);
+            }
         } catch (QuickBooksException $e) {
             $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
             self::recordPushFailure($ffCreditNoteId, $cn, $e->getMessage(), $httpCode);
@@ -260,12 +320,16 @@ class CreditMemoPusher
         }
 
         // 10. Persist mapping.
-        self::recordSuccessfulPush($ffCreditNoteId, $cn, $qboCm, $itemType);
+        self::recordSuccessfulPush($ffCreditNoteId, $cn, $qboCm, $itemType, $operation);
 
         return [
             'success'    => true,
-            'status'     => 'created',
-            'outcome'    => 'created',
+            // create keeps this pusher's existing status='created'; update
+            // returns 'pushed' (the map row push_status is 'pushed' for both —
+            // recordSuccessfulPush writes it). outcome distinguishes for the
+            // worker tally / smoke.
+            'status'     => $operation === 'update' ? 'pushed' : 'created',
+            'outcome'    => $operation === 'update' ? 'updated' : 'created',
             'qbo_id'     => (string) $qboCm['Id'],
             'sync_token' => (string) ($qboCm['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;
@@ -449,7 +513,7 @@ class CreditMemoPusher
         return db_row("SELECT id FROM credit_notes WHERE id = ?", [$id]) !== null;
     }
 
-    private static function recordSuccessfulPush(int $ffCreditNoteId, array $cn, array $qboCm, string $itemType): void
+    private static function recordSuccessfulPush(int $ffCreditNoteId, array $cn, array $qboCm, string $itemType, string $operation = 'create'): void
     {
         if (!self::ffCreditNoteExists($ffCreditNoteId)) {
             return;
@@ -470,7 +534,7 @@ class CreditMemoPusher
             'pushed_at'                     => $now,
             'last_synced_at'                => $now,
         ]);
-        self::writeSyncLog($ffCreditNoteId, 'create', 'pushed', "QBO CreditMemo #{$qboCm['Id']} created");
+        self::writeSyncLog($ffCreditNoteId, $operation, 'pushed', "QBO CreditMemo #{$qboCm['Id']} " . ($operation === 'update' ? 'updated' : 'created'));
     }
 
     private static function recordPushFailure(int $ffCreditNoteId, array $cn, string $error, int $httpCode): void

@@ -17,16 +17,25 @@ declare(strict_types=1);
  *   1. Master kill — quickbooks.sync_enabled must be '1' (default '0' per D-CPA-5).
  *   2. Mode kill — quickbooks.sync_mode.credit_memo ('sync' default). 'qbo_to_ff'
  *      + 'disabled' refuse.
- *   3. Operation whitelist — 'create' only in S-QBO-16. 'update'/'void'
- *      deferred to S-QBO-16-UPDATE-FOLLOWUP (F20) per D-QBO-16-2.
+ *   3. Operation whitelist — 'create' + 'update' since S-QBO-CREDIT-MEMO-UPDATE
+ *      (D-QBO-16-2 pushUpdate stub CLOSED). 'void' still deferred to the
+ *      pushVoid trio (OPERATOR_FOLLOWUPS F7). NOTE: no enqueue('update') hook
+ *      is wired into a credit_notes endpoint (credit notes have no editable
+ *      header) — the mechanical update rides manual-sync force_resync; the
+ *      credit-APPLICATION propagation (apply→LinkedTxn) is a carved-out
+ *      follow-up (F25 / D-QBO-CREDIT-MEMO-UPDATE-1). Gate-0's active-only
+ *      status check applies to 'create'; 'update' may re-sync any live credit
+ *      (active/partially_used/fully_used — the Pusher skips void/deleted).
  *   4. INSERT into acc_qbo_sync_queue (entity_type='credit_memo').
  *
  * Best-effort per D-ENQUEUER-CONTRACT — never throws; the FF credit-note
  * create flow always succeeds even if enqueue fails.
  *
- * @session  S-QBO-16
+ * @session  S-QBO-16 (create) + S-QBO-CREDIT-MEMO-UPDATE (update)
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §6.9 (Enqueuer Contract), §8.6
- * @decision D-QBO-16-2 (create only; update/void deferred → F20),
+ * @decision D-QBO-16-2 (pushUpdate stub CLOSED by S-QBO-CREDIT-MEMO-UPDATE;
+ *               gate-3 now allows 'update'; pushVoid still stubbed → F7),
+ *           D-QBO-CREDIT-MEMO-UPDATE-1 (mechanical update; apply flow → F25),
  *           D-ENQUEUER-CONTRACT (best-effort 4-step gating),
  *           D-ENQUEUER-GATE-0-ELIGIBILITY (gate-0 entity-state check)
  */
@@ -40,7 +49,7 @@ class CreditMemoEnqueuer
      * inserted; false on any gate refusal. Never throws.
      *
      * @param  int    $ffCreditNoteId  credit_notes.id
-     * @param  string $operation       'create' allowed in S-QBO-16; others rejected
+     * @param  string $operation       'create' + 'update' allowed (S-QBO-CREDIT-MEMO-UPDATE); 'void' rejected (F7)
      * @return bool
      */
     public static function enqueue(int $ffCreditNoteId, string $operation): bool
@@ -79,8 +88,10 @@ class CreditMemoEnqueuer
                 return false;
             }
 
-            // Gate 3: operation whitelist (create only in S-QBO-16).
-            if ($operation !== 'create') {
+            // Gate 3: operation whitelist. 'create' + 'update' supported since
+            // S-QBO-CREDIT-MEMO-UPDATE (D-QBO-16-2 pushUpdate stub closed).
+            // 'void' still deferred to the pushVoid trio (OPERATOR_FOLLOWUPS F7).
+            if (!in_array($operation, ['create', 'update'], true)) {
                 return false;
             }
 
