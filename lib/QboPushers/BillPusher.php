@@ -24,11 +24,14 @@ declare(strict_types=1);
  *   - DocNumber = vendor_bill_number (when set) else FF bill_number
  *     (D-QBO-18-7). QBO Bill.DocNumber represents the vendor's
  *     reference number, not FF's internal sequence.
- *   - pushUpdate stubbed → S-QBO-19 (D-QBO-18-5; mirrors S-QBO-11 D-QBO-
- *     11-4 stub-then-implement pattern).
+ *   - pushUpdate IMPLEMENTED in S-QBO-BILL-UPDATE (closes the D-QBO-18-5
+ *     stub): routes through pushImpl with operation='update' — full-payload
+ *     re-send via QuickBooksClient::updateEntity + SyncToken round-trip
+ *     (mirrors InvoicePusher D-QBO-12-1), demote-to-create when unmapped.
  *   - pushVoid absent in v1 — voided bills before push hit
  *     skipped_unmapped_void (D-QBO-18-4); voided bills after push need
- *     pushVoid implementation in S-QBO-19.
+ *     pushVoid implementation in a future pushVoid follow-up slice
+ *     (see OPERATOR_FOLLOWUPS F7).
  *   - No engine-version dispatch (bills don't have the holistic-vs-
  *     period_independent split that invoices have).
  *   - No customer mismatch preflight (bills push to vendor; vendor
@@ -43,15 +46,17 @@ declare(strict_types=1);
  *               mapping deferred),
  *           D-QBO-18-3 (AccountBasedExpenseLineDetail per line),
  *           D-QBO-18-4 (skipped_voided when bill.status='void'),
- *           D-QBO-18-5 (pushUpdate stubbed → S-QBO-19),
+ *           D-QBO-18-5 (pushUpdate stub — CLOSED by S-QBO-BILL-UPDATE /
+ *               D-QBO-BILL-UPDATE-1),
  *           D-QBO-18-6 (ff_bill_id NOT NULL — bills FF-origin only),
  *           D-QBO-18-7 (DocNumber = vendor_bill_number ?? bill_number),
  *           D-QBO-FIXPACK-6 (class-of-entity CurrencyRef principle),
  *           D-QBO-FIXPACK-12 (CurrencyRef emission gated on
  *               multi_currency_enabled),
  *           D-QBO-FIXPACK-10 (idempotency-replay mismatch warning),
- *           D-PUSHER-DEMOTION-RULE (update→create demotion — N/A
- *               while pushUpdate stubbed),
+ *           D-PUSHER-DEMOTION-RULE (update→create demotion — ACTIVE since
+ *               S-QBO-BILL-UPDATE: pushImpl step 5b demotes an 'update' of
+ *               an unmapped bill to 'create'),
  *           D-PUSHER-OUTCOME-FIELD-UNIVERSAL-2 (outcome field on
  *               every return path)
  */
