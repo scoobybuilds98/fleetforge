@@ -28,8 +28,16 @@ declare(strict_types=1);
  * Per D-QBO-19-3: BankAccountRef from acc_qbo_account_map lookup on
  *   ap_payment.bank_account_id (FF bank account → QBO bank/credit account).
  * Per D-QBO-19-4: LinkedTxn.TxnType='Bill' for each allocation.
- * Per D-QBO-19-5: pushUpdate stubbed → S-QBO-19-UPDATE-FOLLOWUP (matches
- *   S-QBO-11/14/18 stub-then-implement pattern).
+ * Per D-QBO-19-5: pushUpdate IMPLEMENTED in S-QBO-BILL-PAYMENT-UPDATE
+ *   (closes the stub): routes through pushImpl with operation='update' →
+ *   full-payload re-send via QuickBooksClient::updateEntity + SyncToken
+ *   round-trip (mirrors InvoicePusher D-QBO-12-1 + BillPusher
+ *   D-QBO-BILL-UPDATE-1 + PaymentPusher D-QBO-PAYMENT-UPDATE-1), demote-
+ *   to-create when unmapped (D-PUSHER-DEMOTION-RULE). No origin/dedup
+ *   gate dance is needed here because acc_ap_payments has no `origin`
+ *   column (FF-native only per D-QBO-19-1) — the bill-template placement
+ *   at step 5b (after create-idempotency, before status-cleared gate)
+ *   is sufficient.
  *
  * @session  S-QBO-19
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §8.9 (Bill Payment),
@@ -38,7 +46,11 @@ declare(strict_types=1);
  *           D-QBO-19-2 (PayType mapping),
  *           D-QBO-19-3 (BankAccountRef from acc_qbo_account_map),
  *           D-QBO-19-4 (LinkedTxn.TxnType='Bill'),
- *           D-QBO-19-5 (pushUpdate stubbed → S-QBO-19-UPDATE-FOLLOWUP),
+ *           D-QBO-19-5 (pushUpdate stub — CLOSED by S-QBO-BILL-PAYMENT-UPDATE /
+ *               D-QBO-BILL-PAYMENT-UPDATE-1),
+ *           D-PUSHER-DEMOTION-RULE (update→create demotion — ACTIVE since
+ *               S-QBO-BILL-PAYMENT-UPDATE: pushImpl step 5b demotes an
+ *               'update' of an unmapped ap_payment to 'create'),
  *           D-QBO-19-6 (currency-mismatch gate mirrors D-QBO-BILL-GOTCHAS-1
  *               + D-QBO-14-7; SKIPS when multi_currency='0' per
  *               D-QBO-FIXPACK-12),
@@ -91,18 +103,32 @@ class BillPaymentPusher
     }
 
     /**
-     * S-QBO-19 v1 stub per D-QBO-19-5 — pushUpdate will be implemented
-     * in S-QBO-19-UPDATE-FOLLOWUP. Returns success=false with
-     * status='unsupported_in_session'.
+     * Push an UPDATE to an existing QBO BillPayment (S-QBO-BILL-PAYMENT-UPDATE,
+     * closing the D-QBO-19-5 stub). Full-payload re-send via
+     * QuickBooksClient::updateEntity — not a sparse diff (mirrors
+     * InvoicePusher D-QBO-12-1 + BillPusher D-QBO-BILL-UPDATE-1 +
+     * PaymentPusher D-QBO-PAYMENT-UPDATE-1). FF is canonical (D-QBO-CORE-1);
+     * QBO accepts the complete payload + current SyncToken and replaces.
+     *
+     * Demotion (D-PUSHER-DEMOTION-RULE): if the bill payment was never
+     * pushed (no map row / null qbo_bill_payment_id), pushImpl auto-demotes
+     * to 'create' at step 5b and re-POSTs — an update of an unmapped
+     * entity is just a first push.
+     *
+     * No origin/dedup gate is needed here because acc_ap_payments has
+     * no `origin` column (D-QBO-19-1 — bill payments are FF-native only;
+     * there is no QBO-side BillPayment webhook intake).
+     *
+     * @return array  §6.8 5-key return shape; status='pushed' on a
+     *                successful update (acc_qbo_bill_payment_map.push_status
+     *                ENUM has no 'updated' value, so we reuse 'pushed';
+     *                no migration this session), outcome='updated'.
+     *                Demoted-to-create returns outcome='created'. Plus the
+     *                skip / failure status codes inherited from pushImpl.
      */
     public static function pushUpdate(int $entityId, ?array $payloadSnapshot = null): array
     {
-        return [
-            'success' => false,
-            'status'  => 'unsupported_in_session',
-            'outcome' => 'failed',
-            'error'   => 'BillPaymentPusher::pushUpdate is not implemented in S-QBO-19 v1 (D-QBO-19-5). Queue this for S-QBO-19-UPDATE-FOLLOWUP.',
-        ] + self::RESULT_BASE;
+        return self::pushImpl($entityId, 'update', $payloadSnapshot);
     }
 
     /**
@@ -188,6 +214,18 @@ class BillPaymentPusher
             ] + self::RESULT_BASE;
         }
 
+        // 5b. Update demotion (D-PUSHER-DEMOTION-RULE, mirrors InvoicePusher
+        //     D-QBO-12-1 + BillPusher S-QBO-BILL-UPDATE step 5b + PaymentPusher
+        //     S-QBO-PAYMENT-UPDATE step 7b). An 'update' of a bill payment
+        //     that was never pushed (no map row OR null qbo_bill_payment_id)
+        //     is just a first push — demote to 'create' so the HTTP dispatch
+        //     in step 9 calls createEntity. No origin gate exists for
+        //     bill_payment (acc_ap_payments has no `origin` column per
+        //     D-QBO-19-1 — FF-native only), so placement here is straightforward.
+        if ($operation === 'update' && ($mapping === null || empty($mapping['qbo_bill_payment_id']))) {
+            $operation = 'create';
+        }
+
         // 6. Status must be 'cleared' to push. 'pending' payments aren't
         //    confirmed yet; 'void' caught at step 4.
         if ($ff['status'] !== 'cleared') {
@@ -247,10 +285,24 @@ class BillPaymentPusher
             ] + self::RESULT_BASE;
         }
 
-        // 9. HTTP call.
+        // 9. HTTP call. createEntity for a new bill payment, updateEntity for
+        //    an existing one (full-payload re-send per D-QBO-12-1; updateEntity
+        //    merges Id + SyncToken into the payload). SyncToken comes from the
+        //    mapping row (refreshed on every push). Demotion in step 5b
+        //    guarantees $mapping has a qbo_bill_payment_id whenever $operation
+        //    is still 'update' here.
         $client = new QuickBooksClient();
         try {
-            $response = $client->createEntity('billpayment', $qboPayload);
+            if ($operation === 'update') {
+                $response = $client->updateEntity(
+                    'billpayment',
+                    (string) $mapping['qbo_bill_payment_id'],
+                    (string) ($mapping['qbo_sync_token'] ?? '0'),
+                    $qboPayload
+                );
+            } else {
+                $response = $client->createEntity('billpayment', $qboPayload);
+            }
         } catch (QuickBooksException $e) {
             self::recordPushFailure($ffApPaymentId, $e->getMessage());
             return [
@@ -278,7 +330,11 @@ class BillPaymentPusher
         return [
             'success'    => true,
             'status'     => 'pushed',
-            'outcome'    => 'created',
+            // acc_qbo_bill_payment_map.push_status ENUM has no 'updated'
+            // value — the map row stays 'pushed' for both create + update.
+            // The transient outcome field distinguishes them for the worker
+            // tally / smoke assertions.
+            'outcome'    => $operation === 'update' ? 'updated' : 'created',
             'qbo_id'     => (string) $qboBp['Id'],
             'sync_token' => (string) ($qboBp['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;

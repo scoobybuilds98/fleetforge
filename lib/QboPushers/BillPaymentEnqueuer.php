@@ -11,16 +11,22 @@ declare(strict_types=1);
  *   - create: ap_payment must exist AND status='cleared' (not pending or
  *     void). FF ap_payments default to 'cleared' at create-time per
  *     api/v1/accounting/ap-payments/create.php.
- *   - update: stubbed (D-QBO-19-5 mirrors S-QBO-11/14/18); gate-0 still
- *     validates ap_payment exists + status='cleared'.
- *   - void: not in v1.
+ *   - update: SUPPORTED since S-QBO-BILL-PAYMENT-UPDATE (D-QBO-19-5 stub
+ *     CLOSED); gate-3 allowlist accepts 'update'; BillPaymentPusher::pushUpdate
+ *     full-payload re-send via QuickBooksClient::updateEntity. enqueue('update')
+ *     wired into api/v1/accounting/ap-payments/update.php post-commit
+ *     (3 of 4 editable fields directly affect QBO payload: payment_date →
+ *     TxnDate, reference_number + check_number → PrivateNote).
+ *   - void: still NOT in v1 (rides the pushVoid trio in OPERATOR_FOLLOWUPS F7);
+ *     gate-3 allowlist rejects it.
  *
  * No origin filter (D-QBO-14-1-equivalent) because acc_ap_payments has no
  * origin column — bill payments are FF-native only per D-QBO-19-1.
  *
  * @session  S-QBO-19
  * @decision D-QBO-19-1 (FF-origin only),
- *           D-QBO-19-5 (pushUpdate stubbed → S-QBO-19-UPDATE-FOLLOWUP),
+ *           D-QBO-19-5 (pushUpdate stub — CLOSED by S-QBO-BILL-PAYMENT-UPDATE;
+ *               D-QBO-BILL-PAYMENT-UPDATE-1; gate-3 now allows 'update'),
  *           D-ENQUEUER-CONTRACT (best-effort discipline),
  *           D-ENQUEUER-GATE-0-ELIGIBILITY (eligibility gate-0)
  */
@@ -34,14 +40,18 @@ class BillPaymentEnqueuer
      */
     private const OPERATION_STATUS_REQUIREMENTS = [
         'create' => ['cleared'],
-        'update' => ['cleared'],  // pushUpdate stubbed per D-QBO-19-5 but gate-0 still checks status
+        // 'update' now SUPPORTED — D-QBO-19-5 stub closed by S-QBO-BILL-PAYMENT-UPDATE.
+        // Same status requirement as create (pushUpdate is just a full-payload
+        // re-send via QuickBooksClient::updateEntity).
+        'update' => ['cleared'],
     ];
 
     /**
      * Best-effort enqueue. Returns true on success, false on rejection.
      *
      * @param int    $apPaymentId FF acc_ap_payments.id
-     * @param string $operation   'create' (S-QBO-19 v1)
+     * @param string $operation   'create' or 'update' (S-QBO-BILL-PAYMENT-UPDATE
+     *                            widened gate-3); 'void' still deferred (F7)
      * @return bool               true on enqueue success
      */
     public static function enqueue(int $apPaymentId, string $operation): bool
@@ -82,9 +92,11 @@ class BillPaymentEnqueuer
                 return false;
             }
 
-            // Gate 3: operation allowlist (v1 = create only).
-            if (!in_array($operation, ['create'], true)) {
-                error_log("[BillPaymentEnqueuer] gate-3 reject: operation '{$operation}' not in S-QBO-19 v1 allowlist (create only; update + void deferred to S-QBO-19-UPDATE-FOLLOWUP)");
+            // Gate 3: operation allowlist. 'create' + 'update' supported since
+            // S-QBO-BILL-PAYMENT-UPDATE (D-QBO-19-5 closed). 'void' still
+            // deferred to the separate pushVoid trio slice (OPERATOR_FOLLOWUPS F7).
+            if (!in_array($operation, ['create', 'update'], true)) {
+                error_log("[BillPaymentEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist [create,update] (void deferred to pushVoid trio — F7)");
                 return false;
             }
 

@@ -7,6 +7,8 @@ declare(strict_types=1);
  * Smoke test for S-QBO-19 Bill Payment Push (Phase QBO-8 / 2 of 2).
  *
  * Sub-checks (C1-C25):
+ * Sub-checks (C1-C27, extended by S-QBO-BILL-PAYMENT-UPDATE):
+ *
  *  C1: class surfaces (BillPaymentPusher + BillPaymentEnqueuer + RESULT_BASE
  *      + key methods)
  *  C2: acc_qbo_bill_payment_map schema (19 cols + 2 UNIQUE + 2 indexes + FK)
@@ -34,19 +36,30 @@ declare(strict_types=1);
  *      eligibility — only 'cleared' pushes)
  * C15: pushImpl already_mapped → outcome='created' idempotency
  * C16: pushImpl missing FF ap_payment → ff_not_found
- * C17: pushUpdate stub → unsupported_in_session pointing to
+ * C17: REPURPOSED (S-QBO-BILL-PAYMENT-UPDATE) — pushUpdate delegates to
+ *      pushImpl (no longer a stub); sync_mode='disabled' proves delegation
+ *      via skipped_by_mode return. Below entry kept for historical context.
+ * C17 (historical): pushUpdate stub → unsupported_in_session pointing to
  *      S-QBO-19-UPDATE-FOLLOWUP (D-QBO-19-5)
  * C18: gate 7 typed status — failed_preflight_field_too_long
  *      (reference_number > 21 chars per D-QBO-19-7)
  * C19: gate 8 SKIPS when multi_currency_enabled='0' (D-QBO-FIXPACK-12)
  * C20: BillPaymentEnqueuer gate-0 rejects missing ap_payment
  * C21: BillPaymentEnqueuer gate-0 rejects status='pending' (D-QBO-19-1)
- * C22: BillPaymentEnqueuer gate-3 rejects 'update' op (v1 allowlist;
+ * C22: REPURPOSED (S-QBO-BILL-PAYMENT-UPDATE) — BillPaymentEnqueuer gate-3
+ *      now ACCEPTS 'update' op + inserts queue row (D-QBO-19-5 stub closed).
+ * C22 (historical): BillPaymentEnqueuer gate-3 rejects 'update' op (v1 allowlist;
  *      D-QBO-19-5)
  * C23: BillPaymentEnqueuer happy path queue insert (entity_type=
  *      'bill_payment', op='create', status='queued')
  * C24: PrivateNote includes ff_payment_number + reference_number +
  *      check_number when set
+ * C26: NEW (S-QBO-BILL-PAYMENT-UPDATE) — pushUpdate on an UNMAPPED ap_payment
+ *      demotes to create → runs create pipeline → fails at a preflight gate
+ *      BEFORE the HTTP boundary; no qbo_bill_payment_id persisted. Proves
+ *      D-PUSHER-DEMOTION-RULE active for bill_payment.
+ * C27: NEW (S-QBO-BILL-PAYMENT-UPDATE) — BillPaymentEnqueuer still REJECTS
+ *      'void' (allowlist = create+update only; pushVoid is the separate F7 slice).
  * C25: D-QBO-19-3 BankAccountRef sourced from acc_qbo_account_map via
  *      ap_payment.bank_account_id (verified via payload assertion)
  *
@@ -63,7 +76,7 @@ use FleetForge\QboPushers\BillPaymentEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 25;
+$total = 27;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -492,12 +505,28 @@ try {
     if (empty($c16Errors)) { echo "PASS C16 missing FF ap_payment → ff_not_found\n"; $pass++; }
     else { echo "FAIL C16 " . implode('; ', $c16Errors) . "\n"; $failures[] = 'C16'; }
 
-    // ── C17: pushUpdate stub ───────────────────────────────────────────
+    // ── C17: pushUpdate delegates to pushImpl (S-QBO-BILL-PAYMENT-UPDATE) ─
+    // The old stub returned 'unsupported_in_session' regardless of state.
+    // pushUpdate now routes through pushImpl; with sync_mode='disabled' it
+    // returns skipped_by_mode at step 1 — proving delegation (definitively
+    // NOT the stub). The prior sync_mode is restored after the assertion.
     $c17Errors = [];
+    $prevModeC17 = ff_smoke_bp_get_setting('quickbooks.sync_mode.bill_payment');
+    ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'disabled');
     $r17 = BillPaymentPusher::pushUpdate(999990);
-    if (($r17['status'] ?? null) !== 'unsupported_in_session') $c17Errors[] = "status: " . json_encode($r17['status'] ?? null);
-    if (strpos((string) ($r17['error'] ?? ''), 'S-QBO-19-UPDATE-FOLLOWUP') === false) $c17Errors[] = "error should mention S-QBO-19-UPDATE-FOLLOWUP";
-    if (empty($c17Errors)) { echo "PASS C17 pushUpdate stub → unsupported_in_session pointing to S-QBO-19-UPDATE-FOLLOWUP (D-QBO-19-5)\n"; $pass++; }
+    if (($r17['status'] ?? null) === 'unsupported_in_session') {
+        $c17Errors[] = "pushUpdate still a stub — returned unsupported_in_session";
+    }
+    if (($r17['status'] ?? null) !== 'skipped_by_mode') {
+        $c17Errors[] = "expected skipped_by_mode (delegation proof), got " . json_encode($r17['status'] ?? null);
+    }
+    if (($r17['outcome'] ?? null) !== 'skipped') {
+        $c17Errors[] = "outcome: " . json_encode($r17['outcome'] ?? null);
+    }
+    ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', $prevModeC17 ?? 'queue');
+    db_execute("DELETE FROM acc_qbo_bill_payment_map WHERE ff_ap_payment_id = 999990");
+    db_execute("DELETE FROM acc_qbo_sync_log WHERE entity_type='bill_payment' AND entity_id=999990");
+    if (empty($c17Errors)) { echo "PASS C17 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-BILL-PAYMENT-UPDATE; D-QBO-19-5 closed)\n"; $pass++; }
     else { echo "FAIL C17 " . implode('; ', $c17Errors) . "\n"; $failures[] = 'C17'; }
 
     // ── C18: gate 7 typed failed_preflight_field_too_long ──────────────
@@ -548,11 +577,27 @@ try {
     if (empty($c21Errors)) { echo "PASS C21 Enqueuer gate-0 rejects status='pending' (D-QBO-19-1)\n"; $pass++; }
     else { echo "FAIL C21 " . implode('; ', $c21Errors) . "\n"; $failures[] = 'C21'; }
 
-    // ── C22: Enqueuer gate-3 rejects 'update' op ──────────────────────
+    // ── C22: Enqueuer gate-3 ACCEPTS 'update' op (S-QBO-BILL-PAYMENT-UPDATE) ─
+    // gate-3 allowlist widened ['create'] → ['create','update'] in
+    // S-QBO-BILL-PAYMENT-UPDATE (D-QBO-19-5 stub closed). 999990 is cleared +
+    // sync_enabled=1 + sync_mode.bill_payment=queue → enqueue('update') now
+    // succeeds + writes a queue row with operation='update'.
     $c22Errors = [];
+    ff_smoke_bp_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'queue');
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990");
     $r22 = BillPaymentEnqueuer::enqueue(999990, 'update');
-    if ($r22 !== false) $c22Errors[] = "enqueue should reject 'update' op in v1";
-    if (empty($c22Errors)) { echo "PASS C22 Enqueuer gate-3 rejects 'update' op (S-QBO-19 v1 allowlist; D-QBO-19-5)\n"; $pass++; }
+    $queued22 = db_row("SELECT operation, status FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990 AND operation='update'");
+    if ($r22 !== true) {
+        $c22Errors[] = "enqueue should accept 'update' now; got " . json_encode($r22);
+    }
+    if ($queued22 === null) {
+        $c22Errors[] = "an 'update' queue row should be written; none found";
+    } elseif ($queued22['operation'] !== 'update' || $queued22['status'] !== 'queued') {
+        $c22Errors[] = "queue row shape: " . json_encode($queued22);
+    }
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990");
+    if (empty($c22Errors)) { echo "PASS C22 Enqueuer gate-3 accepts 'update' op + inserts queue row (S-QBO-BILL-PAYMENT-UPDATE; D-QBO-19-5 closed)\n"; $pass++; }
     else { echo "FAIL C22 " . implode('; ', $c22Errors) . "\n"; $failures[] = 'C22'; }
 
     // ── C23: Enqueuer happy path ───────────────────────────────────────
@@ -592,6 +637,57 @@ try {
     }
     if (empty($c25Errors)) { echo "PASS C25 BankAccountRef sourced from acc_qbo_account_map via ap_payment.bank_account_id (D-QBO-19-3)\n"; $pass++; }
     else { echo "FAIL C25 " . implode('; ', $c25Errors) . "\n"; $failures[] = 'C25'; }
+
+    // ── C26: pushUpdate on UNMAPPED ap_payment demotes to create (S-QBO-BILL-PAYMENT-UPDATE) ─
+    // No map row → pushImpl step 5b flips operation to 'create' → runs the
+    // create pipeline. With the vendor mapping removed, preflight gate 1
+    // (vendor mapping) fails → failed_preflight (returns BEFORE the HTTP
+    // boundary, so no real updateEntity/createEntity is attempted). Proves
+    // the demotion ran the create path rather than attempting an UPDATE on
+    // an entity QBO doesn't know about (which would 404). Vendor mapping is
+    // restored afterward so later checks are unaffected.
+    $c26Errors = [];
+    ff_smoke_bp_seed_ap_payment(999992, $fx);
+    db_execute("DELETE FROM acc_qbo_bill_payment_map WHERE ff_ap_payment_id = 999992");
+    db_execute("DELETE FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?", [$fx['vendor_id']]);
+    ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'queue');
+    $r26 = BillPaymentPusher::pushUpdate(999992);
+    $map26 = db_row("SELECT qbo_bill_payment_id, push_status FROM acc_qbo_bill_payment_map WHERE ff_ap_payment_id = 999992");
+    if (($r26['status'] ?? null) === 'unsupported_in_session') {
+        $c26Errors[] = "pushUpdate still a stub";
+    }
+    if (($r26['status'] ?? null) !== 'failed_preflight') {
+        $c26Errors[] = "expected failed_preflight (demoted-create at vendor gate), got " . json_encode($r26['status'] ?? null);
+    }
+    if (!empty($map26['qbo_bill_payment_id'])) {
+        $c26Errors[] = "no qbo_bill_payment_id should be persisted on a failed demoted-create; got " . json_encode($map26['qbo_bill_payment_id']);
+    }
+    // Restore vendor mapping for any downstream assertions.
+    db_execute(
+        "INSERT INTO acc_qbo_vendor_map (ff_vendor_id, qbo_vendor_id, mapping_status, qbo_display_name)
+         VALUES (?, 'V-9999', 'mapped', 'Smoke BP Vendor')",
+        [$fx['vendor_id']]
+    );
+    if (empty($c26Errors)) { echo "PASS C26 pushUpdate on unmapped ap_payment demotes to create (failed_preflight at vendor gate; no qbo_id; D-PUSHER-DEMOTION-RULE)\n"; $pass++; }
+    else { echo "FAIL C26 " . implode('; ', $c26Errors) . "\n"; $failures[] = 'C26'; }
+
+    // ── C27: Enqueuer still REJECTS 'void' (S-QBO-BILL-PAYMENT-UPDATE) ──
+    // gate-3 allowlist is now ['create','update'] — 'void' remains
+    // unsupported (separate F7 pushVoid trio slice). Mirrors PaymentEnqueuer
+    // C22 + BillEnqueuer C25.
+    $c27Errors = [];
+    ff_smoke_bp_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'queue');
+    $r27 = BillPaymentEnqueuer::enqueue(999990, 'void');
+    $queued27 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990 AND operation='void'");
+    if ($r27 !== false) {
+        $c27Errors[] = "expected false (void not in allowlist), got " . json_encode($r27);
+    }
+    if ($queued27 !== null) {
+        $c27Errors[] = "no 'void' queue row should be inserted; found id=" . $queued27['id'];
+    }
+    if (empty($c27Errors)) { echo "PASS C27 Enqueuer rejects 'void' op (gate-3 allowlist = create+update only; pushVoid → F7)\n"; $pass++; }
+    else { echo "FAIL C27 " . implode('; ', $c27Errors) . "\n"; $failures[] = 'C27'; }
 } finally {
     ff_smoke_bp_cleanup();
     foreach ($snapshotKeys as $k) {

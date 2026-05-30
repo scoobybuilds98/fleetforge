@@ -111,4 +111,19 @@ db_transaction(function () use ($id, $updates, $payment) {
     ]);
 });
 
+// ── QBO sync enqueue (S-QBO-BILL-PAYMENT-UPDATE / D-QBO-BILL-PAYMENT-UPDATE-1) ──
+// Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws; silent reject
+// when sync_enabled=0 or status != 'cleared'. Mirrors bills/update.php
+// (S-QBO-BILL-UPDATE) hook pattern: AFTER db_transaction commits, BEFORE
+// json_success — failure here must not break the FF AP payment edit flow.
+//
+// 3 of 4 editable fields directly affect the QBO BillPayment payload:
+// payment_date → TxnDate; reference_number + check_number → PrivateNote.
+// Only `notes` is FF-only. So unlike payments/update.php (D2 decided NO
+// hook because only 1 of 5 fields was QBO-pushable), this endpoint DOES
+// wire the hook — the diff typically carries real QBO-relevant changes.
+// BillPaymentEnqueuer's gate-3 widened ['create']→['create','update'] in
+// S-QBO-BILL-PAYMENT-UPDATE so this enqueue('update') goes through.
+\FleetForge\QboPushers\BillPaymentEnqueuer::enqueue($id, 'update');
+
 json_success(['id' => $id]);
