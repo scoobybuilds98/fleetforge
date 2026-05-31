@@ -339,17 +339,12 @@ try {
     if (empty($c21)) { echo "PASS C21 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-CREDIT-MEMO-UPDATE; D-QBO-16-2 update stub closed)\n"; $pass++; }
     else { echo "FAIL C21 " . implode('; ', $c21) . "\n"; $failures[] = 'C21'; }
 
-    // C22 (REPURPOSED): pushVoid now IMPLEMENTED (S-QBO-PUSHVOID-TRIO).
-    // 999990 was reseeded active in C21 — a non-'void' credit note must be
-    // rejected at the inverted status invariant BEFORE any HTTP call.
+    // C22 — pushVoid STILL a stub (rides the F7 pushVoid trio; NOT this slice).
     $c22 = [];
-    ff_smoke_cm_seed_cn(999990, ['source' => 'other', 'status' => 'active']);
     $r = CreditMemoPusher::pushVoid(999990);
-    if (($r['status'] ?? null) === 'unsupported_in_session') { $c22[] = "pushVoid still a stub"; }
-    if (($r['status'] ?? null) !== 'void_status_mismatch') { $c22[] = "status: " . json_encode($r['status'] ?? null) . ", want 'void_status_mismatch'"; }
-    db_execute("DELETE FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id=999990");
-    db_execute("DELETE FROM credit_notes WHERE id=999990");
-    if (empty($c22)) { echo "PASS C22 pushVoid on non-void credit note → void_status_mismatch (S-QBO-PUSHVOID-TRIO; D-QBO-PUSHVOID-TRIO-1)\n"; $pass++; }
+    if (($r['status'] ?? null) !== 'unsupported_in_session') { $c22[] = "status: " . json_encode($r['status'] ?? null); }
+    if (strpos((string) ($r['error'] ?? ''), 'F7') === false) { $c22[] = "error should mention F7 pushVoid trio; got " . json_encode($r['error'] ?? null); }
+    if (empty($c22)) { echo "PASS C22 pushVoid STILL stub → unsupported_in_session (D-QBO-16-2; rides F7 trio, not this slice)\n"; $pass++; }
     else { echo "FAIL C22 " . implode('; ', $c22) . "\n"; $failures[] = 'C22'; }
 
     // ══ Module G — Enqueuer gates ═════════════════════════════════════
@@ -414,7 +409,7 @@ try {
     $q28 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990 AND operation='void'");
     if ($r28 !== false) { $c28[] = "enqueue should reject 'void'; got " . json_encode($r28); }
     if ($q28 !== null) { $c28[] = "no 'void' queue row should be inserted; found id=" . $q28['id']; }
-    if (empty($c28)) { echo "PASS C28 Enqueuer gate-3 accepts 'void' op + inserts queue row (S-QBO-PUSHVOID-TRIO; gate-3 +void)\n"; $pass++; }
+    if (empty($c28)) { echo "PASS C28 Enqueuer gate-3 rejects 'void' op (allowlist = create+update only; pushVoid → F7)\n"; $pass++; }
     else { echo "FAIL C28 " . implode('; ', $c28) . "\n"; $failures[] = 'C28'; }
 
 } finally {

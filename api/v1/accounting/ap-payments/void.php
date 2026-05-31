@@ -106,4 +106,13 @@ $result = db_transaction(function () use ($id, $voidReason) {
     return ['id' => $id, 'payment_number' => $payment['payment_number'], 'status' => 'void'];
 });
 
+// ── QBO sync enqueue (S-QBO-PUSHVOID-TRIO / F7) ─────────────────────────
+// Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws. AFTER the
+// db_transaction commits (status now 'void'), BEFORE json_success. The
+// Enqueuer's gate-0 requires status='void' for the 'void' op; sync_enabled
+// + sync_mode gates still apply. Mirrors the create/update hook pattern.
+if (!empty($id)) {
+    \FleetForge\QboPushers\BillPaymentEnqueuer::enqueue((int) $id, 'void');
+}
+
 json_success($result);
