@@ -129,13 +129,14 @@
 
 ---
 
-### F7 — pushVoid absent in PaymentPusher + BillPaymentPusher v1
+### F7 — pushVoid absent in PaymentPusher + BillPaymentPusher v1 ✅ CLOSED 2026-06-01
 
 **Surfaced by:** S-QBO-14 + S-QBO-19 (2026-05-28/29)
-**Affects:** void semantics for FF-native payments + bill payments
-**Operator action:** queue a session pair `S-QBO-14-VOID-FOLLOWUP` + `S-QBO-19-VOID-FOLLOWUP` (or combined `S-QBO-AR-AP-PAYMENT-VOID-FOLLOWUP`).
+**Affects:** void semantics for FF-native payments + bill payments + credit memos
 
-**Why deferred:** v1 handles voided payments at the skipped_unmapped_void level (don't push voids that never made it to QBO) but POST-push voids need QBO-side void API calls. Mirrors S-QBO-12 which added pushVoid for invoices after S-QBO-11.
+**Closed by:** S-QBO-PUSHVOID-TRIO (2026-06-01) — D-QBO-PUSHVOID-TRIO-1 locked. `pushVoid` implemented for PaymentPusher + BillPaymentPusher + CreditMemoPusher, each modeled on InvoicePusher::pushVoidImpl (D-QBO-12-3/4/5): separate pipeline; idempotent on push_status='voided' → already_voided; no mapping → skipped_unmapped_void; HTTP via the uniform QuickBooksClient::voidEntity(type,id,syncToken). **Per-entity void trigger:** bill_payment + credit_note key on status='void' (ap-payments/void.php + credit_notes/void.php); **payment keys on deleted_at IS NOT NULL** (no status='void' on payments — the soft-delete path payments/delete.php is the void; refunded/partially_refunded → a future RefundReceipt entity, out of scope). PaymentPusher::pushVoid also carries the D-QBO-14-1 origin guard. All 3 Enqueuers: gate-3 allowlist widened += 'void' + per-entity gate-0 void eligibility; enqueue('void') hooks wired post-commit into the 3 FF void endpoints. NO migration ('voided'/'skipped_voided' already in all 3 map ENUMs). Smokes: payment 23→26, bill_payment 27→30, credit_memo 28→30. **Every entity Pusher now supports create + update + void.** Commits a4fe6bf + 3060d0e (impl) + 48eb468 (enqueuer-gate repair + green smokes). See FLEETFORGE_PROGRESS.md SESSION LOG.
+
+**Why deferred originally:** v1 handled voided payments only at the skipped_unmapped_void level (don't push voids that never made it to QBO); POST-push voids needed QBO-side void API calls. The uniform QuickBooksClient::voidEntity + the InvoicePusher::pushVoidImpl template made it a clean mirror; the only per-entity judgment was the void *trigger* (payment soft-delete vs status='void'), resolved via AskUserQuestion.
 
 ---
 
