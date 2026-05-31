@@ -339,12 +339,14 @@ try {
     if (empty($c21)) { echo "PASS C21 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-CREDIT-MEMO-UPDATE; D-QBO-16-2 update stub closed)\n"; $pass++; }
     else { echo "FAIL C21 " . implode('; ', $c21) . "\n"; $failures[] = 'C21'; }
 
-    // C22 — pushVoid STILL a stub (rides the F7 pushVoid trio; NOT this slice).
+    // C22 (REPURPOSED): pushVoid now IMPLEMENTED (S-QBO-PUSHVOID-TRIO).
+    // 999990 is active here — a non-'void' credit note is rejected at the
+    // inverted status invariant BEFORE any HTTP call.
     $c22 = [];
     $r = CreditMemoPusher::pushVoid(999990);
-    if (($r['status'] ?? null) !== 'unsupported_in_session') { $c22[] = "status: " . json_encode($r['status'] ?? null); }
-    if (strpos((string) ($r['error'] ?? ''), 'F7') === false) { $c22[] = "error should mention F7 pushVoid trio; got " . json_encode($r['error'] ?? null); }
-    if (empty($c22)) { echo "PASS C22 pushVoid STILL stub → unsupported_in_session (D-QBO-16-2; rides F7 trio, not this slice)\n"; $pass++; }
+    if (($r['status'] ?? null) === 'unsupported_in_session') { $c22[] = "pushVoid still a stub"; }
+    if (($r['status'] ?? null) !== 'void_status_mismatch') { $c22[] = "status: " . json_encode($r['status'] ?? null) . ", want 'void_status_mismatch'"; }
+    if (empty($c22)) { echo "PASS C22 pushVoid on non-void credit note -> void_status_mismatch (S-QBO-PUSHVOID-TRIO; D-QBO-PUSHVOID-TRIO-1)\n"; $pass++; }
     else { echo "FAIL C22 " . implode('; ', $c22) . "\n"; $failures[] = 'C22'; }
 
     // ══ Module G — Enqueuer gates ═════════════════════════════════════
