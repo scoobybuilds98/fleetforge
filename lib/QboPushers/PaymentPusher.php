@@ -143,6 +143,179 @@ class PaymentPusher
     }
 
     /**
+     * Push a VOID to an existing QBO payment (S-QBO-PUSHVOID-TRIO, closing
+     * the F7 pushVoid follow-up for payments). Separate pipeline from
+     * pushImpl — mirrors InvoicePusher::pushVoidImpl (D-QBO-12-3/4/5):
+     *
+     *   - Void trigger (D-QBO-PUSHVOID-TRIO-1): payments are soft-deleted
+     *     (NOT status='void' — payments.status ENUM has no 'void' value).
+     *     The canonical reversal path is api/v1/payments/delete.php which
+     *     sets deleted_at + reverses the JE/counters. So pushVoid keys on
+     *     deleted_at IS NOT NULL. (refunded / partially_refunded map to a
+     *     QBO RefundReceipt — a different entity, deferred — and bounced is
+     *     a separate reversal; neither triggers a Payment void here.)
+     *   - Idempotent on push_status='voided' (already_voided no-op).
+     *   - No mapping / null qbo_payment_id → skipped_unmapped_void (FF
+     *     payment soft-deleted before it was ever pushed — nothing in QBO).
+     *   - origin guard: a webhook-originated / pulled_from_qbo map row is
+     *     never voided by the push side (D-QBO-14-1 — that QBO Payment is
+     *     QBO-canonical; FF must not void it via our push pipeline).
+     *   - voidEntity('payment') HTTP call.
+     *
+     * @return array §6.8 5-key shape; status='voided' on success,
+     *               'already_voided' on idempotent replay,
+     *               'skipped_unmapped_void' for never-pushed payments.
+     */
+    public static function pushVoid(int $entityId, ?array $payloadSnapshot = null): array
+    {
+        return self::pushVoidImpl($entityId);
+    }
+
+    /**
+     * Separate void pipeline (mirrors InvoicePusher::pushVoidImpl). Keeps
+     * pushImpl untouched — the void invariant (deleted_at IS NOT NULL)
+     * inverts pushImpl's soft-delete skip, so a shared pipeline would fight
+     * itself.
+     */
+    private static function pushVoidImpl(int $ffPaymentId): array
+    {
+        // 1. Sync mode gate.
+        $mode = (string) settings_get('quickbooks.sync_mode.payment', 'queue');
+        if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+            $ffForSkip = db_row("SELECT id, status, origin FROM payments WHERE id = ?", [$ffPaymentId])
+                ?? ['id' => $ffPaymentId, 'status' => null, 'origin' => null];
+            self::recordSkipped($ffPaymentId, $ffForSkip, 'skipped_by_mode', 'void');
+            return [
+                'success' => true,
+                'status'  => 'skipped_by_mode',
+                'outcome' => 'skipped',
+                'mode'    => $mode,
+            ] + self::RESULT_BASE;
+        }
+
+        // 2. Load FF payment (include deleted rows — the void trigger IS the
+        //    soft-delete, so a normal "WHERE deleted_at IS NULL" would hide it).
+        $ff = db_row(
+            "SELECT id, payment_number, status, origin, deleted_at FROM payments WHERE id = ?",
+            [$ffPaymentId]
+        );
+        if ($ff === null) {
+            return [
+                'success' => false,
+                'status'  => 'ff_not_found',
+                'outcome' => 'failed',
+                'error'   => "FF payment {$ffPaymentId} not found",
+            ] + self::RESULT_BASE;
+        }
+
+        // 3. INVERTED invariant (D-QBO-PUSHVOID-TRIO-1): payment must be
+        //    soft-deleted. The canonical void trigger is payments/delete.php
+        //    post-commit, where deleted_at is guaranteed set. This catches
+        //    mis-dispatch (manual CLI / stale queue row for a live payment).
+        if ($ff['deleted_at'] === null) {
+            return [
+                'success' => false,
+                'status'  => 'void_status_mismatch',
+                'outcome' => 'failed',
+                'error'   => "Cannot push void for FF payment {$ffPaymentId}: deleted_at IS NULL (payment not voided/soft-deleted)",
+            ] + self::RESULT_BASE;
+        }
+
+        // 4. Mapping lookup. Void requires an existing QBO entity.
+        $mapping = db_row(
+            "SELECT id, qbo_payment_id, qbo_sync_token, push_status
+               FROM acc_qbo_payment_map
+              WHERE ff_payment_id = ?",
+            [$ffPaymentId]
+        );
+
+        // 4a. No mapping → FF payment soft-deleted before ever pushing.
+        //     Nothing in QBO to void (D-QBO-12-5 pattern). No row written.
+        if ($mapping === null || empty($mapping['qbo_payment_id'])) {
+            return [
+                'success' => true,
+                'status'  => 'skipped_unmapped_void',
+                'outcome' => 'skipped',
+            ] + self::RESULT_BASE;
+        }
+
+        // 4b. Origin guard (D-QBO-14-1): a webhook-originated payment carries
+        //     push_status='pulled_from_qbo' — that QBO Payment is QBO-canonical
+        //     and must NOT be voided via our push side. Skip without touching
+        //     the terminal map row.
+        if ($mapping['push_status'] === 'pulled_from_qbo') {
+            self::writeNonHttpSyncLog(
+                $ffPaymentId,
+                'void',
+                'skipped_non_ff_origin',
+                "payment {$ff['payment_number']} map row has push_status='pulled_from_qbo'; webhook-originated payments are not voided via push (D-QBO-14-1)"
+            );
+            return [
+                'success' => true,
+                'status'  => 'skipped_non_ff_origin',
+                'outcome' => 'skipped',
+                'qbo_id'  => (string) $mapping['qbo_payment_id'],
+            ] + self::RESULT_BASE;
+        }
+
+        // 4c. Already voided → idempotent no-op (D-QBO-12-4).
+        if ($mapping['push_status'] === 'voided') {
+            return [
+                'success'    => true,
+                'status'     => 'already_voided',
+                'outcome'    => 'voided',
+                'qbo_id'     => (string) $mapping['qbo_payment_id'],
+                'sync_token' => (string) ($mapping['qbo_sync_token'] ?? '0'),
+            ] + self::RESULT_BASE;
+        }
+
+        // 5. HTTP void via QuickBooksClient::voidEntity.
+        $client = new QuickBooksClient();
+        try {
+            $response = $client->voidEntity(
+                'payment',
+                (string) $mapping['qbo_payment_id'],
+                (string) ($mapping['qbo_sync_token'] ?? '0')
+            );
+        } catch (QuickBooksException $e) {
+            self::recordPushFailure($ffPaymentId, 'Void failed: ' . $e->getMessage());
+            return [
+                'success' => false,
+                'status'  => 'qbo_error',
+                'outcome' => 'failed',
+                'error'   => 'Void failed: ' . $e->getMessage(),
+            ] + self::RESULT_BASE;
+        }
+
+        $qboPayment = $response['Payment'] ?? null;
+        if (!is_array($qboPayment) || empty($qboPayment['Id'])) {
+            self::recordPushFailure($ffPaymentId, 'QBO void response missing Payment.Id');
+            return [
+                'success' => false,
+                'status'  => 'qbo_malformed_response',
+                'outcome' => 'failed',
+                'error'   => 'QBO void response missing Payment.Id',
+            ] + self::RESULT_BASE;
+        }
+
+        // 6. Persist voided state on the existing map row.
+        self::upsertMappingRow($ffPaymentId, [
+            'qbo_sync_token' => (string) ($qboPayment['SyncToken'] ?? '0'),
+            'push_status'    => 'voided',
+            'push_error'     => null,
+            'last_synced_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return [
+            'success'    => true,
+            'status'     => 'voided',
+            'outcome'    => 'voided',
+            'qbo_id'     => (string) $qboPayment['Id'],
+            'sync_token' => (string) ($qboPayment['SyncToken'] ?? '0'),
+        ] + self::RESULT_BASE;
+    }
+
+    /**
      * Shared orchestration. Both public methods delegate here to keep
      * the per-operation methods tiny and match the dispatcher's
      * OPERATION_METHODS contract.

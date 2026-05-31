@@ -44,14 +44,18 @@ class BillPaymentEnqueuer
         // Same status requirement as create (pushUpdate is just a full-payload
         // re-send via QuickBooksClient::updateEntity).
         'update' => ['cleared'],
+        // 'void' SUPPORTED since S-QBO-PUSHVOID-TRIO — requires status='void'
+        // (the INVERTED invariant; canonical trigger ap-payments/void.php).
+        // D-QBO-PUSHVOID-TRIO-1.
+        'void'   => ['void'],
     ];
 
     /**
      * Best-effort enqueue. Returns true on success, false on rejection.
      *
      * @param int    $apPaymentId FF acc_ap_payments.id
-     * @param string $operation   'create' or 'update' (S-QBO-BILL-PAYMENT-UPDATE
-     *                            widened gate-3); 'void' still deferred (F7)
+     * @param string $operation   'create' / 'update' / 'void' (S-QBO-PUSHVOID-TRIO
+     *                            added 'void' — requires status='void')
      * @return bool               true on enqueue success
      */
     public static function enqueue(int $apPaymentId, string $operation): bool

@@ -76,7 +76,7 @@ use FleetForge\QboPushers\BillPaymentEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 27;
+$total = 30;
 $failures = [];
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -76,6 +76,12 @@ class CreditMemoEnqueuer
                 error_log("[CreditMemoEnqueuer] gate-0 reject: credit note id {$ffCreditNoteId} op=create requires status='active', got '{$cn['status']}'");
                 return false;
             }
+            // 'void' requires the INVERTED status invariant: status='void'
+            // (canonical trigger credit_notes/void.php). D-QBO-PUSHVOID-TRIO-1.
+            if ($operation === 'void' && $cn['status'] !== 'void') {
+                error_log("[CreditMemoEnqueuer] gate-0 reject: credit note id {$ffCreditNoteId} op=void requires status='void', got '{$cn['status']}'");
+                return false;
+            }
 
             // Gate 1: master kill switch (D-CPA-5).
             if ((string) settings_get('quickbooks.sync_enabled', '0') !== '1') {
@@ -88,10 +94,10 @@ class CreditMemoEnqueuer
                 return false;
             }
 
-            // Gate 3: operation whitelist. 'create' + 'update' supported since
-            // S-QBO-CREDIT-MEMO-UPDATE (D-QBO-16-2 pushUpdate stub closed).
-            // 'void' still deferred to the pushVoid trio (OPERATOR_FOLLOWUPS F7).
-            if (!in_array($operation, ['create', 'update'], true)) {
+            // Gate 3: operation whitelist. 'create' + 'update' + 'void' all
+            // supported — pushUpdate closed by S-QBO-CREDIT-MEMO-UPDATE,
+            // pushVoid closed by S-QBO-PUSHVOID-TRIO (D-QBO-PUSHVOID-TRIO-1).
+            if (!in_array($operation, ['create', 'update', 'void'], true)) {
                 return false;
             }
 

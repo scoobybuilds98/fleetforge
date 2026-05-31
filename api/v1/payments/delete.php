@@ -226,6 +226,17 @@ db_transaction(function () use ($id, $payment, $allocations, $reason, &$reverted
     }
 });
 
+// ── QBO sync enqueue (S-QBO-PUSHVOID-TRIO / F7) ─────────────────────────
+// Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws. AFTER the
+// db_transaction commits (payment now soft-deleted: deleted_at set), BEFORE
+// json_success. Payments have no status='void' — the soft-delete IS the void
+// signal (D-QBO-PUSHVOID-TRIO-1); the Enqueuer's gate-0 for op='void'
+// requires deleted_at IS NOT NULL. Propagates the void to the mapped QBO
+// Payment (PaymentPusher::pushVoid). origin/sync gates still apply.
+if (!empty($id)) {
+    \FleetForge\QboPushers\PaymentEnqueuer::enqueue((int) $id, 'void');
+}
+
 json_success([
     'id'                       => $id,
     'deleted'                  => true,

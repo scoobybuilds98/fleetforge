@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-05-31 via S-QBO-JE-UPDATE (closed F13 JournalEntryPusher::pushUpdate; flipped F-PAYDOWN-PROGRESS to ✅ COMPLETE — 5/5 update slices shipped; remaining QBO update-debt = pushVoid trio F7 + carved-out apply→LinkedTxn F25).
+**Last updated:** 2026-06-01 via S-QBO-PUSHVOID-TRIO (closed F7 — pushVoid for Payment/BillPayment/CreditMemo; every entity Pusher now does create+update+void; remaining QBO update-debt = ONLY the carved-out credit-memo apply→LinkedTxn F25, which needs a migration).
 
 ---
 

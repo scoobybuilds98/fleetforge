@@ -73,8 +73,8 @@ class PaymentEnqueuer
      * enqueue rejects).
      *
      * @param int    $paymentId FF payments.id
-     * @param string $operation 'create' or 'update' (S-QBO-PAYMENT-UPDATE
-     *                          widened gate-3); 'void' still deferred (F7)
+     * @param string $operation 'create' / 'update' / 'void' (S-QBO-PUSHVOID-TRIO
+     *                          added 'void' — gate-3 allowlist now all three)
      * @return bool             true on enqueue success
      */
     public static function enqueue(int $paymentId, string $operation): bool
@@ -90,7 +90,7 @@ class PaymentEnqueuer
             // and create duplicate QBO Payments.
             // ────────────────────────────────────────────────────────
             $ff = db_row(
-                "SELECT id, status, origin FROM payments WHERE id = ?",
+                "SELECT id, status, origin, deleted_at FROM payments WHERE id = ?",
                 [$paymentId]
             );
             if ($ff === null) {
@@ -143,8 +143,8 @@ class PaymentEnqueuer
             // since S-QBO-PAYMENT-UPDATE (D-QBO-14-5 closed). 'void' still
             // deferred to the separate pushVoid trio slice (OPERATOR_FOLLOWUPS F7).
             // ────────────────────────────────────────────────────────
-            if (!in_array($operation, ['create', 'update'], true)) {
-                error_log("[PaymentEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist [create,update] (void deferred to pushVoid trio — F7)");
+            if (!in_array($operation, ['create', 'update', 'void'], true)) {
+                error_log("[PaymentEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist [create,update,void]");
                 return false;
             }
 

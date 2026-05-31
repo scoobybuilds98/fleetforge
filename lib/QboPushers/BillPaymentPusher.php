@@ -132,6 +132,149 @@ class BillPaymentPusher
     }
 
     /**
+     * Push a VOID to an existing QBO bill payment (S-QBO-PUSHVOID-TRIO,
+     * closing the F7 pushVoid follow-up for bill payments). Separate
+     * pipeline mirroring InvoicePusher::pushVoidImpl (D-QBO-12-3/4/5):
+     *
+     *   - Void trigger (D-QBO-PUSHVOID-TRIO-1): acc_ap_payments.status='void'
+     *     (the canonical reversal path is api/v1/accounting/ap-payments/
+     *     void.php). Inverts pushImpl's status='void' → skipped_voided skip.
+     *   - Idempotent on push_status='voided' (already_voided no-op).
+     *   - No mapping / null qbo_bill_payment_id → skipped_unmapped_void.
+     *   - No origin gate (acc_ap_payments has no origin column — FF-native
+     *     only per D-QBO-19-1).
+     *   - voidEntity('billpayment') HTTP call.
+     *
+     * @return array §6.8 5-key shape; status='voided' on success,
+     *               'already_voided' on replay, 'skipped_unmapped_void'
+     *               for never-pushed bill payments.
+     */
+    public static function pushVoid(int $entityId, ?array $payloadSnapshot = null): array
+    {
+        return self::pushVoidImpl($entityId);
+    }
+
+    /**
+     * Separate void pipeline (mirrors InvoicePusher::pushVoidImpl). The void
+     * invariant (status='void') inverts pushImpl's skipped_voided skip, so a
+     * shared pipeline would fight itself.
+     */
+    private static function pushVoidImpl(int $ffApPaymentId): array
+    {
+        // 1. Sync mode gate.
+        $mode = (string) settings_get('quickbooks.sync_mode.bill_payment', 'queue');
+        if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+            $ffForSkip = db_row("SELECT id, status FROM acc_ap_payments WHERE id = ?", [$ffApPaymentId])
+                ?? ['id' => $ffApPaymentId, 'status' => null];
+            self::recordSkipped($ffApPaymentId, $ffForSkip, 'skipped_by_mode', 'void');
+            return [
+                'success' => true,
+                'status'  => 'skipped_by_mode',
+                'outcome' => 'skipped',
+                'mode'    => $mode,
+            ] + self::RESULT_BASE;
+        }
+
+        // 2. Load FF ap_payment.
+        $ff = db_row(
+            "SELECT id, payment_number, status FROM acc_ap_payments WHERE id = ?",
+            [$ffApPaymentId]
+        );
+        if ($ff === null) {
+            return [
+                'success' => false,
+                'status'  => 'ff_not_found',
+                'outcome' => 'failed',
+                'error'   => "FF ap_payment {$ffApPaymentId} not found",
+            ] + self::RESULT_BASE;
+        }
+
+        // 3. INVERTED status invariant (D-QBO-PUSHVOID-TRIO-1): must be 'void'.
+        //    Canonical trigger is ap-payments/void.php post-commit.
+        if ($ff['status'] !== 'void') {
+            return [
+                'success' => false,
+                'status'  => 'void_status_mismatch',
+                'outcome' => 'failed',
+                'error'   => "Cannot push void for FF ap_payment {$ffApPaymentId}: status='{$ff['status']}', expected 'void'",
+            ] + self::RESULT_BASE;
+        }
+
+        // 4. Mapping lookup.
+        $mapping = db_row(
+            "SELECT id, qbo_bill_payment_id, qbo_sync_token, push_status
+               FROM acc_qbo_bill_payment_map
+              WHERE ff_ap_payment_id = ?",
+            [$ffApPaymentId]
+        );
+
+        // 4a. No mapping → voided before ever pushing → skipped_unmapped_void.
+        if ($mapping === null || empty($mapping['qbo_bill_payment_id'])) {
+            return [
+                'success' => true,
+                'status'  => 'skipped_unmapped_void',
+                'outcome' => 'skipped',
+            ] + self::RESULT_BASE;
+        }
+
+        // 4b. Already voided → idempotent no-op.
+        if ($mapping['push_status'] === 'voided') {
+            return [
+                'success'    => true,
+                'status'     => 'already_voided',
+                'outcome'    => 'voided',
+                'qbo_id'     => (string) $mapping['qbo_bill_payment_id'],
+                'sync_token' => (string) ($mapping['qbo_sync_token'] ?? '0'),
+            ] + self::RESULT_BASE;
+        }
+
+        // 5. HTTP void.
+        $client = new QuickBooksClient();
+        try {
+            $response = $client->voidEntity(
+                'billpayment',
+                (string) $mapping['qbo_bill_payment_id'],
+                (string) ($mapping['qbo_sync_token'] ?? '0')
+            );
+        } catch (QuickBooksException $e) {
+            self::recordPushFailure($ffApPaymentId, 'Void failed: ' . $e->getMessage());
+            return [
+                'success' => false,
+                'status'  => 'qbo_error',
+                'outcome' => 'failed',
+                'error'   => 'Void failed: ' . $e->getMessage(),
+            ] + self::RESULT_BASE;
+        }
+
+        $qboBp = $response['BillPayment'] ?? null;
+        if (!is_array($qboBp) || empty($qboBp['Id'])) {
+            self::recordPushFailure($ffApPaymentId, 'QBO void response missing BillPayment.Id');
+            return [
+                'success' => false,
+                'status'  => 'qbo_malformed_response',
+                'outcome' => 'failed',
+                'error'   => 'QBO void response missing BillPayment.Id',
+            ] + self::RESULT_BASE;
+        }
+
+        // 6. Persist voided state.
+        self::upsertMappingRow($ffApPaymentId, [
+            'qbo_sync_token' => (string) ($qboBp['SyncToken'] ?? '0'),
+            'push_status'    => 'voided',
+            'push_error'     => null,
+            'last_synced_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return [
+            'success'    => true,
+            'status'     => 'voided',
+            'outcome'    => 'voided',
+            'qbo_id'     => (string) $qboBp['Id'],
+            'sync_token' => (string) ($qboBp['SyncToken'] ?? '0'),
+        ] + self::RESULT_BASE;
+    }
+
+    /**
      * Shared orchestration. Both public methods delegate here.
      */
     private static function pushImpl(int $ffApPaymentId, string $operation, ?array $payloadSnapshot): array

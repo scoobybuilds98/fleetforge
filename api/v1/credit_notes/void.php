@@ -115,4 +115,13 @@ db_transaction(function () use ($id, $reason, $cnCheck, &$result) {
     ];
 });
 
+// ── QBO sync enqueue (S-QBO-PUSHVOID-TRIO / F7) ─────────────────────────
+// Best-effort per §6.9 D-ENQUEUER-CONTRACT — never throws. AFTER the
+// db_transaction commits (status now 'void'), BEFORE json_success. The
+// Enqueuer's gate-0 requires status='void' for the 'void' op. Propagates
+// the void to the mapped QBO CreditMemo (CreditMemoPusher::pushVoid).
+if (!empty($id)) {
+    \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $id, 'void');
+}
+
 json_success($result);

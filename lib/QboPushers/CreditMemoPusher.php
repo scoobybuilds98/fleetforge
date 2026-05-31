@@ -17,9 +17,9 @@ declare(strict_types=1);
  *            — MECHANICAL full-payload re-send via updateEntity + demote-to-
  *            create; the apply→LinkedTxn application flow is carved out to a
  *            dedicated follow-up — see D-QBO-CREDIT-MEMO-UPDATE-1)
- *   void   → pushVoid(int): array     (STILL STUB → pushVoid trio / F7)
+ *   void   → pushVoid(int): array     (IMPLEMENTED in S-QBO-PUSHVOID-TRIO — closes F7)
  *
- * pushImpl pipeline (create + update; pushVoid still stubbed):
+ * pushImpl pipeline (create + update; pushVoid is a separate method):
  *   1. Sync mode gate (quickbooks.sync_mode.credit_memo; 'sync' default)
  *   2. Load FF credit_notes row (404 → ff_not_found)
  *   3. Voided check (status='void' → skipped_voided)
@@ -45,7 +45,9 @@ declare(strict_types=1);
  * @decision D-QBO-16-1 (SOURCE_TO_ITEM_TYPE map → acc_qbo_item_map lookup
  *                       for the single line ItemRef),
  *           D-QBO-16-2 (S-QBO-16 shipped pushCreate only; pushUpdate CLOSED by
- *                       S-QBO-CREDIT-MEMO-UPDATE; pushVoid still stubbed → F7),
+ *                       S-QBO-CREDIT-MEMO-UPDATE; pushVoid CLOSED by S-QBO-PUSHVOID-TRIO),
+ *           D-QBO-PUSHVOID-TRIO-1 (pushVoid via voidEntity('creditmemo') when
+ *               status='void'; idempotent on push_status='voided'; skipped_unmapped_void),
  *           D-QBO-CREDIT-MEMO-UPDATE-1 (mechanical pushUpdate via updateEntity
  *                       full-payload re-send + demote-to-create at step 5b;
  *                       credit notes have no editable header so it's a
@@ -151,18 +153,132 @@ class CreditMemoPusher
     }
 
     /**
-     * VOID still STUBBED per D-QBO-16-2 — pushVoid rides the pushVoid trio
-     * follow-up (OPERATOR_FOLLOWUPS F7: PaymentPusher / BillPaymentPusher /
-     * CreditMemoPusher pushVoid, mirroring InvoicePusher pushVoidImpl). NOT
-     * in scope for S-QBO-CREDIT-MEMO-UPDATE (which only closes pushUpdate).
+     * Push a VOID to an existing QBO credit memo (S-QBO-PUSHVOID-TRIO,
+     * closing the F7 pushVoid follow-up for credit memos). Separate
+     * pipeline mirroring InvoicePusher::pushVoidImpl (D-QBO-12-3/4/5):
+     *
+     *   - Void trigger (D-QBO-PUSHVOID-TRIO-1): credit_notes.status='void'
+     *     (canonical path: api/v1/credit_notes/void.php). Inverts the
+     *     create-path's status='void' → skipped_voided skip.
+     *   - Idempotent on push_status='voided' (already_voided no-op).
+     *   - No mapping / null qbo_credit_memo_id → skipped_unmapped_void.
+     *   - voidEntity('creditmemo') HTTP call.
+     *
+     * NOTE: this is the *void* of the CreditMemo entity, distinct from the
+     * carved-out F25 apply→LinkedTxn credit-APPLICATION propagation.
+     *
+     * @return array §6.8 5-key shape; status='voided' on success,
+     *               'already_voided' on replay, 'skipped_unmapped_void'
+     *               for never-pushed credit memos.
      */
     public static function pushVoid(int $ffCreditNoteId): array
     {
+        // 1. Sync mode gate.
+        $mode = (string) settings_get('quickbooks.sync_mode.credit_memo', 'sync');
+        if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+            $cnForSkip = db_row("SELECT * FROM credit_notes WHERE id = ?", [$ffCreditNoteId]) ?? ['id' => $ffCreditNoteId];
+            self::recordSkipped($ffCreditNoteId, $cnForSkip, 'skipped_by_mode', 'void');
+            return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
+        }
+
+        // 2. Load FF credit note.
+        $cn = db_row("SELECT * FROM credit_notes WHERE id = ?", [$ffCreditNoteId]);
+        if ($cn === null) {
+            return [
+                'success' => false,
+                'status'  => 'ff_not_found',
+                'outcome' => 'failed',
+                'error'   => "FF credit note {$ffCreditNoteId} not found",
+            ] + self::RESULT_BASE;
+        }
+
+        // 3. INVERTED status invariant (D-QBO-PUSHVOID-TRIO-1): must be 'void'.
+        //    Canonical trigger is credit_notes/void.php post-commit.
+        if ($cn['status'] !== 'void') {
+            return [
+                'success' => false,
+                'status'  => 'void_status_mismatch',
+                'outcome' => 'failed',
+                'error'   => "Cannot push void for FF credit note {$ffCreditNoteId}: status='{$cn['status']}', expected 'void'",
+            ] + self::RESULT_BASE;
+        }
+
+        // 4. Mapping lookup.
+        $mapping = db_row(
+            "SELECT id, qbo_credit_memo_id, qbo_sync_token, push_status
+               FROM acc_qbo_credit_memo_map
+              WHERE ff_credit_note_id = ?",
+            [$ffCreditNoteId]
+        );
+
+        // 4a. No mapping → voided before ever pushing → skipped_unmapped_void.
+        if ($mapping === null || empty($mapping['qbo_credit_memo_id'])) {
+            return [
+                'success' => true,
+                'status'  => 'skipped_unmapped_void',
+                'outcome' => 'skipped',
+            ] + self::RESULT_BASE;
+        }
+
+        // 4b. Already voided → idempotent no-op.
+        if ($mapping['push_status'] === 'voided') {
+            return [
+                'success'    => true,
+                'status'     => 'already_voided',
+                'outcome'    => 'voided',
+                'qbo_id'     => (string) $mapping['qbo_credit_memo_id'],
+                'sync_token' => (string) ($mapping['qbo_sync_token'] ?? '0'),
+            ] + self::RESULT_BASE;
+        }
+
+        // 5. HTTP void.
+        $client = new QuickBooksClient();
+        try {
+            $response = $client->voidEntity(
+                'creditmemo',
+                (string) $mapping['qbo_credit_memo_id'],
+                (string) ($mapping['qbo_sync_token'] ?? '0')
+            );
+        } catch (QuickBooksException $e) {
+            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            self::recordPushFailure($ffCreditNoteId, $cn, 'Void failed: ' . $e->getMessage(), $httpCode);
+            return [
+                'success' => false,
+                'status'  => 'qbo_error',
+                'outcome' => 'failed',
+                'error'   => 'Void failed: ' . $e->getMessage(),
+            ] + self::RESULT_BASE;
+        }
+
+        $qboCm = $response['CreditMemo'] ?? null;
+        if (!is_array($qboCm) || empty($qboCm['Id'])) {
+            self::recordPushFailure($ffCreditNoteId, $cn, 'QBO void response missing CreditMemo.Id', 0);
+            return [
+                'success' => false,
+                'status'  => 'qbo_malformed_response',
+                'outcome' => 'failed',
+                'error'   => 'QBO void response missing CreditMemo.Id',
+            ] + self::RESULT_BASE;
+        }
+
+        // 6. Persist voided state. The HTTP sync_log row is written by
+        //    QuickBooksClient::voidEntity dispatch; writeSyncLog here only
+        //    marks non-HTTP states ('pushed'-vs-SKIP), so a 'voided' status
+        //    would mislabel the real void call as SKIP — the push_status=
+        //    'voided' map row is the durable record (mirrors InvoicePusher).
+        self::upsertMappingRow($ffCreditNoteId, [
+            'qbo_sync_token' => (string) ($qboCm['SyncToken'] ?? '0'),
+            'push_status'    => 'voided',
+            'push_error'     => null,
+            'last_synced_at' => date('Y-m-d H:i:s'),
+        ]);
+
         return [
-            'success' => false,
-            'status'  => 'unsupported_in_session',
-            'outcome' => 'skipped',
-            'error'   => 'CreditMemoPusher::pushVoid is stubbed (D-QBO-16-2). Queue this for the pushVoid trio follow-up (OPERATOR_FOLLOWUPS F7).',
+            'success'    => true,
+            'status'     => 'voided',
+            'outcome'    => 'voided',
+            'qbo_id'     => (string) $qboCm['Id'],
+            'sync_token' => (string) ($qboCm['SyncToken'] ?? '0'),
         ] + self::RESULT_BASE;
     }
 
