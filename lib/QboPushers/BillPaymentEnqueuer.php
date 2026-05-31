@@ -99,8 +99,8 @@ class BillPaymentEnqueuer
             // Gate 3: operation allowlist. 'create' + 'update' supported since
             // S-QBO-BILL-PAYMENT-UPDATE (D-QBO-19-5 closed). 'void' still
             // deferred to the separate pushVoid trio slice (OPERATOR_FOLLOWUPS F7).
-            if (!in_array($operation, ['create', 'update'], true)) {
-                error_log("[BillPaymentEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist [create,update] (void deferred to pushVoid trio — F7)");
+            if (!in_array($operation, ['create', 'update', 'void'], true)) {
+                error_log("[BillPaymentEnqueuer] gate-3 reject: operation '{$operation}' not in allowlist [create,update,void]");
                 return false;
             }
 

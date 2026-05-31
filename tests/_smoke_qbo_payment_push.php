@@ -185,10 +185,11 @@ function ff_smoke_pp_seed_payment(int $paymentId, array $fx, array $overrides = 
     $status = $overrides['status'] ?? 'cleared';
     $origin = $overrides['origin'] ?? 'ff_native';
     $refNum = array_key_exists('reference_number', $overrides) ? $overrides['reference_number'] : 'PAY-REF-001';
+    $deleted = $overrides['deleted_at'] ?? null;
     db_execute(
         "INSERT INTO payments (id, payment_number, customer_id, amount, currency, payment_method,
-                                reference_number, payment_date, status, origin)
-         VALUES (?, ?, ?, '500.00', 'CAD', 'e_transfer', ?, '2026-04-15', ?, ?)",
+                                reference_number, payment_date, status, origin, deleted_at)
+         VALUES (?, ?, ?, '500.00', 'CAD', 'e_transfer', ?, '2026-04-15', ?, ?, ?)",
         [
             $paymentId,
             "PAY-SMOKE-{$paymentId}",
@@ -196,6 +197,7 @@ function ff_smoke_pp_seed_payment(int $paymentId, array $fx, array $overrides = 
             $refNum,
             $status,
             $origin,
+            $deleted,
         ]
     );
     db_execute(

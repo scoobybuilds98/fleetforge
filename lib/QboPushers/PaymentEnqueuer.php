@@ -54,6 +54,10 @@ class PaymentEnqueuer
         // Same status requirement as create (pushUpdate is just a full-
         // payload re-send via QuickBooksClient::updateEntity).
         'update' => ['cleared'],
+        // 'void' SUPPORTED since S-QBO-PUSHVOID-TRIO — eligibility is the
+        // soft-delete signal (deleted_at IS NOT NULL), checked in gate-0
+        // below; [] here just keeps the unknown-operation guard from firing.
+        'void'   => [],
     ];
 
     /**
@@ -114,7 +118,15 @@ class PaymentEnqueuer
                 error_log("[PaymentEnqueuer] gate-0 reject: unknown operation '{$operation}' for payment {$paymentId}");
                 return false;
             }
-            if (!in_array($ff['status'], $allowedStatuses, true)) {
+            if ($operation === 'void') {
+                // Void eligibility is the soft-delete signal (D-QBO-PUSHVOID-TRIO-1),
+                // not a status value — canonical trigger is payments/delete.php
+                // post-commit, where deleted_at is set.
+                if ($ff['deleted_at'] === null) {
+                    error_log("[PaymentEnqueuer] gate-0 reject: payment {$paymentId} op='void' but deleted_at IS NULL (not soft-deleted/voided)");
+                    return false;
+                }
+            } elseif (!in_array($ff['status'], $allowedStatuses, true)) {
                 error_log(
                     "[PaymentEnqueuer] gate-0 reject: payment {$paymentId} status='{$ff['status']}' not in allowlist " .
                     "[" . implode(',', $allowedStatuses) . "] for operation='{$operation}' (D-QBO-14-2)"
