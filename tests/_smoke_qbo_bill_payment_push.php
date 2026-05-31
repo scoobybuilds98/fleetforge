@@ -673,6 +673,8 @@ try {
 
     // C27 (REPURPOSED): BillPaymentEnqueuer ACCEPTS 'void' op (S-QBO-PUSHVOID-TRIO)
     $c27Errors = [];
+    db_execute("DELETE FROM acc_ap_payment_allocations WHERE ap_payment_id=999990");
+    db_execute("DELETE FROM acc_ap_payments WHERE id=999990");
     ff_smoke_bp_seed_ap_payment(999990, $fx, ['status' => 'void']);
     ff_smoke_bp_set_setting('quickbooks.sync_enabled', '1');
     ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'queue');
@@ -688,6 +690,8 @@ try {
 
     // C28: pushVoid on status!='void' ap_payment -> void_status_mismatch (no HTTP)
     $c28Errors = [];
+    db_execute("DELETE FROM acc_ap_payment_allocations WHERE ap_payment_id=999991");
+    db_execute("DELETE FROM acc_ap_payments WHERE id=999991");
     ff_smoke_bp_seed_ap_payment(999991, $fx, ['status' => 'cleared']);
     $r28 = BillPaymentPusher::pushVoid(999991);
     if (($r28['status'] ?? null) !== 'void_status_mismatch') { $c28Errors[] = "status: got " . json_encode($r28['status'] ?? null) . ", want 'void_status_mismatch'"; }
@@ -696,6 +700,8 @@ try {
 
     // C29: pushVoid on status='void' + UNMAPPED -> skipped_unmapped_void (no HTTP)
     $c29Errors = [];
+    db_execute("DELETE FROM acc_ap_payment_allocations WHERE ap_payment_id=999992");
+    db_execute("DELETE FROM acc_ap_payments WHERE id=999992");
     ff_smoke_bp_seed_ap_payment(999992, $fx, ['status' => 'void']);
     db_execute("DELETE FROM acc_qbo_bill_payment_map WHERE ff_ap_payment_id = 999992");
     ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'queue');
@@ -706,6 +712,8 @@ try {
 
     // C30: pushVoid idempotent — push_status='voided' -> already_voided (no HTTP)
     $c30Errors = [];
+    db_execute("DELETE FROM acc_ap_payment_allocations WHERE ap_payment_id=999993");
+    db_execute("DELETE FROM acc_ap_payments WHERE id=999993");
     ff_smoke_bp_seed_ap_payment(999993, $fx, ['status' => 'void']);
     db_execute("DELETE FROM acc_qbo_bill_payment_map WHERE ff_ap_payment_id = 999993");
     db_execute("INSERT INTO acc_qbo_bill_payment_map (ff_ap_payment_id, qbo_bill_payment_id, qbo_sync_token, push_status) VALUES (999993, 'QBO-BP-VOIDED', '2', 'voided')");
