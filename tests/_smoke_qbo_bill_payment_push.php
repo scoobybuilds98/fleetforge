@@ -671,23 +671,50 @@ try {
     if (empty($c26Errors)) { echo "PASS C26 pushUpdate on unmapped ap_payment demotes to create (failed_preflight at vendor gate; no qbo_id; D-PUSHER-DEMOTION-RULE)\n"; $pass++; }
     else { echo "FAIL C26 " . implode('; ', $c26Errors) . "\n"; $failures[] = 'C26'; }
 
-    // ── C27: Enqueuer still REJECTS 'void' (S-QBO-BILL-PAYMENT-UPDATE) ──
-    // gate-3 allowlist is now ['create','update'] — 'void' remains
-    // unsupported (separate F7 pushVoid trio slice). Mirrors PaymentEnqueuer
-    // C22 + BillEnqueuer C25.
+    // C27 (REPURPOSED): BillPaymentEnqueuer ACCEPTS 'void' op (S-QBO-PUSHVOID-TRIO)
     $c27Errors = [];
+    ff_smoke_bp_seed_ap_payment(999990, $fx, ['status' => 'void']);
     ff_smoke_bp_set_setting('quickbooks.sync_enabled', '1');
     ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'queue');
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990 AND operation='void'");
     $r27 = BillPaymentEnqueuer::enqueue(999990, 'void');
-    $queued27 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990 AND operation='void'");
-    if ($r27 !== false) {
-        $c27Errors[] = "expected false (void not in allowlist), got " . json_encode($r27);
-    }
-    if ($queued27 !== null) {
-        $c27Errors[] = "no 'void' queue row should be inserted; found id=" . $queued27['id'];
-    }
-    if (empty($c27Errors)) { echo "PASS C27 Enqueuer rejects 'void' op (gate-3 allowlist = create+update only; pushVoid → F7)\n"; $pass++; }
+    $q27 = db_row("SELECT operation, status FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990 AND operation='void'");
+    if ($r27 !== true) { $c27Errors[] = "enqueue should accept 'void' now; got " . json_encode($r27); }
+    if ($q27 === null) { $c27Errors[] = "a 'void' queue row should be written; none found"; }
+    elseif ($q27['operation'] !== 'void' || $q27['status'] !== 'queued') { $c27Errors[] = "queue row shape: " . json_encode($q27); }
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='bill_payment' AND entity_id=999990 AND operation='void'");
+    if (empty($c27Errors)) { echo "PASS C27 BillPaymentEnqueuer accepts 'void' op + queue row (S-QBO-PUSHVOID-TRIO; gate-3 +void)\n"; $pass++; }
     else { echo "FAIL C27 " . implode('; ', $c27Errors) . "\n"; $failures[] = 'C27'; }
+
+    // C28: pushVoid on status!='void' ap_payment -> void_status_mismatch (no HTTP)
+    $c28Errors = [];
+    ff_smoke_bp_seed_ap_payment(999991, $fx, ['status' => 'cleared']);
+    $r28 = BillPaymentPusher::pushVoid(999991);
+    if (($r28['status'] ?? null) !== 'void_status_mismatch') { $c28Errors[] = "status: got " . json_encode($r28['status'] ?? null) . ", want 'void_status_mismatch'"; }
+    if (empty($c28Errors)) { echo "PASS C28 pushVoid on non-void ap_payment -> void_status_mismatch (D-QBO-PUSHVOID-TRIO-1)\n"; $pass++; }
+    else { echo "FAIL C28 " . implode('; ', $c28Errors) . "\n"; $failures[] = 'C28'; }
+
+    // C29: pushVoid on status='void' + UNMAPPED -> skipped_unmapped_void (no HTTP)
+    $c29Errors = [];
+    ff_smoke_bp_seed_ap_payment(999992, $fx, ['status' => 'void']);
+    db_execute("DELETE FROM acc_qbo_bill_payment_map WHERE ff_ap_payment_id = 999992");
+    ff_smoke_bp_set_setting('quickbooks.sync_mode.bill_payment', 'queue');
+    $r29 = BillPaymentPusher::pushVoid(999992);
+    if (($r29['status'] ?? null) !== 'skipped_unmapped_void') { $c29Errors[] = "status: got " . json_encode($r29['status'] ?? null) . ", want 'skipped_unmapped_void'"; }
+    if (empty($c29Errors)) { echo "PASS C29 pushVoid on void+unmapped ap_payment -> skipped_unmapped_void (no HTTP)\n"; $pass++; }
+    else { echo "FAIL C29 " . implode('; ', $c29Errors) . "\n"; $failures[] = 'C29'; }
+
+    // C30: pushVoid idempotent — push_status='voided' -> already_voided (no HTTP)
+    $c30Errors = [];
+    ff_smoke_bp_seed_ap_payment(999993, $fx, ['status' => 'void']);
+    db_execute("DELETE FROM acc_qbo_bill_payment_map WHERE ff_ap_payment_id = 999993");
+    db_execute("INSERT INTO acc_qbo_bill_payment_map (ff_ap_payment_id, qbo_bill_payment_id, qbo_sync_token, push_status) VALUES (999993, 'QBO-BP-VOIDED', '2', 'voided')");
+    $r30 = BillPaymentPusher::pushVoid(999993);
+    if (($r30['status'] ?? null) !== 'already_voided') { $c30Errors[] = "status: got " . json_encode($r30['status'] ?? null) . ", want 'already_voided'"; }
+    if (($r30['qbo_id'] ?? null) !== 'QBO-BP-VOIDED') { $c30Errors[] = "qbo_id: got " . json_encode($r30['qbo_id'] ?? null); }
+    if (empty($c30Errors)) { echo "PASS C30 pushVoid idempotent on push_status='voided' -> already_voided (no HTTP)\n"; $pass++; }
+    else { echo "FAIL C30 " . implode('; ', $c30Errors) . "\n"; $failures[] = 'C30'; }
+
 } finally {
     ff_smoke_bp_cleanup();
     foreach ($snapshotKeys as $k) {

@@ -863,6 +863,40 @@ try {
         echo "FAIL C23 " . implode('; ', $c23Errors) . "\n";
         $failures[] = 'C23';
     }
+    // ══ S-QBO-PUSHVOID-TRIO — pushVoid checks (no HTTP: short-circuit pre-call) ══
+    ff_smoke_pp_set_setting('quickbooks.sync_mode.payment', 'queue');
+
+    // C24: pushVoid on a NON-deleted payment -> void_status_mismatch
+    $c24Errors = [];
+    ff_smoke_pp_seed_payment(999994, $fx);
+    $r24 = PaymentPusher::pushVoid(999994);
+    if (($r24['status'] ?? null) !== 'void_status_mismatch') { $c24Errors[] = "status: got " . json_encode($r24['status'] ?? null) . ", want 'void_status_mismatch'"; }
+    if (empty($c24Errors)) { echo "PASS C24 pushVoid on non-deleted payment -> void_status_mismatch (D-QBO-PUSHVOID-TRIO-1)\n"; $pass++; }
+    else { echo "FAIL C24 " . implode('; ', $c24Errors) . "\n"; $failures[] = 'C24'; }
+
+    // C25: pushVoid on soft-deleted UNMAPPED payment -> skipped_unmapped_void (no HTTP)
+    $c25Errors = [];
+    ff_smoke_pp_seed_payment(999995, $fx, ['deleted_at' => date('Y-m-d H:i:s')]);
+    db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id = 999995");
+    $r25 = PaymentPusher::pushVoid(999995);
+    if (($r25['status'] ?? null) !== 'skipped_unmapped_void') { $c25Errors[] = "status: got " . json_encode($r25['status'] ?? null) . ", want 'skipped_unmapped_void'"; }
+    if (($r25['success'] ?? null) !== true) { $c25Errors[] = "success should be true; got " . json_encode($r25['success'] ?? null); }
+    if (empty($c25Errors)) { echo "PASS C25 pushVoid on soft-deleted unmapped payment -> skipped_unmapped_void (no HTTP)\n"; $pass++; }
+    else { echo "FAIL C25 " . implode('; ', $c25Errors) . "\n"; $failures[] = 'C25'; }
+
+    // C26: PaymentEnqueuer ACCEPTS 'void' for a soft-deleted ff_native payment
+    $c26Errors = [];
+    ff_smoke_pp_set_setting('quickbooks.sync_enabled', '1');
+    ff_smoke_pp_set_setting('quickbooks.sync_mode.payment', 'queue');
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='payment' AND entity_id=999995");
+    $r26 = PaymentEnqueuer::enqueue(999995, 'void');
+    $q26 = db_row("SELECT operation, status FROM acc_qbo_sync_queue WHERE entity_type='payment' AND entity_id=999995 AND operation='void'");
+    if ($r26 !== true) { $c26Errors[] = "enqueue should accept 'void'; got " . json_encode($r26); }
+    if ($q26 === null) { $c26Errors[] = "a 'void' queue row should be written; none found"; }
+    elseif ($q26['operation'] !== 'void' || $q26['status'] !== 'queued') { $c26Errors[] = "queue row shape: " . json_encode($q26); }
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='payment' AND entity_id=999995");
+    if (empty($c26Errors)) { echo "PASS C26 PaymentEnqueuer accepts 'void' op for soft-deleted payment + queue row (S-QBO-PUSHVOID-TRIO)\n"; $pass++; }
+    else { echo "FAIL C26 " . implode('; ', $c26Errors) . "\n"; $failures[] = 'C26'; }
 } finally {
     ff_smoke_pp_cleanup();
     foreach ($snapshotKeys as $k) {

@@ -339,14 +339,14 @@ try {
     if (empty($c21)) { echo "PASS C21 pushUpdate delegates to pushImpl — no longer a stub (S-QBO-CREDIT-MEMO-UPDATE; D-QBO-16-2 update stub closed)\n"; $pass++; }
     else { echo "FAIL C21 " . implode('; ', $c21) . "\n"; $failures[] = 'C21'; }
 
-    // C22 (REPURPOSED): pushVoid now IMPLEMENTED (S-QBO-PUSHVOID-TRIO).
-    // 999990 is active here — a non-'void' credit note is rejected at the
-    // inverted status invariant BEFORE any HTTP call.
+    // C22 (REPURPOSED): pushVoid now IMPLEMENTED (S-QBO-PUSHVOID-TRIO). 999990 is
+    // active here -> a non-'void' credit note is rejected at the inverted
+    // status invariant BEFORE any HTTP call.
     $c22 = [];
     $r = CreditMemoPusher::pushVoid(999990);
     if (($r['status'] ?? null) === 'unsupported_in_session') { $c22[] = "pushVoid still a stub"; }
     if (($r['status'] ?? null) !== 'void_status_mismatch') { $c22[] = "status: " . json_encode($r['status'] ?? null) . ", want 'void_status_mismatch'"; }
-    if (empty($c22)) { echo "PASS C22 pushVoid on non-void credit note -> void_status_mismatch (S-QBO-PUSHVOID-TRIO; D-QBO-PUSHVOID-TRIO-1)\n"; $pass++; }
+    if (empty($c22)) { echo "PASS C22 pushVoid on non-void credit note -> void_status_mismatch (S-QBO-PUSHVOID-TRIO)\n"; $pass++; }
     else { echo "FAIL C22 " . implode('; ', $c22) . "\n"; $failures[] = 'C22'; }
 
     // ══ Module G — Enqueuer gates ═════════════════════════════════════
@@ -403,18 +403,45 @@ try {
     if (empty($c27)) { echo "PASS C27 pushUpdate on unmapped credit note demotes to create (failed_preflight at customer gate; no qbo_id; D-PUSHER-DEMOTION-RULE)\n"; $pass++; }
     else { echo "FAIL C27 " . implode('; ', $c27) . "\n"; $failures[] = 'C27'; }
 
-    // C28: Enqueuer gate-3 still REJECTS 'void' (allowlist = create+update only;
-    // pushVoid rides the F7 trio).
+    // C28 (REPURPOSED): Enqueuer gate-3 now ACCEPTS 'void' (S-QBO-PUSHVOID-TRIO)
     $c28 = [];
+    db_execute("DELETE FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id=999990");
+    db_execute("DELETE FROM credit_notes WHERE id=999990");
+    ff_smoke_cm_seed_cn(999990, ['source' => 'other', 'status' => 'void']);
+    ff_smoke_cm_set('quickbooks.sync_enabled', '1');
+    ff_smoke_cm_set('quickbooks.sync_mode.credit_memo', 'sync');
     db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990");
     $r28 = CreditMemoEnqueuer::enqueue(999990, 'void');
-    $q28 = db_row("SELECT id FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990 AND operation='void'");
-    if ($r28 !== false) { $c28[] = "enqueue should reject 'void'; got " . json_encode($r28); }
-    if ($q28 !== null) { $c28[] = "no 'void' queue row should be inserted; found id=" . $q28['id']; }
-    if (empty($c28)) { echo "PASS C28 Enqueuer gate-3 rejects 'void' op (allowlist = create+update only; pushVoid → F7)\n"; $pass++; }
+    $q28 = db_row("SELECT operation, status FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990 AND operation='void'");
+    if ($r28 !== true) { $c28[] = "enqueue should accept 'void' now; got " . json_encode($r28); }
+    if ($q28 === null) { $c28[] = "a 'void' queue row should be written; none found"; }
+    elseif ($q28['operation'] !== 'void' || $q28['status'] !== 'queued') { $c28[] = "queue row shape: " . json_encode($q28); }
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='credit_memo' AND entity_id=999990");
+    if (empty($c28)) { echo "PASS C28 Enqueuer gate-3 accepts 'void' op + queue row (S-QBO-PUSHVOID-TRIO; gate-3 +void)\n"; $pass++; }
     else { echo "FAIL C28 " . implode('; ', $c28) . "\n"; $failures[] = 'C28'; }
 
-} finally {
+    // C29: pushVoid on status='void' + UNMAPPED -> skipped_unmapped_void (no HTTP)
+    $c29 = [];
+    db_execute("DELETE FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id=999990");
+    db_execute("DELETE FROM credit_notes WHERE id=999990");
+    ff_smoke_cm_seed_cn(999990, ['source' => 'other', 'status' => 'void']);
+    ff_smoke_cm_set('quickbooks.sync_mode.credit_memo', 'sync');
+    $r29 = CreditMemoPusher::pushVoid(999990);
+    if (($r29['status'] ?? null) !== 'skipped_unmapped_void') { $c29[] = "status: " . json_encode($r29['status'] ?? null) . ", want 'skipped_unmapped_void'"; }
+    if (empty($c29)) { echo "PASS C29 pushVoid on void+unmapped credit note -> skipped_unmapped_void (no HTTP)\n"; $pass++; }
+    else { echo "FAIL C29 " . implode('; ', $c29) . "\n"; $failures[] = 'C29'; }
+
+    // C30: pushVoid idempotent — push_status='voided' -> already_voided (no HTTP)
+    $c30 = [];
+    db_execute("DELETE FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id=999990");
+    db_execute("INSERT INTO acc_qbo_credit_memo_map (ff_credit_note_id, qbo_credit_memo_id, qbo_sync_token, push_status) VALUES (999990, 'QBO-CM-VOIDED', '3', 'voided')");
+    $r30 = CreditMemoPusher::pushVoid(999990);
+    if (($r30['status'] ?? null) !== 'already_voided') { $c30[] = "status: " . json_encode($r30['status'] ?? null) . ", want 'already_voided'"; }
+    if (($r30['qbo_id'] ?? null) !== 'QBO-CM-VOIDED') { $c30[] = "qbo_id: " . json_encode($r30['qbo_id'] ?? null); }
+    if (empty($c30)) { echo "PASS C30 pushVoid idempotent on push_status='voided' -> already_voided (no HTTP)\n"; $pass++; }
+    else { echo "FAIL C30 " . implode('; ', $c30) . "\n"; $failures[] = 'C30'; }
+
+    } finally {
     ff_smoke_cm_cleanup();
     // Restore 'other' item mapping to pre-state if we mutated it.
     if ($otherItemPre && isset($otherQboItemId) && $otherQboItemId === 'SMOKE-CM-OTHER') {
