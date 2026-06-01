@@ -23,6 +23,76 @@
 declare(strict_types=1);
 require '/Users/avi/Documents/fleetforge/config/app.php';
 
+// ── D-WIPE-PRODUCTION-GUARD ──────────────────────────────────────────────────
+// G1 fix (S-DRESS-REHEARSAL-PREP-1): fail-closed production guard.
+// Modeled on D-QBO-FIXTURE-2 (QuickBooksClient::fixtureRefusalReason).
+//
+// THREE LAYERS — all must pass before the first TRUNCATE fires:
+//   1. APP_ENV must NOT be 'production'. config/app.php line 96 defaults
+//      APP_ENV to 'production' when the env var is absent, so an unset or
+//      missing .env line ALSO refuses — ambiguity always fails closed.
+//   2. Explicit confirmation token required as a CLI arg so accidental
+//      execution (cron, script runner, fat-finger) cannot wipe silently.
+//      The token is intentionally verbose so it cannot appear by accident.
+//   3. Blast-radius echo: resolved DB + APP_ENV + QBO realm printed to
+//      stdout before the first TRUNCATE so the operator sees exactly what
+//      will be wiped.
+
+// ── Layer 1: hard-refuse on production (or ambiguous/missing ENV) ─────────
+if (!defined('APP_ENV') || APP_ENV === 'production') {
+    $detectedEnv = defined('APP_ENV') ? APP_ENV : '(undefined — defaults to production)';
+    $detectedDb  = defined('FF_DB_NAME') ? FF_DB_NAME : '(unknown)';
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  ┌──────────────────────────────────────────────────────────────┐\n");
+    fwrite(STDERR, "  │  HARD REFUSAL — demo_wipe.php refuses on production          │\n");
+    fwrite(STDERR, "  └──────────────────────────────────────────────────────────────┘\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  APP_ENV = {$detectedEnv}\n");
+    fwrite(STDERR, "  DB      = {$detectedDb}\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  This script TRUNCATEs customer, billing, and accounting data.\n");
+    fwrite(STDERR, "  Running it against a production DB destroys live records with\n");
+    fwrite(STDERR, "  no undo. There is NO override for production — ever.\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  If this is a dev/staging server, set APP_ENV=development in\n");
+    fwrite(STDERR, "  your .env and re-run. (D-WIPE-PRODUCTION-GUARD)\n");
+    fwrite(STDERR, "\n");
+    exit(1);
+}
+
+// ── Layer 2: require explicit confirmation token ──────────────────────────
+// Must be passed as a literal CLI argument. Intentionally verbose so a
+// cron job or accidental invocation cannot supply it without human intent.
+const DEMO_WIPE_TOKEN = '--i-understand-this-wipes-dev';
+if (!in_array(DEMO_WIPE_TOKEN, $argv ?? [], true)) {
+    $qboEnv   = (string) settings_get('quickbooks.environment', '(unknown)');
+    $qboRealm = (string) settings_get('quickbooks.realm_id',    '(not connected)');
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  USAGE: php scripts/demo_wipe.php " . DEMO_WIPE_TOKEN . "\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  Confirm this is the correct target before passing the token:\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "    APP_ENV  = " . APP_ENV . "\n");
+    fwrite(STDERR, "    DB       = " . FF_DB_NAME . "\n");
+    fwrite(STDERR, "    QBO env  = {$qboEnv}\n");
+    fwrite(STDERR, "    QBO realm= {$qboRealm}\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  Pass the token above to proceed. (D-WIPE-PRODUCTION-GUARD)\n");
+    fwrite(STDERR, "\n");
+    exit(1);
+}
+
+// ── Layer 3: blast-radius echo to stdout (last-look before first TRUNCATE) ─
+$_wipeQboEnv   = (string) settings_get('quickbooks.environment', '(unknown)');
+$_wipeQboRealm = (string) settings_get('quickbooks.realm_id',    '(not connected)');
+echo "\n";
+echo "  Target DB : " . FF_DB_NAME . "\n";
+echo "  APP_ENV   : " . APP_ENV . "\n";
+echo "  QBO env   : {$_wipeQboEnv}  realm = {$_wipeQboRealm}\n";
+echo "\n";
+unset($_wipeQboEnv, $_wipeQboRealm);
+// ── End D-WIPE-PRODUCTION-GUARD ──────────────────────────────────────────────
+
 echo "=== FleetForge demo DB wipe ===\n\n";
 echo "Disabling FK checks for bulk truncate...\n";
 db_execute('SET FOREIGN_KEY_CHECKS = 0', []);
