@@ -75,12 +75,17 @@ try {
     if (isset($result['skipped'])) {
         $summary = "Drift check skipped: {$result['skipped']}.";
     } else {
+        $fa = (array) ($result['fixed_asset_reference'] ?? []);
         $summary = sprintf(
-            'Drift check completed. mode=%s entities_checked=%d drift_events=%d notified=%d.',
+            'Drift check completed. mode=%s entities_checked=%d drift_events=%d notified=%d resolved=%d. FA-ref refreshed=%d (synced=%d pending=%d).',
             ($result['live'] ?? false) ? 'live+snapshot' : 'snapshot-only',
             (int) ($result['checked'] ?? 0),
             (int) ($result['drift_events'] ?? 0),
-            (int) ($result['notified'] ?? 0)
+            (int) ($result['notified'] ?? 0),
+            (int) ($result['resolved'] ?? 0),
+            (int) ($fa['total'] ?? 0),
+            (int) ($fa['synced'] ?? 0),
+            (int) ($fa['pending'] ?? 0)
         );
     }
     echo "[{$startedAt}] {$summary}\n";

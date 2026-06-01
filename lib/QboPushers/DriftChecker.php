@@ -247,6 +247,20 @@ class DriftChecker
             $totalDrift += $glDrift;
         }
 
+        // ── Fixed-asset reference map refresh (S-QBO-FA-MAP) ─────────
+        // Keep acc_qbo_fixed_asset_map current on every drift run so each
+        // asset's QBO account-plumbing readiness (sync_status: synced/pending)
+        // stays fresh without a manual "Refresh FA reference map" click. PURE
+        // MAINTENANCE — emits NO drift_events, so it never interacts with the
+        // $checkedCategories / detectedKeys / autoResolveParity machinery
+        // above. Best-effort: a failure here must not abort the drift run.
+        $faRefresh = ['total' => 0, 'synced' => 0, 'pending' => 0, 'errors' => 0];
+        try {
+            $faRefresh = FixedAssetMapSync::sync();
+        } catch (\Throwable $e) {
+            error_log("[DriftChecker] fixed-asset reference refresh failed: " . $e->getMessage());
+        }
+
         // ── Auto-resolve-on-parity (D-QBO-25-2) ──────────────────────
         // After all entities scanned, close any OPEN drift_cron events whose
         // (entity_type, entity_id, category) was NOT re-detected — drift is
@@ -272,6 +286,7 @@ class DriftChecker
             'notified'     => $notified,
             'live'         => $live,
             'resolved'     => $autoResolved,
+            'fixed_asset_reference' => $faRefresh,
         ];
     }
 

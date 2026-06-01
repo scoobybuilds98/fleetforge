@@ -36,9 +36,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/../api/bootstrap.php';
 
 use FleetForge\QboPushers\FixedAssetMapSync;
+use FleetForge\QboPushers\DriftChecker;
 
 $pass = 0;
-$total = 10;
+$total = 11;
 $failures = [];
 
 function ff_smoke_famap_cleanup(): void
@@ -180,6 +181,27 @@ try {
     }
     if (empty($c10)) { echo "PASS C10 fixed_asset_map_sync.php endpoint exists + calls engine\n"; $pass++; }
     else { echo "FAIL C10 " . implode('; ', $c10) . "\n"; $failures[] = 'C10'; }
+
+    // ── C11: DriftChecker::runCheck() auto-refreshes the FA map (integration) ──
+    // The nightly drift cron + Run-now button both call runCheck(); it now
+    // refreshes acc_qbo_fixed_asset_map as a maintenance step. Delete the
+    // sentinel's map row, run the drift check, assert it was re-created + the
+    // return carries the fixed_asset_reference stats.
+    $c11 = [];
+    // Ensure drift detection is enabled (its default; S-QBO-24 seed) so
+    // runCheck() doesn't short-circuit to {skipped:'disabled'}.
+    db_execute(
+        "INSERT INTO settings (`key`,`value`,value_type,group_name,is_public,is_sensitive) VALUES ('quickbooks.drift.enabled','1','string','quickbooks',0,0)
+         ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)"
+    );
+    db_execute("DELETE FROM acc_qbo_fixed_asset_map WHERE ff_fixed_asset_id = 999990");
+    $r = DriftChecker::runCheck(false); // forceLive=false → snapshot-only, no QBO HTTP
+    $reborn = db_row("SELECT sync_status FROM acc_qbo_fixed_asset_map WHERE ff_fixed_asset_id = 999990");
+    if (!isset($r['fixed_asset_reference'])) $c11[] = 'runCheck return missing fixed_asset_reference';
+    if (!$reborn) $c11[] = 'runCheck did not refresh the sentinel FA map row';
+    if ((int) ($r['fixed_asset_reference']['total'] ?? 0) < 1) $c11[] = 'fixed_asset_reference.total < 1';
+    if (empty($c11)) { echo "PASS C11 DriftChecker::runCheck() refreshes the FA reference map (integration)\n"; $pass++; }
+    else { echo "FAIL C11 " . implode('; ', $c11) . "\n"; $failures[] = 'C11'; }
 
 } finally {
     ff_smoke_famap_cleanup();
