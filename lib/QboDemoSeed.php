@@ -147,6 +147,14 @@ class QboDemoSeed
         ];
 
         try {
+            // ── Idempotency pre-clean (D-QBO-FIXTURE-5) ───────────────
+            // Clear any fixture-tagged rows left by a prior load that
+            // crashed before its finally, or by an operator clicking
+            // "Load" twice. Without this, the DETERMINISTIC synthetic ids
+            // (QBO-FIX-<entity>-<n>, counter resets per process) collide
+            // with surviving rows on the uq_qbo_* UNIQUE constraints.
+            self::deleteFixtureRows();
+
             // ── Activate fixture mode + sandbox-permissive settings ───
             self::writeSetting('quickbooks.environment',           'sandbox');
             self::writeSetting('quickbooks.realm_id',              QboFixture::REALM_SENTINEL);
@@ -235,12 +243,47 @@ class QboDemoSeed
      */
     public static function wipe(): array
     {
-        $deleted  = [];
-        $realDiff = [];
-
         // ── Pre-wipe real-row counts ──────────────────────────────────
         // Real = NOT in the fixture range AND NOT realm_id=FIXTURE-DEMO.
-        $before = self::countRealRows();
+        $before  = self::countRealRows();
+        $deleted = self::deleteFixtureRows();
+        $after   = self::countRealRows();
+
+        // ── Post-wipe real-row counts — must match before ─────────────
+        $realDiff = [];
+        foreach ($before as $table => $count) {
+            $realDiff[$table] = ($after[$table] ?? 0) - $count;
+        }
+
+        return [
+            'deleted'        => $deleted,
+            'real_row_diff'  => $realDiff,
+        ];
+    }
+
+    /**
+     * Delete every fixture-tagged row across the QBO surface. Returns a
+     * per-table deleted count. Shared by wipe() (which wraps it with
+     * before/after real-row count assertions) AND by load() (which calls
+     * it FIRST so a seed is idempotent — a prior load that crashed before
+     * its finally, or an operator clicking "Load" twice, can't leave a
+     * survivor that collides with the next run's DETERMINISTIC synthetic
+     * id on a UNIQUE qbo_*_id constraint).
+     *
+     * D-QBO-FIXTURE-5 (idempotency): the fixture id counter resets per
+     * process so `QBO-FIX-<entity>-<n>` ids repeat across runs; combined
+     * with the `uq_qbo_*` UNIQUE keys, ANY surviving fixture map row would
+     * make the next run's INSERT collide. Clearing fixture rows at the
+     * START of every load/seed is the structural guarantee that makes the
+     * operation safe to repeat. (Surfaced 2026-06-01 by an operator
+     * `_smoke_qbo_fixture_pipeline` run that hit a 1062 duplicate on
+     * acc_qbo_customer_map.uq_qbo_customer.)
+     *
+     * @return array<string,int>  table → rows deleted
+     */
+    private static function deleteFixtureRows(): array
+    {
+        $deleted = [];
 
         // ── sync_log + drift_events: realm-tagged OR fixture-entity-id ─
         $deleted['acc_qbo_sync_log'] = (int) db_execute(
@@ -293,16 +336,7 @@ class QboDemoSeed
             );
         }
 
-        // ── Post-wipe real-row counts — must match before ─────────────
-        $after = self::countRealRows();
-        foreach ($before as $table => $count) {
-            $realDiff[$table] = ($after[$table] ?? 0) - $count;
-        }
-
-        return [
-            'deleted'        => $deleted,
-            'real_row_diff'  => $realDiff,
-        ];
+        return $deleted;
     }
 
     // ============================================================

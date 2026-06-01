@@ -80,7 +80,16 @@ function ff_fp_set(string $key, string $val): void {
     );
 }
 
-// Snapshot real-row counts BEFORE we touch anything — F13 compares.
+// Idempotency pre-clean — clear any fixture-tagged rows a prior run left
+// behind (a crash before finally, or an operator "Load" left loaded). The
+// fixture's synthetic ids are DETERMINISTIC across runs (counter resets per
+// process), so a survivor would collide with this run's INSERT on a
+// uq_qbo_* UNIQUE key. wipe() is the same self-clean load() now does first.
+// (Surfaced 2026-06-01 by an operator run hitting a 1062 duplicate on
+// acc_qbo_customer_map.uq_qbo_customer.) D-QBO-FIXTURE-5.
+QboDemoSeed::wipe();
+
+// Snapshot real-row counts AFTER the pre-clean — F13 compares.
 $rowCountsAtStart = QboDemoSeed::countRealRows();
 
 try {
