@@ -874,7 +874,7 @@ function FF_Reservations() {
 
         // ── Heat map state ───────────────────────────────────────
         heatmapData: { loaded: false, days: [], max: 1 },
-        heatmapOpen: false,  // collapsed by default; user toggles it open
+        heatmapOpen: true,  // expanded by default — operator wants density visible on entry
 
         // ── Gantt (timeline) view ─────────────────────────────────
         ganttView:  false,   // false = table view, true = timeline view

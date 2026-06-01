@@ -19,6 +19,8 @@ storage/generated/
 storage/documents/
 storage/branding/
 storage/maintenance.flag
+# mPDF runtime font-metrics cache (regenerated on demand; never source)
+storage/tmp/
 
 # --- Office documents (specs / references kept locally, not in repo) ---
 *.docx

@@ -263,6 +263,74 @@ require_once FF_ROOT . '/includes/header.php';
         </template>
     </div>
 
+    <!-- ── RESERVATIONS ───────────────────────────────────────────── -->
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Reservations</h3>
+            <a href="<?= base_url('reservations') ?>"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load reservations.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.reservations.length === 0">
+            <div class="carousel-empty">No upcoming reservations</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.reservations.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.reservations" :key="row.id">
+                    <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.reservation_number"></span>
+                            <span class="cc-pill"
+                                  :class="row.status === 'confirmed' ? 'cc-pill--active' : 'cc-pill--info'"
+                                  x-text="row.status.charAt(0).toUpperCase() + row.status.slice(1)"></span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-equipment">
+                            <span x-text="parseInt(row.quantity) + ' unit' + (parseInt(row.quantity) === 1 ? '' : 's') + ' reserved'"></span>
+                        </div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <span class="cc-rate-amount" x-text="fmtDate(row.pickup_date)"></span>
+                            <span class="cc-rate-period"> pickup</span>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Time</span>
+                                <span class="cc-footer-value"
+                                      x-text="row.pickup_time ? row.pickup_time.substring(0,5) : '—'"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">In</span>
+                                <span class="cc-footer-value"
+                                      x-text="parseInt(row.days_until_pickup) === 0 ? 'Today' : (parseInt(row.days_until_pickup) + ' day' + (parseInt(row.days_until_pickup) === 1 ? '' : 's'))"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
     <!-- ── Revenue Forecast (2/3) + Occupancy by Type (1/3) ─ -->
     <div class="dashboard-grid dashboard-grid--charts" style="margin-bottom:24px;">
 
@@ -1060,81 +1128,6 @@ require_once FF_ROOT . '/includes/header.php';
         </template>
     </div>
 
-    <!-- ── UPCOMING RESERVATIONS ─────────────────────────────────── -->
-    <?php /* S-DASHBOARD-CAROUSEL-ENRICH — synthesized fields, see tables.php */ ?>
-    <div class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h3 class="dashboard-section-title">Upcoming Reservations</h3>
-            <a href="<?= base_url('reservations') ?>"
-               class="dashboard-section-viewall">View all →</a>
-        </div>
-
-        <template x-if="!tablesLoaded && !tablesError">
-            <div class="carousel-empty">Loading…</div>
-        </template>
-
-        <template x-if="tablesError">
-            <div class="carousel-empty">
-                Could not load data.
-                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
-            </div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.reservations.length === 0">
-            <div class="carousel-empty">No upcoming reservations</div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.reservations.length > 0">
-            <div class="dashboard-carousel">
-                <template x-for="row in tables.reservations" :key="row.id">
-                    <a :href="'<?= base_url('reservations/show') ?>?id=' + row.id"
-                       class="carousel-card carousel-card--link">
-
-                        <!-- WHY reservation_number is synthesized: reservations table has no
-                             natural reservation_number column — CONCAT('RES-', id) from API. -->
-                        <div class="cc-top">
-                            <span class="cc-id" x-text="row.reservation_number"></span>
-                            <span class="cc-pill"
-                                  :class="{
-                                      'cc-pill--warning': parseInt(row.days_until_pickup) <= 2,
-                                      'cc-pill--info':    parseInt(row.days_until_pickup) > 2
-                                  }"
-                                  x-text="row.days_until_pickup + ' days away'">
-                            </span>
-                        </div>
-
-                        <div class="cc-customer" x-text="row.customer_name"></div>
-
-                        <div class="cc-equipment">
-                            <span x-text="row.equipment_type || '—'"></span>
-                            <template x-if="row.unit_number && row.unit_number !== '—'">
-                                <span> · <span x-text="row.unit_number"></span></span>
-                            </template>
-                        </div>
-
-                        <div class="cc-divider"></div>
-
-                        <div class="cc-rate" style="font-size:1.125rem;">
-                            <span x-text="fmtDate(row.pickup_date)"></span>
-                        </div>
-
-                        <div class="cc-footer">
-                            <span class="cc-footer-item">
-                                <span class="cc-footer-label">Pickup</span>
-                            </span>
-                            <span class="cc-footer-item cc-footer-item--right">
-                                <span class="cc-footer-label">Returns</span>
-                                <!-- return_date is NULL — schema has no return_date column -->
-                                <span class="cc-footer-value" x-text="fmtDate(row.return_date)"></span>
-                            </span>
-                        </div>
-
-                    </a>
-                </template>
-            </div>
-        </template>
-    </div>
-
     <!-- ── ROW 5: Weekly Revenue Heatmap (full width) ─────────── -->
     <div class="card chart-card" style="margin-bottom:24px;">
         <div class="card-header">
@@ -1221,12 +1214,6 @@ function FF_Dashboard() {
                 if (res.success) {
                     this.kpis       = res.data;
                     this.kpisLoaded = true;
-                    // S-ANIMATIONS-PACK Bundle A: count-up KPI numbers
-                    // once values are bound. Alpine renders the
-                    // textContent synchronously via x-text during the
-                    // next tick — run after $nextTick so we override
-                    // the rendered value with an animated count-up.
-                    this.$nextTick(() => this._animateKpiTiles());
                 } else {
                     this.kpiError = true;
                 }
@@ -1234,38 +1221,6 @@ function FF_Dashboard() {
                 this.kpiError = true;
                 console.error('[Dashboard] KPI fetch failed', e);
             }
-        },
-
-        /**
-         * S-ANIMATIONS-PACK Bundle A — animate KPI stat-value text
-         * from 0 to the loaded value. Reads each tile's final text,
-         * parses out the numeric portion + prefix + suffix, and uses
-         * FF_CountUp to tick from 0 to the value over ~900ms.
-         * Falls back gracefully if FF_CountUp isn't loaded.
-         */
-        _animateKpiTiles() {
-            if (typeof window.FF_CountUp === 'undefined') return;
-            document.querySelectorAll('#kpi-grid .stat-value').forEach(el => {
-                const txt = el.textContent.trim();
-                if (!txt || txt === '—') return;
-                // Parse: optional prefix ($), digits w/ commas + optional decimals, optional suffix (%, ' units', etc.)
-                const m = txt.match(/^(\D*)([\d,]+(?:\.\d+)?)(.*)$/);
-                if (!m) return;
-                const prefix = m[1];
-                const numStr = m[2];
-                const suffix = m[3];
-                const numeric = parseFloat(numStr.replace(/,/g, ''));
-                if (isNaN(numeric)) return;
-                const decimals = (numStr.split('.')[1] || '').length;
-                window.FF_CountUp.run(el, {
-                    to:       numeric,
-                    from:     0,
-                    duration: 900,
-                    prefix:   prefix,
-                    suffix:   suffix,
-                    decimals: decimals,
-                });
-            });
         },
 
         // ── Charts fetch ───────────────────────────────────────

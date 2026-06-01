@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(jq -r '.tool_input.file_path // empty'); case \"$FILE\" in */includes/*|*/api/bootstrap.php|*/config/*.php) PID=$(pgrep -f 'php-fpm: master' | head -1); [ -n \"$PID\" ] && kill -USR2 \"$PID\" 2>/dev/null && echo \"[hook] php-fpm opcache reloaded after $FILE\" >&2;; esac; true"
+          }
+        ]
+      }
+    ]
+  }
+}
