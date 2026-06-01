@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-05-30
-**Tables:** 149 total · **Columns:** 2368
+**Generated:** 2026-06-01
+**Tables:** 154 total · **Columns:** 2450
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -541,7 +541,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_66 tables._
+_71 tables._
 
 ## `acc_accounts`
 
@@ -1440,29 +1440,6 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
-## `acc_qbo_credit_memo_map`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `ff_credit_note_id` | int unsigned | UNI | NO |
-| `qbo_credit_memo_id` | varchar(50) | UNI | YES |
-| `qbo_sync_token` | varchar(20) |  | YES |
-| `qbo_doc_number` | varchar(100) |  | YES |
-| `qbo_total_amt` | decimal(15,2) |  | YES |
-| `qbo_balance` | decimal(15,2) |  | YES |
-| `qbo_status` | varchar(30) |  | YES |
-| `qbo_currency` | varchar(3) |  | YES |
-| `qbo_exchange_rate` | decimal(10,6) |  | YES |
-| `qbo_item_type_used` | varchar(60) |  | YES |
-| `ff_credit_note_snapshot_total` | decimal(15,2) |  | YES |
-| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') | MUL | NO |
-| `push_error` | text |  | YES |
-| `pushed_at` | datetime | MUL | YES |
-| `last_synced_at` | datetime |  | YES |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-
 ## `acc_qbo_credit_application_map`
 
 | Column | Type | Key | Nullable |
@@ -1487,65 +1464,27 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
-## `acc_qbo_refund_receipt_map`
+## `acc_qbo_credit_memo_map`
 
 | Column | Type | Key | Nullable |
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `ff_lease_id` | int unsigned | UNI | NO |
-| `ff_customer_id_snapshot` | int unsigned |  | YES |
-| `ff_contract_number_snapshot` | varchar(100) |  | YES |
-| `qbo_refund_receipt_id` | varchar(50) | UNI | YES |
+| `ff_credit_note_id` | int unsigned | UNI | NO |
+| `qbo_credit_memo_id` | varchar(50) | UNI | YES |
 | `qbo_sync_token` | varchar(20) |  | YES |
 | `qbo_doc_number` | varchar(100) |  | YES |
 | `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_balance` | decimal(15,2) |  | YES |
+| `qbo_status` | varchar(30) |  | YES |
 | `qbo_currency` | varchar(3) |  | YES |
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
-| `qbo_txn_date` | date |  | YES |
-| `qbo_deposit_account_id` | varchar(50) |  | YES |
-| `qbo_payment_method_id` | varchar(50) |  | YES |
-| `ff_refund_amount_snapshot` | decimal(15,2) |  | YES |
-| `push_status` | enum('pending','pushed','failed','skipped_by_mode','failed_preflight','failed_preflight_field_too_long') | MUL | NO |
+| `qbo_item_type_used` | varchar(60) |  | YES |
+| `ff_credit_note_snapshot_total` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
 | `last_synced_at` | datetime |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-
-## `acc_qbo_tax_rate_map`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `ff_tax_component` | enum('gst','pst','hst') | UNI | NO |
-| `qbo_tax_rate_id` | varchar(50) |  | YES |
-| `qbo_tax_rate_name` | varchar(255) |  | YES |
-| `qbo_tax_percent` | decimal(7,4) |  | YES |
-| `mapping_status` | enum('mapped','unmapped') | MUL | NO |
-| `notes` | varchar(500) |  | YES |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-
-## `acc_qbo_historical_pull_runs`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `realm_id` | varchar(64) | MUL | NO |
-| `mode` | enum('dry_run','live') |  | NO |
-| `phase` | varchar(20) |  | NO |
-| `status` | enum('pending','running','paused','completed','failed','stopped_gate') |  | NO |
-| `entity_counts` | json |  | YES |
-| `checkpoints` | json |  | YES |
-| `ar_drift_before` | decimal(15,2) |  | YES |
-| `ar_drift_after` | decimal(15,2) |  | YES |
-| `remediation_status` | enum('not_run','detected','reported','approved','posted','stopped') |  | NO |
-| `remediation_plan` | json |  | YES |
-| `error_message` | text |  | YES |
-| `started_by` | int unsigned | MUL | YES |
-| `started_at` | datetime |  | YES |
-| `finished_at` | datetime |  | YES |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `acc_qbo_customer_map`
@@ -1597,6 +1536,47 @@ _66 tables._
 | `resolution_note` | text |  | YES |
 | `realm_id` | varchar(50) |  | NO |
 | `environment` | enum('sandbox','production') |  | NO |
+
+## `acc_qbo_fixed_asset_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_fixed_asset_id` | int unsigned | UNI | NO |
+| `qbo_asset_account_id` | varchar(50) |  | YES |
+| `qbo_accum_depr_account_id` | varchar(50) |  | YES |
+| `qbo_depr_expense_account_id` | varchar(50) |  | YES |
+| `ff_acquisition_cost_snapshot` | decimal(15,2) |  | YES |
+| `ff_accumulated_depreciation_snapshot` | decimal(15,2) |  | YES |
+| `ff_net_book_value_snapshot` | decimal(15,2) |  | YES |
+| `ff_status_snapshot` | enum('active','fully_depreciated','disposed','impaired') |  | YES |
+| `last_je_synced_at` | datetime |  | YES |
+| `sync_status` | enum('pending','synced','drift','not_applicable') | MUL | NO |
+| `notes` | text |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_historical_pull_runs`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `realm_id` | varchar(64) | MUL | NO |
+| `mode` | enum('dry_run','live') |  | NO |
+| `phase` | varchar(20) |  | NO |
+| `status` | enum('pending','running','paused','completed','failed','stopped_gate') |  | NO |
+| `entity_counts` | json |  | YES |
+| `checkpoints` | json |  | YES |
+| `ar_drift_before` | decimal(15,2) |  | YES |
+| `ar_drift_after` | decimal(15,2) |  | YES |
+| `remediation_status` | enum('not_run','detected','reported','approved','posted','stopped') |  | NO |
+| `remediation_plan` | json |  | YES |
+| `error_message` | text |  | YES |
+| `started_by` | int unsigned | MUL | YES |
+| `started_at` | datetime |  | YES |
+| `finished_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `acc_qbo_invoice_map`
 
@@ -1717,6 +1697,31 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `acc_qbo_refund_receipt_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_lease_id` | int unsigned | UNI | NO |
+| `ff_customer_id_snapshot` | int unsigned |  | YES |
+| `ff_contract_number_snapshot` | varchar(100) |  | YES |
+| `qbo_refund_receipt_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_doc_number` | varchar(100) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_exchange_rate` | decimal(10,6) |  | YES |
+| `qbo_txn_date` | date |  | YES |
+| `qbo_deposit_account_id` | varchar(50) |  | YES |
+| `qbo_payment_method_id` | varchar(50) |  | YES |
+| `ff_refund_amount_snapshot` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','failed','skipped_by_mode','failed_preflight','failed_preflight_field_too_long') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `acc_qbo_sync_log`
 
 | Column | Type | Key | Nullable |
@@ -1788,6 +1793,20 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `created_by_user_id` | int unsigned | MUL | YES |
+
+## `acc_qbo_tax_rate_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_tax_component` | enum('gst','pst','hst') | UNI | NO |
+| `qbo_tax_rate_id` | varchar(50) |  | YES |
+| `qbo_tax_rate_name` | varchar(255) |  | YES |
+| `qbo_tax_percent` | decimal(7,4) |  | YES |
+| `mapping_status` | enum('mapped','unmapped') | MUL | NO |
+| `notes` | varchar(500) |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `acc_qbo_vendor_map`
 

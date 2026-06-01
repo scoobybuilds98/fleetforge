@@ -1562,6 +1562,8 @@ FF is canonical. QBO doesn't have a full fixed-asset module (Plus tier has limit
 - Impairment JEs push as standard JE — same auto-enqueue path from `FixedAssetService::impair`.
 - Asset records themselves (cost, accumulated depreciation, useful life, etc.) DON'T sync — they live only in FF.
 
+> **Operator-directed addendum 2026-06-01 (S-QBO-FA-MAP):** a per-asset REFERENCE table `acc_qbo_fixed_asset_map` was added at operator request (reverses the S-QBO-22 D-QBO-22-3 "no FA table" sub-decision). It is NOT a push-map to a QBO entity — there is no QBO FixedAsset entity. Each row tracks one FF asset's resolved QBO GL-account refs (asset cost / accumulated depreciation / depreciation expense, via `acc_qbo_account_map`) + cost/accum-depr/NBV/status snapshots + a `sync_status` (`synced` = all three GL accounts mapped so the asset's JEs can reach QBO; `pending` = plumbing incomplete). Maintained by `lib/QboPushers/FixedAssetMapSync.php` (`sync()` / `syncOne()`), triggerable via `api/v1/quickbooks/fixed_asset_map_sync.php` + a "Refresh FA reference map" button on `/quickbooks/journal_entries`. The depreciation/disposal/impairment JEs themselves still push through `acc_qbo_journal_entry_map` (S-QBO-22), unchanged.
+
 This is because FF has CCA Schedule 8 continuity (§23.3 of accounting spec) which QBO can't represent. The accountant pulls CCA data from FF; QBO sees only the book depreciation JEs.
 
 **Source-type taxonomy** (acc_journal_entries.source_type ENUM, post-S-QBO-22):

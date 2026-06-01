@@ -1423,6 +1423,26 @@ CREATE TABLE `acc_qbo_customer_map` (
   CONSTRAINT `fk_qbo_cust_map_ff` FOREIGN KEY (`ff_customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_qbo_cust_map_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `acc_qbo_fixed_asset_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_fixed_asset_id` int unsigned NOT NULL COMMENT 'acc_fixed_assets.id — FF asset this reference row tracks. FF-origin only (spec §8.13: assets stay FF-canonical).',
+  `qbo_asset_account_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Account.Id for the asset-cost account, resolved via acc_qbo_account_map from acc_fixed_assets.asset_account_id. NULL until that GL account is mapped.',
+  `qbo_accum_depr_account_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Account.Id for the accumulated-depreciation account (from accum_depr_account_id).',
+  `qbo_depr_expense_account_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Account.Id for the depreciation-expense account (from depr_expense_account_id).',
+  `ff_acquisition_cost_snapshot` decimal(15,2) DEFAULT NULL COMMENT 'acc_fixed_assets.acquisition_cost snapshot at last sync — FA-level drift baseline.',
+  `ff_accumulated_depreciation_snapshot` decimal(15,2) DEFAULT NULL COMMENT 'acc_fixed_assets.accumulated_depreciation snapshot at last sync.',
+  `ff_net_book_value_snapshot` decimal(15,2) DEFAULT NULL COMMENT 'acc_fixed_assets.net_book_value snapshot at last sync.',
+  `ff_status_snapshot` enum('active','fully_depreciated','disposed','impaired') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'acc_fixed_assets.status snapshot at last sync.',
+  `last_je_synced_at` datetime DEFAULT NULL COMMENT 'Timestamp of the most recent depreciation/disposal/impairment JE that synced to QBO for this asset (via acc_qbo_journal_entry_map).',
+  `sync_status` enum('pending','synced','drift','not_applicable') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'pending=accounts not yet mapped / no JE synced; synced=accounts mapped + JEs flowing; drift=snapshot mismatch flagged; not_applicable=asset has no QBO-relevant activity.',
+  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Operator/forensic notes.',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_fixed_asset` (`ff_fixed_asset_id`) COMMENT 'One reference row per FF fixed asset.',
+  KEY `idx_sync_status` (`sync_status`),
+  CONSTRAINT `fk_qbo_fa_map_ff` FOREIGN KEY (`ff_fixed_asset_id`) REFERENCES `acc_fixed_assets` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Operator-directed S-QBO-FA-MAP 2026-06-01: per-FF-asset reference/tracking row (NOT a QBO-entity push-map — QBO has no FixedAsset entity per spec §8.13). Tracks the asset''s QBO GL-account refs + cost/depr snapshots + sync_status. Reverses D-QBO-22-3 no-table sub-decision.';
 CREATE TABLE `acc_qbo_invoice_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_invoice_id` int unsigned NOT NULL COMMENT 'NOT NULL: invoices originate in FF only in S-QBO-11. QBO-authored invoices (D-CPA-4) handled in S-QBO-26.',

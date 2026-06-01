@@ -131,6 +131,18 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
                 <div class="text-xs text-secondary">% synced</div>
                 <div class="font-mono text-lg" x-text="(kpis.fa_total > 0 ? Math.round((kpis.fa_pushed / kpis.fa_total) * 100) : 0) + '%'">0%</div>
             </div>
+            <?php if ($canEditCredentials): ?>
+            <!-- S-QBO-FA-MAP: refresh the per-asset QBO reference map
+                 (acc_qbo_fixed_asset_map) — resolves each asset's QBO GL-account
+                 refs + cost/depr snapshots + sync_status. -->
+            <div style="border-left:1px solid #e2e8f0;padding-left:18px;" x-data="qboFaMapSync()">
+                <button class="btn btn-secondary btn-xs" @click="run()" :disabled="running">
+                    <span x-show="!running">Refresh FA reference map</span>
+                    <span x-show="running" x-cloak>Syncing…</span>
+                </button>
+                <div class="text-xs text-secondary" style="margin-top:4px;" x-show="result" x-cloak x-text="result"></div>
+            </div>
+            <?php endif; ?>
         </div>
         <div style="display:flex;gap:18px;align-items:center;border-left:1px solid #e2e8f0;padding-left:24px;">
             <div class="text-sm text-secondary" style="font-weight:600;">Tax Remittance JEs</div>
@@ -368,6 +380,31 @@ function qboJournalEntriesAdmin(canEdit) {
 
         formatTs(ts) { return ts ? ts.replace('T', ' ').substring(0, 16) : '—'; },
         truncate(s, n) { if (!s) return ''; return s.length > n ? s.substring(0, n) + '…' : s; },
+    };
+}
+
+// S-QBO-FA-MAP: refresh acc_qbo_fixed_asset_map (per-asset QBO reference rows).
+function qboFaMapSync() {
+    return {
+        running: false,
+        result: '',
+        async run() {
+            this.running = true;
+            this.result = '';
+            try {
+                const j = await FF_Api.post('<?= base_url('api/v1/quickbooks/fixed_asset_map_sync') ?>', {});
+                if (j && j.success) {
+                    const r = j.data || j;
+                    this.result = (r.total ?? 0) + ' assets · ' + (r.synced ?? 0) + ' synced · ' + (r.pending ?? 0) + ' pending';
+                } else {
+                    this.result = 'Failed: ' + ((j && j.error && j.error.message) || 'error');
+                }
+            } catch (e) {
+                this.result = 'Failed: ' + (e.message || e);
+            } finally {
+                this.running = false;
+            }
+        },
     };
 }
 </script>
