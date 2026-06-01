@@ -384,6 +384,49 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 
     <!-- ============================================================
+         CARD 3.5 — QBO Payments Configuration (F11)
+         ============================================================
+         Exposes the quickbooks.payments.* URL/TTL keys (seeded by
+         S-QBO-15, previously only editable via DB). The master
+         payments_enabled toggle lives in Master Controls above.
+         Gated on edit_credentials (operator config, not the master
+         kill-switch). D-QBO-PAYMENTS-SETTINGS-UI-1.
+         ============================================================ -->
+    <?php if (can('quickbooks', 'edit_credentials')): ?>
+    <div class="card" style="padding:20px;margin-bottom:16px;">
+        <h3 class="h6" style="margin:0 0 4px;">QBO Payments Configuration</h3>
+        <p class="text-secondary text-sm" style="margin:0 0 14px;">
+            Redirect paths + URL lifetime for the customer-portal "Pay Online" hosted page (S-QBO-15).
+            The master on/off switch is <strong>QBO Payments</strong> in Master Controls above.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:14px;max-width:520px;">
+            <div>
+                <label class="form-label">Success redirect URL</label>
+                <input type="text" class="form-control" x-model="payments.success_url"
+                       placeholder="portal/payments/payment_success">
+            </div>
+            <div>
+                <label class="form-label">Cancel redirect URL</label>
+                <input type="text" class="form-control" x-model="payments.cancel_url"
+                       placeholder="portal/payments/payment_cancel">
+            </div>
+            <div>
+                <label class="form-label">Hosted-page URL lifetime (minutes)</label>
+                <input type="number" class="form-control" x-model="payments.url_ttl_minutes"
+                       min="1" max="1440" step="1" style="max-width:160px;">
+                <p class="text-secondary text-sm" style="margin:4px 0 0;">1–1440. After this, a generated payment URL expires.</p>
+            </div>
+        </div>
+        <div style="margin-top:18px;">
+            <button class="btn btn-primary btn-sm" @click="savePaymentsConfig()" :disabled="savingPayments">
+                <span x-show="!savingPayments">Save Payments Config</span>
+                <span x-show="savingPayments" x-cloak>Saving…</span>
+            </button>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- ============================================================
          CARD 4 — Sync Modes (read-only entity-by-entity)
          ============================================================
          S-QBO-22 / D-QBO-22-3 — surfaces the per-entity sync_mode.*
@@ -484,6 +527,14 @@ function qboSettings() {
             payments_enabled: <?= ($qbo['payments_enabled'] ?? '0') === '1' ? 'true' : 'false' ?>,
         },
 
+        // F11 — QBO Payments config (URL/TTL knobs).
+        savingPayments: false,
+        payments: {
+            success_url:     '<?= e($qbo['payments.success_url'] ?? 'portal/payments/payment_success') ?>',
+            cancel_url:      '<?= e($qbo['payments.cancel_url'] ?? 'portal/payments/payment_cancel') ?>',
+            url_ttl_minutes: '<?= e($qbo['payments.url_ttl_minutes'] ?? '30') ?>',
+        },
+
         // ── Lifecycle ─────────────────────────────────────────
         init() {
             // Surface query-string flash messages (e.g. from OAuth
@@ -573,6 +624,29 @@ function qboSettings() {
                 this.flash = { message: e.message || 'Network error', type: 'error' };
             } finally {
                 this.savingMasters = false;
+            }
+        },
+
+        // F11 — save the QBO Payments URL/TTL config.
+        async savePaymentsConfig() {
+            this.savingPayments = true;
+            try {
+                const payload = {
+                    success_url:     (this.payments.success_url || '').trim(),
+                    cancel_url:      (this.payments.cancel_url || '').trim(),
+                    url_ttl_minutes: parseInt(this.payments.url_ttl_minutes, 10) || 30,
+                };
+                const r = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/save_payments_config.php'), payload);
+                if (r.success) {
+                    this.flash = { message: 'Payments config saved.', type: 'success' };
+                } else {
+                    const msg = (r.error && (r.error.message || (r.error.fields && Object.values(r.error.fields).join(' ')))) || 'Save failed.';
+                    this.flash = { message: msg, type: 'error' };
+                }
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.savingPayments = false;
             }
         },
     };
