@@ -117,6 +117,10 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
+<?php // F17: QBO sync hint — this asset's depreciation/disposal/impairment JEs enqueue for QBO push.
+$qboFaNote = 'fixed-asset';
+require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
+
 <?php if ($parentSummary): ?>
 <div class="card" style="padding:12px 16px;margin-bottom:14px;background:#eef2ff;border:1px solid #6366f1;color:#3730a3;font-size:0.8125rem;">
     <strong>Part of:</strong>

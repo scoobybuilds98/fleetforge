@@ -51,6 +51,10 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
+<?php // F17: QBO sync hint — impairment JEs enqueue for QBO push on posting.
+$qboFaNote = 'impairment';
+require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
+
 <div x-data="impairmentWorkflow(<?= (int) $fiscalYear ?>)" x-init="init()">
 
     <!-- Fiscal year + run controls -->

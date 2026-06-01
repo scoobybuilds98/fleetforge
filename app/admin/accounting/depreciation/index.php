@@ -67,6 +67,10 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
+<?php // F17: QBO sync hint — depreciation JEs enqueue for QBO push on posting.
+$qboFaNote = 'depreciation';
+require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
+
 <!-- TILES-1: each tile dispatches `ff-depr-filter` to toggle filterStatus -->
 <div class="stat-grid" style="margin-bottom:24px;">
     <div class="stat-card stat-card--blue" style="cursor:pointer"
