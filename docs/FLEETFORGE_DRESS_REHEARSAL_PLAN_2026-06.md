@@ -19,10 +19,26 @@ before the real production cutover (S-QBO-28/29/30).
 > seeded 6 equipment templates, 25 equipment units, 12 BC trucking customers,
 > 4 vendors, 6 leases (varied lifecycle), 14 invoices, 4 payments, 3 bills.
 > FF data verified coherent (all invoices reconcile, no $0 rates, 0 orphan FKs,
-> Path-B outstanding = $7,937.71). **NO QBO sync performed** —
-> `quickbooks.sync_enabled='0'` throughout, zero sandbox contact. **PART 2**
-> (sync FF→sandbox realm `9341457119548719`) is **S-DRESS-REHEARSAL-SYNC**,
-> still pending — the QBO token needs a refresh first (see §7).
+> Path-B outstanding = $7,937.71).
+
+> ✅ **PART 2 EXECUTED — 2026-06-02 (S-DRESS-REHEARSAL-SYNC). DRESS REHEARSAL
+> COMPLETE.** Pushed the part-1 data FF→QBO sandbox realm `9341457119548719`
+> end-to-end: **12 customers + 4 vendors + 14 invoices + 3 bills + 4 payments
+> pushed, 0 failures** (38 HTTP-2xx push rows). Reference data pulled + mapped
+> (critical accounts AR 1030 / Sales-Rev 4122 / AP 2010 mapped; tax override
+> 'NON'; items base_rental + gps matched). Entity-sync-only — no GL/JE pushed.
+> `sync_enabled` restored to '0'. **Three findings surfaced for the real
+> cutover:** (1) `demo_wipe.php` does NOT truncate the `acc_qbo_*_map` tables —
+> stale maps from prior sessions collided with the reseeded ids and required a
+> full FF-side map reset before pushing (operator-approved); a real cutover wipe
+> should clear the map tables too. (2) `InvoiceEnqueuer` gate-0 only pushes
+> status='sent' invoices — already-'paid' invoices (sent+paid pre-sync) need a
+> replay-as-sent or the historical-backfill path (S-QBO-27). (3) Payments need
+> an FF account mapped to QBO **Undeposited Funds** — FF's chart has no analog
+> (D-QBO-VALIDATOR-3); a deposit-account decision is required before live
+> payment sync. Pushing FF Canadian-tax invoices to the **US** sandbox produces
+> expected `amount_drift` (= the GST+PST portion) under TaxCodeRef='NON'; a real
+> Canadian QBO company would map GST/PST and show zero drift.
 
 ---
 
