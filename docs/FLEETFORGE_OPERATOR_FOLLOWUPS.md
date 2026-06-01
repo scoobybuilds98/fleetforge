@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-06-01 via S-QBO-24-GL-BALANCE-FOLLOWUP — **closed F23** (GL-account-balance drift check added to DriftChecker; gated default-off, enable at cutover; NO migration; NEW _smoke_qbo_gl_balance_drift 8/8). Prior same-day: S-QBO-CREDIT-APP-UNAPPLY — **closed F27** (credit-application un-apply: reversal service + unapply.php + pushVoid + UI; migration 85→86; NEW _smoke_qbo_credit_app_unapply 16/16). Prior same-day: S-QBO-SHOW-PANEL-PAYDOWN — **closed F8** (shared QuickBooks Sync rich panel partial wired into bills/payments/ap-payments/journal-entries/credit_notes show pages; NEW _smoke_qbo_show_panels 8/8). Prior same-day: S-QBO-PAYDOWN-NAV-VENDOR-UI — **closed F21** (Bank Accounts nav child added to config/navigation.php; 6 nav smokes 18→19) + **closed F10** (vendor currency selector added to create/edit forms + show display). Prior 2026-06-01 ships: S-QBO-27 (Historical Backfill machinery — surfaced F29 live-run follow-up) + S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 + F27).
+**Last updated:** 2026-06-01 via S-CLAUDE-CODE-REFERENCE-D131-BACKFILL — **closed F18** (backfilled the 6 missing D131 history bullets for S-QBO-14/15/18/19/20/21; docs-only). Prior same-day: S-QBO-24-GL-BALANCE-FOLLOWUP — **closed F23** (GL-account-balance drift check added to DriftChecker; gated default-off, enable at cutover; NO migration; NEW _smoke_qbo_gl_balance_drift 8/8). Prior same-day: S-QBO-CREDIT-APP-UNAPPLY — **closed F27** (credit-application un-apply: reversal service + unapply.php + pushVoid + UI; migration 85→86; NEW _smoke_qbo_credit_app_unapply 16/16). Prior same-day: S-QBO-SHOW-PANEL-PAYDOWN — **closed F8** (shared QuickBooks Sync rich panel partial wired into bills/payments/ap-payments/journal-entries/credit_notes show pages; NEW _smoke_qbo_show_panels 8/8). Prior same-day: S-QBO-PAYDOWN-NAV-VENDOR-UI — **closed F21** (Bank Accounts nav child added to config/navigation.php; 6 nav smokes 18→19) + **closed F10** (vendor currency selector added to create/edit forms + show display). Prior 2026-06-01 ships: S-QBO-27 (Historical Backfill machinery — surfaced F29 live-run follow-up) + S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 + F27).
 
 ---
 
@@ -279,7 +279,11 @@ The umbrella paydown (F5 payment / F6 bill_payment / F13 JE / F20 credit_memo up
 
 ---
 
-### F18 — CLAUDE_CODE_REFERENCE D131 history paragraph backfill
+### F18 — CLAUDE_CODE_REFERENCE D131 history paragraph backfill ✅ CLOSED 2026-06-01
+
+**Closed by:** S-CLAUDE-CODE-REFERENCE-D131-BACKFILL (2026-06-01). Added the 6 missing D131 history bullets for S-QBO-14 / 15 / 18 / 19 / 20 / 21 to `docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md` (the gap the S-QBO-22 entry flagged), each indexing the smoke that session added + its original sub-check count (with the current count noted where later update/void slices extended it). Docs-only — NO code/schema/UI change.
+
+**Original report (preserved):**
 
 **Surfaced by:** S-QBO-22 post-ship audit (2026-05-29) — operator-asked "is every doc updated?"
 **Affects:** documentation drift in `docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md` D131 history paragraph (line 2672)
