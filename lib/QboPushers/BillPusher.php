@@ -650,21 +650,11 @@ class BillPusher
         }
         $payload['Line'] = $payloadLines;
 
-        // 5. TxnTaxDetail header per D-QBO-CORE-6 tax-override pattern.
-        //    TotalTax = bcmath(gst+pst+hst). QBO accepts this when each
-        //    line carries the NON TaxCodeRef (no server-side recompute).
-        $taxTotal = bcadd(
-            bcadd(
-                (string) ($ff['tax_gst_amount'] ?? '0.00'),
-                (string) ($ff['tax_pst_amount'] ?? '0.00'),
-                2
-            ),
-            (string) ($ff['tax_hst_amount'] ?? '0.00'),
-            2
-        );
-        $payload['TxnTaxDetail'] = [
-            'TotalTax' => (float) $taxTotal,
-        ];
+        // 5. TxnTaxDetail header. Default (tax_mode='override') = the proven
+        //    D-QBO-CORE-6 pattern (TotalTax = bcmath(gst+pst+hst); each line
+        //    carries NON). The opt-in per-rate ITC path (F9 / D-QBO-BILL-ITC-1)
+        //    is built in buildBillTaxDetail() and gated default-off.
+        $payload['TxnTaxDetail'] = self::buildBillTaxDetail($ff);
 
         // 6. PrivateNote — JSON audit trail for QBO-side review per
         //    D-QBO-11-6 pattern (mirror for bills). Includes the FF
@@ -672,6 +662,82 @@ class BillPusher
         $payload['PrivateNote'] = self::buildPrivateNoteJson($ff);
 
         return $payload;
+    }
+
+    /**
+     * Build the bill's TxnTaxDetail (F9 / D-QBO-BILL-ITC-1). GATED:
+     *
+     *   - tax_mode='override' (DEFAULT): returns the exact proven shape
+     *     ['TotalTax' => bcmath(gst+pst+hst)] — byte-identical to pre-F9, so the
+     *     working bill push is completely untouched.
+     *
+     *   - tax_mode='per_rate': emits TxnTaxDetail.TaxLine[] per NON-ZERO FF tax
+     *     component that has a mapped QBO TaxRate (spec §8.8 — exposes the
+     *     recoverable GST/HST ITC as a QBO tax-rate line). If ANY non-zero
+     *     component is unmapped, FALLS BACK to override — never ships a partial
+     *     or incorrect tax detail.
+     *
+     * Public-static so the offline smoke exercises both modes without cURL.
+     */
+    public static function buildBillTaxDetail(array $ff): array
+    {
+        $components = [
+            'gst' => (string) ($ff['tax_gst_amount'] ?? '0.00'),
+            'pst' => (string) ($ff['tax_pst_amount'] ?? '0.00'),
+            'hst' => (string) ($ff['tax_hst_amount'] ?? '0.00'),
+        ];
+        $taxTotal = bcadd(bcadd($components['gst'], $components['pst'], 2), $components['hst'], 2);
+        $override = ['TotalTax' => (float) $taxTotal];
+
+        $mode = (string) settings_get('quickbooks.bill.tax_mode', 'override');
+        if ($mode !== 'per_rate') {
+            return $override;
+        }
+
+        // Per-rate: build a TaxLine for every non-zero, mapped component.
+        $taxLines = [];
+        foreach ($components as $component => $amount) {
+            if (bccomp($amount, '0', 2) === 0) {
+                continue; // zero component → no tax line
+            }
+            $rateId = self::qboTaxRateId($component);
+            if ($rateId === null) {
+                // A non-zero component with no mapped QBO TaxRate → cannot emit a
+                // correct per-rate detail. Fall back to the safe override shape.
+                error_log("[BillPusher] tax_mode=per_rate but FF '{$component}' tax (\${$amount}) has no mapped QBO TaxRate — falling back to override for bill #" . ($ff['id'] ?? '?') . ".");
+                return $override;
+            }
+            $taxLines[] = [
+                'Amount'        => (float) $amount,
+                'DetailType'    => 'TaxLineDetail',
+                'TaxLineDetail' => [
+                    'TaxRateRef'  => ['value' => $rateId],
+                    'PercentBased'=> true,
+                ],
+            ];
+        }
+
+        if ($taxLines === []) {
+            return $override; // no taxable components → plain TotalTax
+        }
+        return [
+            'TotalTax' => (float) $taxTotal,
+            'TaxLine'  => $taxLines,
+        ];
+    }
+
+    /**
+     * Resolve the mapped QBO TaxRate.Id for an FF tax component (gst/pst/hst),
+     * or null when unmapped. Operator-configured via acc_qbo_tax_rate_map (F9).
+     */
+    public static function qboTaxRateId(string $component): ?string
+    {
+        $row = db_row(
+            "SELECT qbo_tax_rate_id FROM acc_qbo_tax_rate_map
+              WHERE ff_tax_component = ? AND mapping_status = 'mapped' AND qbo_tax_rate_id IS NOT NULL",
+            [$component]
+        );
+        return $row && $row['qbo_tax_rate_id'] !== '' ? (string) $row['qbo_tax_rate_id'] : null;
     }
 
     /**

@@ -1512,6 +1512,20 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `acc_qbo_tax_rate_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_tax_component` | enum('gst','pst','hst') | UNI | NO |
+| `qbo_tax_rate_id` | varchar(50) |  | YES |
+| `qbo_tax_rate_name` | varchar(255) |  | YES |
+| `qbo_tax_percent` | decimal(7,4) |  | YES |
+| `mapping_status` | enum('mapped','unmapped') | MUL | NO |
+| `notes` | varchar(500) |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `acc_qbo_historical_pull_runs`
 
 | Column | Type | Key | Nullable |

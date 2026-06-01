@@ -1253,6 +1253,20 @@ CREATE TABLE `acc_qbo_refund_receipt_map` (
   KEY `idx_pushed_at` (`pushed_at`),
   CONSTRAINT `fk_qbo_refund_receipt_map_ff` FOREIGN KEY (`ff_lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-7 S-QBO-17 (CLOSES QBO-7): FF→QBO cash refund-receipt push state. One row per lease cash precharge refund; pushes as a QBO RefundReceipt entity. Mirrors acc_qbo_credit_memo_map shape with refund deltas (deposit account + payment method forensic cols).';
+CREATE TABLE `acc_qbo_tax_rate_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_tax_component` enum('gst','pst','hst') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'FF tax component this QBO TaxRate represents (the recoverable ITC rate for GST/HST; PST where applicable).',
+  `qbo_tax_rate_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit TaxRate.Id — operator-mapped (manual entry until the cutover TaxRate pull). NULL = unmapped.',
+  `qbo_tax_rate_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO TaxRate.Name snapshot for operator legibility.',
+  `qbo_tax_percent` decimal(7,4) DEFAULT NULL COMMENT 'QBO TaxRate.RateValue snapshot (e.g. 5.0000 for GST 5%).',
+  `mapping_status` enum('mapped','unmapped') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'unmapped' COMMENT 'mapped = qbo_tax_rate_id set + usable by the per_rate bill-tax path.',
+  `notes` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_tax_component` (`ff_tax_component`) COMMENT 'One QBO TaxRate mapping per FF tax component.',
+  KEY `idx_status` (`mapping_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F9 S-QBO-BILL-ITC-TAX-RATE: FF tax component → QBO TaxRate.Id for the opt-in per-rate bill-tax (ITC) emission. Default-off (quickbooks.bill.tax_mode=override).';
 CREATE TABLE `acc_qbo_historical_pull_runs` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `realm_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'QBO realm the pull targets — scopes checkpoints (D-QBO-27-2).',

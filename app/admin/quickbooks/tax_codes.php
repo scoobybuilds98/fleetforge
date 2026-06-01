@@ -539,4 +539,108 @@ function qboTaxCodeMapping() {
 }
 </script>
 
+<?php
+// ── F9: ITC tax-rate mapping section (S-QBO-BILL-ITC-TAX-RATE) ──────────────
+// Self-contained sibling component. Maps FF tax components (gst/pst/hst) → QBO
+// TaxRate.Ids + flips the bill tax-emission mode. Default-off: the proven
+// override path is untouched until tax_mode='per_rate' AND rates are mapped.
+$billTaxMode = (string) settings_get('quickbooks.bill.tax_mode', 'override');
+$rateRows = db_select("SELECT ff_tax_component, qbo_tax_rate_id, qbo_tax_rate_name, mapping_status FROM acc_qbo_tax_rate_map");
+$rateMap = ['gst' => ['id'=>'','name'=>''], 'pst' => ['id'=>'','name'=>''], 'hst' => ['id'=>'','name'=>'']];
+foreach ($rateRows as $rr) {
+    $rateMap[$rr['ff_tax_component']] = [
+        'id'   => (string) ($rr['qbo_tax_rate_id'] ?? ''),
+        'name' => (string) ($rr['qbo_tax_rate_name'] ?? ''),
+    ];
+}
+$canEditTaxRate = can('quickbooks', 'edit_credentials');
+?>
+<div x-data="qboTaxRateMapping()" style="margin-top:32px;max-width:880px;">
+    <div class="page-header">
+        <h2 class="h5" style="margin:0;">ITC Tax-Rate Mapping (bill push)</h2>
+        <div class="text-secondary text-sm" style="margin-top:4px;">
+            Optional per-rate bill tax. <strong>Default-off</strong> — bills push with the proven tax-override
+            pattern (every line <code>TaxCodeRef=NON</code> + header <code>TotalTax</code>). Switch to
+            <strong>per-rate</strong> to expose the recoverable GST/HST Input Tax Credit as a QBO tax-rate line
+            (spec §8.8). Map each component to its QBO <code>TaxRate.Id</code> first — per-rate falls back to
+            override on any unmapped non-zero component, so it can never ship a wrong tax detail.
+            The QBO TaxRate ids are confirmed against the live company at cutover (F9 live-verify).
+        </div>
+    </div>
+
+    <div x-show="flash.message" x-cloak :class="flash.type==='success'?'alert alert-success':'alert alert-danger'"
+         style="margin:14px 0;" x-text="flash.message"></div>
+
+    <div class="card" style="padding:18px 20px;">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
+            <label class="form-label" style="margin:0;">Bill tax mode:</label>
+            <select class="form-control" style="max-width:240px;" x-model="taxMode" :disabled="!canEdit">
+                <option value="override">override (proven; default)</option>
+                <option value="per_rate">per_rate (ITC tax lines)</option>
+            </select>
+            <span class="badge" :class="taxMode==='per_rate'?'badge-warning':'badge-secondary'"
+                  x-text="taxMode==='per_rate'?'PER-RATE (opt-in)':'OVERRIDE (safe)'"></span>
+        </div>
+
+        <table class="table" style="margin:0;">
+            <thead><tr><th>FF component</th><th>QBO TaxRate.Id</th><th>QBO TaxRate name</th><th>Status</th></tr></thead>
+            <tbody>
+                <template x-for="c in ['gst','pst','hst']" :key="c">
+                    <tr>
+                        <td class="font-mono" x-text="c.toUpperCase()"></td>
+                        <td><input type="text" class="form-control" style="max-width:200px;" x-model="rates[c].id" :disabled="!canEdit" placeholder="(unmapped)"></td>
+                        <td><input type="text" class="form-control" x-model="rates[c].name" :disabled="!canEdit" placeholder="e.g. GST 5% (ITC)"></td>
+                        <td>
+                            <span class="badge" :class="(rates[c].id && rates[c].id.trim()) ? 'badge-success' : 'badge-secondary'"
+                                  x-text="(rates[c].id && rates[c].id.trim()) ? 'mapped' : 'unmapped'"></span>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+
+        <template x-if="canEdit">
+            <div style="margin-top:16px;">
+                <button class="btn btn-primary btn-sm" @click="save()" :disabled="saving">
+                    <span x-show="!saving">Save tax-rate mapping</span>
+                    <span x-show="saving" x-cloak>Saving…</span>
+                </button>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script>
+function qboTaxRateMapping() {
+    return {
+        canEdit: <?= $canEditTaxRate ? 'true' : 'false' ?>,
+        saving: false,
+        flash: { message: '', type: 'success' },
+        taxMode: '<?= e($billTaxMode) ?>',
+        rates: {
+            gst: { id: '<?= e($rateMap['gst']['id']) ?>', name: '<?= e($rateMap['gst']['name']) ?>' },
+            pst: { id: '<?= e($rateMap['pst']['id']) ?>', name: '<?= e($rateMap['pst']['name']) ?>' },
+            hst: { id: '<?= e($rateMap['hst']['id']) ?>', name: '<?= e($rateMap['hst']['name']) ?>' },
+        },
+        async save() {
+            this.saving = true; this.flash = { message: '', type: 'success' };
+            try {
+                const payload = {
+                    tax_mode: this.taxMode,
+                    components: {
+                        gst: { id: (this.rates.gst.id||'').trim(), name: (this.rates.gst.name||'').trim() },
+                        pst: { id: (this.rates.pst.id||'').trim(), name: (this.rates.pst.name||'').trim() },
+                        hst: { id: (this.rates.hst.id||'').trim(), name: (this.rates.hst.name||'').trim() },
+                    },
+                };
+                const r = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/save_tax_rate_map.php'), payload);
+                if (r.success) { this.flash = { message: 'Tax-rate mapping saved (mode: ' + ((r.data && r.data.tax_mode) || this.taxMode) + ').', type: 'success' }; }
+                else { this.flash = { message: (r.error && r.error.message) || 'Save failed.', type: 'error' }; }
+            } catch (e) { this.flash = { message: e.message || 'Network error', type: 'error' }; }
+            finally { this.saving = false; }
+        },
+    };
+}
+</script>
+
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>
