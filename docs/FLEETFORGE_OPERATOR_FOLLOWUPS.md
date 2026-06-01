@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-06-01 via S-QBO-27 (Historical Backfill MACHINERY — Phase QBO-13; orchestrator + checkpoint/resume + H5/H6 AR-drift detection, dry-run gated). New operator follow-up: **F29** (historical-pull live execution + QBO→FF business-row transform + H5/H6 GL remediation posting — all gated to the accountant-seeded sandbox at cutover). Prior 2026-06-01 ships: S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28 refund-tax verify) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 auto-apply + F27 un-apply).
+**Last updated:** 2026-06-01 via S-QBO-PAYDOWN-NAV-VENDOR-UI — **closed F21** (Bank Accounts nav child added to config/navigation.php; 6 nav smokes 18→19) + **closed F10** (vendor currency selector added to create/edit forms + show display). Prior 2026-06-01 ships: S-QBO-27 (Historical Backfill machinery — surfaced F29 live-run follow-up) + S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 + F27).
 
 ---
 
@@ -169,13 +169,10 @@ Each follows the 6-state badge + identifiers row + Push History table pattern fr
 
 ---
 
-### F10 — S-VENDOR-UI-CURRENCY-SELECTOR — admin UI vendor currency selector
+### F10 — S-VENDOR-UI-CURRENCY-SELECTOR — admin UI vendor currency selector ✅ CLOSED 2026-06-01
 
 **Surfaced by:** S-VENDOR-CURRENCY-COLUMN (2026-05-27) — D-VENDOR-CURRENCY-COLUMN-4
-**Affects:** operator workflow for setting per-vendor currency
-**Operator action:** queue a session to extend `app/admin/vendors/{create,edit}.php` Alpine forms with currency selector. Currently the API accepts `currency` ENUM input but admin UI form doesn't expose it.
-
-**Why deferred:** S-VENDOR-CURRENCY-COLUMN was scoped XS — column + Pusher read + API endpoints. UI extension was explicitly deferred. Operators can set currency via API call or DB UPDATE in the interim.
+**Closed by:** S-QBO-PAYDOWN-NAV-VENDOR-UI (2026-06-01). `app/admin/vendors/create.php` + `edit.php` Alpine forms now expose a Currency selector (CAD/USD) — added to the form markup, the `form` object init (create default 'CAD'; edit seeded from `$vendor['currency']`), and the submit payload. The create form notes "QBO locks vendor currency at creation"; the edit form notes a change only reaches QBO on a re-create (VendorPusher strips CurrencyRef from UPDATE payloads, per the existing update.php comment). `app/admin/vendors/show.php` gains a Currency display row. Backend (vendors.currency ENUM + VendorPusher CurrencyRef + API accept) already shipped S-VENDOR-CURRENCY-COLUMN — this was UI-only, no schema/API change.
 
 ---
 
@@ -331,7 +328,11 @@ The umbrella paydown (F5 payment / F6 bill_payment / F13 JE / F20 credit_memo up
 
 ---
 
-### F21 — `config/navigation.php` is MISSING the Bank Accounts QuickBooks child
+### F21 — `config/navigation.php` is MISSING the Bank Accounts QuickBooks child ✅ CLOSED 2026-06-01
+
+**Closed by:** S-QBO-PAYDOWN-NAV-VENDOR-UI (2026-06-01). Added the `Bank Accounts` child to `config/navigation.php` between Tax Codes and Items (icon `building-library`, url `/quickbooks/bank_accounts`) — matching the partial's position. The 6 nav-asserting smokes were bumped 18→19 with 'Bank Accounts' inserted into their `$expected`/`$expectedOrder` arrays after 'Tax Codes'. config/navigation.php (19 children) + includes/partials/quickbooks-nav.php (19) + the smokes now all agree. (Original counts in this entry — 15/16 — predate the Refund Receipts + Manual Sync additions; at close time both sources sit at 19.)
+
+**Original report (preserved):**
 
 **Surfaced by:** S-QBO-16 (2026-05-29) nav audit — caught while adding Credit Memos to the nav.
 **Affects:** the live admin sidebar may not render the "Bank Accounts" link (S-QBO-20's `/quickbooks/bank_accounts` page) depending on which nav source the layout reads.

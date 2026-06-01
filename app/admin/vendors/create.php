@@ -167,6 +167,24 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+        <!-- S-VENDOR-UI-CURRENCY-SELECTOR (F10): per-vendor currency. The
+             backend (vendors.currency ENUM) + VendorPusher CurrencyRef + API
+             shipped in S-VENDOR-CURRENCY-COLUMN; this exposes it in the form.
+             QBO locks vendor currency at creation, so it is effectively
+             immutable once the vendor is pushed (see edit form note). -->
+        <div class="form-row-2" style="margin-bottom:16px;">
+            <div>
+                <label class="form-label">Currency</label>
+                <select class="form-control" x-model="form.currency">
+                    <option value="CAD">CAD — Canadian Dollar</option>
+                    <option value="USD">USD — US Dollar</option>
+                </select>
+                <p class="text-secondary" style="margin:4px 0 0;font-size:0.8125rem;">
+                    QBO locks vendor currency at creation — set it correctly now.
+                </p>
+            </div>
+        </div>
+
         <!-- ── Specializations ───────────────────────────────────────────── -->
         <h3 style="font-size:0.875rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
                    color:var(--text-secondary);margin:24px 0 16px;">Specializations</h3>
@@ -251,6 +269,7 @@ function vendorCreate() {
             specializations: [],
             hourly_rate:     '',
             rating:          '',
+            currency:        'CAD',
             is_preferred:    false,
             notes:           '',
         },
@@ -285,6 +304,7 @@ function vendorCreate() {
                 specializations: this.form.specializations,
                 hourly_rate:     this.form.hourly_rate || null,
                 rating:          this.form.rating ? parseInt(this.form.rating) : null,
+                currency:        this.form.currency || 'CAD',
                 is_preferred:    this.form.is_preferred ? 1 : 0,
                 notes:           this.form.notes.trim() || null,
             };

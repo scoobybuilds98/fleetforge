@@ -266,6 +266,9 @@ require_once FF_ROOT . '/includes/header.php';
             <dt>Hourly Rate</dt>
             <dd class="font-mono"><?= $vendor['hourly_rate'] ? format_currency($vendor['hourly_rate']) . '/hr' : '—' ?></dd>
 
+            <dt>Currency</dt>
+            <dd class="font-mono"><?= e($vendor['currency'] ?? 'CAD') ?></dd>
+
             <dt>Rating</dt>
             <dd>
                 <?php if ($vendor['rating']): ?>

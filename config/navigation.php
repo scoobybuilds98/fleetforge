@@ -274,6 +274,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Bank Accounts',
+                'icon'   => 'building-library',
+                'url'    => '/quickbooks/bank_accounts',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Items',
                 'icon'   => 'cube',
                 'url'    => '/quickbooks/items',

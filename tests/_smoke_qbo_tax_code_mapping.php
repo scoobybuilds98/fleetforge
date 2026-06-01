@@ -463,13 +463,13 @@ if ($qbo === null) {
 } else {
     $children = $qbo['children'] ?? [];
     $labels = array_map(fn($c) => $c['label'] ?? '', $children);
-    if (count($children) !== 18) {
-        $c13Errors[] = 'expected 18 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
+    if (count($children) !== 19) {
+        $c13Errors[] = 'expected 19 QuickBooks children, got ' . count($children) . ' (' . implode(', ', $labels) . ')';
     }
     if (!in_array('Tax Codes', $labels, true)) {
         $c13Errors[] = "no 'Tax Codes' child in QuickBooks nav";
     }
-    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Manual Sync', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Credit Memos', 'Refund Receipts', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
+    $expectedOrder = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Manual Sync', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Bank Accounts', 'Items', 'Invoices', 'Credit Memos', 'Refund Receipts', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
     if ($labels !== $expectedOrder) {
         $c13Errors[] = 'nav order mismatch — got [' . implode(', ', $labels) . '], expected [' . implode(', ', $expectedOrder) . ']';
     }

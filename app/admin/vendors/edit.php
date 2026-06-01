@@ -71,6 +71,7 @@ $formSeed = [
     'specializations' => $existingSpecs,
     'hourly_rate'     => $vendor['hourly_rate']     ?? '',
     'rating'          => $vendor['rating']          ?? '',
+    'currency'        => $vendor['currency']        ?? 'CAD',
     'is_preferred'    => (bool) ($vendor['is_preferred'] ?? false),
     'notes'           => $vendor['notes']           ?? '',
 ];
@@ -214,6 +215,24 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+        <!-- S-VENDOR-UI-CURRENCY-SELECTOR (F10): per-vendor currency. Editable
+             FF-side (recorded for unlink/re-push correction scenarios), but
+             QBO locks vendor currency at creation — VendorPusher strips
+             CurrencyRef from UPDATE payloads, so a change here only reaches QBO
+             via a fresh re-create. -->
+        <div class="form-row-2" style="margin-bottom:16px;">
+            <div>
+                <label class="form-label">Currency</label>
+                <select class="form-control" x-model="form.currency">
+                    <option value="CAD">CAD — Canadian Dollar</option>
+                    <option value="USD">USD — US Dollar</option>
+                </select>
+                <p class="text-secondary" style="margin:4px 0 0;font-size:0.8125rem;">
+                    QBO locks vendor currency at creation; changing it here only takes effect on a re-create.
+                </p>
+            </div>
+        </div>
+
         <!-- ── Specializations ───────────────────────────────────────────── -->
         <h3 style="font-size:0.875rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
                    color:var(--text-secondary);margin:24px 0 16px;">Specializations</h3>
@@ -316,6 +335,7 @@ function vendorEdit() {
                 specializations: this.form.specializations,
                 hourly_rate:     this.form.hourly_rate || null,
                 rating:          this.form.rating ? parseInt(this.form.rating) : null,
+                currency:        this.form.currency || 'CAD',
                 is_preferred:    this.form.is_preferred ? 1 : 0,
                 notes:           this.form.notes.trim() || null,
             };
