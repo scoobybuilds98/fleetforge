@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-06-01 via S-QBO-PUSHVOID-TRIO (closed F7 — pushVoid for Payment/BillPayment/CreditMemo; every entity Pusher now does create+update+void; remaining QBO update-debt = ONLY the carved-out credit-memo apply→LinkedTxn F25, which needs a migration).
+**Last updated:** 2026-06-01 via S-QBO-CREDIT-MEMO-APPLY (closed F25 — credit-memo apply→LinkedTxn propagation; every QBO entity sync path — create/update/void/apply — now complete; QBO update-debt **fully paid down**). New operator follow-ups surfaced: **F26** (QBO auto-apply pre-req — must turn OFF before cutover) + **F27** (un-apply / void-after-apply path — deferred to a future session).
 
 ---
 
@@ -361,6 +361,53 @@ Runs nightly at 03:30 (after token refresh 02:00 + bank CDC 02:30) per spec §15
 **Operator action:** queue a follow-up to add the GL-account-balance drift check (spec §15.2 step 4 + §15.5 GL row) to DriftChecker: for each mapped `acc_qbo_account_map` row, compare the FF account running balance vs the live QBO `Account.CurrentBalance`; if `|delta| > $1.00` (configurable tolerance) → `category='balance_drift'` drift event.
 
 **Why deferred:** distinct sub-system from the 8 entity-map checks — it compares balances (not entity counts/totals), `acc_qbo_account_map` is Puller-only (accountant owns COA), and it needs a per-account live QBO balance API call. Only meaningful post-cutover (sync_enabled='1'). Keeps S-QBO-24 v1 focused on the entity-drift bulk.
+
+---
+
+### F25 — S-QBO-CREDIT-MEMO-APPLY-FOLLOWUP — credit-memo apply→LinkedTxn propagation ✅ CLOSED 2026-06-01
+
+**Surfaced by:** S-QBO-CREDIT-MEMO-UPDATE (2026-05-31) — carved out of F20 because the apply→LinkedTxn flow needed a migration + a new QBO entity (zero-dollar Payment) + an `apply.php` enqueue hook, which would have expanded the no-migration paydown's scope.
+
+**Closed by:** S-QBO-CREDIT-MEMO-APPLY (2026-06-01) — `CreditApplicationPusher::pushCreate` + `CreditApplicationEnqueuer::enqueue` + migration `202606010000_S-QBO-CREDIT-MEMO-APPLY.sql` (migrate 82→83; ALTER acc_qbo_sync_queue entity_type ENUM += 'credit_application'; CREATE acc_qbo_credit_application_map; seed `quickbooks.sync_mode.credit_application='sync'`). Post-commit `enqueue('create')` hook wired into `api/v1/credit_notes/apply.php`. Admin UI shares `app/admin/quickbooks/credit_memos.php` per CLASS 12 (new "Applications → QBO LinkedTxn" section + `api/v1/quickbooks/credit_applications/{list,retry}.php`). Smoke `_smoke_qbo_credit_application_push` 26/26 PASS; `_smoke_qbo_queue` C8 widened to assert `hasImplementation('credit_application','create')===true` + update/void===false. Locked as D-QBO-CREDIT-MEMO-APPLY-1/-2/-3/-4/-5.
+
+**Big-picture milestone:** every QBO entity sync path — create, update, void, AND apply — is now complete. QBO update-debt fully paid down.
+
+**Operator action:** none for F25 itself (CLOSED). See **F26** for the auto-apply pre-req that gates live cutover.
+
+**Carry-overs (new follow-ups surfaced by this session):**
+- **F26** — QBO "Automatically apply credits" setting must be OFF before cutover (gates live correctness)
+- **F27** — un-apply / void-after-apply path (forward-apply-only is v1 scope per D-QBO-CREDIT-MEMO-APPLY-4)
+
+---
+
+### F26 — QBO "Automatically apply credits" setting must be OFF before cutover 🔴 BLOCKING
+
+**Surfaced by:** S-QBO-CREDIT-MEMO-APPLY (2026-06-01) — D-QBO-CREDIT-MEMO-APPLY-3
+**Affects:** any FF credit application that propagates to QBO via `CreditApplicationPusher`. With auto-apply ON, QBO will auto-apply the CreditMemo to the Invoice the moment they share a CustomerRef, and our explicit zero-dollar Payment will then attempt a second application → double-application, corrupt AR ledger.
+**Operator action:**
+1. In QBO: Account & Settings → Advanced → Automation → **turn OFF "Automatically apply credits"** for the realm being connected (both sandbox + production)
+2. Verify in QBO UI that the toggle is OFF before flipping FF's `quickbooks.sync_enabled='1'` in S-QBO-30 cutover
+3. Run a test apply (create FF credit → apply to FF invoice → confirm a SINGLE QBO Payment row appears with TotalAmt=0 + 2 LinkedTxns; confirm the QBO Invoice's `Balance` decremented by exactly `amount_applied`, not 2×)
+
+**Why blocking:** QBO has no runtime API to disable auto-apply per-transaction. With the setting ON, our explicit apply Payment and QBO's implicit auto-apply both fire — there is no idempotency between them. Pre-cutover detection is not possible (sync_enabled='0' suppresses all writes), so this MUST be confirmed via operator-side QBO UI check before flipping the master kill switch.
+
+**Why NOT runtime-probed:** matches FF's pre-flight-as-doc pattern for all other QBO-side prerequisites (tax_override_code_id, sync_enabled, sync_mode). Adding a Preferences API probe would cost an HTTP call per apply push + a new endpoint-scope dependency, for a setting that operators only flip once at cutover.
+
+---
+
+### F27 — Credit-application un-apply / void-after-apply path 🟢 DEFERRED
+
+**Surfaced by:** S-QBO-CREDIT-MEMO-APPLY (2026-06-01) — D-QBO-CREDIT-MEMO-APPLY-4 (v1 scope = forward-apply only)
+**Affects:** any future flow that un-applies a credit from an invoice OR voids an already-applied credit. Today no FF endpoint un-applies (`credit_notes/void.php` voids the parent credit, not individual applications); `credit_note_applications` is append-only with no `status`/`deleted_at` column.
+
+**Operator action:** queue a follow-up session to:
+1. Add `status` + `deleted_at` columns to `credit_note_applications` (un-apply is a state transition + soft-delete pair)
+2. Build `api/v1/credit_notes/unapply.php` (reverses the 5 counters from `apply.php` + state-machine transition)
+3. Add `CreditApplicationPusher::pushVoid` (DELETE on the QBO Payment via QuickBooksClient + idempotency on `push_status='voided'`)
+4. Widen `CreditApplicationEnqueuer` gate-3 to accept `'void'` op
+5. Decide policy for void-the-parent-credit-while-applications-exist (cascade un-apply all? refuse to void?) — needs business decision
+
+**Why deferred:** no FF endpoint un-applies today, so there is no source-side trigger to propagate. v1 forward-apply (the only flow operators currently exercise) is correct + complete. Builds the path when un-apply becomes an actual user need rather than a speculative one.
 
 ---
 

@@ -856,6 +856,18 @@ $pusherToAdminPage = [
     'BillPaymentPusher' => 'bill_payments.php',
     'JournalEntryPusher' => 'journal_entries.php',
     'CreditMemoPusher'  => 'credit_memos.php',   // S-QBO-16
+    // S-QBO-CREDIT-MEMO-APPLY (closes F25): CreditApplicationPusher shares
+    // credit_memos.php — applications are operationally a sub-view of
+    // their parent credit memo (1 credit → N applications). The
+    // "Applications → QBO LinkedTxn" section in credit_memos.php is backed
+    // by api/v1/quickbooks/credit_applications/{list,retry}.php.
+    // D-QBO-CREDIT-MEMO-APPLY-5.
+    //
+    // NOTE: The intent of the original allowlist pattern (NULL = exempt)
+    // is unreachable via isset() above, so we map to the real shared
+    // surface file. That's also more honest: the UI does exist, just
+    // not at a dedicated /quickbooks/credit_applications.php.
+    'CreditApplicationPusher' => 'credit_memos.php', // S-QBO-CREDIT-MEMO-APPLY (shared surface)
     // Future: RefundReceiptPusher → refund_receipts.php (S-QBO-17)
 ];
 

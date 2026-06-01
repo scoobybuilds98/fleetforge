@@ -1463,6 +1463,30 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `acc_qbo_credit_application_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_credit_application_id` | int unsigned | UNI | NO |
+| `ff_credit_note_id_snapshot` | int unsigned | MUL | NO |
+| `ff_invoice_id_snapshot` | int unsigned |  | NO |
+| `qbo_payment_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_credit_memo_id_ref` | varchar(50) |  | YES |
+| `qbo_invoice_id_ref` | varchar(50) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_exchange_rate` | decimal(10,6) |  | YES |
+| `qbo_txn_date` | date |  | YES |
+| `amount_applied_snapshot` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','failed','skipped_by_mode','failed_preflight') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `acc_qbo_customer_map`
 
 | Column | Type | Key | Nullable |
@@ -1661,7 +1685,7 @@ _66 tables._
 | Column | Type | Key | Nullable |
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `entity_type` | enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code') | MUL | NO |
+| `entity_type` | enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code','credit_application') | MUL | NO |
 | `entity_id` | int unsigned |  | NO |
 | `operation` | enum('create','update','void','delete') |  | NO |
 | `status` | enum('queued','processing','completed','failed','skipped') | MUL | NO |

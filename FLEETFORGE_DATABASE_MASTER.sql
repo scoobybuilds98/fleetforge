@@ -1197,6 +1197,34 @@ CREATE TABLE `acc_qbo_credit_memo_map` (
   KEY `idx_pushed_at` (`pushed_at`),
   CONSTRAINT `fk_qbo_credit_memo_map_ff` FOREIGN KEY (`ff_credit_note_id`) REFERENCES `credit_notes` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-7 S-QBO-16: FF→QBO credit memo push state. Mirrors acc_qbo_invoice_map shape with credit-memo deltas (qbo_item_type_used forensic column for the SOURCE_TO_ITEM_TYPE resolution per D-QBO-16-1). sync_mode.credit_memo already seeded S-QBO-3.';
+CREATE TABLE `acc_qbo_credit_application_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_credit_application_id` int unsigned NOT NULL COMMENT 'credit_note_applications.id; one row per FF application; FK CASCADE',
+  `ff_credit_note_id_snapshot` int unsigned NOT NULL COMMENT 'credit_note_applications.credit_note_id snapshot — forensic trail; lets the row survive after FK CASCADE deletion of the application table is impossible (we cascade both)',
+  `ff_invoice_id_snapshot` int unsigned NOT NULL COMMENT 'credit_note_applications.invoice_id snapshot — forensic trail',
+  `qbo_payment_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit Payment.Id (zero-dollar Payment carrying 2 LinkedTxns); NULL until first successful push',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token',
+  `qbo_credit_memo_id_ref` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CreditMemo.Id referenced by Line[0].LinkedTxn[CreditMemo]',
+  `qbo_invoice_id_ref` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Invoice.Id referenced by Line[0].LinkedTxn[Invoice]',
+  `qbo_total_amt` decimal(15,2) DEFAULT NULL COMMENT 'QBO TotalAmt snapshot — always 0.00 for apply Payments (it is the LINE Amount that carries amount_applied, not the header)',
+  `qbo_currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CurrencyRef.value snapshot',
+  `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
+  `qbo_txn_date` date DEFAULT NULL COMMENT 'QBO TxnDate snapshot (mirrors FF credit_note_applications.applied_at)',
+  `amount_applied_snapshot` decimal(15,2) DEFAULT NULL COMMENT 'FF credit_note_applications.amount_applied snapshot at push time — drift baseline',
+  `push_status` enum('pending','pushed','failed','skipped_by_mode','failed_preflight') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Slimmer than credit_memo_map.push_status — apply has no soft-delete / no field_too_long / no currency-mismatch path (currencies are guaranteed equal by api/v1/credit_notes/apply.php D18 CURRENCY_MISMATCH gate). Reverse-apply (voided state) is a future-extension follow-up per D-QBO-CREDIT-MEMO-APPLY-4.',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_credit_application` (`ff_credit_application_id`) COMMENT 'One mapping row per FF application; enforces idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_payment_apply` (`qbo_payment_id`) COMMENT 'No two FF applications share a QBO Payment.Id; NULL-multi-OK per InnoDB',
+  KEY `idx_status` (`push_status`),
+  KEY `idx_pushed_at` (`pushed_at`),
+  KEY `idx_ff_credit_note` (`ff_credit_note_id_snapshot`) COMMENT 'List-by-parent-credit lookups for the credit_memos.php admin Applications section',
+  CONSTRAINT `fk_qbo_credit_application_map_ff` FOREIGN KEY (`ff_credit_application_id`) REFERENCES `credit_note_applications` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-QBO-CREDIT-MEMO-APPLY: FF→QBO credit-application push state. One row per credit_note_applications row; pushes as a zero-dollar QBO Payment carrying 2 LinkedTxns (CreditMemo + Invoice).';
 CREATE TABLE `acc_qbo_journal_entry_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_journal_entry_id` int unsigned NOT NULL COMMENT 'NOT NULL: JE pushes are FF-origin only in S-QBO-21 v1 (Phase QBO-10). QBO-authored JEs handled via S-QBO-26 manual sync or bank-CDC pull (§8.12 for bank-transaction-typed JEs).',
@@ -1450,7 +1478,7 @@ CREATE TABLE `acc_qbo_sync_log` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_qbo_sync_queue` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `entity_type` enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `entity_type` enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code','credit_application') COLLATE utf8mb4_unicode_ci NOT NULL,
   `entity_id` int unsigned NOT NULL,
   `operation` enum('create','update','void','delete') COLLATE utf8mb4_unicode_ci NOT NULL,
   `status` enum('queued','processing','completed','failed','skipped') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'queued',

@@ -294,4 +294,21 @@ db_transaction(function () use (
     ];
 });
 
+// S-QBO-CREDIT-MEMO-APPLY (closes F25): enqueue QBO credit-application push
+// after the apply transaction commits. Propagates the FF apply→QBO as a
+// zero-dollar Payment carrying 2 LinkedTxns (CreditMemo + Invoice). Mirrors
+// the post-commit enqueue pattern in credit_notes/create.php and void.php.
+// Best-effort per D-ENQUEUER-CONTRACT — never throws; sync_enabled='0'
+// default (D-CPA-5) makes this a silent no-op until live cutover.
+if (is_array($result) && !empty($result['application_id'])) {
+    try {
+        \FleetForge\QboPushers\CreditApplicationEnqueuer::enqueue(
+            (int) $result['application_id'],
+            'create'
+        );
+    } catch (\Throwable $e) {
+        error_log("credit_notes/apply.php: CreditApplicationEnqueuer threw despite best-effort discipline: " . $e->getMessage());
+    }
+}
+
 json_success($result, 201);

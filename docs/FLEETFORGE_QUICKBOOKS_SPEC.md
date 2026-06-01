@@ -1314,7 +1314,31 @@ Unknown source → `other` (defensive). The resolved item_type must have a mappe
 }
 ```
 
-**Application to invoice** (FF `api/v1/credit_notes/apply.php`): updates the QBO CreditMemo to link to the QBO Invoice via `LinkedTxn`.
+**Application to invoice** (FF `api/v1/credit_notes/apply.php`) ✅ SHIPPED 2026-06-01 via S-QBO-CREDIT-MEMO-APPLY (closes F25 — the LAST open QBO update-debt item; carved out of S-QBO-CREDIT-MEMO-UPDATE per D-QBO-CREDIT-MEMO-UPDATE-1). QBO does NOT model "apply a credit to an invoice" as a CreditMemo update — it is a ZERO-DOLLAR `Payment` entity carrying TWO `LinkedTxn` entries on a single `Line` (CreditMemo + Invoice); header `TotalAmt=0`; line `Amount=amount_applied`. NEW `lib/QboPushers/CreditApplicationPusher.php` + `CreditApplicationEnqueuer.php` + `acc_qbo_credit_application_map` table + UI shares `app/admin/quickbooks/credit_memos.php` (new "Applications → QBO LinkedTxn" sub-section per D-QBO-CREDIT-MEMO-APPLY-5 + CLASS 12 shared-surface mapping) + post-commit `enqueue('create')` hook in `apply.php`. NEW queue `entity_type='credit_application'` keyed on `credit_note_applications.id` (1 row → 1 QBO Payment); rejected `reuse credit_memo + op=apply` because one credit_note has N applications and the op can't identify which (D-QBO-CREDIT-MEMO-APPLY-1). Migration 82→83 (`db_migrations/202606010000_S-QBO-CREDIT-MEMO-APPLY.sql`): ALTER `acc_qbo_sync_queue.entity_type` ENUM += 'credit_application' + CREATE `acc_qbo_credit_application_map` (D-QBO-CREDIT-MEMO-APPLY-2; UNIQUE ff_credit_application_id ↔ qbo_payment_id; FK CASCADE on credit_note_applications) + INSERT `quickbooks.sync_mode.credit_application='sync'` (separate from `sync_mode.credit_memo` so apply propagation can be paused independently). **Apply payload:**
+
+```json
+{
+  "CustomerRef": {"value": "qbo_customer_id"},
+  "TxnDate": "2026-04-22",
+  "TotalAmt": 0,
+  "Line": [
+    {
+      "Amount": 50.00,
+      "LinkedTxn": [
+        {"TxnId": "qbo_credit_memo_id", "TxnType": "CreditMemo"},
+        {"TxnId": "qbo_invoice_id",    "TxnType": "Invoice"}
+      ]
+    }
+  ],
+  "PrivateNote": "{ff_credit_application_id, ff_credit_note_id, ff_invoice_id, amount_applied, pushed_at}"
+}
+```
+
+**v1 scope = forward-create only** (D-QBO-CREDIT-MEMO-APPLY-4): un-apply / void-after-apply path tracked as new OPERATOR_FOLLOWUPS F27 — needs `status`+`deleted_at` cols on credit_note_applications + an unapply endpoint + CreditApplicationPusher::pushVoid + a cascade policy decision. No FF endpoint un-applies today (`credit_notes/void.php` voids the parent credit, not individual applications).
+
+**🔴 Operator pre-req (D-QBO-CREDIT-MEMO-APPLY-3, F26 BLOCKING):** QBO Account & Settings → Advanced → Automation → "Automatically apply credits" must be **OFF** before live cutover, otherwise QBO auto-applies the CreditMemo to the Invoice the moment they share a CustomerRef and our explicit zero-dollar apply Payment then double-applies. NOT runtime-probed — matches FF's pre-flight-as-doc pattern for all other QBO-side pre-reqs (tax_override_code_id, sync_enabled, sync_mode).
+
+Smoke `_smoke_qbo_credit_application_push` 26/26 PASS per-function. 5 D-QBO-CREDIT-MEMO-APPLY-* locked.
 
 ### 8.7 Refund Receipt
 

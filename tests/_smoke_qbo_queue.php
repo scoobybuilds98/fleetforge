@@ -11,7 +11,7 @@ declare(strict_types=1);
  * 9 sub-checks:
  *   C1: acc_qbo_sync_queue table exists with spec §6.4 columns + indexes
  *   C2: acc_qbo_drift_events table exists with spec §15 derivation
- *   C3: 13 quickbooks.sync_mode.* settings keys present with expected defaults
+ *   C3: 14 quickbooks.sync_mode.* settings keys present with expected defaults
  *   C4: QboPusherDispatcher class exists with public methods dispatch + hasImplementation + classNameFor
  *   C5: QuickBooksSync class exists with public methods enqueue + syncDispatch + isEnabled + syncMode
  *   C6: PusherNotImplementedException class exists, extends QuickBooksException
@@ -111,6 +111,7 @@ $expected = [
     'quickbooks.sync_mode.recurring_je'        => 'queue',
     'quickbooks.sync_mode.tax_remittance_je'   => 'sync',
     'quickbooks.sync_mode.year_end_closing_je' => 'sync',
+    'quickbooks.sync_mode.credit_application'  => 'sync', // S-QBO-CREDIT-MEMO-APPLY (F25) — separate from credit_memo so apply propagation can be paused independently
 ];
 foreach ($expected as $k => $expectedVal) {
     $actual = settings_get($k);
@@ -118,7 +119,7 @@ foreach ($expected as $k => $expectedVal) {
         $c3Errs[] = "{$k}: expected '{$expectedVal}', got " . var_export($actual, true);
     }
 }
-$check('C3  13 sync_mode settings keys with expected defaults', $c3Errs);
+$check('C3  14 sync_mode settings keys with expected defaults', $c3Errs);
 
 // ── C4: dispatcher class surface ──────────────────────────────
 $c4Errs = [];
@@ -215,19 +216,22 @@ foreach ([
     ['payment',  'update'],
     ['credit_memo', 'create'],   // S-QBO-16: CreditMemoPusher shipped (pushCreate)
     ['credit_memo', 'update'],   // S-QBO-16: pushUpdate stub method exists (→ F20)
+    ['credit_application', 'create'], // S-QBO-CREDIT-MEMO-APPLY (F25): CreditApplicationPusher::pushCreate
 ] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== true) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be true post-shipped";
     }
 }
 // item has no Pusher (S-QBO-10 was Puller+Creator only); journal_entry has
-// no pushVoid (S-QBO-21 create+update only). Both remain false.
-foreach ([['journal_entry','void'], ['item','create']] as $pair) {
+// no pushVoid (S-QBO-21 create+update only); credit_application has no
+// pushUpdate/pushVoid (S-QBO-CREDIT-MEMO-APPLY v1 = forward-create only;
+// un-apply is a follow-up per D-QBO-CREDIT-MEMO-APPLY-4). All three remain false.
+foreach ([['journal_entry','void'], ['item','create'], ['credit_application','update'], ['credit_application','void']] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== false) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-Pusher-session";
     }
 }
-$check('C8  hasImplementation true for customer+vendor+invoice+bill+payment+credit_memo (S-QBO-6/7/11/18/14/16 shipped), false for item + journal_entry-void', $c8Errs);
+$check('C8  hasImplementation true for customer+vendor+invoice+bill+payment+credit_memo+credit_application (S-QBO-6/7/11/18/14/16/CREDIT-MEMO-APPLY shipped), false for item + journal_entry-void + credit_application update/void', $c8Errs);
 
 // ── C9: worker pusher_not_implemented pathway (SELF-CLEANING) ──
 // CRITICAL: every artifact created in this check MUST be reverted
