@@ -237,6 +237,16 @@ class DriftChecker
             $totalDrift += $stats['push_failed'] + $stats['amount_drift'] + $stats['missing_in_qbo'] + $stats['missing_in_ff'];
         }
 
+        // ── GL-account-balance drift (F23, gated default-off) ────────
+        // Compares FF account natural balance vs QBO CurrentBalance per mapped
+        // account. Off by default → no effect on the existing entity-drift run.
+        $glStats = ['balance_drift' => 0];
+        $glDrift = self::checkGlAccountBalances($glStats, $live);
+        if ($glDrift > 0 || isset(self::$checkedCategories['gl_account'])) {
+            $byEntity['gl_account'] = $glStats;
+            $totalDrift += $glDrift;
+        }
+
         // ── Auto-resolve-on-parity (D-QBO-25-2) ──────────────────────
         // After all entities scanned, close any OPEN drift_cron events whose
         // (entity_type, entity_id, category) was NOT re-detected — drift is
@@ -398,6 +408,145 @@ class DriftChecker
                 $stats['missing_in_ff']++;
             }
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  GL-ACCOUNT-BALANCE DRIFT (F23 / S-QBO-24-GL-BALANCE-FOLLOWUP)
+    //
+    //  For each mapped acc_qbo_account_map row, compare the FF account's
+    //  natural-balance (computed from posted JE lines) against QBO's
+    //  CurrentBalance; |delta| > tolerance → category='balance_drift' event
+    //  (spec §15.2 step 4 + §15.5 GL row).
+    //
+    //  GATED default-off (quickbooks.drift.gl_balance_enabled='0') — GL
+    //  balances legitimately diverge intra-period (timing of bridge JEs vs
+    //  QBO posting), so this is noise until the accountant defines the
+    //  reconciliation cadence; enabled at cutover (D-QBO-GL-BALANCE-1). The
+    //  SNAPSHOT comparison (FF balance vs acc_qbo_account_map.qbo_current_balance,
+    //  the last-pulled QBO balance) runs offline; the LIVE layer refreshes
+    //  qbo_current_balance from QBO first (gated on liveModeAvailable).
+    // ════════════════════════════════════════════════════════════════════
+
+    /** Debit-normal FF account types (natural balance = debit − credit). */
+    public const DEBIT_NORMAL_TYPES = ['asset', 'cost_of_revenue', 'operating_expense', 'other_expense'];
+
+    /**
+     * FF account NATURAL balance from posted JE lines, signed per the account's
+     * normal balance side so it aligns with QBO's positive-normal CurrentBalance
+     * convention: debit-normal (asset/expense) → SUM(debit)−SUM(credit);
+     * credit-normal (liability/equity/revenue) → SUM(credit)−SUM(debit).
+     *
+     * @return string|null  bcmath 2dp, or null if the account does not exist
+     */
+    public static function ffAccountNaturalBalance(int $ffAccountId): ?string
+    {
+        $acct = db_row("SELECT account_type FROM acc_accounts WHERE id = ?", [$ffAccountId]);
+        if ($acct === null) {
+            return null;
+        }
+        $sums = db_row(
+            "SELECT COALESCE(SUM(jel.debit),0) AS d, COALESCE(SUM(jel.credit),0) AS c
+               FROM acc_journal_entry_lines jel
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id AND je.status = 'posted'
+              WHERE jel.account_id = ?",
+            [$ffAccountId]
+        );
+        $debit  = bcadd((string) ($sums['d'] ?? '0'), '0', 2);
+        $credit = bcadd((string) ($sums['c'] ?? '0'), '0', 2);
+        $debitNormal = in_array((string) $acct['account_type'], self::DEBIT_NORMAL_TYPES, true);
+        return $debitNormal ? bcsub($debit, $credit, 2) : bcsub($credit, $debit, 2);
+    }
+
+    /** True when |ffBalance − qboBalance| exceeds the tolerance. */
+    public static function glBalanceDrifts(string $ffBalance, string $qboBalance, string $tol): bool
+    {
+        $delta = bcsub($ffBalance, $qboBalance, 2);
+        if (bccomp($delta, '0', 2) < 0) {
+            $delta = bcmul($delta, '-1', 2);
+        }
+        return bccomp($delta, $tol, 2) > 0;
+    }
+
+    /**
+     * GL-account-balance drift check (F23). Gated default-off. For each mapped
+     * account with a known QBO balance, records a balance_drift event when the
+     * FF natural balance diverges beyond tolerance. When $live, first refreshes
+     * acc_qbo_account_map.qbo_current_balance from QBO (gated; best-effort).
+     *
+     * @return int  number of balance_drift events recorded this run
+     */
+    public static function checkGlAccountBalances(array &$stats, bool $live): int
+    {
+        if ((string) settings_get('quickbooks.drift.gl_balance_enabled', '0') !== '1') {
+            return 0;
+        }
+
+        // Mark the GL-balance scope as scanned this run so autoResolveParity()
+        // can auto-close balance_drift events whose drift is gone — but ONLY
+        // because the check actually ran (gated). When off, gl_account is never
+        // in checkedCategories, so no auto-resolve touches balance_drift.
+        self::$checkedCategories['gl_account'] = ['balance_drift'];
+
+        $tol = self::tolerance('gl_account');
+        $drift = 0;
+
+        $maps = db_select(
+            "SELECT id, ff_account_id, qbo_account_id, qbo_current_balance
+               FROM acc_qbo_account_map
+              WHERE mapping_status = 'mapped'
+                AND ff_account_id IS NOT NULL
+                AND qbo_account_id IS NOT NULL"
+        );
+
+        foreach ($maps as $m) {
+            $ffAccountId = (int) $m['ff_account_id'];
+            $qboAccountId = (string) $m['qbo_account_id'];
+
+            // LIVE layer (gated): refresh qbo_current_balance from QBO.
+            $qboBalance = $m['qbo_current_balance'];
+            if ($live) {
+                try {
+                    $client = new QuickBooksClient();
+                    $resp = $client->getEntity('account', $qboAccountId);
+                    $qboAcct = $resp['Account'] ?? null;
+                    if (is_array($qboAcct) && array_key_exists('CurrentBalance', $qboAcct)) {
+                        $qboBalance = bcadd((string) $qboAcct['CurrentBalance'], '0', 2);
+                        db_update('acc_qbo_account_map', ['qbo_current_balance' => $qboBalance], 'id = ?', [(int) $m['id']]);
+                    }
+                } catch (\Throwable $e) {
+                    error_log("[DriftChecker] GL-balance live refresh failed for account {$qboAccountId}: " . $e->getMessage());
+                }
+            }
+
+            // No QBO balance to compare against (never pulled) — skip.
+            if ($qboBalance === null || $qboBalance === '') {
+                continue;
+            }
+            $qboBalance = bcadd((string) $qboBalance, '0', 2);
+
+            $ffBalance = self::ffAccountNaturalBalance($ffAccountId);
+            if ($ffBalance === null) {
+                continue;
+            }
+
+            if (self::glBalanceDrifts($ffBalance, $qboBalance, $tol)) {
+                $delta = bcsub($ffBalance, $qboBalance, 2);
+                self::recordDrift([
+                    'entity_type'   => 'gl_account',
+                    'entity_id'     => $ffAccountId,
+                    'qbo_entity_id' => $qboAccountId,
+                    'category'      => 'balance_drift',
+                    'ff_value'      => $ffBalance,
+                    'qbo_value'     => $qboBalance,
+                    'drift_amount'  => $delta,
+                    'description'   => "FF GL balance {$ffBalance} ≠ QBO CurrentBalance {$qboBalance} (Δ {$delta}; tolerance {$tol}) for account #{$ffAccountId}.",
+                ]);
+                $drift++;
+            }
+        }
+
+        $stats['balance_drift'] = $drift;
+        return $drift;
     }
 
     /**
@@ -628,6 +777,7 @@ class DriftChecker
             'invoice' => '0.05', 'payment' => '0.01', 'bill' => '0.05',
             'bill_payment' => '0.01', 'credit_memo' => '0.05',
             'journal_entry' => '0.01', 'customer' => '0.00', 'vendor' => '0.00',
+            'gl_account' => '1.00', // F23 — GL-account-balance drift tolerance (spec §15.5)
         ];
         $v = (string) settings_get("quickbooks.drift.tolerance.{$tolKey}", $defaults[$tolKey] ?? '0.00');
         return $v === '' ? ($defaults[$tolKey] ?? '0.00') : $v;
