@@ -7,8 +7,10 @@ are not. Never modify, create, or delete files in this repo. Read-only operation
 (view, grep, php -l, mysqldump --no-data, etc.).
 
 ## Output convention
-Write findings as a single markdown report to ~/Documents/fleetforge-audits/CODEX_<date>_<topic>.md 
-(outside the repo). Do not write into docs/ or any tracked directory.
+Write findings as a single markdown report to docs/audits/CODEX_<date>_<topic>.md
+(grouped under a dated subfolder when a batch spans many topics, e.g.
+docs/audits/codex-2026-05-26/). This is the ONE place auditors may write — do
+not create or modify files anywhere else in the repo.
 
 ## Hard "do not touch"
 - .env, FF_ASSET_VERSION (production asset surface)
