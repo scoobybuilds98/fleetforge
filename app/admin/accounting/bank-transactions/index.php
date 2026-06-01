@@ -88,9 +88,18 @@ $rows = db_select(
             t.is_cleared, t.journal_entry_id,
             ba.name AS bank_account_name,
             ba.currency AS bank_account_currency,
+            m.qbo_currency_snapshot, m.qbo_exchange_rate_snapshot,
             je.entry_number AS je_number, je.id AS je_id
        FROM acc_bank_transactions t
        JOIN acc_bank_accounts ba ON ba.id = t.bank_account_id
+  LEFT JOIN (
+            SELECT ff_bank_transaction_id,
+                   MAX(qbo_currency_snapshot) AS qbo_currency_snapshot,
+                   MAX(qbo_exchange_rate_snapshot) AS qbo_exchange_rate_snapshot
+              FROM acc_qbo_bank_transaction_map
+             WHERE pull_status = 'pulled'
+             GROUP BY ff_bank_transaction_id
+       ) m ON m.ff_bank_transaction_id = t.id
   LEFT JOIN acc_journal_entries je ON je.id = t.journal_entry_id
      {$whereSQL}
      ORDER BY t.transaction_date DESC, t.id DESC
@@ -271,7 +280,28 @@ require_once FF_ROOT . '/includes/header.php';
                             </span>
                         </td>
                         <td class="text-right font-mono <?= $isDebit ? 'text-danger' : '' ?>">
+                            <?php
+                            // F15: multi-currency display. For a foreign-currency row
+                            // (e.g. a USD bank-account mirror), show a currency badge +
+                            // the CAD-equivalent at the frozen pull-time rate so the
+                            // bare foreign figure isn't read as CAD. No-op for home-
+                            // currency rows (the common case today).
+                            $rowCurrency = $r['qbo_currency_snapshot'] ?? $r['bank_account_currency'] ?? null;
+                            $fxForeign   = \FleetForge\FxConverter::isForeign($rowCurrency);
+                            ?>
+                            <?php if ($fxForeign): ?>
+                                <span class="badge badge-no-dot badge-neutral" style="font-size:10px;margin-right:4px;"><?= e(strtoupper((string) $rowCurrency)) ?></span>
+                            <?php endif; ?>
                             <?= $isDebit ? '-' : '' ?>$<?= number_format(abs((float) $r['amount']), 2) ?>
+                            <?php if ($fxForeign):
+                                $fxLabel = \FleetForge\FxConverter::homeEquivalentLabel((string) $r['amount'], $rowCurrency, $r['qbo_exchange_rate_snapshot'] ?? null);
+                            ?>
+                                <?php if ($fxLabel !== ''): ?>
+                                    <div class="text-secondary" style="font-size:10px;" title="Converted at the QBO pull-time exchange rate (frozen). Live revaluation deferred — F15.">
+                                        <?= e($fxLabel) ?>
+                                    </div>
+                                <?php endif; ?>
+                            <?php endif; ?>
                         </td>
                         <td>
                             <span class="badge badge-no-dot <?= $statusBadge($r['status']) ?>">
