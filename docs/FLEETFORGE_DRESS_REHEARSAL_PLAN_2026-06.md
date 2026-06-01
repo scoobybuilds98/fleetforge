@@ -9,9 +9,20 @@ production-shaped data, and sync it all to the sandbox (realm
 `9341457119548719`), exercising the cutover sequence end-to-end in **dev**
 before the real production cutover (S-QBO-28/29/30).
 
-> ⚠️ This document is a PLAN. Nothing in Parts A–E mutated state. The recon
-> probes were read-only (`SELECT`, `SHOW COLUMNS`, file greps). No TRUNCATE,
-> DELETE, pull-write, or seed was executed.
+> ⚠️ This document is a PLAN authored by S-DRESS-REHEARSAL-RECON. Its recon
+> probes were read-only (`SELECT`, `SHOW COLUMNS`, file greps).
+
+> ✅ **PART 1 EXECUTED — 2026-06-02 (S-DRESS-REHEARSAL-WIPE-AND-SEED).** The
+> destructive wipe + production-shaped reseed are now DONE in **dev**:
+> `scripts/demo_wipe.php` (3-layer guard, 58 tables truncated, 0 failures) →
+> NEW `scripts/rehearsal_seed.php` (idempotent, fail-closed on production)
+> seeded 6 equipment templates, 25 equipment units, 12 BC trucking customers,
+> 4 vendors, 6 leases (varied lifecycle), 14 invoices, 4 payments, 3 bills.
+> FF data verified coherent (all invoices reconcile, no $0 rates, 0 orphan FKs,
+> Path-B outstanding = $7,937.71). **NO QBO sync performed** —
+> `quickbooks.sync_enabled='0'` throughout, zero sandbox contact. **PART 2**
+> (sync FF→sandbox realm `9341457119548719`) is **S-DRESS-REHEARSAL-SYNC**,
+> still pending — the QBO token needs a refresh first (see §7).
 
 ---
 
