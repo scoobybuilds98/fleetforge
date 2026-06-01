@@ -152,6 +152,21 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
+<?php
+// F8 (S-QBO-ENTITY-SHOW-RICH-PANEL-PAYDOWN): shared QuickBooks Sync rich panel.
+// credit_notes/show.php had ZERO QBO mentions before this — now at parity with invoices.
+$qboPanel = [
+    'entity_type' => 'credit_memo',
+    'map_table'   => 'acc_qbo_credit_memo_map',
+    'qbo_id_col'  => 'qbo_credit_memo_id',
+    'ff_fk'       => 'ff_credit_note_id',
+    'ff_id'       => (int) $cn['id'],
+    'deep_link'   => 'creditmemo',
+    'retry_url'   => base_url('api/v1/quickbooks/credit_memos/retry'),
+];
+require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
+?>
+
 <!-- Summary tiles -->
 <div class="stat-grid" style="margin-bottom:1.5rem;">
     <div class="stat-card">

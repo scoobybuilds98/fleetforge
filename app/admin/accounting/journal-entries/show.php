@@ -110,6 +110,20 @@ require_once FF_ROOT . '/includes/header.php';
     <span class="breadcrumb-current"><?= e($entry['entry_number']) ?></span>
 </nav>
 
+<?php
+// F8 (S-QBO-ENTITY-SHOW-RICH-PANEL-PAYDOWN): shared QuickBooks Sync rich panel.
+$qboPanel = [
+    'entity_type' => 'journal_entry',
+    'map_table'   => 'acc_qbo_journal_entry_map',
+    'qbo_id_col'  => 'qbo_journal_entry_id',
+    'ff_fk'       => 'ff_journal_entry_id',
+    'ff_id'       => (int) $entry['id'],
+    'deep_link'   => 'journal',
+    'retry_url'   => base_url('api/v1/quickbooks/journal_entries/retry'),
+];
+require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
+?>
+
 <div class="page-header">
     <h1 class="page-header-title h4">
         <?= e($entry['entry_number']) ?>

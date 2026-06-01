@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-06-01 via S-QBO-PAYDOWN-NAV-VENDOR-UI — **closed F21** (Bank Accounts nav child added to config/navigation.php; 6 nav smokes 18→19) + **closed F10** (vendor currency selector added to create/edit forms + show display). Prior 2026-06-01 ships: S-QBO-27 (Historical Backfill machinery — surfaced F29 live-run follow-up) + S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 + F27).
+**Last updated:** 2026-06-01 via S-QBO-SHOW-PANEL-PAYDOWN — **closed F8** (shared QuickBooks Sync rich panel partial wired into bills/payments/ap-payments/journal-entries/credit_notes show pages; NEW _smoke_qbo_show_panels 8/8). Prior same-day: S-QBO-PAYDOWN-NAV-VENDOR-UI — **closed F21** (Bank Accounts nav child added to config/navigation.php; 6 nav smokes 18→19) + **closed F10** (vendor currency selector added to create/edit forms + show display). Prior 2026-06-01 ships: S-QBO-27 (Historical Backfill machinery — surfaced F29 live-run follow-up) + S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 + F27).
 
 ---
 
@@ -140,7 +140,11 @@
 
 ---
 
-### F8 — S-QBO-ENTITY-SHOW-RICH-PANEL-PAYDOWN — rich QBO sync panel on FF show pages
+### F8 — S-QBO-ENTITY-SHOW-RICH-PANEL-PAYDOWN — rich QBO sync panel on FF show pages ✅ CLOSED 2026-06-01
+
+**Closed by:** S-QBO-SHOW-PANEL-PAYDOWN (2026-06-01). Generalized the invoices/show.php "QuickBooks Sync" rich panel into a reusable partial `includes/partials/qbo-sync-panel.php` (6-state badge + identifiers row [QBO id deep-link + pushed-relative + currency + sync token] + last-20 Push History table + Retry/View-in-QBO actions) and wired it into all 5 parallel show pages: `app/admin/accounting/bills/show.php`, `app/admin/payments/show.php`, `app/admin/accounting/ap-payments/show.php`, `app/admin/accounting/journal-entries/show.php`, `app/admin/credit_notes/show.php` (the last had ZERO QBO mentions before — now at parity with invoices). The partial takes a per-page `$qboPanel` config (entity_type / map_table / qbo_id_col / ff_fk / ff_id / deep_link / retry_url), validates table+columns against a whitelist (fail-closed), renders nothing when QBO is disconnected, and reuses the per-entity retry endpoints. NEW smoke `_smoke_qbo_show_panels` 8/8 guards each page's wiring. NO migration / schema change.
+
+**Original report (preserved):**
 
 **Surfaced by:** S-QBO-19 (2026-05-29) — operator catch during S-QBO-19 audit
 **Affects:** UX parity across all 4 FF-origin push surfaces

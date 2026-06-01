@@ -98,6 +98,20 @@ require_once FF_ROOT . '/includes/header.php';
     <span class="breadcrumb-current"><?= e($payment['payment_number']) ?></span>
 </nav>
 
+<?php
+// F8 (S-QBO-ENTITY-SHOW-RICH-PANEL-PAYDOWN): shared QuickBooks Sync rich panel.
+$qboPanel = [
+    'entity_type' => 'bill_payment',
+    'map_table'   => 'acc_qbo_bill_payment_map',
+    'qbo_id_col'  => 'qbo_bill_payment_id',
+    'ff_fk'       => 'ff_ap_payment_id',
+    'ff_id'       => (int) $payment['id'],
+    'deep_link'   => 'billpayment',
+    'retry_url'   => base_url('api/v1/quickbooks/bill_payments/retry'),
+];
+require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
+?>
+
 <div class="page-header">
     <h1 class="page-header-title h4">
         Payment <?= e($payment['payment_number']) ?>
