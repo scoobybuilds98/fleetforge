@@ -50,13 +50,23 @@ class CreditApplicationEnqueuer
     public static function enqueue(int $ffApplicationId, string $operation): bool
     {
         try {
-            // Gate 0: entity eligibility.
+            // Gate 0: entity eligibility — per-operation status invariant (F27).
+            //   create → application must be live ('applied')
+            //   void   → application must be 'reversed' (un-applied via unapply.php)
             $app = db_row(
-                "SELECT id FROM credit_note_applications WHERE id = ?",
+                "SELECT id, status FROM credit_note_applications WHERE id = ?",
                 [$ffApplicationId]
             );
             if ($app === null) {
                 error_log("[CreditApplicationEnqueuer] gate-0 reject: application id {$ffApplicationId} not found");
+                return false;
+            }
+            if ($operation === 'create' && ($app['status'] ?? 'applied') !== 'applied') {
+                error_log("[CreditApplicationEnqueuer] gate-0 reject: op=create requires status='applied', got '" . ($app['status'] ?? '') . "'");
+                return false;
+            }
+            if ($operation === 'void' && ($app['status'] ?? '') !== 'reversed') {
+                error_log("[CreditApplicationEnqueuer] gate-0 reject: op=void requires status='reversed', got '" . ($app['status'] ?? '') . "'");
                 return false;
             }
 
@@ -71,8 +81,8 @@ class CreditApplicationEnqueuer
                 return false;
             }
 
-            // Gate 3: operation whitelist. v1 = 'create' only.
-            if ($operation !== 'create') {
+            // Gate 3: operation whitelist. 'create' (apply) + 'void' (un-apply, F27).
+            if (!in_array($operation, ['create', 'void'], true)) {
                 return false;
             }
 

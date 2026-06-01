@@ -611,6 +611,84 @@ class AutoEntryBridge
     }
 
     // ============================================================
+    // CREDIT NOTE UN-APPLIED — DR 1030 AR / CR 2060 Customer Credits Liability
+    // (the exact inverse of onCreditNoteApplied — F27)
+    // ============================================================
+
+    /**
+     * Post the reversing JE when a credit-note application is un-applied
+     * (api/v1/credit_notes/unapply.php). Restores AR that onCreditNoteApplied
+     * reduced: DR 1030 AR / CR 2060 Customer Credits Liability — the exact
+     * swap of the apply JE. source_type='credit_note' so it stays bridge-derived
+     * (QBO derives its own reversal from the deleted apply Payment; the FF JE is
+     * never double-pushed per D-QBO-21-1).
+     *
+     * @param int      $creditNoteId
+     * @param int      $invoiceId
+     * @param string   $amountApplied  bcmath string (the amount being restored)
+     * @param int|null $userId
+     * @return array|null
+     */
+    public static function onCreditNoteUnapplied(
+        int $creditNoteId,
+        int $invoiceId,
+        string $amountApplied,
+        ?int $userId = null
+    ): ?array {
+        if (!self::isEnabled()) return null;
+
+        if (bccomp($amountApplied, '0', 2) <= 0) return null;
+
+        $cn = \db_row(
+            "SELECT credit_note_number, customer_id FROM credit_notes WHERE id = ?",
+            [$creditNoteId]
+        );
+        if (!$cn) return null;
+
+        $invoice = \db_row(
+            "SELECT invoice_number FROM invoices WHERE id = ?",
+            [$invoiceId]
+        );
+        if (!$invoice) return null;
+
+        $creditsLiabilityId = self::requireAccountId(
+            'accounting.customer_credits_account_id',
+            'Customer Credits Liability (2060)'
+        );
+        $arAccountId = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+
+        // Inverse of onCreditNoteApplied: DR AR (restore) / CR Credits Liability.
+        $jeLines = [
+            [
+                'account_id'  => $arAccountId,
+                'debit'       => $amountApplied,
+                'credit'      => '0.00',
+                'description' => "AR restored — credit {$cn['credit_note_number']} un-applied from {$invoice['invoice_number']}",
+                'customer_id' => $cn['customer_id'],
+            ],
+            [
+                'account_id'  => $creditsLiabilityId,
+                'debit'       => '0.00',
+                'credit'      => $amountApplied,
+                'description' => "Credit liability restored — {$cn['credit_note_number']} un-applied",
+                'customer_id' => $cn['customer_id'],
+            ],
+        ];
+
+        $periodInfo = self::resolvePeriod(date('Y-m-d'));
+
+        return JournalEntryService::create([
+            'entry_date'       => $periodInfo['entry_date'],
+            'description'      => "Credit {$cn['credit_note_number']} un-applied from {$invoice['invoice_number']}",
+            'entry_type'       => 'system',
+            'reference'        => $cn['credit_note_number'] . '↩' . $invoice['invoice_number'],
+            'source_type'      => 'credit_note',
+            'source_id'        => $creditNoteId,
+            'post_immediately' => true,
+        ], $jeLines, $userId);
+    }
+
+    // ============================================================
     // BAD DEBT WRITE-OFF — DR 6160 Bad Debt Expense / CR 1030 AR
     // Spec ref: §5, §16 Rule: "Bad debt write-off"
     // ============================================================

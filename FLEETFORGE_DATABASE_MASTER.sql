@@ -1211,7 +1211,7 @@ CREATE TABLE `acc_qbo_credit_application_map` (
   `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
   `qbo_txn_date` date DEFAULT NULL COMMENT 'QBO TxnDate snapshot (mirrors FF credit_note_applications.applied_at)',
   `amount_applied_snapshot` decimal(15,2) DEFAULT NULL COMMENT 'FF credit_note_applications.amount_applied snapshot at push time — drift baseline',
-  `push_status` enum('pending','pushed','failed','skipped_by_mode','failed_preflight') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Slimmer than credit_memo_map.push_status — apply has no soft-delete / no field_too_long / no currency-mismatch path (currencies are guaranteed equal by api/v1/credit_notes/apply.php D18 CURRENCY_MISMATCH gate). Reverse-apply (voided state) is a future-extension follow-up per D-QBO-CREDIT-MEMO-APPLY-4.',
+  `push_status` enum('pending','pushed','failed','skipped_by_mode','failed_preflight','voided') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Slimmer than credit_memo_map. voided added F27 — terminal state after CreditApplicationPusher::pushVoid deletes the QBO apply Payment.',
   `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
   `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
   `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
@@ -2049,15 +2049,21 @@ CREATE TABLE `credit_note_applications` (
   `credit_note_id` int unsigned NOT NULL,
   `invoice_id` int unsigned NOT NULL,
   `amount_applied` decimal(12,2) NOT NULL,
+  `status` enum('applied','reversed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'applied' COMMENT 'applied = live; reversed = un-applied via credit_notes/unapply.php (F27). Append-only — reversed rows are kept for audit + to drive the QBO Payment void.',
   `applied_by` int unsigned DEFAULT NULL,
   `applied_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `reversed_at` datetime DEFAULT NULL COMMENT 'When the application was un-applied (F27).',
+  `reversed_by` int unsigned DEFAULT NULL COMMENT 'users.id who un-applied (F27).',
   PRIMARY KEY (`id`),
   KEY `idx_invoice` (`invoice_id`),
   KEY `credit_note_id` (`credit_note_id`),
   KEY `applied_by` (`applied_by`),
+  KEY `idx_status` (`status`),
+  KEY `idx_reversed_by` (`reversed_by`),
   CONSTRAINT `credit_note_applications_ibfk_1` FOREIGN KEY (`credit_note_id`) REFERENCES `credit_notes` (`id`) ON DELETE CASCADE,
   CONSTRAINT `credit_note_applications_ibfk_2` FOREIGN KEY (`invoice_id`) REFERENCES `invoices` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `credit_note_applications_ibfk_3` FOREIGN KEY (`applied_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `credit_note_applications_ibfk_3` FOREIGN KEY (`applied_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_credit_note_app_reversed_by` FOREIGN KEY (`reversed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `credit_notes` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

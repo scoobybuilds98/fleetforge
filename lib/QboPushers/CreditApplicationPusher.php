@@ -91,6 +91,88 @@ class CreditApplicationPusher
     }
 
     /**
+     * Void the QBO apply-Payment when an FF credit application is un-applied
+     * (F27 / api/v1/credit_notes/unapply.php). Deletes the zero-dollar Payment
+     * that carried the CreditMemo+Invoice LinkedTxns — QBO then restores the
+     * credit + invoice balances on its side. Mirrors the pushVoid trio
+     * (D-QBO-PUSHVOID-TRIO-1): separate pipeline, idempotent on
+     * push_status='voided', skipped_unmapped_void when never pushed.
+     *
+     * @return array §6.8 5-key shape; status='voided' on success,
+     *               'already_voided' on replay, 'skipped_unmapped_void' for
+     *               applications that never pushed to QBO.
+     */
+    public static function pushVoid(int $ffApplicationId, ?array $payloadSnapshot = null): array
+    {
+        // 1. Sync mode gate.
+        $mode = (string) settings_get('quickbooks.sync_mode.credit_application', 'sync');
+        if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
+            return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
+        }
+
+        // 2. Mapping lookup.
+        $mapping = db_row(
+            "SELECT id, qbo_payment_id, qbo_sync_token, push_status
+               FROM acc_qbo_credit_application_map
+              WHERE ff_credit_application_id = ?",
+            [$ffApplicationId]
+        );
+
+        // 2a. Never pushed → nothing in QBO to void.
+        if ($mapping === null || empty($mapping['qbo_payment_id'])) {
+            return ['success' => true, 'status' => 'skipped_unmapped_void', 'outcome' => 'skipped'] + self::RESULT_BASE;
+        }
+
+        // 2b. Already voided → idempotent no-op.
+        if (($mapping['push_status'] ?? '') === 'voided') {
+            return [
+                'success'    => true,
+                'status'     => 'already_voided',
+                'outcome'    => 'voided',
+                'qbo_id'     => (string) $mapping['qbo_payment_id'],
+                'sync_token' => (string) ($mapping['qbo_sync_token'] ?? '0'),
+            ] + self::RESULT_BASE;
+        }
+
+        // 3. HTTP void of the apply Payment.
+        $client = new QuickBooksClient();
+        try {
+            $response = $client->voidEntity(
+                'payment',
+                (string) $mapping['qbo_payment_id'],
+                (string) ($mapping['qbo_sync_token'] ?? '0')
+            );
+        } catch (QuickBooksException $e) {
+            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            self::recordPushFailure($ffApplicationId, ['credit_note_id' => 0, 'invoice_id' => 0], 'Void failed: ' . $e->getMessage(), $httpCode);
+            return ['success' => false, 'status' => 'qbo_error', 'outcome' => 'failed', 'error' => 'Void failed: ' . $e->getMessage()] + self::RESULT_BASE;
+        }
+
+        $qboPay = $response['Payment'] ?? null;
+        if (!is_array($qboPay) || empty($qboPay['Id'])) {
+            self::recordPushFailure($ffApplicationId, ['credit_note_id' => 0, 'invoice_id' => 0], 'QBO void response missing Payment.Id', 0);
+            return ['success' => false, 'status' => 'qbo_malformed_response', 'outcome' => 'failed', 'error' => 'QBO void response missing Payment.Id'] + self::RESULT_BASE;
+        }
+
+        // 4. Persist voided state.
+        self::upsertMappingRow($ffApplicationId, [
+            'qbo_sync_token' => (string) ($qboPay['SyncToken'] ?? '0'),
+            'push_status'    => 'voided',
+            'push_error'     => null,
+            'last_synced_at' => date('Y-m-d H:i:s'),
+        ]);
+        self::writeSyncLog($ffApplicationId, 'void', 'voided', "QBO apply Payment #{$qboPay['Id']} voided (un-applied)");
+
+        return [
+            'success'    => true,
+            'status'     => 'voided',
+            'outcome'    => 'voided',
+            'qbo_id'     => (string) $qboPay['Id'],
+            'sync_token' => (string) ($qboPay['SyncToken'] ?? '0'),
+        ] + self::RESULT_BASE;
+    }
+
+    /**
      * Create-only pipeline. Mirrors CreditMemoPusher::pushImpl structure but
      * SLIMMER: no soft-delete gate (credit_note_applications has no
      * deleted_at column — applications are append-only), no voided gate
@@ -492,7 +574,7 @@ class CreditApplicationPusher
      */
     private static function writeSyncLog(int $ffAppId, string $operation, string $status, string $message): void
     {
-        $isSuccess = ($status === 'pushed');
+        $isSuccess = in_array($status, ['pushed', 'voided'], true);
         try {
             db_insert('acc_qbo_sync_log', [
                 'direction'       => 'push',

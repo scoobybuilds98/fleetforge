@@ -1480,7 +1480,7 @@ _66 tables._
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
 | `qbo_txn_date` | date |  | YES |
 | `amount_applied_snapshot` | decimal(15,2) |  | YES |
-| `push_status` | enum('pending','pushed','failed','skipped_by_mode','failed_preflight') | MUL | NO |
+| `push_status` | enum('pending','pushed','failed','skipped_by_mode','failed_preflight','voided') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
 | `last_synced_at` | datetime |  | YES |
@@ -2196,8 +2196,11 @@ _71 tables._
 | `credit_note_id` | int unsigned | MUL | NO |
 | `invoice_id` | int unsigned | MUL | NO |
 | `amount_applied` | decimal(12,2) |  | NO |
+| `status` | enum('applied','reversed') | MUL | NO |
 | `applied_by` | int unsigned | MUL | YES |
 | `applied_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `reversed_at` | datetime |  | YES |
+| `reversed_by` | int unsigned | MUL | YES |
 
 ## `credit_notes`
 

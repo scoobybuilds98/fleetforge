@@ -218,6 +218,7 @@ foreach ([
     ['credit_memo', 'create'],   // S-QBO-16: CreditMemoPusher shipped (pushCreate)
     ['credit_memo', 'update'],   // S-QBO-16: pushUpdate stub method exists (→ F20)
     ['credit_application', 'create'], // S-QBO-CREDIT-MEMO-APPLY (F25): CreditApplicationPusher::pushCreate
+    ['credit_application', 'void'],   // F27 S-QBO-CREDIT-APP-UNAPPLY: CreditApplicationPusher::pushVoid
     ['refund_receipt', 'create'],     // S-QBO-17 (closes Phase QBO-7): RefundReceiptPusher::pushCreate
 ] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== true) {
@@ -229,12 +230,13 @@ foreach ([
 // pushUpdate/pushVoid (S-QBO-CREDIT-MEMO-APPLY v1 = forward-create only;
 // un-apply is a follow-up per D-QBO-CREDIT-MEMO-APPLY-4). All three remain false.
 // refund_receipt is create-only too (v1; a reversed refund is a fresh event).
-foreach ([['journal_entry','void'], ['item','create'], ['credit_application','update'], ['credit_application','void'], ['refund_receipt','update'], ['refund_receipt','void']] as $pair) {
+// credit_application now has create + void (F27 pushVoid), still no update.
+foreach ([['journal_entry','void'], ['item','create'], ['credit_application','update'], ['refund_receipt','update'], ['refund_receipt','void']] as $pair) {
     if (QboPusherDispatcher::hasImplementation($pair[0], $pair[1]) !== false) {
         $c8Errs[] = "hasImplementation('{$pair[0]}','{$pair[1]}') should be false pre-Pusher-session";
     }
 }
-$check('C8  hasImplementation true for customer+vendor+invoice+bill+payment+credit_memo+credit_application+refund_receipt (S-QBO-6/7/11/18/14/16/CREDIT-MEMO-APPLY/17 shipped), false for item + journal_entry-void + credit_application/refund_receipt update/void', $c8Errs);
+$check('C8  hasImplementation true for customer+vendor+invoice+bill+payment+credit_memo+credit_application(create+void)+refund_receipt (S-QBO-6/7/11/18/14/16/CREDIT-MEMO-APPLY/CREDIT-APP-UNAPPLY/17 shipped), false for item + journal_entry-void + credit_application-update + refund_receipt update/void', $c8Errs);
 
 // ── C9: worker pusher_not_implemented pathway (SELF-CLEANING) ──
 // CRITICAL: every artifact created in this check MUST be reverted

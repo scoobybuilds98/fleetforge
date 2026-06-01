@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-06-01 via S-QBO-SHOW-PANEL-PAYDOWN — **closed F8** (shared QuickBooks Sync rich panel partial wired into bills/payments/ap-payments/journal-entries/credit_notes show pages; NEW _smoke_qbo_show_panels 8/8). Prior same-day: S-QBO-PAYDOWN-NAV-VENDOR-UI — **closed F21** (Bank Accounts nav child added to config/navigation.php; 6 nav smokes 18→19) + **closed F10** (vendor currency selector added to create/edit forms + show display). Prior 2026-06-01 ships: S-QBO-27 (Historical Backfill machinery — surfaced F29 live-run follow-up) + S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 + F27).
+**Last updated:** 2026-06-01 via S-QBO-CREDIT-APP-UNAPPLY — **closed F27** (credit-application un-apply: reversal service + unapply.php + pushVoid + UI; migration 85→86; NEW _smoke_qbo_credit_app_unapply 16/16). Prior same-day: S-QBO-SHOW-PANEL-PAYDOWN — **closed F8** (shared QuickBooks Sync rich panel partial wired into bills/payments/ap-payments/journal-entries/credit_notes show pages; NEW _smoke_qbo_show_panels 8/8). Prior same-day: S-QBO-PAYDOWN-NAV-VENDOR-UI — **closed F21** (Bank Accounts nav child added to config/navigation.php; 6 nav smokes 18→19) + **closed F10** (vendor currency selector added to create/edit forms + show display). Prior 2026-06-01 ships: S-QBO-27 (Historical Backfill machinery — surfaced F29 live-run follow-up) + S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 + F27).
 
 ---
 
@@ -400,7 +400,11 @@ Runs nightly at 03:30 (after token refresh 02:00 + bank CDC 02:30) per spec §15
 
 ---
 
-### F27 — Credit-application un-apply / void-after-apply path 🟢 DEFERRED
+### F27 — Credit-application un-apply / void-after-apply path ✅ CLOSED 2026-06-01
+
+**Closed by:** S-QBO-CREDIT-APP-UNAPPLY (2026-06-01). Migration 85→86 added `status` ENUM('applied','reversed') + `reversed_at` + `reversed_by` to `credit_note_applications` (append-only — reversed rows kept) + `'voided'` to `acc_qbo_credit_application_map.push_status`. NEW testable service `lib/CreditApplicationReversal::reverse()` runs the exact inverse of apply.php in one FOR-UPDATE transaction (restores credit remaining+status, invoice credits_applied+balance_due+status, customer outstanding_balance; marks the application reversed; posts the reversing DR-AR/CR-2060 JE via NEW `AutoEntryBridge::onCreditNoteUnapplied`). Thin endpoint `api/v1/credit_notes/unapply.php` calls it + enqueues the QBO void. `CreditApplicationPusher::pushVoid` voids the QBO apply-Payment (`voidEntity('payment')`; idempotent on push_status='voided'; skipped_unmapped_void when never pushed). `CreditApplicationEnqueuer` gate-3 widened ['create']→['create','void'] + gate-0 status invariant (create→'applied', void→'reversed'). UI: an Un-apply button + Reversed badge on the credit_notes/show.php Application History table (excludes reversed rows from the Total Applied). NEW smoke `_smoke_qbo_credit_app_unapply` 16/16 incl. the apply→reverse counter round-trip + the voided-parent edge (credit left terminal, invoice/customer still restored). `_smoke_qbo_queue` C8 updated (credit_application now create+void). NO cascade change to credit_notes/void.php — it already leaves applied portions intact by design. D-QBO-UNAPPLY-1/-2/-3 locked.
+
+**Original report (preserved):**
 
 **Surfaced by:** S-QBO-CREDIT-MEMO-APPLY (2026-06-01) — D-QBO-CREDIT-MEMO-APPLY-4 (v1 scope = forward-apply only)
 **Affects:** any future flow that un-applies a credit from an invoice OR voids an already-applied credit. Today no FF endpoint un-applies (`credit_notes/void.php` voids the parent credit, not individual applications); `credit_note_applications` is append-only with no `status`/`deleted_at` column.

@@ -82,7 +82,9 @@ $applications = db_select(
         cna.amount_applied,
         cna.applied_by,
         au.name AS applied_by_name,
-        cna.applied_at
+        cna.applied_at,
+        cna.status AS application_status,
+        cna.reversed_at
      FROM credit_note_applications cna
      JOIN invoices i ON i.id = cna.invoice_id AND i.deleted_at IS NULL
      LEFT JOIN users au ON au.id = cna.applied_by
@@ -330,11 +332,13 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                     <th style="text-align:right;">Amount Applied</th>
                     <th>Applied By</th>
                     <th>Applied At</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($applications as $app): ?>
-                <tr>
+                <?php $appReversed = (($app['application_status'] ?? 'applied') === 'reversed'); ?>
+                <tr<?= $appReversed ? ' style="opacity:0.6;"' : '' ?>>
                     <td>
                         <a href="<?= base_url('invoices/show') ?>?id=<?= (int)$app['invoice_id'] ?>" class="link font-mono">
                             <?= e($app['invoice_number']) ?>
@@ -356,6 +360,31 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                     <td class="font-mono" style="text-align:right;"><?= format_currency($app['amount_applied']) ?> <?= e($cn['currency']) ?></td>
                     <td><?= e($app['applied_by_name'] ?? '—') ?></td>
                     <td><?= e(format_datetime($app['applied_at'])) ?></td>
+                    <td x-data="{ busy:false, msg:'',
+                        async unapply(){
+                            if(!confirm('Un-apply this credit from invoice <?= e($app['invoice_number']) ?>? This restores the invoice balance and the credit\'s remaining amount.')) return;
+                            this.busy=true; this.msg='';
+                            try {
+                                const r = await FF_Api.post('<?= base_url('api/v1/credit_notes/unapply') ?>', { application_id: <?= (int)$app['id'] ?> });
+                                if (r.success) { window.location.reload(); }
+                                else { this.msg = (r.error && r.error.message) || 'Un-apply failed'; this.busy=false; }
+                            } catch(e) { this.msg = e.message || 'Error'; this.busy=false; }
+                        } }">
+                        <?php if ($appReversed): ?>
+                            <span class="badge badge-neutral line-through">Reversed</span>
+                            <?php if (!empty($app['reversed_at'])): ?>
+                                <div class="text-xs text-secondary"><?= e(format_datetime($app['reversed_at'])) ?></div>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <span class="badge badge-success">Applied</span>
+                            <?php if ($canEdit && $cn['status'] !== 'void'): ?>
+                                <button type="button" class="btn btn-xs btn-secondary" style="margin-left:6px;" @click="unapply()" :disabled="busy">
+                                    <span x-show="!busy">Un-apply</span><span x-show="busy" x-cloak>…</span>
+                                </button>
+                            <?php endif; ?>
+                            <span x-show="msg" x-cloak x-text="msg" class="text-xs text-danger" style="display:block;margin-top:4px;"></span>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -364,11 +393,15 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                     <th colspan="2">Total Applied</th>
                     <th class="font-mono" style="text-align:right;">
                         <?php
-                        $totalApplied = array_reduce($applications, fn($c, $a) => bcadd($c, (string)$a['amount_applied'], 6), '0');
+                        $totalApplied = array_reduce(
+                            array_filter($applications, fn($a) => ($a['application_status'] ?? 'applied') !== 'reversed'),
+                            fn($c, $a) => bcadd($c, (string)$a['amount_applied'], 6),
+                            '0'
+                        );
                         echo format_currency(bcround($totalApplied, 2));
                         ?> <?= e($cn['currency']) ?>
                     </th>
-                    <th colspan="2"></th>
+                    <th colspan="3"></th>
                 </tr>
             </tfoot>
         </table>
