@@ -161,7 +161,140 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!--  Historical Backfill (S-QBO-27 — Phase QBO-13)                        -->
+<!--                                                                       -->
+<!--  Machinery-only ship (D-QBO-27 locked scope): the live pull + H5/H6   -->
+<!--  GL remediation need a real accountant-seeded sandbox (dry_run gate).  -->
+<!--  What runs now: AR-drift DETECTION + a proposed compensating-JE plan   -->
+<!--  (REPORT only — nothing posts; hard-stop-and-report per D-QBO-27-5).   -->
+<!--  Shares this page per D-QBO-27-7 (operational sibling of Manual Sync). -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div x-data="qboHistoricalPull()" x-init="loadStatus()" style="margin-top:32px;">
+    <div class="page-header">
+        <h2 class="h5" style="margin:0;">Historical Backfill — AR-drift detection (S-QBO-27)</h2>
+        <div class="text-secondary text-sm" style="margin-top:4px;">
+            One-time inbound migration machinery. The live pull (phases 27.A–E) + the H5/H6 GL
+            remediation run against the accountant-seeded QBO sandbox at cutover (F29). What runs here
+            now: <strong>dry-run AR-drift detection</strong> — finds H5 (missing DR-AR) + H6 (1.375× inflated)
+            invoice anomalies and proposes tagged compensating JEs. <strong>Nothing is posted</strong> —
+            this is report-only (D-QBO-27-5).
+        </div>
+    </div>
+
+    <div x-show="flash.message" x-cloak
+         :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
+         style="margin:14px 0;" x-text="flash.message"></div>
+
+    <div class="card" style="padding:16px 20px;">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+            <span class="badge" :class="dryRun ? 'badge-secondary' : 'badge-warning'"
+                  x-text="dryRun ? 'DRY-RUN (safe)' : 'LIVE GATE OPEN'"></span>
+            <span class="text-sm text-secondary">Batch size <span x-text="batchSize">100</span></span>
+            <button class="btn btn-primary btn-sm" style="margin-left:auto;" @click="runDetection()" :disabled="busy">
+                <span x-show="!busy">Run AR-drift detection (dry-run)</span>
+                <span x-show="busy" x-cloak>Detecting…</span>
+            </button>
+        </div>
+
+        <template x-if="detection">
+            <div style="margin-top:16px;">
+                <div class="kpi-grid kpi-grid--qbo" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+                    <div class="kpi-tile">
+                        <div class="kpi-label">H5 (missing DR-AR)</div>
+                        <div class="kpi-value text-warning" x-text="detection.h5_count">0</div>
+                    </div>
+                    <div class="kpi-tile">
+                        <div class="kpi-label">H6 (1.375× inflated)</div>
+                        <div class="kpi-value text-warning" x-text="detection.h6_count">0</div>
+                    </div>
+                    <div class="kpi-tile">
+                        <div class="kpi-label">H5 total (GL too low)</div>
+                        <div class="kpi-value text-success font-mono" x-text="'$' + detection.total_h5"></div>
+                    </div>
+                    <div class="kpi-tile">
+                        <div class="kpi-label">H6 excess (GL too high)</div>
+                        <div class="kpi-value text-danger font-mono" x-text="'$' + detection.total_h6"></div>
+                    </div>
+                </div>
+                <div class="text-sm" style="margin-bottom:10px;">
+                    Net AR drift: <strong class="font-mono" x-text="'$' + detection.net_drift"></strong>
+                    · remediation status: <span class="badge badge-secondary" x-text="remediationStatus"></span>
+                    <span x-show="!detection.ok" x-cloak class="text-danger" x-text="' — ' + (detection.reason || '')"></span>
+                </div>
+                <template x-if="plan.length > 0">
+                    <div class="card" style="padding:0;">
+                        <table class="table table-striped" style="margin:0;">
+                            <thead><tr><th>Case</th><th>Invoice</th><th>Tag</th><th>Dir</th><th>AR Acct</th><th class="text-right">Amount</th></tr></thead>
+                            <tbody>
+                                <template x-for="p in plan" :key="p.tag">
+                                    <tr>
+                                        <td><span class="badge" :class="p.case === 'H5' ? 'badge-success' : 'badge-danger'" x-text="p.case"></span></td>
+                                        <td class="text-sm" x-text="p.invoice_number || ('#' + p.invoice_id)"></td>
+                                        <td class="font-mono text-xs" x-text="p.tag"></td>
+                                        <td x-text="p.direction"></td>
+                                        <td class="font-mono text-xs" x-text="p.ar_account_code"></td>
+                                        <td class="text-right font-mono" x-text="'$' + p.amount"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+                <template x-if="plan.length === 0 && detection.ok">
+                    <div class="text-sm text-secondary" style="padding:8px 0;">No H5/H6 anomalies detected — AR subledger and GL agree.</div>
+                </template>
+                <p class="text-xs text-secondary" style="margin-top:10px;">
+                    Posting compensating JEs is an operator-approved, live-gated action executed against the
+                    seeded sandbox with the accountant (F29) — never from this report.
+                </p>
+            </div>
+        </template>
+    </div>
+</div>
+
 <script>
+function qboHistoricalPull() {
+    return {
+        busy: false,
+        dryRun: true,
+        batchSize: 100,
+        detection: null,
+        plan: [],
+        remediationStatus: 'not_run',
+        flash: { message: '', type: 'success' },
+
+        async loadStatus() {
+            try {
+                const j = await FF_Api.get(FF_Api.url('/api/v1/quickbooks/historical_pull/status.php'));
+                if (j.success) {
+                    this.dryRun = !!j.data.dry_run;
+                    this.batchSize = j.data.batch_size || 100;
+                }
+            } catch (e) { /* non-fatal */ }
+        },
+
+        async runDetection() {
+            this.busy = true;
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/historical_pull/start.php'), { mode: 'dry_run' });
+                if (j.success) {
+                    const d = j.data || {};
+                    this.detection = d.detection || null;
+                    this.plan = d.plan || [];
+                    this.remediationStatus = d.remediation_status || 'not_run';
+                    this.dryRun = !!d.dry_run;
+                    this.flash = { message: 'Detection complete (run #' + d.run_id + '). Report-only — nothing posted.', type: 'success' };
+                } else {
+                    this.flash = { message: (j.error && j.error.message) || 'Detection failed.', type: 'error' };
+                }
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally { this.busy = false; }
+        },
+    };
+}
+
 function qboManualSync() {
     return {
         busy: false,

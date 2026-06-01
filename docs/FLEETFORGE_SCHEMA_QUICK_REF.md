@@ -1512,6 +1512,28 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `acc_qbo_historical_pull_runs`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `realm_id` | varchar(64) | MUL | NO |
+| `mode` | enum('dry_run','live') |  | NO |
+| `phase` | varchar(20) |  | NO |
+| `status` | enum('pending','running','paused','completed','failed','stopped_gate') |  | NO |
+| `entity_counts` | json |  | YES |
+| `checkpoints` | json |  | YES |
+| `ar_drift_before` | decimal(15,2) |  | YES |
+| `ar_drift_after` | decimal(15,2) |  | YES |
+| `remediation_status` | enum('not_run','detected','reported','approved','posted','stopped') |  | NO |
+| `remediation_plan` | json |  | YES |
+| `error_message` | text |  | YES |
+| `started_by` | int unsigned | MUL | YES |
+| `started_at` | datetime |  | YES |
+| `finished_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `acc_qbo_customer_map`
 
 | Column | Type | Key | Nullable |

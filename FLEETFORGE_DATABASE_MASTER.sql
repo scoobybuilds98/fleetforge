@@ -1253,6 +1253,30 @@ CREATE TABLE `acc_qbo_refund_receipt_map` (
   KEY `idx_pushed_at` (`pushed_at`),
   CONSTRAINT `fk_qbo_refund_receipt_map_ff` FOREIGN KEY (`ff_lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-7 S-QBO-17 (CLOSES QBO-7): FF→QBO cash refund-receipt push state. One row per lease cash precharge refund; pushes as a QBO RefundReceipt entity. Mirrors acc_qbo_credit_memo_map shape with refund deltas (deposit account + payment method forensic cols).';
+CREATE TABLE `acc_qbo_historical_pull_runs` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `realm_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'QBO realm the pull targets — scopes checkpoints (D-QBO-27-2).',
+  `mode` enum('dry_run','live') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'dry_run' COMMENT 'dry_run = no FF business-row writes, no JE posting (default; safe). live = real writes — gated behind dry_run=0 + live connection.',
+  `phase` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'reference' COMMENT 'Coarse phase: reference | transactional | remediation | verify (maps to spec 27.A–E operational phases).',
+  `status` enum('pending','running','paused','completed','failed','stopped_gate') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'stopped_gate = the H5/H6 hard stop-gate fired (D-QBO-27-5).',
+  `entity_counts` json DEFAULT NULL COMMENT 'Per-entity tally: {"customer":{"pulled":N,"inserted":N,"updated":N,"skipped":N}, ...}.',
+  `checkpoints` json DEFAULT NULL COMMENT 'Per-entity resume timestamps: {"invoice":"2026-05-01 12:00:00", ...} — MAX(pushed_at) snapshots (D-QBO-27-2).',
+  `ar_drift_before` decimal(15,2) DEFAULT NULL COMMENT 'AR subledger-vs-GL drift measured before remediation (spec §16.3 baseline; expected ~$17,064.62).',
+  `ar_drift_after` decimal(15,2) DEFAULT NULL COMMENT 'AR drift after remediation; verification target $0.00 ±$1 (D-QBO-27-6).',
+  `remediation_status` enum('not_run','detected','reported','approved','posted','stopped') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'not_run' COMMENT 'H5/H6 state machine. detected→reported = plan computed, awaiting operator. approved→posted only via explicit operator action (D-QBO-27-5). stopped = hard stop-gate.',
+  `remediation_plan` json DEFAULT NULL COMMENT 'Proposed compensating JEs: [{"case":"H5","invoice_id":N,"tag":"[A1-FIX-invoice-N]","dr_account":"1030","amount":"..."}, ...]. Computed, NOT posted, until approved.',
+  `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Failure / stop-gate detail.',
+  `started_by` int unsigned DEFAULT NULL COMMENT 'users.id who launched the run.',
+  `started_at` datetime DEFAULT NULL,
+  `finished_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_realm_status` (`realm_id`,`status`),
+  KEY `idx_created` (`created_at`),
+  KEY `fk_qbo_histpull_started_by` (`started_by`),
+  CONSTRAINT `fk_qbo_histpull_started_by` FOREIGN KEY (`started_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-13 S-QBO-27: historical-backfill run + checkpoint + H5/H6 remediation state. Machinery-only ship (dry-run default); live runs + GL remediation gated to the accountant-seeded sandbox (F29).';
 CREATE TABLE `acc_qbo_journal_entry_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_journal_entry_id` int unsigned NOT NULL COMMENT 'NOT NULL: JE pushes are FF-origin only in S-QBO-21 v1 (Phase QBO-10). QBO-authored JEs handled via S-QBO-26 manual sync or bank-CDC pull (§8.12 for bank-transaction-typed JEs).',

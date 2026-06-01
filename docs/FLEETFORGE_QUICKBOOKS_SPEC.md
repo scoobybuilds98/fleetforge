@@ -2420,6 +2420,10 @@ Each action logged to `audit_log` and `acc_qbo_drift_events.resolution_note` (si
 
 ## 16. HISTORICAL BACKFILL (S-QBO-27)
 
+> **🟡 MACHINERY SHIPPED 2026-06-01 via S-QBO-27 (Phase QBO-13) — DRY-RUN scaffold; live runs + GL remediation deferred to the seeded sandbox (F29).** The orchestration backbone is built + offline-tested: `lib/QboPushers/HistoricalPuller.php` (ENTITY_ORDER per §16.6, batch-100 + `MAX(pushed_at)` resume per §16.5, dry-run safety gate, reference-pull delegation to the shipped Account/TaxCode/Item/Customer/Vendor pullers, transactional-pull dispatch + idempotency) + `lib/QboPushers/ArDriftRemediator.php` (H5/H6 detection — pure FF queries — + tagged compensating-JE plan + hard-stop-and-report). Migration 84→85 adds `acc_qbo_historical_pull_runs` (run/checkpoint/remediation state) + 2 settings (`historical_pull.dry_run='1'`, `historical_pull.batch_size='100'`). UI = a "Historical Backfill — AR-drift detection" section on `/quickbooks/manual_sync` (D-QBO-27-7) backed by `api/v1/quickbooks/historical_pull/{start,status,remediation_plan}.php`. Smoke `_smoke_qbo_historical_pull` 22/22. 7 D-QBO-27-* locked.
+>
+> **What is DEFERRED to F29 (needs the accountant-pre-seeded sandbox + live OAuth — neither exists yet: realm=SMOKE-REALM, sync_enabled='0'):** the live pull execution (phases 27.A–E), the QBO→FF business-row transform for QBO-only historical entities (`HistoricalPuller::writeFfRowFromQbo` — a gated seam that throws under dry-run), and the POSTING of the H5/H6 compensating JEs (`ArDriftRemediator::postApprovedPlan` — operator-approved + live-gated, never auto-posts per D-QBO-27-5). The H6 1.375× root-cause (an InvoiceGenerator bug) is its own investigation follow-up. **Dry-run AR-drift DETECTION + the proposed plan run + are reportable today** (pure FF subledger-vs-GL comparison); only POSTING + live pull wait for the sandbox.
+
 The one-time inbound migration. Pulls Mainland's existing real QBO data into FleetForge.
 
 ### 16.1 Why historical backfill is needed

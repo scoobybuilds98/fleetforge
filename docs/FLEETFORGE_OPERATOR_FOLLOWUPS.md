@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-06-01 via S-QBO-17 (Refund Receipt push — CLOSES Phase QBO-7; cash precharge refunds → QBO RefundReceipt). New operator follow-up: **F28** (refund tax-treatment live-verify — refunds currently push as non-taxable TaxCodeRef=NON pending accountant confirmation; F16/F19 pattern). Prior 2026-06-01 ship S-QBO-CREDIT-MEMO-APPLY (closed F25 — every QBO entity sync path create/update/void/apply complete; surfaced F26 auto-apply pre-req + F27 un-apply deferral).
+**Last updated:** 2026-06-01 via S-QBO-27 (Historical Backfill MACHINERY — Phase QBO-13; orchestrator + checkpoint/resume + H5/H6 AR-drift detection, dry-run gated). New operator follow-up: **F29** (historical-pull live execution + QBO→FF business-row transform + H5/H6 GL remediation posting — all gated to the accountant-seeded sandbox at cutover). Prior 2026-06-01 ships: S-QBO-17 (Refund Receipt — CLOSES Phase QBO-7; surfaced F28 refund-tax verify) + S-QBO-CREDIT-MEMO-APPLY (closed F25; surfaced F26 auto-apply + F27 un-apply).
 
 ---
 
@@ -408,6 +408,27 @@ Runs nightly at 03:30 (after token refresh 02:00 + bank CDC 02:30) per spec §15
 5. Decide policy for void-the-parent-credit-while-applications-exist (cascade un-apply all? refuse to void?) — needs business decision
 
 **Why deferred:** no FF endpoint un-applies today, so there is no source-side trigger to propagate. v1 forward-apply (the only flow operators currently exercise) is correct + complete. Builds the path when un-apply becomes an actual user need rather than a speculative one.
+
+---
+
+### F29 — Historical-pull live execution + H5/H6 GL remediation 🔴 BLOCKING (cutover)
+
+**Surfaced by:** S-QBO-27 (2026-06-01) — the machinery-only ship per the locked scope decision.
+**Affects:** the entire historical backfill (spec §16). The S-QBO-27 ship is the orchestration + checkpoint + AR-drift DETECTION machinery, all dry-run-gated. The parts that genuinely need a live, accountant-pre-seeded QBO sandbox are deferred here:
+1. **Live pull execution** (phases 27.A–E) — pull all historical customers/vendors/invoices/bills/payments/bill_payments/credit_memos/refund_receipts/journal_entries from the real QBO file.
+2. **QBO→FF business-row transform** (`HistoricalPuller::writeFfRowFromQbo`) — materializing a brand-new FF row (e.g. a full `invoices` row with billing-period + lease-linkage columns QBO does not carry) for a QBO-only historical entity. The transform is implemented against the real entity shapes, not guessed.
+3. **H5/H6 compensating-JE POSTING** (`ArDriftRemediator::postApprovedPlan`) — the $20,764.80 (H5) + −$3,700.18 (H6) AR-drift fixes. Detection + the tagged `[A1-FIX-invoice-N]` plan run today; posting is operator-approved + live-gated (D-QBO-27-5, hard-stop-and-report — never auto-posts).
+4. **H6 root-cause bug investigation** — the deterministic 1.375× (11/8) InvoiceGenerator anomaly. The compensating JE resolves the symptom; the investigation finds + fixes the code path so it can't recur.
+
+**Operator action (at the S-QBO-27 live session, after the sandbox is seeded):**
+1. Accountant pre-seeds the QBO sandbox with a representative subset of Mainland's real data.
+2. Connect FF to the sandbox (real realm + OAuth; not SMOKE-REALM).
+3. Run dry-run AR-drift detection on `/quickbooks/manual_sync` → review the H5/H6 report + plan.
+4. Implement + verify the per-entity QBO→FF transforms against the seeded shapes; run 27.A dry-run → 27.B full sandbox.
+5. With the accountant present, approve + post the H5/H6 compensating JEs; confirm AR drift = $0.00 ±$1 (D-QBO-27-6).
+6. Open the H6 InvoiceGenerator bug investigation.
+
+**Why deferred (not blocking the build):** every deferred item needs real QBO entity shapes + the accountant + posts to the GL. Building the transforms blind or auto-posting remediation JEs against assumed data would be guesswork on financial records. The dry-run gate (`quickbooks.historical_pull.dry_run='1'`) + the live-allowed assertion keep the shipped machinery from mutating anything until the gate is explicitly opened with a live connection. Same build-now / verify-at-cutover pattern as F16/F19/F28, at larger scale. **Gates the S-QBO-27→28/29/30 cutover sequence** (§17.1: "Historical pull completed successfully on sandbox" + "AR drift = $0.00").
 
 ---
 
