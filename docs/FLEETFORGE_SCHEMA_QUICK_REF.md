@@ -1487,6 +1487,31 @@ _66 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `acc_qbo_refund_receipt_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_lease_id` | int unsigned | UNI | NO |
+| `ff_customer_id_snapshot` | int unsigned |  | YES |
+| `ff_contract_number_snapshot` | varchar(100) |  | YES |
+| `qbo_refund_receipt_id` | varchar(50) | UNI | YES |
+| `qbo_sync_token` | varchar(20) |  | YES |
+| `qbo_doc_number` | varchar(100) |  | YES |
+| `qbo_total_amt` | decimal(15,2) |  | YES |
+| `qbo_currency` | varchar(3) |  | YES |
+| `qbo_exchange_rate` | decimal(10,6) |  | YES |
+| `qbo_txn_date` | date |  | YES |
+| `qbo_deposit_account_id` | varchar(50) |  | YES |
+| `qbo_payment_method_id` | varchar(50) |  | YES |
+| `ff_refund_amount_snapshot` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','failed','skipped_by_mode','failed_preflight','failed_preflight_field_too_long') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `acc_qbo_customer_map`
 
 | Column | Type | Key | Nullable |

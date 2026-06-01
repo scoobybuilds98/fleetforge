@@ -295,6 +295,13 @@ return [
                 'badge'  => null,
             ],
             [
+                'label'  => 'Refund Receipts',
+                'icon'   => 'banknotes',
+                'url'    => '/quickbooks/refund_receipts',
+                'module' => 'quickbooks',
+                'badge'  => null,
+            ],
+            [
                 'label'  => 'Bills',
                 'icon'   => 'clipboard-document',
                 'url'    => '/quickbooks/bills',

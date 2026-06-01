@@ -1225,6 +1225,34 @@ CREATE TABLE `acc_qbo_credit_application_map` (
   KEY `idx_ff_credit_note` (`ff_credit_note_id_snapshot`) COMMENT 'List-by-parent-credit lookups for the credit_memos.php admin Applications section',
   CONSTRAINT `fk_qbo_credit_application_map_ff` FOREIGN KEY (`ff_credit_application_id`) REFERENCES `credit_note_applications` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-QBO-CREDIT-MEMO-APPLY: FF→QBO credit-application push state. One row per credit_note_applications row; pushes as a zero-dollar QBO Payment carrying 2 LinkedTxns (CreditMemo + Invoice).';
+CREATE TABLE `acc_qbo_refund_receipt_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_lease_id` int unsigned NOT NULL COMMENT 'leases.id — the lease whose cash precharge refund this RefundReceipt mirrors. One cash refund per lease (D-QBO-17-5).',
+  `ff_customer_id_snapshot` int unsigned DEFAULT NULL COMMENT 'leases.customer_id snapshot — forensic trail',
+  `ff_contract_number_snapshot` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'leases.contract_number snapshot — DocNumber forensic',
+  `qbo_refund_receipt_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit RefundReceipt.Id; NULL until first successful push',
+  `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token',
+  `qbo_doc_number` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO DocNumber snapshot (synthesized REF-<contract>)',
+  `qbo_total_amt` decimal(15,2) DEFAULT NULL COMMENT 'QBO TotalAmt snapshot (= precharge_balance) — drift baseline',
+  `qbo_currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CurrencyRef.value snapshot',
+  `qbo_exchange_rate` decimal(10,6) DEFAULT NULL COMMENT 'QBO ExchangeRate pinned at push time',
+  `qbo_txn_date` date DEFAULT NULL COMMENT 'QBO TxnDate snapshot (= precharge_refund_settled_at date)',
+  `qbo_deposit_account_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Account.Id used as DepositToAccountRef (from settings) — forensic',
+  `qbo_payment_method_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO PaymentMethod.Id used as PaymentMethodRef (from settings) — forensic',
+  `ff_refund_amount_snapshot` decimal(15,2) DEFAULT NULL COMMENT 'FF leases.precharge_balance snapshot at push time — drift baseline',
+  `push_status` enum('pending','pushed','failed','skipped_by_mode','failed_preflight','failed_preflight_field_too_long') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Slimmer than credit_memo_map — refund has no void path in v1 (a re-refund is a fresh event) and no currency-mismatch probe (settle-time refund currency = lease currency). field_too_long retained for the synthesized DocNumber gate.',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_lease` (`ff_lease_id`) COMMENT 'One RefundReceipt mapping per lease; enforces idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_refund_receipt` (`qbo_refund_receipt_id`) COMMENT 'No two leases share a QBO RefundReceipt.Id; NULL-multi-OK per InnoDB',
+  KEY `idx_status` (`push_status`),
+  KEY `idx_pushed_at` (`pushed_at`),
+  CONSTRAINT `fk_qbo_refund_receipt_map_ff` FOREIGN KEY (`ff_lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-7 S-QBO-17 (CLOSES QBO-7): FF→QBO cash refund-receipt push state. One row per lease cash precharge refund; pushes as a QBO RefundReceipt entity. Mirrors acc_qbo_credit_memo_map shape with refund deltas (deposit account + payment method forensic cols).';
 CREATE TABLE `acc_qbo_journal_entry_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_journal_entry_id` int unsigned NOT NULL COMMENT 'NOT NULL: JE pushes are FF-origin only in S-QBO-21 v1 (Phase QBO-10). QBO-authored JEs handled via S-QBO-26 manual sync or bank-CDC pull (§8.12 for bank-transaction-typed JEs).',

@@ -115,6 +115,11 @@ $_qboNavGroups = [
         'icon'  => 'receipt-percent',
     ],
     [
+        'label' => 'Refund Receipts',
+        'url'   => '/quickbooks/refund_receipts',
+        'icon'  => 'banknotes',
+    ],
+    [
         'label' => 'Bills',
         'url'   => '/quickbooks/bills',
         'icon'  => 'clipboard-document',

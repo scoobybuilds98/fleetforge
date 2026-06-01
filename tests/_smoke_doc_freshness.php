@@ -868,7 +868,7 @@ $pusherToAdminPage = [
     // surface file. That's also more honest: the UI does exist, just
     // not at a dedicated /quickbooks/credit_applications.php.
     'CreditApplicationPusher' => 'credit_memos.php', // S-QBO-CREDIT-MEMO-APPLY (shared surface)
-    // Future: RefundReceiptPusher → refund_receipts.php (S-QBO-17)
+    'RefundReceiptPusher'     => 'refund_receipts.php', // S-QBO-17 (CLOSES Phase QBO-7)
 ];
 
 $pushersDir = REPO_ROOT . '/lib/QboPushers';

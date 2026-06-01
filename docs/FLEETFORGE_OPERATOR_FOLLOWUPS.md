@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-06-01 via S-QBO-CREDIT-MEMO-APPLY (closed F25 — credit-memo apply→LinkedTxn propagation; every QBO entity sync path — create/update/void/apply — now complete; QBO update-debt **fully paid down**). New operator follow-ups surfaced: **F26** (QBO auto-apply pre-req — must turn OFF before cutover) + **F27** (un-apply / void-after-apply path — deferred to a future session).
+**Last updated:** 2026-06-01 via S-QBO-17 (Refund Receipt push — CLOSES Phase QBO-7; cash precharge refunds → QBO RefundReceipt). New operator follow-up: **F28** (refund tax-treatment live-verify — refunds currently push as non-taxable TaxCodeRef=NON pending accountant confirmation; F16/F19 pattern). Prior 2026-06-01 ship S-QBO-CREDIT-MEMO-APPLY (closed F25 — every QBO entity sync path create/update/void/apply complete; surfaced F26 auto-apply pre-req + F27 un-apply deferral).
 
 ---
 
@@ -408,6 +408,20 @@ Runs nightly at 03:30 (after token refresh 02:00 + bank CDC 02:30) per spec §15
 5. Decide policy for void-the-parent-credit-while-applications-exist (cascade un-apply all? refuse to void?) — needs business decision
 
 **Why deferred:** no FF endpoint un-applies today, so there is no source-side trigger to propagate. v1 forward-apply (the only flow operators currently exercise) is correct + complete. Builds the path when un-apply becomes an actual user need rather than a speculative one.
+
+---
+
+### F28 — Refund-receipt tax-treatment live-verification 🟡 PARTIAL
+
+**Surfaced by:** S-QBO-17 (2026-06-01) — D-QBO-17-3
+**Affects:** every QBO RefundReceipt pushed by `RefundReceiptPusher`. The push currently emits `TaxCodeRef=NON` + `TxnTaxDetail.TotalTax=0` (non-taxable refund), a documented assumption from spec §8.7's payload — NOT yet confirmed by the accountant.
+**Operator action:**
+1. Confirm with the accountant whether a mileage-prepayment cash refund is non-taxable (NON) or must reverse GST/HST originally collected.
+2. If non-taxable → no code change; mark this follow-up CLOSED.
+3. If it must carry/reverse tax → a small follow-up adjusts `RefundReceiptPusher::buildQboPayload` (line `TaxCodeRef` + `TxnTaxDetail`) + likely a tax-rate setting, mirroring the S-QBO-BILL-ITC tax-rate work.
+4. After S-QBO-30 flips `sync_enabled='1'`, push one real refund and confirm the QBO RefundReceipt's tax line matches the accountant's expectation before relying on the path.
+
+**Why deferred (not blocking the build):** the QBO master kill-switch (`sync_enabled='0'`) stays OFF until cutover, so nothing posts to QBO before this verify — the NON assumption cannot corrupt the live ledger pre-cutover. Same defer-to-cutover pattern as F16 (S-QBO-22) + F19 (S-QBO-23) live-verifications. The FF-side GL JE for the refund is a separate concern owned by `S-MILEAGE-3-ACCT-SPEC` (QBO derives its own posting from the RefundReceipt).
 
 ---
 

@@ -158,4 +158,19 @@ db_transaction(function () use ($id, &$result) {
     ];
 });
 
+// S-QBO-17 (closes Phase QBO-7): enqueue QBO RefundReceipt push after the
+// cash refund is marked settled (money has physically moved — the canonical
+// trigger per D-QBO-17-1). Best-effort per D-ENQUEUER-CONTRACT — never throws;
+// sync_enabled='0' default (D-CPA-5) makes this a silent no-op until cutover.
+// Credit-method refunds do NOT reach here (gate-0 + the method-mismatch guard
+// above both require method='cash') — they ride the CreditMemo path instead
+// (D-QBO-17-2).
+if (is_array($result) && !empty($result['id'])) {
+    try {
+        \FleetForge\QboPushers\RefundReceiptEnqueuer::enqueue((int) $result['id'], 'create');
+    } catch (\Throwable $e) {
+        error_log("leases/mark_refund_settled.php: RefundReceiptEnqueuer threw despite best-effort discipline: " . $e->getMessage());
+    }
+}
+
 json_success($result);

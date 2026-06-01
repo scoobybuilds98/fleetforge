@@ -130,12 +130,12 @@ if ($qboParent === null) {
     $c4Errs[] = 'QuickBooks parent entry with children not found in config/navigation.php';
 } else {
     $childLabels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Manual Sync', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Credit Memos', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Manual Sync', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Credit Memos', 'Refund Receipts', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
     if ($childLabels !== $expected) {
         $c4Errs[] = 'expected children ' . json_encode($expected) . ' got ' . json_encode($childLabels);
     }
 }
-$check('C4  config/navigation.php has 17 QuickBooks children (incl. Manual Sync between Drift and Customers)', $c4Errs);
+$check('C4  config/navigation.php has 18 QuickBooks children (incl. Manual Sync between Drift and Customers)', $c4Errs);
 
 // ── C5 + C6: empty + synthetic render (combined for cleanup symmetry)
 // We don't actually render pages over HTTP — that requires the test

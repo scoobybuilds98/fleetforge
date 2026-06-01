@@ -530,12 +530,12 @@ if ($qboParent === null) {
     $labels = array_map(static fn($c) => $c['label'] ?? '', $qboParent['children']);
     // S-QBO-BILL-SYNC-UI 2026-05-27: +Bills between Invoices and Settings.
     // S-QBO-26 2026-05-30: +Manual Sync between Drift and Customers.
-    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Manual Sync', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Credit Memos', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
+    $expected = ['Dashboard', 'Sync Queue', 'Sync Log', 'Drift', 'Manual Sync', 'Customers', 'Vendors', 'Accounts', 'Tax Codes', 'Items', 'Invoices', 'Credit Memos', 'Refund Receipts', 'Bills', 'Bill Payments', 'Payments', 'Journal Entries', 'Settings'];
     if ($labels !== $expected) {
         $c16Errors[] = 'expected ' . json_encode($expected) . ' got ' . json_encode($labels);
     }
 }
-if (empty($c16Errors)) { echo "PASS C16 nav has 17 QuickBooks children with Manual Sync between Drift and Customers (S-QBO-26)\n"; $pass++; }
+if (empty($c16Errors)) { echo "PASS C16 nav has 18 QuickBooks children with Manual Sync between Drift and Customers (S-QBO-26)\n"; $pass++; }
 else { echo "FAIL C16 " . implode('; ', $c16Errors) . "\n"; $failures[] = 'C16'; }
 
 // ── C17: ItemPuller::normalize maps representative JSON ──────
