@@ -135,6 +135,31 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ── Offline demo-seed (S-QBO-OFFLINE-TESTBED) ─────────── -->
+    <div class="card" style="padding:18px;margin-top:14px;border:1px dashed var(--border-color);">
+        <h2 class="h6" style="margin:0 0 4px;">Offline demo-seed (fixture HTTP layer)</h2>
+        <p class="text-secondary text-sm" style="margin:0 0 14px;">
+            <strong>Load QBO demo data</strong> runs the REAL push/pull pipeline against the canned QBO fixture
+            (lib/QboFixture.php) so every /quickbooks/* admin surface populates without a live Intuit connection.
+            <strong>Wipe</strong> removes only fixture-tagged rows (realm_id='FIXTURE-DEMO', FF ids 999000-999989,
+            QBO ids 'QBO-FIX-*'). Hard-refused in production or when a real realm is connected.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-secondary btn-sm" :disabled="demoBusy" @click="loadDemo()">
+                <span x-show="!demoBusy">Load QBO demo data</span>
+                <span x-show="demoBusy" x-cloak>Loading…</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" :disabled="demoBusy" @click="wipeDemo()">
+                <span x-show="!demoBusy">Wipe QBO demo data</span>
+                <span x-show="demoBusy" x-cloak>Wiping…</span>
+            </button>
+            <span class="text-xs text-secondary">Setting: <code>quickbooks.fixture_mode</code></span>
+        </div>
+        <template x-if="demoResult">
+            <pre class="text-xs" style="background:var(--bg-secondary);padding:10px;border-radius:4px;margin-top:12px;max-height:240px;overflow:auto;" x-text="demoResult"></pre>
+        </template>
+    </div>
+
     <!-- ── Confirm modal ─────────────────────────────────────── -->
     <div x-show="confirm.open" x-cloak class="modal-overlay" @click.self="closeConfirm()">
         <div class="modal-backdrop" @click="closeConfirm()" aria-hidden="true"></div>
@@ -298,6 +323,12 @@ function qboHistoricalPull() {
 function qboManualSync() {
     return {
         busy: false,
+        // S-QBO-OFFLINE-TESTBED: independent busy + result state so the
+        // demo-seed buttons don't interleave with the bulk re-sync confirm
+        // flow above. demoResult holds the JSON summary the API returns
+        // so the operator sees pushed/failed/skipped counts inline.
+        demoBusy: false,
+        demoResult: '',
         flash: { message: '', type: 'success' },
         pushTypes: [
             { key: 'invoice',       label: 'Invoices' },
@@ -378,6 +409,46 @@ function qboManualSync() {
                 this.flash = { message: e.message || 'Network error', type: 'error' };
                 this.closeConfirm();
             } finally { this.busy = false; }
+        },
+
+        // ── Offline demo-seed (S-QBO-OFFLINE-TESTBED) ─────────────
+        async loadDemo() {
+            if (!confirm('Load QBO demo data via the fixture HTTP layer? This flips quickbooks.fixture_mode for the duration of the load and seeds synthetic FF entities. Hard-refused in production.')) return;
+            this.demoBusy = true;
+            this.demoResult = '';
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/qbo_demo_seed.php'), { action: 'load' });
+                if (j.success) {
+                    const d = j.data || {};
+                    this.flash = { message: 'Demo data loaded: ' + (d.pushed||0) + ' pushed, ' + (d.failed||0) + ' failed, ' + (d.skipped||0) + ' skipped, ' + (d.drift_events||0) + ' drift event(s). Browse /quickbooks/* surfaces to see the populated state.', type: 'success' };
+                    this.demoResult = JSON.stringify(d, null, 2);
+                } else {
+                    this.flash = { message: (j.error && j.error.message) || 'Demo-seed load failed.', type: 'error' };
+                    this.demoResult = JSON.stringify(j.error || {}, null, 2);
+                }
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally { this.demoBusy = false; }
+        },
+
+        async wipeDemo() {
+            if (!confirm('Wipe fixture-tagged demo data? Only rows with realm_id=FIXTURE-DEMO or FF ids in the reserved 999000-999989 range are removed. Real data is not touched.')) return;
+            this.demoBusy = true;
+            this.demoResult = '';
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/qbo_demo_seed.php'), { action: 'wipe' });
+                if (j.success) {
+                    const d = j.data || {};
+                    const totalDeleted = Object.values(d.deleted || {}).reduce((a, b) => a + (b || 0), 0);
+                    this.flash = { message: 'Demo data wiped: ' + totalDeleted + ' fixture-tagged rows removed. Real-row counts unchanged.', type: 'success' };
+                    this.demoResult = JSON.stringify(d, null, 2);
+                } else {
+                    this.flash = { message: (j.error && j.error.message) || 'Demo-seed wipe failed.', type: 'error' };
+                    this.demoResult = JSON.stringify(j.error || {}, null, 2);
+                }
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally { this.demoBusy = false; }
         },
     };
 }

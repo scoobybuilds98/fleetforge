@@ -185,6 +185,55 @@ class QuickBooksClient
     }
 
     /**
+     * fixtureMode — true when the offline fixture HTTP layer should
+     * answer in place of the real Intuit API. Default-off so existing
+     * smokes + production traffic see byte-identical behaviour.
+     *
+     * D-QBO-FIXTURE-2 PRODUCTION GUARD: hard-refuses when (a) environment
+     * is 'production' OR (b) a non-sentinel realm is connected. Without
+     * this guard, canned fixture data could flow alongside real-realm
+     * map/log/drift rows and corrupt accountant reasoning. The guard
+     * fires HERE (the read accessor) so EVERY consumer — dispatch, the
+     * worker, QboDemoSeed, the admin UI — gets the same answer without
+     * needing to re-check.
+     *
+     * @session  S-QBO-OFFLINE-TESTBED
+     * @decision D-QBO-FIXTURE-1 (intercept point),
+     *           D-QBO-FIXTURE-2 (production + real-realm hard refuse)
+     */
+    public static function fixtureMode(): bool
+    {
+        if ((string) settings_get('quickbooks.fixture_mode', '0') !== '1') {
+            return false;
+        }
+        return self::fixtureRefusalReason() === null;
+    }
+
+    /**
+     * fixtureRefusalReason — null when fixture mode is permitted, or a
+     * human-readable string explaining the guard that refused it. UI
+     * surfaces this so the operator understands why the toggle won't
+     * stick (instead of assuming the setting is broken).
+     */
+    public static function fixtureRefusalReason(): ?string
+    {
+        $env   = (string) settings_get('quickbooks.environment', 'sandbox');
+        $realm = (string) settings_get('quickbooks.realm_id', '');
+
+        if ($env === 'production') {
+            return 'Fixture mode is hard-refused in production environment (D-QBO-FIXTURE-2).';
+        }
+        // Permit empty realm, the SMOKE-REALM sentinel from the default
+        // pre-OAuth setup, and the QboFixture::REALM_SENTINEL the
+        // demo-seed flips to. Any other value implies a real connected
+        // realm — canned fixture data must not leak alongside it.
+        if ($realm !== '' && $realm !== 'SMOKE-REALM' && $realm !== QboFixture::REALM_SENTINEL) {
+            return "Fixture mode is hard-refused while a real realm is connected (realm_id='{$realm}'). Disconnect from QBO first (D-QBO-FIXTURE-2).";
+        }
+        return null;
+    }
+
+    /**
      * Ensure $this->accessToken holds a valid token, refreshing if
      * the stored access token expires within 5 minutes. Called by
      * every HTTP-issuing method before the request goes out.
@@ -742,6 +791,19 @@ class QuickBooksClient
      */
     private function executeRequest(string $method, string $endpoint, array $opts = []): array
     {
+        // ── Fixture short-circuit (S-QBO-OFFLINE-TESTBED) ──────
+        // When fixture mode is active (gated by settings + production
+        // guard, see fixtureMode()), route the request through QboFixture
+        // INSTEAD of cURL. Everything DOWNSTREAM of the wire — sync_log
+        // write, error classification, JSON parsing, Pusher persistence —
+        // still runs through the genuine code path, so the fixture
+        // exercises the whole boundary contract minus the actual network
+        // round-trip. Default-off ⇒ zero behaviour change for live
+        // traffic + every pre-existing smoke.
+        if (self::fixtureMode()) {
+            return $this->executeFixture($method, $endpoint, $opts);
+        }
+
         // ── Pre-throttle ───────────────────────────────────────
         $this->maybeThrottle($opts);
 
@@ -856,6 +918,81 @@ class QuickBooksClient
         }
 
         // ── Success ────────────────────────────────────────────
+        $this->writeSyncLog($logRow);
+        return $decoded;
+    }
+
+    /**
+     * executeFixture — fixture-mode equivalent of executeRequest. Builds
+     * the real URL + body (so request-shape build is exercised), routes
+     * the (method, endpoint, opts) tuple through QboFixture::respond for
+     * a synthetic response, then runs the canonical downstream pipeline
+     * (parse JSON → writeSyncLog → classify-and-throw if non-2xx).
+     *
+     * Skipped vs executeRequest:
+     *   • maybeThrottle  — fixture has no rate limit
+     *   • ensureValidToken / refreshAccessToken — no real Intuit token
+     *     required; the request is never actually sent
+     *   • cURL exec       — replaced by QboFixture::respond()
+     *
+     * Run identically to the real path:
+     *   • inferDirection / extractQboEntityId / scrubRequestForLog
+     *   • writeSyncLog (acc_qbo_sync_log row stamped with realm_id =
+     *     'FIXTURE-DEMO' so QboDemoSeed::wipe can scrub fixture-only rows)
+     *   • classifyError + buildException (lets QboFixture::injectError
+     *     manufacture failed/transient states without bypassing the
+     *     Pusher's catch-and-record paths)
+     *
+     * @session S-QBO-OFFLINE-TESTBED
+     */
+    private function executeFixture(string $method, string $endpoint, array $opts): array
+    {
+        // Real URL + body — the request-build path runs even in fixture
+        // mode so a Pusher payload bug surfaces as a malformed-call here
+        // rather than slipping past the fixture only to fail in live mode.
+        $queryParams = $opts['query'] ?? [];
+        if (!isset($queryParams['minorversion'])) {
+            $queryParams['minorversion'] = self::QBO_MINORVERSION;
+        }
+        $bodyJson = null;
+        if (isset($opts['json'])) {
+            $bodyJson = json_encode($opts['json']);
+        }
+
+        $startMs    = microtime(true);
+        $fixture    = QboFixture::respond($method, $endpoint, $opts);
+        $httpStatus = (int) $fixture['status'];
+        $body       = (string) $fixture['body'];
+        $durationMs = (int) round((microtime(true) - $startMs) * 1000);
+
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded)) {
+            $decoded = [];
+        }
+
+        $logRow = [
+            'direction'        => $this->inferDirection($opts),
+            'entity_type'      => (string) ($opts['entity_type'] ?? 'unknown'),
+            'entity_id'        => $opts['entity_id'] ?? null,
+            'qbo_entity_id'    => $this->extractQboEntityId($decoded, (string) ($opts['entity_type'] ?? '')),
+            'operation'        => (string) ($opts['operation'] ?? strtolower($method)),
+            'http_method'      => $method,
+            'endpoint'         => $endpoint,
+            'request_payload'  => $this->scrubRequestForLog($bodyJson, $queryParams),
+            'response_status'  => $httpStatus,
+            'response_payload' => $this->truncateForLog($body, self::SYNC_LOG_PAYLOAD_LIMIT_BYTES),
+            'duration_ms'      => $durationMs,
+            'queue_id'         => $opts['queue_id'] ?? null,
+        ];
+
+        if ($httpStatus < 200 || $httpStatus >= 300) {
+            $classified = $this->classifyError($httpStatus, $decoded, []);
+            $logRow['error_code']    = $classified['code'] ?? (string) $classified['category'];
+            $logRow['error_message'] = $classified['message'];
+            $this->writeSyncLog($logRow);
+            throw $this->buildException($classified, $httpStatus, $decoded);
+        }
+
         $this->writeSyncLog($logRow);
         return $decoded;
     }
