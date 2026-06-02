@@ -167,6 +167,10 @@ function FF_HelpDrawer() {
                 document.body.style.overflow = 'hidden';
             }
 
+            // Measure the sticky page-header so the panel starts below it
+            // (the header spans full width above the drawer, like the topbar).
+            this._syncHeaderOffset();
+
             this._persist(true, slug);
 
             try {
@@ -196,7 +200,17 @@ function FF_HelpDrawer() {
             this.isOpen = false;
             document.body.removeAttribute('data-help-drawer-open');
             document.body.style.overflow = '';
+            document.documentElement.style.setProperty('--ff-help-drawer-offset', '0px');
             this._persist(false, this.currentSlug);
+        },
+
+        // Sets --ff-help-drawer-offset to the sticky page-header's height so
+        // the drawer panel starts beneath it. Falls back to 0 when the page
+        // has no page-header (drawer then sits directly below the topbar).
+        _syncHeaderOffset() {
+            const ph = document.querySelector('.page-content .page-header');
+            const h  = ph ? Math.round(ph.getBoundingClientRect().height) : 0;
+            document.documentElement.style.setProperty('--ff-help-drawer-offset', h + 'px');
         },
 
         reload() {
