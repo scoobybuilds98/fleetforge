@@ -41,7 +41,8 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('equipment', 'view');
 
-$pageTitle = 'Fleet Tracking';
+$pageTitle      = 'Fleet Tracking';
+$helpModuleSlug = 'tracking';
 require_once FF_ROOT . '/includes/header.php';
 
 // Check if Samsara API is configured — used for the dev-mode banner.
@@ -74,7 +75,8 @@ $gpsConfigured = ($samsaraKey !== '');
             </span>
         </p>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;">
+    <div class="page-header-actions" style="align-items:center;">
+        <?= help_button('tracking') ?>
         <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;color:var(--text-secondary);cursor:pointer;">
             <input type="checkbox" x-model="autoRefresh" style="accent-color:var(--color-primary);">
             Auto-refresh

@@ -20,7 +20,8 @@ require_auth();
 require_permission('customers', 'view');
 
 $canRespond = can('customers', 'edit');
-$pageTitle = 'Service Requests';
+$pageTitle      = 'Service Requests';
+$helpModuleSlug = 'service-requests';
 require_once FF_ROOT . '/includes/header.php';
 
 // Status filter via query string
@@ -95,14 +96,17 @@ $typeLabels = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABE
             also gets notified when you respond or change status.
         </div>
     </div>
-    <?php if (can('settings', 'edit')): ?>
-    <a href="<?= base_url('settings') ?>?tab=portal_users#service-request-routing"
-       class="btn btn-secondary btn-sm"
-       style="white-space:nowrap;align-self:center;">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>
-        Configure routing
-    </a>
-    <?php endif; ?>
+    <div class="page-header-actions" style="align-self:center;">
+        <?= help_button('service-requests') ?>
+        <?php if (can('settings', 'edit')): ?>
+        <a href="<?= base_url('settings') ?>?tab=portal_users#service-request-routing"
+           class="btn btn-secondary btn-sm"
+           style="white-space:nowrap;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>
+            Configure routing
+        </a>
+        <?php endif; ?>
+    </div>
 </div>
 
 <!-- ── 4 KPI tiles ────────────────────────────────────────────── -->

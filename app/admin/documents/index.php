@@ -32,7 +32,8 @@ require_auth();
 // WHY: documents nav entry has module=null — visible to all authenticated staff
 // No per-module permission required for listing; delete is gated in the API.
 
-$pageTitle = 'Documents';
+$pageTitle      = 'Documents';
+$helpModuleSlug = 'documents';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -44,9 +45,12 @@ require_once FF_ROOT . '/includes/header.php';
             <h1 class="page-title">Documents</h1>
             <p class="page-subtitle">All uploaded files across customers, equipment, and leases.</p>
         </div>
-        <?php if (can('equipment', 'edit') || can('customers', 'edit') || can('leases', 'edit')): ?>
-        <button class="btn btn-primary" @click="openUploadModal()">+ Upload</button>
-        <?php endif; ?>
+        <div class="page-header-actions">
+            <?= help_button('documents') ?>
+            <?php if (can('equipment', 'edit') || can('customers', 'edit') || can('leases', 'edit')): ?>
+            <button class="btn btn-primary" @click="openUploadModal()">+ Upload</button>
+            <?php endif; ?>
+        </div>
     </div>
 
     <!-- ── Filter bar ───────────────────────────────────────────── -->

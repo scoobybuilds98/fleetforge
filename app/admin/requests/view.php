@@ -55,7 +55,8 @@ if (!$req) {
     exit;
 }
 
-$pageTitle = 'Service Request #' . (int) $req['id'];
+$pageTitle      = 'Service Request #' . (int) $req['id'];
+$helpModuleSlug = 'service-requests';
 require_once FF_ROOT . '/includes/header.php';
 
 $typeLabels = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABELS;
@@ -90,7 +91,10 @@ $statusBadge = match ($req['status']) {
             <?php endif; ?>
         </div>
     </div>
-    <span class="badge <?= $statusBadge ?>" style="font-size:0.875rem;"><?= e($req['status']) ?></span>
+    <div class="page-header-actions" style="align-items:center;">
+        <?= help_button('service-requests') ?>
+        <span class="badge <?= $statusBadge ?>" style="font-size:0.875rem;"><?= e($req['status']) ?></span>
+    </div>
 </div>
 
 <!-- ── Top: customer + lease + equipment refs ─────────────────── -->
