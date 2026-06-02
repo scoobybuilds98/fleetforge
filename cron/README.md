@@ -20,8 +20,15 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 0 3 * * 0     /usr/bin/php /var/www/fleetforge/cron/backup_storage.php >> /var/www/fleetforge/logs/cron.log 2>&1
 
 # ── Billing ───────────────────────────────────────────────────────────────────
-# Monthly invoice generation — 1st of each month at 06:00 UTC
-0 6 1 * *     /usr/bin/php /var/www/fleetforge/cron/invoice_generate_monthly.php >> /var/www/fleetforge/logs/cron.log 2>&1
+# Monthly invoice generation — 1st of each month at 06:00 America/Vancouver
+# (= 14:00 UTC). MUST fire AFTER the billing-tz midnight has rolled to the 1st;
+# the historical `0 6 1 * *` UTC line fired at ~22:00 Vancouver on the PRIOR
+# month's last day, so `today` resolved to that prior day and the cron billed
+# nothing (cron-audit HIGH-1, fixed in S-CRON-FIX-1). The cron now self-heals
+# via `next_billing_date <= today` catch-up + an idempotency guard, so a missed
+# or mistimed run recovers on the next run — and running DAILY (`0 14 * * *`) is
+# also safe (idempotent) and recovers within a day instead of a month.
+0 14 1 * *    /usr/bin/php /var/www/fleetforge/cron/invoice_generate_monthly.php >> /var/www/fleetforge/logs/cron.log 2>&1
 
 # Overdue invoice detection — daily at 07:00 UTC
 0 7 * * *     /usr/bin/php /var/www/fleetforge/cron/invoice_overdue.php >> /var/www/fleetforge/logs/cron.log 2>&1
@@ -88,7 +95,7 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 |---|---|---|---|
 | `backup_db.php` | Every 6 hours | `ff_cron_backup_db` | mysqldump → S3, tiered retention |
 | `backup_storage.php` | Sunday 03:00 UTC | `ff_cron_backup_storage` | storage/uploads/ tarball → S3 |
-| `invoice_generate_monthly.php` | 1st of month 06:00 | `ff_cron_invoice_generate_monthly` | Monthly invoice generation |
+| `invoice_generate_monthly.php` | 1st of month 06:00 local / 14:00 UTC | `ff_cron_invoice_generate_monthly` | Monthly invoice generation (tz-safe `<=` catch-up, idempotent — S-CRON-FIX-1) |
 | `invoice_overdue.php` | Daily 07:00 | `ff_cron_invoice_overdue` | Mark overdue invoices |
 | `late_fee_apply.php` | Daily 07:30 | `ff_cron_late_fee` | Apply late fees |
 | `collections_auto_escalate.php` | Daily 08:00 | `ff_cron_collections` | Auto-escalate collections |

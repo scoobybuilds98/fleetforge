@@ -72,6 +72,13 @@ require_once FF_ROOT . '/vendor/autoload.php';
 
 use FleetForge\Billing\InvoiceGenerator;
 
+// S-CRON-FIX-1: load the monthly-billing cron's runner WITHOUT executing its
+// script wrapper (FF_MONTHLY_BILLING_INCLUDE), so the catch-up / idempotency /
+// timezone logic can be driven directly with deterministic dates in the
+// C1–C6 scenarios below (cron-audit HIGH-1 regression coverage).
+define('FF_MONTHLY_BILLING_INCLUDE', true);
+require_once FF_ROOT . '/cron/invoice_generate_monthly.php';
+
 $results = [];
 
 function s5_record(array &$results, string $case, bool $ok, string $msg): void {
@@ -1312,6 +1319,140 @@ s5_scenario($results, 'S20 I10 cross-check: audit refund_amount == post-drawdown
             $finalLease['precharge_balance'] ?? 'null',
             $audit['audit_amount'] ?? 'null',
             $cn['amount'] ?? 'null')];
+    }, $customerId, $unitId, $userId);
+
+// ═════════════════════════════════════════════════════════════════════
+// S-CRON-FIX-1 — monthly billing cron: timezone + <= catch-up + idempotency
+// Regression coverage for cron-audit HIGH-1 (invoice_generate_monthly silently
+// billed zero invoices: date('Y-m-d') under a UTC cron-fire boundary resolved
+// to the prior day, and the exact `next_billing_date = ?` match never caught
+// up). Each scenario drives ff_run_monthly_billing() with a deterministic
+// $today inside the hermetic BEGIN/ROLLBACK harness. Leases use a fresh
+// NON-Samsara unit so billing is clean full_month (no odometer noise).
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * Push the year's invoice-number counter clear of MAX(invoice_number) so an
+ * in-scenario generate can't collide on the INV-YYYY-NNNNN UNIQUE index.
+ * Reverts with the scenario's ROLLBACK.
+ */
+function mbcron_bump_counter(): void {
+    $yr     = date('Y');
+    $maxStr = db_row("SELECT MAX(invoice_number) m FROM invoices WHERE invoice_number LIKE ?", ["INV-{$yr}-%"])['m'] ?? '';
+    $maxNum = ($maxStr !== '' && $maxStr !== null) ? (int) substr(strrchr($maxStr, '-'), 1) : 0;
+    db_execute(
+        "INSERT INTO settings (`key`, `value`) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE value = VALUES(value)",
+        ["invoice.next_number.{$yr}", (string) ($maxNum + 50)]
+    );
+}
+
+// NOTE on isolation: ff_run_monthly_billing() bills EVERY eligible lease in the
+// DB, so the returned global counters also reflect unrelated seed leases. These
+// scenarios therefore assert on the SEEDED lease's own invoices + advanced
+// next_billing_date (robust regardless of other data), and use early-2026 dates
+// so the rehearsal seed leases (next_billing_date in June 2026) aren't eligible.
+
+// C1 — next_billing_date == today → bills the calendar month + advances 1 month.
+s5_scenario($results, 'C1 cron bills when next_billing_date == today',
+    function ($customerId, $unitId, $userId) {
+        mbcron_bump_counter();
+        $unit    = s5_make_unit(null, $userId); // non-Samsara → clean full_month
+        $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-03-15'], $customerId, $unitId, $userId);
+
+        ff_run_monthly_billing('2026-03-15');
+        $inv = db_select("SELECT billing_period_start, billing_period_end FROM invoices WHERE lease_id = ? AND deleted_at IS NULL", [$leaseId]);
+        $nbd = db_row("SELECT next_billing_date FROM leases WHERE id = ?", [$leaseId])['next_billing_date'];
+
+        $ok = count($inv) === 1
+            && ($inv[0]['billing_period_start'] ?? '') === '2026-03-01'
+            && ($inv[0]['billing_period_end'] ?? '') === '2026-03-31'
+            && $nbd === '2026-04-15';
+        return ['ok' => $ok, 'msg' => sprintf('my-lease invoices=%d period=%s..%s nbd->%s (expect 1/2026-03-01..2026-03-31/2026-04-15)',
+            count($inv), $inv[0]['billing_period_start'] ?? 'none', $inv[0]['billing_period_end'] ?? 'none', $nbd)];
+    }, $customerId, $unitId, $userId);
+
+// C2 — next_billing_date in the PAST → <= catches it (the old `=` would miss it).
+s5_scenario($results, 'C2 cron catch-up bills a past-due period (<= match)',
+    function ($customerId, $unitId, $userId) {
+        mbcron_bump_counter();
+        $unit    = s5_make_unit(null, $userId);
+        $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-03-01'], $customerId, $unitId, $userId);
+
+        ff_run_monthly_billing('2026-03-20'); // 19 days "late" — old exact-match billed NOTHING
+        $inv = db_select("SELECT billing_period_start FROM invoices WHERE lease_id = ? AND deleted_at IS NULL", [$leaseId]);
+        $nbd = db_row("SELECT next_billing_date FROM leases WHERE id = ?", [$leaseId])['next_billing_date'];
+
+        $ok = count($inv) === 1 && ($inv[0]['billing_period_start'] ?? '') === '2026-03-01' && $nbd === '2026-04-01';
+        return ['ok' => $ok, 'msg' => sprintf('my-lease invoices=%d nbd->%s (expect 1/2026-04-01 — proves <= catches a date that already passed)', count($inv), $nbd)];
+    }, $customerId, $unitId, $userId);
+
+// C3 — next_billing_date in the FUTURE → not selected, nothing billed.
+s5_scenario($results, 'C3 cron does NOT bill a future-dated lease',
+    function ($customerId, $unitId, $userId) {
+        $unit    = s5_make_unit(null, $userId);
+        $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-04-01'], $customerId, $unitId, $userId);
+
+        ff_run_monthly_billing('2026-03-20');
+        $cnt = (int) db_row("SELECT COUNT(*) c FROM invoices WHERE lease_id = ? AND deleted_at IS NULL", [$leaseId])['c'];
+        $nbd = db_row("SELECT next_billing_date FROM leases WHERE id = ?", [$leaseId])['next_billing_date'];
+
+        $ok = $cnt === 0 && $nbd === '2026-04-01';
+        return ['ok' => $ok, 'msg' => sprintf('my-lease invoices=%d nbd=%s (expect 0/unchanged 2026-04-01)', $cnt, $nbd)];
+    }, $customerId, $unitId, $userId);
+
+// C4 — period already has a full_month invoice → NO double-bill; pointer heals.
+s5_scenario($results, 'C4 cron does NOT double-bill an already-billed period',
+    function ($customerId, $unitId, $userId) {
+        mbcron_bump_counter();
+        $unit    = s5_make_unit(null, $userId);
+        $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-03-01'], $customerId, $unitId, $userId);
+
+        // Pre-existing March full_month invoice (e.g. advance-billed or a prior
+        // partial run) — but next_billing_date was NOT advanced.
+        (new InvoiceGenerator())->createFromLease([
+            'lease_id' => $leaseId, 'period_start' => '2026-03-01', 'period_end' => '2026-03-31',
+            'billing_type' => 'full_month', 'invoice_type' => 'regular',
+            'generation_source' => 'cron', 'auto_generated' => 1, 'created_by' => null,
+        ]);
+
+        ff_run_monthly_billing('2026-03-20');
+        $cnt = (int) db_row("SELECT COUNT(*) c FROM invoices WHERE lease_id = ? AND billing_period_start = '2026-03-01' AND deleted_at IS NULL", [$leaseId])['c'];
+        $nbd = db_row("SELECT next_billing_date FROM leases WHERE id = ?", [$leaseId])['next_billing_date'];
+
+        // Exactly one March invoice (not two) + the pointer advanced past it.
+        $ok = $cnt === 1 && $nbd === '2026-04-01';
+        return ['ok' => $ok, 'msg' => sprintf('my-lease march_invoices=%d nbd->%s (expect 1/2026-04-01 — no double-bill, pointer healed)', $cnt, $nbd)];
+    }, $customerId, $unitId, $userId);
+
+// C5 — two missed periods → BOTH billed in one run (catch-up, not 2 months).
+s5_scenario($results, 'C5 cron multi-period catch-up bills every missed month',
+    function ($customerId, $unitId, $userId) {
+        mbcron_bump_counter();
+        $unit    = s5_make_unit(null, $userId);
+        $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-02-01'], $customerId, $unitId, $userId);
+
+        ff_run_monthly_billing('2026-03-20'); // Feb + March due in one run
+        $inv    = db_select("SELECT billing_period_start FROM invoices WHERE lease_id = ? AND deleted_at IS NULL ORDER BY billing_period_start", [$leaseId]);
+        $starts = array_column($inv, 'billing_period_start');
+        $nbd    = db_row("SELECT next_billing_date FROM leases WHERE id = ?", [$leaseId])['next_billing_date'];
+
+        $ok = count($inv) === 2 && $starts === ['2026-02-01', '2026-03-01'] && $nbd === '2026-04-01';
+        return ['ok' => $ok, 'msg' => sprintf('my-lease invoices=%d periods=[%s] nbd->%s (expect 2 / 2026-02-01,2026-03-01 / 2026-04-01 in ONE run)',
+            count($inv), implode(',', $starts), $nbd)];
+    }, $customerId, $unitId, $userId);
+
+// C6 — today() resolves a business-tz calendar day + honors the non-prod override.
+s5_scenario($results, 'C6 ff_monthly_billing_today resolves business-tz + override',
+    function ($customerId, $unitId, $userId) {
+        putenv('FF_CRON_TODAY=2026-02-15');
+        $override = ff_monthly_billing_today();
+        putenv('FF_CRON_TODAY');                 // clear the override
+        $natural  = ff_monthly_billing_today();
+
+        $ok = $override === '2026-02-15'
+            && preg_match('/^\d{4}-\d{2}-\d{2}$/', $natural) === 1;
+        return ['ok' => $ok, 'msg' => sprintf('override=%s natural=%s (expect 2026-02-15 / a valid business-tz Y-m-d)', $override, $natural)];
     }, $customerId, $unitId, $userId);
 
 // ─────────────────────────────────────────────────────────────────────
