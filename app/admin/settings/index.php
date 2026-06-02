@@ -121,8 +121,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 }
             } else {
                 // Backward-compat path: all keys in the submitted group.
+                //
+                // S-SECURITY-SAVE-SCOPE: restrict to label IS NOT NULL so the
+                // save scope MATCHES the render scope. The form only renders
+                // keys with a non-NULL label (see the $allSettings query
+                // below, which filters the same way), so any NULL-label key in
+                // the group is never present in POST. Without this filter the
+                // loop below treats "absent from POST" as "reset to type
+                // default", silently clobbering hidden rows: the 13
+                // security.rate_limit.* keys (NULL label, never rendered) were
+                // forced to 0 every time the Security/MFA card was saved —
+                // which disabled IP + MFA rate limiting (window/threshold 0).
+                // Only persist what the operator could actually see and edit.
                 $groupKeys = db_select(
-                    "SELECT `key`, value_type FROM settings WHERE group_name = ?",
+                    "SELECT `key`, value_type FROM settings WHERE group_name = ? AND label IS NOT NULL",
                     [$groupName]
                 );
             }
@@ -143,6 +155,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             ];
 
             db_transaction(function () use ($groupKeys, $groupName, $secretKeys) {
+                // S-MFA-SETTINGS-RECONCILE: captured below when the
+                // security.mfa.required_roles key is processed. Drives the
+                // users.mfa_required reconcile that runs after the settings
+                // loop. Stays null when that key is not part of this save, so
+                // non-security group saves never touch user rows.
+                $reconcileRoles = null;
+
                 foreach ($groupKeys as $setting) {
                     $key       = $setting['key'];
                     $valueType = $setting['value_type'];
@@ -178,6 +197,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                         // requirement entirely.
                         $rolesArr = is_array($raw) ? array_values(array_filter(array_map('strval', $raw))) : [];
                         $val = json_encode($rolesArr, JSON_UNESCAPED_SLASHES);
+                        // S-MFA-SETTINGS-RECONCILE: remember the freshly-saved
+                        // role list so the post-loop block can propagate it to
+                        // users.mfa_required. An empty array (operator unchecked
+                        // every role) reconciles every user to mfa_required = 0.
+                        $reconcileRoles = $rolesArr;
                     } elseif ($key === 'ai.briefing_recipient_roles') {
                         // S-INTEL-TAB: multi-checkbox UI for Intelligence tab.
                         // JSON array of user_roles.slug values per D-INTEL-2;
@@ -245,6 +269,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                     'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
                     'notes'        => "Settings group '{$groupName}' updated",
                 ]);
+
+                // ── S-MFA-SETTINGS-RECONCILE ───────────────────────────────
+                // Propagate security.mfa.required_roles → users.mfa_required.
+                //
+                // WHY: app/auth/login.php gates the login challenge on the
+                // per-user columns users.mfa_required / users.mfa_enabled, NOT
+                // on this setting. Historically the column was only written at
+                // user-create (api/v1/users/create.php), role-change
+                // (api/v1/users/update.php), and via the manual CLI
+                // (scripts/reconcile_mfa_required.php) — so editing the role
+                // list here had ZERO effect at login. An operator who emptied
+                // the list to "turn off MFA" still saw super_admins/managers
+                // prompted because their mfa_required column kept its stale
+                // value. Reconciling in the SAME transaction makes the setting
+                // take effect immediately and atomically.
+                //
+                // SCOPE (D-E): only mfa_required is reconciled here. mfa_enabled
+                // + mfa_secret are deliberately never touched on a settings
+                // save — a user who personally enrolled an authenticator
+                // (voluntary setup from My Profile) must keep their second
+                // factor even when their role stops requiring it. To strip MFA
+                // from a specific enrolled account, an admin uses the per-user
+                // disable action (api/v1/users/disable_mfa.php) or the CLI
+                // (scripts/admin_override_mfa.php).
+                if ($reconcileRoles !== null) {
+                    $usersForMfa = db_select(
+                        "SELECT u.id, u.email, u.mfa_required, r.slug AS role_slug
+                           FROM users u
+                           JOIN user_roles r ON r.id = u.role_id
+                          WHERE u.deleted_at IS NULL"
+                    );
+                    $mfaChanged = 0;
+                    foreach ($usersForMfa as $uRow) {
+                        $should = in_array($uRow['role_slug'], $reconcileRoles, true) ? 1 : 0;
+                        if ((int) $uRow['mfa_required'] !== $should) {
+                            db_execute(
+                                "UPDATE users SET mfa_required = ? WHERE id = ?",
+                                [$should, (int) $uRow['id']]
+                            );
+                            $mfaChanged++;
+                        }
+                    }
+                    if ($mfaChanged > 0) {
+                        $rolesLabel = empty($reconcileRoles) ? '(none)' : implode(', ', $reconcileRoles);
+                        db_insert('audit_log', [
+                            'user_id'      => current_user_id(),
+                            'user_name'    => current_user()['name'] ?? 'system',
+                            'action'       => 'update',
+                            'module'       => 'settings',
+                            'entity_type'  => 'settings_group',
+                            'entity_label' => 'security',
+                            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                            'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                            'notes'        => "MFA required-roles saved → reconciled mfa_required for {$mfaChanged} user(s). Required roles now: {$rolesLabel}.",
+                        ]);
+                    }
+                }
             });
 
             $saveFlash = 'Settings saved successfully.';
