@@ -132,7 +132,7 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- Create/Edit Modal -->
-    <div x-show="showForm" x-cloak style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+    <div class="modal-overlay" x-show="showForm" x-cloak style="background:rgba(0,0,0,0.5);"
          @click.self="showForm = false">
             <div class="card" style="width:100%;max-width:600px;padding:24px;" x-show="showForm" x-transition>
                 <div style="font-weight:700;font-size:1rem;margin-bottom:16px;" x-text="form.id ? 'Edit Rule' : 'New Rule'"></div>

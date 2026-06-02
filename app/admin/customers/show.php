@@ -1070,8 +1070,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
     <!-- ── Rate Override Modal ──────────────────────────────── -->
     <?php if (can('rates', 'edit')): ?>
-    <div x-show="rateModal.open" x-cloak
-         style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);">
+    <div class="modal-overlay" x-show="rateModal.open" x-cloak
+         style="background:rgba(0,0,0,0.5);">
         <div class="modal" style="width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
             <div class="modal-header">
                 <h3 class="modal-title" x-text="rateModal.id ? 'Edit Rate Override' : 'Add Rate Override'"></h3>
@@ -1377,7 +1377,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     <!-- ── Document Upload Modal ────────────────────────────────── -->
     <?php if (can('customers', 'edit')): ?>
     <div x-show="docUploadModal.open" x-cloak
-         style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+         class="modal-overlay"
+         style="background:rgba(0,0,0,0.5);"
          @click.self="docUploadModal.open = false">
         <div class="modal" style="width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
             <div class="modal-header">

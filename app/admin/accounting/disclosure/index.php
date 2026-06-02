@@ -217,9 +217,9 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- Related Party Modal -->
-    <div x-show="relatedPartyModalOpen"
+    <div class="modal-overlay" x-show="relatedPartyModalOpen"
          x-cloak
-         style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:100;"
+         style="background:rgba(0,0,0,0.5);"
          @click.self="relatedPartyModalOpen = false">
         <div class="card" style="max-width:760px;width:90%;max-height:80vh;overflow:auto;padding:20px;">
             <div style="display:flex;align-items:center;margin-bottom:14px;">

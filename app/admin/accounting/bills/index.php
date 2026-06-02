@@ -180,7 +180,7 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- Create/Edit Modal -->
-    <div x-show="showModal" x-cloak style="position:fixed;inset:0;z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;background:rgba(0,0,0,0.5);overflow-y:auto;"
+    <div class="modal-overlay" x-show="showModal" x-cloak style="background:rgba(0,0,0,0.5);"
          @click.self="showModal = false">
             <div class="card" style="width:100%;max-width:900px;padding:24px;" x-show="showModal" x-transition>
                 <div style="font-weight:700;font-size:1rem;margin-bottom:16px;" x-text="form.id ? 'Edit Bill' : 'New Bill'"></div>
@@ -313,7 +313,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- Pay Modal -->
-    <div x-show="showPayModal" x-cloak style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+    <div class="modal-overlay" x-show="showPayModal" x-cloak style="background:rgba(0,0,0,0.5);"
          @click.self="showPayModal = false">
             <div class="card" style="width:100%;max-width:520px;padding:24px;" x-show="showPayModal" x-transition>
                 <div style="font-weight:700;font-size:1rem;margin-bottom:16px;">Record Payment</div>
@@ -366,7 +366,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- View Detail Modal -->
-    <div x-show="showDetail" x-cloak style="position:fixed;inset:0;z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;background:rgba(0,0,0,0.5);overflow-y:auto;"
+    <div class="modal-overlay" x-show="showDetail" x-cloak style="background:rgba(0,0,0,0.5);"
          @click.self="showDetail = false">
             <div class="card" style="width:100%;max-width:800px;padding:24px;" x-show="showDetail" x-transition>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">

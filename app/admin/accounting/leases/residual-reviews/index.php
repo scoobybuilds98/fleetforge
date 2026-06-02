@@ -204,8 +204,8 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- Review modal -->
-    <div x-show="showModal" x-cloak
-         style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;"
+    <div class="modal-overlay" x-show="showModal" x-cloak
+         style="background:rgba(0,0,0,0.55);"
          @click.self="showModal = false">
         <div class="card" style="max-width:560px;padding:24px;">
             <div class="card-title" style="margin-bottom:10px;">

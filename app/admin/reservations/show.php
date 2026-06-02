@@ -756,8 +756,8 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- ── Cancel Modal ──────────────────────────────────────────── -->
-    <div x-show="cancelModal.open"
-         style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+    <div class="modal-overlay" x-show="cancelModal.open"
+         style="background:rgba(0,0,0,0.5);"
          @keydown.escape.window="cancelModal.open = false">
         <div class="card" style="width:480px;max-width:calc(100vw - 32px);padding:24px;">
             <h3 class="h5" style="margin-bottom:8px;">Cancel Reservation</h3>

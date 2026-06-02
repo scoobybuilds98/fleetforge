@@ -191,7 +191,8 @@ require_once FF_ROOT . '/includes/header.php';
          UPLOAD MODAL
          ════════════════════════════════════════════════════════════ -->
     <div x-show="uploadModal.open" x-cloak
-         style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+         class="modal-overlay"
+         style="background:rgba(0,0,0,0.5);"
          @click.self="uploadModal.open = false">
         <div class="modal" style="width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;" @click.stop>
             <div class="modal-header">

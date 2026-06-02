@@ -302,7 +302,7 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ────────────────────────────────────────────────────────────────────
          Manual adjustment modal (S-ACCT-CCA-2 — Step 3 adjustments_transfers)
          ──────────────────────────────────────────────────────────────────── -->
-    <div x-show="adjustModal.open" x-cloak class="modal-backdrop" @click.self="adjustModal.open = false" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;">
+    <div x-show="adjustModal.open" x-cloak class="modal-backdrop" @click.self="adjustModal.open = false" style="background:rgba(0,0,0,0.4);">
         <div class="card" style="padding:24px;width:min(560px,95vw);">
             <h3 style="margin-top:0;font-size:1rem;font-weight:600;">Manual CCA Adjustment</h3>
             <p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 12px;">

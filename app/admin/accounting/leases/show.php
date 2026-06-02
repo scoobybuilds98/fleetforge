@@ -349,8 +349,8 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── Regenerate confirm modal ───────────────────────────── -->
-    <div x-show="showRegenModal" x-cloak
-         style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;"
+    <div class="modal-overlay" x-show="showRegenModal" x-cloak
+         style="background:rgba(0,0,0,0.55);"
          @click.self="showRegenModal = false">
         <div class="card" style="max-width:480px;padding:24px;">
             <div class="card-title" style="margin-bottom:10px;">Regenerate Schedule?</div>

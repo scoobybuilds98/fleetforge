@@ -189,7 +189,7 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- Apply Modal -->
-    <div x-show="showApply" x-cloak style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+    <div class="modal-overlay" x-show="showApply" x-cloak style="background:rgba(0,0,0,0.5);"
          @click.self="showApply = false">
             <div class="card" style="width:100%;max-width:480px;padding:24px;" x-show="showApply" x-transition>
                 <div style="font-weight:700;font-size:1rem;margin-bottom:12px;">Apply Credit to Bill</div>

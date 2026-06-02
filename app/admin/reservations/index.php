@@ -783,14 +783,14 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /x-show !ganttView wrapper -->
 
     <!-- ── CANCEL MODAL ───────────────────────────────────────────── -->
-    <div x-show="cancelModal.open"
+    <div class="modal-overlay" x-show="cancelModal.open"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100"
          x-transition:leave="transition ease-in duration-150"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
-         style="position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);"
+         style="background:rgba(0,0,0,0.5);"
          @keydown.escape.window="cancelModal.open = false">
 
         <div class="card" style="width:480px;max-width:calc(100vw - 32px);padding:24px;">

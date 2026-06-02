@@ -215,7 +215,7 @@ require_once FF_ROOT . '/includes/header.php';
     </template>
 
     <!-- ═══ ACCOUNT MODAL ═══ -->
-    <div x-show="showAccountModal" x-cloak class="modal-backdrop" @click.self="showAccountModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
+    <div x-show="showAccountModal" x-cloak class="modal-backdrop" @click.self="showAccountModal=false" style="background:rgba(0,0,0,0.5);">
         <div class="card" style="width:560px;max-height:90vh;overflow-y:auto;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;" x-text="editingAccount ? 'Edit Bank Account' : 'Add Bank Account'"></h3>
             <div class="form-error-banner" x-show="accountFormError" x-cloak x-text="accountFormError" style="margin-bottom:12px;"></div>
@@ -305,7 +305,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ═══ CSV IMPORT MODAL ═══ -->
-    <div x-show="showImportModal" x-cloak class="modal-backdrop" @click.self="showImportModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
+    <div x-show="showImportModal" x-cloak class="modal-backdrop" @click.self="showImportModal=false" style="background:rgba(0,0,0,0.5);">
         <div class="card" style="width:800px;max-height:90vh;overflow-y:auto;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;">Import Bank CSV</h3>
 
@@ -436,7 +436,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ═══ MANUAL TRANSACTION MODAL ═══ -->
-    <div x-show="showManualTxnModal" x-cloak class="modal-backdrop" @click.self="showManualTxnModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
+    <div x-show="showManualTxnModal" x-cloak class="modal-backdrop" @click.self="showManualTxnModal=false" style="background:rgba(0,0,0,0.5);">
         <div class="card" style="width:480px;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;">Manual Bank Transaction</h3>
             <div class="form-error-banner" x-show="manualTxnFormError" x-cloak x-text="manualTxnFormError" style="margin-bottom:12px;"></div>
@@ -493,7 +493,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ═══ TRANSFER MODAL ═══ -->
-    <div x-show="showTransferModal" x-cloak class="modal-backdrop" @click.self="showTransferModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
+    <div x-show="showTransferModal" x-cloak class="modal-backdrop" @click.self="showTransferModal=false" style="background:rgba(0,0,0,0.5);">
         <div class="card" style="width:480px;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;">Transfer Between Accounts</h3>
             <div class="form-error-banner" x-show="transferFormError" x-cloak x-text="transferFormError" style="margin-bottom:12px;"></div>
@@ -550,7 +550,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ═══ NSF MODAL ═══ -->
-    <div x-show="showNsfModal" x-cloak class="modal-backdrop" @click.self="showNsfModal=false" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
+    <div x-show="showNsfModal" x-cloak class="modal-backdrop" @click.self="showNsfModal=false" style="background:rgba(0,0,0,0.5);">
         <div class="card" style="width:480px;padding:24px;" @click.stop>
             <h3 class="h5" style="margin-bottom:16px;color:var(--color-danger);">Process NSF (Returned Payment)</h3>
             <div style="padding:10px 14px;background:var(--badge-danger-bg);color:var(--badge-danger-text);border-radius:6px;font-size:0.8125rem;margin-bottom:16px;">

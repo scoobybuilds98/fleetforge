@@ -281,7 +281,7 @@ require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
 
     <!-- Add Component modal -->
     <div x-show="modal.open" x-cloak class="modal-backdrop" @click.self="modal.open = false"
-         style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;">
+         style="background:rgba(0,0,0,0.4);">
         <div class="card" style="padding:24px;width:min(640px,95vw);max-height:90vh;overflow:auto;">
             <h3 style="margin-top:0;font-size:1rem;font-weight:600;">Add Component to <?= e($asset['asset_number']) ?></h3>
             <p style="font-size:0.75rem;color:var(--text-secondary);margin:0 0 12px;">
