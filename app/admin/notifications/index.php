@@ -4,19 +4,16 @@ declare(strict_types=1);
 /**
  * app/admin/notifications/index.php
  *
- * Full notifications page — fixes the 404 that the topbar's
- * "See all notifications" link previously hit.
+ * Full notifications page with flat + grouped views.
  *
- * Server-side filters + server-side pagination, no separate API
- * call to render the initial page (matches /audit pattern).
+ * Views:
+ *   flat    — paginated chronological list (default)
+ *   grouped — collapsible sections per category, unread-heavy
+ *             groups first; up to 10 items shown per group with
+ *             a "See all" link when more exist
  *
  * Filters: is_read (all|unread|read), category, date_range, search
- * Paging:  25 per page
- *
- * Inline actions (fetch from /api/v1/notifications/...):
- *   - Mark single as read / delete
- *   - Mark all as read
- *   - Clear all read
+ * Paging:  25 per page (flat only)
  *
  * @method  GET
  * @auth    require_auth + login session
@@ -88,7 +85,10 @@ if ($search !== '') {
 
 $whereSQL = implode(' AND ', $where);
 
-// ── Pagination ─────────────────────────────────────────────────────────────────
+// ── View mode ──────────────────────────────────────────────────────────────────
+$viewMode = ($_GET['view'] ?? '') === 'grouped' ? 'grouped' : 'flat';
+
+// ── Pagination (flat only) ─────────────────────────────────────────────────────
 $perPage = 25;
 $page    = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
 $offset  = ($page - 1) * $perPage;
@@ -106,16 +106,51 @@ $unreadCount = db_count(
 );
 
 // ── Fetch rows ─────────────────────────────────────────────────────────────────
-$rows = db_select(
-    "SELECT n.id, n.title, n.message, n.type, n.category, n.url,
-            n.entity_type, n.entity_id, n.severity, n.is_read, n.read_at,
-            n.created_at
-       FROM notifications n
-      WHERE $whereSQL
-   ORDER BY n.is_read ASC, n.created_at DESC
-      LIMIT $perPage OFFSET $offset",
-    $params
-);
+$notifCols = "n.id, n.title, n.message, n.type, n.category, n.url,
+              n.entity_type, n.entity_id, n.severity, n.is_read, n.read_at, n.created_at";
+
+if ($viewMode === 'grouped') {
+    // Summary: count + unread per category (respects active filters)
+    $groupSummary = [];
+    foreach (db_select(
+        "SELECT n.category, COUNT(*) AS total, SUM(n.is_read = 0) AS unread
+           FROM notifications n WHERE $whereSQL GROUP BY n.category",
+        $params
+    ) as $s) {
+        $groupSummary[$s['category'] ?? 'system'] = [
+            'total'  => (int) $s['total'],
+            'unread' => (int) $s['unread'],
+        ];
+    }
+
+    // Fetch up to 500 items; group in PHP (up to 10 shown per section)
+    $allRows = db_select(
+        "SELECT $notifCols FROM notifications n
+          WHERE $whereSQL ORDER BY n.is_read ASC, n.created_at DESC LIMIT 500",
+        $params
+    );
+    $grouped = [];
+    foreach ($allRows as $r) {
+        $grouped[$r['category'] ?? 'system'][] = $r;
+    }
+    // Sort groups: most unread first, then by total
+    uksort($grouped, static function (string $a, string $b) use ($groupSummary): int {
+        $au = $groupSummary[$a]['unread'] ?? 0;
+        $bu = $groupSummary[$b]['unread'] ?? 0;
+        if ($au !== $bu) return $bu <=> $au;
+        return ($groupSummary[$b]['total'] ?? 0) <=> ($groupSummary[$a]['total'] ?? 0);
+    });
+    $rows = []; // flat rows unused in grouped mode
+} else {
+    $rows = db_select(
+        "SELECT $notifCols FROM notifications n
+          WHERE $whereSQL ORDER BY n.is_read ASC, n.created_at DESC
+          LIMIT $perPage OFFSET $offset",
+        $params
+    );
+    $grouped = [];
+    $groupSummary = [];
+}
 
 // ── Helper: relative time string ───────────────────────────────────────────────
 function notif_time_ago(string $createdAt): string {
@@ -158,6 +193,23 @@ function notif_page_url(int $p): string {
     return '?' . http_build_query($q);
 }
 
+// ── Helper: view toggle URL ────────────────────────────────────────────────────
+function notif_view_url(string $v): string {
+    $q = $_GET;
+    $q['view'] = $v;
+    unset($q['page']);
+    return '?' . http_build_query($q);
+}
+
+// ── Helper: "See all in category" URL (flat view, filtered) ───────────────────
+function notif_cat_url(string $cat): string {
+    $q = $_GET;
+    $q['view']     = 'flat';
+    $q['category'] = $cat;
+    unset($q['page']);
+    return '?' . http_build_query($q);
+}
+
 $pageTitle = 'Notifications';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -170,6 +222,15 @@ require_once FF_ROOT . '/includes/header.php';
         </p>
     </div>
     <div class="page-header-actions">
+        <!-- ── View toggle ── -->
+        <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">
+            <a href="<?= e(notif_view_url('flat')) ?>"
+               class="btn btn-xs <?= $viewMode === 'flat' ? 'btn-primary' : 'btn-secondary' ?>"
+               style="border-radius:0;border:none;padding:5px 12px;">Flat</a>
+            <a href="<?= e(notif_view_url('grouped')) ?>"
+               class="btn btn-xs <?= $viewMode === 'grouped' ? 'btn-primary' : 'btn-secondary' ?>"
+               style="border-radius:0;border:none;border-left:1px solid var(--border-color);padding:5px 12px;">Grouped</a>
+        </div>
         <button type="button" class="btn btn-secondary btn-sm" id="notif-mark-all-btn"
                 <?= $unreadCount === 0 ? 'disabled' : '' ?>>
             Mark all read
@@ -232,9 +293,120 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── List ─────────────────────────────────────────────────────────────────── -->
+
+<?php
+// Shared helper: render a single notification <li>
+function notif_render_item(array $n, bool $showCatBadge = true): void {
+    $unread   = (int) $n['is_read'] === 0;
+    $cat      = $n['category'] ?? 'system';
+    $catClass = 'notif-icon--' . $cat;
+    $type     = (string) ($n['type'] ?? '');
+    if ($type === 'compliance.expired' || $n['severity'] === 'critical') {
+        $catClass = 'notif-icon--danger';
+    } elseif ($type === 'compliance.expiring_7' || $n['severity'] === 'warning') {
+        $catClass = 'notif-icon--warning';
+    }
+    ?>
+    <li class="notif-page-item <?= $unread ? 'notif-page-item--unread' : '' ?>"
+        data-id="<?= (int) $n['id'] ?>">
+        <div class="notif-icon <?= e($catClass) ?>">
+            <?= heroicon(notif_category_icon($n['category']), 'nav-icon') ?>
+        </div>
+        <div class="notif-page-content">
+            <div class="notif-page-title"><?= e($n['title']) ?></div>
+            <div class="notif-page-message"><?= e($n['message']) ?></div>
+            <div class="notif-page-meta">
+                <span title="<?= e($n['created_at']) ?> UTC">
+                    <?= e(notif_time_ago((string) $n['created_at'])) ?>
+                </span>
+                <?php if ($showCatBadge && !empty($n['category'])): ?>
+                    · <span class="badge badge-neutral" style="font-size:0.65rem;padding:2px 7px;">
+                        <?= e(ucfirst($n['category'])) ?>
+                    </span>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="notif-page-actions">
+            <?php if (!empty($n['url'])): ?>
+                <a href="<?= e($n['url']) ?>" class="btn btn-link btn-xs notif-page-link"
+                   data-id="<?= (int) $n['id'] ?>">Open</a>
+            <?php endif; ?>
+            <?php if ($unread): ?>
+                <button type="button" class="btn btn-link btn-xs notif-page-mark"
+                        data-id="<?= (int) $n['id'] ?>">Mark read</button>
+            <?php endif; ?>
+            <button type="button" class="btn btn-link btn-xs notif-page-delete"
+                    data-id="<?= (int) $n['id'] ?>">Delete</button>
+        </div>
+    </li>
+    <?php
+}
+?>
+
+<?php if ($viewMode === 'grouped'): ?>
+
+<!-- ── GROUPED VIEW ─────────────────────────────────────────────────────────── -->
 <div class="card notif-list-card">
     <div class="card-body notif-list-body">
+        <?php if (empty($grouped)): ?>
+            <div class="notif-page-empty">
+                <?= heroicon('bell', 'nav-icon') ?>
+                <p class="notif-page-empty-title">No notifications found</p>
+                <p class="notif-page-empty-sub">Notifications will appear here when events occur</p>
+            </div>
+        <?php else: ?>
+            <?php foreach ($grouped as $grpCat => $grpRows): ?>
+            <?php
+                $grpLabel   = $allowedCategories[$grpCat] ?? ucfirst((string) $grpCat);
+                $grpTotal   = $groupSummary[$grpCat]['total']  ?? count($grpRows);
+                $grpUnread  = $groupSummary[$grpCat]['unread'] ?? 0;
+                $grpVisible = array_slice($grpRows, 0, 10);
+                $grpMore    = $grpTotal > 10;
+            ?>
+            <div class="notif-group" id="notif-group-<?= e($grpCat) ?>">
+                <div class="notif-group-header"
+                     onclick="notifToggleGroup(<?= json_encode($grpCat) ?>)"
+                     role="button" tabindex="0"
+                     onkeydown="if(event.key==='Enter'||event.key===' ')notifToggleGroup(<?= json_encode($grpCat) ?>)">
+                    <div class="notif-icon <?= e('notif-icon--' . $grpCat) ?>" style="flex-shrink:0;">
+                        <?= heroicon(notif_category_icon($grpCat), 'nav-icon') ?>
+                    </div>
+                    <span class="notif-group-label"><?= e($grpLabel) ?></span>
+                    <?php if ($grpUnread > 0): ?>
+                        <span class="badge badge-warning" style="font-size:0.7rem;padding:2px 8px;">
+                            <?= $grpUnread ?> unread
+                        </span>
+                    <?php endif; ?>
+                    <span class="text-muted" style="font-size:0.75rem;white-space:nowrap;">
+                        <?= $grpTotal ?> total
+                    </span>
+                    <svg class="notif-group-chevron" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
+                </div>
+                <ul class="notif-page-list notif-group-items" id="notif-group-items-<?= e($grpCat) ?>">
+                    <?php foreach ($grpVisible as $n): ?>
+                        <?php notif_render_item($n, false); ?>
+                    <?php endforeach; ?>
+                    <?php if ($grpMore): ?>
+                    <li style="padding:12px 20px;text-align:center;border-top:1px solid var(--border-color);">
+                        <a href="<?= e(notif_cat_url($grpCat)) ?>" class="btn btn-link btn-sm">
+                            See all <?= $grpTotal ?> <?= e($grpLabel) ?> notifications →
+                        </a>
+                    </li>
+                    <?php endif; ?>
+                </ul>
+            </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+</div>
 
+<?php else: ?>
+
+<!-- ── FLAT VIEW ────────────────────────────────────────────────────────────── -->
+<div class="card notif-list-card">
+    <div class="card-body notif-list-body">
         <?php if (empty($rows)): ?>
             <div class="notif-page-empty">
                 <?= heroicon('bell', 'nav-icon') ?>
@@ -244,52 +416,7 @@ require_once FF_ROOT . '/includes/header.php';
         <?php else: ?>
             <ul class="notif-page-list">
                 <?php foreach ($rows as $n): ?>
-                    <?php
-                        $unread   = (int) $n['is_read'] === 0;
-                        $cat      = $n['category'] ?? 'system';
-                        $catClass = 'notif-icon--' . $cat;
-                        $type     = (string) ($n['type'] ?? '');
-                        if ($type === 'compliance.expired' || $n['severity'] === 'critical') {
-                            $catClass = 'notif-icon--danger';
-                        } elseif ($type === 'compliance.expiring_7' || $n['severity'] === 'warning') {
-                            $catClass = 'notif-icon--warning';
-                        }
-                    ?>
-                    <li class="notif-page-item <?= $unread ? 'notif-page-item--unread' : '' ?>"
-                        data-id="<?= (int) $n['id'] ?>">
-
-                        <div class="notif-icon <?= e($catClass) ?>">
-                            <?= heroicon(notif_category_icon($n['category']), 'nav-icon') ?>
-                        </div>
-
-                        <div class="notif-page-content">
-                            <div class="notif-page-title"><?= e($n['title']) ?></div>
-                            <div class="notif-page-message"><?= e($n['message']) ?></div>
-                            <div class="notif-page-meta">
-                                <span title="<?= e($n['created_at']) ?> UTC">
-                                    <?= e(notif_time_ago((string) $n['created_at'])) ?>
-                                </span>
-                                <?php if (!empty($n['category'])): ?>
-                                    · <span class="badge badge-neutral" style="font-size:0.65rem;padding:2px 7px;">
-                                        <?= e(ucfirst($n['category'])) ?>
-                                    </span>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-
-                        <div class="notif-page-actions">
-                            <?php if (!empty($n['url'])): ?>
-                                <a href="<?= e($n['url']) ?>" class="btn btn-link btn-xs notif-page-link"
-                                   data-id="<?= (int) $n['id'] ?>">Open</a>
-                            <?php endif; ?>
-                            <?php if ($unread): ?>
-                                <button type="button" class="btn btn-link btn-xs notif-page-mark"
-                                        data-id="<?= (int) $n['id'] ?>">Mark read</button>
-                            <?php endif; ?>
-                            <button type="button" class="btn btn-link btn-xs notif-page-delete"
-                                    data-id="<?= (int) $n['id'] ?>">Delete</button>
-                        </div>
-                    </li>
+                    <?php notif_render_item($n); ?>
                 <?php endforeach; ?>
             </ul>
         <?php endif; ?>
@@ -312,7 +439,53 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 </div>
 
+<?php endif; ?>
+
+<style>
+/* ── Grouped view ───────────────────────────────────────────── */
+.notif-group { border-bottom: 1px solid var(--border-color); }
+.notif-group:last-child { border-bottom: none; }
+
+.notif-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 20px;
+    cursor: pointer;
+    background: var(--bg-surface-2, #161616);
+    user-select: none;
+    outline: none;
+}
+.notif-group-header:hover,
+.notif-group-header:focus-visible {
+    background: var(--bg-hover, #1d1d1d);
+}
+.notif-group-label {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+.notif-group-chevron {
+    width: 18px;
+    height: 18px;
+    color: var(--text-muted);
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+}
+.notif-group--collapsed .notif-group-chevron { transform: rotate(-90deg); }
+.notif-group--collapsed .notif-group-items   { display: none; }
+
+/* Items inside groups don't show a category badge (redundant) */
+.notif-group-items .notif-page-item:last-child { border-bottom: none; }
+</style>
+
 <script>
+// ── Group collapse toggle ─────────────────────────────────────────────────────
+function notifToggleGroup(cat) {
+    document.getElementById('notif-group-' + cat)?.classList.toggle('notif-group--collapsed');
+}
+
 // ── Notifications page actions (NOTIF-1) ──────────────────────────────────
 // All POSTs go through FF_Api so the CSRF token + cookies travel correctly.
 (function () {

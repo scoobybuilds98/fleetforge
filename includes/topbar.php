@@ -578,12 +578,20 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
                 <!-- Header -->
                 <div class="notif-dropdown-header">
                     <span class="notif-dropdown-title">Notifications</span>
-                    <button type="button"
-                            class="notif-mark-all"
-                            @click="markAllRead()"
-                            x-show="unreadCount > 0">
-                        Mark all read
-                    </button>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <div class="notif-view-toggle">
+                            <button @click="setView('flat')"
+                                    :class="{ 'notif-view-toggle--active': viewMode === 'flat' }">Flat</button>
+                            <button @click="setView('grouped')"
+                                    :class="{ 'notif-view-toggle--active': viewMode === 'grouped' }">Grouped</button>
+                        </div>
+                        <button type="button"
+                                class="notif-mark-all"
+                                @click="markAllRead()"
+                                x-show="unreadCount > 0">
+                            Mark all read
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Loading -->
@@ -591,7 +599,7 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
                     Loading notifications…
                 </div>
 
-                <!-- Empty -->
+                <!-- Empty (shown only when there are genuinely no notifications) -->
                 <div class="notif-empty"
                      x-show="!loading && notifications.length === 0"
                      x-cloak>
@@ -599,26 +607,62 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
                     <p>No notifications yet</p>
                 </div>
 
-                <!-- Items -->
-                <template x-for="n in notifications" :key="n.id">
-                    <a :href="n.url || '#'"
-                       class="notif-item"
-                       :class="{ 'notif-item--unread': !n.is_read }"
-                       @click="markRead(n.id)">
+                <!-- ── FLAT view (x-show keeps it in DOM so x-for stays initialised) ── -->
+                <div x-show="viewMode === 'flat'">
+                    <template x-for="n in notifications" :key="n.id">
+                        <a :href="n.url || '#'"
+                           class="notif-item"
+                           :class="{ 'notif-item--unread': !n.is_read }"
+                           @click="markRead(n.id)">
+                            <div class="notif-icon" :class="categoryClass(n)" x-html="iconFor(n.category)"></div>
+                            <div class="notif-content">
+                                <div class="notif-title" x-text="n.title"></div>
+                                <div class="notif-message" x-text="n.message"></div>
+                                <div class="notif-time" x-text="n.time_ago"></div>
+                            </div>
+                            <div class="notif-unread-dot" x-show="!n.is_read"></div>
+                        </a>
+                    </template>
+                </div>
 
-                        <div class="notif-icon"
-                             :class="categoryClass(n)"
-                             x-html="iconFor(n.category)"></div>
-
-                        <div class="notif-content">
-                            <div class="notif-title" x-text="n.title"></div>
-                            <div class="notif-message" x-text="n.message"></div>
-                            <div class="notif-time" x-text="n.time_ago"></div>
+                <!-- ── GROUPED view ── -->
+                <div x-show="viewMode === 'grouped'">
+                    <template x-for="group in groupedEntries()" :key="group.cat">
+                        <div class="notif-group-block">
+                            <!-- Group header -->
+                            <div class="notif-group-row" @click="toggleGroup(group.cat)">
+                                <div class="notif-icon notif-icon--sm"
+                                     :class="'notif-icon--' + group.cat"
+                                     x-html="iconFor(group.cat)"></div>
+                                <span class="notif-group-row-label" x-text="categoryLabel(group.cat)"></span>
+                                <span class="notif-group-row-badge"
+                                      x-show="group.unread > 0"
+                                      x-text="group.unread"></span>
+                                <svg class="notif-group-row-chevron"
+                                     :class="{ 'is-collapsed': !expandedGroups[group.cat] }"
+                                     viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                                </svg>
+                            </div>
+                            <!-- Group items — x-show instead of x-if to keep x-for alive -->
+                            <div x-show="expandedGroups[group.cat]">
+                                <template x-for="n in group.items" :key="n.id">
+                                    <a :href="n.url || '#'"
+                                       class="notif-item notif-item--indented"
+                                       :class="{ 'notif-item--unread': !n.is_read }"
+                                       @click="markRead(n.id)">
+                                        <div class="notif-content">
+                                            <div class="notif-title" x-text="n.title"></div>
+                                            <div class="notif-message" x-text="n.message"></div>
+                                            <div class="notif-time" x-text="n.time_ago"></div>
+                                        </div>
+                                        <div class="notif-unread-dot" x-show="!n.is_read"></div>
+                                    </a>
+                                </template>
+                            </div>
                         </div>
-
-                        <div class="notif-unread-dot" x-show="!n.is_read"></div>
-                    </a>
-                </template>
+                    </template>
+                </div>
 
                 <!-- Footer -->
                 <a href="<?= e(base_url('notifications')) ?>"
