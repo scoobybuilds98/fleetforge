@@ -121,44 +121,33 @@ $gpsConfigured = ($samsaraKey !== '');
 </template>
 
 <!-- ── Alerts strip ─────────────────────────────────────────────── -->
-<!-- Collapsible, contracted by default. Badge shows count even when closed. -->
-<div x-show="visibleAlerts.length > 0" class="card spec-card" style="margin-bottom:16px;">
-    <div class="card-header"
-         style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;"
-         @click="alertsExpanded = !alertsExpanded">
-        <div style="display:flex;align-items:center;gap:8px;">
-            <svg style="width:16px;height:16px;color:var(--text-muted);transition:transform 0.18s ease;flex-shrink:0;"
-                 :style="alertsExpanded ? 'transform:rotate(0deg)' : 'transform:rotate(-90deg)'"
-                 viewBox="0 0 20 20" fill="currentColor">
+<template x-if="visibleAlerts.length > 0">
+    <div style="margin-bottom:16px;border-radius:8px;overflow:hidden;border:1px solid var(--border-color-strong);border-left:3px solid var(--color-danger);">
+        <!-- Collapsible header -->
+        <div @click="alertsExpanded = !alertsExpanded"
+             style="display:flex;align-items:center;gap:10px;padding:11px 16px;cursor:pointer;user-select:none;background:var(--bg-surface-2);">
+            <svg viewBox="0 0 20 20" fill="currentColor"
+                 :style="'width:14px;height:14px;flex-shrink:0;transition:transform .18s;transform:' + (alertsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)')">
                 <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
             </svg>
-            <span class="card-title" style="margin:0;">Active Alerts</span>
+            <span style="font-weight:600;font-size:0.875rem;">Active Alerts</span>
             <span class="badge badge-danger" style="font-size:0.7rem;" x-text="visibleAlerts.length"></span>
+            <span style="font-size:0.75rem;color:var(--text-muted);flex:1;" x-text="alertSeveritySummary()"></span>
+            <button class="btn btn-xs btn-ghost" style="color:var(--color-danger-text);" @click.stop="dismissAllAlerts()">Dismiss all</button>
         </div>
-        <button class="btn btn-ghost btn-xs"
-                style="color:#fff;opacity:0.85;"
-                @click.stop="dismissAllAlerts()">Dismiss all</button>
+        <!-- Rows -->
+        <div x-show="alertsExpanded">
+            <template x-for="alert in visibleAlerts" :key="alert.unit_id + '-' + alert.type">
+                <div style="display:flex;align-items:center;gap:12px;padding:9px 16px;border-top:1px solid var(--border-color);">
+                    <span :class="alert.severity === 'critical' ? 'badge badge-danger' : 'badge badge-warning'" style="font-size:0.65rem;text-transform:uppercase;white-space:nowrap;" x-text="alert.severity"></span>
+                    <a :href="'<?= base_url('equipment/show') ?>?id=' + alert.unit_id" class="font-mono" style="font-weight:600;font-size:0.8125rem;color:var(--text-primary);text-decoration:none;white-space:nowrap;" x-text="alert.unit_number"></a>
+                    <span style="font-size:0.8125rem;color:var(--text-secondary);flex:1;" x-text="alert.message"></span>
+                    <button class="btn btn-xs btn-ghost" @click="dismissAlert(alert)" title="Dismiss for 24 hours">Dismiss</button>
+                </div>
+            </template>
+        </div>
     </div>
-    <div class="card-body" style="padding:0;" x-show="alertsExpanded" x-collapse>
-        <template x-for="alert in visibleAlerts" :key="alert.unit_id + '-' + alert.type">
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border-color);">
-                <span :class="alert.severity === 'critical' ? 'badge badge-danger' : 'badge badge-warning'"
-                      style="font-size:0.7rem;text-transform:uppercase;"
-                      x-text="alert.severity"></span>
-                <a :href="'<?= base_url('equipment/show') ?>?id=' + alert.unit_id"
-                   class="font-mono"
-                   style="font-weight:600;font-size:0.875rem;color:var(--text-primary);text-decoration:none;"
-                   x-text="alert.unit_number"></a>
-                <span style="font-size:0.875rem;color:var(--text-secondary);flex:1;" x-text="alert.message"></span>
-                <button class="btn btn-ghost btn-xs"
-                        @click="dismissAlert(alert)"
-                        title="Dismiss for 24 hours">
-                    Dismiss
-                </button>
-            </div>
-        </template>
-    </div>
-</div>
+</template>
 
 <!-- ── Tabs ─────────────────────────────────────────────────────── -->
 <div class="tab-bar" role="tablist" style="margin-bottom:16px;">
@@ -599,6 +588,15 @@ function FF_FleetTracking() {
                 this.error = 'Import request failed: ' + (e?.message || 'unknown error');
             }
             this.importing = false;
+        },
+
+        alertSeveritySummary() {
+            const c = this.visibleAlerts.filter(a => a.severity === 'critical').length;
+            const w = this.visibleAlerts.filter(a => a.severity !== 'critical').length;
+            const parts = [];
+            if (c) parts.push(c + ' critical');
+            if (w) parts.push(w + ' warning');
+            return parts.join(', ');
         },
 
         // ── Map init/update ──────────────────────────────────
