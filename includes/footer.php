@@ -14,6 +14,7 @@
                 <span class="app-footer-version">FleetForge <?= e(FF_VERSION) ?></span>
             </div>
             <div class="app-footer-legal">
+                <a href="<?= e(base_url('help')) ?>" class="app-footer-legal-link">Help Center</a>
                 <?php // S-LEGAL-FOOTER-COMMERCIAL: renders /legal/terms, /legal/privacy, /legal/aup, /legal/security ?>
                 <?php foreach (['terms', 'privacy', 'aup', 'security'] as $_slug): ?>
                     <a href="<?= e(legal_url($_slug)) ?>"

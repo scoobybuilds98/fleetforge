@@ -174,6 +174,13 @@ return [
         'module' => 'ai',
         'badge'  => null,
     ],
+    [
+        'label'  => 'Help Center',
+        'icon'   => 'book-open',
+        'url'    => '/help',
+        'module' => null,   // visible to all authenticated users
+        'badge'  => null,
+    ],
 
     // ----------------------------------------------------------
     // QuickBooks section — accountant role + super_admin (Phase QBO)
