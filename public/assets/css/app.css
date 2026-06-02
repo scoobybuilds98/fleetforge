@@ -590,6 +590,12 @@ kbd {
     .help-drawer-panel {
         box-shadow: -2px 0 16px rgba(0, 0, 0, 0.18);
     }
+    /* Stat tiles reflow to fill the narrower content column.
+       The viewport-width media queries don't know 500px is now a drawer,
+       so auto-fill with a sensible minimum prevents text truncation. */
+    body[data-help-drawer-open] .stat-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    }
 }
 
 
