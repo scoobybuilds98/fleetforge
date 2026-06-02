@@ -178,23 +178,6 @@
      header.php. Used by the drawer to restore the correct guide on navigation.
      ────────────────────────────────────────────────────────── -->
 <script>window.FF_HELP_SLUG = <?= json_encode($helpModuleSlug ?? '') ?>;</script>
-<script>
-/* Set --ff-sticky-content-top so sticky table headers land below the sticky
-   page-header. Runs after DOM ready; re-measures on resize (headers can reflow). */
-(function () {
-    function measurePageHeader() {
-        var ph  = document.querySelector('.page-content .page-header');
-        var top = ph ? Math.round(ph.getBoundingClientRect().bottom) : 60;
-        document.documentElement.style.setProperty('--ff-sticky-content-top', top + 'px');
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', measurePageHeader, { once: true });
-    } else {
-        measurePageHeader();
-    }
-    window.addEventListener('resize', measurePageHeader, { passive: true });
-})();
-</script>
 <?php require_once FF_ROOT . '/includes/partials/help-drawer.php'; ?>
 
 <!-- ============================================================
