@@ -2887,6 +2887,12 @@ textarea.form-input {
     background: var(--bg-surface-2);
     border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
+    /* Sticky header — stays visible below the sticky page-header as user scrolls.
+       --ff-sticky-content-top is set by JS in footer.php to the page-header's
+       bottom edge; falls back to just the topbar height on pages without one. */
+    position: sticky;
+    top: var(--ff-sticky-content-top, var(--topbar-height));
+    z-index: 8; /* below page-header (29) and topbar (30) */
 }
 
 .table thead th:first-child,
