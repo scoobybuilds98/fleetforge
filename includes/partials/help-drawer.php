@@ -70,9 +70,11 @@ declare(strict_types=1);
             <button type="button"
                     class="help-drawer-close btn btn-ghost btn-xs"
                     @click="close()"
-                    aria-label="Close help panel">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                    aria-label="Collapse help panel"
+                    title="Collapse">
+                <!-- Chevron-right — indicates the panel collapses back to the right -->
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/>
                 </svg>
             </button>
         </div>
