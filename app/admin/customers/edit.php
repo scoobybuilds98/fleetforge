@@ -60,7 +60,8 @@ if (isset($customerRow['invoice_cc_emails']) && $customerRow['invoice_cc_emails'
     $customerRow['invoice_cc_emails'] = json_decode($customerRow['invoice_cc_emails'], true) ?? [];
 }
 
-$pageTitle = 'Edit — ' . $customerRow['company_name'];
+$pageTitle      = 'Edit — ' . $customerRow['company_name'];
+$helpModuleSlug = 'customers';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

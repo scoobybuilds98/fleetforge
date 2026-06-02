@@ -2834,13 +2834,25 @@ Full Model B (precharge balance + drawdown) supersedes Model B Lite once S-MILEA
 
 ## 15. HELP GUIDE AUTHORING — per-module "How This Works" guides
 
-**S-HELP-SYSTEM-FOUNDATION (2026-06-03)** built the infrastructure. **S-HELP-DRAWER-TUTORIAL-REWORK (2026-06-03)** converted the primary access to a right-side drawer and established the tutorial-first content format. Every module eventually gets a guide. This section is the authoring contract for future per-module sessions.
+**S-HELP-SYSTEM-FOUNDATION (2026-06-03)** built the infrastructure. **S-HELP-DRAWER-TUTORIAL-REWORK (2026-06-03)** converted the primary access to a right-side drawer and established the tutorial-first content format. **S-HELP-DRAWER-PUSH-AND-PERSIST (2026-06-03)** converted the drawer from an overlay to a push/squeeze layout and added cross-navigation persistence. Every module eventually gets a guide. This section is the authoring contract for future per-module sessions.
 
-### Primary access: right-side drawer (D-HELP-DRAWER-ACCESS)
+### Primary access: right-side push drawer (D-HELP-DRAWER-ACCESS + D-HELP-DRAWER-PUSH)
 
-`help_button('slug')` renders a button (not a link) in `.page-header-actions`. Clicking dispatches `window CustomEvent('ff-help-drawer', {detail:{slug}})`. The global help drawer (`includes/partials/help-drawer.php`, mounted in `footer.php`) catches this event, fetches the guide fragment from `/help/fragment?slug=...`, and slides in from the right — the user stays on the current page.
+`help_button('slug')` renders a button (not a link) in `.page-header-actions`. Clicking dispatches `window CustomEvent('ff-help-drawer', {detail:{slug}})`.
+
+**Desktop (≥1024px) — push layout**: The drawer slides in from the right; the main content (`body[data-help-drawer-open] .app-main`) gets `margin-right: 460px` via CSS, narrowing the content column. No backdrop — the page stays **fully interactive**. The user can read the tutorial steps while clicking the actual UI elements. (D-HELP-DRAWER-PUSH)
+
+**Mobile (<1024px) — overlay**: Drawer is full-width over the content, with a semi-transparent backdrop. (D-HELP-DRAWER-MOBILE-OVERLAY)
 
 **Secondary access**: `/help` center (card grid at `app/admin/help/index.php`) and `/help/{module}` full-page routes (`app/admin/help/_guide.php`) remain active for browsing and deep-linking. The "Open full guide ↗" link in the drawer footer points to the full-page route.
+
+### Cross-navigation persistence (D-HELP-DRAWER-PERSIST)
+
+The drawer's open state (and current slug) is stored in `sessionStorage` under key `ff_help_drawer` on every open/close. On each page load, `FF_HelpDrawer.init()` reads this and auto-reopens the drawer if it was open, using the **current page's slug** (via `window.FF_HELP_SLUG`) — not the stored slug — so navigating within a module keeps the right guide visible.
+
+**Module pages declare their slug**: Set `$helpModuleSlug = 'module-slug';` before `require_once header.php`. Footer outputs `window.FF_HELP_SLUG = 'module-slug';` as an inline script. Pages without a declared slug get `window.FF_HELP_SLUG = ''` and the drawer stays closed on restore (graceful).
+
+Currently declared: `customers` on all four customers pages (index, create, edit, show). Add to new module pages when wiring their help button.
 
 ### Storage convention
 

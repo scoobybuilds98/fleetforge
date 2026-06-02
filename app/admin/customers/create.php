@@ -25,7 +25,8 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('customers', 'create');
 
-$pageTitle = 'New Customer';
+$pageTitle      = 'New Customer';
+$helpModuleSlug = 'customers';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

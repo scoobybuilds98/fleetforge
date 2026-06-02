@@ -2,21 +2,29 @@
 declare(strict_types=1);
 
 /**
- * FleetForge — Global Help Drawer (S-HELP-DRAWER-TUTORIAL-REWORK)
+ * FleetForge — Global Help Drawer (S-HELP-DRAWER-PUSH-AND-PERSIST)
  *
  * @file        includes/partials/help-drawer.php
- * @description Right-side slide-in drawer for in-module help guides.
- *              Included once from includes/footer.php so any page can open it.
- *              Triggered via: window.dispatchEvent(new CustomEvent('ff-help-drawer', {detail:{slug:'...'}}))
- *              Content is fetched on demand from /help/fragment?slug=... (bare HTML, no layout).
- *              The drawer's Alpine component is self-contained here.
+ * @description Right-side help panel. Desktop: PUSHES/squeezes the main
+ *              content (no backdrop, fully interactive). Mobile: full-screen
+ *              overlay with backdrop. Open state persists per tab via
+ *              sessionStorage and is restored on page navigation.
  *
- * @depends     app.js (FF_Api, FF_Toast), Alpine.js, HelpRenderer, /help/fragment endpoint
- * @session     S-HELP-DRAWER-TUTORIAL-REWORK
+ *              Open triggers:
+ *                window.dispatchEvent(new CustomEvent('ff-help-drawer', {detail:{slug:'...'}}))
+ *              Auto-restore on load via sessionStorage + window.FF_HELP_SLUG
+ *              (declared by module pages before including header.php).
+ *
+ *              CSS push hook: sets/removes `data-help-drawer-open` on <body>.
+ *              CSS handles the margin-right on .app-main at ≥1024px.
+ *
+ * @depends     Alpine.js, /help/fragment endpoint (app/admin/help/fragment.php)
+ * @session     S-HELP-DRAWER-PUSH-AND-PERSIST
  */
 ?>
 <!-- ============================================================
-     GLOBAL HELP DRAWER — opened via window.dispatchEvent(new CustomEvent('ff-help-drawer', ...))
+     GLOBAL HELP DRAWER
+     Desktop: push layout (no backdrop). Mobile: overlay + backdrop.
      ============================================================ -->
 <div id="ff-help-drawer"
      x-data="FF_HelpDrawer()"
@@ -25,7 +33,7 @@ declare(strict_types=1);
      @keydown.escape.window="if (isOpen) close()"
      x-cloak>
 
-    <!-- Backdrop -->
+    <!-- Backdrop — visible on mobile only (CSS hides on desktop) -->
     <div x-show="isOpen"
          class="help-drawer-backdrop"
          x-transition:enter="help-drawer-bd-enter"
@@ -46,12 +54,11 @@ declare(strict_types=1);
            x-transition:leave="help-drawer-panel-leave"
            x-transition:leave-start="help-drawer-panel-to"
            x-transition:leave-end="help-drawer-panel-from"
-           role="dialog"
-           aria-modal="true"
+           role="complementary"
            aria-label="How this works"
            @click.stop>
 
-        <!-- Header (sticky) -->
+        <!-- Header -->
         <div class="help-drawer-header">
             <div class="help-drawer-header-inner">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"
@@ -63,7 +70,7 @@ declare(strict_types=1);
             <button type="button"
                     class="help-drawer-close btn btn-ghost btn-xs"
                     @click="close()"
-                    aria-label="Close help drawer">
+                    aria-label="Close help panel">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
                 </svg>
@@ -73,7 +80,6 @@ declare(strict_types=1);
         <!-- Body (scrollable) -->
         <div class="help-drawer-body">
 
-            <!-- Loading skeleton -->
             <div x-show="loading" class="help-drawer-loading" aria-busy="true" aria-label="Loading guide…">
                 <div class="skeleton" style="height:22px;width:55%;border-radius:4px;margin-bottom:16px;"></div>
                 <div class="skeleton" style="height:14px;width:90%;border-radius:3px;margin-bottom:8px;"></div>
@@ -84,20 +90,18 @@ declare(strict_types=1);
                 <div class="skeleton" style="height:14px;width:75%;border-radius:3px;margin-bottom:8px;"></div>
             </div>
 
-            <!-- Error -->
             <div x-show="!loading && loadError" class="help-drawer-error">
                 <p x-text="loadError"></p>
                 <button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px;" @click="reload()">Try again</button>
             </div>
 
-            <!-- Rendered guide content -->
             <div x-show="!loading && !loadError"
                  class="help-content help-drawer-content"
                  x-html="contentHtml"></div>
 
         </div>
 
-        <!-- Footer: link to full-page guide -->
+        <!-- Footer -->
         <div class="help-drawer-footer" x-show="!loading && !loadError && currentSlug">
             <a :href="'<?= e(base_url('help')) ?>/' + currentSlug"
                class="help-drawer-full-link"
@@ -121,8 +125,27 @@ function FF_HelpDrawer() {
         drawerTitle: '',
         currentSlug: '',
 
+        _STORAGE_KEY: 'ff_help_drawer',
+        _BREAKPOINT:  1024,  // px — push on desktop, overlay on mobile
+
+        get isDesktop() {
+            return window.innerWidth >= this._BREAKPOINT;
+        },
+
         init() {
-            // Nothing to preload — content fetched on first open per slug.
+            // Restore persisted state — use $nextTick so the slide-in
+            // transition plays even on a restored page load.
+            try {
+                const stored = JSON.parse(sessionStorage.getItem(this._STORAGE_KEY) || 'null');
+                if (stored && stored.open) {
+                    // Current page's slug takes priority over the stored slug
+                    // (so /customers/create correctly shows the customers guide).
+                    const slug = (window.FF_HELP_SLUG || stored.slug || '').trim();
+                    if (slug) {
+                        this.$nextTick(() => this.open(slug));
+                    }
+                }
+            } catch (_) { /* sessionStorage unavailable — continue without restore */ }
         },
 
         async open(slug) {
@@ -135,8 +158,14 @@ function FF_HelpDrawer() {
             this.contentHtml = '';
             this.drawerTitle = '';
 
-            // Prevent background scroll while drawer is open
-            document.body.style.overflow = 'hidden';
+            // Desktop: push main content via CSS (body attribute → margin-right).
+            // Mobile: overlay — prevent body scroll.
+            document.body.setAttribute('data-help-drawer-open', '1');
+            if (!this.isDesktop) {
+                document.body.style.overflow = 'hidden';
+            }
+
+            this._persist(true, slug);
 
             try {
                 const url = '<?= e(base_url('help/fragment')) ?>?slug=' + encodeURIComponent(slug);
@@ -151,8 +180,8 @@ function FF_HelpDrawer() {
                 }
 
                 const data = await res.json();
-                this.drawerTitle = data.title  || 'How This Works';
-                this.contentHtml = data.found  ? (data.html || '') : this._comingSoon(slug);
+                this.drawerTitle = data.title || 'How This Works';
+                this.contentHtml = data.found ? (data.html || '') : this._comingSoon(slug);
 
             } catch (_) {
                 this.loadError = 'Network error loading the guide. Please try again.';
@@ -161,13 +190,21 @@ function FF_HelpDrawer() {
             }
         },
 
+        close() {
+            this.isOpen = false;
+            document.body.removeAttribute('data-help-drawer-open');
+            document.body.style.overflow = '';
+            this._persist(false, this.currentSlug);
+        },
+
         reload() {
             if (this.currentSlug) this.open(this.currentSlug);
         },
 
-        close() {
-            this.isOpen = false;
-            document.body.style.overflow = '';
+        _persist(open, slug) {
+            try {
+                sessionStorage.setItem(this._STORAGE_KEY, JSON.stringify({ open, slug: slug || '' }));
+            } catch (_) { /* sessionStorage blocked — in-memory only */ }
         },
 
         _comingSoon(slug) {

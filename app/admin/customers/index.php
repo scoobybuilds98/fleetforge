@@ -23,7 +23,8 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('customers', 'view');
 
-$pageTitle = 'Customers';
+$pageTitle       = 'Customers';
+$helpModuleSlug  = 'customers';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

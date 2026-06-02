@@ -566,7 +566,28 @@ kbd {
     flex: 1;
     min-width: 0;   /* prevent flex blowout */
     min-height: 100vh;
-    transition: margin-left var(--transition-slow);
+    transition: margin-left var(--transition-slow),
+                margin-right var(--transition-slow); /* S-HELP-DRAWER-PUSH: animated push for help panel */
+}
+
+/* ── S-HELP-DRAWER-PUSH: desktop push layout ──────────────────────────────
+   When the help drawer is open on desktop (≥1024px), shrink the main content
+   by the drawer width rather than overlaying it. body[data-help-drawer-open]
+   is set by FF_HelpDrawer.open() / cleared by close().
+   Mobile (<1024px): overlay mode — no margin, backdrop shown instead.
+*/
+@media (min-width: 1024px) {
+    body[data-help-drawer-open] .app-main {
+        margin-right: 460px; /* matches .help-drawer-panel width */
+    }
+    /* No backdrop on desktop — page must stay fully interactive */
+    body[data-help-drawer-open] .help-drawer-backdrop {
+        display: none !important;
+    }
+    /* Panel is a side column, not a modal on desktop */
+    .help-drawer-panel {
+        box-shadow: -2px 0 16px rgba(0, 0, 0, 0.18);
+    }
 }
 
 

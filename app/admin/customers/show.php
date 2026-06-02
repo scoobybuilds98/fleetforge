@@ -91,7 +91,8 @@ $riskBadgeClass = match($customer['risk_score']) {
     default  => 'badge-neutral',
 };
 
-$pageTitle = $customer['company_name'];
+$pageTitle      = $customer['company_name'];
+$helpModuleSlug = 'customers';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

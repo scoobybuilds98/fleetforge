@@ -171,10 +171,13 @@
      ────────────────────────────────────────────────────────── -->
 <?php require_once FF_ROOT . '/includes/partials/email-compose-modal.php'; ?>
 
-<!-- ── Global Help Drawer (S-HELP-DRAWER-TUTORIAL-REWORK) ────
-     Right-side slide-in drawer for in-module help guides.
-     Opens via: window.dispatchEvent(new CustomEvent('ff-help-drawer', {detail:{slug:'...'}}))
+<!-- ── Global Help Drawer (S-HELP-DRAWER-PUSH-AND-PERSIST) ──
+     Desktop: push/squeeze layout (non-blocking side panel).
+     Mobile: full-screen overlay with backdrop.
+     FF_HELP_SLUG: set by module pages as $helpModuleSlug before including
+     header.php. Used by the drawer to restore the correct guide on navigation.
      ────────────────────────────────────────────────────────── -->
+<script>window.FF_HELP_SLUG = <?= json_encode($helpModuleSlug ?? '') ?>;</script>
 <?php require_once FF_ROOT . '/includes/partials/help-drawer.php'; ?>
 
 <!-- ============================================================
