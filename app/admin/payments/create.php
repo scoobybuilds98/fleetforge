@@ -158,6 +158,8 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
+                <!-- Payment method + date row -->
+                <div class="form-row-2">
                 <!-- Payment method -->
                 <div class="form-group">
                     <label class="form-label" for="payment_method">
@@ -195,6 +197,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <!-- VALID-2: FF_Validate slot -->
                     <div class="field-error" data-error-for="payment_date"></div>
                 </div>
+                </div><!-- /payment method + date row -->
 
                 <!-- Reference fields — conditional by method -->
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">

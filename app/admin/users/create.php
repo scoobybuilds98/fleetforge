@@ -87,8 +87,10 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
+        <div class="form-grid">
+
         <!-- Full Name -->
-        <div class="form-group">
+        <div class="form-group form-group--full">
             <label class="form-label" for="user-name">
                 Full Name <span class="required" aria-hidden="true">*</span>
             </label>
@@ -152,6 +154,8 @@ require_once FF_ROOT . '/includes/header.php';
                 e.g. America/Vancouver, America/Toronto, UTC
             </p>
         </div>
+
+        </div><!-- /form-grid -->
 
         <!-- Actions -->
         <div style="display:flex;gap:12px;padding-top:16px;border-top:1px solid var(--border-default);margin-top:8px;">

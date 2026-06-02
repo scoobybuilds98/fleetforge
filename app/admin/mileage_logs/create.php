@@ -65,7 +65,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 
 <div id="mileage-page-wrapper" x-data="{ showSuccessOverlay: false }">
 
-<div class="card" style="max-width:640px;">
+<div class="card" style="max-width:720px;">
     <div class="card-header">
         <div class="card-title">New Mileage Entry</div>
     </div>
@@ -74,59 +74,80 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <div class="form-error-banner" id="js-error" style="display:none;"></div>
 
         <form id="mileage-form" novalidate>
-            <!-- Equipment Unit -->
-            <div class="form-group">
-                <label class="form-label" for="equipment_unit_id">Equipment Unit <span style="color:var(--danger);">*</span></label>
-                <select class="form-control" id="equipment_unit_id" name="equipment_unit_id" required>
-                    <option value="">— Select unit —</option>
-                    <?php foreach ($units as $u): ?>
-                    <?php // [SELECTOR-1] service context — only decommissioned/inactive disabled. ?>
-                    <option value="<?= e($u['id']) ?>"
-                            data-status="<?= e($u['status']) ?>"
-                            <?= ($preUnitId === (int)$u['id']) ? 'selected' : '' ?>
-                            <?= ff_unit_is_selectable($u['status'], 'service') ? '' : 'disabled' ?>>
-                        <?= e(ff_unit_selector_label($u)) ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-                <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
-                    Decommissioned and inactive units cannot have new readings.
+            <!-- Unit + Lease row -->
+            <div class="form-row-2">
+                <!-- Equipment Unit -->
+                <div class="form-group">
+                    <label class="form-label" for="equipment_unit_id">Equipment Unit <span style="color:var(--danger);">*</span></label>
+                    <select class="form-control" id="equipment_unit_id" name="equipment_unit_id" required>
+                        <option value="">— Select unit —</option>
+                        <?php foreach ($units as $u): ?>
+                        <?php // [SELECTOR-1] service context — only decommissioned/inactive disabled. ?>
+                        <option value="<?= e($u['id']) ?>"
+                                data-status="<?= e($u['status']) ?>"
+                                <?= ($preUnitId === (int)$u['id']) ? 'selected' : '' ?>
+                                <?= ff_unit_is_selectable($u['status'], 'service') ? '' : 'disabled' ?>>
+                            <?= e(ff_unit_selector_label($u)) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
+                        Decommissioned and inactive units cannot have new readings.
+                    </div>
+                    <div class="field-error" id="err-equipment_unit_id"></div>
                 </div>
-                <div class="field-error" id="err-equipment_unit_id"></div>
+
+                <!-- Lease (optional) -->
+                <div class="form-group">
+                    <label class="form-label" for="lease_id">
+                        Linked Lease
+                        <span style="color:var(--text-secondary);font-weight:400;">(optional)</span>
+                    </label>
+                    <select class="form-control" id="lease_id" name="lease_id">
+                        <option value="">— None —</option>
+                        <?php foreach ($leases as $l): ?>
+                        <option value="<?= e($l['id']) ?>"
+                            <?= ($preLeaseId === (int)$l['id']) ? 'selected' : '' ?>>
+                            <?= e($l['contract_number']) ?> — <?= e($l['unit_number']) ?> (<?= e($l['company_name']) ?>)
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
+                        Only active/pending leases shown. Links this reading to the lease's mileage history.
+                    </div>
+                    <div class="field-error" id="err-lease_id"></div>
+                </div>
             </div>
 
-            <!-- Lease (optional) -->
-            <div class="form-group">
-                <label class="form-label" for="lease_id">
-                    Linked Lease
-                    <span style="color:var(--text-secondary);font-weight:400;">(optional)</span>
-                </label>
-                <select class="form-control" id="lease_id" name="lease_id">
-                    <option value="">— None —</option>
-                    <?php foreach ($leases as $l): ?>
-                    <option value="<?= e($l['id']) ?>"
-                        <?= ($preLeaseId === (int)$l['id']) ? 'selected' : '' ?>>
-                        <?= e($l['contract_number']) ?> — <?= e($l['unit_number']) ?> (<?= e($l['company_name']) ?>)
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-                <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
-                    Only active/pending leases shown. Links this reading to the lease's mileage history.
+            <!-- Entry Type + Date row -->
+            <div class="form-row-2">
+                <!-- Log Type -->
+                <div class="form-group">
+                    <label class="form-label" for="log_type">Entry Type <span style="color:var(--danger);">*</span></label>
+                    <select class="form-control" id="log_type" name="log_type" required>
+                        <option value="manual" selected>Manual — admin entry</option>
+                        <option value="service">Service — recorded at maintenance</option>
+                    </select>
+                    <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
+                        System types (GPS Sync, Lease Start/End) are recorded automatically.
+                    </div>
+                    <div class="field-error" id="err-log_type"></div>
                 </div>
-                <div class="field-error" id="err-lease_id"></div>
-            </div>
 
-            <!-- Log Type -->
-            <div class="form-group">
-                <label class="form-label" for="log_type">Entry Type <span style="color:var(--danger);">*</span></label>
-                <select class="form-control" id="log_type" name="log_type" required>
-                    <option value="manual" selected>Manual — admin entry</option>
-                    <option value="service">Service — recorded at maintenance</option>
-                </select>
-                <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
-                    System types (GPS Sync, Lease Start/End) are recorded automatically.
+                <!-- Log Date -->
+                <div class="form-group">
+                    <label class="form-label" for="log_date">Date <span style="color:var(--danger);">*</span></label>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <input type="date" class="form-control" id="log_date" name="log_date"
+                               value="<?= e(date('Y-m-d')) ?>"
+                               max="<?= e(date('Y-m-d')) ?>"
+                               required style="flex:1;">
+                        <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" onclick="(function(e){e.showPicker?e.showPicker():e.click()})(document.getElementById('log_date'))">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                        </button>
+                    </div>
+                    <div class="field-error" id="err-log_date"></div>
                 </div>
-                <div class="field-error" id="err-log_type"></div>
             </div>
 
             <!-- Odometer + Unit row -->
@@ -145,21 +166,6 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                     </select>
                     <div class="field-error" id="err-mileage_unit"></div>
                 </div>
-            </div>
-
-            <!-- Log Date -->
-            <div class="form-group">
-                <label class="form-label" for="log_date">Date <span style="color:var(--danger);">*</span></label>
-                <div style="display:flex;gap:6px;align-items:center;">
-                    <input type="date" class="form-control" id="log_date" name="log_date"
-                           value="<?= e(date('Y-m-d')) ?>"
-                           max="<?= e(date('Y-m-d')) ?>"
-                           required style="flex:1;">
-                    <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" onclick="(function(e){e.showPicker?e.showPicker():e.click()})(document.getElementById('log_date'))">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
-                    </button>
-                </div>
-                <div class="field-error" id="err-log_date"></div>
             </div>
 
             <!-- Notes -->

@@ -74,18 +74,31 @@ require_once FF_ROOT . '/includes/header.php';
             ?>
         </div>
 
-        <!-- Source type -->
-        <div class="form-group" style="margin-bottom:1.25rem;">
-            <label class="form-label">Source Type <span style="color:var(--color-danger);">*</span></label>
-            <select class="form-select" x-model="form.source" :disabled="submitting">
-                <option value="">— Select Source —</option>
-                <option value="goodwill">Goodwill</option>
-                <option value="invoice_adjustment">Invoice Adjustment</option>
-                <option value="damage_resolution">Damage Resolution</option>
-                <option value="mileage_overpayment">Mileage Overpayment</option>
-                <option value="payment_returned">Payment Returned</option>
-                <option value="other">Other</option>
-            </select>
+        <!-- Source type + Expiry date -->
+        <div class="form-row-2" style="margin-bottom:1.25rem;">
+            <div class="form-group">
+                <label class="form-label">Source Type <span style="color:var(--color-danger);">*</span></label>
+                <select class="form-select" x-model="form.source" :disabled="submitting">
+                    <option value="">— Select Source —</option>
+                    <option value="goodwill">Goodwill</option>
+                    <option value="invoice_adjustment">Invoice Adjustment</option>
+                    <option value="damage_resolution">Damage Resolution</option>
+                    <option value="mileage_overpayment">Mileage Overpayment</option>
+                    <option value="payment_returned">Payment Returned</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Expiry Date <span style="color:var(--text-tertiary);">(optional)</span></label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input class="form-input" type="date" x-model="form.expires_at" :disabled="submitting"
+                           min="<?= date('Y-m-d') ?>" x-ref="cnExpiry" style="flex:1;">
+                    <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" :disabled="submitting" @click="$refs.cnExpiry.showPicker ? $refs.cnExpiry.showPicker() : $refs.cnExpiry.click()">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+                    </button>
+                </div>
+                <div class="form-hint">Leave blank for no expiry. Expired notes cannot be applied to invoices.</div>
+            </div>
         </div>
 
         <!-- Amount + Currency -->
@@ -110,19 +123,6 @@ require_once FF_ROOT . '/includes/header.php';
             <textarea class="form-input" rows="3" x-model="form.reason" :disabled="submitting"
                       placeholder="Describe why this credit is being issued…"></textarea>
             <div class="form-hint">Visible to the customer on statements and credit note document.</div>
-        </div>
-
-        <!-- Expiry date -->
-        <div class="form-group" style="margin-bottom:1.25rem;">
-            <label class="form-label">Expiry Date <span style="color:var(--text-tertiary);">(optional)</span></label>
-            <div style="display:flex;gap:6px;align-items:center;">
-                <input class="form-input" type="date" x-model="form.expires_at" :disabled="submitting"
-                       min="<?= date('Y-m-d') ?>" x-ref="cnExpiry" style="flex:1;">
-                <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" :disabled="submitting" @click="$refs.cnExpiry.showPicker ? $refs.cnExpiry.showPicker() : $refs.cnExpiry.click()">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
-                </button>
-            </div>
-            <div class="form-hint">Leave blank for no expiry. Expired notes cannot be applied to invoices.</div>
         </div>
 
         <!-- Optional linkage (collapsed by default) -->

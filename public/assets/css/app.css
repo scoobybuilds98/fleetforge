@@ -2806,7 +2806,14 @@ textarea.form-input {
 }
 
 /* Form row / grid */
-.form-row {
+/* WHY display:grid on every variant: the column classes were previously
+   relied on standalone (e.g. <div class="form-row-2">) but only .form-row
+   carried display:grid — so those rows silently stacked into one column.
+   Setting it on all variants makes form-row-2/3/4 work on their own. */
+.form-row,
+.form-row-2,
+.form-row-3,
+.form-row-4 {
     display: grid;
     gap: 16px;
 }
