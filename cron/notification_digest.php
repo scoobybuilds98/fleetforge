@@ -33,6 +33,15 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Testability seam (S-CRON-FIX-NOTIFICATION): when required by a smoke
+// (FF_NOTIFICATION_DIGEST_INCLUDE defined), expose the helper functions at the
+// bottom of this file (incl. digest_hour_sections_should_run) WITHOUT running
+// the cron body. Top-level function declarations are hoisted, so they remain
+// available to the includer even though this early return skips the body.
+if (defined('FF_NOTIFICATION_DIGEST_INCLUDE')) {
+    return;
+}
+
 // -----------------------------------------------------------------------
 // Timezone gate. S-INTEL-V2 / D-INTEL-V2-2: per-user briefing_hour means
 // the cron now runs every hour and dispatches only to users matching
@@ -57,14 +66,12 @@ $GLOBALS['ff_current_local_hour']  = $localHour;
 $GLOBALS['ff_global_digest_hour']  = $digestHour;
 $GLOBALS['ff_force']               = $forced;
 
-// 4c + 4e still gate on the global digest_hour — keep parity.
-if (!$forced && $localHour !== $digestHour) {
-    // For 4a (briefing) we still proceed to filter per-user hour
-    // matches; for 4c + 4e exit early if not the global hour.
-    // Implementation note: rather than splitting the cron file, we
-    // proceed to 4a unconditionally and the run_dunning_letters /
-    // run_scheduled_reports functions self-gate.
-}
+// 4a (morning briefing) always runs — it self-filters per-user briefing hour
+// via $GLOBALS['ff_current_local_hour']. 4c (dunning) + 4e (scheduled reports)
+// have no per-user hour concept, so they are gated at their call site below via
+// digest_hour_sections_should_run() (S-CRON-FIX-NOTIFICATION — MED-5). Before
+// this fix the gate here was an empty block, so 4c/4e fired on every hourly
+// tick instead of only at the digest hour.
 
 // -----------------------------------------------------------------------
 // Advisory lock. One lock guards all 3 subsections so a long subsection
@@ -90,16 +97,21 @@ try {
     // ===================================================================
     [$digestEmailsSent, $digestEmailsSkipped, $digestEmailsErrors] = run_morning_digest_emails();
 
-    // ===================================================================
-    // 4c — Dunning letter generation
-    // ===================================================================
-    [$dunningCounts, $dunningSkipped, $dunningErrors] = run_dunning_letters();
+    // 4c + 4e fire ONLY at the digest hour (S-CRON-FIX-NOTIFICATION — MED-5).
+    // $forced (manual trigger) bypasses the gate. When the hour doesn't match,
+    // the pre-initialized zero counters above flow into the summary unchanged.
+    if (digest_hour_sections_should_run($forced, $localHour, $digestHour)) {
+        // ===============================================================
+        // 4c — Dunning letter generation
+        // ===============================================================
+        [$dunningCounts, $dunningSkipped, $dunningErrors] = run_dunning_letters();
 
-    // ===================================================================
-    // 4e — Scheduled reports dispatch (orphan table per audit #23 — most
-    // runs will skip silently with no work to do).
-    // ===================================================================
-    [$reportsDispatched, $reportsSkipped] = run_scheduled_reports();
+        // ===============================================================
+        // 4e — Scheduled reports dispatch (orphan table per audit #23 — most
+        // runs will skip silently with no work to do).
+        // ===============================================================
+        [$reportsDispatched, $reportsSkipped] = run_scheduled_reports();
+    }
 
     $summary = sprintf(
         'Digest cron complete. emails(sent=%d skipped=%d errors=%d) dunning(r30=%d r60=%d w90=%d skipped=%d errors=%d) reports(sent=%d skipped=%d). [4b/4d run by collections_auto_escalate + promise_to_pay_check.]',
@@ -561,4 +573,16 @@ function compute_next_send_at(array $row): string
         'monthly' => date('Y-m-d H:i:s', strtotime('+1 month')),
         default   => date('Y-m-d H:i:s', $base),
     };
+}
+
+/**
+ * digest_hour_sections_should_run — gate for the hour-dependent digest
+ * sub-sections (4c dunning + 4e scheduled reports). They have no per-user hour
+ * concept (unlike 4a, which self-filters per user), so they run only at the
+ * digest hour. $forced (manual trigger) bypasses the gate.
+ * (S-CRON-FIX-NOTIFICATION — MED-5, D-DIGEST-HOUR-GATE)
+ */
+function digest_hour_sections_should_run(bool $forced, int $localHour, int $digestHour): bool
+{
+    return $forced || $localHour === $digestHour;
 }

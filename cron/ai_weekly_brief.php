@@ -75,78 +75,91 @@ try {
         $email  = (string) $u['email'];
         $name   = (string) ($u['name'] ?? 'Team');
 
-        // 23-hour dedup so re-runs don't double-send.
-        $recent = db_row(
-            "SELECT id FROM notification_log
-              WHERE entity_type='user' AND entity_id=?
-                AND notification_type='weekly_digest'
-                AND created_at >= NOW() - INTERVAL 23 HOUR
-              LIMIT 1",
-            [$userId]
-        );
-        if ($recent) { $skipped++; continue; }
+        // Per-recipient failure isolation (S-CRON-FIX-NOTIFICATION — HIGH-2),
+        // mirroring run_morning_digest_emails() in notification_digest.php: one
+        // recipient's failure (a disabled channel, a network/API fault, a bad
+        // row) must NOT abort the remaining recipients' weekly digests. This is
+        // defense-in-depth on top of the enum fix (status='skipped' +
+        // channel='slack' now write cleanly) — any OTHER throw stays contained.
+        try {
+            // 23-hour dedup so re-runs don't double-send.
+            $recent = db_row(
+                "SELECT id FROM notification_log
+                  WHERE entity_type='user' AND entity_id=?
+                    AND notification_type='weekly_digest'
+                    AND created_at >= NOW() - INTERVAL 23 HOUR
+                  LIMIT 1",
+                [$userId]
+            );
+            if ($recent) { $skipped++; continue; }
 
-        $bodyHtml = MorningBriefingRenderer::renderWeeklyBody($name, $payload);
+            $bodyHtml = MorningBriefingRenderer::renderWeeklyBody($name, $payload);
 
-        $channels = ['email'];
-        if (!empty($u['briefing_channels'])) {
-            $decoded = json_decode((string) $u['briefing_channels'], true);
-            if (is_array($decoded) && !empty($decoded)) {
-                $channels = array_values(array_filter($decoded, 'is_string'));
+            $channels = ['email'];
+            if (!empty($u['briefing_channels'])) {
+                $decoded = json_decode((string) $u['briefing_channels'], true);
+                if (is_array($decoded) && !empty($decoded)) {
+                    $channels = array_values(array_filter($decoded, 'is_string'));
+                }
             }
-        }
 
-        $anySent = false;
-        foreach ($channels as $channel) {
-            if ($channel === 'email' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $wrapped = EmailService::renderEmailHtml($bodyHtml);
-                $ok = Mailer::send(toEmail: $email, toName: $name, subject: $subject, htmlBody: $wrapped);
-                db_insert('notification_log', [
-                    'channel' => 'email', 'recipient' => $email, 'subject' => $subject,
-                    'body' => mb_substr(strip_tags($bodyHtml), 0, 2000),
-                    'entity_type' => 'user', 'entity_id' => $userId,
-                    'notification_type' => 'weekly_digest',
-                    'status' => $ok ? 'sent' : 'failed',
-                    'sent_at' => $ok ? date('Y-m-d H:i:s') : null,
-                ]);
-                if ($ok) $anySent = true;
-            } elseif ($channel === 'slack') {
-                $text = "*Weekly Fleet Digest — " . $payload['week_start'] . " to " . $payload['week_end'] . "*\n"
-                      . "Invoices: " . $payload['invoices']['count'] . " ($" . $payload['invoices']['total'] . ")\n"
-                      . "Payments: " . $payload['payments']['count'] . " ($" . $payload['payments']['total'] . ")\n"
-                      . "Active leases: " . $payload['leases']['active'] . " (" . $payload['leases']['new_7d'] . " new)\n"
-                      . "Overdue: " . $payload['overdue']['count'] . " ($" . $payload['overdue']['total'] . ")\n"
-                      . "Damage open: " . $payload['damage']['count'];
-                $r = SlackPoster::post($text, $u['slack_user_id'] ?? null, $subject);
-                db_insert('notification_log', [
-                    'channel' => 'slack', 'recipient' => (string) ($u['slack_user_id'] ?? 'channel-webhook'),
-                    'subject' => $subject, 'body' => mb_substr($text, 0, 2000),
-                    'entity_type' => 'user', 'entity_id' => $userId,
-                    'notification_type' => 'weekly_digest',
-                    'status' => $r['ok'] ? 'sent' : (($r['skipped'] ?? false) ? 'skipped' : 'failed'),
-                    'error_message' => $r['ok'] ? null : (string) ($r['reason'] ?? ''),
-                    'sent_at' => $r['ok'] ? date('Y-m-d H:i:s') : null,
-                ]);
-                if ($r['ok']) $anySent = true;
-            } elseif ($channel === 'sms') {
-                $smsBody = 'Weekly: Inv=' . $payload['invoices']['count'] . ', Pmt=' . $payload['payments']['count']
-                         . ', Overdue=' . $payload['overdue']['count'] . ', Damage=' . $payload['damage']['count'];
-                $r = SmsClient::send((string) ($u['phone_e164'] ?? ''), $smsBody);
-                db_insert('notification_log', [
-                    'channel' => 'sms', 'recipient' => (string) ($u['phone_e164'] ?? '(no phone)'),
-                    'subject' => $subject, 'body' => mb_substr($smsBody, 0, 2000),
-                    'entity_type' => 'user', 'entity_id' => $userId,
-                    'notification_type' => 'weekly_digest',
-                    'status' => $r['ok'] ? 'sent' : (($r['skipped'] ?? false) ? 'skipped' : 'failed'),
-                    'error_message' => $r['ok'] ? null : (string) ($r['reason'] ?? ''),
-                    'sent_at' => $r['ok'] ? date('Y-m-d H:i:s') : null,
-                ]);
-                if ($r['ok']) $anySent = true;
+            $anySent = false;
+            foreach ($channels as $channel) {
+                if ($channel === 'email' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $wrapped = EmailService::renderEmailHtml($bodyHtml);
+                    $ok = Mailer::send(toEmail: $email, toName: $name, subject: $subject, htmlBody: $wrapped);
+                    db_insert('notification_log', [
+                        'channel' => 'email', 'recipient' => $email, 'subject' => $subject,
+                        'body' => mb_substr(strip_tags($bodyHtml), 0, 2000),
+                        'entity_type' => 'user', 'entity_id' => $userId,
+                        'notification_type' => 'weekly_digest',
+                        'status' => $ok ? 'sent' : 'failed',
+                        'sent_at' => $ok ? date('Y-m-d H:i:s') : null,
+                    ]);
+                    if ($ok) $anySent = true;
+                } elseif ($channel === 'slack') {
+                    $text = "*Weekly Fleet Digest — " . $payload['week_start'] . " to " . $payload['week_end'] . "*\n"
+                          . "Invoices: " . $payload['invoices']['count'] . " ($" . $payload['invoices']['total'] . ")\n"
+                          . "Payments: " . $payload['payments']['count'] . " ($" . $payload['payments']['total'] . ")\n"
+                          . "Active leases: " . $payload['leases']['active'] . " (" . $payload['leases']['new_7d'] . " new)\n"
+                          . "Overdue: " . $payload['overdue']['count'] . " ($" . $payload['overdue']['total'] . ")\n"
+                          . "Damage open: " . $payload['damage']['count'];
+                    $r = SlackPoster::post($text, $u['slack_user_id'] ?? null, $subject);
+                    db_insert('notification_log', [
+                        'channel' => 'slack', 'recipient' => (string) ($u['slack_user_id'] ?? 'channel-webhook'),
+                        'subject' => $subject, 'body' => mb_substr($text, 0, 2000),
+                        'entity_type' => 'user', 'entity_id' => $userId,
+                        'notification_type' => 'weekly_digest',
+                        'status' => $r['ok'] ? 'sent' : (($r['skipped'] ?? false) ? 'skipped' : 'failed'),
+                        'error_message' => $r['ok'] ? null : (string) ($r['reason'] ?? ''),
+                        'sent_at' => $r['ok'] ? date('Y-m-d H:i:s') : null,
+                    ]);
+                    if ($r['ok']) $anySent = true;
+                } elseif ($channel === 'sms') {
+                    $smsBody = 'Weekly: Inv=' . $payload['invoices']['count'] . ', Pmt=' . $payload['payments']['count']
+                             . ', Overdue=' . $payload['overdue']['count'] . ', Damage=' . $payload['damage']['count'];
+                    $r = SmsClient::send((string) ($u['phone_e164'] ?? ''), $smsBody);
+                    db_insert('notification_log', [
+                        'channel' => 'sms', 'recipient' => (string) ($u['phone_e164'] ?? '(no phone)'),
+                        'subject' => $subject, 'body' => mb_substr($smsBody, 0, 2000),
+                        'entity_type' => 'user', 'entity_id' => $userId,
+                        'notification_type' => 'weekly_digest',
+                        'status' => $r['ok'] ? 'sent' : (($r['skipped'] ?? false) ? 'skipped' : 'failed'),
+                        'error_message' => $r['ok'] ? null : (string) ($r['reason'] ?? ''),
+                        'sent_at' => $r['ok'] ? date('Y-m-d H:i:s') : null,
+                    ]);
+                    if ($r['ok']) $anySent = true;
+                }
             }
-        }
 
-        if ($anySent) $sent++;
-        else          $errors++;
+            if ($anySent) $sent++;
+            else          $errors++;
+        } catch (\Throwable $recipErr) {
+            // Isolate this recipient; the loop proceeds to the next one.
+            $errors++;
+            error_log('[CRON ai_weekly_brief] recipient #' . $userId . ' failed: ' . $recipErr->getMessage());
+            \FleetForge\Observability\Sentry::captureException($recipErr);
+        }
     }
 
     error_log(sprintf('[CRON ai_weekly_brief] sent=%d skipped=%d errors=%d', $sent, $skipped, $errors));

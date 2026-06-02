@@ -25,9 +25,15 @@ use FleetForge\Notifications\MorningBriefingRenderer;
 use FleetForge\Notifications\SlackPoster;
 use FleetForge\Notifications\SmsClient;
 
+// S-CRON-FIX-NOTIFICATION: load notification_digest's hour-gate helper WITHOUT
+// running the cron body (FF_NOTIFICATION_DIGEST_INCLUDE early-return guard) so
+// C32 can test digest_hour_sections_should_run() directly.
+define('FF_NOTIFICATION_DIGEST_INCLUDE', true);
+require_once FF_ROOT . '/cron/notification_digest.php';
+
 $failures = [];
 $pass     = 0;
-$total    = 30;
+$total    = 33;
 
 // Snapshot mutable settings + user state we'll touch.
 $snapshot = [];
@@ -445,6 +451,53 @@ foreach ($endpoints as $ep => $needle) {
 }
 if (empty($err)) { echo "PASS C30 All 9 Phase A-F endpoints have correct permission gates\n"; $pass++; }
 else { echo "FAIL C30 " . implode('; ', $err) . "\n"; $failures[] = 'C30'; }
+
+// ── S-CRON-FIX-NOTIFICATION (HIGH-2 + MED-5) ──────────────────────────
+// C31: notification_log + _archive accept status='skipped' AND channel='slack'
+// (the enum hardening — without it the slack path throws under strict mode).
+$err = [];
+db_execute('BEGIN');
+try {
+    foreach (['notification_log', 'notification_log_archive'] as $tbl) {
+        db_execute(
+            "INSERT INTO `{$tbl}` (channel, recipient, notification_type, status, created_at)
+             VALUES ('slack', 'U-test', 'weekly_digest', 'skipped', NOW())"
+        );
+        $row = db_row("SELECT channel, status FROM `{$tbl}` WHERE notification_type='weekly_digest' ORDER BY id DESC LIMIT 1");
+        if (($row['status'] ?? '') !== 'skipped') $err[] = "{$tbl}.status stored '" . ($row['status'] ?? '?') . "' (expect skipped)";
+        if (($row['channel'] ?? '') !== 'slack')  $err[] = "{$tbl}.channel stored '" . ($row['channel'] ?? '?') . "' (expect slack)";
+    }
+} catch (\Throwable $e) { $err[] = 'insert threw (enum not migrated?): ' . $e->getMessage(); }
+finally { db_execute('ROLLBACK'); }
+if (empty($err)) { echo "PASS C31 notification_log + _archive accept status='skipped' + channel='slack'\n"; $pass++; }
+else { echo "FAIL C31 " . implode('; ', $err) . "\n"; $failures[] = 'C31'; }
+
+// C32: digest 4c/4e hour-gate — fires only at the digest hour; $forced bypasses.
+$err = [];
+if (!function_exists('digest_hour_sections_should_run')) {
+    $err[] = 'digest_hour_sections_should_run() not found (notification_digest not included)';
+} else {
+    if (digest_hour_sections_should_run(false, 7, 7) !== true)  $err[] = 'hour match should run (expected true)';
+    if (digest_hour_sections_should_run(false, 3, 7) !== false) $err[] = 'hour mismatch should NOT run (expected false)';
+    if (digest_hour_sections_should_run(true, 3, 7) !== true)   $err[] = 'forced should bypass gate (expected true)';
+}
+if (empty($err)) { echo "PASS C32 digest 4c/4e hour-gate (match runs / mismatch skips / forced bypasses)\n"; $pass++; }
+else { echo "FAIL C32 " . implode('; ', $err) . "\n"; $failures[] = 'C32'; }
+
+// C33: ai_weekly_brief per-recipient failure isolation (HIGH-2). The recipient
+// loop body must be wrapped so one recipient's throw can't abort the rest.
+// Structural assertion (an integration test of the live loop would need
+// cron-body extraction/mocking, disproportionate here — see SESSION LOG).
+$err = [];
+$wsrc = (string) file_get_contents(FF_ROOT . '/cron/ai_weekly_brief.php');
+if (!preg_match('/foreach\s*\(\s*\$recipients\s+as\s+\$u\s*\)\s*\{.*?\btry\s*\{/s', $wsrc)) {
+    $err[] = 'per-recipient loop body is not wrapped in try{}';
+}
+if (substr_count($wsrc, 'catch (\Throwable') < 2) {
+    $err[] = 'expected >=2 \Throwable catches (outer + per-recipient), found ' . substr_count($wsrc, 'catch (\Throwable');
+}
+if (empty($err)) { echo "PASS C33 ai_weekly_brief per-recipient try/catch isolation\n"; $pass++; }
+else { echo "FAIL C33 " . implode('; ', $err) . "\n"; $failures[] = 'C33'; }
 
 } catch (\Throwable $e) {
     echo "CRASH: " . $e->getMessage() . " at " . $e->getFile() . ':' . $e->getLine() . "\n";
