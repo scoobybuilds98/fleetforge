@@ -10712,34 +10712,47 @@ body:has(.chat-page-content) #ff-chat-widget {
 }
 
 .help-drawer-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 13px 18px;
+    padding: 16px 20px 14px 20px;
     border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.08));
     background: var(--bg-surface-2);
     flex-shrink: 0;
 }
-.help-drawer-header-inner {
+
+/* Top row: "HOW THIS WORKS" label + collapse button */
+.help-drawer-header-top {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-width: 0;
+    justify-content: space-between;
+    margin-bottom: 6px;
 }
-.help-drawer-title {
+
+/* "How this works" eyebrow label */
+.help-drawer-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.6875rem;
     font-weight: 700;
-    font-size: 0.9375rem;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-primary);
 }
+
+/* Module title — larger, prominent */
+.help-drawer-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1.3;
+}
+
 .help-drawer-close {
     flex-shrink: 0;
-    margin-left: 8px;
-    opacity: 0.6;
+    opacity: 0.5;
     transition: opacity 0.15s;
+    padding: 4px;
 }
 .help-drawer-close:hover { opacity: 1; }
 

@@ -60,23 +60,25 @@ declare(strict_types=1);
 
         <!-- Header -->
         <div class="help-drawer-header">
-            <div class="help-drawer-header-inner">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"
-                     width="16" height="16" aria-hidden="true" style="flex-shrink:0;color:var(--color-primary);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"/>
-                </svg>
-                <span class="help-drawer-title" x-text="drawerTitle || 'How This Works'"></span>
+            <div class="help-drawer-header-top">
+                <span class="help-drawer-label">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"
+                         width="13" height="13" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"/>
+                    </svg>
+                    How this works
+                </span>
+                <button type="button"
+                        class="help-drawer-close btn btn-ghost btn-xs"
+                        @click="close()"
+                        aria-label="Collapse help panel"
+                        title="Collapse">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/>
+                    </svg>
+                </button>
             </div>
-            <button type="button"
-                    class="help-drawer-close btn btn-ghost btn-xs"
-                    @click="close()"
-                    aria-label="Collapse help panel"
-                    title="Collapse">
-                <!-- Chevron-right — indicates the panel collapses back to the right -->
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/>
-                </svg>
-            </button>
+            <h2 class="help-drawer-title" x-text="drawerTitle || currentSlug"></h2>
         </div>
 
         <!-- Body (scrollable) -->
