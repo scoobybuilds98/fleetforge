@@ -106,6 +106,16 @@ class DriftChecker
     private static array $checkedCategories = [];
 
     /**
+     * Per-run list of newly-inserted drift event rows (INSERT path only —
+     * not refreshes of existing OPEN rows). Populated by recordDrift();
+     * read by runCheck() to dispatch grouped per-event notifications that
+     * link directly to drift_show.php?id=X.
+     *
+     * @var array<int, array{id:int, entity_type:string, category:string, entity_id:int|null, description:string}>
+     */
+    private static array $newDriftEvents = [];
+
+    /**
      * Per-entity drift-check configuration. Each entry:
      *   map        — acc_qbo_*_map table
      *   ff_table   — FF source table
@@ -185,6 +195,7 @@ class DriftChecker
         // by autoResolveParity() after the scan completes.
         self::$detectedKeys      = [];
         self::$checkedCategories = [];
+        self::$newDriftEvents    = [];
 
         $live = $forceLive ?? self::liveModeAvailable();
 
@@ -225,14 +236,6 @@ class DriftChecker
                 }
             }
 
-            // ── Per-entity notification on aggregate amount drift ────
-            $threshold = (string) settings_get('quickbooks.drift.notify_threshold', '10.00');
-            if (bccomp($stats['aggregate_drift'], $threshold, 2) > 0) {
-                if (self::dispatchNotification($entityType, $stats)) {
-                    $notified++;
-                }
-            }
-
             $byEntity[$entityType] = $stats;
             $totalDrift += $stats['push_failed'] + $stats['amount_drift'] + $stats['missing_in_qbo'] + $stats['missing_in_ff'];
         }
@@ -268,6 +271,37 @@ class DriftChecker
         // scanned this run (push_failure-sourced events untouched; missing_in_ff
         // only auto-resolves when the live layer ran successfully).
         $autoResolved = self::autoResolveParity();
+
+        // ── Per-new-event notifications ───────────────────────────────
+        // One notification per newly-inserted drift event, each linking
+        // directly to drift_show.php?id=X so the operator lands on the
+        // specific profile rather than the general list. Refreshes of
+        // existing OPEN rows are excluded — $newDriftEvents only
+        // contains rows from the INSERT path.
+        try {
+            if (!empty(self::$newDriftEvents)
+                && class_exists('\\FleetForge\\Notifications\\NotificationService')
+            ) {
+                foreach (self::$newDriftEvents as $ev) {
+                    $eTyp  = str_replace('_', ' ', $ev['entity_type']);
+                    $cat   = str_replace('_', ' ', $ev['category']);
+                    $title = ucfirst($eTyp) . ' ' . $cat . ' drift detected';
+                    $msg   = $ev['description'] ?: "New {$eTyp} {$cat} drift event.";
+                    \FleetForge\Notifications\NotificationService::notify(
+                        type:       'quickbooks.drift',
+                        title:      $title,
+                        message:    $msg,
+                        entityType: 'qbo_drift',
+                        entityId:   $ev['id'],
+                        url:        base_url('quickbooks/drift_show') . '?id=' . $ev['id'],
+                        severity:   'warning'
+                    );
+                    $notified++;
+                }
+            }
+        } catch (\Throwable $notifErr) {
+            error_log('[DriftChecker] notification dispatch failed: ' . $notifErr->getMessage());
+        }
 
         // Stamp last-check timestamp (whole-run level). Direct upsert —
         // matches BankTransactionPuller::runCdc's last_bank_cdc_at pattern
@@ -635,7 +669,7 @@ class DriftChecker
                 return;
             }
 
-            db_insert('acc_qbo_drift_events', [
+            $newId = db_insert('acc_qbo_drift_events', [
                 'detection_source' => 'drift_cron',
                 'category'         => $d['category'],
                 'entity_type'      => $d['entity_type'],
@@ -648,6 +682,14 @@ class DriftChecker
                 'realm_id'         => $realmId !== '' ? $realmId : 'unknown',
                 'environment'      => $environment,
             ]);
+            // Track for grouped notification dispatch in runCheck()
+            self::$newDriftEvents[] = [
+                'id'          => $newId,
+                'entity_type' => $d['entity_type'],
+                'category'    => $d['category'],
+                'entity_id'   => $d['entity_id'] ?? null,
+                'description' => (string) ($d['description'] ?? ''),
+            ];
         } catch (\Throwable $e) {
             error_log("[DriftChecker] recordDrift failed for {$d['entity_type']}#" . ($d['entity_id'] ?? '?') . ": " . $e->getMessage());
         }
@@ -750,36 +792,6 @@ class DriftChecker
             error_log('[DriftChecker] autoResolveParity failed: ' . $e->getMessage());
         }
         return $resolved;
-    }
-
-    /**
-     * Dispatch a quickbooks notification when a per-entity aggregate amount
-     * drift exceeds the threshold (spec §15.2 step 3). Best-effort — never
-     * throws. Audience = super_admin + accountant (resolved by the caller's
-     * NotificationService module rules; explicit IDs not required here).
-     */
-    private static function dispatchNotification(string $entityType, array $stats): bool
-    {
-        try {
-            $msg = "QBO drift: {$entityType} aggregate amount drift {$stats['aggregate_drift']} "
-                 . "({$stats['amount_drift']} entities) exceeds notify threshold.";
-            if (class_exists('\\FleetForge\\Notifications\\NotificationService')) {
-                \FleetForge\Notifications\NotificationService::notify(
-                    'quickbooks',                 // type → quickbooks module/category
-                    'QBO Drift Detected',         // title
-                    $msg,                          // message
-                    'qbo_drift',                  // entityType
-                    null,                          // entityId (aggregate, no single row)
-                    '/quickbooks/drift',          // url (drilldown)
-                    null,                          // specificUserIds (module rules resolve audience)
-                    'warning'                      // severity
-                );
-            }
-            return true;
-        } catch (\Throwable $e) {
-            error_log("[DriftChecker] notification dispatch failed for {$entityType}: " . $e->getMessage());
-            return false;
-        }
     }
 
     /**

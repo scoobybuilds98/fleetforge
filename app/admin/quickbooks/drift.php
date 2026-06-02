@@ -211,6 +211,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 </td>
                                 <td class="text-right" style="white-space:nowrap;">
                                     <!-- Resolve stays view-gated per S-QBO-4. Other actions require edit_credentials. -->
+                                    <a :href="driftShowUrl(row.id)" class="btn btn-link btn-xs">View</a>
                                     <button x-show="!row.resolved_at" class="btn btn-primary btn-sm" @click="openActionModal(row, 'resolve')">Resolve</button>
                                     <template x-if="canEditCreds">
                                         <span>
@@ -321,6 +322,10 @@ function qboDrift(opts) {
         canEditCreds: !!opts.canEditCreds,
         categories:  ['count_mismatch','field_mismatch','missing_in_qbo','missing_in_ff','amount_drift','balance_drift','push_failed','pull_failed','stale_object_unresolved'],
         entityTypes: ['customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code'],
+
+        driftShowUrl(id) {
+            return FF_Api.url('/quickbooks/drift_show?id=' + id);
+        },
 
         async init() { await this.reload(); },
 
