@@ -2075,13 +2075,22 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
    ============================================================ */
 .stat-grid {
     display: grid;
-    /* WHY: 200px minimum keeps 6-tile dashboards on a single row at
-       our standard 1280–1440px content widths. After padding (30px)
-       that leaves ~170px content area which fits $1,234,567.89 at
-       the 1.375rem value font below with room to spare. */
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    /* WHY repeat(6): 12-tile dashboard = 2 complete rows of 6 regardless
+       of sidebar state. auto-fit shifts column count when the sidebar
+       opens/closes, producing orphaned tiles. Fixed 6 keeps both states
+       identical at desktop widths. */
+    grid-template-columns: repeat(6, 1fr);
     gap: 14px;
     margin-bottom: 20px;
+}
+@media (max-width: 1100px) {
+    .stat-grid { grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 700px) {
+    .stat-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 480px) {
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* Invoice addresses: Bill To + Invoice Details cards side-by-side.
@@ -10259,3 +10268,82 @@ body:has(.chat-page-content) #ff-chat-widget {
 /* ════════════════════════════════════════════════════════════════════
    S-DASHBOARD-MOBILE-CAROUSEL END
    ════════════════════════════════════════════════════════════════════ */
+
+/* ── Notification dropdown — Flat / Grouped toggle ────────────────── */
+.notif-view-toggle {
+    display: flex;
+    border: 1px solid var(--border-color, #2e2e2e);
+    border-radius: 5px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.notif-view-toggle button {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #9c9c96);
+    font-size: 11px;
+    padding: 3px 9px;
+    cursor: pointer;
+    line-height: 1.4;
+    border-right: 1px solid var(--border-color, #2e2e2e);
+}
+.notif-view-toggle button:last-child { border-right: none; }
+.notif-view-toggle button:hover { background: var(--bg-muted, #242424); color: var(--text-primary, #e8e8e4); }
+.notif-view-toggle button.notif-view-toggle--active {
+    background: var(--color-accent, #3b82f6);
+    color: #fff;
+}
+
+/* ── Grouped view: category section ──────────────────────────────── */
+.notif-group-block { border-bottom: 1px solid var(--border-color, #2e2e2e); }
+.notif-group-block:last-child { border-bottom: none; }
+
+.notif-group-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 14px;
+    cursor: pointer;
+    background: var(--bg-surface-2, #161616);
+    user-select: none;
+}
+.notif-group-row:hover { background: var(--bg-muted, #242424); }
+
+.notif-icon--sm {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+.notif-icon--sm svg { width: 14px; height: 14px; }
+
+.notif-group-row-label {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary, #e8e8e4);
+}
+.notif-group-row-badge {
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--color-warning, #f59e0b);
+    color: #000;
+    border-radius: 10px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+}
+.notif-group-row-chevron {
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted, #6b6b66);
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+}
+.notif-group-row-chevron.is-collapsed { transform: rotate(-90deg); }
+
+/* Items inside a group — no icon (category already shown in header) */
+.notif-item--indented {
+    padding-left: 20px;
+    background: var(--bg-card, #1a1a1a);
+}
+.notif-item--indented:hover { background: var(--bg-muted, #242424); }

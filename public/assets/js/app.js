@@ -1233,12 +1233,18 @@ function FF_Notifications() {
         notifications: [],
         unreadCount: 0,
         _pollTimer: null,
+        // flat | grouped — persisted to localStorage
+        viewMode: 'flat',
+        // tracks which category sections are expanded in grouped mode
+        // default (key absent) = collapsed, so sections start closed
+        expandedGroups: {},
         // MEDIA-1: _initialized gates sound playback so we don't
         // ding the user on first page load just for seeing the
         // current unread total.
         _initialized: false,
 
         async init() {
+            try { this.viewMode = localStorage.getItem('ff_notif_view') || 'flat'; } catch {}
             await this.fetchCount();
             // Refresh badge every 60s — lightweight COUNT only.
             this._pollTimer = setInterval(() => { this.fetchCount(); }, 60000);
@@ -1288,8 +1294,10 @@ function FF_Notifications() {
 
         async fetchNotifications() {
             this.loading = true;
+            // Fetch more items in grouped mode so all categories have representation
+            const perPage = this.viewMode === 'grouped' ? 40 : 10;
             try {
-                const data = await FF_Api.get(FF_Api.url('/api/v1/notifications/index.php?per_page=10'));
+                const data = await FF_Api.get(FF_Api.url(`/api/v1/notifications/index.php?per_page=${perPage}`));
                 if (data?.success) {
                     this.notifications = data.data?.items ?? [];
                     this.unreadCount = data.data?.total_unread
@@ -1303,6 +1311,45 @@ function FF_Notifications() {
             } finally {
                 this.loading = false;
             }
+        },
+
+        async setView(v) {
+            this.viewMode = v;
+            try { localStorage.setItem('ff_notif_view', v); } catch {}
+            // Refetch since per_page differs between modes
+            await this.fetchNotifications();
+        },
+
+        toggleGroup(cat) {
+            this.expandedGroups = { ...this.expandedGroups, [cat]: !this.expandedGroups[cat] };
+        },
+
+        // Returns [{cat, items, unread}] sorted: most unread first, then by total
+        groupedEntries() {
+            const map = {};
+            this.notifications.forEach(n => {
+                const cat = n.category || 'system';
+                if (!map[cat]) map[cat] = [];
+                map[cat].push(n);
+            });
+            return Object.keys(map)
+                .map(cat => ({
+                    cat,
+                    items:  map[cat],
+                    unread: map[cat].filter(n => !n.is_read).length,
+                }))
+                .sort((a, b) => b.unread - a.unread || b.items.length - a.items.length);
+        },
+
+        categoryLabel(cat) {
+            const labels = {
+                leases: 'Leases', invoices: 'Invoices', payments: 'Payments',
+                customers: 'Customers', equipment: 'Equipment', compliance: 'Compliance',
+                maintenance: 'Maintenance', damage: 'Damage Claims',
+                reservations: 'Reservations', samsara: 'GPS / Samsara',
+                accounting: 'Accounting', quickbooks: 'QuickBooks', system: 'System',
+            };
+            return labels[cat] || (cat.charAt(0).toUpperCase() + cat.slice(1));
         },
 
         async toggleDropdown() {

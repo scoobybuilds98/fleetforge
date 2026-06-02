@@ -42,13 +42,6 @@ return [
         'badge'  => null,
     ],
     [
-        'label'  => 'Service Requests',
-        'icon'   => 'envelope-open',
-        'url'    => '/requests',
-        'module' => 'customers',
-        'badge'  => null,
-    ],
-    [
         'label'  => 'Equipment',
         'icon'   => 'truck',
         'url'    => '/equipment',
@@ -56,7 +49,7 @@ return [
         'badge'  => null,
     ],
     [
-        'label'  => 'Fleet Tracking',
+        'label'  => 'Samsara Tracking',
         'icon'   => 'map',
         'url'    => '/tracking',
         'module' => 'equipment',  // WHY: same permission as equipment — anyone who can view equipment can track
@@ -116,6 +109,13 @@ return [
         'icon'   => 'clipboard-document-check',
         'url'    => '/inspections',
         'module' => 'inspections',
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'Service Requests',
+        'icon'   => 'envelope-open',
+        'url'    => '/requests',
+        'module' => 'customers',
         'badge'  => null,
     ],
     [
