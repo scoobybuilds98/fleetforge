@@ -200,6 +200,14 @@ if (str_starts_with($localPath, '/api/') || $localPath === '/api') {
     $routeRoot  = FF_ROOT . '/webhooks';
     $routeLocal = substr($localPath, strlen('/webhooks')) ?: '/';
 
+} elseif (str_starts_with($localPath, '/help') && (strlen($localPath) === 5 || $localPath[5] === '/')) {
+    // S-HELP-SYSTEM-FOUNDATION — in-app help center.
+    // Unknown /help/{slug} paths fall back to _guide.php (graceful "guide coming soon")
+    // instead of a hard 404, so module buttons can be wired before guides are authored.
+    $routeRoot        = FF_ROOT . '/app/admin/help';
+    $routeLocal       = strlen($localPath) > 5 ? substr($localPath, 5) : '/';
+    $helpSlugFallback = true;
+
 } else {
     // Everything else → admin
     $routeRoot  = FF_ROOT . '/app/admin';
@@ -210,6 +218,14 @@ if (str_starts_with($localPath, '/api/') || $localPath === '/api') {
 // DISPATCH
 // ============================================================
 $resolvedFile = resolve_route($routeRoot, $routeLocal);
+
+// Help: unknown slugs use the guide renderer (shows "coming soon") rather than hard 404.
+if ($resolvedFile === null && isset($helpSlugFallback) && $routeLocal !== '/') {
+    $helpFallbackFile = FF_ROOT . '/app/admin/help/_guide.php';
+    if (is_file($helpFallbackFile)) {
+        $resolvedFile = realpath($helpFallbackFile);
+    }
+}
 
 if ($resolvedFile === null) {
     ff_not_found();

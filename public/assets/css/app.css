@@ -10347,3 +10347,143 @@ body:has(.chat-page-content) #ff-chat-widget {
     background: var(--bg-card, #1a1a1a);
 }
 .notif-item--indented:hover { background: var(--bg-muted, #242424); }
+
+/* ============================================================
+   S-HELP-SYSTEM-FOUNDATION — In-app Help Center
+   ============================================================ */
+
+/* Help Center — guide card grid */
+.help-guide-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+}
+.help-guide-card {
+    border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+    border-radius: var(--radius-md, 8px);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.help-guide-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 1px var(--color-primary);
+}
+.help-guide-title {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+.help-guide-desc {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    margin: 0 0 10px 0;
+}
+.help-guide-link {
+    font-size: 0.8125rem;
+    color: var(--color-primary);
+    font-weight: 500;
+}
+
+/* Help button — sits in page-header-actions next to primary buttons */
+.help-btn {
+    color: var(--text-secondary);
+    border-color: transparent;
+}
+.help-btn:hover {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+    background: var(--color-primary-light, rgba(249,115,22,0.08));
+}
+
+/* Help guide content — typography for rendered markdown */
+.help-content {
+    line-height: 1.7;
+    font-size: 0.9375rem;
+    max-width: 800px;
+}
+.help-content h2 {
+    font-size: 1.125rem;
+    font-weight: 700;
+    margin: 2rem 0 0.75rem 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.08));
+    color: var(--text-primary);
+}
+.help-content h3 {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    margin: 1.5rem 0 0.5rem 0;
+    color: var(--text-primary);
+}
+.help-content h4 {
+    font-size: 0.875rem;
+    font-weight: 700;
+    margin: 1.2rem 0 0.4rem 0;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.help-content p {
+    margin: 0 0 0.85rem 0;
+    color: var(--text-secondary);
+}
+.help-content ul,
+.help-content ol {
+    padding-left: 1.5rem;
+    margin: 0 0 0.85rem 0;
+    color: var(--text-secondary);
+}
+.help-content ul { list-style: disc; }
+.help-content ol { list-style: decimal; }
+.help-content li { margin-bottom: 0.3rem; line-height: 1.65; }
+.help-content li > ul,
+.help-content li > ol { margin-top: 0.3rem; margin-bottom: 0; }
+.help-content strong { color: var(--text-primary); font-weight: 600; }
+.help-content em { font-style: italic; }
+.help-content code {
+    background: var(--bg-surface-2, rgba(255,255,255,0.06));
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8125rem;
+    color: var(--color-primary-text, var(--color-primary));
+}
+.help-content pre {
+    background: var(--bg-surface-2);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 0 0 1rem 0;
+}
+.help-content pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+}
+.help-content a {
+    color: var(--color-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.help-content a:hover { opacity: 0.8; }
+.help-content hr {
+    border: none;
+    border-top: 2px solid var(--border-color, rgba(255,255,255,0.08));
+    margin: 2.5rem 0;
+}
+/* The "Under the Hood" section sits below the HR — give it a subtle indent signal */
+.help-content hr + h2 {
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+/* Blockquotes used for callouts */
+.help-content blockquote {
+    border-left: 3px solid var(--color-primary);
+    margin: 0 0 0.85rem 0;
+    padding: 0.5rem 1rem;
+    background: var(--color-primary-light, rgba(249,115,22,0.06));
+    border-radius: 0 4px 4px 0;
+    color: var(--text-secondary);
+    font-style: normal;
+}

@@ -33,6 +33,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title h4">Customers</h1>
     <div class="page-header-actions">
+        <?= help_button('customers') ?>
         <?php if (can('customers', 'create')): ?>
         <a href="<?= base_url('customers/create') ?>" class="btn btn-primary btn-sm">
             + New Customer

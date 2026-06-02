@@ -11,6 +11,7 @@
         "ext-pdo": "*",
         "aws/aws-sdk-php": "^3.300",
         "bacon/bacon-qr-code": "^3.1",
+        "erusev/parsedown": "^1.8",
         "mpdf/mpdf": "^8.2",
         "pragmarx/google2fa": "^9.0",
         "sentry/sentry": "^4.25"

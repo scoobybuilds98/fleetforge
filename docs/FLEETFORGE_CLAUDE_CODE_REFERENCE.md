@@ -2830,6 +2830,66 @@ Full Model B (precharge balance + drawdown) supersedes Model B Lite once S-MILEA
 
 ---
 
+## 15. HELP GUIDE AUTHORING — per-module "How This Works" guides
+
+**S-HELP-SYSTEM-FOUNDATION (2026-06-03)** built the in-app help infrastructure. Every module eventually gets a guide. This section is the authoring contract for future per-module sessions.
+
+### Storage convention
+
+- Guides live at `docs/help/{module}.md` — one file per module slug.
+- `HelpRenderer::listGuides()` scans `docs/help/*.md` automatically; a new guide appears in `/help` the moment its `.md` file is committed. No code change needed.
+- Files whose basename starts with `_` (e.g. `_TEMPLATE.md`) are skipped by the auto-discover.
+
+### YAML front matter (required)
+
+Every guide must begin with:
+```
+---
+description: One-line plain-language description of what this module does.
+---
+```
+The description is shown on the `/help` index card. Missing front matter → empty description on the index (non-fatal, but add it).
+
+### Canonical 9-section template
+
+Template file: `docs/help/_TEMPLATE.md`. Structure:
+
+1. `# {Module} — How This Works` (H1)
+2. `## Overview` (1–2 plain-language paragraphs; what it's for and who uses it)
+3. `## Common Tasks` (3–5 main things users do, each as a numbered step-by-step)
+4. `## Key Concepts` (core terms a user must understand, bolded term + definition)
+5. `## Understanding the Fields` (non-obvious field meanings; exclude trivial fields)
+6. `## How It Connects` (bullet list of relationships to other modules)
+7. `---` (horizontal rule — visual divider between user section and technical section)
+8. `## Under the Hood` (technical section; H3/H4 subheadings: Data Model, Business Rules & Invariants, Integrations, Edge Cases & Behaviours)
+9. `## Related Guides` (links to sibling `/help/{slug}` pages)
+
+### Wiring the help button
+
+On the module's list page (or the most natural entry point), add to `.page-header-actions`:
+```php
+<?= help_button('module-slug') ?>
+```
+`help_button()` is defined in `includes/functions.php`. It outputs a ghost button with a question-mark icon linking to `/help/{slug}`.
+
+### Accuracy discipline (D-HELP-GUIDE-FRESHNESS)
+
+**Every under-the-hood claim must trace to actual code read during the session.** If unsure, omit it — vague or invented behavior is worse than a gap.
+
+When a module's behavior changes (new field, status transition change, QBO wiring modification, etc.), the guide for that module must be updated in the same commit. This is the help-guide analog of the doc-freshness discipline.
+
+### Graceful degradation
+
+The `/help` router falls back to `app/admin/help/_guide.php` for any slug without a `.md` file, showing a "Guide Coming Soon" page. This means:
+- Module buttons (`help_button('leases')`) can be wired on any module page even before the guide is authored.
+- The "coming soon" page is fully styled and branded — no hard 404.
+
+### D131 gate impact
+
+Help guides are static markdown files and PHP view files — no schema changes, no new smokes required. A session that ONLY adds a new guide (no code changes) should still run the full D131 gate (parity + invariants + doc_freshness + settings) to confirm nothing regressed.
+
+---
+
 ## 14. SESSION CHECKLIST — Do this at the END of every session
 
 1. Mark touched items ✅ or 🔄 in FLEETFORGE_PROGRESS.md
