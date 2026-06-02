@@ -328,19 +328,21 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header"><div class="card-title">Notes</div></div>
             <div class="card-body">
 
-                <div class="form-group">
-                    <label class="form-label" for="notes">Notes</label>
-                    <textarea id="notes" class="form-control" x-model="form.notes"
-                              rows="3" maxlength="2000"
-                              placeholder="General notes about this unit…"></textarea>
-                    <div class="form-hint" style="text-align:right;" x-text="(form.notes || '').length + ' / 2000'"></div>
-                </div>
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label" for="notes">Notes</label>
+                        <textarea id="notes" class="form-control" x-model="form.notes"
+                                  rows="3" maxlength="2000"
+                                  placeholder="General notes about this unit…"></textarea>
+                        <div class="form-hint" style="text-align:right;" x-text="(form.notes || '').length + ' / 2000'"></div>
+                    </div>
 
-                <div class="form-group">
-                    <label class="form-label" for="internal_notes">Internal Notes (not shown to customers)</label>
-                    <textarea id="internal_notes" class="form-control" x-model="form.internal_notes"
-                              rows="2" maxlength="2000"></textarea>
-                    <div class="form-hint" style="text-align:right;" x-text="(form.internal_notes || '').length + ' / 2000'"></div>
+                    <div class="form-group">
+                        <label class="form-label" for="internal_notes">Internal Notes (not shown to customers)</label>
+                        <textarea id="internal_notes" class="form-control" x-model="form.internal_notes"
+                                  rows="3" maxlength="2000"></textarea>
+                        <div class="form-hint" style="text-align:right;" x-text="(form.internal_notes || '').length + ' / 2000'"></div>
+                    </div>
                 </div>
 
             </div>

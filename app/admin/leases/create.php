@@ -814,6 +814,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="card" style="margin-bottom:1.5rem;">
             <div class="card-header"><div class="card-title">Notes</div></div>
             <div class="card-body">
+                <div class="form-row-2">
                 <div class="form-group">
                     <label class="form-label" for="notes">Notes</label>
                     <textarea id="notes" class="form-control"
@@ -828,6 +829,7 @@ require_once FF_ROOT . '/includes/header.php';
                               placeholder="Internal use only — not shown to customer"></textarea>
                     <div class="form-hint" style="text-align:right;" x-text="(form.internal_notes || '').length + ' / 2000'"></div>
                 </div>
+                </div><!-- /form-row-2 notes -->
             </div>
         </div>
 
