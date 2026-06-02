@@ -63,6 +63,14 @@ $skipped   = 0;   // Samsara returned no data for this vehicle
 $failed    = 0;   // DB or unexpected error during sync of this unit
 $now       = date('Y-m-d H:i:s');
 
+// Pending alerts keyed by type — filled per-unit, dispatched as
+// grouped notifications after the loop (one notif per type, not per unit).
+$pendingAlerts = [
+    'samsara.battery_critical' => [],
+    'samsara.battery_low'      => [],
+    'samsara.not_connected'    => [],
+];
+
 /**
  * Append a single line to logs/gps.log.
  *
@@ -197,67 +205,28 @@ try {
                 ff_samsara_log('CRON_SYNC', "Unit $unitNum: telemetry updated (no movement)");
             }
 
-            // ── [NOTIF-1] Battery + connectivity alerts ───────
-            // Dedup via notification_log so we only fire each alert once
-            // per (unit + type) per 6 hours.
+            // ── [NOTIF-1] Battery + connectivity alerts — accumulate ─
+            // Dispatch is grouped after the full sync loop so
+            // "5 units offline" fires as one notification, not five.
             try {
                 $batteryPct = isset($stats['battery_pct']) ? (int) $stats['battery_pct'] : null;
                 $lastConn   = $update['samsara_last_connected_at'];
 
-                $alerts = [];
                 if ($batteryPct !== null) {
                     if ($batteryPct < 10) {
-                        $alerts[] = ['type' => 'samsara.battery_critical', 'sev' => 'critical',
-                            'title' => "Unit {$unitNum} battery CRITICAL",
-                            'msg'   => "Unit {$unitNum} battery CRITICAL at {$batteryPct}%"];
+                        $pendingAlerts['samsara.battery_critical'][] =
+                            ['id' => $unitId, 'num' => $unitNum, 'pct' => $batteryPct];
                     } elseif ($batteryPct < 20) {
-                        $alerts[] = ['type' => 'samsara.battery_low', 'sev' => 'warning',
-                            'title' => "Unit {$unitNum} battery low",
-                            'msg'   => "Unit {$unitNum} battery at {$batteryPct}% — charge needed"];
+                        $pendingAlerts['samsara.battery_low'][] =
+                            ['id' => $unitId, 'num' => $unitNum, 'pct' => $batteryPct];
                     }
                 }
                 if ($lastConn !== null) {
                     $hoursSince = (int) floor((time() - strtotime($lastConn . ' UTC')) / 3600);
                     if ($hoursSince > 8) {
-                        $alerts[] = ['type' => 'samsara.not_connected', 'sev' => 'warning',
-                            'title' => "Unit {$unitNum} offline",
-                            'msg'   => "Unit {$unitNum} not connected for {$hoursSince} hours"];
+                        $pendingAlerts['samsara.not_connected'][] =
+                            ['id' => $unitId, 'num' => $unitNum, 'hours' => $hoursSince];
                     }
-                }
-
-                foreach ($alerts as $a) {
-                    // 6h dedup
-                    $recent = db_row(
-                        "SELECT id FROM notification_log
-                          WHERE entity_type = 'equipment_unit' AND entity_id = ?
-                            AND notification_type = ?
-                            AND created_at >= NOW() - INTERVAL 6 HOUR
-                          LIMIT 1",
-                        [$unitId, $a['type']]
-                    );
-                    if ($recent) continue;
-
-                    \FleetForge\Notifications\NotificationService::notify(
-                        type:       $a['type'],
-                        title:      $a['title'],
-                        message:    $a['msg'],
-                        entityType: 'equipment_unit',
-                        entityId:   $unitId,
-                        url:        '/fleetforge/equipment/show?id=' . $unitId,
-                        severity:   $a['sev']
-                    );
-                    db_insert('notification_log', [
-                        'rule_id'           => null,
-                        'channel'           => 'in_app',
-                        'recipient'         => 'all_staff',
-                        'subject'           => $a['title'],
-                        'body'              => $a['msg'],
-                        'entity_type'       => 'equipment_unit',
-                        'entity_id'         => $unitId,
-                        'notification_type' => $a['type'],
-                        'status'            => 'sent',
-                        'sent_at'           => $now,
-                    ]);
                 }
             } catch (\Throwable $notifErr) {
                 error_log('[NOTIF samsara] ' . $notifErr->getMessage());
@@ -267,6 +236,107 @@ try {
             $failed++;
             ff_samsara_log('CRON_FAIL', "Unit $unitNum: " . $e->getMessage());
         }
+    }
+
+    // ── [NOTIF-1] Grouped alert dispatch ──────────────────────────
+    // Fires at most one notification per alert type per cron tick.
+    // Per-unit 6h dedup via notification_log prevents re-alerting the
+    // same unit until it clears; units that already fired are excluded
+    // from the grouped message without suppressing new ones.
+    try {
+        $alertMeta = [
+            'samsara.battery_critical' => [
+                'sev'   => 'critical',
+                'title' => static fn(int $n): string  => $n === 1
+                    ? '1 unit battery CRITICAL'
+                    : "{$n} units battery CRITICAL",
+                'msg'   => static fn(array $us): string => 'Battery below 10% on: '
+                    . implode(', ', array_map(
+                        static fn($u) => $u['num'] . " ({$u['pct']}%)", $us
+                    ))
+                    . ' — charge immediately.',
+            ],
+            'samsara.battery_low' => [
+                'sev'   => 'warning',
+                'title' => static fn(int $n): string  => $n === 1
+                    ? '1 unit battery low'
+                    : "{$n} units battery low",
+                'msg'   => static fn(array $us): string => 'Battery below 20% on: '
+                    . implode(', ', array_map(
+                        static fn($u) => $u['num'] . " ({$u['pct']}%)", $us
+                    ))
+                    . ' — charge needed.',
+            ],
+            'samsara.not_connected' => [
+                'sev'   => 'warning',
+                'title' => static fn(int $n): string  => $n === 1
+                    ? '1 unit offline'
+                    : "{$n} units offline",
+                'msg'   => static fn(array $us): string => 'Not connected for 8+ hours: '
+                    . implode(', ', array_map(
+                        static fn($u) => $u['num'] . " ({$u['hours']}h)", $us
+                    )) . '.',
+            ],
+        ];
+
+        foreach ($alertMeta as $type => $meta) {
+            $candidates = $pendingAlerts[$type];
+            if (empty($candidates)) {
+                continue;
+            }
+
+            // Filter out units already notified within the 6h window
+            $fresh = [];
+            foreach ($candidates as $c) {
+                $recent = db_row(
+                    "SELECT id FROM notification_log
+                      WHERE entity_type = 'equipment_unit' AND entity_id = ?
+                        AND notification_type = ?
+                        AND created_at >= NOW() - INTERVAL 6 HOUR
+                      LIMIT 1",
+                    [$c['id'], $type]
+                );
+                if (!$recent) {
+                    $fresh[] = $c;
+                }
+            }
+            if (empty($fresh)) {
+                continue;
+            }
+
+            $n     = count($fresh);
+            $title = ($meta['title'])($n);
+            $msg   = ($meta['msg'])($fresh);
+
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       $type,
+                title:      $title,
+                message:    $msg,
+                entityType: 'equipment_unit',
+                entityId:   $n === 1 ? (int) $fresh[0]['id'] : null,
+                url:        '/fleetforge/equipment/',
+                severity:   $meta['sev']
+            );
+
+            // One notification_log row per unit so the 6h dedup works on
+            // the next tick — entity_id tracks the individual unit, not the group.
+            foreach ($fresh as $c) {
+                db_insert('notification_log', [
+                    'rule_id'           => null,
+                    'channel'           => 'in_app',
+                    'recipient'         => 'all_staff',
+                    'subject'           => $title,
+                    'body'              => $msg,
+                    'entity_type'       => 'equipment_unit',
+                    'entity_id'         => (int) $c['id'],
+                    'notification_type' => $type,
+                    'status'            => 'sent',
+                    'sent_at'           => $now,
+                ]);
+            }
+        }
+    } catch (\Throwable $notifErr) {
+        error_log('[NOTIF samsara grouped] ' . $notifErr->getMessage());
     }
 
     $duration = round(microtime(true) - $startedAt, 2);

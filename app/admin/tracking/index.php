@@ -84,7 +84,12 @@ $gpsConfigured = ($samsaraKey !== '');
             <span x-show="loading" x-cloak>Loading…</span>
         </button>
         <?php if (can('equipment', 'edit')): ?>
-        <button class="btn btn-primary btn-sm" @click="syncAllNow()" :disabled="syncing">
+        <button class="btn btn-secondary btn-sm" @click="importFromSamsara()" :disabled="importing || syncing"
+                title="Fetch all vehicles &amp; trailers from Samsara and create any that are missing in FleetForge. Safe to re-run — already-linked units are skipped.">
+            <span x-show="!importing">Import from Samsara</span>
+            <span x-show="importing" x-cloak>Importing…</span>
+        </button>
+        <button class="btn btn-primary btn-sm" @click="syncAllNow()" :disabled="syncing || importing">
             <span x-show="!syncing">Sync All Now</span>
             <span x-show="syncing" x-cloak>Syncing…</span>
         </button>
@@ -116,39 +121,44 @@ $gpsConfigured = ($samsaraKey !== '');
 </template>
 
 <!-- ── Alerts strip ─────────────────────────────────────────────── -->
-<!-- Sits above the tabs because it's the most actionable thing on
-     the page. Each alert has a Dismiss button that hides it for 24h
-     via localStorage (no server roundtrip needed for dismissal). -->
-<template x-if="visibleAlerts.length > 0">
-    <div class="card spec-card" style="margin-bottom:16px;">
-        <div class="card-header" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">
-            <div class="card-title">
-                Active Alerts
-                <span class="badge badge-danger" style="font-size:0.7rem;margin-left:6px;" x-text="visibleAlerts.length"></span>
-            </div>
-            <button class="btn btn-ghost btn-xs" @click="dismissAllAlerts()" style="color:#fff;opacity:0.85;">Dismiss all</button>
+<!-- Collapsible, contracted by default. Badge shows count even when closed. -->
+<div x-show="visibleAlerts.length > 0" class="card spec-card" style="margin-bottom:16px;">
+    <div class="card-header"
+         style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;"
+         @click="alertsExpanded = !alertsExpanded">
+        <div style="display:flex;align-items:center;gap:8px;">
+            <svg style="width:16px;height:16px;color:var(--text-muted);transition:transform 0.18s ease;flex-shrink:0;"
+                 :style="alertsExpanded ? 'transform:rotate(0deg)' : 'transform:rotate(-90deg)'"
+                 viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+            </svg>
+            <span class="card-title" style="margin:0;">Active Alerts</span>
+            <span class="badge badge-danger" style="font-size:0.7rem;" x-text="visibleAlerts.length"></span>
         </div>
-        <div class="card-body" style="padding:0;">
-            <template x-for="alert in visibleAlerts" :key="alert.unit_id + '-' + alert.type">
-                <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border-color);">
-                    <span :class="alert.severity === 'critical' ? 'badge badge-danger' : 'badge badge-warning'"
-                          style="font-size:0.7rem;text-transform:uppercase;"
-                          x-text="alert.severity"></span>
-                    <a :href="'<?= base_url('equipment/show') ?>?id=' + alert.unit_id"
-                       class="font-mono"
-                       style="font-weight:600;font-size:0.875rem;color:var(--text-primary);text-decoration:none;"
-                       x-text="alert.unit_number"></a>
-                    <span style="font-size:0.875rem;color:var(--text-secondary);flex:1;" x-text="alert.message"></span>
-                    <button class="btn btn-ghost btn-xs"
-                            @click="dismissAlert(alert)"
-                            title="Dismiss for 24 hours">
-                        Dismiss
-                    </button>
-                </div>
-            </template>
-        </div>
+        <button class="btn btn-ghost btn-xs"
+                style="color:#fff;opacity:0.85;"
+                @click.stop="dismissAllAlerts()">Dismiss all</button>
     </div>
-</template>
+    <div class="card-body" style="padding:0;" x-show="alertsExpanded" x-collapse>
+        <template x-for="alert in visibleAlerts" :key="alert.unit_id + '-' + alert.type">
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border-color);">
+                <span :class="alert.severity === 'critical' ? 'badge badge-danger' : 'badge badge-warning'"
+                      style="font-size:0.7rem;text-transform:uppercase;"
+                      x-text="alert.severity"></span>
+                <a :href="'<?= base_url('equipment/show') ?>?id=' + alert.unit_id"
+                   class="font-mono"
+                   style="font-weight:600;font-size:0.875rem;color:var(--text-primary);text-decoration:none;"
+                   x-text="alert.unit_number"></a>
+                <span style="font-size:0.875rem;color:var(--text-secondary);flex:1;" x-text="alert.message"></span>
+                <button class="btn btn-ghost btn-xs"
+                        @click="dismissAlert(alert)"
+                        title="Dismiss for 24 hours">
+                    Dismiss
+                </button>
+            </div>
+        </template>
+    </div>
+</div>
 
 <!-- ── Tabs ─────────────────────────────────────────────────────── -->
 <div class="tab-bar" role="tablist" style="margin-bottom:16px;">
@@ -379,6 +389,7 @@ function FF_FleetTracking() {
     // intentionally has no trailing slash.
     const FLEET_URL    = '<?= base_url('api/v1/samsara/fleet') ?>';
     const SYNC_URL     = '<?= base_url('api/v1/samsara/sync') ?>';
+    const IMPORT_URL   = '<?= base_url('api/v1/samsara/import') ?>';
     const UNIT_SHOW    = '<?= base_url('equipment/show') ?>';
     const DISMISS_KEY  = 'ff_samsara_dismissed_alerts';
     const DISMISS_TTL  = 24 * 3600 * 1000; // 24 hours in ms
@@ -417,10 +428,14 @@ function FF_FleetTracking() {
         stats:          { total: 0, linked: 0, unlinked: 0, online: 0, offline: 0, alert_counts: {} },
         loading:        false,
         syncing:        false,
+        importing:      false,
         error:          null,
         lastUpdated:    null,
         autoRefresh:    true,
         refreshInterval:null,
+
+        // ── Alerts panel ─────────────────────────────────────
+        alertsExpanded: false,
 
         // ── Tabs ─────────────────────────────────────────────
         activeTab:      'map',
@@ -546,6 +561,44 @@ function FF_FleetTracking() {
                 this.error = 'Sync request failed.';
             }
             this.syncing = false;
+        },
+
+        // Fetch all Samsara trackables and create any missing in FF.
+        // Idempotent: already-linked units are skipped.
+        // Different from syncAllNow() — that refreshes telemetry on
+        // existing links; this creates the links themselves.
+        async importFromSamsara() {
+            if (!confirm(
+                'Import all vehicles & trailers from Samsara?\n\n' +
+                'Already-linked units are skipped — this is safe to run anytime.\n' +
+                'New units will be created with status "available".'
+            )) return;
+            this.importing = true;
+            this.error = '';
+            try {
+                const res = await FF_Api.post(IMPORT_URL, {});
+                if (res?.success) {
+                    const d = res.data;
+                    const msg = `Import complete: ${d.created} created, ` +
+                        `${d.skipped_linked} already linked, ` +
+                        `${d.skipped_name} name conflicts` +
+                        (d.failed > 0 ? `, ${d.failed} failed` : '') +
+                        `. Total linked: ${d.total_linked}.`;
+                    if (window.FF_Toast) {
+                        d.failed > 0
+                            ? FF_Toast.warning('Import done', msg)
+                            : FF_Toast.success('Import done', msg);
+                    } else {
+                        alert(msg);
+                    }
+                    await this.refresh();
+                } else {
+                    this.error = res?.message || 'Import failed.';
+                }
+            } catch (e) {
+                this.error = 'Import request failed: ' + (e?.message || 'unknown error');
+            }
+            this.importing = false;
         },
 
         // ── Map init/update ──────────────────────────────────
