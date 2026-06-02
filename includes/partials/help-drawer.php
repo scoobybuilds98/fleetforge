@@ -202,17 +202,24 @@ function FF_HelpDrawer() {
             this.isOpen = false;
             document.body.removeAttribute('data-help-drawer-open');
             document.body.style.overflow = '';
-            document.documentElement.style.setProperty('--ff-help-drawer-offset', '0px');
+            document.documentElement.style.removeProperty('--ff-help-drawer-offset');
             this._persist(false, this.currentSlug);
         },
 
-        // Sets --ff-help-drawer-offset to the sticky page-header's height so
-        // the drawer panel starts beneath it. Falls back to 0 when the page
-        // has no page-header (drawer then sits directly below the topbar).
+        // Computes the absolute top position for the drawer panel so it starts
+        // below the sticky page-header's bottom edge (not just its height —
+        // the .page-content padding-top pushes the header down from the topbar).
         _syncHeaderOffset() {
-            const ph = document.querySelector('.page-content .page-header');
-            const h  = ph ? Math.round(ph.getBoundingClientRect().height) : 0;
-            document.documentElement.style.setProperty('--ff-help-drawer-offset', h + 'px');
+            const ph       = document.querySelector('.page-content .page-header');
+            const topbarH  = parseInt(
+                getComputedStyle(document.documentElement).getPropertyValue('--topbar-height') || '60'
+            );
+            // Use the bottom edge of the page-header relative to the viewport,
+            // then subtract the topbar height so the CSS calc() adds it back.
+            const offset = ph
+                ? Math.round(ph.getBoundingClientRect().bottom) - topbarH
+                : 0;
+            document.documentElement.style.setProperty('--ff-help-drawer-offset', Math.max(0, offset) + 'px');
         },
 
         reload() {
