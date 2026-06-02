@@ -60,6 +60,9 @@ require_once FF_ROOT . '/includes/header.php';
         + New Rate Card
     </a>
     <?php endif; ?>
+    <div class="page-header-actions">
+        <?= help_button('rates') ?>
+    </div>
 </div>
 
 <!-- ── KPI tiles ───────────────────────────────────────────────────���─────── -->

@@ -75,6 +75,9 @@ require_once FF_ROOT . '/includes/header.php';
     <div>
         <h1 class="page-header-title h4">Create Invoice</h1>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('invoices') ?>
+    </div>
 </div>
 
 <!-- ============================================================

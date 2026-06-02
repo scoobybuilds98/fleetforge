@@ -71,6 +71,9 @@ require_once FF_ROOT . '/includes/header.php';
             Unit <?= e($lease['unit_display_number']) ?>
         </div>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('leases') ?>
+    </div>
 </div>
 
 <?php if ($isActive): ?>

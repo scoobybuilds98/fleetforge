@@ -56,6 +56,9 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title h4">
         <span style="font-size:1.1em;margin-right:6px;">+</span> Reservation Form
     </h1>
+    <div class="page-header-actions">
+        <?= help_button('reservations') ?>
+    </div>
 </div>
 
 <!-- ============================================================

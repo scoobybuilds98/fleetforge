@@ -128,7 +128,8 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <!-- Action buttons -->
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <div class="page-header-actions">
+        <?= help_button('inspections') ?>
         <?php if ($insp['status'] === 'complete' && can('inspections', 'create')): ?>
         <a href="<?= base_url('damage_claims/create') ?>?inspection_id=<?= (int)$id ?>&unit_id=<?= (int)$insp['equipment_unit_id'] ?><?= $insp['lease_id'] ? '&lease_id=' . (int)$insp['lease_id'] : '' ?>"
            class="btn btn-danger btn-sm">+ Create Damage Claim</a>

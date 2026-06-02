@@ -71,6 +71,9 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <a href="<?= base_url('damage_claims') ?>" class="btn btn-secondary btn-sm">← Back</a>
     <h1 class="page-header-title">New Damage Claim</h1>
+    <div class="page-header-actions">
+        <?= help_button('damage-claims') ?>
+    </div>
 </div>
 
 <div x-data="damageClaimCreate()">

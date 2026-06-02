@@ -61,6 +61,9 @@ require_once FF_ROOT . '/includes/header.php';
     <a href="<?= base_url('maintenance_work_orders') ?>" class="btn btn-secondary btn-sm">
         ← Back to Work Orders
     </a>
+    <div class="page-header-actions">
+        <?= help_button('maintenance') ?>
+    </div>
 </div>
 
 <div x-data="woCreate()" x-init="init()">

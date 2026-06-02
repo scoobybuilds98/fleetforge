@@ -111,14 +111,15 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <?php if (can('maintenance', 'delete') && in_array($wo['status'], ['open', 'cancelled'])): ?>
-    <div style="margin-left:auto;">
+    <div class="page-header-actions">
+        <?= help_button('maintenance') ?>
+        <?php if (can('maintenance', 'delete') && in_array($wo['status'], ['open', 'cancelled'])): ?>
         <button class="btn btn-danger btn-sm"
                 onclick="document.getElementById('delete-modal').style.display='flex'">
             Delete
         </button>
+        <?php endif; ?>
     </div>
-    <?php endif; ?>
 </div>
 
 <?php

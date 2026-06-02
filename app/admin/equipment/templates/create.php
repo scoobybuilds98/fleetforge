@@ -36,6 +36,9 @@ require_once FF_ROOT . '/includes/header.php';
         </a>
         <h1 class="page-header-title h4">New Equipment Template</h1>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('equipment') ?>
+    </div>
 </div>
 
 <!-- ============================================================

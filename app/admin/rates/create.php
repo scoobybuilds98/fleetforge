@@ -45,6 +45,9 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <a href="<?= base_url('rates') ?>" class="btn btn-ghost btn-sm">← Back to Rates</a>
     <h1 class="page-header-title">New Rate Card</h1>
+    <div class="page-header-actions">
+        <?= help_button('rates') ?>
+    </div>
 </div>
 
 <div x-data="FF_RateCardCreate()" x-init="init()">

@@ -84,6 +84,9 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <a href="<?= base_url('vendors/show?id=' . $vendorId) ?>" class="btn btn-secondary btn-sm">← Back</a>
     <h1 class="page-header-title">Edit Vendor</h1>
+    <div class="page-header-actions">
+        <?= help_button('vendors') ?>
+    </div>
 </div>
 
 <div x-data="vendorEdit()" @submit.prevent="submit">

@@ -67,6 +67,9 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <a href="<?= base_url('inspections') ?>" class="btn btn-secondary btn-sm">Back to Inspections</a>
     <h1 class="page-header-title">New Inspection</h1>
+    <div class="page-header-actions">
+        <?= help_button('inspections') ?>
+    </div>
 </div>
 
 <div x-data="createInspection()" x-init="init()">

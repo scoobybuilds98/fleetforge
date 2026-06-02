@@ -177,6 +177,9 @@ require_once FF_ROOT . '/includes/header.php';
                 onclick="document.getElementById('vendor-delete-modal').style.display='flex'">Delete</button>
         <?php endif; ?>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('vendors') ?>
+    </div>
 </div>
 
 <!-- TILES-2: vendor-level tiles drill to the maintenance work orders list

@@ -58,6 +58,9 @@ require_once FF_ROOT . '/includes/header.php';
         + New Vendor
     </a>
     <?php endif; ?>
+    <div class="page-header-actions">
+        <?= help_button('vendors') ?>
+    </div>
 </div>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->

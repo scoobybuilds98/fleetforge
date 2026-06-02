@@ -54,6 +54,9 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="text-secondary text-sm" style="margin-top:4px;">
         Link FleetForge customers to their QuickBooks counterparts. Pull refreshes QBO data; Auto-Match suggests pairings using normalized name + Levenshtein + email + phone last-7-digits.
     </div>
+    <div class="page-header-actions">
+        <?= help_button('quickbooks') ?>
+    </div>
 </div>
 
 <div x-data="qboCustomerMapping()" x-init="init()">

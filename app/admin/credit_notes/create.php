@@ -40,6 +40,9 @@ require_once FF_ROOT . '/includes/header.php';
             <p style="margin:4px 0 0; color:var(--text-secondary); font-size:0.9rem;">Issue a credit note against a customer account</p>
         </div>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('credit-notes') ?>
+    </div>
 </div>
 
 <!-- Form -->

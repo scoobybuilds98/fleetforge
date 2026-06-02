@@ -47,6 +47,9 @@ require_once FF_ROOT . '/includes/header.php';
         + New Work Order
     </a>
     <?php endif; ?>
+    <div class="page-header-actions">
+        <?= help_button('maintenance') ?>
+    </div>
 </div>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->

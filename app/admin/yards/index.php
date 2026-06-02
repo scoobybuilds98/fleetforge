@@ -57,6 +57,9 @@ require_once FF_ROOT . '/includes/header.php';
         + New Yard
     </button>
     <?php endif; ?>
+    <div class="page-header-actions">
+        <?= help_button('yards') ?>
+    </div>
 </div>
 
 <!-- TILES-1: KPI tiles dispatch `ff-yards-filter` to the Alpine component

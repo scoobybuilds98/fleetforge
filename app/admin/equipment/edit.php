@@ -63,6 +63,9 @@ require_once FF_ROOT . '/includes/header.php';
         <h1 class="page-header-title h4">Edit Unit <?= e($unit['unit_number']) ?></h1>
         <div class="text-secondary text-sm"><?= e($unit['template_name']) ?></div>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('equipment') ?>
+    </div>
 </div>
 
 <!-- ============================================================

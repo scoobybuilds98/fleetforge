@@ -59,13 +59,14 @@ $isAdmin    = can('settings', 'view');
             Ask questions about your fleet, customers, leases, and financial data
         </p>
     </div>
-    <?php if ($isAdmin): ?>
-    <div style="display:flex;gap:8px;align-items:center;">
+    <div class="page-header-actions">
+        <?= help_button('ai') ?>
+        <?php if ($isAdmin): ?>
         <a href="<?= base_url('settings') ?>?tab=integrations" class="btn btn-secondary btn-sm" style="font-size:0.8125rem;">
             AI Settings
         </a>
+        <?php endif; ?>
     </div>
-    <?php endif; ?>
 </div>
 
 <?php if (!$aiReady): ?>

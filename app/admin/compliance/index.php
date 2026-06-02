@@ -263,6 +263,9 @@ require_once FF_ROOT . '/includes/header.php';
         </button>
         <?php endif; ?>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('compliance') ?>
+    </div>
 </div>
 
 <!-- ── Alpine.js component wraps tiles + grid so tiles can refresh after save ── -->

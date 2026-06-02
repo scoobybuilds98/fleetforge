@@ -183,7 +183,8 @@ require_once FF_ROOT . '/includes/header.php';
         <span class="<?= $statusBadgeClass ?>"><?= $statusLabel ?></span>
         <span class="<?= $severityBadgeClass ?>"><?= $severityLabel ?></span>
     </div>
-    <div style="display:flex;gap:8px;margin-left:auto;">
+    <div class="page-header-actions">
+        <?= help_button('damage-claims') ?>
         <?php if (can('maintenance', 'edit') && $nextStates): ?>
         <button class="btn btn-secondary btn-sm"
                 @click="showStatusPanel = !showStatusPanel">

@@ -68,6 +68,9 @@ require_once FF_ROOT . '/includes/header.php';
         + New Claim
     </a>
     <?php endif; ?>
+    <div class="page-header-actions">
+        <?= help_button('damage-claims') ?>
+    </div>
 </div>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
