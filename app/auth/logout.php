@@ -42,13 +42,19 @@ if ($cookieVal !== '') {
         }
     }
 
-    // Expire the cookie immediately
+    // Expire the cookie immediately.
+    // WHY '/' . ltrim(FF_BASE_PATH, '/'):  the cookie was originally set in
+    // auth_login() with this exact path formula (produces '/fleetforge', no
+    // trailing slash). RFC 6265 requires an exact (name+domain+path) match
+    // to delete a cookie — the previous 'FF_BASE_PATH . "/"' produced
+    // '/fleetforge/', which browsers treated as a different path and left the
+    // original cookie alive for up to 30 days after logout.
     setcookie(
         $cookieName,
         '',
         [
             'expires'  => time() - 3600,
-            'path'     => FF_BASE_PATH . '/',
+            'path'     => '/' . ltrim(FF_BASE_PATH, '/'),
             'secure'   => APP_ENV === 'production',
             'httponly' => true,
             'samesite' => 'Lax',
