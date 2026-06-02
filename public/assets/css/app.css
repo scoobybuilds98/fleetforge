@@ -566,8 +566,13 @@ kbd {
     flex: 1;
     min-width: 0;   /* prevent flex blowout */
     min-height: 100vh;
-    transition: margin-left var(--transition-slow),
-                margin-right var(--transition-slow); /* S-HELP-DRAWER-PUSH: animated push for help panel */
+    transition: margin-left var(--transition-slow);
+}
+
+/* S-HELP-DRAWER-PUSH: only the content + footer shift right — topbar stays full-width */
+.page-content,
+.app-footer {
+    transition: margin-right var(--transition-slow);
 }
 
 /* ── S-HELP-DRAWER-PUSH: desktop push layout ──────────────────────────────
@@ -577,9 +582,6 @@ kbd {
    Mobile (<1024px): overlay mode — no margin, backdrop shown instead.
 */
 @media (min-width: 1024px) {
-    body[data-help-drawer-open] .app-main {
-        margin-right: 460px; /* matches .help-drawer-panel width */
-    }
     /* No backdrop on desktop — page must stay fully interactive */
     body[data-help-drawer-open] .help-drawer-backdrop {
         display: none !important;
@@ -10797,7 +10799,9 @@ body:has(.chat-page-content) #ff-chat-widget {
 
 /* ── Desktop push (≥1024px) ─────────────────────────────────── */
 @media (min-width: 1024px) {
-    body[data-help-drawer-open] .app-main {
+    /* Push only .page-content and .app-footer — topbar is excluded so it stays full-width */
+    body[data-help-drawer-open] .page-content,
+    body[data-help-drawer-open] .app-footer {
         margin-right: 500px;
     }
     body[data-help-drawer-open] .help-drawer-backdrop {
