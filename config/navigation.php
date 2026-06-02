@@ -49,6 +49,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'Leases',
+        'icon'   => 'document-text',
+        'url'    => '/leases',
+        'module' => 'leases',
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Samsara Tracking',
         'icon'   => 'map',
         'url'    => '/tracking',
@@ -56,11 +63,11 @@ return [
         'badge'  => null,
     ],
     [
-        'label'  => 'Leases',
-        'icon'   => 'document-text',
-        'url'    => '/leases',
-        'module' => 'leases',
-        'badge'  => null,
+        'label'  => 'Invoices',
+        'icon'   => 'banknotes',
+        'url'    => '/invoices',
+        'module' => 'invoices',
+        'badge'  => 'overdue_invoices',
     ],
     [
         'label'  => 'Reservations',
@@ -75,13 +82,6 @@ return [
         'url'    => '/yards',
         'module' => 'reservations',
         'badge'  => null,
-    ],
-    [
-        'label'  => 'Invoices',
-        'icon'   => 'banknotes',
-        'url'    => '/invoices',
-        'module' => 'invoices',
-        'badge'  => 'overdue_invoices',
     ],
     [
         'label'  => 'Payments',
