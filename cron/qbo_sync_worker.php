@@ -68,6 +68,15 @@ use FleetForge\Notifications\NotificationService;
 
 \FleetForge\Observability\Sentry::init();
 
+// ── Testability seam (S-CRON-FIX-3) ───────────────────────────
+// When required by a smoke (FF_QBO_WORKER_INCLUDE defined), expose the helper
+// functions at the bottom of this file WITHOUT running the worker body. Those
+// top-level function declarations are hoisted, so they remain available to the
+// includer even though this early return skips the executable body below.
+if (defined('FF_QBO_WORKER_INCLUDE')) {
+    return;
+}
+
 // ── D21 advisory lock ─────────────────────────────────────────
 $lock = db_row("SELECT GET_LOCK('ff_qbo_sync_worker', 0) AS ok", []);
 if (!$lock || (int) $lock['ok'] !== 1) {
@@ -82,6 +91,8 @@ $completed = 0;
 $skipped   = 0;
 $failed    = 0;
 $deferred  = 0;
+$workerId  = null;   // set once sync is enabled (below); referenced by the top-level catch
+$fatal     = false;  // set by the top-level catch so we exit non-zero AFTER finally runs
 
 try {
     // ── Master kill-switch (D-CPA-5) ──────────────────────────
@@ -114,6 +125,16 @@ try {
         $notifyUserIds = array_map(static fn($r) => (int) $r['id'], $rows);
     } catch (\Throwable $audErr) {
         error_log('cron/qbo_sync_worker: audience resolution failed — ' . $audErr->getMessage());
+    }
+
+    // ── Stale-processing reaper (S-CRON-FIX-3, D-QBO-WORKER-STALE-REAPER) ──
+    // Reclaim rows orphaned in 'processing' by a crashed worker BEFORE claiming
+    // new work. Runs under the advisory lock acquired above (so two workers
+    // can't both reap), and before the claim loop. Requeues rows still under
+    // the retry cap; fails poison rows that exhausted retries.
+    $reap = qbo_worker_reap_stale(10);
+    if ($reap['requeued'] > 0 || $reap['failed'] > 0) {
+        echo "[{$startedAt}] REAP reclaimed {$reap['requeued']} stale row(s) → queued; failed {$reap['failed']} exhausted.\n";
     }
 
     // ── Batch claim under FOR UPDATE (D20) ────────────────────
@@ -286,7 +307,7 @@ try {
                 // truth. Pusher's recordSkipped (invoice path) already wrote
                 // the map row + sync_log entry; worker just records the
                 // queue-level outcome here.
-                $typedCode = substr((string) ($result['status'] ?? 'skipped'), 0, 50);
+                $typedCode = qbo_safe_error_code((string) ($result['status'] ?? 'skipped'));
                 $skipMsg   = substr("Skipped: " . ($result['status'] ?? 'unknown'), 0, 500);
                 db_execute(
                     "UPDATE acc_qbo_sync_queue
@@ -304,7 +325,7 @@ try {
                 // D-QBO-FIXPACK-14 (Bug B): Pusher returned success=false without
                 // throwing. Mark queue row 'failed' with the error from result.
                 $errorMsg  = substr((string) ($result['error'] ?? $result['status'] ?? 'Pusher returned success=false'), 0, 500);
-                $errorCode = substr((string) ($result['error_code'] ?? $result['status'] ?? 'pusher_failed'), 0, 100);
+                $errorCode = qbo_safe_error_code((string) ($result['error_code'] ?? $result['status'] ?? 'pusher_failed'));
                 db_execute(
                     "UPDATE acc_qbo_sync_queue
                         SET status='failed', completed_at=NOW(),
@@ -351,7 +372,7 @@ try {
                       WHERE id=?",
                     [
                         $newRetry,
-                        $e->errorCode ?? 'transient_exhausted',
+                        qbo_safe_error_code($e->errorCode ?? 'transient_exhausted'),
                         substr($e->getMessage(), 0, 500),
                         $qid,
                     ]
@@ -376,7 +397,7 @@ try {
                     [
                         $newRetry,
                         $backoffMinutes,
-                        $e->errorCode ?? 'transient',
+                        qbo_safe_error_code($e->errorCode ?? 'transient'),
                         substr($e->getMessage(), 0, 500),
                         $qid,
                     ]
@@ -395,7 +416,7 @@ try {
                         error_message=?
                   WHERE id=?",
                 [
-                    $e->errorCode ?? 'qbo_permanent',
+                    qbo_safe_error_code($e->errorCode ?? 'qbo_permanent'),
                     substr($e->getMessage(), 0, 500),
                     $qid,
                 ]
@@ -428,8 +449,55 @@ try {
             QuickBooksClient::setWorkerContext(null, null, null);
         }
     }
+} catch (\Throwable $fatalErr) {
+    // ── Last line of defense (S-CRON-FIX-3, D-QBO-WORKER-TOPLEVEL-CATCH) ──
+    // A throw that escaped the per-row arms — e.g. one thrown INSIDE a catch
+    // arm (sibling arms can't catch it), in a pre-dispatch check, or in the
+    // claim transaction — must NOT die without a record nor orphan the row it
+    // was mid-processing. We deliberately do NOT exit() here so the finally
+    // below still runs (PHP skips finally on exit()); $fatal drives a non-zero
+    // exit AFTER finally releases the lock.
+    $fatal = true;
+    error_log('cron/qbo_sync_worker: FATAL — ' . $fatalErr->getMessage()
+        . ($workerId !== null ? " (worker_id={$workerId})" : ''));
+    // Sentry may be a no-op here (cron-audit MED-8 — Sentry::init() wiring is a
+    // separate session); make the call regardless so it reports once that lands.
+    \FleetForge\Observability\Sentry::captureException($fatalErr);
+
+    if ($workerId !== null) {
+        try {
+            // Mark every row THIS worker left in 'processing' as failed so none
+            // orphan. worker_id is unique per process, so this never touches
+            // another worker's in-flight rows.
+            $rescued = qbo_worker_rescue_processing(
+                $workerId,
+                'worker_fatal',
+                'Worker fatal before row reached a terminal state: ' . $fatalErr->getMessage()
+            );
+            db_insert('audit_log', [
+                'user_id'      => null,
+                'user_name'    => 'system',
+                'action'       => 'cron',
+                'module'       => 'quickbooks',
+                'entity_type'  => 'qbo_sync_queue',
+                'entity_id'    => null,
+                'entity_label' => 'qbo_sync_worker',
+                'notes'        => "qbo_sync_worker FATAL — rescued {$rescued} mid-processing row(s) → failed. " . substr($fatalErr->getMessage(), 0, 300),
+                'ip_address'   => '127.0.0.1',
+            ]);
+            echo "[{$startedAt}] FATAL worker error; rescued {$rescued} mid-processing row(s) → failed: " . substr($fatalErr->getMessage(), 0, 120) . "\n";
+        } catch (\Throwable $rescueErr) {
+            error_log('cron/qbo_sync_worker: rescue after fatal FAILED — ' . $rescueErr->getMessage());
+        }
+    }
 } finally {
     db_execute("SELECT RELEASE_LOCK('ff_qbo_sync_worker')", []);
+}
+
+if ($fatal) {
+    // Non-zero exit AFTER finally released the lock (the catch above set the
+    // flag instead of exiting, precisely because finally is skipped on exit()).
+    exit(1);
 }
 
 echo sprintf(
@@ -440,6 +508,82 @@ echo sprintf(
 // ============================================================
 // Helpers
 // ============================================================
+
+/**
+ * qbo_safe_error_code — clamp any error_code to the
+ * acc_qbo_sync_queue.error_code column width (varchar(50)). Only the SHORT
+ * typed code is truncated; the FULL human-readable detail always goes to
+ * error_message (TEXT) separately, so there is no information loss overall.
+ * Single point to update if the column ever widens.
+ * (S-CRON-FIX-3, D-QBO-WORKER-ERRORCODE-TRUNCATE)
+ */
+function qbo_safe_error_code(?string $code): string
+{
+    return substr((string) ($code ?? 'unknown'), 0, 50);
+}
+
+/**
+ * qbo_worker_reap_stale — reclaim rows orphaned in 'processing' by a crashed
+ * worker (picked_up_at older than $thresholdMinutes). Requeues rows still under
+ * the retry cap (status='queued', retry_count+1, picked_up_at/worker_id cleared
+ * so they re-pick cleanly); fails poison rows that already hit max_retries.
+ * Respects the max_retries cap — never infinite-loops a poison row.
+ * (S-CRON-FIX-3, D-QBO-WORKER-STALE-REAPER)
+ *
+ * @return array{requeued:int,failed:int}
+ */
+function qbo_worker_reap_stale(int $thresholdMinutes = 10): array
+{
+    $requeued = db_execute(
+        "UPDATE acc_qbo_sync_queue
+            SET status='queued',
+                retry_count=retry_count+1,
+                picked_up_at=NULL,
+                worker_id=NULL,
+                error_code=?,
+                error_message='Reclaimed orphaned processing row (worker crash); requeued.'
+          WHERE status='processing'
+            AND picked_up_at IS NOT NULL
+            AND picked_up_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)
+            AND retry_count < max_retries",
+        [qbo_safe_error_code('stale_reclaim'), $thresholdMinutes]
+    );
+
+    $failed = db_execute(
+        "UPDATE acc_qbo_sync_queue
+            SET status='failed',
+                completed_at=NOW(),
+                error_code=?,
+                error_message='Orphaned processing row exceeded max_retries; failed.'
+          WHERE status='processing'
+            AND picked_up_at IS NOT NULL
+            AND picked_up_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)
+            AND retry_count >= max_retries",
+        [qbo_safe_error_code('stale_exhausted'), $thresholdMinutes]
+    );
+
+    return ['requeued' => (int) $requeued, 'failed' => (int) $failed];
+}
+
+/**
+ * qbo_worker_rescue_processing — mark every row a given worker_id left in
+ * 'processing' as failed. Invoked by the top-level catch so a fatal mid-run
+ * doesn't orphan the row being processed. worker_id is unique per process, so
+ * this never touches another worker's in-flight rows.
+ * (S-CRON-FIX-3, D-QBO-WORKER-TOPLEVEL-CATCH)
+ *
+ * @return int rows rescued
+ */
+function qbo_worker_rescue_processing(string $workerId, string $errorCode, string $errorMessage): int
+{
+    return (int) db_execute(
+        "UPDATE acc_qbo_sync_queue
+            SET status='failed', completed_at=NOW(),
+                error_code=?, error_message=?
+          WHERE worker_id=? AND status='processing'",
+        [qbo_safe_error_code($errorCode), substr($errorMessage, 0, 500), $workerId]
+    );
+}
 
 /**
  * dispatchFailureNotification — send a 'quickbooks.push_failed'

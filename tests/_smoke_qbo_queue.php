@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Offline (no real QBO HTTP). Self-cleaning — any test artifact
  * (queue row, audit_log row, settings flip) is reverted before exit.
  *
- * 9 sub-checks:
+ * 13 sub-checks (C10–C13 added by S-CRON-FIX-3 — QBO worker hardening):
  *   C1: acc_qbo_sync_queue table exists with spec §6.4 columns + indexes
  *   C2: acc_qbo_drift_events table exists with spec §15 derivation
  *   C3: 15 quickbooks.sync_mode.* settings keys present with expected defaults
@@ -23,6 +23,13 @@ declare(strict_types=1);
  *   C9: Worker pusher_not_implemented pathway — insert fake queue row, flip sync_enabled=1, run worker,
  *       confirm row marked 'failed' with error_code='pusher_not_implemented' AND no notification dispatched
  *       (verified by counting notifications rows pre + post). Restore sync_enabled=0, delete all artifacts.
+ *   C10: error_code overflow guard — qbo_safe_error_code() caps at 50 chars;
+ *        a raw >50-char error_code write throws under strict mode (cron-audit HIGH-3 fix).
+ *   C11: stale-processing reaper requeues an orphaned 'processing' row older than
+ *        10min under the retry cap (→ queued, retry_count+1) + skips fresh rows.
+ *   C12: stale-processing reaper fails a poison orphan (retry_count >= max_retries).
+ *   C13: top-level-catch rescue marks THIS worker's mid-processing rows failed
+ *        (worker_id-scoped) so a fatal can't orphan them.
  *
  * Exit 0 on all PASS; exit 1 with failure list.
  *
@@ -36,9 +43,16 @@ use FleetForge\QuickBooksSync;
 use FleetForge\Exceptions\PusherNotImplementedException;
 use FleetForge\Exceptions\QuickBooksException;
 
+// S-CRON-FIX-3: load the worker's helper functions (qbo_safe_error_code /
+// qbo_worker_reap_stale / qbo_worker_rescue_processing) WITHOUT running the
+// worker body (FF_QBO_WORKER_INCLUDE early-return guard), so C10–C13 can
+// exercise them directly inside BEGIN/ROLLBACK.
+define('FF_QBO_WORKER_INCLUDE', true);
+require_once FF_ROOT . '/cron/qbo_sync_worker.php';
+
 $failures = [];
 $pass     = 0;
-$total    = 9;
+$total    = 13;
 
 // Helper — array of error messages for a check
 $check = function (string $label, array $errs) use (&$pass, &$failures): void {
@@ -347,6 +361,93 @@ try {
     }
 }
 $check('C9  worker pusher_not_implemented pathway + suppression (self-cleaning)', $c9Errs);
+
+// ══════════════════════════════════════════════════════════════
+// S-CRON-FIX-3 — QBO worker hardening (cron-audit HIGH-3)
+// error_code truncation + stale-processing reaper + top-level-catch rescue.
+// Each check is hermetic: seed → exercise → assert inside BEGIN/ROLLBACK.
+// Queue rows set picked_up_at via SQL NOW()/DATE_SUB so they match the worker's
+// UTC NOW() stamping (PHP date() would be tz-skewed — that's a test footgun,
+// not a worker bug: the reaper compares MySQL NOW() against picked_up_at).
+// ══════════════════════════════════════════════════════════════
+
+// Insert a synthetic queue row; picked_up_at is an inline SQL expression
+// (test constant, not user input). Returns the new id.
+$insQ = function (int $eid, string $status, int $rc, int $mr, string $puaSql, ?string $wid = null): int {
+    db_execute(
+        "INSERT INTO acc_qbo_sync_queue (entity_type,entity_id,operation,status,retry_count,max_retries,picked_up_at,worker_id)
+         VALUES ('customer',?,'create',?,?,?,{$puaSql},?)",
+        [$eid, $status, $rc, $mr, $wid]
+    );
+    return (int) db_row("SELECT LAST_INSERT_ID() AS id", [])['id'];
+};
+$qRow = fn(int $id) => db_row("SELECT status,retry_count,error_code,picked_up_at,worker_id FROM acc_qbo_sync_queue WHERE id=?", [$id]);
+
+// ── C10: error_code overflow guard ────────────────────────────
+$c10Errs = [];
+db_execute('BEGIN');
+try {
+    $long = str_repeat('X', 80);
+    if (strlen(qbo_safe_error_code($long)) !== 50) { $c10Errs[] = 'safeErrorCode(80) length=' . strlen(qbo_safe_error_code($long)) . ' (expect 50)'; }
+    if (qbo_safe_error_code(null) !== 'unknown')   { $c10Errs[] = "safeErrorCode(null) !== 'unknown'"; }
+    $id       = $insQ(990010, 'processing', 0, 5, 'NOW()');
+    $rawThrew = false;
+    try { db_execute("UPDATE acc_qbo_sync_queue SET error_code=? WHERE id=?", [$long, $id]); }
+    catch (\Throwable $e) { $rawThrew = true; }
+    if (!$rawThrew) { $c10Errs[] = 'raw 80-char error_code write did NOT throw (strict mode expected)'; }
+    db_execute("UPDATE acc_qbo_sync_queue SET error_code=? WHERE id=?", [qbo_safe_error_code($long), $id]);
+    $stored = (string) $qRow($id)['error_code'];
+    if (strlen($stored) !== 50) { $c10Errs[] = 'capped write stored length=' . strlen($stored) . ' (expect 50)'; }
+} catch (\Throwable $e) { $c10Errs[] = 'unexpected: ' . $e->getMessage(); }
+finally { db_execute('ROLLBACK'); }
+$check('C10 error_code overflow guard (safeErrorCode caps 50; raw >50 throws)', $c10Errs);
+
+// ── C11: reaper requeues stale under cap + skips fresh ─────────
+$c11Errs = [];
+db_execute('BEGIN');
+try {
+    $stale = $insQ(990011, 'processing', 1, 5, 'DATE_SUB(NOW(), INTERVAL 20 MINUTE)');
+    $fresh = $insQ(990012, 'processing', 0, 5, 'NOW()');
+    qbo_worker_reap_stale(10);
+    $rs = $qRow($stale);
+    if ($rs['status'] !== 'queued')            { $c11Errs[] = "stale status='{$rs['status']}' (expect queued)"; }
+    if ((int) $rs['retry_count'] !== 2)        { $c11Errs[] = "stale retry_count={$rs['retry_count']} (expect 2)"; }
+    if ($rs['error_code'] !== 'stale_reclaim') { $c11Errs[] = "stale error_code='{$rs['error_code']}' (expect stale_reclaim)"; }
+    if ($rs['picked_up_at'] !== null)          { $c11Errs[] = 'stale picked_up_at not cleared'; }
+    if ($rs['worker_id'] !== null)             { $c11Errs[] = 'stale worker_id not cleared'; }
+    if ($qRow($fresh)['status'] !== 'processing') { $c11Errs[] = 'fresh row wrongly reaped (expect still processing)'; }
+} catch (\Throwable $e) { $c11Errs[] = 'unexpected: ' . $e->getMessage(); }
+finally { db_execute('ROLLBACK'); }
+$check('C11 reaper requeues stale processing under cap + skips fresh', $c11Errs);
+
+// ── C12: reaper fails poison (retry exhausted) ────────────────
+$c12Errs = [];
+db_execute('BEGIN');
+try {
+    $poison = $insQ(990013, 'processing', 5, 5, 'DATE_SUB(NOW(), INTERVAL 20 MINUTE)');
+    qbo_worker_reap_stale(10);
+    $rp = $qRow($poison);
+    if ($rp['status'] !== 'failed')              { $c12Errs[] = "poison status='{$rp['status']}' (expect failed)"; }
+    if ($rp['error_code'] !== 'stale_exhausted') { $c12Errs[] = "poison error_code='{$rp['error_code']}' (expect stale_exhausted)"; }
+} catch (\Throwable $e) { $c12Errs[] = 'unexpected: ' . $e->getMessage(); }
+finally { db_execute('ROLLBACK'); }
+$check('C12 reaper fails poison orphan (retry_count >= max_retries)', $c12Errs);
+
+// ── C13: top-level-catch rescue (worker_id-scoped) ────────────
+$c13Errs = [];
+db_execute('BEGIN');
+try {
+    $mine  = $insQ(990014, 'processing', 0, 5, 'NOW()', 'unit-rescue-worker');
+    $other = $insQ(990015, 'processing', 0, 5, 'NOW()', 'some-other-worker');
+    $rescued = qbo_worker_rescue_processing('unit-rescue-worker', 'worker_fatal', str_repeat('Z', 700));
+    if ($rescued !== 1) { $c13Errs[] = "rescued count={$rescued} (expect 1)"; }
+    $rm = $qRow($mine);
+    if ($rm['status'] !== 'failed')           { $c13Errs[] = "my row status='{$rm['status']}' (expect failed — not orphaned)"; }
+    if ($rm['error_code'] !== 'worker_fatal') { $c13Errs[] = "my row error_code='{$rm['error_code']}' (expect worker_fatal)"; }
+    if ($qRow($other)['status'] !== 'processing') { $c13Errs[] = 'other-worker row was touched (expect untouched)'; }
+} catch (\Throwable $e) { $c13Errs[] = 'unexpected: ' . $e->getMessage(); }
+finally { db_execute('ROLLBACK'); }
+$check('C13 top-level-catch rescue marks own processing rows failed (worker_id-scoped)', $c13Errs);
 
 // ── Final cleanup verification ────────────────────────────────
 $leftoverQueue = (int) db_count("SELECT COUNT(*) FROM acc_qbo_sync_queue WHERE entity_id = 999999", []);
