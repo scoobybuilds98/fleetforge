@@ -183,6 +183,13 @@ unset($_autoload);
 require_once FF_ROOT . '/includes/db.php';
 require_once FF_ROOT . '/includes/functions.php';
 
+// Sentry error-monitoring — init() is idempotent (no-op if already
+// initialized), so centralising here gives every entry-point (cron +
+// web) automatic coverage. The 24+ crons that self-init are unaffected;
+// their second call hits the $initialized guard and returns immediately.
+// (D-SENTRY-INIT-CENTRAL, locked S-CRON-FIX-REMAINING 2026-06-03)
+\FleetForge\Observability\Sentry::init();
+
 // ============================================================
 // S-LEGAL-FOOTER-COMMERCIAL: load legal/company metadata into
 // $GLOBALS['_ff_legal']. legal_config() in functions.php reads

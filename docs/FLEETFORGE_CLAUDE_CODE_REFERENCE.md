@@ -448,9 +448,11 @@ db_insert('audit_log', [
 
 `audit_log.action` is an **ENUM** (not free-text). Valid values:
 
-`create | update | delete | restore | login | logout | export | status_change | view | bulk_action | payment_recorded | invoice_sent | invoice_voided | lease_closed | cron`
+`create | update | delete | restore | login | logout | export | status_change | view | bulk_action | payment_recorded | invoice_sent | invoice_voided | lease_closed | cron | manual_trigger`
 
 If you need a new action verb, ALTER the enum first (separate migration); never invent freeform values — the INSERT will throw "Data truncated for column 'action'". CLI runners (cron, migration runner) use `action='cron'` with the specific intent in `module` and `notes`.
+
+**`audit_log.action` and `audit_log_archive.action` MUST stay in lockstep.** Any future ENUM addition goes to BOTH tables in the same migration. Divergence causes `archive_old_data.php`'s `INSERT IGNORE` to silently coerce unknown values to `''` then DELETE the source row — silent audit-trail corruption. (D-AUDIT-ARCHIVE-ACTION-LOCKSTEP, locked S-CRON-FIX-REMAINING 2026-06-03)
 
 ---
 

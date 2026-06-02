@@ -45,7 +45,29 @@ if ((string) settings_get('ai.enabled', '1') !== '1') {
     exit(0);
 }
 
+// ── Advisory lock (D21) — prevents two parallel cron ticks from racing
+// (double-create alerts / double-spend API tokens). Lock key aligns with
+// the ff_cron_<filename> convention. Timeout 0: don't block, exit cleanly.
+// (D-ANOMALY-SCAN-LOCK, locked S-CRON-FIX-REMAINING 2026-06-03)
+$lock = db_row("SELECT GET_LOCK('ff_cron_ai_anomaly_scan', 0) AS ok", []);
+if (!$lock || (int) $lock['ok'] !== 1) {
+    echo "{$logPrefix} Another instance is already running — exiting.\n";
+    exit(0);
+}
+
 try {
+    db_insert('audit_log', [
+        'user_id'      => null,
+        'user_name'    => 'system',
+        'action'       => 'cron',
+        'module'       => 'intelligence',
+        'entity_type'  => 'cron',
+        'entity_id'    => null,
+        'entity_label' => 'ai_anomaly_scan',
+        'notes'        => 'Anomaly scan started',
+        'ip_address'   => '127.0.0.1',
+    ]);
+
     $alertCount = \FleetForge\AI\AnomalyDetector::runAll(null);
     $elapsed    = round((microtime(true) - $startTime) * 1000);
 
@@ -70,8 +92,23 @@ try {
         // Non-fatal — settings update failure shouldn't crash the cron
     }
 
+    $duration = round(microtime(true) - $startTime, 2);
+    db_insert('audit_log', [
+        'user_id'      => null,
+        'user_name'    => 'system',
+        'action'       => 'cron',
+        'module'       => 'intelligence',
+        'entity_type'  => 'cron',
+        'entity_id'    => null,
+        'entity_label' => 'ai_anomaly_scan',
+        'notes'        => "Anomaly scan completed: {$alertCount} new alert(s) in {$duration}s",
+        'ip_address'   => '127.0.0.1',
+    ]);
+
 } catch (\Throwable $e) {
     \FleetForge\Observability\Sentry::captureException($e);
     echo "{$logPrefix} FATAL: {$e->getMessage()}\n";
     exit(1);
+} finally {
+    db_execute("SELECT RELEASE_LOCK('ff_cron_ai_anomaly_scan')", []);
 }

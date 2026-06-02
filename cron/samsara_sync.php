@@ -106,6 +106,19 @@ try {
 
     ff_samsara_log('CRON_START', sprintf('Tick: %d linked units to sync', count($linked)));
 
+    // Resolve the offline-alert timezone once outside the unit loop.
+    // samsara_last_connected_at is stored as a local-tz string (date() uses
+    // APP_TIMEZONE); using DateTimeImmutable with an explicit DateTimeZone
+    // gives an accurate Unix timestamp for the >8h offline threshold, avoiding
+    // the prior ~7-8h skew from strtotime($lastConn . ' UTC').
+    // (D-SAMSARA-OFFLINE-TZ, locked S-CRON-FIX-REMAINING 2026-06-03)
+    $tzName = (string) settings_get('company.timezone', APP_TIMEZONE);
+    try {
+        $alertTz = new \DateTimeZone($tzName);
+    } catch (\Exception) {
+        $alertTz = new \DateTimeZone(APP_TIMEZONE);
+    }
+
     foreach ($linked as $unit) {
         $unitId     = (int) $unit['id'];
         $unitNum    = (string) $unit['unit_number'];
@@ -222,7 +235,10 @@ try {
                     }
                 }
                 if ($lastConn !== null) {
-                    $hoursSince = (int) floor((time() - strtotime($lastConn . ' UTC')) / 3600);
+                    $lastConnDt = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $lastConn, $alertTz);
+                    $hoursSince = $lastConnDt !== false
+                        ? (int) floor((time() - $lastConnDt->getTimestamp()) / 3600)
+                        : 0;
                     if ($hoursSince > 8) {
                         $pendingAlerts['samsara.not_connected'][] =
                             ['id' => $unitId, 'num' => $unitNum, 'hours' => $hoursSince];

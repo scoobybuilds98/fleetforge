@@ -33,7 +33,7 @@ require_once FF_ROOT . '/cron/notification_digest.php';
 
 $failures = [];
 $pass     = 0;
-$total    = 33;
+$total    = 37;
 
 // Snapshot mutable settings + user state we'll touch.
 $snapshot = [];
@@ -510,6 +510,67 @@ else { echo "FAIL C33 " . implode('; ', $err) . "\n"; $failures[] = 'C33'; }
         }
     }
 }
+
+// ── S-CRON-FIX-REMAINING ─────────────────────────────────────────────────────
+// C34: ai_anomaly_scan.php has an advisory lock (GET_LOCK + RELEASE_LOCK).
+// Without the lock, two overlapping cron ticks can double-create alerts and
+// double-spend API tokens (cron-audit MED-6). Lock key: ff_cron_ai_anomaly_scan.
+$err = [];
+$asrc = (string) file_get_contents(FF_ROOT . '/cron/ai_anomaly_scan.php');
+if (!str_contains($asrc, "GET_LOCK('ff_cron_ai_anomaly_scan'")) {
+    $err[] = "GET_LOCK('ff_cron_ai_anomaly_scan') not found";
+}
+if (!str_contains($asrc, "RELEASE_LOCK('ff_cron_ai_anomaly_scan')")) {
+    $err[] = "RELEASE_LOCK('ff_cron_ai_anomaly_scan') not found";
+}
+if (empty($err)) { echo "PASS C34 ai_anomaly_scan has advisory lock ff_cron_ai_anomaly_scan\n"; $pass++; }
+else { echo "FAIL C34 " . implode('; ', $err) . "\n"; $failures[] = 'C34'; }
+
+// C35: ai_anomaly_scan.php writes audit_log start + end rows (cron-audit MED-6).
+$err = [];
+if (substr_count($asrc, "db_insert('audit_log'") < 2) {
+    $err[] = "expected >=2 audit_log inserts (start + end), found "
+        . substr_count($asrc, "db_insert('audit_log'");
+}
+if (empty($err)) { echo "PASS C35 ai_anomaly_scan writes audit_log start + end rows\n"; $pass++; }
+else { echo "FAIL C35 " . implode('; ', $err) . "\n"; $failures[] = 'C35'; }
+
+// C36: audit_log_archive accepts action='manual_trigger' (HIGH-4 migration).
+// Without migration 202606030000, INSERT IGNORE coerces 'manual_trigger' to ''
+// then archive_old_data.php DELETEs the source — silent audit-trail corruption.
+$err = [];
+db_execute('BEGIN');
+try {
+    db_execute(
+        "INSERT INTO `audit_log_archive`
+            (user_name, action, module, entity_type, ip_address, notes, created_at)
+         VALUES ('system', 'manual_trigger', 'test', 'cron', '127.0.0.1', 'C36 smoke', NOW())"
+    );
+    $row = db_row(
+        "SELECT action FROM audit_log_archive
+          WHERE user_name='system' AND module='test' ORDER BY id DESC LIMIT 1"
+    );
+    if (($row['action'] ?? '') !== 'manual_trigger') {
+        $err[] = "stored '" . ($row['action'] ?? '?') . "' (expect manual_trigger — enum not migrated?)";
+    }
+} catch (\Throwable $e) {
+    $err[] = 'insert threw: ' . $e->getMessage();
+} finally {
+    db_execute('ROLLBACK');
+}
+if (empty($err)) { echo "PASS C36 audit_log_archive accepts action='manual_trigger'\n"; $pass++; }
+else { echo "FAIL C36 " . implode('; ', $err) . "\n"; $failures[] = 'C36'; }
+
+// C37: config/app.php calls Sentry::init() centrally (cron-audit MED-8).
+// Closes the gap where 7 crons (6 accounting_* + qbo_token_refresh) never
+// called Sentry::init() so captureException() was a silent no-op for them.
+$err = [];
+$appsrc = (string) file_get_contents(FF_ROOT . '/config/app.php');
+if (!str_contains($appsrc, 'Sentry::init()')) {
+    $err[] = 'Sentry::init() call not found in config/app.php (MED-8 fix missing)';
+}
+if (empty($err)) { echo "PASS C37 config/app.php calls Sentry::init() centrally\n"; $pass++; }
+else { echo "FAIL C37 " . implode('; ', $err) . "\n"; $failures[] = 'C37'; }
 
 if (!empty($failures)) {
     echo "\nintelligence_v2_smoke: {$pass}/{$total} PASS — failures: " . implode(', ', $failures) . "\n";
