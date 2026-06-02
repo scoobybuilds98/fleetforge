@@ -16,8 +16,8 @@
  */
 
 declare(strict_types=1);
-require '/Users/avi/Documents/fleetforge/config/app.php';
-require_once '/Users/avi/Documents/fleetforge/lib/Billing/InvoiceGenerator.php';
+require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../lib/Billing/InvoiceGenerator.php';
 
 $userId = 1;
 $today  = new DateTime();

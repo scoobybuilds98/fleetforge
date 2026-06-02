@@ -13,7 +13,7 @@
  */
 
 declare(strict_types=1);
-require '/Users/avi/Documents/fleetforge/config/app.php';
+require_once __DIR__ . '/../config/app.php';
 
 echo "=== Backdating invoices for demo realism ===\n\n";
 

@@ -25,7 +25,7 @@
  */
 
 declare(strict_types=1);
-require '/Users/avi/Documents/fleetforge/config/app.php';
+require_once __DIR__ . '/../config/app.php';
 
 $userId = 1;
 $now    = date('Y-m-d H:i:s');

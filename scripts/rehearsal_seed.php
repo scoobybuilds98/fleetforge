@@ -67,8 +67,8 @@
  */
 
 declare(strict_types=1);
-require '/Users/avi/Documents/fleetforge/config/app.php';
-require_once '/Users/avi/Documents/fleetforge/lib/Billing/InvoiceGenerator.php';
+require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../lib/Billing/InvoiceGenerator.php';
 
 // ── Include-guard (FF_REHEARSAL_SEED_INCLUDE) ─────────────────────────────────
 // When loaded as a library by scripts/stage_demo_to_production.php, only the

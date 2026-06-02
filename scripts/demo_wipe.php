@@ -21,7 +21,7 @@
  */
 
 declare(strict_types=1);
-require '/Users/avi/Documents/fleetforge/config/app.php';
+require_once __DIR__ . '/../config/app.php';
 
 // ── D-WIPE-PRODUCTION-GUARD ──────────────────────────────────────────────────
 // Include-guard: when loaded as a library (FF_DEMO_WIPE_INCLUDE defined by
