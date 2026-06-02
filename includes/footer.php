@@ -170,6 +170,12 @@
      ────────────────────────────────────────────────────────── -->
 <?php require_once FF_ROOT . '/includes/partials/email-compose-modal.php'; ?>
 
+<!-- ── Global Help Drawer (S-HELP-DRAWER-TUTORIAL-REWORK) ────
+     Right-side slide-in drawer for in-module help guides.
+     Opens via: window.dispatchEvent(new CustomEvent('ff-help-drawer', {detail:{slug:'...'}}))
+     ────────────────────────────────────────────────────────── -->
+<?php require_once FF_ROOT . '/includes/partials/help-drawer.php'; ?>
+
 <!-- ============================================================
      CDN SCRIPTS
      Order: ApexCharts → app.js → Alpine.js

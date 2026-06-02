@@ -2832,7 +2832,13 @@ Full Model B (precharge balance + drawdown) supersedes Model B Lite once S-MILEA
 
 ## 15. HELP GUIDE AUTHORING — per-module "How This Works" guides
 
-**S-HELP-SYSTEM-FOUNDATION (2026-06-03)** built the in-app help infrastructure. Every module eventually gets a guide. This section is the authoring contract for future per-module sessions.
+**S-HELP-SYSTEM-FOUNDATION (2026-06-03)** built the infrastructure. **S-HELP-DRAWER-TUTORIAL-REWORK (2026-06-03)** converted the primary access to a right-side drawer and established the tutorial-first content format. Every module eventually gets a guide. This section is the authoring contract for future per-module sessions.
+
+### Primary access: right-side drawer (D-HELP-DRAWER-ACCESS)
+
+`help_button('slug')` renders a button (not a link) in `.page-header-actions`. Clicking dispatches `window CustomEvent('ff-help-drawer', {detail:{slug}})`. The global help drawer (`includes/partials/help-drawer.php`, mounted in `footer.php`) catches this event, fetches the guide fragment from `/help/fragment?slug=...`, and slides in from the right — the user stays on the current page.
+
+**Secondary access**: `/help` center (card grid at `app/admin/help/index.php`) and `/help/{module}` full-page routes (`app/admin/help/_guide.php`) remain active for browsing and deep-linking. The "Open full guide ↗" link in the drawer footer points to the full-page route.
 
 ### Storage convention
 
@@ -2850,43 +2856,44 @@ description: One-line plain-language description of what this module does.
 ```
 The description is shown on the `/help` index card. Missing front matter → empty description on the index (non-fatal, but add it).
 
-### Canonical 9-section template
+### Tutorial-first template (D-HELP-TUTORIAL-FORMAT)
 
 Template file: `docs/help/_TEMPLATE.md`. Structure:
 
-1. `# {Module} — How This Works` (H1)
-2. `## Overview` (1–2 plain-language paragraphs; what it's for and who uses it)
-3. `## Common Tasks` (3–5 main things users do, each as a numbered step-by-step)
-4. `## Key Concepts` (core terms a user must understand, bolded term + definition)
-5. `## Understanding the Fields` (non-obvious field meanings; exclude trivial fields)
-6. `## How It Connects` (bullet list of relationships to other modules)
-7. `---` (horizontal rule — visual divider between user section and technical section)
-8. `## Under the Hood` (technical section; H3/H4 subheadings: Data Model, Business Rules & Invariants, Integrations, Edge Cases & Behaviours)
-9. `## Related Guides` (links to sibling `/help/{slug}` pages)
+1. `# {Module}` (H1 — short module name, no "How This Works" suffix)
+2. One-line subtitle: "Quick tutorials for working with {module} in FleetForge."
+3. `## {Task phrased as an action}` — e.g. "Adding a new customer"
+   - Numbered steps, action-first, short. **Bold the real UI element** (button label, field name) the user interacts with.
+   - 4–6 tasks covering the most common things a user actually does.
+4. (Horizontal rule `---` if needed before the details block)
+5. `<details><summary>Under the hood</summary>` — collapsed by default in the drawer and on the page. Tight bullets: accurate technical notes (integrations, key behaviors, data rules, edge cases). No prose walls.
+6. `## Related` — links to sibling guides.
+
+**The tutorials are the product; under-the-hood is a collapsed footnote.**
+
+### Accuracy discipline (D-HELP-GUIDE-FRESHNESS)
+
+Before writing tutorials: **read the actual module page** (the PHP file) to verify button labels, field names, and tab names. A tutorial that says "click Add Customer" when the button says "+ New Customer" is worse than no tutorial.
+
+**Under-the-hood bullets must trace to actual code read during the session.** If unsure, omit it.
+
+When a module's behavior changes, its guide must be updated in the same commit.
 
 ### Wiring the help button
 
 On the module's list page (or the most natural entry point), add to `.page-header-actions`:
 ```php
-<?= help_button('module-slug') ?>
+echo help_button('module-slug');
 ```
-`help_button()` is defined in `includes/functions.php`. It outputs a ghost button with a question-mark icon linking to `/help/{slug}`.
-
-### Accuracy discipline (D-HELP-GUIDE-FRESHNESS)
-
-**Every under-the-hood claim must trace to actual code read during the session.** If unsure, omit it — vague or invented behavior is worse than a gap.
-
-When a module's behavior changes (new field, status transition change, QBO wiring modification, etc.), the guide for that module must be updated in the same commit. This is the help-guide analog of the doc-freshness discipline.
+`help_button()` is defined in `includes/functions.php`. It renders a ghost button that dispatches the `ff-help-drawer` event. Works outside Alpine `x-data` scope (uses `window.dispatchEvent`).
 
 ### Graceful degradation
 
-The `/help` router falls back to `app/admin/help/_guide.php` for any slug without a `.md` file, showing a "Guide Coming Soon" page. This means:
-- Module buttons (`help_button('leases')`) can be wired on any module page even before the guide is authored.
-- The "coming soon" page is fully styled and branded — no hard 404.
+If no `.md` file exists for a slug: the drawer shows "Guide being written — check back soon". The `/help/{slug}` full-page route shows a "Guide Coming Soon" card. Module buttons can be wired on any page before their guide is authored.
 
 ### D131 gate impact
 
-Help guides are static markdown files and PHP view files — no schema changes, no new smokes required. A session that ONLY adds a new guide (no code changes) should still run the full D131 gate (parity + invariants + doc_freshness + settings) to confirm nothing regressed.
+Help guides are static markdown files and PHP view files — no schema changes, no new smokes required. A guide-only session still runs the full D131 gate (parity + invariants + doc_freshness) to confirm no regressions.
 
 ---
 

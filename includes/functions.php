@@ -755,29 +755,32 @@ function unit_status_badge_class(?string $status): string
 }
 
 // ============================================================
-// help_button() — S-HELP-SYSTEM-FOUNDATION
+// help_button() — S-HELP-DRAWER-TUTORIAL-REWORK
 //
 // Renders the standard "How this works" button for a module page
-// header. Outputs an anchor styled as a ghost/secondary button
-// that links to /help/{slug}.
+// header. Clicking dispatches a window CustomEvent ('ff-help-drawer')
+// which opens the global right-side help drawer (help-drawer.php).
+// The user stays on the current page — no navigation.
 //
 // Usage (inside a .page-header-actions block):
 //   echo help_button('customers');
 //
-// The button is intentionally small (btn-sm) so it sits beside
-// primary action buttons without competing for visual weight.
+// The button dispatches via window.dispatchEvent so it works outside
+// Alpine x-data scope (page headers are often outside the main
+// Alpine component). The drawer partial listens via @ff-help-drawer.window.
 // ============================================================
 function help_button(string $moduleSlug): string
 {
-    $slug = preg_replace('/[^a-z0-9_-]/', '', strtolower($moduleSlug));
-    $url  = base_url('help/' . $slug);
+    $slug  = preg_replace('/[^a-z0-9_-]/', '', strtolower($moduleSlug));
+    $label = e(ucwords(str_replace('-', ' ', $slug)));
 
-    return '<a href="' . e($url) . '" '
+    return '<button type="button" '
          . 'class="btn btn-ghost btn-sm help-btn" '
-         . 'title="How this works — ' . e(ucwords(str_replace('-', ' ', $slug))) . '">'
+         . 'title="How this works — ' . $label . '" '
+         . 'onclick="window.dispatchEvent(new CustomEvent(\'ff-help-drawer\',{detail:{slug:\'' . $slug . '\'}}))">'
          . '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="15" height="15" aria-hidden="true" style="margin-right:5px;vertical-align:-2px;">'
          . '<path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"/>'
          . '</svg>'
          . 'How this works'
-         . '</a>';
+         . '</button>';
 }
