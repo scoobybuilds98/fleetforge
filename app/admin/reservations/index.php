@@ -29,7 +29,8 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('reservations', 'view');
 
-$pageTitle = 'Reservations';
+$pageTitle      = 'Reservations';
+$helpModuleSlug = 'reservations';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -44,6 +45,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title h4">Reservations</h1>
     <div class="page-header-actions">
+        <?= help_button('reservations') ?>
         <?php if (can('reservations', 'create')): ?>
         <a href="<?= base_url('reservations/create') ?>" class="btn btn-primary btn-sm">
             + New Reservation

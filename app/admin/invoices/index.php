@@ -65,7 +65,8 @@ $ar90 = db_row(
 // non-QBO operators.
 $qboConnected = (string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected';
 
-$pageTitle = 'Invoices';
+$pageTitle      = 'Invoices';
+$helpModuleSlug = 'invoices';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -80,6 +81,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title h4">Invoices</h1>
     <div class="page-header-actions">
+        <?= help_button('invoices') ?>
         <?php if (can('invoices', 'create')): ?>
         <a href="<?= base_url('invoices/create') ?>" class="btn btn-primary btn-sm">
             + New Invoice

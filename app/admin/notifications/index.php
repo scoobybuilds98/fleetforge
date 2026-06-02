@@ -210,7 +210,8 @@ function notif_cat_url(string $cat): string {
     return '?' . http_build_query($q);
 }
 
-$pageTitle = 'Notifications';
+$pageTitle      = 'Notifications';
+$helpModuleSlug = 'notifications';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -222,6 +223,7 @@ require_once FF_ROOT . '/includes/header.php';
         </p>
     </div>
     <div class="page-header-actions">
+        <?= help_button('notifications') ?>
         <!-- ── View toggle ── -->
         <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">
             <a href="<?= e(notif_view_url('flat')) ?>"

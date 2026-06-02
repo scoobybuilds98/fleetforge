@@ -94,7 +94,8 @@ $statusBadge = match($payment['status']) {
     default    => 'badge-neutral',
 };
 
-$pageTitle = 'Payment ' . $payment['payment_number'];
+$pageTitle      = 'Payment ' . $payment['payment_number'];
+$helpModuleSlug = 'payments';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -135,6 +136,7 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
         </p>
     </div>
     <div class="page-header-actions">
+        <?= help_button('payments') ?>
         <span class="badge <?= $statusBadge ?>" style="font-size:1rem; padding:6px 14px;">
             <?= e(strtoupper($payment['status'])) ?>
         </span>

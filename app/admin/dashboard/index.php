@@ -26,7 +26,8 @@ require_once FF_ROOT . '/includes/auth.php';
 
 require_auth();
 
-$pageTitle = 'Dashboard';
+$pageTitle      = 'Dashboard';
+$helpModuleSlug = 'dashboard';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -36,6 +37,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title h4">Dashboard</h1>
     <div class="page-header-actions">
+        <?= help_button('dashboard') ?>
         <span class="text-secondary text-sm">
             <?= e(format_date(date('Y-m-d'))) ?>
         </span>

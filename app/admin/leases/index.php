@@ -27,7 +27,8 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('leases', 'view');
 
-$pageTitle = 'Leases';
+$pageTitle      = 'Leases';
+$helpModuleSlug = 'leases';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -42,6 +43,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title h4">Leases</h1>
     <div class="page-header-actions">
+        <?= help_button('leases') ?>
         <?php if (can('leases', 'create')): ?>
         <a href="<?= base_url('leases/create') ?>" class="btn btn-primary btn-sm">
             + New Lease

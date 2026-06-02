@@ -52,7 +52,8 @@ if (!$resId) {
 // Flash message from create redirect
 $flashMsg = clean_string($_GET['flash'] ?? null, 200);
 
-$pageTitle = 'Reservation #' . $resId;
+$pageTitle      = 'Reservation #' . $resId;
+$helpModuleSlug = 'reservations';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -114,6 +115,7 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- Quick action buttons (header level) -->
         <div class="page-header-actions" x-show="!loading" style="flex-wrap:wrap;gap:6px;">
+            <?= help_button('reservations') ?>
             <a href="<?= base_url('reservations') ?>" class="btn btn-ghost btn-sm">← Back</a>
             <a href="<?= base_url('reservations/create') ?>" class="btn btn-ghost btn-sm">+ New</a>
             <?php if (can('reservations', 'edit')): ?>

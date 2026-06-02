@@ -107,7 +107,8 @@ $isApplicable = in_array($cn['status'], ['active', 'partially_used'], true);
 $canEdit      = can('invoices', 'edit');
 $canCreate    = can('invoices', 'create');
 
-$pageTitle = 'Credit Note ' . e($cn['credit_note_number']);
+$pageTitle      = 'Credit Note ' . e($cn['credit_note_number']);
+$helpModuleSlug = 'credit-notes';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -127,6 +128,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <div class="page-header-actions" style="display:flex; gap:0.5rem; align-items:center;">
+        <?= help_button('credit-notes') ?>
         <?php
         $badgeClass = match($cn['status']) {
             'active'         => 'badge badge-success',

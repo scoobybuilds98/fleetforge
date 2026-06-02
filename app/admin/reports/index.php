@@ -22,8 +22,9 @@ require_once dirname(__DIR__, 3) . '/includes/auth.php';
 require_auth();
 require_permission('reports', 'view');
 
-$pageTitle   = 'Reports';
-$canExport   = can('reports', 'view');
+$pageTitle      = 'Reports';
+$helpModuleSlug = 'reports';
+$canExport      = can('reports', 'view');
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 
@@ -33,6 +34,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <p class="page-subtitle">Financial, fleet, customer, and compliance analytics</p>
     </div>
     <div class="page-header-actions no-print">
+        <?= help_button('reports') ?>
         <button class="btn btn-secondary btn-sm" onclick="window.print()">
             <svg width="14" height="14"><use href="#icon-printer"/></svg> Print
         </button>

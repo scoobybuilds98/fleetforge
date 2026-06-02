@@ -24,7 +24,8 @@ require_once dirname(__DIR__, 3) . '/includes/auth.php';
 require_auth();
 require_permission('analytics', 'view');
 
-$pageTitle = 'Analytics';
+$pageTitle      = 'Analytics';
+$helpModuleSlug = 'analytics';
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 
@@ -170,6 +171,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <p class="page-subtitle">Revenue forecasting, utilization patterns, and fleet intelligence</p>
     </div>
     <div class="page-header-actions">
+        <?= help_button('analytics') ?>
         <button class="btn btn-secondary btn-sm"
                 @click.prevent="refreshAll()"
                 :disabled="anyLoading"

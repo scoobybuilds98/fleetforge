@@ -73,7 +73,8 @@ function leaseBadgeClass(string $status): string
     };
 }
 
-$pageTitle = $lease['contract_number'];
+$pageTitle      = $lease['contract_number'];
+$helpModuleSlug = 'leases';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -105,6 +106,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <div class="page-header-actions">
+        <?= help_button('leases') ?>
         <?php if (can('customers', 'create')): /* EMAIL-1: send lease confirmation email */ ?>
         <button type="button"
                 class="btn btn-secondary btn-sm"

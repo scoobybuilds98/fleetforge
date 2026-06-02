@@ -81,7 +81,8 @@ $linkedAsset = db_row(
 );
 $linkedAssetId = $linkedAsset ? (int) $linkedAsset['id'] : 0;
 
-$pageTitle = 'Unit ' . e($unit['unit_number']);
+$pageTitle      = 'Unit ' . e($unit['unit_number']);
+$helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 
 // statusBadgeClass — page-local alias for the canonical shared helper at
@@ -178,6 +179,7 @@ function daysUntil(?string $date): ?int {
         </div>
     </div>
     <div class="page-header-actions">
+        <?= help_button('equipment') ?>
         <?php
         // SAMSARA-1: Direct link to the live trackable in the Samsara
         // dashboard. Only shown when mapped — built from the vehicle

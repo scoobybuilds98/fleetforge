@@ -156,6 +156,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
     <div class="page-header-actions">
+        <?= help_button('customers') ?>
         <?php if (can('customers', 'create')): /* EMAIL-1: send-email button */ ?>
         <button type="button"
                 class="btn btn-secondary btn-sm"

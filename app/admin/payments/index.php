@@ -56,7 +56,8 @@ $today = db_row(
     []
 );
 
-$pageTitle = 'Payments';
+$pageTitle      = 'Payments';
+$helpModuleSlug = 'payments';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -69,6 +70,7 @@ require_once FF_ROOT . '/includes/header.php';
         <p style="margin:4px 0 0; color:var(--text-secondary); font-size:0.9rem;">Record and track customer payments against invoices</p>
     </div>
     <div class="page-header-actions">
+        <?= help_button('payments') ?>
         <a href="<?= base_url('/payments/create') ?>" class="btn btn-primary btn-md">
             <?= heroicon('plus', 'icon-sm') ?>
             Record Payment

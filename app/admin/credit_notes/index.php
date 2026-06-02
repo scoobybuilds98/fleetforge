@@ -70,7 +70,8 @@ $expiredThisMonth = db_row(
     []
 );
 
-$pageTitle = 'Credit Notes';
+$pageTitle      = 'Credit Notes';
+$helpModuleSlug = 'credit-notes';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -80,14 +81,15 @@ require_once FF_ROOT . '/includes/header.php';
         <h1 class="page-header-title h4">Credit Notes</h1>
         <p style="margin:4px 0 0; color:var(--text-secondary); font-size:0.9rem;">Issue and track customer credit notes against outstanding invoices</p>
     </div>
-    <?php if (can('invoices', 'create')): ?>
     <div class="page-header-actions">
+        <?= help_button('credit-notes') ?>
+        <?php if (can('invoices', 'create')): ?>
         <a href="<?= base_url('credit_notes/create') ?>" class="btn btn-primary btn-md">
             <?= heroicon('plus', 'icon-sm') ?>
             New Credit Note
         </a>
+        <?php endif; ?>
     </div>
-    <?php endif; ?>
 </div>
 
 <!-- KPI tiles -->

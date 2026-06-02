@@ -346,7 +346,8 @@ $hasPrintableNotes = !empty($invoice['notes'])
                   || !empty($invoice['void_reason'])
                   || !empty($invoice['write_off_reason']);
 
-$pageTitle = 'Invoice ' . $invoice['invoice_number'];
+$pageTitle      = 'Invoice ' . $invoice['invoice_number'];
+$helpModuleSlug = 'invoices';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -1134,6 +1135,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- Action Buttons -->
     <div class="page-header-actions">
+        <?= help_button('invoices') ?>
         <!-- Print -->
         <button class="btn btn-secondary btn-sm no-print" onclick="window.print();" title="Print Invoice">
             <?= heroicon('document-text', 'icon-sm') ?>

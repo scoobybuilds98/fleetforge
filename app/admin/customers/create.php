@@ -40,6 +40,9 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
         <h1 class="page-header-title h4">New Customer</h1>
     </div>
+    <div class="page-header-actions">
+        <?= help_button('customers') ?>
+    </div>
 </div>
 
 <!-- ============================================================

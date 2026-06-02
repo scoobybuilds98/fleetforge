@@ -28,7 +28,8 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('equipment', 'view');
 
-$pageTitle = 'Equipment';
+$pageTitle      = 'Equipment';
+$helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -38,6 +39,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title h4">Equipment</h1>
     <div class="page-header-actions">
+        <?= help_button('equipment') ?>
         <a href="<?= base_url('equipment/templates') ?>" class="btn btn-secondary btn-sm">
             Templates
         </a>

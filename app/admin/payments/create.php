@@ -40,7 +40,8 @@ $outstandingInvoices = db_select(
 // If an invoice_id was passed in the query string (coming from invoice show page), pre-select it
 $preselectedInvoiceId = clean_int($_GET['invoice_id'] ?? null);
 
-$pageTitle = 'Record Payment';
+$pageTitle      = 'Record Payment';
+$helpModuleSlug = 'payments';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -62,6 +63,7 @@ require_once FF_ROOT . '/includes/header.php';
         <p style="margin:4px 0 0; color:var(--text-secondary); font-size:0.9rem;">Apply a customer payment against an outstanding invoice</p>
     </div>
     <div class="page-header-actions">
+        <?= help_button('payments') ?>
         <a href="<?= base_url('/payments') ?>" class="btn btn-secondary btn-md">Cancel</a>
     </div>
 </div>
