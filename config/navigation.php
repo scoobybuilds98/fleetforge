@@ -56,18 +56,18 @@ return [
         'badge'  => null,
     ],
     [
-        'label'  => 'Samsara Tracking',
-        'icon'   => 'map',
-        'url'    => '/tracking',
-        'module' => 'equipment',  // WHY: same permission as equipment — anyone who can view equipment can track
-        'badge'  => null,
-    ],
-    [
         'label'  => 'Invoices',
         'icon'   => 'banknotes',
         'url'    => '/invoices',
         'module' => 'invoices',
         'badge'  => 'overdue_invoices',
+    ],
+    [
+        'label'  => 'Samsara Tracking',
+        'icon'   => 'map',
+        'url'    => '/tracking',
+        'module' => 'equipment',  // WHY: same permission as equipment — anyone who can view equipment can track
+        'badge'  => null,
     ],
     [
         'label'  => 'Reservations',
