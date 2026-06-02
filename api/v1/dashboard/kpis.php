@@ -150,20 +150,66 @@ $pickupsRow     = db_row(
 );
 $todaysPickups = (int) $pickupsRow['cnt'];
 
+// ── KPI 7: Available Units ─────────────────────────────────────
+$availableUnits = (int) db_count(
+    "SELECT COUNT(*) FROM equipment_units
+      WHERE status = 'available' AND deleted_at IS NULL"
+);
+
+// ── KPI 8: Open Work Orders ────────────────────────────────────
+$openWorkOrders = (int) db_count(
+    "SELECT COUNT(*) FROM maintenance_work_orders
+      WHERE status IN ('open','in_progress') AND deleted_at IS NULL"
+);
+
+// ── KPI 9: Open Damage Claims ──────────────────────────────────
+$openDamageClaims = (int) db_count(
+    "SELECT COUNT(*) FROM damage_claims
+      WHERE status NOT IN ('closed','voided') AND deleted_at IS NULL"
+);
+
+// ── KPI 10: Sent (Unpaid) Invoices ────────────────────────────
+$sentInvoices = (int) db_count(
+    "SELECT COUNT(*) FROM invoices
+      WHERE status = 'sent' AND deleted_at IS NULL"
+);
+
+// ── KPI 11: This Month's Collections ─────────────────────────
+$collectionsRow = db_row(
+    "SELECT COALESCE(SUM(amount), 0) AS total
+       FROM payments
+      WHERE MONTH(payment_date) = MONTH(CURDATE())
+        AND YEAR(payment_date)  = YEAR(CURDATE())
+        AND deleted_at IS NULL"
+);
+$monthlyCollections = bcround((string) $collectionsRow['total'], 2);
+
+// ── KPI 12: Active Reservations ───────────────────────────────
+$activeReservations = (int) db_count(
+    "SELECT COUNT(*) FROM reservations
+      WHERE status IN ('pending','confirmed') AND deleted_at IS NULL"
+);
+
 // ── Build payload ──────────────────────────────────────────────
 $payload = [
-    'active_revenue'     => $activeRevenue,
-    'fleet_utilization'  => $utilizationPct,
-    'on_lease_count'     => $onLeaseCount,
-    'total_active_units' => $totalActiveUnits,
-    'overdue_invoices'   => [
+    'active_revenue'      => $activeRevenue,
+    'fleet_utilization'   => $utilizationPct,
+    'on_lease_count'      => $onLeaseCount,
+    'total_active_units'  => $totalActiveUnits,
+    'overdue_invoices'    => [
         'count' => $overdueCount,
         'total' => $overdueTotal,
     ],
-    'compliance_alerts'  => $complianceAlerts,
-    'open_leases'        => $openLeases,
-    'todays_pickups'     => $todaysPickups,
-    'generated_at'       => $now,
+    'compliance_alerts'   => $complianceAlerts,
+    'open_leases'         => $openLeases,
+    'todays_pickups'      => $todaysPickups,
+    'available_units'     => $availableUnits,
+    'open_work_orders'    => $openWorkOrders,
+    'open_damage_claims'  => $openDamageClaims,
+    'sent_invoices'       => $sentInvoices,
+    'monthly_collections' => $monthlyCollections,
+    'active_reservations' => $activeReservations,
+    'generated_at'        => $now,
 ];
 
 // ── Write cache ────────────────────────────────────────────────

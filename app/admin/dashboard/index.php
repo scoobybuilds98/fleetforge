@@ -147,6 +147,97 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
         </a>
 
+        <!-- Available Units -->
+        <a href="<?= base_url('equipment') ?>?status=available"
+           class="stat-card stat-card--link"
+           aria-label="Available Units — click to view available equipment">
+            <div class="stat-card__header">
+                <div class="stat-label">Available Units</div>
+                <div class="stat-card__icon stat-card__icon--success">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+                </div>
+            </div>
+            <div class="stat-value" x-text="kpisLoaded ? kpis.available_units : '—'">—</div>
+            <div class="stat-delta text-secondary" x-show="kpisLoaded">Ready to rent</div>
+            <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+        </a>
+
+        <!-- Open Work Orders -->
+        <a href="<?= base_url('maintenance_work_orders') ?>?status=open"
+           class="stat-card stat-card--link"
+           aria-label="Open Work Orders — click to view maintenance">
+            <div class="stat-card__header">
+                <div class="stat-label">Open Work Orders</div>
+                <div class="stat-card__icon stat-card__icon--warning">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z"/></svg>
+                </div>
+            </div>
+            <div class="stat-value" x-text="kpisLoaded ? kpis.open_work_orders : '—'">—</div>
+            <div class="stat-delta text-secondary" x-show="kpisLoaded">Open &amp; in progress</div>
+            <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+        </a>
+
+        <!-- Open Damage Claims -->
+        <a href="<?= base_url('damage_claims') ?>"
+           class="stat-card stat-card--link"
+           :class="kpisLoaded && kpis.open_damage_claims > 0 ? 'stat-card--danger' : ''"
+           aria-label="Open Damage Claims — click to view damage claims">
+            <div class="stat-card__header">
+                <div class="stat-label">Damage Claims</div>
+                <div class="stat-card__icon stat-card__icon--danger">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+                </div>
+            </div>
+            <div class="stat-value" x-text="kpisLoaded ? kpis.open_damage_claims : '—'">—</div>
+            <div class="stat-delta text-secondary" x-show="kpisLoaded">Open claims</div>
+            <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+        </a>
+
+        <!-- Sent Invoices (awaiting payment) -->
+        <a href="<?= base_url('invoices') ?>?status=sent"
+           class="stat-card stat-card--link"
+           aria-label="Sent Invoices — click to view sent invoices">
+            <div class="stat-card__header">
+                <div class="stat-label">Sent Invoices</div>
+                <div class="stat-card__icon stat-card__icon--purple">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 9v.906a2.25 2.25 0 0 1-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 0 0 1.183 1.981l6.478 3.488m8.839 2.51-4.66-2.51m0 0-1.023-.55a2.25 2.25 0 0 0-2.134 0l-1.022.55m0 0-4.661 2.51m16.5 1.615a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V8.844a2.25 2.25 0 0 1 1.183-1.981l7.5-4.039a2.25 2.25 0 0 1 2.134 0l7.5 4.039a2.25 2.25 0 0 1 1.183 1.98V19.5Z"/></svg>
+                </div>
+            </div>
+            <div class="stat-value" x-text="kpisLoaded ? kpis.sent_invoices : '—'">—</div>
+            <div class="stat-delta text-secondary" x-show="kpisLoaded">Awaiting payment</div>
+            <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+        </a>
+
+        <!-- This Month's Collections -->
+        <a href="<?= base_url('payments') ?>"
+           class="stat-card stat-card--link"
+           aria-label="Monthly Collections — click to view payments">
+            <div class="stat-card__header">
+                <div class="stat-label">Monthly Collections</div>
+                <div class="stat-card__icon stat-card__icon--success">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z"/></svg>
+                </div>
+            </div>
+            <div class="stat-value" x-text="kpisLoaded ? '$' + formatMoney(kpis.monthly_collections) : '—'">—</div>
+            <div class="stat-delta text-secondary" x-show="kpisLoaded">Collected this month</div>
+            <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+        </a>
+
+        <!-- Active Reservations -->
+        <a href="<?= base_url('reservations') ?>"
+           class="stat-card stat-card--link"
+           aria-label="Active Reservations — click to view reservations">
+            <div class="stat-card__header">
+                <div class="stat-label">Active Reservations</div>
+                <div class="stat-card__icon stat-card__icon--info">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/></svg>
+                </div>
+            </div>
+            <div class="stat-value" x-text="kpisLoaded ? kpis.active_reservations : '—'">—</div>
+            <div class="stat-delta text-secondary" x-show="kpisLoaded">Pending &amp; confirmed</div>
+            <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+        </a>
+
     </div><!-- /stat-grid -->
 
 
