@@ -259,43 +259,44 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'notes' }"
                 @click="activeTab = 'notes'; loadNotes()" :aria-selected="activeTab === 'notes'" role="tab">
             Notes
-            <span class="tab-badge" x-show="noteCount > 0" x-text="noteCount"></span>
+            <span class="tab-badge" x-show="tabCounts.notes > 0" x-text="tabCounts.notes"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'leases' }"
                 @click="activeTab = 'leases'" :aria-selected="activeTab === 'leases'" role="tab">
             Leases
-            <span class="tab-badge"><?= e($customer['lease_count']) ?></span>
+            <span class="tab-badge" x-show="tabCounts.leases > 0" x-text="tabCounts.leases"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'invoices' }"
                 @click="activeTab = 'invoices'" :aria-selected="activeTab === 'invoices'" role="tab">
             Invoices
+            <span class="tab-badge" x-show="tabCounts.invoices > 0" x-text="tabCounts.invoices"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'damage_claims' }"
                 @click="activeTab = 'damage_claims'" :aria-selected="activeTab === 'damage_claims'" role="tab">
             Damage Claims
+            <span class="tab-badge" x-show="tabCounts.damage_claims > 0" x-text="tabCounts.damage_claims"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'mileage_logs' }"
                 @click="activeTab = 'mileage_logs'" :aria-selected="activeTab === 'mileage_logs'" role="tab">
             Mileage Logs
+            <span class="tab-badge" x-show="tabCounts.mileage_logs > 0" x-text="tabCounts.mileage_logs"></span>
         </button>
         <?php if (can('rates', 'view')): ?>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'rates' }"
                 @click="activeTab = 'rates'" :aria-selected="activeTab === 'rates'" role="tab">
             Rates
-            <?php if ($rateOverridesCount > 0): ?>
-            <span class="tab-badge"><?= e($rateOverridesCount) ?></span>
-            <?php endif; ?>
+            <span class="tab-badge" x-show="tabCounts.rates > 0" x-text="tabCounts.rates"></span>
         </button>
         <?php endif; ?>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'documents' }"
                 @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
             Documents
-            <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
+            <span class="tab-badge" x-show="tabCounts.documents > 0" x-text="tabCounts.documents"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'emails' }"
                 @click="activeTab = 'emails'; loadEmails()" :aria-selected="activeTab === 'emails'" role="tab">
             Email History
-            <span class="tab-badge" x-show="emails.length > 0" x-text="emails.length"></span>
+            <span class="tab-badge" x-show="tabCounts.emails > 0" x-text="tabCounts.emails"></span>
         </button>
     </div>
 
@@ -1446,6 +1447,20 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 function FF_CustomerProfile() {
     return {
         activeTab:           'overview',
+
+        // Tab badge counts — loaded in init() from tab-counts API so all
+        // badges are accurate on page load without clicking each tab.
+        tabCounts: {
+            notes:         0,
+            leases:        <?= (int) $customer['lease_count'] ?>, // server-preloaded
+            invoices:      0,
+            damage_claims: 0,
+            mileage_logs:  0,
+            rates:         <?= (int) $rateOverridesCount ?>,      // server-preloaded
+            documents:     0,
+            emails:        0,
+        },
+
         notes:               [],
         noteCount:           0,
         notesLoaded:         false,
@@ -1537,8 +1552,7 @@ function FF_CustomerProfile() {
         },
 
         init() {
-            this.loadNoteCount();
-            this.loadEmailCount();
+            this.loadTabCounts();
             this.$watch('activeTab', (tab) => {
                 if (tab === 'leases'        && !this.leasesLoaded)         this.loadLeases();
                 if (tab === 'invoices'      && !this.invoicesLoaded)       this.loadInvoices();
@@ -1559,17 +1573,29 @@ function FF_CustomerProfile() {
         },
 
         // ── Email History (EMAIL-1) ───────────────────────────────
-        async loadEmailCount() {
+        // loadTabCounts — fetches all tab badge counts in one call on init.
+        // Leases and Rates are server-preloaded in tabCounts defaults above.
+        // After lazy-loading a tab, that tab's live array length takes over
+        // automatically because tabCounts is updated in the loaders below.
+        async loadTabCounts() {
             try {
-                const r = await FF_Api.get(FF_Api.url('/api/v1/email/logs/?customer_id=<?= (int)$customerId ?>&per_page=1'));
-                if (r.success && r.data && r.data.pagination) {
-                    // Use pagination total as the badge count
-                    if (r.data.pagination.total) {
-                        // Use a sentinel array with length so the badge shows
-                        this.emails = new Array(r.data.pagination.total).fill(null);
-                    }
+                const res = await fetch('<?= base_url('api/v1/customers/tab-counts') ?>?id=<?= $customerId ?>', {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                const json = await res.json();
+                if (json.success) {
+                    const d = json.data;
+                    this.tabCounts.notes         = d.notes         ?? 0;
+                    this.tabCounts.invoices      = d.invoices      ?? 0;
+                    this.tabCounts.damage_claims = d.damage_claims ?? 0;
+                    this.tabCounts.mileage_logs  = d.mileage_logs  ?? 0;
+                    this.tabCounts.documents     = d.documents     ?? 0;
+                    this.tabCounts.emails        = d.emails        ?? 0;
+                    // Keep legacy noteCount in sync (used internally)
+                    this.noteCount = this.tabCounts.notes;
                 }
-            } catch (e) { /* silent */ }
+            } catch (e) { /* silent — badges fall back to server-preloaded defaults */ }
         },
         async loadEmails() {
             if (this.emailsLoading) return;
@@ -1577,8 +1603,9 @@ function FF_CustomerProfile() {
             try {
                 const r = await FF_Api.get(FF_Api.url('/api/v1/email/logs/?customer_id=<?= (int)$customerId ?>&per_page=50'));
                 if (r.success) {
-                    this.emails       = r.data.items;
-                    this.emailsLoaded = true;
+                    this.emails            = r.data.items;
+                    this.tabCounts.emails  = r.data.pagination?.total ?? this.emails.length;
+                    this.emailsLoaded      = true;
                 }
             } catch (e) { console.error(e); }
             finally { this.emailsLoading = false; }
@@ -1600,13 +1627,6 @@ function FF_CustomerProfile() {
         },
 
         // ── Notes ──────────────────────────────────────────────────
-        async loadNoteCount() {
-            try {
-                const res  = await fetch('<?= base_url('api/v1/customers/notes') ?>?customer_id=<?= $customerId ?>');
-                const json = await res.json();
-                if (json.success) this.noteCount = json.data.notes.length;
-            } catch (e) { /* silent */ }
-        },
 
         async loadNotes() {
             if (this.notesLoaded) return;
@@ -1615,9 +1635,10 @@ function FF_CustomerProfile() {
                 const res  = await fetch('<?= base_url('api/v1/customers/notes') ?>?customer_id=<?= $customerId ?>');
                 const json = await res.json();
                 if (json.success) {
-                    this.notes       = json.data.notes;
-                    this.noteCount   = this.notes.length;
-                    this.notesLoaded = true;
+                    this.notes                = json.data.notes;
+                    this.noteCount            = this.notes.length;
+                    this.tabCounts.notes      = this.notes.length;
+                    this.notesLoaded          = true;
                 }
             } catch (e) { /* silent */ }
             finally { this.notesLoading = false; }
@@ -1692,10 +1713,11 @@ function FF_CustomerProfile() {
                 if (this.invoicesFilters.status) p.set('status', this.invoicesFilters.status);
                 const json = await (await fetch('<?= base_url('api/v1/invoices') ?>?' + p)).json();
                 if (json.success) {
-                    const items       = json.data.items || [];
-                    this.invoices     = append ? [...this.invoices, ...items] : items;
-                    this.invoicesTotal = json.data.pagination?.total ?? items.length;
-                    this.invoicesLoaded = true;
+                    const items              = json.data.items || [];
+                    this.invoices            = append ? [...this.invoices, ...items] : items;
+                    this.invoicesTotal       = json.data.pagination?.total ?? items.length;
+                    this.tabCounts.invoices  = this.invoicesTotal;
+                    this.invoicesLoaded      = true;
                 }
             } catch (e) { /* silent */ }
             this.invoicesLoading = false;
@@ -1712,10 +1734,11 @@ function FF_CustomerProfile() {
                 if (this.damageClaimsFilters.status)   p.set('status',   this.damageClaimsFilters.status);
                 const json = await (await fetch('<?= base_url('api/v1/damage_claims') ?>?' + p)).json();
                 if (json.success) {
-                    const items          = json.data?.items ?? [];
-                    this.damageClaims    = append ? [...this.damageClaims, ...items] : items;
-                    this.damageClaimsTotal  = json.data.pagination?.total ?? items.length;
-                    this.damageClaimsLoaded = true;
+                    const items                  = json.data?.items ?? [];
+                    this.damageClaims            = append ? [...this.damageClaims, ...items] : items;
+                    this.damageClaimsTotal       = json.data.pagination?.total ?? items.length;
+                    this.tabCounts.damage_claims = this.damageClaimsTotal;
+                    this.damageClaimsLoaded      = true;
                 }
             } catch (e) { /* silent */ }
             this.damageClaimsLoading = false;
@@ -1731,10 +1754,11 @@ function FF_CustomerProfile() {
                 if (this.mileageLogsFilters.log_type) p.set('log_type', this.mileageLogsFilters.log_type);
                 const json = await (await fetch('<?= base_url('api/v1/mileage_logs/index') ?>?' + p)).json();
                 if (json.success) {
-                    const items          = json.data?.items ?? [];
-                    this.mileageLogs     = append ? [...this.mileageLogs, ...items] : items;
-                    this.mileageLogsTotal  = json.data.pagination?.total ?? items.length;
-                    this.mileageLogsLoaded = true;
+                    const items                  = json.data?.items ?? [];
+                    this.mileageLogs             = append ? [...this.mileageLogs, ...items] : items;
+                    this.mileageLogsTotal        = json.data.pagination?.total ?? items.length;
+                    this.tabCounts.mileage_logs  = this.mileageLogsTotal;
+                    this.mileageLogsLoaded       = true;
                 }
             } catch (e) { /* silent */ }
             this.mileageLogsLoading = false;
@@ -1861,8 +1885,9 @@ function FF_CustomerProfile() {
                 const url  = '<?= base_url('api/v1/documents') ?>?entity_type=customer&entity_id=<?= $customerId ?>';
                 const json = await (await fetch(url)).json();
                 if (json.success) {
-                    this.documents = json.data.items || [];
-                    this.docsLoaded = true;
+                    this.documents           = json.data.items || [];
+                    this.tabCounts.documents = this.documents.length;
+                    this.docsLoaded          = true;
                 }
             } catch (e) { /* silent */ }
             this.docsLoading = false;
