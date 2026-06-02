@@ -47,6 +47,7 @@ $kpis['top_vendor_name']  = $topSpendRow['name'] ?? null;
 $kpis['top_vendor_spent'] = $topSpendRow['total_spent'] ?? '0.00';
 
 $pageTitle = 'Vendors';
+$helpModuleSlug = 'vendors';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

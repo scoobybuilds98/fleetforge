@@ -45,7 +45,8 @@ $leases = db_select(
     []
 );
 
-$pageTitle = 'Record Mileage';
+$pageTitle      = 'Record Mileage';
+$helpModuleSlug = 'mileage-logs';
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 
@@ -56,6 +57,9 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
             <a href="<?= base_url('mileage_logs') ?>" class="link">Mileage Logs</a>
             &rsaquo; Record Mileage
         </nav>
+    </div>
+    <div class="page-header-actions">
+        <?= help_button('mileage-logs') ?>
     </div>
 </div>
 

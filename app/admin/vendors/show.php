@@ -126,6 +126,7 @@ $typeBadges = [
 ];
 
 $pageTitle = e($vendor['name']);
+$helpModuleSlug = 'vendors';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

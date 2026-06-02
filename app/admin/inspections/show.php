@@ -84,6 +84,7 @@ $canEdit     = can('inspections', 'edit') && !($insp['status'] === 'signed');
 $canDelete   = can('inspections', 'delete');
 
 $pageTitle = $insp['inspection_number'] ?? ('Inspection #' . $id);
+$helpModuleSlug = 'inspections';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

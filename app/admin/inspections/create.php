@@ -60,6 +60,7 @@ $validPreTypes = ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance']
 if (!in_array($preType, $validPreTypes, true)) $preType = 'pre_lease';
 
 $pageTitle = 'New Inspection';
+$helpModuleSlug = 'inspections';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

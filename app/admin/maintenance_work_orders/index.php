@@ -36,6 +36,7 @@ $kpiCompleted  = db_count(
 );
 
 $pageTitle = 'Work Orders';
+$helpModuleSlug = 'maintenance';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

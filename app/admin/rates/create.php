@@ -38,6 +38,7 @@ $templates = db_select(
 );
 
 $pageTitle = 'New Rate Card';
+$helpModuleSlug = 'rates';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

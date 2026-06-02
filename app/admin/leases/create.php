@@ -70,6 +70,7 @@ $availableUnits = db_select(
 );
 
 $pageTitle = 'New Lease';
+$helpModuleSlug = 'leases';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

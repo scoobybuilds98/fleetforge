@@ -77,6 +77,7 @@ $formSeed = [
 ];
 
 $pageTitle = 'Edit Vendor — ' . $vendor['name'];
+$helpModuleSlug = 'vendors';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

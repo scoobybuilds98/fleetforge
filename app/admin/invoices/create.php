@@ -57,6 +57,7 @@ $leases = db_select(
 );
 
 $pageTitle = 'Create Invoice';
+$helpModuleSlug = 'invoices';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

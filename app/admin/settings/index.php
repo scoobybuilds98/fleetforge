@@ -480,6 +480,7 @@ $portalUserCount = db_count("SELECT COUNT(*) FROM portal_users");
 $recentAuditCount = db_count("SELECT COUNT(*) FROM audit_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
 
 $pageTitle = 'Settings';
+$helpModuleSlug = 'settings';
 require_once FF_ROOT . '/includes/header.php';
 
 if (empty($_SESSION['csrf_token'])) {
@@ -505,6 +506,7 @@ if ($defaultTab === 'design' && !$isSuperAdmin) $defaultTab = 'general';
         <p style="margin:4px 0 0;font-size:0.8125rem;color:var(--text-muted);">System configuration, user management, and administration</p>
     </div>
     <div class="page-header-actions">
+        <?= help_button('settings') ?>
         <?php /* EMAIL-1: link to standalone email templates manager */ ?>
         <a href="<?= base_url('settings/email_templates') ?>" class="btn btn-secondary btn-sm">
             <?= heroicon('envelope', 'btn-icon') ?>

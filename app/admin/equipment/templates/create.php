@@ -22,6 +22,7 @@ require_auth();
 require_permission('equipment', 'create');
 
 $pageTitle = 'New Equipment Template';
+$helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

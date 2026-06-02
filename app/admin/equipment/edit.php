@@ -48,6 +48,7 @@ if (!$unit) {
 $yards = db_select("SELECT name FROM yards WHERE is_active = 1 ORDER BY name", []);
 
 $pageTitle = 'Edit Unit ' . $unit['unit_number'];
+$helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

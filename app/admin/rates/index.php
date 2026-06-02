@@ -49,6 +49,7 @@ $totalOverrides = db_count(
 );
 
 $pageTitle = 'Rates';
+$helpModuleSlug = 'rates';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

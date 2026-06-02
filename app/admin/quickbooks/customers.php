@@ -35,6 +35,7 @@ require_auth();
 require_permission('quickbooks', 'view');
 
 $pageTitle = 'QuickBooks Customers';
+$helpModuleSlug = 'quickbooks';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

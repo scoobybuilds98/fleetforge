@@ -52,6 +52,7 @@ if (!$lease) {
 $isActive = $lease['status'] === 'active';
 
 $pageTitle = 'Edit ' . $lease['contract_number'];
+$helpModuleSlug = 'leases';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

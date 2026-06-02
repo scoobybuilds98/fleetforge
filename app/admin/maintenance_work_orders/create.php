@@ -52,6 +52,7 @@ $assignableUsers = db_select(
 );
 
 $pageTitle = 'New Work Order';
+$helpModuleSlug = 'maintenance';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

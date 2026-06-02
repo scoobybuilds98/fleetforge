@@ -76,7 +76,8 @@ $typeBadgeMap = [
     'service'     => 'badge-warning',
 ];
 
-$pageTitle = 'Mileage Log #' . $id;
+$pageTitle      = 'Mileage Log #' . $id;
+$helpModuleSlug = 'mileage-logs';
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 
@@ -88,7 +89,8 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
             &rsaquo; #<?= e($id) ?>
         </nav>
     </div>
-    <div style="display:flex;gap:.5rem;">
+    <div class="page-header-actions">
+        <?= help_button('mileage-logs') ?>
         <?php if ($isEditable): ?>
         <button class="btn btn-secondary" onclick="document.getElementById('edit-section').style.display='block';this.style.display='none';">
             Edit

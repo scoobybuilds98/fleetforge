@@ -31,6 +31,7 @@ require_auth();
 require_permission('ai', 'view');
 
 $pageTitle = 'AI Assistant';
+$helpModuleSlug = 'ai';
 require_once FF_ROOT . '/includes/header.php';
 
 // WHY: Check if AI is configured so we can show setup prompt if needed

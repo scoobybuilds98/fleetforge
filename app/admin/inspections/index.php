@@ -34,6 +34,7 @@ $kpiSigned = db_count(
 );
 
 $pageTitle = 'Inspections';
+$helpModuleSlug = 'inspections';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

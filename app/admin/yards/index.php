@@ -43,6 +43,7 @@ $activeYards   = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 1");
 $inactiveYards = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 0");
 
 $pageTitle = 'Yards';
+$helpModuleSlug = 'yards';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

@@ -29,6 +29,7 @@ require_auth();
 require_permission('maintenance', 'create');
 
 $pageTitle = 'New Vendor';
+$helpModuleSlug = 'vendors';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

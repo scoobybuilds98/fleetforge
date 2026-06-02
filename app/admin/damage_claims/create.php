@@ -64,6 +64,7 @@ $vendors = db_select(
 );
 
 $pageTitle = 'New Damage Claim';
+$helpModuleSlug = 'damage-claims';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

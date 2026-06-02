@@ -42,7 +42,8 @@ $filterUnits = db_select(
     []
 );
 
-$pageTitle = 'Mileage Logs';
+$pageTitle      = 'Mileage Logs';
+$helpModuleSlug = 'mileage-logs';
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 
@@ -51,13 +52,14 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <h1 class="page-header-title">Mileage Logs</h1>
         <p style="color:var(--text-secondary);margin:0;">Odometer history across all equipment units</p>
     </div>
-    <?php if (can('maintenance', 'create')): ?>
-    <div>
+    <div class="page-header-actions">
+        <?= help_button('mileage-logs') ?>
+        <?php if (can('maintenance', 'create')): ?>
         <a href="<?= base_url('mileage_logs/create') ?>" class="btn btn-primary">
             + Record Mileage
         </a>
+        <?php endif; ?>
     </div>
-    <?php endif; ?>
 </div>
 
 <!-- TILES-1: KPI tiles now dispatch `ff-mileage-filter` events that the

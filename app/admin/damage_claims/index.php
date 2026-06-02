@@ -57,6 +57,7 @@ $preCustomerId = clean_int($_GET['customer_id'] ?? null);
 $preUnitId     = clean_int($_GET['equipment_unit_id'] ?? null);
 
 $pageTitle = 'Damage Claims';
+$helpModuleSlug = 'damage-claims';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

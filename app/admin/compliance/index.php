@@ -185,6 +185,7 @@ $yards = db_select(
 );
 
 $pageTitle = 'Compliance';
+$helpModuleSlug = 'compliance';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

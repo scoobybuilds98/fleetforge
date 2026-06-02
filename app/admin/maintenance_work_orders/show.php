@@ -88,6 +88,7 @@ $nextStatuses = $transitions[$wo['status']] ?? [];
 $isEditable = !in_array($wo['status'], ['completed', 'cancelled']);
 
 $pageTitle = $wo['work_order_number'];
+$helpModuleSlug = 'maintenance';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

@@ -38,6 +38,7 @@ require_auth();
 require_permission('reservations', 'create');
 
 $pageTitle = 'New Reservation';
+$helpModuleSlug = 'reservations';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

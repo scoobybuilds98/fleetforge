@@ -25,6 +25,7 @@ require_auth();
 require_permission('invoices', 'create');
 
 $pageTitle = 'New Credit Note';
+$helpModuleSlug = 'credit-notes';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

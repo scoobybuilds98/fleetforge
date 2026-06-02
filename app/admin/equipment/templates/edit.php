@@ -33,6 +33,7 @@ if (!$templateId) {
 }
 
 $pageTitle = 'Edit Equipment Template';
+$helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -53,6 +54,7 @@ require_once FF_ROOT . '/includes/header.php';
         <p class="text-secondary text-sm" x-show="!loading" x-text="form.name"></p>
     </div>
     <div class="page-header-actions">
+        <?= help_button('equipment') ?>
         <a href="<?= base_url('equipment/templates') ?>" class="btn btn-ghost btn-sm">← Back</a>
     </div>
 </div>
