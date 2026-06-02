@@ -29,7 +29,7 @@ declare(strict_types=1);
 <div id="ff-help-drawer"
      x-data="FF_HelpDrawer()"
      x-init="init()"
-     @ff-help-drawer.window="open($event.detail.slug)"
+     @ff-help-drawer.window="toggle($event.detail.slug)"
      @keydown.escape.window="if (isOpen) close()"
      x-cloak>
 
@@ -150,6 +150,18 @@ function FF_HelpDrawer() {
                     }
                 }
             } catch (_) { /* sessionStorage unavailable — continue without restore */ }
+        },
+
+        // Toggle: clicking "How this works" opens the panel, or closes it if
+        // it's already open for the same module. Switches guides if a different
+        // module's button is clicked while the panel is open.
+        toggle(slug) {
+            if (!slug) return;
+            if (this.isOpen && this.currentSlug === slug) {
+                this.close();
+            } else {
+                this.open(slug);
+            }
         },
 
         async open(slug) {
