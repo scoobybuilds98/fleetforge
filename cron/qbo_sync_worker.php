@@ -617,7 +617,7 @@ function dispatchFailureNotification(array $row, \Throwable $e, array $userIds):
             "Reason: " . substr($e->getMessage(), 0, 300) . " Click to view the sync log entry.",
             $row['entity_type'],
             (int) $row['entity_id'],
-            '/quickbooks/sync_log?queue_id=' . (int) $row['id'],
+            base_url('quickbooks/sync_log') . '?queue_id=' . (int) $row['id'],
             $userIds,
             'critical'
         );
