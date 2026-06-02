@@ -10445,10 +10445,9 @@ body:has(.chat-page-content) #ff-chat-widget {
     font-size: 1rem;
     font-weight: 700;
     margin: 2rem 0 0.75rem 0;
-    padding: 7px 12px;
+    padding: 7px 0 7px 12px;
     border-left: 3px solid var(--color-primary);
-    background: var(--color-primary-light, rgba(249,115,22,0.06));
-    border-radius: 0 6px 6px 0;
+    background: none;              /* removed — primary-light varies by brand and wrecked contrast */
     color: var(--text-primary);
 }
 .help-content h2:first-of-type { margin-top: 0.5rem; }
@@ -10535,11 +10534,10 @@ body:has(.chat-page-content) #ff-chat-widget {
 /* Bold / UI labels — subtle highlight pill */
 .help-content strong {
     color: var(--text-primary);
-    font-weight: 600;
-    background: var(--color-primary-light, rgba(249,115,22,0.09));
-    border-radius: 3px;
-    padding: 0 4px;
-    margin: 0 1px;
+    font-weight: 700;
+    background: none;              /* removed — primary-light pill was unreadable across brand colors */
+    padding: 0;
+    margin: 0;
 }
 .help-content em { font-style: italic; }
 
