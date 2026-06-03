@@ -4662,6 +4662,21 @@ html.is-mac .non-mac-only { display: none; }
     color: #fff;
 }
 
+/* Locked tab — visible but non-interactive, matches sidebar locked pattern */
+.tab-btn--locked {
+    cursor: not-allowed !important;
+    pointer-events: none;
+    opacity: 0.42;
+    user-select: none;
+}
+.tab-btn--locked .tab-lock-icon {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 5px;
+    opacity: 0.8;
+    vertical-align: -2px;
+}
+
 /* ── Breadcrumb ──────────────────────────────────────────── */
 .breadcrumb {
     display: flex;

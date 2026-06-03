@@ -555,56 +555,73 @@ if (!can($tabPermMap[$defaultTab], 'view')) {
 </div>
 <?php endif; ?>
 
+<?php
+// Lock icon SVG — reused for each locked tab
+$_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
+    . '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" xmlns="http://www.w3.org/2000/svg">'
+    . '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>'
+    . '<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
+    . '</svg></span>';
+?>
 <!-- ── Tab Navigation ─────────────────────────────────────────────────────── -->
 <div class="tab-bar" role="tablist" style="margin-bottom:24px;">
-    <?php if (can('settings_general', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'general' }"
-            @click="activeTab = 'general'" role="tab">
-        General
+
+    <?php $_can = can('settings_general', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'general\' }" @click="activeTab = \'general\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to General settings"' ?>>
+        General<?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
-    <?php if (can('settings_design', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'design' }"
-            @click="activeTab = 'design'" role="tab">
-        Design
+
+    <?php $_can = can('settings_design', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'design\' }" @click="activeTab = \'design\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Design settings"' ?>>
+        Design<?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
-    <?php if (can('settings_users', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'users' }"
-            @click="activeTab = 'users'" role="tab">
-        Users <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$userCount) ?></span>
+
+    <?php $_can = can('settings_users', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'users\' }" @click="activeTab = \'users\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Users settings"' ?>>
+        Users<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$userCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
-    <?php if (can('settings_portal', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'portal_users' }"
-            @click="activeTab = 'portal_users'" role="tab">
-        Portal &amp; Requests <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$portalUserCount) ?></span>
+
+    <?php $_can = can('settings_portal', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'portal_users\' }" @click="activeTab = \'portal_users\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Portal &amp; Requests settings"' ?>>
+        Portal &amp; Requests<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$portalUserCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
-    <?php if (can('settings_audit', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'audit' }"
-            @click="activeTab = 'audit'" role="tab">
-        Audit Log <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$recentAuditCount) ?></span>
+
+    <?php $_can = can('settings_audit', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'audit\' }" @click="activeTab = \'audit\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Audit Log settings"' ?>>
+        Audit Log<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$recentAuditCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
-    <?php if (can('settings_system', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'system' }"
-            @click="activeTab = 'system'" role="tab">
-        System
+
+    <?php $_can = can('settings_system', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'system\' }" @click="activeTab = \'system\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to System settings"' ?>>
+        System<?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
-    <?php if (can('settings_integrations', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'integrations' }"
-            @click="activeTab = 'integrations'" role="tab">
-        Integrations
+
+    <?php $_can = can('settings_integrations', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'integrations\' }" @click="activeTab = \'integrations\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Integrations settings"' ?>>
+        Integrations<?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
-    <?php if (can('settings_intelligence', 'view')): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'intelligence' }"
-            @click="activeTab = 'intelligence'" role="tab">
-        Intelligence
+
+    <?php $_can = can('settings_intelligence', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'intelligence\' }" @click="activeTab = \'intelligence\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Intelligence settings"' ?>>
+        Intelligence<?= $_can ? '' : $_lockSvg ?>
     </button>
-    <?php endif; ?>
+
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
