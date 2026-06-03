@@ -10123,9 +10123,19 @@ body:has(.chat-page-content) #ff-chat-widget {
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;      /* Firefox */
-    padding-bottom: 8px;
-    padding-top: 6px;           /* breathing room above first card */
+    /* Scrollable lane: prominent track background signals "swipe here".
+       Dark themes: lighter tint on dark body so cards (darker) pop off the track.
+       Light theme override below flips to a darker tint. */
+    background: rgba(255, 255, 255, 0.09);
+    border: 1.5px solid rgba(255, 255, 255, 0.13);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+    border-radius: 18px;
+    padding: 14px;
+    /* Right padding ≈ half a card — next card always peeking through */
+    padding-right: calc(var(--carousel-card-w, 300px) / 2);
+    cursor: grab;
 }
+.dashboard-carousel:active { cursor: grabbing; }
 .dashboard-carousel::-webkit-scrollbar {
     display: none;              /* Chrome / Safari */
 }
@@ -10138,14 +10148,14 @@ body:has(.chat-page-content) #ff-chat-widget {
 .carousel-card {
     flex: 0 0 300px;
     scroll-snap-align: start;
-    background: var(--bg-card);
+    background: var(--bg-surface);
     border: 1px solid var(--border-color);
-    border-radius: 14px;
-    padding: 28px 28px 24px;
+    border-radius: 12px;
+    padding: 22px 22px 18px;
     display: flex;
     flex-direction: column;
     gap: 0;
-    min-height: 290px;
+    min-height: 270px;
     position: relative;
     transition:
         transform    200ms cubic-bezier(0.23, 1, 0.32, 1),
@@ -10311,33 +10321,32 @@ body:has(.chat-page-content) #ff-chat-widget {
     padding: 24px 4px;
 }
 
-/* ── Responsive card widths ──────────────────────────────────── */
+/* ── Responsive card widths + peek variable ─────────────────── */
 @media (max-width: 767px) {
     .dashboard-carousel {
-        /* Right padding creates space so last card doesn't
-           bleed to edge, revealing next card peek */
-        padding-right: 20px;
-        /* Scroll padding aligns cards to left edge */
-        scroll-padding-left: 16px;
+        --carousel-card-w: 78vw;
+        scroll-padding-left: 14px;
     }
     .carousel-card {
-        /* 78vw = card takes 78% of screen width,
-           leaving ~22% visible for gap + next card peek.
-           Guaranteed regardless of screen size. */
         flex: 0 0 78vw;
-        max-width: 320px; /* cap on larger phones/tablets */
-        min-width: 220px; /* floor on very small screens */
+        max-width: 300px;
+        min-width: 220px;
     }
 }
 @media (min-width: 768px) {
-    .carousel-card {
-        flex: 0 0 340px;
-    }
+    .dashboard-carousel { --carousel-card-w: 340px; }
+    .carousel-card { flex: 0 0 340px; }
 }
 @media (min-width: 1280px) {
-    .carousel-card {
-        flex: 0 0 380px;
-    }
+    .dashboard-carousel { --carousel-card-w: 360px; }
+    .carousel-card { flex: 0 0 360px; }
+}
+/* Light theme: flip to a darker tint so the track is a distinct sunken lane
+   (white body → slightly gray track → white cards pop off it). */
+[data-theme="light"] .dashboard-carousel {
+    background: rgba(0, 0, 0, 0.07);
+    border-color: rgba(0, 0, 0, 0.14);
+    box-shadow: inset 0 1px 0 rgba(0,0,0,0.04);
 }
 /* ════════════════════════════════════════════════════════════════════
    S-DASHBOARD-MOBILE-CAROUSEL END
