@@ -94,7 +94,7 @@ if (!$targetId) {
 }
 
 $target = db_row(
-    "SELECT u.id, u.name, u.email, u.role_id,
+    "SELECT u.id, u.name, u.email, u.role_id, u.notification_preferences,
             ur.name AS role_name, ur.slug AS role_slug
      FROM users u
      JOIN user_roles ur ON ur.id = u.role_id
@@ -426,6 +426,58 @@ require_once FF_ROOT . '/includes/header.php';
                     </li>
                 </template>
             </ul>
+        </div>
+    </div>
+
+    <!-- Notification Preferences card -->
+    <?php
+    $notifCategories = [
+        ['slug' => 'customers',    'label' => 'Customers',       'desc' => 'New customer, credit hold, suspended'],
+        ['slug' => 'leases',       'label' => 'Leases',          'desc' => 'Lease created, activated, closed'],
+        ['slug' => 'invoices',     'label' => 'Invoices',        'desc' => 'Overdue invoices, billing events'],
+        ['slug' => 'payments',     'label' => 'Payments',        'desc' => 'Payments received, failed, reversed'],
+        ['slug' => 'equipment',    'label' => 'Equipment',       'desc' => 'Unit status changes, availability'],
+        ['slug' => 'compliance',   'label' => 'Compliance',      'desc' => 'Expiring docs, CVI/MVI/registration alerts'],
+        ['slug' => 'maintenance',  'label' => 'Maintenance',     'desc' => 'Work orders opened and closed'],
+        ['slug' => 'damage',       'label' => 'Damage Claims',   'desc' => 'New claims, status changes'],
+        ['slug' => 'reservations', 'label' => 'Reservations',    'desc' => 'New, confirmed, and cancelled bookings'],
+        ['slug' => 'samsara',      'label' => 'Samsara / GPS',   'desc' => 'Vehicle offline, sync alerts'],
+        ['slug' => 'accounting',   'label' => 'Accounting',      'desc' => 'Reconciliation drift, period events'],
+        ['slug' => 'quickbooks',   'label' => 'QuickBooks',      'desc' => 'Sync errors, QBO connection issues'],
+        ['slug' => 'system',       'label' => 'System',          'desc' => 'Service requests, AI alerts, chat'],
+    ];
+    $currentOptedOut = json_decode($target['notification_preferences'] ?? 'null', true) ?? [];
+    ?>
+    <div class="card" x-data="FF_NotifPrefs()"
+         x-init="init(<?= json_encode($currentOptedOut) ?>)">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-weight:600;font-size:0.875rem;">Notification Categories</span>
+            <button class="btn btn-primary btn-xs" :disabled="saving" @click="save()">
+                <span x-show="!saving">Save</span><span x-show="saving">Saving…</span>
+            </button>
+        </div>
+        <div class="card-body" style="padding:12px 16px;">
+            <p class="text-secondary" style="font-size:0.8125rem;margin:0 0 12px;">
+                Turn off categories to stop this user from receiving those notifications.
+                All categories are on by default.
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+                <?php foreach ($notifCategories as $cat): ?>
+                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:6px 0;">
+                    <input type="checkbox"
+                           value="<?= e($cat['slug']) ?>"
+                           style="margin-top:2px;accent-color:var(--color-primary);flex-shrink:0;"
+                           :checked="!optedOut.includes('<?= e($cat['slug']) ?>')"
+                           @change="toggle('<?= e($cat['slug']) ?>', $event.target.checked)">
+                    <span>
+                        <span style="font-weight:600;font-size:0.8125rem;color:var(--text-primary);"><?= e($cat['label']) ?></span>
+                        <span style="display:block;font-size:0.75rem;color:var(--text-secondary);"><?= e($cat['desc']) ?></span>
+                    </span>
+                </label>
+                <?php endforeach; ?>
+            </div>
+            <div x-show="saveError" class="alert alert-danger" x-text="saveError" style="margin-top:10px;font-size:0.8125rem;"></div>
+            <div x-show="saveOk" class="alert alert-success" style="margin-top:10px;font-size:0.8125rem;">Notification preferences saved.</div>
         </div>
     </div>
 
@@ -1121,6 +1173,50 @@ function permissionsMatrix() {
                 }
             } catch (err) {
                 this.groupMacroModal.error = 'Network error. Please try again.';
+            } finally {
+                this.saving = false;
+            }
+        },
+    };
+}
+
+function FF_NotifPrefs() {
+    return {
+        optedOut: [],
+        saving:   false,
+        saveError: null,
+        saveOk:    false,
+
+        init(currentOptedOut) {
+            this.optedOut = Array.isArray(currentOptedOut) ? currentOptedOut : [];
+        },
+
+        toggle(slug, checked) {
+            // checked = user WANTS to receive this category (checkbox on = receive)
+            if (checked) {
+                this.optedOut = this.optedOut.filter(s => s !== slug);
+            } else {
+                if (!this.optedOut.includes(slug)) this.optedOut.push(slug);
+            }
+        },
+
+        async save() {
+            this.saving   = true;
+            this.saveError = null;
+            this.saveOk    = false;
+            try {
+                const res = await FF_Api.post(
+                    FF_Api.url('/api/v1/users/notification_preferences/update.php'),
+                    { user_id: <?= (int) $targetId ?>, opted_out: this.optedOut }
+                );
+                if (res.success) {
+                    this.saveOk = true;
+                    setTimeout(() => { this.saveOk = false; }, 3000);
+                } else {
+                    this.saveError = (res.error && res.error.message) || 'Save failed.';
+                }
+            } catch (_) {
+                this.saveError = 'Network error. Please try again.';
             } finally {
                 this.saving = false;
             }

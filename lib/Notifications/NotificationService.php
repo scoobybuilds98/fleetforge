@@ -370,18 +370,20 @@ class NotificationService
      */
     private static function resolveUsersForType(string $type): array
     {
-        $module = self::getModuleFromType($type);
+        $module   = self::getModuleFromType($type);
+        $category = self::getCategoryFromType($type);
 
         try {
             if ($module === null) {
                 $rows = \db_select(
-                    "SELECT id FROM users
+                    "SELECT id, notification_preferences FROM users
                       WHERE deleted_at IS NULL AND status = 'active'"
                 );
             } else {
                 // Users with view permission via their role + always-include super_admin
+                // Also exclude users who opted out of this notification category
                 $rows = \db_select(
-                    "SELECT DISTINCT u.id
+                    "SELECT DISTINCT u.id, u.notification_preferences
                        FROM users u
                        LEFT JOIN user_roles r ON r.id = u.role_id
                        LEFT JOIN user_permissions p
@@ -395,7 +397,19 @@ class NotificationService
                 );
             }
 
-            return array_map(static fn($r) => (int) $r['id'], $rows);
+            // Filter out users who opted out of this notification category.
+            // notification_preferences is a JSON array of opted-out category slugs.
+            // NULL = no preferences set = receive all.
+            return array_values(array_filter(
+                array_map(static fn($r) => (int) $r['id'], array_filter(
+                    $rows,
+                    static function (array $r) use ($category): bool {
+                        if ($r['notification_preferences'] === null) return true;
+                        $optedOut = json_decode($r['notification_preferences'], true);
+                        return !is_array($optedOut) || !in_array($category, $optedOut, true);
+                    }
+                ))
+            ));
         } catch (\Throwable $e) {
             error_log('[NotificationService] resolveUsersForType failed: ' . $e->getMessage());
             return [];

@@ -230,11 +230,17 @@ function auth_login(array $user, bool $rememberMe = false): void
         'role_slug'            => $roleSlug,
         'permissions'          => $permissions,
         'permission_overrides' => $overrides,
-        // S-PERM-SESSION-REFRESH: timestamp of when overrides were loaded.
-        // Compared per-request against users.permissions_updated_at by
-        // _ff_check_permission_freshness() to auto-refresh stale sessions.
-        // Stamped at login (here) and on every refresh fire.
+        // S-PERM-SESSION-REFRESH: identity-based freshness token.
+        // _ff_check_permission_freshness() compares permissions_db_ts
+        // (the exact users.permissions_updated_at value we last saw) by
+        // string identity — avoiding the same-second timing bug of the
+        // old strtotime() > comparison.  permissions_loaded_at kept for
+        // backwards compat with existing sessions during rollout.
         'permissions_loaded_at' => date('Y-m-d H:i:s'),
+        'permissions_db_ts'    => db_row(
+            "SELECT permissions_updated_at FROM users WHERE id = ?",
+            [(int) $user['id']]
+        )['permissions_updated_at'] ?? null,
         'theme'                => $user['theme_preference'] ?? 'dark',
         // PERM-1 Feature 2: per-user display settings (font size + density).
         // Read by header.php to inject inline <style> + body data-density.
@@ -511,29 +517,37 @@ function _ff_check_permission_freshness(): void
     );
     $dbTimestamp = $row['permissions_updated_at'] ?? null;
 
-    // DB never stamped (column NULL) → no override change has happened
-    // since the column was added; nothing to refresh.
+    // DB never stamped (column NULL) → no override change has happened;
+    // nothing to refresh.
     if ($dbTimestamp === null) return;
 
-    $sessionTimestamp = $_SESSION['ff_user']['permissions_loaded_at'] ?? null;
+    // WHY identity comparison, not strtotime() >:
+    // Storing the ACTUAL DB timestamp we last saw and comparing by string
+    // identity avoids the same-second timing bug where both the override
+    // save and the session login happen within the same calendar second —
+    // `strtotime(T) > strtotime(T)` is false, so the session would never
+    // refresh. Comparing the exact string value we last read means ANY
+    // change (even same-second) is detected reliably.
+    //
+    // Fall back to the old time-comparison for sessions that pre-date this
+    // change (they store permissions_loaded_at, not permissions_db_ts).
+    $sessionDbTs = $_SESSION['ff_user']['permissions_db_ts'] ?? null;
 
-    // Stale when:
-    //   (a) session has no load timestamp (pre-S-PERM-SESSION-REFRESH login
-    //       that survived across the migration — must refresh on first
-    //       DB-stamped detection), OR
-    //   (b) DB stamp is strictly newer than session stamp.
-    // Per D-PERM-REFRESH-3.
-    $isStale = ($sessionTimestamp === null)
-            || (strtotime($dbTimestamp) > strtotime($sessionTimestamp));
+    if ($sessionDbTs !== null) {
+        // New path: compare exact DB timestamp we last stored in session.
+        $isStale = ($sessionDbTs !== $dbTimestamp);
+    } else {
+        // Legacy path: pre-existing sessions only have permissions_loaded_at.
+        $sessionLoadedAt = $_SESSION['ff_user']['permissions_loaded_at'] ?? null;
+        $isStale = ($sessionLoadedAt === null)
+                || (strtotime($dbTimestamp) > strtotime($sessionLoadedAt));
+    }
 
     if (!$isStale) return;
 
-    // Refresh: re-load override map from DB + stamp session loaded_at.
-    // Bypass the `current_user_id() !== $userId` guard inside
-    // _ff_refresh_user_permissions() by writing directly — by definition
-    // we are the target user (we're running under their session) so the
-    // guard would pass anyway, but writing here makes the contract
-    // self-documenting.
+    // Refresh override map and store the exact DB timestamp so the next
+    // request uses identity comparison (not time comparison).
     $_SESSION['ff_user']['permission_overrides'] = _ff_load_user_overrides($userId);
-    $_SESSION['ff_user']['permissions_loaded_at'] = date('Y-m-d H:i:s');
+    $_SESSION['ff_user']['permissions_db_ts']    = $dbTimestamp;
+    $_SESSION['ff_user']['permissions_loaded_at'] = date('Y-m-d H:i:s'); // keep for compat
 }
