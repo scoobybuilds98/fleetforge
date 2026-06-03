@@ -449,7 +449,7 @@ require_once FF_ROOT . '/includes/header.php';
     $currentOptedOut = json_decode($target['notification_preferences'] ?? 'null', true) ?? [];
     ?>
     <div class="card" x-data="FF_NotifPrefs()"
-         x-init="init(<?= json_encode($currentOptedOut) ?>)">
+         x-init="init(<?= e(json_encode($currentOptedOut)) ?>)">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
             <span style="font-weight:600;font-size:0.875rem;">Notification Categories</span>
             <button class="btn btn-primary btn-xs" :disabled="saving" @click="save()">
