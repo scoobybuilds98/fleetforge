@@ -404,17 +404,17 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="!loading && pagination.total_pages > 1">
         <div class="pagination">
             <div class="pagination-info"
-                 x-text="'Page ' + pagination.current_page + ' of ' + pagination.total_pages">
+                 x-text="'Page ' + pagination.page + ' of ' + pagination.total_pages">
             </div>
             <div class="pagination-controls">
                 <button class="btn btn-secondary btn-sm"
-                        :disabled="pagination.current_page <= 1"
-                        @click="goToPage(pagination.current_page - 1)">
+                        :disabled="pagination.page <= 1"
+                        @click="goToPage(pagination.page - 1)">
                     ← Prev
                 </button>
                 <button class="btn btn-secondary btn-sm"
-                        :disabled="pagination.current_page >= pagination.total_pages"
-                        @click="goToPage(pagination.current_page + 1)">
+                        :disabled="pagination.page >= pagination.total_pages"
+                        @click="goToPage(pagination.page + 1)">
                     Next →
                 </button>
             </div>
