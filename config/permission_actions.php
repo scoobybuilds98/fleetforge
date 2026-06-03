@@ -85,6 +85,19 @@ return [
         // columns (settings rows are updated, not created/destroyed).
         'accounting_settings' => ['view', 'edit'],
 
+        // ── Settings tabs — granular per-tab access control ─────────
+        // Super admin can grant/deny each tab independently via the Users
+        // permission editor. Only 'view' and 'edit' are meaningful for
+        // settings tabs (no create/delete/export semantics).
+        'settings_general'      => ['view', 'edit'],
+        'settings_design'       => ['view', 'edit'],
+        'settings_users'        => ['view', 'edit'],
+        'settings_portal'       => ['view', 'edit'],
+        'settings_audit'        => ['view', 'edit'],
+        'settings_system'       => ['view', 'edit'],
+        'settings_integrations' => ['view', 'edit'],
+        'settings_intelligence' => ['view', 'edit'],
+
         // QuickBooks — reserved key for Phase QBO. Defines the
         // sensitive integration-control vocabulary in advance so
         // per-user overrides can grant access before any

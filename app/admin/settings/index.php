@@ -492,10 +492,29 @@ $csrfToken = $_SESSION['csrf_token'];
 $defaultTab = clean_string($_GET['tab'] ?? 'general');
 // S-DESIGN-SETTINGS-FOOTER-LOGIN: 'design' (super_admin only) added between
 // general and users. Validation list includes it regardless so a deep-link
-// like ?tab=design from a non-super-admin still resolves to general gracefully.
-$validTabs = ['general', 'design', 'users', 'portal_users', 'audit', 'system', 'integrations', 'intelligence'];
+// Per-tab access: each tab has its own permission (settings_general, settings_design, etc.).
+// super_admin always has access (short-circuit in can()); for other roles, access requires
+// an explicit grant via the Users permission editor.
+// Falls back to the first tab the user can view when the requested tab is not permitted.
+$tabPermMap = [
+    'general'      => 'settings_general',
+    'design'       => 'settings_design',
+    'users'        => 'settings_users',
+    'portal_users' => 'settings_portal',
+    'audit'        => 'settings_audit',
+    'system'       => 'settings_system',
+    'integrations' => 'settings_integrations',
+    'intelligence' => 'settings_intelligence',
+];
+$validTabs = array_keys($tabPermMap);
 if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
-if ($defaultTab === 'design' && !$isSuperAdmin) $defaultTab = 'general';
+// Redirect to the first permitted tab if the requested tab is not accessible
+if (!can($tabPermMap[$defaultTab], 'view')) {
+    $defaultTab = 'general'; // fallback
+    foreach ($tabPermMap as $tab => $perm) {
+        if (can($perm, 'view')) { $defaultTab = $tab; break; }
+    }
+}
 ?>
 
 <div x-data="{ activeTab: '<?= e($defaultTab) ?>' }">
@@ -538,42 +557,54 @@ if ($defaultTab === 'design' && !$isSuperAdmin) $defaultTab = 'general';
 
 <!-- ── Tab Navigation ─────────────────────────────────────────────────────── -->
 <div class="tab-bar" role="tablist" style="margin-bottom:24px;">
+    <?php if (can('settings_general', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'general' }"
             @click="activeTab = 'general'" role="tab">
         General
     </button>
-    <?php if ($isSuperAdmin): /* S-DESIGN-SETTINGS-FOOTER-LOGIN: super_admin-only Design tab */ ?>
+    <?php endif; ?>
+    <?php if (can('settings_design', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'design' }"
             @click="activeTab = 'design'" role="tab">
         Design
     </button>
     <?php endif; ?>
+    <?php if (can('settings_users', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'users' }"
             @click="activeTab = 'users'" role="tab">
         Users <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$userCount) ?></span>
     </button>
-    <?php if ($isSuperAdmin): ?>
+    <?php endif; ?>
+    <?php if (can('settings_portal', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'portal_users' }"
             @click="activeTab = 'portal_users'" role="tab">
         Portal &amp; Requests <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$portalUserCount) ?></span>
     </button>
     <?php endif; ?>
+    <?php if (can('settings_audit', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'audit' }"
             @click="activeTab = 'audit'" role="tab">
         Audit Log <span class="tab-badge" style="font-size:0.7rem;"><?= e((string)$recentAuditCount) ?></span>
     </button>
+    <?php endif; ?>
+    <?php if (can('settings_system', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'system' }"
             @click="activeTab = 'system'" role="tab">
         System
     </button>
+    <?php endif; ?>
+    <?php if (can('settings_integrations', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'integrations' }"
             @click="activeTab = 'integrations'" role="tab">
         Integrations
     </button>
+    <?php endif; ?>
+    <?php if (can('settings_intelligence', 'view')): ?>
     <button class="tab-btn" :class="{ 'is-active': activeTab === 'intelligence' }"
             @click="activeTab = 'intelligence'" role="tab">
         Intelligence
     </button>
+    <?php endif; ?>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -689,7 +720,7 @@ if (!empty($grouped['currency'])) {
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- TAB 1.5: DESIGN — brand color, logo, defaults, regional, PDF, UI (super_admin only) -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
-<?php if ($isSuperAdmin): ?>
+<?php if (can('settings_design', 'view')): ?>
 <div x-show="activeTab === 'design'" x-transition:enter class="ff-tab-enter">
     <?php require_once __DIR__ . '/design.php'; ?>
 </div>
@@ -728,9 +759,9 @@ if (!empty($grouped['currency'])) {
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
-<!-- TAB 3: PORTAL USERS (super_admin only)                                  -->
+<!-- TAB 3: PORTAL USERS                                                      -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
-<?php if ($isSuperAdmin): ?>
+<?php if (can('settings_portal', 'view')): ?>
 <?php /* S-USERS-CONSOLIDATE D-B: tab content swapped from settings/portal_users.php
          (the prior full management surface) to a link card pointing at the
          unified Users module's Portal Users tab. Matches the S-SETTINGS-CLEANUP
@@ -1026,7 +1057,7 @@ foreach ($sensitiveGroups as $_ig) {
 <?php endif; ?>
 
 <!-- ── Samsara Connection Status ──────────────────────────────────────── -->
-<?php if ($isSuperAdmin): ?>
+<?php if (can('settings_integrations', 'view')): ?>
 <div class="card" style="margin-bottom:20px;" x-data="FF_SamsaraTest()">
     <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
         Samsara Connection
