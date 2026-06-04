@@ -210,12 +210,36 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
+        <!-- Bulk action bar -->
+        <div x-show="selectedIds.length > 0"
+             x-transition
+             class="bulk-action-bar"
+             style="display:flex;align-items:center;gap:12px;padding:10px 16px;
+                    background:var(--color-surface-raised,#1e2430);
+                    border:1px solid var(--color-border);border-radius:8px;
+                    margin-bottom:12px;">
+            <span class="text-sm font-medium"
+                  x-text="selectedIds.length + ' item' + (selectedIds.length === 1 ? '' : 's') + ' selected'"></span>
+            <button class="btn btn-danger btn-sm" @click="bulkDelete()">
+                Delete selected
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="clearSelection()">
+                Clear
+            </button>
+        </div>
+
         <!-- Table -->
         <template x-if="!loading && !loadError && customers.length > 0">
             <div style="overflow-x:auto;">
                 <table class="table" aria-label="Customers">
                     <thead>
                         <tr>
+                            <th style="width:40px;text-align:center;padding:8px 12px;">
+                                <input type="checkbox" class="form-checkbox"
+                                       :checked="selectAll"
+                                       @change="toggleSelectAll()"
+                                       title="Select all on this page">
+                            </th>
                             <th scope="col" class="th-sortable" @click="setSort('company_name')">
                                 Company <span x-show="filters.sort === 'company_name'">↑</span>
                             </th>
@@ -236,6 +260,11 @@ require_once FF_ROOT . '/includes/header.php';
                     <tbody>
                         <template x-for="c in customers" :key="c.id">
                             <tr>
+                                <td style="text-align:center;padding:8px 12px;" @click.stop>
+                                    <input type="checkbox" class="form-checkbox"
+                                           :checked="selectedIds.includes(c.id)"
+                                           @change="toggleSelect(c.id)">
+                                </td>
                                 <td>
                                     <a :href="'<?= base_url('customers/show') ?>?id=' + c.id"
                                        class="link font-medium"
@@ -316,10 +345,13 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function FF_Customers() {
     return {
-        customers:  [],
-        pagination: {},
-        kpis:       {},
-        kpisLoaded: false,
+        customers:   [],
+        pagination:  {},
+        kpis:        {},
+        kpisLoaded:  false,
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
         filters: {
             search:     '',
             status:     '',
@@ -333,6 +365,7 @@ function FF_Customers() {
         init() {
             this.load();
             this.loadKpis();
+            this.$watch('page', () => this.clearSelection());
         },
 
         async load() {
@@ -436,6 +469,54 @@ function FF_Customers() {
             const n = parseFloat(val);
             if (isNaN(n)) return '0.00';
             return n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else this.selectedIds.splice(idx, 1);
+            this.selectAll = this.customers.length > 0 && this.selectedIds.length === this.customers.length;
+        },
+
+        toggleSelectAll() {
+            if (this.selectAll) {
+                this.selectedIds = [];
+                this.selectAll = false;
+            } else {
+                this.selectedIds = this.customers.map(item => item.id);
+                this.selectAll = true;
+            }
+        },
+
+        clearSelection() {
+            this.selectedIds = [];
+            this.selectAll = false;
+        },
+
+        async bulkDelete() {
+            if (this.selectedIds.length === 0 || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask(
+                'Delete ' + count + ' item' + (count === 1 ? '' : 's') + '? This cannot be undone.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/customers/bulk_delete') ?>', { ids: this.selectedIds });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.deleted > 0) FF_Toast.success(d.deleted + ' deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' could not be deleted: ' + d.errors.map(e => e.reason).join('; '));
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk delete failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error during bulk delete.');
+            } finally {
+                this.bulkWorking = false;
+            }
         },
     };
 }

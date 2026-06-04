@@ -242,12 +242,36 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
+        <!-- Bulk action bar — visible when one or more rows are checked -->
+        <div x-show="selectedIds.length > 0"
+             x-transition
+             class="bulk-action-bar"
+             style="display:flex;align-items:center;gap:12px;padding:10px 16px;
+                    background:var(--color-surface-raised,#1e2430);
+                    border:1px solid var(--color-border);border-radius:8px;
+                    margin-bottom:12px;">
+            <span class="text-sm font-medium"
+                  x-text="selectedIds.length + ' item' + (selectedIds.length === 1 ? '' : 's') + ' selected'"></span>
+            <button class="btn btn-danger btn-sm" @click="bulkDelete()">
+                Delete selected
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="clearSelection()">
+                Clear
+            </button>
+        </div>
+
         <!-- Table -->
         <template x-if="!loading && !loadError && leases.length > 0">
             <div style="overflow-x:auto;">
                 <table class="table" aria-label="Leases">
                     <thead>
                         <tr>
+                            <th style="width:40px;text-align:center;padding:8px 12px;">
+                                <input type="checkbox" class="form-checkbox"
+                                       :checked="selectAll"
+                                       @change="toggleSelectAll()"
+                                       title="Select all on this page">
+                            </th>
                             <th scope="col" class="th-sortable" @click="setSort('contract_number')">
                                 Contract
                                 <span x-show="filters.sort === 'contract_number'"
@@ -273,6 +297,11 @@ require_once FF_ROOT . '/includes/header.php';
                     <tbody>
                         <template x-for="lease in leases" :key="lease.id">
                             <tr>
+                                <td style="text-align:center;padding:8px 12px;" @click.stop>
+                                    <input type="checkbox" class="form-checkbox"
+                                           :checked="selectedIds.includes(lease.id)"
+                                           @change="toggleSelect(lease.id)">
+                                </td>
                                 <td>
                                     <a :href="'<?= base_url('leases/show') ?>?id=' + lease.id"
                                        class="font-mono font-medium link"
@@ -379,9 +408,16 @@ function FF_Leases() {
         },
         currentPage: 1,
 
+        // Bulk selection state
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
+
         async init() {
             this.load();
             this.loadKpis();
+            // Clear selection whenever pagination changes
+            this.$watch('currentPage', () => this.clearSelection());
         },
 
         // Load KPI counts in parallel from lightweight API calls.
@@ -417,6 +453,7 @@ function FF_Leases() {
         },
 
         async load() {
+            this.clearSelection();
             this.loading   = true;
             this.loadError = null;
 
@@ -498,6 +535,60 @@ function FF_Leases() {
             const n = parseFloat(val);
             if (isNaN(n)) return '0.00';
             return n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        // --- Bulk selection methods ---
+
+        /** Toggle a single row in/out of the selection set. */
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else this.selectedIds.splice(idx, 1);
+            this.selectAll = this.leases.length > 0 && this.selectedIds.length === this.leases.length;
+        },
+
+        /** Select all visible rows, or deselect all if already all selected. */
+        toggleSelectAll() {
+            if (this.selectAll) {
+                this.selectedIds = [];
+                this.selectAll   = false;
+            } else {
+                this.selectedIds = this.leases.map(item => item.id);
+                this.selectAll   = true;
+            }
+        },
+
+        /** Clear all selections. */
+        clearSelection() {
+            this.selectedIds = [];
+            this.selectAll   = false;
+        },
+
+        /** Confirm and POST selected IDs to the bulk-delete endpoint. */
+        async bulkDelete() {
+            if (this.selectedIds.length === 0 || this.bulkWorking) return;
+            const count     = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask(
+                'Delete ' + count + ' item' + (count === 1 ? '' : 's') + '? This cannot be undone.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/leases/bulk_delete') ?>', { ids: this.selectedIds });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.deleted > 0) FF_Toast.success(d.deleted + ' deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' could not be deleted: ' + d.errors.map(e => e.reason).join('; '));
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk delete failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error during bulk delete.');
+            } finally {
+                this.bulkWorking = false;
+            }
         },
     };
 }

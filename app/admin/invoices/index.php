@@ -263,12 +263,36 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
+        <!-- Bulk action bar — visible when one or more rows are checked -->
+        <div x-show="selectedIds.length > 0"
+             x-transition
+             class="bulk-action-bar"
+             style="display:flex;align-items:center;gap:12px;padding:10px 16px;
+                    background:var(--color-surface-raised,#1e2430);
+                    border:1px solid var(--color-border);border-radius:8px;
+                    margin-bottom:12px;">
+            <span class="text-sm font-medium"
+                  x-text="selectedIds.length + ' item' + (selectedIds.length === 1 ? '' : 's') + ' selected'"></span>
+            <button class="btn btn-danger btn-sm" @click="bulkDelete()">
+                Delete selected
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="clearSelection()">
+                Clear
+            </button>
+        </div>
+
         <!-- Table -->
         <template x-if="!loading && !loadError && invoices.length > 0">
             <div style="overflow-x:auto;">
                 <table class="table" aria-label="Invoices">
                     <thead>
                         <tr>
+                            <th style="width:40px;text-align:center;padding:8px 12px;">
+                                <input type="checkbox" class="form-checkbox"
+                                       :checked="selectAll"
+                                       @change="toggleSelectAll()"
+                                       title="Select all on this page">
+                            </th>
                             <th scope="col" class="th-sortable" @click="setSort('invoice_number')">
                                 Invoice #
                                 <span x-show="filters.sort === 'invoice_number'"
@@ -311,6 +335,11 @@ require_once FF_ROOT . '/includes/header.php';
                     <tbody>
                         <template x-for="inv in invoices" :key="inv.id">
                             <tr>
+                                <td style="text-align:center;padding:8px 12px;" @click.stop>
+                                    <input type="checkbox" class="form-checkbox"
+                                           :checked="selectedIds.includes(inv.id)"
+                                           @change="toggleSelect(inv.id)">
+                                </td>
                                 <td>
                                     <a :href="'<?= base_url('invoices/show') ?>?id=' + inv.id"
                                        class="font-mono font-medium link"
@@ -467,6 +496,11 @@ function FF_Invoices() {
         pagination:  {},
         activeTab:   'outstanding',
 
+        // Bulk-select state
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
+
         filters: {
             search:     '',
             status:     '',
@@ -511,6 +545,7 @@ function FF_Invoices() {
         },
 
         async load() {
+            this.clearSelection();
             this.loading   = true;
             this.loadError = null;
 
@@ -654,6 +689,52 @@ function FF_Invoices() {
                 skipped_by_mode:                     'QuickBooks: Skipped (mode)',
             };
             return m[s] || (s ? ('QuickBooks: ' + s) : 'QuickBooks: not synced');
+        },
+
+        // ── Bulk-select helpers ──────────────────────────────────────────────
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else this.selectedIds.splice(idx, 1);
+            this.selectAll = this.invoices.length > 0 && this.selectedIds.length === this.invoices.length;
+        },
+        toggleSelectAll() {
+            if (this.selectAll) {
+                this.selectedIds = [];
+                this.selectAll   = false;
+            } else {
+                this.selectedIds = this.invoices.map(item => item.id);
+                this.selectAll   = true;
+            }
+        },
+        clearSelection() {
+            this.selectedIds = [];
+            this.selectAll   = false;
+        },
+        async bulkDelete() {
+            if (this.selectedIds.length === 0 || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask(
+                'Delete ' + count + ' item' + (count === 1 ? '' : 's') + '? This cannot be undone.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/invoices/bulk_delete') ?>', { ids: this.selectedIds });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.deleted > 0) FF_Toast.success(d.deleted + ' deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' could not be deleted: ' + d.errors.map(e => e.reason).join('; '));
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk delete failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error during bulk delete.');
+            } finally {
+                this.bulkWorking = false;
+            }
         },
     };
 }

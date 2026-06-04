@@ -260,6 +260,24 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- Bulk action bar (team) -->
+    <div x-show="selectedIds.length > 0"
+         x-transition
+         class="bulk-action-bar"
+         style="display:flex;align-items:center;gap:12px;padding:10px 16px;
+                background:var(--color-surface-raised,#1e2430);
+                border:1px solid var(--color-border);border-radius:8px;
+                margin-bottom:12px;">
+        <span class="text-sm font-medium"
+              x-text="selectedIds.length + ' item' + (selectedIds.length === 1 ? '' : 's') + ' selected'"></span>
+        <button class="btn btn-danger btn-sm" @click="bulkDelete()">
+            Delete selected
+        </button>
+        <button class="btn btn-ghost btn-sm" @click="clearSelection()">
+            Clear
+        </button>
+    </div>
+
     <!-- Table card -->
     <div class="card">
 
@@ -283,6 +301,12 @@ require_once FF_ROOT . '/includes/header.php';
                 <table class="table table-hover">
                     <thead>
                         <tr>
+                            <th style="width:40px;text-align:center;padding:8px 12px;">
+                                <input type="checkbox" class="form-checkbox"
+                                       :checked="selectAll"
+                                       @change="toggleSelectAll()"
+                                       title="Select all on this page">
+                            </th>
                             <th @click="setSort('name')" style="cursor:pointer;">
                                 Name <span x-text="sortIcon('name')"></span>
                             </th>
@@ -305,6 +329,11 @@ require_once FF_ROOT . '/includes/header.php';
                             <tr @click="window.location = '<?= base_url('users/show') ?>?id=' + row.id"
                                 :class="row.status === 'invited' ? 'is-invited' : ''"
                                 :style="(row.status === 'invited' ? 'opacity:0.78;font-style:italic;' : '') + 'cursor:pointer;'">
+                                <td style="text-align:center;padding:8px 12px;" @click.stop>
+                                    <input type="checkbox" class="form-checkbox"
+                                           :checked="selectedIds.includes(row.id)"
+                                           @change="toggleSelect(row.id)">
+                                </td>
                                 <td x-text="row.name"></td>
                                 <td x-text="row.email"></td>
                                 <td>
@@ -589,8 +618,14 @@ function teamList() {
         sort:       'name',
         dir:        'ASC',
         filters: { q: '', role_id: '', status: '' },
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
 
-        init() { this.fetch(); },
+        init() {
+            this.fetch();
+            this.$watch('page', () => this.clearSelection());
+        },
 
         fetch() {
             this.loading = true;
@@ -656,6 +691,51 @@ function teamList() {
             if (diff < 86400 * 30) return Math.floor(diff / 86400) + 'd ago';
             if (diff < 86400 * 365) return Math.floor(diff / (86400 * 30)) + 'mo ago';
             return Math.floor(diff / (86400 * 365)) + 'y ago';
+        },
+
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else this.selectedIds.splice(idx, 1);
+            this.selectAll = this.rows.length > 0 && this.selectedIds.length === this.rows.length;
+        },
+        toggleSelectAll() {
+            if (this.selectAll) {
+                this.selectedIds = [];
+                this.selectAll = false;
+            } else {
+                this.selectedIds = this.rows.map(item => item.id);
+                this.selectAll = true;
+            }
+        },
+        clearSelection() {
+            this.selectedIds = [];
+            this.selectAll = false;
+        },
+        async bulkDelete() {
+            if (this.selectedIds.length === 0 || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask(
+                'Delete ' + count + ' item' + (count === 1 ? '' : 's') + '? This cannot be undone.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/users/bulk_delete') ?>', { ids: this.selectedIds });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.deleted > 0) FF_Toast.success(d.deleted + ' deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' could not be deleted: ' + d.errors.map(e => e.reason).join('; '));
+                    this.clearSelection();
+                    await this.fetch();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk delete failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error during bulk delete.');
+            } finally {
+                this.bulkWorking = false;
+            }
         },
     };
 }
