@@ -9369,6 +9369,50 @@ body:has(.chat-page-content) #ff-chat-widget {
     to { transform: rotate(360deg); }
 }
 
+/* ── FF picker — chevron affordance (S-PICKER-DISCOVERABILITY) ─────────────
+   A down-chevron appears when nothing is selected so the control reads as a
+   picker/combobox, not a plain text input. It and the clear (✕) button share
+   the same absolute slot — they never overlap because they are mutually
+   exclusive (chevron: x-show="!selected", clear: x-show="selected").
+   Rotates 180° when the dropdown is open. ──────────────────────────────── */
+.ff-picker-chevron {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted, #9ca3af);
+    padding: 2px 4px;
+    display: flex;
+    align-items: center;
+    border-radius: 3px;
+    transition: color 120ms ease;
+    line-height: 0;
+    pointer-events: all;
+    flex-shrink: 0;
+}
+.ff-picker-chevron svg {
+    transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ff-picker-chevron.is-open svg {
+    transform: rotate(180deg);
+}
+.ff-picker-chevron:hover { color: var(--text-secondary, #6b7280); }
+
+/* The input itself should look interactive even before typing */
+.ff-picker-input:not(.is-selected) { cursor: pointer; }
+.ff-picker-input.is-selected       { cursor: text; }
+
+/* Hint text shown when dropdown is open but no query typed yet */
+.ff-picker-hint {
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 /* ════════════════════════════════════════════════════════════════════
    UI-AUDIT-1 — Missing utility classes
    ────────────────────────────────────────────────────────────────────

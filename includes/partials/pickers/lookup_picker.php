@@ -47,17 +47,39 @@ $pickerLabelHint        = $pickerLabelHint        ?? '';
                        @blur="closeDropdown()"
                        @keydown="onKeyDown($event)"
                        autocomplete="off">
+
+                <!-- Clear: visible when there's a selection or partial query -->
                 <button type="button" class="ff-picker-clear"
                         x-show="selectedId || query"
+                        x-cloak
                         @click="clear()"
                         aria-label="Clear">&times;</button>
+
+                <!-- Chevron: visible when nothing is selected/typed — signals "picker" -->
+                <button type="button"
+                        class="ff-picker-chevron"
+                        :class="{ 'is-open': open }"
+                        x-show="!selectedId && !query"
+                        x-cloak
+                        @mousedown.prevent="open ? closeDropdown() : openDropdown()"
+                        tabindex="-1"
+                        aria-hidden="true"
+                        aria-label="Open options">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
+                </button>
+
                 <div class="ff-picker-dropdown" x-show="open" x-cloak>
                     <template x-if="loading">
                         <div class="ff-picker-loading">Searching…</div>
                     </template>
-                    <template x-if="!loading && results.length === 0">
+                    <template x-if="!loading && results.length === 0 && !query">
+                        <div class="ff-picker-hint">Start typing to search, or scroll to browse.</div>
+                    </template>
+                    <template x-if="!loading && results.length === 0 && query">
                         <div class="ff-picker-empty"
-                             x-text="query ? 'No matches for &quot;' + query + '&quot;.' : 'Type to search…'"></div>
+                             x-text="'No matches for &quot;' + query + '&quot;.'"></div>
                     </template>
                     <template x-for="(item, i) in results" :key="item.id">
                         <div class="ff-picker-item"

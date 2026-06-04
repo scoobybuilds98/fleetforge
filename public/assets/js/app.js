@@ -287,7 +287,7 @@ function FF_LookupPicker(opts) {
         format: r => r.name || r.label || ('#' + r.id),
         initialId: '',
         initialLabel: '',
-        placeholder: 'Search…',
+        placeholder: 'Search or select…',
         manualPlaceholder: 'Enter ID',
         onSelect: () => {},
         // targetPath: dot-path into the nearest ancestor Alpine component
@@ -3127,21 +3127,23 @@ function FF_RecordPicker(config) {
             perPage:     10,
             extraParams: '',             // additional query string fragment
             minChars:    1,
-            placeholder: 'Search…',
+            placeholder: 'Search or select…', // visible affordance that this is a picker
             mapResult:   (r) => ({ id: r.id, label: r.name || r.title || ('#' + r.id), sublabel: '', raw: r }),
             initialId:   null,           // for edit forms — pre-select by ID
             initialLabel: '',            // display text if initialId is given
-            loadInitial: true,           // fetch initial results on focus
+            loadInitial: true,           // fetch initial set (capped 20) on first focus
+            initialPerPage: 20,          // max rows in the initial-open list
         }, config || {}),
 
         // ── State ──────────────────────────────────────────────────────
-        query:        '',
-        results:      [],
-        selected:     null,
-        loading:      false,
-        showDropdown: false,
-        highlightIdx: 0,
-        _searchTimer: null,
+        query:           '',
+        results:         [],
+        selected:        null,
+        loading:         false,
+        showDropdown:    false,
+        highlightIdx:    0,
+        _searchTimer:    null,
+        _initialLoaded:  false, // avoid re-fetching initial set on every focus
 
         init() {
             // Pre-fill if editing an existing record
@@ -3178,6 +3180,37 @@ function FF_RecordPicker(config) {
             this.loading = false;
         },
 
+        // Fetch an initial set (capped) on focus/chevron-click so the dropdown
+        // opens immediately without requiring the user to type first.
+        // WHY: without this, the picker looks like a blank text input — nothing
+        // signals it can be clicked to browse options. Capped at initialPerPage
+        // (default 20) to keep the initial render fast on large datasets.
+        async fetchInitial() {
+            if (this._initialLoaded) {
+                // Results already cached from a prior focus — just show them.
+                if (this.results.length > 0) this.showDropdown = true;
+                return;
+            }
+            this.loading      = true;
+            this.showDropdown = true;
+            try {
+                // Always include extraParams (e.g. status filters) + empty search
+                // so the result set is correctly scoped even on initial load.
+                let url = FF_Api.url(this._cfg.endpoint) +
+                          '?' + this._cfg.searchParam + '=&per_page=' + this._cfg.initialPerPage;
+                if (this._cfg.extraParams) url += '&' + this._cfg.extraParams;
+
+                const data  = await FF_Api.get(url);
+                const items = data.data?.[this._cfg.resultKey] || data.data || [];
+                this.results         = Array.isArray(items) ? items.map(r => this._cfg.mapResult(r)) : [];
+                this._initialLoaded  = true;
+                this.highlightIdx    = 0;
+            } catch (e) {
+                this.results = [];
+            }
+            this.loading = false;
+        },
+
         onInput() {
             // Debounce search by 200ms
             clearTimeout(this._searchTimer);
@@ -3189,8 +3222,31 @@ function FF_RecordPicker(config) {
         },
 
         onFocus() {
-            if (this.results.length > 0) this.showDropdown = true;
-            else if (this.query.trim() !== '') this.search();
+            if (this.selected) return; // already picked — don't re-open
+            if (this.results.length > 0) {
+                this.showDropdown = true; // re-show cached results
+            } else if ((this.query || '').trim() !== '') {
+                this.search();           // resume mid-type search
+            } else if (this._cfg.loadInitial) {
+                this.fetchInitial();     // open-on-focus: load initial set
+            }
+        },
+
+        // Chevron click: toggle the dropdown open/closed.
+        onChevronClick() {
+            if (this.showDropdown) {
+                this.showDropdown = false;
+            } else {
+                if (this.results.length > 0) {
+                    this.showDropdown = true;
+                } else if ((this.query || '').trim() !== '') {
+                    this.search();
+                } else if (this._cfg.loadInitial) {
+                    this.fetchInitial();
+                }
+                // Bring focus to the input so keyboard nav works after click
+                this.$el.querySelector('input')?.focus();
+            }
         },
 
         onBlur() {

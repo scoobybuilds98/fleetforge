@@ -3823,6 +3823,7 @@ CREATE TABLE `users` (
   `slack_user_id` varchar(50) DEFAULT NULL COMMENT 'Slack user ID (UXXXXXXXX) for DM delivery. Without this, Slack channel posts to webhook channel.',
   `phone_e164` varchar(32) DEFAULT NULL COMMENT 'E.164-formatted phone number for SMS dispatch (e.g. +14155551212). Distinct from users.phone (free-form display).',
   `weekly_brief_opt_in` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'D-INTEL-V2-7: per-user weekly digest opt-in. Independent of morning_briefing_opt_in. Default 0 — opt-in.',
+  `notification_preferences` json DEFAULT NULL COMMENT 'JSON array of category slugs the user has opted OUT of. NULL = receive all.',
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`),
   UNIQUE KEY `auth0_sub` (`auth0_sub`),

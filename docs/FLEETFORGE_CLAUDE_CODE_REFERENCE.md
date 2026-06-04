@@ -2911,6 +2911,58 @@ Help guides are static markdown files and PHP view files — no schema changes, 
 
 ---
 
+## 16. ENTITY PICKER PATTERN — canonical FK selector for forms
+
+**S-PICKER-DISCOVERABILITY (2026-06-04)** retrofitted the existing picker components with chevron + open-on-focus affordance.
+
+### Canonical components
+
+Two shared components handle all FK entity-selection on forms. Use these — never a raw `<select>` for an entity with more than ~10 rows or that grows over time.
+
+**FF_RecordPicker** (`includes/partials/record-picker.php`)  
+For entities with a search API endpoint (customers, invoices, leases, payments, vendors, equipment units).
+
+```php
+$pickerConfig   = [
+    'endpoint'    => '/api/v1/customers/index.php',
+    'searchParam' => 'search',
+    'resultKey'   => 'items',
+    'perPage'     => 15,
+    'placeholder' => 'Search or select a customer…',
+    'mapResult'   => "r => ({ id: r.id, label: r.company_name, sublabel: r.city })",
+    // optional:
+    'extraParams' => 'status=active', // scopes the list
+    'initialId'   => (int)$row['customer_id'],
+    'initialLabel'=> e($row['company_name']),
+    'loadInitial' => true,    // true (default) = load first 20 on focus/click
+    'initialPerPage' => 20,   // cap for the open-on-focus list (large datasets)
+];
+$pickerOnPicked  = "form.customer_id = \$event.detail.id; onCustomerChange(\$event.detail.raw)";
+$pickerOnCleared = "form.customer_id = ''";
+require FF_ROOT . '/includes/partials/record-picker.php';
+```
+
+Behavior: chevron visible when nothing selected; clicking chevron or focusing the input fetches the first 20 results immediately; typing filters from there.
+
+**FF_LookupPicker** (`includes/partials/pickers/lookup_picker.php`)  
+For accounting entities (GL accounts, CCA classes) where a **manual-ID fallback** is needed. Same search-on-type behavior + "Manual" toggle button for power users who know the ID.
+
+### Large-list capping rule (D-PICKER-DISCOVERABLE)
+
+`loadInitial: true` (default) fires a capped fetch (`initialPerPage: 20`) on first focus. This prevents dumping hundreds of rows into the DOM on open. Once the user types, the normal search endpoint returns filtered results without the per-page cap.
+
+If a specific entity can have hundreds of rows and an open-on-focus list would be confusing (e.g. all invoices ever), set `loadInitial: false` — the dropdown will only open after the user types.
+
+### Retrofit guidance (38 `<select>` fields remaining)
+
+See `docs/FORM_ENTITY_SELECTOR_AUDIT.md` for the full field-by-field list. When converting a `<select>` to FF_RecordPicker:
+1. The API endpoint must accept the `searchParam` as a query filter.
+2. Keep `extraParams` to scope the list (e.g. `status=active`).
+3. Pass `initialId` + `initialLabel` on edit forms so the selection pre-fills.
+4. If the entity stores a **name string instead of a numeric FK** (flagged ⚠️ M in the audit), normalise storage to a numeric ID at the same time.
+
+---
+
 ## 14. SESSION CHECKLIST — Do this at the END of every session
 
 1. Mark touched items ✅ or 🔄 in FLEETFORGE_PROGRESS.md

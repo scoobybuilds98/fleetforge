@@ -72,6 +72,7 @@ $_errorExpr  = $pickerError      ?? '';
            @keydown="handleKey($event)"
            autocomplete="off">
 
+    <!-- Clear button: visible once something is selected -->
     <button type="button"
             class="ff-picker-clear"
             x-show="selected"
@@ -79,12 +80,33 @@ $_errorExpr  = $pickerError      ?? '';
             @click="clear()"
             aria-label="Clear selection">✕</button>
 
+    <!-- Chevron: visible when nothing is selected — signals "this is a picker" -->
+    <button type="button"
+            class="ff-picker-chevron"
+            :class="{ 'is-open': showDropdown }"
+            x-show="!selected"
+            x-cloak
+            @mousedown.prevent="onChevronClick()"
+            tabindex="-1"
+            aria-hidden="true"
+            aria-label="Open options">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 9l6 6 6-6"/>
+        </svg>
+    </button>
+
     <div class="ff-picker-dropdown"
          x-show="showDropdown"
          x-cloak
          x-transition.opacity.duration.100ms>
 
         <div class="ff-picker-loading" x-show="loading" x-cloak>Searching…</div>
+
+        <!-- Hint shown when dropdown opens before the user types -->
+        <div class="ff-picker-hint"
+             x-show="!loading && results.length === 0 && !query">
+            Start typing to search, or scroll to browse.
+        </div>
 
         <template x-for="(r, i) in results" :key="r.id">
             <div class="ff-picker-option"
@@ -96,8 +118,8 @@ $_errorExpr  = $pickerError      ?? '';
             </div>
         </template>
 
-        <div class="ff-picker-empty" x-show="!loading && results.length === 0 && query.length > 0">
-            No matches found.
+        <div class="ff-picker-empty" x-show="!loading && results.length === 0 && query">
+            No matches found for "<span x-text="query"></span>".
         </div>
     </div>
 </div>
