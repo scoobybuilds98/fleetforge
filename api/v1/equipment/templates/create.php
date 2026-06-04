@@ -45,7 +45,7 @@ if (!$name) {
 }
 
 $validCategories = ['chassis','dry_van','reefer','container','flatbed',
-                    'step_deck','lowboy','tanker','dump','other'];
+                    'step_deck','lowboy','tanker','dump','combo','other'];
 $category = clean_string($body['category'] ?? null);
 if (!$category) {
     $fields['category'] = 'Please select a category.';

@@ -41,7 +41,7 @@ $perPage  = min(100, max(1, clean_int($_GET['per_page'] ?? 25) ?? 25));
 
 // ── Validate enum filters ──────────────────────────────────────
 $validCategories = ['chassis','dry_van','reefer','container','flatbed',
-                    'step_deck','lowboy','tanker','dump','other'];
+                    'step_deck','lowboy','tanker','dump','combo','other'];
 if ($category !== null && !in_array($category, $validCategories, true)) {
     $category = null;
 }

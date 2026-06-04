@@ -104,7 +104,7 @@ if (isset($body['name'])) {
 
 if (isset($body['category'])) {
     $validCategories = ['chassis','dry_van','reefer','container','flatbed',
-                        'step_deck','lowboy','tanker','dump','other'];
+                        'step_deck','lowboy','tanker','dump','combo','other'];
     $cat = clean_string($body['category']);
     if (!in_array($cat, $validCategories, true)) {
         $fields['category'] = 'Please select a valid category.';
