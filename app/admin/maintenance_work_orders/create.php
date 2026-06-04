@@ -25,20 +25,26 @@ require_permission('maintenance', 'create');
 // Pre-populate unit if coming from equipment profile
 $prefilledUnitId = clean_int($_GET['unit_id'] ?? null);
 
-// Load equipment units for dropdown (unit_number + year + brand + model).
-// [SELECTOR-1] Also pull status so the option label can show
-// "· AVAILABLE / · ON LEASE / · MAINTENANCE" inline, and so the
-// template can disable rows that ff_unit_is_selectable() rejects.
-// Service-context rule: block decommissioned + inactive only — a
-// leased or in-maintenance unit still needs WOs.
-$units = db_select(
-    "SELECT eu.id, eu.unit_number, eu.status, eu.year, et.brand, et.model
-     FROM equipment_units eu
-     LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
-     WHERE eu.deleted_at IS NULL
-     ORDER BY (eu.status IN ('available','on_lease','reserved','maintenance')) DESC,
-              eu.unit_number ASC"
-);
+// S-DROPDOWN-RETROFIT-2: Equipment Unit uses FF_RecordPicker.
+// Pre-load label for ?unit_id=N so picker shows the correct selected state.
+$preUnitLabel = null;
+if ($prefilledUnitId) {
+    $preUnit = db_row(
+        "SELECT eu.id, eu.unit_number, et.name AS template_name
+         FROM equipment_units eu
+         LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+         WHERE eu.id = ? AND eu.deleted_at IS NULL",
+        [$prefilledUnitId]
+    );
+    if ($preUnit) {
+        $preUnitLabel = $preUnit['unit_number'];
+        if ($preUnit['template_name']) {
+            $preUnitLabel .= ' — ' . $preUnit['template_name'];
+        }
+    } else {
+        $prefilledUnitId = null;
+    }
+}
 
 // Load vendors for dropdown
 $vendors = db_select(
@@ -81,25 +87,30 @@ require_once FF_ROOT . '/includes/header.php';
             <h3 class="form-section-title">Equipment & Vendor</h3>
 
             <div class="form-row-2">
+                <!-- D-DROPDOWN-RETROFIT-PATTERN: Equipment Unit uses FF_RecordPicker.
+                     Service context — leased/maintenance units can have WOs. -->
                 <div class="form-group">
-                    <label class="form-label" for="equipment_unit_id">
+                    <label class="form-label">
                         Equipment Unit <span class="text-danger">*</span>
                     </label>
-                    <select id="equipment_unit_id"
-                            name="equipment_unit_id"
-                            class="form-select"
-                            x-model="form.equipment_unit_id">
-                        <option value="">— Select Unit —</option>
-                        <?php foreach ($units as $unit): ?>
-                        <?php // [SELECTOR-1] service context: decommissioned/inactive disabled, others allowed. ?>
-                        <option value="<?= e($unit['id']) ?>"
-                                data-status="<?= e($unit['status']) ?>"
-                                <?= ff_unit_is_selectable($unit['status'], 'service') ? '' : 'disabled' ?>>
-                            <?= e(ff_unit_selector_label($unit)) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div class="form-hint">Decommissioned and inactive units cannot be serviced.</div>
+                    <?php
+                    $pickerConfig   = [
+                        'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                        'searchParam' => 'search',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search by unit number or type…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.unit_number + (r.template_name ? ' — ' + r.template_name : ''), sublabel: r.status.toUpperCase() + (r.yard_location ? ' · ' + r.yard_location : ''), raw: r })",
+                    ];
+                    if ($prefilledUnitId && $preUnitLabel) {
+                        $pickerConfig['initialId']    = (int) $prefilledUnitId;
+                        $pickerConfig['initialLabel'] = $preUnitLabel;
+                    }
+                    $pickerOnPicked  = 'form.equipment_unit_id = $event.detail.id';
+                    $pickerOnCleared = "form.equipment_unit_id = ''";
+                    $pickerError     = 'false';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                     <div class="field-error" data-error-for="equipment_unit_id"></div>
                 </div>
 

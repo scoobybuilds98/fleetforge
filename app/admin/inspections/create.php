@@ -24,19 +24,33 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('inspections', 'create');
 
-// ── Load equipment units for dropdown
-// [SELECTOR-1] Pull status so we can show it inline in the option
-// label and disable rows that ff_unit_is_selectable() rejects in
-// the SERVICE context (decommissioned + inactive). A leased / in-
-// maintenance unit can still be inspected, so it stays selectable.
-$units = db_select(
-    "SELECT eu.id, eu.unit_number, eu.status, eu.year, et.brand, et.model
-     FROM equipment_units eu
-     LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
-     WHERE eu.deleted_at IS NULL
-     ORDER BY (eu.status IN ('available','on_lease','reserved','maintenance')) DESC,
-              eu.unit_number ASC"
-);
+// ── Pre-populate from query params
+$preUnitId  = clean_int($_GET['unit_id']  ?? null);
+$preLeaseId = clean_int($_GET['lease_id'] ?? null);
+$preType    = clean_string($_GET['type']  ?? null);
+$validPreTypes = ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance'];
+if (!in_array($preType, $validPreTypes, true)) $preType = 'pre_lease';
+
+// S-DROPDOWN-RETROFIT-2: Equipment Unit uses FF_RecordPicker.
+// Pre-load label for ?unit_id=N so picker shows the correct selected state.
+$preUnitLabel = null;
+if ($preUnitId) {
+    $preUnit = db_row(
+        "SELECT eu.id, eu.unit_number, et.name AS template_name
+         FROM equipment_units eu
+         LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+         WHERE eu.id = ? AND eu.deleted_at IS NULL",
+        [$preUnitId]
+    );
+    if ($preUnit) {
+        $preUnitLabel = $preUnit['unit_number'];
+        if ($preUnit['template_name']) {
+            $preUnitLabel .= ' — ' . $preUnit['template_name'];
+        }
+    } else {
+        $preUnitId = null;
+    }
+}
 
 // ── Load active/pending leases for optional lease linkage
 $leases = db_select(
@@ -51,13 +65,6 @@ $leases = db_select(
 $users = db_select(
     "SELECT id, name FROM users WHERE deleted_at IS NULL ORDER BY name ASC"
 );
-
-// ── Pre-populate from query params
-$preUnitId  = clean_int($_GET['unit_id']  ?? null);
-$preLeaseId = clean_int($_GET['lease_id'] ?? null);
-$preType    = clean_string($_GET['type']  ?? null);
-$validPreTypes = ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance'];
-if (!in_array($preType, $validPreTypes, true)) $preType = 'pre_lease';
 
 $pageTitle = 'New Inspection';
 $helpModuleSlug = 'inspections';
@@ -87,21 +94,28 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- Equipment Unit + Inspection Type -->
         <div class="form-row-2">
+            <!-- D-DROPDOWN-RETROFIT-PATTERN: Equipment Unit uses FF_RecordPicker.
+                 Service context — leased/maintenance units can be inspected. -->
             <div class="form-group">
                 <label class="form-label">Equipment Unit <span class="text-danger">*</span></label>
-                <select class="form-control" :class="errors.equipment_unit_id ? 'is-invalid' : ''"
-                        x-model="form.equipment_unit_id" required>
-                    <option value="">— Select unit —</option>
-                    <?php foreach ($units as $u): ?>
-                    <?php // [SELECTOR-1] service context — only decommissioned/inactive disabled. ?>
-                    <option value="<?= e($u['id']) ?>"
-                            data-status="<?= e($u['status']) ?>"
-                            <?= ff_unit_is_selectable($u['status'], 'service') ? '' : 'disabled' ?>>
-                        <?= e(ff_unit_selector_label($u)) ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-                <div class="form-hint">Decommissioned and inactive units cannot be inspected.</div>
+                <?php
+                $pickerConfig   = [
+                    'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                    'searchParam' => 'search',
+                    'resultKey'   => 'items',
+                    'perPage'     => 10,
+                    'placeholder' => 'Search by unit number or type…',
+                    'mapResult'   => "r => ({ id: r.id, label: r.unit_number + (r.template_name ? ' — ' + r.template_name : ''), sublabel: r.status.toUpperCase() + (r.yard_location ? ' · ' + r.yard_location : ''), raw: r })",
+                ];
+                if ($preUnitId && $preUnitLabel) {
+                    $pickerConfig['initialId']    = (int) $preUnitId;
+                    $pickerConfig['initialLabel'] = $preUnitLabel;
+                }
+                $pickerOnPicked  = 'form.equipment_unit_id = $event.detail.id';
+                $pickerOnCleared = 'form.equipment_unit_id = null';
+                $pickerError     = 'false';
+                require FF_ROOT . '/includes/partials/record-picker.php';
+                ?>
                 <div class="field-error" x-show="errors.equipment_unit_id" x-text="errors.equipment_unit_id" x-cloak></div>
             </div>
             <div class="form-group">

@@ -19,20 +19,28 @@ require_permission('maintenance', 'create');
 $preUnitId  = clean_int($_GET['equipment_unit_id'] ?? null);
 $preLeaseId = clean_int($_GET['lease_id'] ?? null);
 
-// ── Load active equipment units for dropdown (joins template for label)
-//    [SELECTOR-1] Pull status so the option can show it inline and
-//    rows can be disabled via the SERVICE-context predicate. A leased
-//    or in-maintenance unit can absolutely have an odometer reading
-//    recorded — only decommissioned + inactive are blocked.
-$units = db_select(
-    "SELECT eu.id, eu.unit_number, eu.status, et.brand, et.model
-     FROM equipment_units eu
-     JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
-     WHERE eu.deleted_at IS NULL
-     ORDER BY (eu.status IN ('available','on_lease','reserved','maintenance')) DESC,
-              eu.unit_number ASC",
-    []
-);
+// S-DROPDOWN-RETROFIT-2: Equipment Unit uses FF_RecordPicker.
+// This form uses vanilla JS (not Alpine), so the picker updates a hidden
+// <input id="equipment_unit_id"> that the validation + FormData reads from.
+// Pre-load label for ?equipment_unit_id=N so the picker shows the correct state.
+$preUnitLabel = null;
+if ($preUnitId) {
+    $preUnit = db_row(
+        "SELECT eu.id, eu.unit_number, et.name AS template_name
+         FROM equipment_units eu
+         LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+         WHERE eu.id = ? AND eu.deleted_at IS NULL",
+        [$preUnitId]
+    );
+    if ($preUnit) {
+        $preUnitLabel = $preUnit['unit_number'];
+        if ($preUnit['template_name']) {
+            $preUnitLabel .= ' — ' . $preUnit['template_name'];
+        }
+    } else {
+        $preUnitId = null;
+    }
+}
 
 // ── Load active leases for dropdown (only active ones make sense for mileage)
 $leases = db_select(
@@ -76,24 +84,34 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <form id="mileage-form" novalidate>
             <!-- Unit + Lease row -->
             <div class="form-row-2">
-                <!-- Equipment Unit -->
+                <!-- Equipment Unit — D-DROPDOWN-RETROFIT-PATTERN: FF_RecordPicker.
+                     This form uses vanilla JS. The picker updates a hidden input
+                     (id="equipment_unit_id") that the validation and FormData read.
+                     Service context — leased/maintenance units can have mileage readings. -->
                 <div class="form-group">
                     <label class="form-label" for="equipment_unit_id">Equipment Unit <span style="color:var(--danger);">*</span></label>
-                    <select class="form-control" id="equipment_unit_id" name="equipment_unit_id" required>
-                        <option value="">— Select unit —</option>
-                        <?php foreach ($units as $u): ?>
-                        <?php // [SELECTOR-1] service context — only decommissioned/inactive disabled. ?>
-                        <option value="<?= e($u['id']) ?>"
-                                data-status="<?= e($u['status']) ?>"
-                                <?= ($preUnitId === (int)$u['id']) ? 'selected' : '' ?>
-                                <?= ff_unit_is_selectable($u['status'], 'service') ? '' : 'disabled' ?>>
-                            <?= e(ff_unit_selector_label($u)) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
-                        Decommissioned and inactive units cannot have new readings.
-                    </div>
+                    <?php
+                    $pickerConfig   = [
+                        'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                        'searchParam' => 'search',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search by unit number or type…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.unit_number + (r.template_name ? ' — ' + r.template_name : ''), sublabel: r.status.toUpperCase() + (r.yard_location ? ' · ' + r.yard_location : ''), raw: r })",
+                    ];
+                    if ($preUnitId && $preUnitLabel) {
+                        $pickerConfig['initialId']    = (int) $preUnitId;
+                        $pickerConfig['initialLabel'] = $preUnitLabel;
+                    }
+                    // WHY plain document.getElementById: this form is vanilla JS (not Alpine).
+                    // The hidden input below carries the FK value that validation + FormData reads.
+                    $pickerOnPicked  = "document.getElementById('equipment_unit_id').value = \$event.detail.id";
+                    $pickerOnCleared = "document.getElementById('equipment_unit_id').value = ''";
+                    $pickerError     = 'false';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
+                    <input type="hidden" id="equipment_unit_id" name="equipment_unit_id"
+                           value="<?= e((string)($preUnitId ?? '')) ?>">
                     <div class="field-error" id="err-equipment_unit_id"></div>
                 </div>
 

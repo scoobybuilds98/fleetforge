@@ -199,11 +199,10 @@ When the picker's API doesn't return all the data the handler needs (e.g., compl
 | Batch | Session | Status | Fields converted |
 |-------|---------|--------|-----------------|
 | 1 — Leases + Invoices | S-DROPDOWN-RETROFIT-1-LEASES-INVOICES | ✅ DONE | Customer (leases/create), Equipment Unit (leases/create), Lease (invoices/create) — 3/38 |
-| 2 — Maintenance / Inspections / Mileage | TBD | — | Equipment Unit, Lease, Vendor, Inspector — ~6 fields |
-| 3 — Accounting (per-line pickers) | TBD | — | GL Account (bills, JEs, recurring, bank accts) — ~8 fields |
-| 4 — Remaining | TBD | — | Damage Claims, Equipment Create, QBO Mapping UI — remaining |
+| 2 — Equipment Unit (4 forms) | S-DROPDOWN-RETROFIT-2-EQUIPMENT | ✅ DONE | Equipment Unit on Damage Claims/Create, Maintenance WOs/Create, Inspections/Create, Mileage Logs/Create — 4 fields; vanilla-JS hidden-input bridge for Mileage Logs — 7/38 |
+| 3 — Remaining selector fields | TBD | — | Lease + Inspector User (inspections); Lease + Equipment (mileage); Vendor + Assigned To (WOs/Damage Claims); Customer fields on various forms; Equipment Create yard; QBO Mapping; Accounting per-line pickers |
 
-*Total: 38 selector-only fields. 3 converted (this batch). 35 remaining.*
+*Total: 38 selector-only fields. 7 converted. 31 remaining.*
 
 ---
 
