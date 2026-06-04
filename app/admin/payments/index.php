@@ -5,14 +5,15 @@ declare(strict_types=1);
  * app/admin/payments/index.php
  *
  * Payments list page with KPI summary tiles (total collected this month,
- * total AR outstanding, overdue count) and a paginated, searchable table
- * with status filter. Data fetched via Alpine.js from api/v1/payments/index.php.
+ * total AR outstanding, overdue count) and a paginated, searchable, bulk-selectable
+ * table with status filter and sort dropdown. Data fetched via Alpine.js from
+ * api/v1/payments/index.php.
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  * @spec     FLEETFORGE_SPEC_FINAL.md §7.8 Payments
  * @decisions D30 (asset_url), D32 (CSS classes verified in app.css),
  *            D5/D13 (soft-delete filter in API), Permission matrix: dispatcher has no access
- * @session  S009
+ * @session  S009, S-BULK-PAYMENTS
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -164,11 +165,59 @@ require_once FF_ROOT . '/includes/header.php';
             <option value="returned">Returned</option>
         </select>
 
+        <!-- Sort field dropdown -->
+        <select class="form-input" style="width:180px;" x-model="sort" @change="resetAndLoad()">
+            <optgroup label="Date">
+                <option value="payment_date">Payment Date</option>
+                <option value="created_at">Created At</option>
+                <option value="updated_at">Updated At</option>
+            </optgroup>
+            <optgroup label="Amount">
+                <option value="amount">Amount</option>
+            </optgroup>
+            <optgroup label="Reference">
+                <option value="payment_number">Payment #</option>
+                <option value="payment_method">Method</option>
+            </optgroup>
+            <optgroup label="Customer">
+                <option value="company_name">Customer</option>
+            </optgroup>
+            <optgroup label="Status">
+                <option value="status">Status</option>
+            </optgroup>
+        </select>
+
+        <!-- Sort direction -->
+        <select class="form-input" style="width:auto;" x-model="dir" @change="resetAndLoad()">
+            <option value="ASC">↑ Asc</option>
+            <option value="DESC">↓ Desc</option>
+        </select>
+
         <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
 
         <span class="text-muted" style="font-size:0.85rem; margin-left:auto;" x-show="!loading">
             <span x-text="pagination.total"></span> payments
         </span>
+    </div>
+
+    <!-- Bulk action bar — shown when one or more rows are checked -->
+    <div x-show="selectedIds.length > 0"
+         x-transition:enter="ff-bulk-enter"
+         x-transition:enter-start="ff-bulk-enter-from"
+         x-transition:enter-end="ff-bulk-enter-to"
+         x-transition:leave="ff-bulk-leave"
+         x-transition:leave-start="ff-bulk-leave-from"
+         x-transition:leave-end="ff-bulk-leave-to"
+         class="ff-bulk-bar">
+        <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
+        <div class="ff-bulk-bar-sep"></div>
+        <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
+            <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+            Delete
+        </button>
+        <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()" title="Clear" aria-label="Clear selection">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+        </button>
     </div>
 
     <!-- Table -->
@@ -197,6 +246,9 @@ require_once FF_ROOT . '/includes/header.php';
             <table class="table" style="width:100%;">
                 <thead>
                     <tr>
+                        <th class="th-checkbox">
+                            <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
+                        </th>
                         <th @click="setSort('payment_number')" style="cursor:pointer; white-space:nowrap;">
                             Payment #
                             <span x-show="sort === 'payment_number'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
@@ -218,7 +270,10 @@ require_once FF_ROOT . '/includes/header.php';
                 </thead>
                 <tbody>
                     <template x-for="row in rows" :key="row.id">
-                        <tr>
+                        <tr :class="{ 'ff-row-selected': selectedIds.includes(row.id) }">
+                            <td class="td-checkbox" @click.stop>
+                                <input type="checkbox" class="ff-checkbox" :checked="selectedIds.includes(row.id)" @change="toggleSelect(row.id)">
+                            </td>
                             <td>
                                 <a :href="'<?= base_url('/payments/show') ?>?id=' + row.id"
                                    class="link font-mono" x-text="row.payment_number"></a>
@@ -304,19 +359,30 @@ function paymentsKpis() {
 
 function FF_Payments() {
     return {
-        rows:       [],
-        loading:    true,
-        pagination: { total: 0, page: 1, per_page: 25, total_pages: 1, has_more: false },
-        sort:       'payment_date',
-        dir:        'DESC',
+        rows:        [],
+        loading:     true,
+        pagination:  { total: 0, page: 1, per_page: 25, total_pages: 1, has_more: false },
+        sort:        'payment_date',
+        dir:         'DESC',
         filters: {
             q:      '',
             status: '',
         },
+        // Bulk-select state
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
 
-        init() { this.load(); },
+        init() {
+            // Clear selection whenever the page changes (e.g. pagination)
+            this.$watch('pagination.page', () => this.clearSelection());
+            this.load();
+        },
 
         async load() {
+            // Clear stale selections on every data reload so the bar never
+            // shows IDs that are no longer in the current result set.
+            this.clearSelection();
             this.loading = true;
             const p = new URLSearchParams({
                 sort:    this.sort,
@@ -355,7 +421,78 @@ function FF_Payments() {
 
         resetFilters() {
             this.filters = { q: '', status: '' };
+            this.sort    = 'payment_date';
+            this.dir     = 'DESC';
             this.resetAndLoad();
+        },
+
+        // --- Bulk-select helpers ---
+
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else            this.selectedIds.splice(idx, 1);
+            this.selectAll = this.rows.length > 0 && this.selectedIds.length === this.rows.length;
+        },
+
+        toggleSelectAll() {
+            if (this.selectAll) {
+                this.selectedIds = [];
+                this.selectAll   = false;
+            } else {
+                this.selectedIds = this.rows.map(r => r.id);
+                this.selectAll   = true;
+            }
+        },
+
+        clearSelection() {
+            this.selectedIds = [];
+            this.selectAll   = false;
+        },
+
+        /** Bulk-delete: requires a free-text reason for the audit trail. */
+        async bulkDelete() {
+            if (!this.selectedIds.length || this.bulkWorking) return;
+            const count  = this.selectedIds.length;
+            // Payments require an audit reason — use askText instead of plain ask()
+            const reason = await FF_Confirm.askText({
+                title:        'Delete ' + count + ' payment' + (count === 1 ? '' : 's'),
+                message:      'Enter a reason for deletion (required for audit trail):',
+                confirmLabel: 'Delete payment' + (count === 1 ? '' : 's'),
+                placeholder:  'e.g. Entered in error, duplicate…',
+            });
+            if (!reason) return; // user cancelled or left reason blank
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/payments/bulk_delete') ?>', {
+                    ids:    this.selectedIds,
+                    reason: reason,
+                });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.actioned > 0) {
+                        FF_Toast.success(
+                            d.actioned + ' deleted' +
+                            (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.'
+                        );
+                    }
+                    if (d.errors?.length) {
+                        FF_Toast.error(
+                            d.errors.length + ' failed: ' +
+                            d.errors.slice(0, 3).map(e => e.reason).join('; ') +
+                            (d.errors.length > 3 ? '…' : '')
+                        );
+                    }
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk delete failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error.');
+            } finally {
+                this.bulkWorking = false;
+            }
         },
 
         // Badge class per design §9 Payment status colors

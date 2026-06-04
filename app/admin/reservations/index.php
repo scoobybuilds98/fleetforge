@@ -222,22 +222,30 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="toolbar-right">
 
             <!-- Sort -->
-            <select class="form-select" style="min-width:140px;"
+            <select class="form-select" style="min-width:160px;"
                     x-model="filters.sort"
                     @change="applyFilters()">
-                <option value="pickup_date">Sort: Pickup Date</option>
-                <option value="created_at">Sort: Created</option>
-                <option value="company_name">Sort: Company</option>
-                <option value="priority">Sort: Priority</option>
-                <option value="status">Sort: Status</option>
+                <optgroup label="Date">
+                    <option value="pickup_date">Pickup Date</option>
+                    <option value="created_at">Created</option>
+                    <option value="updated_at">Updated</option>
+                </optgroup>
+                <optgroup label="Customer">
+                    <option value="company_name">Company</option>
+                </optgroup>
+                <optgroup label="Reservation">
+                    <option value="status">Status</option>
+                    <option value="priority">Priority</option>
+                    <option value="quantity">Quantity</option>
+                </optgroup>
             </select>
 
             <!-- Direction -->
-            <select class="form-select" style="min-width:90px;"
+            <select class="form-select" style="width:auto;"
                     x-model="filters.dir"
                     @change="applyFilters()">
-                <option value="ASC">ASC</option>
-                <option value="DESC">DESC</option>
+                <option value="ASC">↑ Asc</option>
+                <option value="DESC">↓ Desc</option>
             </select>
 
             <!-- Clear -->
@@ -447,6 +455,32 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── CHASSIS IN (pending + confirmed) — hidden when Gantt active -->
     <div x-show="!ganttView">
+
+    <!-- ── BULK ACTION BAR ──────────────────────────────────────────
+         Shown whenever ≥1 row is selected across either table.
+         Uses the shared selectedIds array so it covers both In + Out.
+         ─────────────────────────────────────────────────────────── -->
+    <div x-show="selectedIds.length > 0"
+         x-transition:enter="ff-bulk-enter"
+         x-transition:enter-start="ff-bulk-enter-from"
+         x-transition:enter-end="ff-bulk-enter-to"
+         x-transition:leave="ff-bulk-leave"
+         x-transition:leave-start="ff-bulk-leave-from"
+         x-transition:leave-end="ff-bulk-leave-to"
+         class="ff-bulk-bar">
+        <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
+        <div class="ff-bulk-bar-sep"></div>
+        <?php if (can('reservations', 'delete')): ?>
+        <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
+            <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+            Delete
+        </button>
+        <?php endif; ?>
+        <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()" title="Clear" aria-label="Clear selection">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+        </button>
+    </div>
+
     <!-- ── CHASSIS IN (pending + confirmed) ───────────────────────── -->
     <div class="card" style="margin-bottom:24px;">
         <div class="card-header" style="display:flex;align-items:center;gap:10px;">
@@ -496,6 +530,12 @@ require_once FF_ROOT . '/includes/header.php';
                 <table class="table" aria-label="Chassis In — Pending and Confirmed Reservations">
                     <thead>
                         <tr>
+                            <th class="th-checkbox">
+                                <input type="checkbox" class="ff-checkbox"
+                                       :checked="inRows.length > 0 && inRows.every(r => selectedIds.includes(r.id))"
+                                       @change="toggleSelectAll('in')"
+                                       title="Select all (Chassis In)">
+                            </th>
                             <th scope="col" class="th-sortable" @click="setSort('id')">
                                 ID
                                 <span x-show="filters.sort === 'id'"
@@ -522,7 +562,15 @@ require_once FF_ROOT . '/includes/header.php';
                     <tbody>
                         <template x-for="r in inRows" :key="r.id">
                             <tr x-show="!quickStatus || r.status === quickStatus"
-                                :class="r.priority === 'urgent' ? 'row-highlight-danger' : (r.priority === 'high' ? 'row-highlight-warning' : '')">
+                                :class="[
+                                    r.priority === 'urgent' ? 'row-highlight-danger' : (r.priority === 'high' ? 'row-highlight-warning' : ''),
+                                    selectedIds.includes(r.id) ? 'ff-row-selected' : '',
+                                ]">
+                                <td class="td-checkbox" @click.stop>
+                                    <input type="checkbox" class="ff-checkbox"
+                                           :checked="selectedIds.includes(r.id)"
+                                           @change="toggleSelect(r.id)">
+                                </td>
                                 <td class="font-mono text-sm"
                                     :style="r.priority === 'urgent'
                                         ? 'border-left:3px solid var(--color-danger);padding-left:10px;'
@@ -686,6 +734,12 @@ require_once FF_ROOT . '/includes/header.php';
                 <table class="table" aria-label="Chassis Out — Completed Reservations">
                     <thead>
                         <tr>
+                            <th class="th-checkbox">
+                                <input type="checkbox" class="ff-checkbox"
+                                       :checked="outRows.length > 0 && outRows.every(r => selectedIds.includes(r.id))"
+                                       @change="toggleSelectAll('out')"
+                                       title="Select all (Chassis Out)">
+                            </th>
                             <th scope="col">ID</th>
                             <th scope="col">Contact</th>
                             <th scope="col">Company</th>
@@ -699,7 +753,12 @@ require_once FF_ROOT . '/includes/header.php';
                     </thead>
                     <tbody>
                         <template x-for="r in outRows" :key="r.id">
-                            <tr>
+                            <tr :class="{ 'ff-row-selected': selectedIds.includes(r.id) }">
+                                <td class="td-checkbox" @click.stop>
+                                    <input type="checkbox" class="ff-checkbox"
+                                           :checked="selectedIds.includes(r.id)"
+                                           @change="toggleSelect(r.id)">
+                                </td>
                                 <td class="font-mono text-sm">
                                     <a :href="'<?= base_url('reservations/show') ?>?id=' + r.id"
                                        class="link font-medium"
@@ -847,6 +906,14 @@ function FF_Reservations() {
         inPagination: {},
         outPagination:{},
 
+        // ── Bulk selection ───────────────────────────────────────
+        // WHY shared array: both In and Out tables live in the same
+        // Alpine component; one selectedIds array is simpler than two
+        // and the bulk-delete endpoint accepts IDs regardless of status.
+        selectedIds:  [],
+        selectAll:    false,
+        bulkWorking:  false,
+
         filters: {
             q:           '',
             pickup_date: '',
@@ -899,10 +966,80 @@ function FF_Reservations() {
             this.loadHeatmap();
         },
 
+        // ── Bulk select helpers ───────────────────────────────────
+        // WHY combined array: inRows + outRows share one selectedIds so
+        // the single bulk-bar covers both tables without duplicate state.
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else            this.selectedIds.splice(idx, 1);
+            const all = [...this.inRows, ...this.outRows];
+            this.selectAll = all.length > 0 && all.every(r => this.selectedIds.includes(r.id));
+        },
+
+        // tableHint: 'in' | 'out' | undefined — selects only that table's rows
+        // when called from a per-table "select all" header checkbox.
+        toggleSelectAll(tableHint) {
+            const rows = tableHint === 'out' ? this.outRows
+                       : tableHint === 'in'  ? this.inRows
+                       : [...this.inRows, ...this.outRows];
+            const allSelected = rows.length > 0 && rows.every(r => this.selectedIds.includes(r.id));
+            if (allSelected) {
+                // Deselect only this table's rows (leave the other table's selection intact)
+                const ids = rows.map(r => r.id);
+                this.selectedIds = this.selectedIds.filter(id => !ids.includes(id));
+            } else {
+                // Add this table's rows to the selection
+                rows.forEach(r => {
+                    if (!this.selectedIds.includes(r.id)) this.selectedIds.push(r.id);
+                });
+            }
+            const all = [...this.inRows, ...this.outRows];
+            this.selectAll = all.length > 0 && all.every(r => this.selectedIds.includes(r.id));
+        },
+
+        clearSelection() {
+            this.selectedIds = [];
+            this.selectAll   = false;
+        },
+
+        async bulkDelete() {
+            if (!this.selectedIds.length || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask(
+                'Delete ' + count + ' reservation' + (count === 1 ? '' : 's') + '? This cannot be undone.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post(
+                    '<?= base_url('api/v1/reservations/bulk_delete') ?>',
+                    { ids: this.selectedIds }
+                );
+                if (res.success) {
+                    const d = res.data;
+                    if (d.actioned > 0)
+                        FF_Toast.success(d.actioned + ' deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length)
+                        FF_Toast.error(d.errors.length + ' failed: ' + d.errors.slice(0, 3).map(e => e.reason).join('; ') + (d.errors.length > 3 ? '…' : ''));
+                    this.clearSelection();
+                    await this.loadAll();
+                    this.loadKpis();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk delete failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error.');
+            } finally {
+                this.bulkWorking = false;
+            }
+        },
+
         // ── Load both tables ─────────────────────────────────────
         async loadAll() {
             this.loading   = true;
             this.loadError = null;
+            this.clearSelection(); // Reset selection on every full reload
             await Promise.all([
                 this.loadIn(),
                 this.loadOut(),

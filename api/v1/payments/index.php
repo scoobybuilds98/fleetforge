@@ -24,8 +24,12 @@ require_auth_api();
 require_permission('payments', 'view');
 
 // --- Allowlisted sort columns (never trust user input for column names) ---
-$allowedSorts = ['created_at', 'payment_date', 'amount', 'status', 'payment_number', 'payment_method'];
+// company_name lives on the JOIN alias c, so it needs an explicit expression rather
+// than the bare p.{$sort} interpolation used for the rest.
+$allowedSorts = ['created_at', 'payment_date', 'amount', 'status', 'payment_number', 'payment_method', 'company_name', 'updated_at'];
+$sortMap = ['company_name' => 'c.company_name'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'payment_date';
+$sortExpr = $sortMap[$sort] ?? "p.{$sort}";
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 
 // --- Build WHERE from allowlisted filters ---
@@ -83,7 +87,7 @@ $rows = db_select(
      FROM payments p
      LEFT JOIN customers c ON c.id = p.customer_id AND c.deleted_at IS NULL
      WHERE {$whereSQL}
-     ORDER BY p.{$sort} {$dir}
+     ORDER BY {$sortExpr} {$dir}
      LIMIT {$perPage} OFFSET {$offset}",
     $params
 );

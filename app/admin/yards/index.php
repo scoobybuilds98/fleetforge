@@ -15,6 +15,10 @@ declare(strict_types=1);
  *              Layout: KPI tiles (server-rendered) + Alpine.js table with
  *              Create modal and Edit modal.
  *
+ *              Bulk actions: Activate and Deactivate (no bulk delete — yards
+ *              use soft is_active toggling). Sort dropdown with direction
+ *              selector passes sort/dir params to api/v1/yards/index.php.
+ *
  * @method      GET
  * @auth        Session required; require_permission('reservations','view')
  *              (S-YARDS-PERM-FIX 2026-05-19: realigned from 'settings' to
@@ -23,7 +27,8 @@ declare(strict_types=1);
  * @depends     config/app.php, includes/auth.php, includes/header.php,
  *              includes/footer.php, api/v1/yards/index.php,
  *              api/v1/yards/create.php, api/v1/yards/update.php,
- *              api/v1/yards/delete.php
+ *              api/v1/yards/delete.php, api/v1/yards/bulk_activate.php,
+ *              api/v1/yards/bulk_deactivate.php
  * @decisions   D19 (optimistic lock on edit), D32 (confirmed CSS classes only)
  * @session     S018-EXT
  */
@@ -136,7 +141,24 @@ require_once FF_ROOT . '/includes/header.php';
                 </button>
             </div>
 
-            <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
+            <!-- Sort controls -->
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
+                <select class="form-input form-input-sm" x-model="sort" @change="load()"
+                        style="width:auto;font-size:0.8125rem;">
+                    <optgroup label="Sort by">
+                        <option value="name">Name</option>
+                        <option value="is_active">Status</option>
+                        <option value="created_at">Created</option>
+                    </optgroup>
+                </select>
+                <select class="form-input form-input-sm" x-model="dir" @change="load()"
+                        style="width:auto;font-size:0.8125rem;">
+                    <option value="ASC">&#8593; Asc</option>
+                    <option value="DESC">&#8595; Desc</option>
+                </select>
+            </div>
+
+            <span class="text-secondary" style="font-size:0.875rem;"
                   x-text="filteredYards.length + ' yard' + (filteredYards.length === 1 ? '' : 's')"></span>
         </div>
 
@@ -167,12 +189,49 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
+        <!-- Bulk action bar -->
+        <div x-show="selectedIds.length > 0"
+             x-transition:enter="ff-bulk-enter"
+             x-transition:enter-start="ff-bulk-enter-from"
+             x-transition:enter-end="ff-bulk-enter-to"
+             x-transition:leave="ff-bulk-leave"
+             x-transition:leave-start="ff-bulk-leave-from"
+             x-transition:leave-end="ff-bulk-leave-to"
+             class="ff-bulk-bar">
+            <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
+            <div class="ff-bulk-bar-sep"></div>
+            <!-- Activate selected yards (re-enable) -->
+            <button class="ff-bulk-btn" style="color:var(--color-success);"
+                    @click="bulkActivate()" :disabled="bulkWorking">
+                Activate
+            </button>
+            <!-- Deactivate selected yards (soft delete via is_active=0) -->
+            <button class="ff-bulk-btn" style="color:var(--text-secondary);"
+                    @click="bulkDeactivate()" :disabled="bulkWorking">
+                Deactivate
+            </button>
+            <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()"
+                    title="Clear" aria-label="Clear selection">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
+                     stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <line x1="1" y1="1" x2="9" y2="9"/>
+                    <line x1="9" y1="1" x2="1" y2="9"/>
+                </svg>
+            </button>
+        </div>
+
         <!-- Table -->
         <template x-if="!loading && filteredYards.length > 0">
             <div class="table-wrapper">
                 <table class="table table-hover">
                     <thead>
                         <tr>
+                            <th class="th-checkbox">
+                                <input type="checkbox" class="ff-checkbox"
+                                       :checked="selectAll"
+                                       @change="toggleSelectAll()"
+                                       title="Select all">
+                            </th>
                             <th>Name</th>
                             <th>Location</th>
                             <th>Capacity</th>
@@ -185,7 +244,13 @@ require_once FF_ROOT . '/includes/header.php';
                     </thead>
                     <tbody>
                         <template x-for="yard in filteredYards" :key="yard.id">
-                            <tr :style="!yard.is_active ? 'opacity:0.65;' : ''">
+                            <tr :style="!yard.is_active ? 'opacity:0.65;' : ''"
+                                :class="{ 'ff-row-selected': selectedIds.includes(yard.id) }">
+                                <td class="td-checkbox" @click.stop>
+                                    <input type="checkbox" class="ff-checkbox"
+                                           :checked="selectedIds.includes(yard.id)"
+                                           @change="toggleSelect(yard.id)">
+                                </td>
                                 <td>
                                     <div class="font-medium" x-text="yard.name"></div>
                                     <div class="text-xs text-secondary" x-show="yard.notes"
@@ -489,6 +554,15 @@ function FF_YardsManager() {
         actionError:   '',
         actionSuccess: '',
 
+        // Sort state — mirrors api/v1/yards/index.php allowed sorts
+        sort: 'name',
+        dir:  'ASC',
+
+        // Bulk selection state
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
+
         // Create modal state
         createModal: {
             open:       false,
@@ -527,10 +601,18 @@ function FF_YardsManager() {
 
         // ── Load yards from API ───────────────────────────────────────
         async load() {
+            // WHY clearSelection: stale selections from a previous sort/filter
+            // pass wrong IDs to bulk actions after the list changes order.
+            this.clearSelection();
             this.loading = true;
             try {
                 // WHY all=1: we manage inactive yards here too
-                const res  = await fetch('<?= base_url('api/v1/yards/index.php') ?>?all=1');
+                const params = new URLSearchParams({
+                    all:  '1',
+                    sort: this.sort,
+                    dir:  this.dir,
+                });
+                const res  = await fetch('<?= base_url('api/v1/yards/index.php') ?>?' + params);
                 const data = await res.json();
                 if (data.success) {
                     this.yards = data.data?.yards ?? [];
@@ -541,6 +623,86 @@ function FF_YardsManager() {
                 this.actionError = 'Network error loading yards.';
             } finally {
                 this.loading = false;
+            }
+        },
+
+        // ── Bulk selection helpers ────────────────────────────────────
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else this.selectedIds.splice(idx, 1);
+            // WHY: keep selectAll checkbox in sync with manual row toggling
+            this.selectAll = this.filteredYards.length > 0 &&
+                             this.selectedIds.length === this.filteredYards.length;
+        },
+        toggleSelectAll() {
+            if (this.selectAll) {
+                this.selectedIds = [];
+                this.selectAll   = false;
+            } else {
+                this.selectedIds = this.filteredYards.map(y => y.id);
+                this.selectAll   = true;
+            }
+        },
+        clearSelection() {
+            this.selectedIds = [];
+            this.selectAll   = false;
+        },
+
+        // ── Bulk deactivate selected yards ────────────────────────────
+        async bulkDeactivate() {
+            if (!this.selectedIds.length || this.bulkWorking) return;
+            const confirmed = await FF_Confirm.ask(
+                'Deactivate ' + this.selectedIds.length + ' yard(s)?\n\n' +
+                'Yards with upcoming reservations will be skipped by the API.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post(
+                    '<?= base_url('api/v1/yards/bulk_deactivate') ?>',
+                    { ids: this.selectedIds }
+                );
+                if (res.success) {
+                    FF_Toast.success(res.data.actioned + ' deactivated.' +
+                        (res.data.skipped > 0 ? ' ' + res.data.skipped + ' skipped.' : ''));
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk deactivate failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error.');
+            } finally {
+                this.bulkWorking = false;
+            }
+        },
+
+        // ── Bulk activate selected yards ──────────────────────────────
+        async bulkActivate() {
+            if (!this.selectedIds.length || this.bulkWorking) return;
+            const confirmed = await FF_Confirm.ask(
+                'Activate ' + this.selectedIds.length + ' yard(s)?'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post(
+                    '<?= base_url('api/v1/yards/bulk_activate') ?>',
+                    { ids: this.selectedIds }
+                );
+                if (res.success) {
+                    FF_Toast.success(res.data.actioned + ' activated.' +
+                        (res.data.skipped > 0 ? ' ' + res.data.skipped + ' skipped.' : ''));
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk activate failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error.');
+            } finally {
+                this.bulkWorking = false;
             }
         },
 

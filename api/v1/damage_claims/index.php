@@ -81,7 +81,7 @@ if ($q = clean_string($_GET['q'] ?? null)) {
 // -----------------------------------------------------------------------
 // 2. Sort (allowlisted — never from raw user input)
 // -----------------------------------------------------------------------
-$allowedSorts = ['created_at', 'claim_number', 'status', 'severity', 'estimated_repair_cost'];
+$allowedSorts = ['created_at', 'updated_at', 'claim_number', 'status', 'severity', 'estimated_repair_cost', 'actual_repair_cost'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'created_at';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 

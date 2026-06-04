@@ -21,6 +21,9 @@ declare(strict_types=1);
  *           api/v1/rate_cards/, api/v1/customer_equipment_rates/
  * @decisions D5/D7/D19/D30/D32
  * @session  S019
+ *
+ * Bulk-select (rate cards tab only): selectedCardIds, bulkDeleteCards()
+ *   API: api/v1/rate_cards/bulk_delete
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -132,12 +135,55 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="1">Default Only</option>
                 </select>
 
+                <!-- Sort column -->
+                <select class="form-select form-select-sm"
+                        x-model="cardSort"
+                        @change="loadCards(1)">
+                    <option value="name">Name</option>
+                    <option value="effective_from">Effective From</option>
+                    <option value="effective_to">Effective To</option>
+                    <option value="is_active">Status</option>
+                    <option value="created_at">Created</option>
+                </select>
+
+                <!-- Sort direction -->
+                <select class="form-select form-select-sm" style="width:auto;"
+                        x-model="cardDir"
+                        @change="loadCards(1)">
+                    <option value="ASC">↑ Asc</option>
+                    <option value="DESC">↓ Desc</option>
+                </select>
+
                 <button class="btn btn-secondary btn-sm"
                         @click="cardFilters = {q:'',active:'',is_default:''}; loadCards(1)">Reset</button>
 
                 <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
                       x-text="cardTotal > 0 ? cardTotal + ' card' + (cardTotal === 1 ? '' : 's') : ''"></span>
             </div>
+
+            <!-- Bulk action bar (cards) — visible only when rows are selected -->
+            <?php if (can('rates', 'delete')): ?>
+            <div class="ff-bulk-bar"
+                 x-show="selectedCardIds.length > 0"
+                 x-transition:enter="ff-bulk-enter"
+                 x-transition:enter-start="ff-bulk-enter-from"
+                 x-transition:enter-end="ff-bulk-enter-to"
+                 x-transition:leave="ff-bulk-leave"
+                 x-transition:leave-start="ff-bulk-leave-from"
+                 x-transition:leave-end="ff-bulk-leave-to"
+                 x-cloak>
+                <span class="ff-bulk-bar-count"
+                      x-text="selectedCardIds.length + ' selected'"></span>
+                <span class="ff-bulk-bar-sep"></span>
+                <button class="ff-bulk-btn ff-bulk-btn-delete"
+                        :disabled="bulkWorking"
+                        @click="bulkDeleteCards()">
+                    <span x-text="bulkWorking ? 'Deleting…' : 'Delete selected'"></span>
+                </button>
+                <button class="ff-bulk-btn ff-bulk-btn-clear"
+                        @click="clearCardSelection()">Clear selection</button>
+            </div>
+            <?php endif; ?>
 
             <!-- Loading -->
             <div class="card-body" x-show="cardLoading" style="text-align:center;padding:32px;">
@@ -165,13 +211,20 @@ require_once FF_ROOT . '/includes/header.php';
                     <table class="table">
                         <thead>
                             <tr>
-                                <th @click="setCardSort('name')" style="cursor:pointer;">
-                                    Name <span x-text="cardSortIcon('name')"></span>
+                                <?php if (can('rates', 'delete')): ?>
+                                <th class="th-checkbox">
+                                    <!-- Select-all checkbox -->
+                                    <label class="ff-checkbox">
+                                        <input type="checkbox"
+                                               :checked="selectAllCards"
+                                               @change="toggleSelectAllCards()">
+                                        <span></span>
+                                    </label>
                                 </th>
+                                <?php endif; ?>
+                                <th>Name</th>
                                 <th>Items</th>
-                                <th @click="setCardSort('effective_from')" style="cursor:pointer;">
-                                    Effective From <span x-text="cardSortIcon('effective_from')"></span>
-                                </th>
+                                <th>Effective From</th>
                                 <th>Effective To</th>
                                 <th>Status</th>
                                 <th>Default</th>
@@ -181,7 +234,17 @@ require_once FF_ROOT . '/includes/header.php';
                         </thead>
                         <tbody>
                             <template x-for="row in cardRows" :key="row.id">
-                                <tr>
+                                <tr :class="selectedCardIds.includes(row.id) ? 'ff-row-selected' : ''">
+                                    <?php if (can('rates', 'delete')): ?>
+                                    <td class="td-checkbox">
+                                        <label class="ff-checkbox">
+                                            <input type="checkbox"
+                                                   :checked="selectedCardIds.includes(row.id)"
+                                                   @change="toggleSelectCard(row.id)">
+                                            <span></span>
+                                        </label>
+                                    </td>
+                                    <?php endif; ?>
                                     <td>
                                         <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
                                            class="link font-medium" x-text="row.name"></a>
@@ -397,14 +460,19 @@ function FF_RatesManager() {
         tab: 'cards',
 
         // ── Rate Cards tab
-        cardRows:       [],
-        cardTotal:      0,
-        cardPage:       1,
-        cardTotalPages: 1,
-        cardLoading:    false,
-        cardSort:       'effective_from',
-        cardDir:        'DESC',
-        cardFilters:    { q: '', active: '', is_default: '' },
+        cardRows:        [],
+        cardTotal:       0,
+        cardPage:        1,
+        cardTotalPages:  1,
+        cardLoading:     false,
+        cardSort:        'effective_from',
+        cardDir:         'DESC',
+        cardFilters:     { q: '', active: '', is_default: '' },
+
+        // ── Bulk-select (cards tab only)
+        selectedCardIds: [],  // array of selected rate_card IDs
+        selectAllCards:  false,
+        bulkWorking:     false,
 
         // ── Overrides tab
         ovRows:       [],
@@ -440,6 +508,10 @@ function FF_RatesManager() {
                 this.cardRows       = r.data?.items ?? [];
                 this.cardTotal      = r.data?.pagination?.total ?? 0;
                 this.cardTotalPages = r.data?.pagination?.total_pages ?? 1;
+                // Recalculate select-all state against the freshly loaded page.
+                this.selectAllCards =
+                    this.cardRows.length > 0 &&
+                    this.cardRows.every(r => this.selectedCardIds.includes(r.id));
             } catch (e) {
                 this.cardRows = [];
             } finally {
@@ -477,6 +549,67 @@ function FF_RatesManager() {
                 this.deleteCardModal.error = e.message || 'Delete failed.';
             } finally {
                 this.deleteCardModal.saving = false;
+            }
+        },
+
+        // ── Bulk select helpers (cards tab) ────────────────────────────────
+
+        /** Toggle a single card in/out of selectedCardIds. */
+        toggleSelectCard(id) {
+            const idx = this.selectedCardIds.indexOf(id);
+            if (idx === -1) {
+                this.selectedCardIds.push(id);
+            } else {
+                this.selectedCardIds.splice(idx, 1);
+            }
+            // Sync the select-all checkbox state.
+            this.selectAllCards =
+                this.cardRows.length > 0 &&
+                this.cardRows.every(r => this.selectedCardIds.includes(r.id));
+        },
+
+        /** Select or deselect every visible card on the current page. */
+        toggleSelectAllCards() {
+            if (this.selectAllCards) {
+                // Already all-selected — deselect the visible set.
+                const visibleIds = this.cardRows.map(r => r.id);
+                this.selectedCardIds = this.selectedCardIds.filter(
+                    id => !visibleIds.includes(id)
+                );
+                this.selectAllCards = false;
+            } else {
+                // Add all visible IDs that are not already selected.
+                this.cardRows.forEach(r => {
+                    if (!this.selectedCardIds.includes(r.id)) {
+                        this.selectedCardIds.push(r.id);
+                    }
+                });
+                this.selectAllCards = true;
+            }
+        },
+
+        /** Clear the entire selection and reset the select-all toggle. */
+        clearCardSelection() {
+            this.selectedCardIds = [];
+            this.selectAllCards  = false;
+        },
+
+        /** POST selected IDs to api/v1/rate_cards/bulk_delete, then reload. */
+        async bulkDeleteCards() {
+            if (!this.selectedCardIds.length) return;
+            if (!confirm(`Delete ${this.selectedCardIds.length} rate card(s)? This cannot be undone.`)) return;
+
+            this.bulkWorking = true;
+            try {
+                await FF_Api.post('<?= base_url('api/v1/rate_cards/bulk_delete') ?>', {
+                    ids: this.selectedCardIds,
+                });
+                this.clearCardSelection();
+                this.loadCards(this.cardPage);
+            } catch (e) {
+                alert(e.message || 'Bulk delete failed.');
+            } finally {
+                this.bulkWorking = false;
             }
         },
 

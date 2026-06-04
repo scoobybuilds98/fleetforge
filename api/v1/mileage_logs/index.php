@@ -25,7 +25,7 @@ require_auth_api();
 require_permission('maintenance', 'view');
 
 // ── Allowed sort columns (never allow raw user input in ORDER BY)
-$allowedSorts = ['log_date', 'odometer_reading', 'created_at'];
+$allowedSorts = ['log_date', 'odometer_reading', 'log_type', 'created_at'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'log_date';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 

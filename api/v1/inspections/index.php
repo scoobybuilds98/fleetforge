@@ -11,6 +11,8 @@ declare(strict_types=1);
  *   - Filters: status, inspection_type, equipment_unit_id, lease_id, date_from, date_to, q (notes search).
  *   - JOINs equipment_units + equipment_templates for unit_number/brand/model.
  *   - JOINs leases for contract_number.
+ *   - Sort allowlist: inspection_date, inspection_number, status, inspection_type,
+ *     created_at, updated_at, overall_condition, unit_number.
  *   - Sort allowlist prevents SQL injection.
  *
  * @method  GET
@@ -30,9 +32,12 @@ require_auth_api();
 require_permission('inspections', 'view');
 
 // ── Sort allowlist (never pass user input directly into SQL ORDER BY)
-$allowedSorts = ['inspection_date', 'inspection_number', 'status', 'inspection_type', 'created_at'];
+$allowedSorts = ['inspection_date', 'inspection_number', 'status', 'inspection_type', 'created_at',
+                 'updated_at', 'overall_condition', 'unit_number'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'inspection_date';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
+// unit_number is a JOIN alias from equipment_units — must not carry the i. table prefix
+$orderExpr = ($sort === 'unit_number') ? "$sort $dir" : "i.$sort $dir";
 
 // ── Build WHERE dynamically from allowlisted filters
 $where  = ['1=1'];
@@ -116,7 +121,7 @@ $rows = db_select(
      LEFT JOIN equipment_templates et ON et.id = eu.template_id   AND et.deleted_at IS NULL
      LEFT JOIN leases l             ON l.id  = i.lease_id         AND l.deleted_at IS NULL
      WHERE $whereSQL
-     ORDER BY i.$sort $dir
+     ORDER BY $orderExpr
      LIMIT $perPage OFFSET $offset",
     $params
 );

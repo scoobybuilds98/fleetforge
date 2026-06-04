@@ -8,7 +8,8 @@ declare(strict_types=1);
  *
  * Filters: status, work_type, priority, equipment_unit_id, vendor_id,
  *          date_from, date_to (on requested_date), q (LIKE on title/WO#).
- * Sort allowlist: requested_date, total_cost, work_order_number, status, priority.
+ * Sort allowlist: requested_date, total_cost, work_order_number, status, priority,
+ *                  completed_date, scheduled_date, updated_at, vendor_name.
  * Default sort: requested_date DESC.
  *
  * SOFT_DELETE: maintenance_work_orders has deleted_at — always AND mwo.deleted_at IS NULL.
@@ -97,9 +98,12 @@ if ($q = clean_string($_GET['q'] ?? null)) {
 // -----------------------------------------------------------------------
 // 2. Sort — allowlisted
 // -----------------------------------------------------------------------
-$allowedSorts = ['requested_date', 'total_cost', 'work_order_number', 'status', 'priority'];
+$allowedSorts = ['requested_date', 'total_cost', 'work_order_number', 'status', 'priority',
+                 'completed_date', 'scheduled_date', 'updated_at', 'vendor_name'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'requested_date';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
+// vendor_name is a JOIN alias — must reference it without the mwo. table prefix
+$orderExpr = ($sort === 'vendor_name') ? "$sort $dir" : "mwo.$sort $dir";
 
 // -----------------------------------------------------------------------
 // 3. Pagination
@@ -132,7 +136,7 @@ $rows = db_select(
      LEFT JOIN vendors v ON v.id = mwo.vendor_id AND v.deleted_at IS NULL
      LEFT JOIN users u ON u.id = mwo.assigned_to AND u.deleted_at IS NULL
      WHERE $whereSQL
-     ORDER BY mwo.$sort $dir
+     ORDER BY $orderExpr
      LIMIT $perPage OFFSET $offset",
     $params
 );

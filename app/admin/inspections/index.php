@@ -10,6 +10,7 @@ declare(strict_types=1);
  * KPI tiles: Total, Draft, Complete, Signed This Month.
  * Filters: status, inspection_type, q (search).
  * Default sort: inspection_date DESC.
+ * Bulk actions: bulk delete (hard delete — permanent).
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/inspections/index.php
@@ -129,8 +130,48 @@ require_once FF_ROOT . '/includes/header.php';
 
         <button class="btn btn-sm btn-ghost" @click="clearFilters()">Clear</button>
 
-        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
+        <div style="display:flex;gap:6px;align-items:center;margin-left:auto;">
+            <select class="form-control form-control-sm" style="width:180px;"
+                    x-model="sort" @change="page=1; loadInspections()">
+                <optgroup label="Date">
+                    <option value="inspection_date">Date</option>
+                    <option value="created_at">Created</option>
+                    <option value="updated_at">Updated</option>
+                </optgroup>
+                <optgroup label="Number">
+                    <option value="inspection_number">Inspection #</option>
+                </optgroup>
+                <optgroup label="Type &amp; Status">
+                    <option value="inspection_type">Type</option>
+                    <option value="status">Status</option>
+                    <option value="overall_condition">Condition</option>
+                </optgroup>
+            </select>
+            <select class="form-control form-control-sm" style="width:auto;"
+                    x-model="dir" @change="page=1; loadInspections()">
+                <option value="ASC">↑ Asc</option>
+                <option value="DESC">↓ Desc</option>
+            </select>
+        </div>
+
+        <span class="text-secondary" style="font-size:0.875rem;"
               x-text="total + ' result' + (total !== 1 ? 's' : '')"></span>
+    </div>
+
+    <!-- Bulk action bar -->
+    <div x-show="selectedIds.length > 0"
+         x-transition:enter="ff-bulk-enter" x-transition:enter-start="ff-bulk-enter-from" x-transition:enter-end="ff-bulk-enter-to"
+         x-transition:leave="ff-bulk-leave" x-transition:leave-start="ff-bulk-leave-from" x-transition:leave-end="ff-bulk-leave-to"
+         class="ff-bulk-bar">
+        <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
+        <div class="ff-bulk-bar-sep"></div>
+        <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
+            <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+            Delete
+        </button>
+        <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()" title="Clear" aria-label="Clear selection">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+        </button>
     </div>
 
     <!-- Table -->
@@ -138,6 +179,9 @@ require_once FF_ROOT . '/includes/header.php';
         <table class="table">
             <thead>
                 <tr>
+                    <th class="th-checkbox">
+                        <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
+                    </th>
                     <th>Inspection #</th>
                     <th>Type</th>
                     <th>Unit</th>
@@ -151,13 +195,16 @@ require_once FF_ROOT . '/includes/header.php';
             </thead>
             <tbody>
                 <template x-if="loading">
-                    <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-muted);">Loading...</td></tr>
+                    <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-muted);">Loading...</td></tr>
                 </template>
                 <template x-if="!loading && inspections.length === 0">
-                    <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-muted);">No inspections found.</td></tr>
+                    <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-muted);">No inspections found.</td></tr>
                 </template>
                 <template x-for="insp in inspections" :key="insp.id">
-                    <tr>
+                    <tr :class="{ 'ff-row-selected': selectedIds.includes(insp.id) }">
+                        <td class="td-checkbox" @click.stop>
+                            <input type="checkbox" class="ff-checkbox" :checked="selectedIds.includes(insp.id)" @change="toggleSelect(insp.id)">
+                        </td>
                         <td class="font-mono" x-text="insp.inspection_number || ('#' + insp.id)"></td>
                         <td><span class="badge" :class="typeBadge(insp.inspection_type)" x-text="typeLabel(insp.inspection_type)"></span></td>
                         <td>
@@ -231,6 +278,12 @@ function inspectionList() {
         total:       0,
         page:        1,
         totalPages:  1,
+        sort:        'inspection_date',
+        dir:         'DESC',
+        // Bulk select
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
         filters: {
             q:               '',
             status:          '',
@@ -238,12 +291,13 @@ function inspectionList() {
         },
 
         loadInspections() {
+            this.clearSelection();
             this.loading = true;
             const p = new URLSearchParams({
                 page:     this.page,
                 per_page: 25,
-                sort:     'inspection_date',
-                dir:      'DESC',
+                sort:     this.sort,
+                dir:      this.dir,
             });
             if (this.filters.q)               p.set('q',               this.filters.q);
             if (this.filters.status)          p.set('status',          this.filters.status);
@@ -271,8 +325,44 @@ function inspectionList() {
 
         clearFilters() {
             this.filters = { q: '', status: '', inspection_type: '' };
+            this.sort = 'inspection_date';
+            this.dir  = 'DESC';
             this.page = 1;
             this.loadInspections();
+        },
+
+        // ── Bulk select ──────────────────────────────────────────────────
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else this.selectedIds.splice(idx, 1);
+            this.selectAll = this.inspections.length > 0 && this.selectedIds.length === this.inspections.length;
+        },
+        toggleSelectAll() {
+            if (this.selectAll) { this.selectedIds = []; this.selectAll = false; }
+            else { this.selectedIds = this.inspections.map(i => i.id); this.selectAll = true; }
+        },
+        clearSelection() { this.selectedIds = []; this.selectAll = false; },
+        async bulkDelete() {
+            if (!this.selectedIds.length || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask(
+                'Permanently delete ' + count + ' inspection' + (count === 1 ? '' : 's') + '? ' +
+                'This cannot be undone.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/inspections/bulk_delete') ?>', { ids: this.selectedIds });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.actioned > 0) FF_Toast.success(d.actioned + ' permanently deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' failed: ' + d.errors.slice(0, 3).map(e => e.reason).join('; ') + (d.errors.length > 3 ? '…' : ''));
+                    this.clearSelection();
+                    await this.loadInspections();
+                } else { FF_Toast.error(res.error?.message || 'Bulk delete failed.'); }
+            } catch (e) { FF_Toast.error('Network error.'); }
+            finally { this.bulkWorking = false; }
         },
 
         // ── Badge helpers ────────────────────────────────────────────────

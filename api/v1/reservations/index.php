@@ -36,7 +36,7 @@ require_auth_api();
 require_permission('reservations', 'view');
 
 // ── Allowlisted sort columns ───────────────────────────────────
-$allowedSorts = ['pickup_date', 'created_at', 'company_name', 'status', 'priority'];
+$allowedSorts = ['pickup_date', 'created_at', 'company_name', 'status', 'priority', 'quantity', 'updated_at'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'pickup_date';
 $dir  = strtoupper($_GET['dir'] ?? 'ASC') === 'DESC' ? 'DESC' : 'ASC';
 

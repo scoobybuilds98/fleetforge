@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Paginated list of vendors with optional filters and sort.
  *
  * Filters: vendor_type, is_preferred, q (FULLTEXT on name + contact_name).
- * Sort allowlist: name, total_spent, rating, created_at.
+ * Sort allowlist: name, total_spent, rating, created_at, updated_at, work_order_count, vendor_type.
  * Default sort: name ASC.
  *
  * SOFT_DELETE: vendors has deleted_at — always AND v.deleted_at IS NULL.
@@ -57,9 +57,11 @@ if ($q = clean_string($_GET['q'] ?? null)) {
 // -----------------------------------------------------------------------
 // 2. Sort — allowlisted, never from raw user input
 // -----------------------------------------------------------------------
-$allowedSorts = ['name', 'total_spent', 'rating', 'created_at'];
+$allowedSorts = ['name', 'total_spent', 'rating', 'created_at', 'updated_at', 'work_order_count', 'vendor_type'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'name';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'DESC' ? 'DESC' : 'ASC';
+// work_order_count is a subquery alias — must reference it without the v. table prefix
+$orderExpr = ($sort === 'work_order_count') ? "$sort $dir" : "v.$sort $dir";
 
 // -----------------------------------------------------------------------
 // 3. Pagination
@@ -85,7 +87,7 @@ $rows = db_select(
             AND mwo.deleted_at IS NULL) AS work_order_count
      FROM vendors v
      WHERE $whereSQL
-     ORDER BY v.$sort $dir
+     ORDER BY $orderExpr
      LIMIT $perPage OFFSET $offset",
     $params
 );

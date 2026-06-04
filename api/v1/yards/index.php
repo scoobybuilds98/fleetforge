@@ -11,10 +11,12 @@ declare(strict_types=1);
  *              and by the yards management admin page.
  *
  *              No pagination — yards is a small reference table (typically < 20 rows).
- *              Returns all matching rows sorted by name ASC.
+ *              Supports ?sort= and ?dir= for flexible ordering.
  *
  * @method      GET
- * @query       all (optional, 1 = include inactive yards)
+ * @query       all  (optional, 1 = include inactive yards)
+ * @query       sort (optional, one of: name|created_at|is_active — default: name)
+ * @query       dir  (optional, ASC|DESC — default: ASC)
  * @auth        Session required; require_permission('reservations','view')
  *              (yards are a support table for reservations — no dedicated module)
  * @returns     200 { yards[] }
@@ -30,6 +32,27 @@ require_auth_api();
 require_permission('reservations', 'view');
 
 $showAll = (($_GET['all'] ?? '0') === '1');
+
+// --- Sort / direction ---
+// Allowed sort keys and the ORDER BY expression each produces.
+// 'is_active' always appends y.name ASC as a secondary sort so active yards
+// group together but remain alphabetical within each group.
+$allowedSorts = ['name', 'created_at', 'is_active'];
+$sort = in_array($_GET['sort'] ?? '', $allowedSorts, true)
+    ? $_GET['sort']
+    : 'name';
+
+// Sanitise direction to exactly ASC or DESC.
+$dir = (strtoupper($_GET['dir'] ?? 'ASC') === 'DESC') ? 'DESC' : 'ASC';
+
+$sortMap = [
+    'name'       => "y.name {$dir}",
+    'created_at' => "y.created_at {$dir}",
+    // Secondary y.name ASC is intentionally fixed so active/inactive groups
+    // stay alphabetical regardless of the requested $dir.
+    'is_active'  => "y.is_active {$dir}, y.name ASC",
+];
+$orderBy = $sortMap[$sort];
 
 $where  = $showAll ? '1=1' : 'y.is_active = 1';
 
@@ -52,7 +75,7 @@ $yards = db_select(
      FROM yards y
      LEFT JOIN users u ON u.id = y.manager_id
      WHERE $where
-     ORDER BY y.is_active DESC, y.name ASC",
+     ORDER BY {$orderBy}",
     []
 );
 

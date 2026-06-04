@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Paginated list of rate cards (with item counts).
  *
  * Filters: is_default, is_active (effective date range), q (name LIKE).
- * Sort allowlist: name, effective_from, created_at.
+ * Sort allowlist: name, effective_from, effective_to, status, created_at, updated_at.
  * Default sort: effective_from DESC.
  *
  * SOFT_DELETE: rate_cards has deleted_at — always AND rc.deleted_at IS NULL.
@@ -59,7 +59,7 @@ if ($q = clean_string($_GET['q'] ?? null)) {
 // -----------------------------------------------------------------------
 // 2. Sort — allowlisted
 // -----------------------------------------------------------------------
-$allowedSorts = ['name', 'effective_from', 'created_at'];
+$allowedSorts = ['name', 'effective_from', 'effective_to', 'status', 'created_at', 'updated_at'];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'effective_from';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 

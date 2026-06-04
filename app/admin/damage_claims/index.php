@@ -162,8 +162,52 @@ require_once FF_ROOT . '/includes/header.php';
         <button class="btn btn-secondary btn-sm"
                 @click="resetFilters()">Reset</button>
 
-        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
-              x-text="total > 0 ? total + ' claim' + (total === 1 ? '' : 's') : ''"></span>
+        <div class="table-toolbar-right" style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <select class="form-select form-select-sm"
+                    x-model="sort"
+                    @change="page=1;fetch()"
+                    style="min-width:150px;">
+                <optgroup label="Date">
+                    <option value="created_at">Date Reported</option>
+                    <option value="updated_at">Updated</option>
+                </optgroup>
+                <optgroup label="Claim">
+                    <option value="claim_number">Claim #</option>
+                    <option value="severity">Severity</option>
+                    <option value="status">Status</option>
+                </optgroup>
+                <optgroup label="Cost">
+                    <option value="estimated_repair_cost">Est. Cost</option>
+                    <option value="actual_repair_cost">Actual Cost</option>
+                </optgroup>
+            </select>
+            <select class="form-select form-select-sm"
+                    x-model="dir"
+                    @change="page=1;fetch()"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+            <span class="text-secondary" style="font-size:0.875rem;white-space:nowrap;"
+                  x-text="total > 0 ? total + ' claim' + (total === 1 ? '' : 's') : ''"></span>
+        </div>
+    </div>
+
+    <!-- Bulk action bar -->
+    <div x-show="selectedIds.length > 0"
+         x-transition:enter="ff-bulk-enter" x-transition:enter-start="ff-bulk-enter-from" x-transition:enter-end="ff-bulk-enter-to"
+         x-transition:leave="ff-bulk-leave" x-transition:leave-start="ff-bulk-leave-from" x-transition:leave-end="ff-bulk-leave-to"
+         class="ff-bulk-bar">
+        <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
+        <div class="ff-bulk-bar-sep"></div>
+        <!-- Delete: only reported/assessed rows are eligible -->
+        <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
+            <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+            Delete
+        </button>
+        <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()" title="Clear" aria-label="Clear selection">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+        </button>
     </div>
 
     <!-- Loading -->
@@ -187,6 +231,9 @@ require_once FF_ROOT . '/includes/header.php';
             <table class="table">
                 <thead>
                     <tr>
+                        <th class="th-checkbox">
+                            <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
+                        </th>
                         <th @click="setSort('claim_number')" style="cursor:pointer;">
                             Claim # <span x-text="sortIcon('claim_number')"></span>
                         </th>
@@ -210,7 +257,11 @@ require_once FF_ROOT . '/includes/header.php';
                     <template x-for="row in rows" :key="row.id">
                         <tr class="table-row-link"
                             @click="window.location = '<?= base_url('damage_claims/show') ?>?id=' + row.id"
-                            style="cursor:pointer;">
+                            style="cursor:pointer;"
+                            :class="{ 'ff-row-selected': selectedIds.includes(row.id) }">
+                            <td class="td-checkbox" @click.stop>
+                                <input type="checkbox" class="ff-checkbox" :checked="selectedIds.includes(row.id)" @change="toggleSelect(row.id)">
+                            </td>
                             <td class="font-mono" x-text="row.claim_number"></td>
                             <td x-text="row.unit_number ?? '—'"></td>
                             <td x-text="row.customer_name ?? '—'"></td>
@@ -284,14 +335,17 @@ function damageClaimsKpis() {
 
 function damageClaimsList() {
     return {
-        rows:       [],
-        total:      0,
-        page:       1,
-        perPage:    25,
-        totalPages: 1,
-        loading:    false,
-        sort:       'created_at',
-        dir:        'DESC',
+        rows:        [],
+        total:       0,
+        page:        1,
+        perPage:     25,
+        totalPages:  1,
+        loading:     false,
+        sort:        'created_at',
+        dir:         'DESC',
+        selectedIds: [],
+        selectAll:   false,
+        bulkWorking: false,
         filters: {
             status:   <?= json_encode($_GET['status'] ?? '') ?>,
             severity: <?= json_encode($_GET['severity'] ?? '') ?>,
@@ -321,7 +375,7 @@ function damageClaimsList() {
                 .finally(() => { this.loading = false; });
         },
 
-        goPage(n) { this.page = n; this.fetch(); },
+        goPage(n) { this.page = n; this.clearSelection(); this.fetch(); },
 
         setSort(col) {
             if (this.sort === col) { this.dir = this.dir === 'DESC' ? 'ASC' : 'DESC'; }
@@ -332,9 +386,43 @@ function damageClaimsList() {
 
         sortIcon(col) { return this.sort === col ? (this.dir === 'DESC' ? ' ↓' : ' ↑') : ''; },
 
+        /* ── Bulk selection ─────────────────────────────────────────────── */
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) this.selectedIds.push(id);
+            else this.selectedIds.splice(idx, 1);
+            this.selectAll = this.rows.length > 0 && this.selectedIds.length === this.rows.length;
+        },
+
+        toggleSelectAll() {
+            if (this.selectAll) { this.selectedIds = []; this.selectAll = false; }
+            else { this.selectedIds = this.rows.map(r => r.id); this.selectAll = true; }
+        },
+
+        clearSelection() { this.selectedIds = []; this.selectAll = false; },
+
+        async bulkDelete() {
+            if (!this.selectedIds.length || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask('Delete ' + count + ' claim' + (count === 1 ? '' : 's') + '? This cannot be undone.');
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/damage_claims/bulk_delete') ?>', { ids: this.selectedIds });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.actioned > 0) FF_Toast.success(d.actioned + ' deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' failed: ' + d.errors.slice(0, 3).map(e => e.reason).join('; ') + (d.errors.length > 3 ? '…' : ''));
+                    this.clearSelection(); await this.fetch();
+                } else { FF_Toast.error(res.error?.message || 'Bulk delete failed.'); }
+            } catch (e) { FF_Toast.error('Network error.'); }
+            finally { this.bulkWorking = false; }
+        },
+
         resetFilters() {
             this.filters = { status:'', severity:'', q:'', customer_id:'', equipment_unit_id:'' };
             this.page = 1;
+            this.clearSelection();
             this.fetch();
         },
 
