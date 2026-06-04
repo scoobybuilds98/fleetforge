@@ -84,12 +84,14 @@ function record(array &$results, string $id, string $name, bool $passed, string 
 // =====================================================================
 // T1 — Standard 30-day period: returns expected distance, no warnings
 // =====================================================================
-// S-INVOICE-COUNTER-BUMP — drift WARN: surface counter ≤ MAX(invoice_number) before it becomes an opaque UNIQUE collision in T14 (precharge_invoice_emit calls InvoiceGenerator::createFromLease).
+// INFO — invoice counter snapshot (S-SMOKE-SAMSARA-HERMETIC): T14 now bumps the counter
+// above MAX inside its BEGIN/ROLLBACK transaction before calling createFromLease(), so this
+// smoke no longer depends on ambient counter state. Numbers below are advisory only.
 $_yr = date('Y');
 $_counter = (int)(db_row("SELECT value FROM settings WHERE `key` = ?", ["invoice.next_number.{$_yr}"])['value'] ?? 1);
 $_maxStr = db_row("SELECT MAX(invoice_number) AS m FROM invoices WHERE invoice_number LIKE ?", ["INV-{$_yr}-%"])['m'] ?? '';
 $_maxNum = $_maxStr !== '' ? (int)substr(strrchr($_maxStr, '-'), 1) : 0;
-if ($_counter <= $_maxNum) { fwrite(STDERR, "WARN invoice-counter-drift: invoice.next_number.{$_yr}={$_counter} <= MAX(invoice_number)={$_maxNum}; next generateInvoiceNumber() will collide. Run: UPDATE settings SET value='" . ($_maxNum + 5) . "' WHERE `key`='invoice.next_number.{$_yr}'. See S-D131-BASELINE-RESTORE / S-INVOICE-COUNTER-BUMP.\n"); }
+if ($_counter <= $_maxNum) { fwrite(STDERR, "INFO invoice-counter-drift: invoice.next_number.{$_yr}={$_counter} <= MAX(invoice_number)={$_maxNum} (advisory — T14 counter bump handles this inside its BEGIN/ROLLBACK)\n"); }
 
 echo "\n[Running 16 stress tests: T1-T13 fixture-mode coverage, T14-T16 S-MILEAGE-2A surface]\n\n";
 
@@ -327,6 +329,17 @@ $t14Ok  = false;
 $t14Msg = '';
 db_execute("BEGIN");
 try {
+    // S-SMOKE-SAMSARA-HERMETIC: bump invoice counter above MAX(committed) before
+    // createFromLease() so generateInvoiceNumber() can't collide with committed
+    // invoice data regardless of ambient counter drift. Reverts with ROLLBACK.
+    $_yr14    = date('Y');
+    $_max14Str = db_row("SELECT MAX(invoice_number) m FROM invoices WHERE invoice_number LIKE ?", ["INV-{$_yr14}-%"])['m'] ?? '';
+    $_max14Num = ($_max14Str !== '' && $_max14Str !== null) ? (int) substr(strrchr($_max14Str, '-'), 1) : 0;
+    db_execute(
+        "INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+        ["invoice.next_number.{$_yr14}", (string) ($_max14Num + 50)]
+    );
+
     $t14LeaseId = db_insert('leases', [
         'contract_number'   => 'SMOKE-2A-T14',
         'customer_id'       => $t14CustomerId,
