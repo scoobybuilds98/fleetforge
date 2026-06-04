@@ -83,6 +83,13 @@ if ($q = clean_string($_GET['q'] ?? null)) {
     $params[] = $like;
 }
 
+// customer_filter — contextual sub-filter shown when sorting by customer name.
+if ($customerFilter = clean_string($_GET['customer_filter'] ?? null)) {
+    $like    = '%' . $customerFilter . '%';
+    $where[] = 'r.company_name LIKE ?';
+    $params[] = $like;
+}
+
 $whereSQL = implode(' AND ', $where);
 
 // ── Pagination ─────────────────────────────────────────────────

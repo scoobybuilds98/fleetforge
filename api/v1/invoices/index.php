@@ -55,6 +55,13 @@ if ($search = clean_string($_GET['q'] ?? null)) {
     array_push($params, $like, $like);
 }
 
+// customer_filter — contextual sub-filter shown when sorting by customer name.
+if ($customerFilter = clean_string($_GET['customer_filter'] ?? null)) {
+    $like    = '%' . $customerFilter . '%';
+    $where[] = 'i.company_name_snapshot LIKE ?';
+    $params[] = $like;
+}
+
 // TILES-1: AR-aging bucket filter used by the invoice-list KPI tiles.
 // The tile click sets aging=current|ar30|ar60|ar90 which translates to
 // a due_date range + an outstanding-status constraint so the list shows

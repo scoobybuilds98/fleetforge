@@ -224,7 +224,7 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- Sort -->
             <select class="form-select" style="min-width:160px;"
                     x-model="filters.sort"
-                    @change="applyFilters()">
+                    @change="if (filters.sort !== 'company_name') filters.customer_filter = ''; applyFilters()">
                 <optgroup label="Date">
                     <option value="pickup_date">Pickup Date</option>
                     <option value="created_at">Created</option>
@@ -239,6 +239,17 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="quantity">Quantity</option>
                 </optgroup>
             </select>
+
+            <!-- Contextual customer filter — appears when sorting by customer name -->
+            <input x-show="filters.sort === 'company_name'"
+                   x-transition
+                   type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Filter by customer…"
+                   x-model="filters.customer_filter"
+                   @input.debounce.350ms="applyFilters()"
+                   style="min-width:160px;"
+                   aria-label="Filter by customer name">
 
             <!-- Direction -->
             <select class="form-select" style="width:auto;"
@@ -915,11 +926,12 @@ function FF_Reservations() {
         bulkWorking:  false,
 
         filters: {
-            q:           '',
-            pickup_date: '',
-            priority:    '',
-            sort:        'pickup_date',
-            dir:         'ASC',
+            q:               '',
+            pickup_date:     '',
+            priority:        '',
+            sort:            'pickup_date',
+            dir:             'ASC',
+            customer_filter: '',  // contextual name filter shown when sort === 'company_name'
         },
 
         // TILES-1: client-side quick-filter set by the Pending/Confirmed tiles.
@@ -1050,9 +1062,10 @@ function FF_Reservations() {
         // ── Build query string from filters ──────────────────────
         buildParams(extraStatus, page) {
             const p = new URLSearchParams();
-            if (this.filters.q)           p.set('q', this.filters.q);
-            if (this.filters.pickup_date) p.set('pickup_date', this.filters.pickup_date);
-            if (this.filters.priority)    p.set('priority', this.filters.priority);
+            if (this.filters.q)               p.set('q', this.filters.q);
+            if (this.filters.pickup_date)     p.set('pickup_date', this.filters.pickup_date);
+            if (this.filters.priority)        p.set('priority', this.filters.priority);
+            if (this.filters.customer_filter) p.set('customer_filter', this.filters.customer_filter);
             p.set('sort', this.filters.sort);
             p.set('dir',  this.filters.dir);
             p.set('status', extraStatus);

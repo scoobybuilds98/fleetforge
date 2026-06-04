@@ -204,7 +204,7 @@ require_once FF_ROOT . '/includes/header.php';
 
             <select class="form-select form-control-sm"
                     x-model="filters.sort"
-                    @change="resetPage()"
+                    @change="if (filters.sort !== 'company_name_snapshot') filters.customer_filter = ''; resetPage()"
                     aria-label="Sort by">
                 <optgroup label="Date">
                     <option value="created_at">Date created</option>
@@ -222,6 +222,17 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="balance_due">Balance due</option>
                 </optgroup>
             </select>
+
+            <!-- Contextual customer filter — appears when sorting by customer name -->
+            <input x-show="filters.sort === 'company_name_snapshot'"
+                   x-transition
+                   type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Filter by customer…"
+                   x-model="filters.customer_filter"
+                   @input.debounce.350ms="resetPage()"
+                   style="min-width:160px;"
+                   aria-label="Filter by customer name">
 
             <select class="form-select form-control-sm"
                     x-model="filters.dir"
@@ -509,13 +520,14 @@ function FF_Invoices() {
         bulkWorking: false,
 
         filters: {
-            search:     '',
-            status:     '',
-            aging:      '',   // TILES-1: AR aging bucket filter (current|ar30|ar60|ar90)
-            sort:       'created_at',
-            dir:        'DESC',
-            leaseId:    '',   // BUGFIX-1: from ?lease_id= URL param (tile drill-through)
-            customerId: '',   // BUGFIX-1: from ?customer_id= URL param (tile drill-through)
+            search:          '',
+            status:          '',
+            aging:           '',   // TILES-1: AR aging bucket filter (current|ar30|ar60|ar90)
+            sort:            'created_at',
+            dir:             'DESC',
+            leaseId:         '',   // BUGFIX-1: from ?lease_id= URL param (tile drill-through)
+            customerId:      '',   // BUGFIX-1: from ?customer_id= URL param (tile drill-through)
+            customer_filter: '',   // contextual name filter shown when sort === company_name_snapshot
         },
         currentPage: 1,
 
@@ -581,6 +593,7 @@ function FF_Invoices() {
             if (this.filters.customerId) params.set('customer_id', this.filters.customerId);
             params.set('sort',     this.filters.sort);
             params.set('dir',      this.filters.dir);
+            if (this.filters.customer_filter) params.set('customer_filter', this.filters.customer_filter);
             params.set('page',     this.currentPage);
             params.set('per_page', 25);
 

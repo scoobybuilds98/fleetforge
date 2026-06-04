@@ -166,7 +166,8 @@ require_once FF_ROOT . '/includes/header.php';
         </select>
 
         <!-- Sort field dropdown -->
-        <select class="form-input" style="width:180px;" x-model="sort" @change="resetAndLoad()">
+        <select class="form-input" style="width:180px;" x-model="sort"
+                @change="if (sort !== 'company_name') filters.customer_filter = ''; resetAndLoad()">
             <optgroup label="Date">
                 <option value="payment_date">Payment Date</option>
                 <option value="created_at">Created At</option>
@@ -186,6 +187,17 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="status">Status</option>
             </optgroup>
         </select>
+
+        <!-- Contextual customer filter — appears when sorting by customer name -->
+        <input x-show="sort === 'company_name'"
+               x-transition
+               type="search"
+               class="form-input"
+               placeholder="Filter by customer…"
+               x-model="filters.customer_filter"
+               @input.debounce.350ms="resetAndLoad()"
+               style="min-width:160px;"
+               aria-label="Filter by customer name">
 
         <!-- Sort direction -->
         <select class="form-input" style="width:auto;" x-model="dir" @change="resetAndLoad()">
@@ -365,8 +377,9 @@ function FF_Payments() {
         sort:        'payment_date',
         dir:         'DESC',
         filters: {
-            q:      '',
-            status: '',
+            q:               '',
+            status:          '',
+            customer_filter: '',  // contextual name filter shown when sort === 'company_name'
         },
         // Bulk-select state
         selectedIds: [],

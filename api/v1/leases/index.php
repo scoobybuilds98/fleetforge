@@ -70,6 +70,14 @@ if ($search = clean_string($_GET['search'] ?? null)) {
     array_push($params, $like, $like, $like);
 }
 
+// customer_filter — contextual sub-filter shown when sorting by customer name.
+// Narrows results to leases matching the typed customer name fragment.
+if ($customerFilter = clean_string($_GET['customer_filter'] ?? null)) {
+    $like    = '%' . $customerFilter . '%';
+    $where[] = 'l.company_name_snapshot LIKE ?';
+    $params[] = $like;
+}
+
 $whereSQL = implode(' AND ', $where);
 
 // ── Pagination ─────────────────────────────────────────────────

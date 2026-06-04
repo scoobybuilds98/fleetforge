@@ -61,6 +61,14 @@ if ($search = clean_string($_GET['q'] ?? null)) {
     $params[] = $like;
 }
 
+// customer_filter — contextual sub-filter shown when sorting by customer name.
+// c alias comes from LEFT JOIN customers c in the query below.
+if ($customerFilter = clean_string($_GET['customer_filter'] ?? null)) {
+    $like    = '%' . $customerFilter . '%';
+    $where[] = 'c.company_name LIKE ?';
+    $params[] = $like;
+}
+
 $whereSQL = implode(' AND ', $where);
 $page     = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
 $perPage  = min(100, max(10, clean_int($_GET['per_page'] ?? 25) ?? 25));

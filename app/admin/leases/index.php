@@ -179,7 +179,7 @@ require_once FF_ROOT . '/includes/header.php';
 
             <select class="form-select form-control-sm"
                     x-model="filters.sort"
-                    @change="resetPage()"
+                    @change="if (filters.sort !== 'company_name_snapshot') filters.customer_filter = ''; resetPage()"
                     aria-label="Sort by">
                 <optgroup label="Date">
                     <option value="created_at">Date created</option>
@@ -199,6 +199,17 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="monthly_rate">Monthly rate</option>
                 </optgroup>
             </select>
+
+            <!-- Contextual customer filter — appears when sorting by customer name -->
+            <input x-show="filters.sort === 'company_name_snapshot'"
+                   x-transition
+                   type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Filter by customer…"
+                   x-model="filters.customer_filter"
+                   @input.debounce.350ms="resetPage()"
+                   style="min-width:160px;"
+                   aria-label="Filter by customer name">
 
             <select class="form-select form-control-sm"
                     x-model="filters.dir"
@@ -412,10 +423,11 @@ function FF_Leases() {
         kpisLoaded:  false,
 
         filters: {
-            search: '',
-            status: '',
-            sort:   'created_at',
-            dir:    'DESC',
+            search:          '',
+            status:          '',
+            sort:            'created_at',
+            dir:             'DESC',
+            customer_filter: '',
         },
         currentPage: 1,
 
@@ -481,6 +493,7 @@ function FF_Leases() {
             if (this.filters.search)  params.set('search',   this.filters.search);
             params.set('sort',     this.filters.sort);
             params.set('dir',      this.filters.dir);
+            if (this.filters.customer_filter) params.set('customer_filter', this.filters.customer_filter);
             params.set('page',     this.currentPage);
             // Larger page for open/closed tabs to capture all with one request
             params.set('per_page', this.activeTab === 'all' ? 25 : 200);
