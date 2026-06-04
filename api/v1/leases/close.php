@@ -334,17 +334,22 @@ function adv_create_credit_note(array $inv, array $lease, string $amount, string
     }
 
     $cnId = db_insert('credit_notes', [
-        'credit_note_number' => $cnNumber,
-        'customer_id'        => $lease['customer_id'],
-        'lease_id'           => (int) $lease['id'],
-        'source'             => 'invoice_adjustment',
-        'source_invoice_id'  => (int) $inv['id'],
-        'amount'             => $amount,
-        'currency'           => $inv['currency'] ?? 'CAD',
-        'amount_remaining'   => $amount,
-        'status'             => 'active',
-        'reason'             => $reason,
-        'created_by'         => current_user_id(),
+        'credit_note_number'     => $cnNumber,
+        'company_name_snapshot'  => $inv['company_name_snapshot']  ?? $lease['company_name_snapshot']  ?? null,
+        'customer_name_snapshot' => $inv['customer_name_snapshot'] ?? $lease['customer_name_snapshot'] ?? null,
+        'billing_address_snapshot' => $inv['billing_address_snapshot'] ?? null,
+        'province_snapshot'      => $inv['province_snapshot']      ?? $lease['province']               ?? null,
+        'customer_email_snapshot' => $inv['customer_email_snapshot'] ?? null,
+        'customer_id'            => $lease['customer_id'],
+        'lease_id'               => (int) $lease['id'],
+        'source'                 => 'invoice_adjustment',
+        'source_invoice_id'      => (int) $inv['id'],
+        'amount'                 => $amount,
+        'currency'               => $inv['currency'] ?? 'CAD',
+        'amount_remaining'       => $amount,
+        'status'                 => 'active',
+        'reason'                 => $reason,
+        'created_by'             => current_user_id(),
     ]);
 
     db_insert('audit_log', [
@@ -635,7 +640,9 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
                 l.discount_type, l.discount_value,
                 l.precharge_enabled, l.precharge_amount, l.precharge_balance,
                 l.precharge_invoiced_at, l.precharge_refund_method, l.precharge_refund_settled_at,
-                c.province AS province
+                c.province AS province,
+                c.billing_address AS billing_address,
+                c.email AS customer_email
          FROM leases l
          LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
          WHERE l.id = ? AND l.deleted_at IS NULL",
@@ -1112,20 +1119,25 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
                 . ($refundNotes ? " ({$refundNotes})" : '');
 
             $refundCnId = db_insert('credit_notes', [
-                'credit_note_number' => $refundCnNum,
-                'customer_id'        => $lease['customer_id'],
-                'lease_id'           => $id,
-                'source'             => 'precharge_refund',
-                'source_invoice_id'  => null,
-                'source_payment_id'  => null,
-                'amount'             => $refundAmount,
-                'currency'           => $lease['currency'] ?? 'CAD',
-                'amount_remaining'   => $refundAmount,
-                'status'             => 'active',
-                'expires_at'         => null,
-                'reason'             => $cnReason,
-                'internal_notes'     => null,
-                'created_by'         => current_user_id(),
+                'credit_note_number'      => $refundCnNum,
+                'company_name_snapshot'   => $lease['company_name_snapshot']  ?? null,
+                'customer_name_snapshot'  => $lease['customer_name_snapshot'] ?? null,
+                'billing_address_snapshot' => $lease['billing_address']       ?? null,
+                'province_snapshot'        => $lease['province']               ?? null,
+                'customer_email_snapshot'  => $lease['customer_email']         ?? null,
+                'customer_id'             => $lease['customer_id'],
+                'lease_id'                => $id,
+                'source'                  => 'precharge_refund',
+                'source_invoice_id'       => null,
+                'source_payment_id'       => null,
+                'amount'                  => $refundAmount,
+                'currency'                => $lease['currency'] ?? 'CAD',
+                'amount_remaining'        => $refundAmount,
+                'status'                  => 'active',
+                'expires_at'              => null,
+                'reason'                  => $cnReason,
+                'internal_notes'          => null,
+                'created_by'              => current_user_id(),
             ]);
 
             // Existing accounting integration — DR 4xxx / CR 2060

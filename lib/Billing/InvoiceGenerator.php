@@ -120,6 +120,8 @@ class InvoiceGenerator
                         c.gst_exempt_expiry  AS customer_gst_exempt_expiry,
                         c.pst_exempt_expiry  AS customer_pst_exempt_expiry,
                         c.tax_exempt_expiry  AS customer_tax_exempt_expiry,
+                        c.gst_exempt_number  AS customer_gst_exempt_number,
+                        c.pst_exempt_number  AS customer_pst_exempt_number,
                         c.id                  AS customer_row_id,
                         c.company_name        AS customer_company_name,
                         eu.samsara_vehicle_id AS samsara_vehicle_id
@@ -1014,11 +1016,14 @@ class InvoiceGenerator
                 'contract_number_snapshot'   => $lease['contract_number'],
                 'unit_number_invoice_snapshot' => $lease['unit_number_snapshot'],
                 'billing_address_snapshot'   => $lease['billing_address'] ?? null,
+                'province_snapshot'          => $province,
                 'customer_email_snapshot'    => $lease['customer_email'] ?? null,
                 'gst_exempt_snapshot'        => (int)$gstExempt,
                 'pst_exempt_snapshot'        => (int)$pstExempt,
                 'tax_exempt_snapshot'        => (int)$lease['tax_exempt'],
                 'tax_exempt_number_snapshot' => null,
+                'gst_exempt_number_snapshot' => $gstExempt ? ($lease['customer_gst_exempt_number'] ?: null) : null,
+                'pst_exempt_number_snapshot' => $pstExempt ? ($lease['customer_pst_exempt_number'] ?: null) : null,
                 'po_number'                 => $params['po_number'] ?? $lease['po_number'] ?? null,
                 'currency'                  => $lease['currency'],
                 'exchange_rate_to_cad'       => $exchangeRate,
@@ -1291,17 +1296,22 @@ class InvoiceGenerator
                     : "Auto-created from mileage credit overflow (S-FIX-2 Bug #3) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$mileageOverflow}.";
 
                 $cnId = db_insert('credit_notes', [
-                    'credit_note_number' => $cnNumber,
-                    'customer_id'        => $lease['customer_id'],
-                    'lease_id'           => $leaseId,
-                    'source'             => $effectiveSource,
-                    'source_invoice_id'  => $invoiceId,
-                    'amount'             => $mileageOverflow,
-                    'currency'           => $lease['currency'],
-                    'amount_remaining'   => $mileageOverflow,
-                    'status'             => 'active',
-                    'reason'             => $cnReason,
-                    'created_by'         => $params['created_by'] ?? null,
+                    'credit_note_number'      => $cnNumber,
+                    'company_name_snapshot'   => $lease['company_name_snapshot']  ?? null,
+                    'customer_name_snapshot'  => $lease['customer_name_snapshot'] ?? null,
+                    'billing_address_snapshot' => $lease['billing_address']        ?? null,
+                    'province_snapshot'        => $lease['province']                ?? null,
+                    'customer_email_snapshot'  => $lease['customer_email']          ?? null,
+                    'customer_id'             => $lease['customer_id'],
+                    'lease_id'                => $leaseId,
+                    'source'                  => $effectiveSource,
+                    'source_invoice_id'       => $invoiceId,
+                    'amount'                  => $mileageOverflow,
+                    'currency'                => $lease['currency'],
+                    'amount_remaining'        => $mileageOverflow,
+                    'status'                  => 'active',
+                    'reason'                  => $cnReason,
+                    'created_by'              => $params['created_by'] ?? null,
                 ]);
 
                 db_insert('audit_log', [
@@ -1566,19 +1576,9 @@ class InvoiceGenerator
                 return ['skipped' => true, 'reason' => 'Calculated fee is zero'];
             }
 
-            // Determine province for tax lookup — from lease → customer join
-            $province = 'BC'; // WHY: default to BC (company location) if no data
-            if ($orig['lease_id']) {
-                $leaseRow = db_row(
-                    "SELECT c.province FROM leases l
-                     LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
-                     WHERE l.id = ? AND l.deleted_at IS NULL",
-                    [$orig['lease_id']]
-                );
-                if ($leaseRow && !empty($leaseRow['province'])) {
-                    $province = $leaseRow['province'];
-                }
-            }
+            // Province: use the snapshot frozen on the original invoice (avoids live JOIN
+            // and ensures the late fee uses the same jurisdiction as the original charge).
+            $province = !empty($orig['province_snapshot']) ? $orig['province_snapshot'] : 'BC';
 
             // Tax: use same exemption snapshots frozen on the original invoice (D22)
             $gstExempt = (bool)$orig['gst_exempt_snapshot'];
@@ -1624,10 +1624,13 @@ class InvoiceGenerator
                 'contract_number_snapshot'       => $orig['contract_number_snapshot'],
                 'unit_number_invoice_snapshot'   => $orig['unit_number_invoice_snapshot'],
                 'billing_address_snapshot'       => $orig['billing_address_snapshot'],
+                'province_snapshot'              => $orig['province_snapshot'] ?? null,
                 'customer_email_snapshot'        => $orig['customer_email_snapshot'],
                 'gst_exempt_snapshot'            => $orig['gst_exempt_snapshot'],
                 'pst_exempt_snapshot'            => $orig['pst_exempt_snapshot'],
                 'tax_exempt_snapshot'            => $orig['tax_exempt_snapshot'],
+                'gst_exempt_number_snapshot'     => $orig['gst_exempt_number_snapshot'] ?? null,
+                'pst_exempt_number_snapshot'     => $orig['pst_exempt_number_snapshot'] ?? null,
                 'currency'                       => $orig['currency'],
                 'exchange_rate_to_cad'           => $orig['exchange_rate_to_cad'],
                 'currency_markup_pct'            => $orig['currency_markup_pct'] ?? '0.0000',
@@ -1656,6 +1659,15 @@ class InvoiceGenerator
                 'credits_applied'                => '0.00',
                 'balance_due'                    => $totalAmount,
                 'notes'                          => "Late fee on invoice {$orig['invoice_number']}",
+                'late_fee_rule_id'               => (int)$rule['id'],
+                'late_fee_rule_snapshot'         => json_encode([
+                    'fee_type'       => $rule['fee_type'],
+                    'fee_value'      => (string)$rule['fee_value'],
+                    'grace_days'     => (int)$rule['grace_days'],
+                    'max_fee_amount' => $rule['max_fee_amount'] !== null ? (string)$rule['max_fee_amount'] : null,
+                    'compound'       => (bool)$rule['compound'],
+                    'customer_id'    => $rule['customer_id'],
+                ]),
                 'auto_generated'                 => 1,
                 'generation_source'              => 'late_fee_cron',
                 'created_by'                     => null,

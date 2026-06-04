@@ -42,6 +42,15 @@ declare(strict_types=1);
  * scenario runs in its own outer try/catch/finally so a thrown
  * exception in one scenario doesn't poison later scenarios.
  *
+ * Counter-drift fix (S-SMOKE-MODELB-HERMETIC): every scenario that
+ * calls InvoiceGenerator::createFromLease() uses s5_invoice_scenario()
+ * instead of s5_scenario(). The wrapper calls mbcron_bump_counter()
+ * inside the BEGIN transaction — setting invoice.next_number.YYYY to
+ * MAX(committed invoice_number)+50 — so generateInvoiceNumber() never
+ * collides with ambient committed data regardless of dev-DB counter
+ * drift. The counter bump reverts with the ROLLBACK. Decision: D-SMOKE-
+ * HERMETIC-MODELB. See S-SMOKE-MODELB-HERMETIC in PROGRESS SESSION LOG.
+ *
  * Decisions enforced:
  *   D16  — bcmath comparisons for monetary asserts (bccomp, not ==)
  *   D135 — three-config matrix (Model B full / Lite / Disabled)
@@ -103,6 +112,24 @@ function s5_scenario(array &$results, string $label, callable $fn, int $customer
     } finally {
         db_execute('ROLLBACK');
     }
+}
+
+/**
+ * Like s5_scenario() but auto-calls mbcron_bump_counter() inside the
+ * BEGIN transaction before running $fn. Use for every scenario that
+ * calls InvoiceGenerator::createFromLease() — ensures the invoice
+ * counter is above MAX(existing invoice_number) so generateInvoiceNumber()
+ * never collides with committed data, regardless of ambient DB counter
+ * drift. The bump is inside the transaction and reverts with ROLLBACK.
+ *
+ * This is the D-SMOKE-HERMETIC-MODELB fix: the fixture controls counter
+ * state locally. (S-SMOKE-MODELB-HERMETIC)
+ */
+function s5_invoice_scenario(array &$results, string $label, callable $fn, int $customerId, int $unitId, int $userId): void {
+    s5_scenario($results, $label, function ($customerId, $unitId, $userId) use ($fn) {
+        mbcron_bump_counter(); // drift-proof: sets counter = MAX(committed)+50 before any generateInvoiceNumber() call
+        return $fn($customerId, $unitId, $userId);
+    }, $customerId, $unitId, $userId);
 }
 
 /**
@@ -174,12 +201,15 @@ if ($customerId === 0 || $unitId === 0 || $userId === 0) {
 echo "S-MILEAGE-5 — _smoke_model_b_lifecycle.php\n";
 echo str_repeat('═', 76), "\n";
 
-// S-INVOICE-COUNTER-BUMP — drift WARN: surface counter ≤ MAX(invoice_number) before it becomes an opaque UNIQUE collision in any scenario that generates ≥2 invoices.
+// INFO — invoice counter snapshot (S-SMOKE-MODELB-HERMETIC): all invoice-generating
+// scenarios call s5_invoice_scenario() which auto-bumps the counter above MAX inside
+// each BEGIN/ROLLBACK, so this smoke no longer depends on the ambient counter state.
+// The numbers below are advisory only — a counter ≤ max is no longer a test failure.
 $_yr = date('Y');
 $_counter = (int)(db_row("SELECT value FROM settings WHERE `key` = ?", ["invoice.next_number.{$_yr}"])['value'] ?? 1);
 $_maxStr = db_row("SELECT MAX(invoice_number) AS m FROM invoices WHERE invoice_number LIKE ?", ["INV-{$_yr}-%"])['m'] ?? '';
 $_maxNum = $_maxStr !== '' ? (int)substr(strrchr($_maxStr, '-'), 1) : 0;
-if ($_counter <= $_maxNum) { fwrite(STDERR, "WARN invoice-counter-drift: invoice.next_number.{$_yr}={$_counter} <= MAX(invoice_number)={$_maxNum}; next generateInvoiceNumber() will collide. Run: UPDATE settings SET value='" . ($_maxNum + 5) . "' WHERE `key`='invoice.next_number.{$_yr}'. See S-D131-BASELINE-RESTORE / S-INVOICE-COUNTER-BUMP.\n"); }
+if ($_counter <= $_maxNum) { fwrite(STDERR, "INFO invoice-counter-drift: invoice.next_number.{$_yr}={$_counter} <= MAX(invoice_number)={$_maxNum} (advisory — scenarios are now counter-drift-independent via s5_invoice_scenario)\n"); }
 
 $periodStart = '2026-04-01';
 $periodEnd   = '2026-04-30';
@@ -225,7 +255,7 @@ s5_scenario($results, 'S01 activation initializes precharge_balance',
 // ─────────────────────────────────────────────────────────────────────
 // S02 — Invoice 1 emits mileage_precharge, NOT mileage_usage (D138/D139)
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S02 Invoice 1 emits mileage_precharge line',
+s5_invoice_scenario($results, 'S02 Invoice 1 emits mileage_precharge line',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -266,7 +296,7 @@ s5_scenario($results, 'S02 Invoice 1 emits mileage_precharge line',
 // ─────────────────────────────────────────────────────────────────────
 // S03 — Send Invoice 1 stamps precharge_invoiced_at (D140)
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S03 send Invoice 1 stamps precharge_invoiced_at',
+s5_invoice_scenario($results, 'S03 send Invoice 1 stamps precharge_invoiced_at',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -307,7 +337,7 @@ s5_scenario($results, 'S03 send Invoice 1 stamps precharge_invoiced_at',
 // S04 — Invoice 2 drawdown: balance > period_charge (partial draw)
 // Period: 1234.56 km × $0.18/km = bcround('222.2208', 2) = $222.22
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S04 drawdown balance(500) > charge(222.22)',
+s5_invoice_scenario($results, 'S04 drawdown balance(500) > charge(222.22)',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -344,7 +374,7 @@ s5_scenario($results, 'S04 drawdown balance(500) > charge(222.22)',
 // ─────────────────────────────────────────────────────────────────────
 // S05 — Invoice 2 drawdown: balance == period_charge (exact draw)
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S05 drawdown balance(222.22) == charge(222.22)',
+s5_invoice_scenario($results, 'S05 drawdown balance(222.22) == charge(222.22)',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -382,7 +412,7 @@ s5_scenario($results, 'S05 drawdown balance(222.22) == charge(222.22)',
 // S06 — Invoice 2 drawdown: balance < period_charge (capped draw)
 // Net charge: $222.22 usage − $100.00 credit = $122.22 net.
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S06 drawdown balance(100) < charge(222.22) capped',
+s5_invoice_scenario($results, 'S06 drawdown balance(100) < charge(222.22) capped',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -425,7 +455,7 @@ s5_scenario($results, 'S06 drawdown balance(100) < charge(222.22) capped',
 // Setup: balance=300, rate=$0.10/km, distance=1000 km/period → charge=$100/period.
 // Inv2: 300→200, Inv3: 200→100, Inv4: 100→0, Inv5: 0 (no drawdown_credit).
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S07 multi-invoice drawdown exhausts then bypasses',
+s5_invoice_scenario($results, 'S07 multi-invoice drawdown exhausts then bypasses',
     function ($customerId, $unitId, $userId) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -497,7 +527,7 @@ s5_scenario($results, 'S07 multi-invoice drawdown exhausts then bypasses',
 //
 // distance × rate = 432.11 × 0.18 = bcround('77.7798', 2) = '77.78'
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S08 close residual=0 → no refund (K-21 Case b)',
+s5_invoice_scenario($results, 'S08 close residual=0 → no refund (K-21 Case b)',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -569,7 +599,7 @@ s5_scenario($results, 'S08 close residual=0 → no refund (K-21 Case b)',
 // precharge_balance PRESERVED at $77.78 per D182 (refund block does
 // not zero it).
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S09 close residual>0 → credit refund (D170)',
+s5_invoice_scenario($results, 'S09 close residual>0 → credit refund (D170)',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -666,7 +696,7 @@ s5_scenario($results, 'S09 close residual>0 → credit refund (D170)',
 // (D-B(i) defer-settle). No credit_note created. precharge_balance
 // preserved at 77.78 per D182.
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S10 close residual>0 → cash refund intent-only (D169)',
+s5_invoice_scenario($results, 'S10 close residual>0 → cash refund intent-only (D169)',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -868,7 +898,7 @@ s5_scenario($results, 'S13 re-close attempt → 409 PRECHARGE_REFUND_LOCKED',
 // Confirms bcmath handles cent-precision amounts cleanly through
 // the refund pipeline.
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S14 tiny $0.01 residual + credit refund',
+s5_invoice_scenario($results, 'S14 tiny $0.01 residual + credit refund',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,
@@ -967,7 +997,7 @@ s5_scenario($results, 'S15 close w/o method → 422 PRECHARGE_REFUND_REQUIRED',
 // 0 — Branch B of D148). Close is clean: refund block skipped (gate
 // requires precharge_enabled=1).
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S16 Model B Lite (D135 row 2): usage-only, no refund',
+s5_invoice_scenario($results, 'S16 Model B Lite (D135 row 2): usage-only, no refund',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 0,
@@ -1024,7 +1054,7 @@ s5_scenario($results, 'S16 Model B Lite (D135 row 2): usage-only, no refund',
 // audit) only fires if distance > 0; with distance=0 the warning
 // path stays quiet too. Close is clean.
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S17 Disabled mileage (D135 row 3): no mileage lines anywhere',
+s5_invoice_scenario($results, 'S17 Disabled mileage (D135 row 3): no mileage lines anywhere',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 0,
@@ -1075,7 +1105,7 @@ s5_scenario($results, 'S17 Disabled mileage (D135 row 3): no mileage lines anywh
 // mileage_usage or mileage_drawdown_credit lines emit. Invoice
 // still generates (base_rental etc.) without PHP error.
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S18 Samsara unavailable (samsara_vehicle_id=NULL): no drawdown emit',
+s5_invoice_scenario($results, 'S18 Samsara unavailable (samsara_vehicle_id=NULL): no drawdown emit',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         // Synthetic unit with samsara_vehicle_id=NULL (production unit
         // may have it set; this hermetic synthesis guarantees the test
@@ -1137,7 +1167,7 @@ s5_scenario($results, 'S18 Samsara unavailable (samsara_vehicle_id=NULL): no dra
 // the right answer per K-18 / K-20 (test what the code does, not
 // what the spec assumed).
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S19 Samsara FIX_RESET: drawdown skipped (distance=0); warning audited',
+s5_invoice_scenario($results, 'S19 Samsara FIX_RESET: drawdown skipped (distance=0); warning audited',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         // Enable Samsara fixture-mode for this scenario (UPDATE inside
         // BEGIN; ROLLBACK reverts at scenario end).
@@ -1225,7 +1255,7 @@ s5_scenario($results, 'S19 Samsara FIX_RESET: drawdown skipped (distance=0); war
 // Credit refund issued for $77.78. Lease.precharge_balance preserved
 // at $77.78 per D182.
 // ─────────────────────────────────────────────────────────────────────
-s5_scenario($results, 'S20 I10 cross-check: audit refund_amount == post-drawdown balance',
+s5_invoice_scenario($results, 'S20 I10 cross-check: audit refund_amount == post-drawdown balance',
     function ($customerId, $unitId, $userId) use ($periodStart, $periodEnd) {
         $leaseId = s5_make_lease([
             'precharge_enabled'     => 1,

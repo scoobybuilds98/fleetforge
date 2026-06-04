@@ -79,7 +79,8 @@ $internalNotes   = clean_string($body['internal_notes'] ?? null, 2000);
 // 2. Pre-flight: verify customer, lease, invoice, payment belong together
 // -----------------------------------------------------------------------
 $customer = db_row(
-    "SELECT id, company_name FROM customers WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, company_name, contact_name, billing_address, province, email
+     FROM customers WHERE id = ? AND deleted_at IS NULL",
     [$customerId]
 );
 if (!$customer) {
@@ -160,20 +161,25 @@ db_transaction(function () use (
     //     status = 'active'
     // ------------------------------------------------------------------
     $cnId = db_insert('credit_notes', [
-        'credit_note_number' => $creditNoteNumber,
-        'customer_id'        => $customerId,
-        'lease_id'           => $leaseId,
-        'source'             => $source,
-        'source_invoice_id'  => $sourceInvoiceId,
-        'source_payment_id'  => $sourcePaymentId,
-        'amount'             => $amount,
-        'currency'           => $currency,
-        'amount_remaining'   => $amount,   // full amount available at creation
-        'status'             => 'active',
-        'expires_at'         => $expiresAt,
-        'reason'             => $reason,
-        'internal_notes'     => $internalNotes,
-        'created_by'         => current_user_id(),
+        'credit_note_number'      => $creditNoteNumber,
+        'company_name_snapshot'   => $customer['company_name']   ?? null,
+        'customer_name_snapshot'  => $customer['contact_name']   ?? null,
+        'billing_address_snapshot' => $customer['billing_address'] ?? null,
+        'province_snapshot'        => $customer['province']        ?? null,
+        'customer_email_snapshot'  => $customer['email']           ?? null,
+        'customer_id'             => $customerId,
+        'lease_id'                => $leaseId,
+        'source'                  => $source,
+        'source_invoice_id'       => $sourceInvoiceId,
+        'source_payment_id'       => $sourcePaymentId,
+        'amount'                  => $amount,
+        'currency'                => $currency,
+        'amount_remaining'        => $amount,
+        'status'                  => 'active',
+        'expires_at'              => $expiresAt,
+        'reason'                  => $reason,
+        'internal_notes'          => $internalNotes,
+        'created_by'              => current_user_id(),
     ]);
 
     // ------------------------------------------------------------------

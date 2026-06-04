@@ -1657,9 +1657,15 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
             <?php else: ?>
                 <?php if ($invoice['gst_exempt_snapshot']): ?>
                     <span class="badge badge-no-dot badge-warning" style="font-size:11px;">GST Exempt</span>
+                    <?php if (!empty($invoice['gst_exempt_number_snapshot'])): ?>
+                        <span class="text-secondary" style="font-size:11px; margin-left:4px;">#<?= e($invoice['gst_exempt_number_snapshot']) ?></span>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($invoice['pst_exempt_snapshot']): ?>
-                    <span class="badge badge-no-dot badge-warning" style="font-size:11px;">PST Exempt</span>
+                    <span class="badge badge-no-dot badge-warning" style="font-size:11px; margin-left:4px;">PST Exempt</span>
+                    <?php if (!empty($invoice['pst_exempt_number_snapshot'])): ?>
+                        <span class="text-secondary" style="font-size:11px; margin-left:4px;">#<?= e($invoice['pst_exempt_number_snapshot']) ?></span>
+                    <?php endif; ?>
                 <?php endif; ?>
             <?php endif; ?>
         </div>
@@ -1788,20 +1794,30 @@ if ($hasOdometer):
         'estimated' => ['badge-warning', 'Estimated'],
         default     => ['badge-neutral', 'Manual'],
     };
-    $leaseOdoContext = db_row(
-        "SELECT start_date, odometer_start_km, mileage_rate_km FROM leases WHERE id = ? AND deleted_at IS NULL",
-        [$invoice['lease_id']]
-    );
+    // Read mileage_rate_km from frozen line-item detail_lines rather than the live
+    // lease — if the lease rate changes post-invoice, the display stays accurate.
+    $frozenMileageRateKm = null;
+    foreach ($lineItems as $li) {
+        if (!empty($li['_detail']['mileage_rate_km'])) {
+            $frozenMileageRateKm = $li['_detail']['mileage_rate_km'];
+            break;
+        }
+    }
+    // Fetch only immutable fields (start_date, odometer_start_km) from the lease.
+    // mileage_rate_km is intentionally excluded — use $frozenMileageRateKm instead.
+    $leaseOdoContext = $invoice['lease_id']
+        ? db_row("SELECT start_date, odometer_start_km FROM leases WHERE id = ? AND deleted_at IS NULL", [$invoice['lease_id']])
+        : null;
 
     // Compute period charge for display: distance × rate (per Model B)
     $periodCharge = null;
     if (($invoice['period_distance_km'] ?? null) !== null
-        && !empty($leaseOdoContext['mileage_rate_km'])
-        && bccomp((string) $leaseOdoContext['mileage_rate_km'], '0', 4) > 0
+        && !empty($frozenMileageRateKm)
+        && bccomp((string) $frozenMileageRateKm, '0', 4) > 0
     ) {
         $periodCharge = bcround(bcmul(
             (string) $invoice['period_distance_km'],
-            (string) $leaseOdoContext['mileage_rate_km'],
+            (string) $frozenMileageRateKm,
             6
         ), 2);
     }
@@ -1834,7 +1850,7 @@ if ($hasOdometer):
         <dt class="text-secondary">Period Charge</dt>
         <dd class="font-mono">
             $<?= number_format((float) $periodCharge, 2) ?>
-            <span class="text-secondary text-sm">(<?= number_format((float)$invoice['period_distance_km'], 2) ?> km × $<?= e($leaseOdoContext['mileage_rate_km']) ?>/km)</span>
+            <span class="text-secondary text-sm">(<?= number_format((float)$invoice['period_distance_km'], 2) ?> km × $<?= e($frozenMileageRateKm) ?>/km)</span>
         </dd>
         <?php endif; ?>
 
@@ -2609,9 +2625,13 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
             <?php if ($invoice['tax_exempt_snapshot']): ?>
                 Fully tax exempt
             <?php else: ?>
-                <?php if ($invoice['gst_exempt_snapshot']): ?>GST exempt<?php endif; ?>
+                <?php if ($invoice['gst_exempt_snapshot']): ?>
+                    GST exempt<?php if (!empty($invoice['gst_exempt_number_snapshot'])): ?> (#<?= e($invoice['gst_exempt_number_snapshot']) ?>)<?php endif; ?>
+                <?php endif; ?>
                 <?php if ($invoice['gst_exempt_snapshot'] && $invoice['pst_exempt_snapshot']): ?>, <?php endif; ?>
-                <?php if ($invoice['pst_exempt_snapshot']): ?>PST exempt<?php endif; ?>
+                <?php if ($invoice['pst_exempt_snapshot']): ?>
+                    PST exempt<?php if (!empty($invoice['pst_exempt_number_snapshot'])): ?> (#<?= e($invoice['pst_exempt_number_snapshot']) ?>)<?php endif; ?>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
         <?php endif; ?>

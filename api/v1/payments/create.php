@@ -174,7 +174,9 @@ db_transaction(function () use (
     // ------------------------------------------------------------------
     $invoice = db_row(
         "SELECT id, status, currency, balance_due, amount_paid, credits_applied,
-                customer_id, lease_id, invoice_number, total_amount
+                customer_id, lease_id, invoice_number, total_amount,
+                company_name_snapshot, customer_name_snapshot,
+                billing_address_snapshot, province_snapshot, customer_email_snapshot
          FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$invoiceId]
     );
@@ -392,18 +394,23 @@ db_transaction(function () use (
         }
 
         $cnId = db_insert('credit_notes', [
-            'credit_note_number' => $cnNumber,
-            'customer_id'        => $invoice['customer_id'],
-            'lease_id'           => $invoice['lease_id'],
-            'source'             => 'overpayment',
-            'source_invoice_id'  => $invoiceId,
-            'source_payment_id'  => $paymentId,
-            'amount'             => $overpaymentAmount,
-            'currency'           => $currency,
-            'amount_remaining'   => $overpaymentAmount,
-            'status'             => 'active',
-            'reason'             => "Overpayment from payment {$paymentNumber} (received {$currency} {$amountRaw}, invoice balance was {$currency} {$balanceDue})",
-            'created_by'         => current_user_id(),
+            'credit_note_number'      => $cnNumber,
+            'company_name_snapshot'   => $invoice['company_name_snapshot']   ?? null,
+            'customer_name_snapshot'  => $invoice['customer_name_snapshot']  ?? null,
+            'billing_address_snapshot' => $invoice['billing_address_snapshot'] ?? null,
+            'province_snapshot'        => $invoice['province_snapshot']        ?? null,
+            'customer_email_snapshot'  => $invoice['customer_email_snapshot']  ?? null,
+            'customer_id'             => $invoice['customer_id'],
+            'lease_id'                => $invoice['lease_id'],
+            'source'                  => 'overpayment',
+            'source_invoice_id'       => $invoiceId,
+            'source_payment_id'       => $paymentId,
+            'amount'                  => $overpaymentAmount,
+            'currency'                => $currency,
+            'amount_remaining'        => $overpaymentAmount,
+            'status'                  => 'active',
+            'reason'                  => "Overpayment from payment {$paymentNumber} (received {$currency} {$amountRaw}, invoice balance was {$currency} {$balanceDue})",
+            'created_by'              => current_user_id(),
         ]);
 
         db_insert('audit_log', [
