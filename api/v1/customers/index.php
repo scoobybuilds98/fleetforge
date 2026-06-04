@@ -38,6 +38,7 @@ $search    = clean_string($_GET['search'] ?? null, 255);
 $status    = clean_string($_GET['status'] ?? null);
 $riskScore = clean_string($_GET['risk_score'] ?? null);
 $sort      = clean_string($_GET['sort'] ?? 'created_at');
+$dir       = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 $page      = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
 $perPage   = min(100, max(1, clean_int($_GET['per_page'] ?? 25) ?? 25));
 
@@ -53,14 +54,22 @@ if ($riskScore !== null && !in_array($riskScore, $validRiskScores, true)) {
 }
 
 // ── Sort ────────────────────────────────────────────────────────
-// Allowlisted columns — never interpolate user input directly
+// Allowlisted columns — never interpolate user input directly.
+// $dir is used for user-controlled direction; FIELD() sorts flip
+// the order list rather than the direction clause.
 $sortMap = [
-    'company_name' => 'c.company_name ASC',
-    'created_at'   => 'c.created_at DESC',
-    'status'       => 'c.status ASC, c.company_name ASC',
-    'risk_score'   => "FIELD(c.risk_score,'high','medium','low'), c.company_name ASC",
+    'company_name'        => "c.company_name {$dir}",
+    'created_at'          => "c.created_at {$dir}",
+    'updated_at'          => "c.updated_at {$dir}",
+    'status'              => "c.status {$dir}, c.company_name ASC",
+    'risk_score'          => $dir === 'ASC'
+                             ? "FIELD(c.risk_score,'low','medium','high'), c.company_name ASC"
+                             : "FIELD(c.risk_score,'high','medium','low'), c.company_name ASC",
+    'outstanding_balance' => "c.outstanding_balance {$dir}, c.company_name ASC",
+    'active_lease_count'  => "c.active_lease_count {$dir}, c.company_name ASC",
+    'credit_limit'        => "c.credit_limit {$dir}, c.company_name ASC",
 ];
-$orderBy = $sortMap[$sort] ?? 'c.created_at DESC';
+$orderBy = $sortMap[$sort] ?? "c.created_at DESC";
 
 // ── Build WHERE conditions ─────────────────────────────────────
 $conditions = ['c.deleted_at IS NULL'];

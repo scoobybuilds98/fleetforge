@@ -24,7 +24,12 @@ require_auth_api();
 require_permission('invoices', 'view');
 
 // Allowlisted sort columns
-$allowedSorts = ['created_at', 'invoice_date', 'due_date', 'total_amount', 'balance_due', 'status', 'invoice_number'];
+$allowedSorts = [
+    'created_at', 'invoice_date', 'due_date', 'total_amount', 'balance_due',
+    'status', 'invoice_number',
+    // Extended sorts
+    'company_name_snapshot', 'updated_at',
+];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'created_at';
 $dir = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 

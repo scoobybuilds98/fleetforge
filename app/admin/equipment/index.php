@@ -179,10 +179,29 @@ require_once FF_ROOT . '/includes/header.php';
                     x-model="filters.sort"
                     @change="resetPage()"
                     aria-label="Sort by">
-                <option value="unit_number">Unit # (A→Z)</option>
-                <option value="status">Status</option>
-                <option value="template">Template</option>
-                <option value="created_at">Newest first</option>
+                <optgroup label="Identifier">
+                    <option value="unit_number">Unit #</option>
+                    <option value="template">Template / Type</option>
+                    <option value="status">Status</option>
+                </optgroup>
+                <optgroup label="Asset">
+                    <option value="year">Year</option>
+                    <option value="acquired_date">Date acquired</option>
+                    <option value="created_at">Date added</option>
+                    <option value="mileage">Mileage</option>
+                </optgroup>
+                <optgroup label="Condition &amp; Compliance">
+                    <option value="health_score">Health score</option>
+                    <option value="cvi_expiry">CVI expiry</option>
+                </optgroup>
+            </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.dir"
+                    @change="resetPage()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="ASC">↑ Asc</option>
+                <option value="DESC">↓ Desc</option>
             </select>
         </div>
 

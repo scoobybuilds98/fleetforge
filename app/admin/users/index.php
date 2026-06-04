@@ -257,6 +257,25 @@ require_once FF_ROOT . '/includes/header.php';
             <span class="text-secondary text-sm"
                   x-show="!loading"
                   x-text="total > 0 ? total + ' user' + (total === 1 ? '' : 's') : ''"></span>
+            <select class="form-select form-control-sm"
+                    x-model="sort"
+                    @change="page = 1; load()"
+                    aria-label="Sort by">
+                <option value="name">Name (A→Z)</option>
+                <option value="email">Email</option>
+                <option value="role_name">Role</option>
+                <option value="status">Status</option>
+                <option value="last_login_at">Recently active</option>
+                <option value="created_at">Newest member</option>
+            </select>
+            <select class="form-select form-control-sm"
+                    x-model="dir"
+                    @change="page = 1; load()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="ASC">↑ Asc</option>
+                <option value="DESC">↓ Desc</option>
+            </select>
         </div>
     </div>
 

@@ -56,11 +56,19 @@ if ($q = clean_string($_GET['q'] ?? null)) {
 }
 
 // -----------------------------------------------------------------------
-// 2. Sort — allowlisted, never from raw user input
+// 2. Sort — sortMap (never raw interpolation) so joined cols like role_name work
 // -----------------------------------------------------------------------
-$allowedSorts = ['name', 'email', 'last_login_at', 'created_at', 'status'];
-$sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'name';
-$dir  = strtoupper($_GET['dir'] ?? '') === 'DESC' ? 'DESC' : 'ASC';
+$dir     = strtoupper($_GET['dir'] ?? '') === 'DESC' ? 'DESC' : 'ASC';
+$sortMap = [
+    'name'          => "u.name {$dir}",
+    'email'         => "u.email {$dir}",
+    'last_login_at' => "u.last_login_at {$dir}",
+    'created_at'    => "u.created_at {$dir}",
+    'status'        => "u.status {$dir}, u.name ASC",
+    'role_name'     => "ur.name {$dir}, u.name ASC",
+];
+$sortKey = $_GET['sort'] ?? 'name';
+$orderBy = $sortMap[$sortKey] ?? "u.name ASC";
 
 // -----------------------------------------------------------------------
 // 3. Pagination
@@ -88,7 +96,7 @@ $rows = db_select(
      FROM users u
      JOIN user_roles ur ON ur.id = u.role_id
      WHERE $whereSQL
-     ORDER BY u.$sort $dir
+     ORDER BY {$orderBy}
      LIMIT $perPage OFFSET $offset",
     $params
 );

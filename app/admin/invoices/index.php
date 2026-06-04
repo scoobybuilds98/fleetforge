@@ -206,13 +206,21 @@ require_once FF_ROOT . '/includes/header.php';
                     x-model="filters.sort"
                     @change="resetPage()"
                     aria-label="Sort by">
-                <option value="created_at">Newest first</option>
-                <option value="invoice_number">Invoice #</option>
-                <option value="invoice_date">Invoice date</option>
-                <option value="due_date">Due date</option>
-                <option value="total_amount">Amount</option>
-                <option value="balance_due">Balance due</option>
-                <option value="status">Status</option>
+                <optgroup label="Date">
+                    <option value="created_at">Date created</option>
+                    <option value="updated_at">Last updated</option>
+                    <option value="invoice_date">Invoice date</option>
+                    <option value="due_date">Due date</option>
+                </optgroup>
+                <optgroup label="Identifier">
+                    <option value="invoice_number">Invoice #</option>
+                    <option value="company_name_snapshot">Customer name</option>
+                    <option value="status">Status</option>
+                </optgroup>
+                <optgroup label="Financial">
+                    <option value="total_amount">Total amount</option>
+                    <option value="balance_due">Balance due</option>
+                </optgroup>
             </select>
 
             <select class="form-select form-control-sm"

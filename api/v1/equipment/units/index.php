@@ -50,10 +50,16 @@ if ($status !== null && !in_array($status, $validStatuses, true)) {
 
 // ── Sort allowlist — never interpolate user input directly ─────
 $sortMap = [
-    'unit_number' => "u.unit_number {$dir}",
-    'status'      => "u.status {$dir}, u.unit_number ASC",
-    'template'    => "t.name {$dir}, u.unit_number ASC",
-    'created_at'  => "u.created_at {$dir}",
+    'unit_number'    => "u.unit_number {$dir}",
+    'status'         => "u.status {$dir}, u.unit_number ASC",
+    'template'       => "t.name {$dir}, u.unit_number ASC",
+    'created_at'     => "u.created_at {$dir}",
+    // Extended sorts
+    'year'           => "u.year {$dir}, u.unit_number ASC",
+    'mileage'        => "u.mileage {$dir}, u.unit_number ASC",
+    'health_score'   => "u.health_score {$dir}, u.unit_number ASC",
+    'cvi_expiry'     => "u.cvi_expiry {$dir}, u.unit_number ASC",
+    'acquired_date'  => "u.acquired_date {$dir}, u.unit_number ASC",
 ];
 $orderBy = $sortMap[$sort] ?? "u.unit_number ASC";
 

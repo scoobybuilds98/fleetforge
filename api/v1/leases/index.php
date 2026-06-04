@@ -31,7 +31,12 @@ require_auth_api();
 require_permission('leases', 'view');
 
 // ── Allowlisted sort columns ───────────────────────────────────
-$allowedSorts = ['created_at', 'start_date', 'end_date', 'contract_number', 'status'];
+$allowedSorts = [
+    'created_at', 'start_date', 'end_date', 'contract_number', 'status',
+    // Extended sorts
+    'outstanding_balance', 'monthly_rate', 'total_invoiced',
+    'company_name_snapshot', 'next_billing_date', 'updated_at',
+];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'created_at';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 

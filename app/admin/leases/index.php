@@ -181,11 +181,23 @@ require_once FF_ROOT . '/includes/header.php';
                     x-model="filters.sort"
                     @change="resetPage()"
                     aria-label="Sort by">
-                <option value="created_at">Newest first</option>
-                <option value="contract_number">Contract #</option>
-                <option value="start_date">Start date</option>
-                <option value="end_date">End date</option>
-                <option value="status">Status</option>
+                <optgroup label="Date">
+                    <option value="created_at">Date created</option>
+                    <option value="updated_at">Last updated</option>
+                    <option value="start_date">Start date</option>
+                    <option value="end_date">End date</option>
+                    <option value="next_billing_date">Next billing date</option>
+                </optgroup>
+                <optgroup label="Identifier">
+                    <option value="contract_number">Contract #</option>
+                    <option value="company_name_snapshot">Customer name</option>
+                    <option value="status">Status</option>
+                </optgroup>
+                <optgroup label="Financial">
+                    <option value="outstanding_balance">Outstanding balance</option>
+                    <option value="total_invoiced">Total invoiced</option>
+                    <option value="monthly_rate">Monthly rate</option>
+                </optgroup>
             </select>
 
             <select class="form-select form-control-sm"

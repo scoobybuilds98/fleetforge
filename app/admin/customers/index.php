@@ -157,10 +157,30 @@ require_once FF_ROOT . '/includes/header.php';
                     x-model="filters.sort"
                     @change="resetPage()"
                     aria-label="Sort by">
-                <option value="created_at">Newest first</option>
-                <option value="company_name">Company name</option>
-                <option value="status">Status</option>
-                <option value="risk_score">Risk (High → Low)</option>
+                <optgroup label="Date">
+                    <option value="created_at">Date created</option>
+                    <option value="updated_at">Last updated</option>
+                </optgroup>
+                <optgroup label="Name &amp; Status">
+                    <option value="company_name">Company name</option>
+                    <option value="status">Status</option>
+                    <option value="risk_score">Risk level</option>
+                </optgroup>
+                <optgroup label="Financial">
+                    <option value="outstanding_balance">Outstanding balance</option>
+                    <option value="credit_limit">Credit limit</option>
+                </optgroup>
+                <optgroup label="Activity">
+                    <option value="active_lease_count">Active leases</option>
+                </optgroup>
+            </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.dir"
+                    @change="resetPage()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
             </select>
         </div>
 
@@ -358,6 +378,7 @@ function FF_Customers() {
             status:     '',
             risk_score: '',
             sort:       'created_at',
+            dir:        'DESC',
         },
         page:      1,
         loading:   true,
@@ -378,6 +399,7 @@ function FF_Customers() {
             if (this.filters.status)     params.set('status',     this.filters.status);
             if (this.filters.risk_score) params.set('risk_score', this.filters.risk_score);
             if (this.filters.sort)       params.set('sort',       this.filters.sort);
+            if (this.filters.dir)        params.set('dir',        this.filters.dir);
             params.set('page',     this.page);
             params.set('per_page', 25);
 
