@@ -120,6 +120,7 @@ $rows = db_select(
         u.acquired_date,
         u.created_at,
         u.updated_at,
+        u.samsara_vehicle_id,
         t.name     AS template_name,
         t.category AS template_category
        FROM equipment_units u
@@ -151,6 +152,7 @@ foreach ($rows as $row) {
         'registration_expiry' => $row['registration_expiry'],
         'mvi_expiry'          => $row['mvi_expiry'],
         'insurance_expiry'    => $row['insurance_expiry'],
+        'samsara_linked'      => !empty($row['samsara_vehicle_id']),
         'health_score'        => $row['health_score'] !== null ? (int) $row['health_score'] : null,
         // health_color: derived band per S-CRON-3 (no separate column;
         // recomputed on every read from the canonical helper).

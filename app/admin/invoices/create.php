@@ -11,7 +11,8 @@ declare(strict_types=1);
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  * @spec     FLEETFORGE_SPEC_FINAL.md §7.7 Invoices
  * @decisions D14 (inclusive days), D30 (asset_url), D32 (CSS classes)
- * @session  S008
+ *            S-DROPDOWN-RETROFIT-1: D-DROPDOWN-RETROFIT-PATTERN
+ * @session  S008, S-DROPDOWN-RETROFIT-1-LEASES-INVOICES
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -20,41 +21,30 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('invoices', 'create');
 
-// Load active + completed leases for the dropdown
-// SAMSARA-3: also pull odometer_start_km, equipment_unit_id, samsara_vehicle_id,
-// and the last invoice's period-end odometer so the create form can
-// auto-populate the period-start odometer and show the Fetch button.
-// S-INVOICE-CREATION-UX C2 (Issue 2): also pull end_date, actual_return_date,
-// billing_cycle, and the latest non-void invoice's billing_period_end so the
-// form can auto-fill period_start (last_period_end + 1 day OR lease.start_date)
-// and period_end (period_start + 1 month - 1 day, capped at lease end / actual
-// return date per billing_cycle).
-$leases = db_select(
-    "SELECT l.id, l.contract_number, l.customer_id, l.company_name_snapshot,
-            l.unit_number_snapshot, l.template_name_snapshot, l.status,
-            l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
-            l.start_date, l.end_date, l.actual_return_date,
-            l.billing_cycle, l.discount_type, l.discount_value,
-            l.gst_exempt, l.pst_exempt, l.tax_exempt,
-            l.odometer_start_km, l.equipment_unit_id,
-            u.samsara_vehicle_id,
-            (SELECT i.odometer_at_period_end_km
-               FROM invoices i
-              WHERE i.lease_id = l.id AND i.deleted_at IS NULL
-                AND i.odometer_at_period_end_km IS NOT NULL
-              ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1) AS latest_invoice_end_odo,
-            (SELECT i.billing_period_end
-               FROM invoices i
-              WHERE i.lease_id = l.id AND i.deleted_at IS NULL
-                AND i.status != 'void'
-                AND i.billing_period_end IS NOT NULL
-              ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1) AS latest_invoice_period_end
-     FROM leases l
-     LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
-     WHERE l.status IN ('active','completed') AND l.deleted_at IS NULL
-     ORDER BY l.contract_number ASC",
-    []
-);
+// S-DROPDOWN-RETROFIT-1: Lease field now uses FF_RecordPicker (queries api/v1/leases/index.php).
+// Full lease context (odometer, period dates, Samsara) is fetched on-demand via
+// api/v1/leases/show.php after a lease is picked. The heavy server-side preload with
+// correlated subqueries is no longer needed at page load time.
+//
+// Pre-load only the initial label for ?lease_id=N URL param so the picker shows
+// a pre-selected state when navigating from a lease show page.
+$preLeaseId    = clean_int($_GET['lease_id'] ?? null);
+$preLeaseLabel = null;
+if ($preLeaseId) {
+    $preLease = db_row(
+        "SELECT id, contract_number, company_name_snapshot, unit_number_snapshot, status
+         FROM leases WHERE id = ? AND deleted_at IS NULL AND status IN ('active','completed')",
+        [$preLeaseId]
+    );
+    if ($preLease) {
+        $preLeaseLabel = $preLease['contract_number'] . ' — ' . ($preLease['company_name_snapshot'] ?? '');
+        if ($preLease['unit_number_snapshot']) {
+            $preLeaseLabel .= ' (Unit ' . $preLease['unit_number_snapshot'] . ')';
+        }
+    } else {
+        $preLeaseId = null; // Drop invalid/inaccessible pre-selection
+    }
+}
 
 $pageTitle = 'Create Invoice';
 $helpModuleSlug = 'invoices';
@@ -86,32 +76,32 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- FIX #39: wrap in form tag so Enter-to-submit works -->
 <form x-data="FF_InvoiceCreate()" x-init="init()" @submit.prevent="submit()" class="card" style="padding:24px; max-width:800px;">
 
-    <!-- Lease Selection -->
+    <!-- Lease Selection — D-DROPDOWN-RETROFIT-PATTERN: FF_RecordPicker.
+         @record-picked fires onLeasePickerSelected(raw) which populates the lease
+         info card immediately, then _fetchLeaseContext(id) fetches full context
+         (odometer history, period dates, Samsara link) from api/v1/leases/show.php. -->
     <div style="margin-bottom:20px;">
         <label class="form-label">Lease <span class="text-danger">*</span></label>
-        <select class="form-control" x-model="form.lease_id" @change="onLeaseChange()">
-            <option value="">Select a lease…</option>
-            <?php foreach ($leases as $lease): ?>
-            <option value="<?= (int)$lease['id'] ?>"
-                    data-daily="<?= e($lease['daily_rate']) ?>"
-                    data-weekly="<?= e($lease['weekly_rate']) ?>"
-                    data-monthly="<?= e($lease['monthly_rate']) ?>"
-                    data-currency="<?= e($lease['currency']) ?>"
-                    data-start="<?= e($lease['start_date']) ?>"
-                    data-end="<?= e($lease['end_date'] ?? '') ?>"
-                    data-actual-return="<?= e($lease['actual_return_date'] ?? '') ?>"
-                    data-billing-cycle="<?= e($lease['billing_cycle']) ?>"
-                    data-equipment-unit-id="<?= (int)$lease['equipment_unit_id'] ?>"
-                    data-samsara-linked="<?= !empty($lease['samsara_vehicle_id']) ? '1' : '0' ?>"
-                    data-lease-start-odo="<?= e($lease['odometer_start_km'] ?? '') ?>"
-                    data-lease-start-date="<?= e($lease['start_date']) ?>"
-                    data-prev-end-odo="<?= e($lease['latest_invoice_end_odo'] ?? '') ?>"
-                    data-prev-period-end="<?= e($lease['latest_invoice_period_end'] ?? '') ?>">
-                <?= e($lease['contract_number']) ?> — <?= e($lease['company_name_snapshot']) ?>
-                (Unit <?= e($lease['unit_number_snapshot']) ?>, <?= e($lease['status']) ?>)
-            </option>
-            <?php endforeach; ?>
-        </select>
+        <?php
+        $pickerConfig   = [
+            'endpoint'    => base_url('api/v1/leases/index.php'),
+            'searchParam' => 'search',
+            'resultKey'   => 'items',
+            'perPage'     => 10,
+            'extraParams' => 'status=active',
+            'placeholder' => 'Search leases by contract #, customer, or unit…',
+            'mapResult'   => "r => ({ id: r.id, label: r.contract_number + ' — ' + (r.customer_display_name || ''), sublabel: 'Unit ' + (r.unit_display_number || '—') + ' · ' + r.status, raw: r })",
+        ];
+        if ($preLeaseId && $preLeaseLabel) {
+            $pickerConfig['initialId']    = (int) $preLeaseId;
+            $pickerConfig['initialLabel'] = $preLeaseLabel;
+        }
+        $pickerOnPicked  = 'form.lease_id = $event.detail.id; onLeasePickerSelected($event.detail.raw)';
+        $pickerOnCleared = "form.lease_id = ''; onLeaseCleared()";
+        $pickerError     = 'false';
+        require FF_ROOT . '/includes/partials/record-picker.php';
+        ?>
+        <div class="field-error" data-error-for="lease_id"></div>
     </div>
 
     <!-- Lease info card (shown after selection) -->
@@ -393,17 +383,15 @@ function FF_InvoiceCreate() {
         // S-INVOICE-CREATION-UX C2: period auto-fill state
         periodWarning:      '',       // banner text when auto-fill hits an edge case (catch-up, capped, etc.)
 
-        // S-INVOICE-CREATION-UX C2 / C3: prefill from URL ?lease_id=N so the
-        // "Generate Invoice" button on the lease profile lands here with the
-        // lease pre-selected and the period dates auto-filled.
-        init() {
-            const params = new URLSearchParams(window.location.search);
-            const leaseIdParam = params.get('lease_id');
-            if (leaseIdParam && /^\d+$/.test(leaseIdParam)) {
-                this.form.lease_id = leaseIdParam;
-                // Wait for the <option> elements to render before reading their data attrs.
-                this.$nextTick(() => this.onLeaseChange());
-            }
+        // S-INVOICE-CREATION-UX C2 / C3: pre-populate from URL ?lease_id=N.
+        // The picker's initialId/initialLabel shows the correct label immediately;
+        // this init call fetches full context (odometer, period dates, Samsara) from
+        // api/v1/leases/show.php so the form auto-fills on page load.
+        async init() {
+            <?php if ($preLeaseId): ?>
+            this.form.lease_id = <?= (int) $preLeaseId ?>;
+            await this._fetchLeaseContext(<?= (int) $preLeaseId ?>);
+            <?php endif; ?>
         },
 
         // ── S-INVOICE-CREATION-UX C2 date helpers ──────────────────
@@ -495,30 +483,19 @@ function FF_InvoiceCreate() {
 
         // S-INVOICE-CREATION-UX C2: derive period_start + period_end from
         // lease shape + prior non-void invoice history.
+        // D-DROPDOWN-RETROFIT-PATTERN: accepts a plain context object (not a DOM option)
+        // so it works with both the picker flow and the legacy init path.
         //
-        //   period_start:
-        //     - prev non-void invoice exists → prev.billing_period_end + 1 day
-        //     - else                          → lease.start_date
-        //
-        //   period_end (by lease.billing_cycle):
-        //     - 'monthly'      → period_start + 1 month - 1 day,
-        //                        capped at actual_return_date OR end_date
-        //     - 'on_close_only'→ actual_return_date OR end_date OR today
-        //     - open-ended     → period_start + 1 month - 1 day (uncapped)
-        //
-        // Edge case: lease ended in the past with no prior invoices → fill
-        // through end_date (or actual_return_date) as a single catch-up
-        // invoice and surface a warning banner so the operator knows.
-        _autoFillPeriodDates(opt) {
+        //   ctx: { startDate, endDate, actualReturn, billingCycle, prevPeriodEnd }
+        _autoFillPeriodDatesFromCtx(ctx) {
             this.periodWarning = '';
-            const startDate    = opt.dataset.start          || '';
-            const endDate      = opt.dataset.end            || '';
-            const actualReturn = opt.dataset.actualReturn   || '';
-            const billingCycle = opt.dataset.billingCycle   || 'monthly';
-            const prevPeriodEnd = opt.dataset.prevPeriodEnd || '';
+            const startDate    = ctx.startDate    || '';
+            const endDate      = ctx.endDate      || '';
+            const actualReturn = ctx.actualReturn || '';
+            const billingCycle = ctx.billingCycle || 'monthly';
+            const prevPeriodEnd = ctx.prevPeriodEnd || '';
             if (!startDate) return;
 
-            // period_start
             let periodStart;
             if (prevPeriodEnd) {
                 periodStart = this._addDays(prevPeriodEnd, 1);
@@ -527,13 +504,9 @@ function FF_InvoiceCreate() {
             }
             this.form.period_start = periodStart;
 
-            // period_end
             const ceiling = this._earliest(actualReturn || null, endDate || null);
             const today   = this._today();
 
-            // Defensive: if a prior invoice already covered through past the
-            // lease ceiling (over-invoiced anomaly), refuse to auto-fill
-            // period_end and warn loudly. Operator must enter manually.
             if (ceiling && periodStart > ceiling) {
                 this.form.period_end = '';
                 this.periodWarning = 'Prior invoice ended on ' + prevPeriodEnd +
@@ -545,13 +518,8 @@ function FF_InvoiceCreate() {
             if (billingCycle === 'on_close_only') {
                 periodEnd = ceiling || today;
             } else if (ceiling && ceiling < today && !prevPeriodEnd) {
-                // Catch-up: lease already ended and no prior invoices exist
-                // → fill the entire span as a single catch-up invoice. The
-                // alternative (1 normal month with the rest unbilled) leaves
-                // a coverage gap that's easy to miss.
                 periodEnd = ceiling;
             } else {
-                // monthly (default)
                 periodEnd = this._addOneMonthMinusOneDay(periodStart);
                 if (ceiling && periodEnd > ceiling) {
                     periodEnd = ceiling;
@@ -559,7 +527,6 @@ function FF_InvoiceCreate() {
             }
             this.form.period_end = periodEnd;
 
-            // Edge-case warnings — fired AFTER the fill so we don't block it.
             if (ceiling && ceiling < today && !prevPeriodEnd) {
                 this.periodWarning = 'Lease ended on ' + ceiling +
                     ' and no prior invoices exist — this is a single catch-up invoice covering the full lease span. Multiple billing cycles would normally have been generated; verify the period before submitting.';
@@ -570,69 +537,101 @@ function FF_InvoiceCreate() {
         },
         // ───────────────────────────────────────────────────────────
 
-        onLeaseChange() {
-            const sel = this.$el.closest('[x-data]').querySelector('select');
-            const opt = sel.options[sel.selectedIndex];
-            if (!this.form.lease_id) {
-                this.selectedLease = null;
-                // Reset odometer state when lease is cleared
-                this.odoCanFetch = false;
-                this.form.odometer_at_period_start_km = '';
-                this.form.odometer_at_period_end_km   = '';
-                this.odoStartSource = null;
-                this.odoEndSource   = null;
-                this.odoStartAutoSource = '';
-                this.odoBanner = null;
-                this._leaseStartOdo  = null;
-                this._leaseStartDate = '';
-                this.periodWarning = '';
-                return;
-            }
+        // D-DROPDOWN-RETROFIT-PATTERN: called by FF_RecordPicker @record-picked.
+        // Sets immediate UI state from the raw lease record (from api/v1/leases/index.php),
+        // then fetches full context (odometer history, period-end date, Samsara link)
+        // from api/v1/leases/show.php via _fetchLeaseContext().
+        async onLeasePickerSelected(raw) {
+            if (!raw) return this.onLeaseCleared();
+
+            // Immediate basic state — show the lease info card without waiting
             this.selectedLease = {
-                daily:    opt.dataset.daily   || '0.00',
-                weekly:   opt.dataset.weekly  || '0.00',
-                monthly:  opt.dataset.monthly || '0.00',
-                currency: opt.dataset.currency || 'CAD',
-                start:    opt.dataset.start   || '',
-                equipmentUnitId: parseInt(opt.dataset.equipmentUnitId) || null,
+                daily:           raw.daily_rate    || '0.00',
+                weekly:          raw.weekly_rate   || '0.00',
+                monthly:         raw.monthly_rate  || '0.00',
+                currency:        raw.currency      || 'CAD',
+                start:           raw.start_date    || '',
+                equipmentUnitId: raw.equipment_unit_id || null,
             };
+            this._leaseStartDate = raw.start_date || '';
 
-            // S-INVOICE-CREATION-UX C2 (Issue 2): auto-fill period_start +
-            // period_end from lease shape + prior-invoice history.
-            // Both fields stay editable so operators can override for
-            // off-cycle invoices.
-            this._autoFillPeriodDates(opt);
-            this.updateDays();
+            // Full context fetch (odometer, period dates, Samsara)
+            await this._fetchLeaseContext(raw.id);
+        },
 
-            // SAMSARA-3: wire up odometer state from the lease option attrs
-            this.odoCanFetch   = opt.dataset.samsaraLinked === '1';
-            this._leaseStartOdo  = opt.dataset.leaseStartOdo ? parseFloat(opt.dataset.leaseStartOdo) : null;
-            this._leaseStartDate = opt.dataset.leaseStartDate || '';
+        // Fetch full lease context from api/v1/leases/show.php. Used by both
+        // onLeasePickerSelected() and the init() pre-populate flow.
+        async _fetchLeaseContext(leaseId) {
+            try {
+                const r = await FF_Api.get(`<?= base_url('api/v1/leases/show') ?>?id=${leaseId}`);
+                const d = r.data || {};
 
-            // Reset end side — user always fetches or enters fresh
-            this.form.odometer_at_period_end_km = '';
-            this.form.odometer_fetched_at       = null;
-            this.odoEndSource                   = null;
-            this.odoBanner                      = null;
+                this.odoCanFetch     = !!d.samsara_vehicle_id;
+                this._leaseStartOdo  = d.odometer_start_km !== null && d.odometer_start_km !== undefined
+                    ? parseFloat(d.odometer_start_km) : null;
+                this._leaseStartDate = d.start_date || this._leaseStartDate;
 
-            // Auto-populate start side:
-            //   1. Previous invoice's odometer_at_period_end_km
-            //   2. Else lease.odometer_start_km
-            //   3. Else leave empty
-            const prevEnd = opt.dataset.prevEndOdo ? parseFloat(opt.dataset.prevEndOdo) : null;
-            if (prevEnd !== null && !isNaN(prevEnd)) {
-                this.form.odometer_at_period_start_km = prevEnd.toFixed(2);
-                this.odoStartSource                    = 'manual';
-                this.odoStartAutoSource                = 'Auto-filled from previous invoice end odometer.';
-            } else if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
-                this.form.odometer_at_period_start_km = this._leaseStartOdo.toFixed(2);
-                this.odoStartSource                    = 'manual';
-                this.odoStartAutoSource                = 'Auto-filled from lease starting odometer.';
-            } else {
-                this.form.odometer_at_period_start_km = '';
-                this.odoStartSource                    = null;
-                this.odoStartAutoSource                = 'No previous odometer on file. Enter manually or fetch from Samsara.';
+                // Ensure selectedLease is set (may not be if called from init())
+                if (!this.selectedLease) {
+                    this.selectedLease = {
+                        daily:           d.daily_rate    || '0.00',
+                        weekly:          d.weekly_rate   || '0.00',
+                        monthly:         d.monthly_rate  || '0.00',
+                        currency:        d.currency      || 'CAD',
+                        start:           d.start_date    || '',
+                        equipmentUnitId: d.equipment_unit_id || null,
+                    };
+                }
+
+                // Period dates auto-fill from full context
+                this._autoFillPeriodDatesFromCtx({
+                    startDate:    d.start_date          || '',
+                    endDate:      d.end_date            || '',
+                    actualReturn: d.actual_return_date  || '',
+                    billingCycle: d.billing_cycle       || 'monthly',
+                    prevPeriodEnd: d.latest_invoice_period_end || '',
+                });
+                this.updateDays();
+
+                // Reset end side — user always fetches or enters fresh
+                this.form.odometer_at_period_end_km = '';
+                this.form.odometer_fetched_at       = null;
+                this.odoEndSource                   = null;
+                this.odoBanner                      = null;
+
+                // Auto-populate start side
+                const prevEndOdo = d.latest_invoice_odometer_km;
+                if (prevEndOdo !== null && prevEndOdo !== undefined && !isNaN(Number(prevEndOdo))) {
+                    this.form.odometer_at_period_start_km = Number(prevEndOdo).toFixed(2);
+                    this.odoStartSource                    = 'manual';
+                    this.odoStartAutoSource                = 'Auto-filled from previous invoice end odometer.';
+                } else if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
+                    this.form.odometer_at_period_start_km = this._leaseStartOdo.toFixed(2);
+                    this.odoStartSource                    = 'manual';
+                    this.odoStartAutoSource                = 'Auto-filled from lease starting odometer.';
+                } else {
+                    this.form.odometer_at_period_start_km = '';
+                    this.odoStartSource                    = null;
+                    this.odoStartAutoSource                = 'No previous odometer on file. Enter manually or fetch from Samsara.';
+                }
+            } catch (e) {
+                // Non-fatal: context fetch failed; basic selectedLease state still works.
+                // Period dates and odometer fields will be blank — user can fill manually.
             }
+        },
+
+        onLeaseCleared() {
+            this.selectedLease = null;
+            this.odoCanFetch = false;
+            this.form.odometer_at_period_start_km = '';
+            this.form.odometer_at_period_end_km   = '';
+            this.odoStartSource     = null;
+            this.odoEndSource       = null;
+            this.odoStartAutoSource = '';
+            this.odoBanner          = null;
+            this._leaseStartOdo     = null;
+            this._leaseStartDate    = '';
+            this.periodWarning      = '';
         },
 
         // Live-calculated period distance (end - start)

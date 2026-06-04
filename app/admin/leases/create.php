@@ -25,7 +25,8 @@ declare(strict_types=1);
  *              D30 (asset_url), D32 (CSS classes only from app.css)
  *              S019 rate priority: customer_equipment_rates → rate_cards → template
  *              S-LEASE-UNITS: D-B (auto-reciprocate), D-C (sticky toggle), D-D (settings default)
- * @session     S007, S019 (rate pre-fill upgrade), S-LEASE-UNITS
+ *              S-DROPDOWN-RETROFIT-1: D-DROPDOWN-RETROFIT-PATTERN
+ * @session     S007, S019 (rate pre-fill upgrade), S-LEASE-UNITS, S-DROPDOWN-RETROFIT-1-LEASES-INVOICES
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -34,40 +35,10 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('leases', 'create');
 
-// ── Server-side: load customers and available units for dropdowns ──
-// Load all active customers for select
-$customers = db_select(
-    "SELECT id, company_name, contact_name, currency, mileage_unit,
-            billing_cycle, discount_type, discount_value,
-            gst_exempt, pst_exempt
-     FROM customers
-     WHERE status NOT IN ('inactive','suspended') AND deleted_at IS NULL
-     ORDER BY company_name ASC",
-    []
-);
-
-// Load available equipment units with template info
-// equipment_units has no mileage_unit — use template's default_mileage_unit instead
-// S019: include u.template_id so JS can call lookup_rates with equipment_template_id
-// [SELECTOR-1] Fetch every non-deleted unit, NOT just available ones,
-// so the user can SEE leased / maintenance units in the dropdown with
-// the reason they can't be picked. ff_unit_is_selectable() decides which
-// rows get the disabled attribute, and the API still 409s on the
-// server side if a non-available id is somehow submitted. Sort the
-// available rows first so the picker is still useful by default.
-$availableUnits = db_select(
-    "SELECT u.id, u.unit_number, u.status, u.template_id,
-            u.samsara_vehicle_id, u.samsara_vehicle_name, u.samsara_entity_type,
-            t.name AS template_name, t.category,
-            t.default_daily_rate, t.default_weekly_rate,
-            t.default_monthly_rate, t.default_mileage_rate,
-            t.default_currency, t.default_mileage_unit
-     FROM equipment_units u
-     JOIN equipment_templates t ON t.id = u.template_id AND t.deleted_at IS NULL
-     WHERE u.deleted_at IS NULL
-     ORDER BY (u.status = 'available') DESC, u.unit_number ASC",
-    []
-);
+// S-DROPDOWN-RETROFIT-1: Customer and Equipment Unit fields now use FF_RecordPicker
+// (queries api/v1/customers/index.php + api/v1/equipment/units/index.php client-side).
+// Server-side preloads for these dropdowns have been removed; the picker APIs supply
+// all data including the fields previously stored in data-* attributes.
 
 $pageTitle = 'New Lease';
 $helpModuleSlug = 'leases';
@@ -102,58 +73,54 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-body">
 
                 <div class="form-row-2">
+                    <!-- D-DROPDOWN-RETROFIT-PATTERN: Customer uses FF_RecordPicker.
+                         @record-picked fires onCustomerPickerSelected(raw) which reads
+                         customer defaults (currency, billing_cycle, tax exemptions,
+                         discount) from the raw API record instead of DOM data attrs. -->
                     <div class="form-group">
-                        <label class="form-label required" for="customer_id">Customer</label>
-                        <select id="customer_id" class="form-control form-select"
-                                x-model="form.customer_id"
-                                :class="errors.customer_id ? 'is-invalid' : ''"
-                                @change="onCustomerChange()">
-                            <option value="">— Select customer —</option>
-                            <?php foreach ($customers as $c): ?>
-                            <option value="<?= $c['id'] ?>"
-                                    data-currency="<?= e($c['currency']) ?>"
-                                    data-mileage-unit="<?= e($c['mileage_unit']) ?>"
-                                    data-billing-cycle="<?= e($c['billing_cycle']) ?>"
-                                    data-gst-exempt="<?= $c['gst_exempt'] ? '1' : '0' ?>"
-                                    data-pst-exempt="<?= $c['pst_exempt'] ? '1' : '0' ?>"
-                                    data-discount-type="<?= e($c['discount_type']) ?>"
-                                    data-discount-value="<?= e($c['discount_value']) ?>">
-                                <?= e($c['company_name']) ?>
-                                <?php if ($c['contact_name']): ?>(<?= e($c['contact_name']) ?>)<?php endif; ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <div class="form-error" x-show="errors.customer_id" x-text="errors.customer_id"></div>
+                        <label class="form-label required">Customer</label>
+                        <?php
+                        $pickerConfig   = [
+                            'endpoint'    => base_url('api/v1/customers/index.php'),
+                            'searchParam' => 'search',
+                            'resultKey'   => 'items',
+                            'perPage'     => 10,
+                            'placeholder' => 'Search customers…',
+                            'mapResult'   => "r => ({ id: r.id, label: r.company_name + (r.contact_name ? ' (' + r.contact_name + ')' : ''), sublabel: [r.city, r.province].filter(Boolean).join(', ') + (r.status !== 'active' ? ' · ' + r.status.toUpperCase() : ''), raw: r })",
+                        ];
+                        $pickerOnPicked  = 'form.customer_id = $event.detail.id; onCustomerPickerSelected($event.detail.raw)';
+                        $pickerOnCleared = "form.customer_id = ''";
+                        $pickerError     = 'false';
+                        require FF_ROOT . '/includes/partials/record-picker.php';
+                        ?>
+                        <div class="field-error" data-error-for="customer_id"></div>
                     </div>
 
+                    <!-- D-DROPDOWN-RETROFIT-PATTERN: Equipment Unit uses FF_RecordPicker.
+                         Shows available units only (status=available). Status shown in
+                         sublabel so operator knows the unit is ready for a new lease.
+                         The API validates on submit (409 UNIT_UNAVAILABLE) as belt-and-suspenders.
+                         @record-picked fires onUnitPickerSelected(raw) which reads
+                         template_id (for rate lookup) and samsara_linked (for GPS odometer). -->
                     <div class="form-group">
-                        <label class="form-label required" for="equipment_unit_id">Equipment Unit</label>
-                        <select id="equipment_unit_id" class="form-control form-select"
-                                x-model="form.equipment_unit_id"
-                                :class="errors.equipment_unit_id ? 'is-invalid' : ''"
-                                @change="onUnitChange()">
-                            <option value="">— Select available unit —</option>
-                            <?php foreach ($availableUnits as $u): ?>
-                            <?php // [SELECTOR-1] disable non-available so the option is visible-but-unpickable. ?>
-                            <option value="<?= $u['id'] ?>"
-                                    data-template-id="<?= (int)$u['template_id'] ?>"
-                                    data-template="<?= e($u['template_name']) ?>"
-                                    data-category="<?= e($u['category']) ?>"
-                                    data-status="<?= e($u['status']) ?>"
-                                    data-daily-rate="<?= e($u['default_daily_rate'] ?? '0.00') ?>"
-                                    data-weekly-rate="<?= e($u['default_weekly_rate'] ?? '0.00') ?>"
-                                    data-monthly-rate="<?= e($u['default_monthly_rate'] ?? '0.00') ?>"
-                                    data-mileage-rate="<?= e($u['default_mileage_rate'] ?? '0.0000') ?>"
-                                    data-currency="<?= e($u['default_currency'] ?? 'CAD') ?>"
-                                    data-mileage-unit="<?= e($u['default_mileage_unit'] ?? 'km') ?>"
-                                    data-samsara-linked="<?= !empty($u['samsara_vehicle_id']) ? '1' : '0' ?>"
-                                    <?= ff_unit_is_selectable($u['status']) ? '' : 'disabled' ?>>
-                                <?= e(ff_unit_selector_label($u)) ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <div class="form-hint">Available units are selectable; leased / maintenance units are shown but greyed out.</div>
-                        <div class="form-error" x-show="errors.equipment_unit_id" x-text="errors.equipment_unit_id"></div>
+                        <label class="form-label required">Equipment Unit</label>
+                        <?php
+                        $pickerConfig   = [
+                            'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                            'searchParam' => 'search',
+                            'resultKey'   => 'items',
+                            'perPage'     => 10,
+                            'extraParams' => 'status=available',
+                            'placeholder' => 'Search available units…',
+                            'mapResult'   => "r => ({ id: r.id, label: r.unit_number + ' — ' + (r.template_name || ''), sublabel: (r.yard_location ? r.yard_location + ' · ' : '') + 'AVAILABLE', raw: r })",
+                        ];
+                        $pickerOnPicked  = 'form.equipment_unit_id = $event.detail.id; onUnitPickerSelected($event.detail.raw)';
+                        $pickerOnCleared = "form.equipment_unit_id = ''; onUnitPickerCleared()";
+                        $pickerError     = 'false';
+                        require FF_ROOT . '/includes/partials/record-picker.php';
+                        ?>
+                        <div class="form-hint">Showing available units only. <a href="<?= base_url('equipment') ?>" class="text-link" target="_blank">View all equipment →</a></div>
+                        <div class="field-error" data-error-for="equipment_unit_id"></div>
                     </div>
                 </div>
 
@@ -1202,67 +1169,69 @@ function FF_CreateLease() {
             return total.toLocaleString('en-CA', { style: 'currency', currency, minimumFractionDigits: 2 });
         },
 
-        onCustomerChange() {
-            const sel = document.getElementById('customer_id');
-            const opt = sel.options[sel.selectedIndex];
-            if (!opt || !opt.value) return;
+        // D-DROPDOWN-RETROFIT-PATTERN: called by FF_RecordPicker @record-picked.
+        // Receives the raw customer record (from api/v1/customers/index.php) and
+        // applies the same defaults that onCustomerChange() previously read from
+        // DOM data-* attributes on the PHP-rendered <select> options.
+        onCustomerPickerSelected(raw) {
+            if (!raw) return;
 
-            // Auto-fill customer defaults — currency/cycle/tax from customer record
-            this.form.currency      = opt.dataset.currency      || 'CAD';
-            this.form.mileage_unit  = opt.dataset.mileageUnit   || 'km';
-            this.form.billing_cycle = opt.dataset.billingCycle  || 'monthly';
-            this.form.gst_exempt    = opt.dataset.gstExempt === '1';
-            this.form.pst_exempt    = opt.dataset.pstExempt === '1';
+            this.form.currency      = raw.currency      || 'CAD';
+            this.form.mileage_unit  = raw.mileage_unit  || 'km';
+            this.form.billing_cycle = raw.billing_cycle || 'monthly';
+            this.form.gst_exempt    = raw.gst_exempt    === 1 || raw.gst_exempt === true;
+            this.form.pst_exempt    = raw.pst_exempt    === 1 || raw.pst_exempt === true;
 
-            if (opt.dataset.discountType && opt.dataset.discountType !== 'none') {
-                this.form.discount_type  = opt.dataset.discountType;
-                this.form.discount_value = opt.dataset.discountValue || '';
+            if (raw.discount_type && raw.discount_type !== 'none') {
+                this.form.discount_type  = raw.discount_type;
+                this.form.discount_value = raw.discount_value || '';
             }
 
-            // S019: If a unit is already selected, re-run rate lookup with new customer
+            // S019: if a unit is already selected, re-run rate lookup with new customer
             if (this.form.equipment_unit_id) {
                 this._lookupRates();
             }
         },
 
-        onUnitChange() {
-            const sel = document.getElementById('equipment_unit_id');
-            const opt = sel.options[sel.selectedIndex];
+        // D-DROPDOWN-RETROFIT-PATTERN: called by FF_RecordPicker @record-picked for
+        // equipment unit. Receives the raw unit record (from api/v1/equipment/units/index.php).
+        // Replaces the DOM-reading onUnitChange(); samsara_linked comes from the API
+        // (added in S-DROPDOWN-RETROFIT-1).
+        onUnitPickerSelected(raw) {
+            if (!raw) return this.onUnitPickerCleared();
 
-            // SAMSARA-3: track selected unit state so the Starting Odometer
-            // section knows whether to show the Fetch button. Reset odometer
-            // state whenever the unit changes so stale GPS values don't
-            // survive across units.
-            if (!opt || !opt.value) {
-                this.selectedUnit     = null;
-                this.odometerCanFetch = false;
-                this.odometerSource   = null;
-                this.odometerBanner   = null;
-                this.form.odometer_start_km         = '';
-                this.form.odometer_start_source     = null;
-                this.form.odometer_start_fetched_at = null;
-                return;
-            }
+            // SAMSARA-3: track selected unit state for the Starting Odometer section.
             this.selectedUnit = {
-                id:             opt.value,
-                templateId:     parseInt(opt.dataset.templateId) || null,
-                samsaraLinked:  opt.dataset.samsaraLinked === '1',
+                id:            raw.id,
+                templateId:    raw.template_id || null,
+                samsaraLinked: !!raw.samsara_linked,
             };
             this.odometerCanFetch = this.selectedUnit.samsaraLinked;
-            // Clear any stale odometer state from a previous selection
+            // Clear stale odometer state from a previous selection
             this.odometerSource                 = null;
             this.odometerBanner                 = null;
             this.form.odometer_start_km         = '';
             this.form.odometer_start_source     = null;
             this.form.odometer_start_fetched_at = null;
 
-            // Reset lock state before lookup — will be re-set based on new source
+            // Reset rate lock before lookup — will be re-set based on new source
             this.ratesLocked = false;
             this.rateSource  = null;
 
-            // Priority: customer override → rate card → template
             this._currentTemplateId = this.selectedUnit.templateId;
             this._lookupRates();
+        },
+
+        onUnitPickerCleared() {
+            this.selectedUnit     = null;
+            this.odometerCanFetch = false;
+            this.odometerSource   = null;
+            this.odometerBanner   = null;
+            this.form.odometer_start_km         = '';
+            this.form.odometer_start_source     = null;
+            this.form.odometer_start_fetched_at = null;
+            this.rateSource  = null;
+            this.ratesLocked = false;
         },
 
         // SAMSARA-3: Live-fetch the current odometer reading from Samsara

@@ -185,6 +185,20 @@ $lease['latest_invoice_number_for_odo']  = $latestOdoInv['invoice_number'] ?? nu
 $lease['latest_invoice_id_for_odo']      = $latestOdoInv && $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
 $lease['samsara_odometer_km']         = $lease['samsara_odometer_km']         !== null ? (float) $lease['samsara_odometer_km']         : null;
 
+// S-DROPDOWN-RETROFIT-1: latest non-void invoice's billing_period_end so the
+// invoice create picker can auto-fill period_start = latest_period_end + 1 day.
+// Separate from the odometer query above (that query filters by odometer IS NOT NULL).
+$latestPeriodInv = db_row(
+    "SELECT i.billing_period_end
+       FROM invoices i
+      WHERE i.lease_id = ? AND i.deleted_at IS NULL
+        AND i.status != 'void'
+        AND i.billing_period_end IS NOT NULL
+      ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1",
+    [$id]
+);
+$lease['latest_invoice_period_end'] = $latestPeriodInv['billing_period_end'] ?? null;
+
 // S-MILEAGE-3 D-F: prior_excess_km block retired 2026-05-13.
 // excess_distance_km column dropped in S-MILEAGE-2B C4 migration
 // 202605120907; the SUM query above would have failed silently
