@@ -212,19 +212,17 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- Bulk action bar -->
         <div x-show="selectedIds.length > 0"
-             x-transition
-             class="bulk-action-bar"
-             style="display:flex;align-items:center;gap:12px;padding:10px 16px;
-                    background:var(--color-surface-raised,#1e2430);
-                    border:1px solid var(--color-border);border-radius:8px;
-                    margin-bottom:12px;">
-            <span class="text-sm font-medium"
-                  x-text="selectedIds.length + ' item' + (selectedIds.length === 1 ? '' : 's') + ' selected'"></span>
-            <button class="btn btn-danger btn-sm" @click="bulkDelete()">
-                Delete selected
+             x-transition:enter="ff-bulk-enter" x-transition:enter-start="ff-bulk-enter-from" x-transition:enter-end="ff-bulk-enter-to"
+             x-transition:leave="ff-bulk-leave" x-transition:leave-start="ff-bulk-leave-from" x-transition:leave-end="ff-bulk-leave-to"
+             class="ff-bulk-bar">
+            <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
+            <div class="ff-bulk-bar-sep"></div>
+            <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
+                <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor" aria-hidden="true"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+                Delete
             </button>
-            <button class="btn btn-ghost btn-sm" @click="clearSelection()">
-                Clear
+            <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()" title="Clear selection" aria-label="Clear selection">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
             </button>
         </div>
 
@@ -234,11 +232,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <table class="table" aria-label="Customers">
                     <thead>
                         <tr>
-                            <th style="width:40px;text-align:center;padding:8px 12px;">
-                                <input type="checkbox" class="form-checkbox"
-                                       :checked="selectAll"
-                                       @change="toggleSelectAll()"
-                                       title="Select all on this page">
+                            <th class="th-checkbox">
+                                <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all on this page">
                             </th>
                             <th scope="col" class="th-sortable" @click="setSort('company_name')">
                                 Company <span x-show="filters.sort === 'company_name'">↑</span>
@@ -259,11 +254,9 @@ require_once FF_ROOT . '/includes/header.php';
                     </thead>
                     <tbody>
                         <template x-for="c in customers" :key="c.id">
-                            <tr>
-                                <td style="text-align:center;padding:8px 12px;" @click.stop>
-                                    <input type="checkbox" class="form-checkbox"
-                                           :checked="selectedIds.includes(c.id)"
-                                           @change="toggleSelect(c.id)">
+                            <tr :class="{ 'ff-row-selected': selectedIds.includes(c.id) }">
+                                <td class="td-checkbox" @click.stop>
+                                    <input type="checkbox" class="ff-checkbox" :checked="selectedIds.includes(c.id)" @change="toggleSelect(c.id)">
                                 </td>
                                 <td>
                                     <a :href="'<?= base_url('customers/show') ?>?id=' + c.id"

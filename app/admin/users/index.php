@@ -262,19 +262,17 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- Bulk action bar (team) -->
     <div x-show="selectedIds.length > 0"
-         x-transition
-         class="bulk-action-bar"
-         style="display:flex;align-items:center;gap:12px;padding:10px 16px;
-                background:var(--color-surface-raised,#1e2430);
-                border:1px solid var(--color-border);border-radius:8px;
-                margin-bottom:12px;">
-        <span class="text-sm font-medium"
-              x-text="selectedIds.length + ' item' + (selectedIds.length === 1 ? '' : 's') + ' selected'"></span>
-        <button class="btn btn-danger btn-sm" @click="bulkDelete()">
-            Delete selected
+         x-transition:enter="ff-bulk-enter" x-transition:enter-start="ff-bulk-enter-from" x-transition:enter-end="ff-bulk-enter-to"
+         x-transition:leave="ff-bulk-leave" x-transition:leave-start="ff-bulk-leave-from" x-transition:leave-end="ff-bulk-leave-to"
+         class="ff-bulk-bar">
+        <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
+        <div class="ff-bulk-bar-sep"></div>
+        <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
+            <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor" aria-hidden="true"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+            Delete
         </button>
-        <button class="btn btn-ghost btn-sm" @click="clearSelection()">
-            Clear
+        <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()" title="Clear selection" aria-label="Clear selection">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
         </button>
     </div>
 
@@ -301,11 +299,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <table class="table table-hover">
                     <thead>
                         <tr>
-                            <th style="width:40px;text-align:center;padding:8px 12px;">
-                                <input type="checkbox" class="form-checkbox"
-                                       :checked="selectAll"
-                                       @change="toggleSelectAll()"
-                                       title="Select all on this page">
+                            <th class="th-checkbox">
+                                <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all on this page">
                             </th>
                             <th @click="setSort('name')" style="cursor:pointer;">
                                 Name <span x-text="sortIcon('name')"></span>
@@ -327,12 +322,10 @@ require_once FF_ROOT . '/includes/header.php';
                     <tbody>
                         <template x-for="row in rows" :key="row.id">
                             <tr @click="window.location = '<?= base_url('users/show') ?>?id=' + row.id"
-                                :class="row.status === 'invited' ? 'is-invited' : ''"
+                                :class="(row.status === 'invited' ? 'is-invited ' : '') + (selectedIds.includes(row.id) ? 'ff-row-selected' : '')"
                                 :style="(row.status === 'invited' ? 'opacity:0.78;font-style:italic;' : '') + 'cursor:pointer;'">
-                                <td style="text-align:center;padding:8px 12px;" @click.stop>
-                                    <input type="checkbox" class="form-checkbox"
-                                           :checked="selectedIds.includes(row.id)"
-                                           @change="toggleSelect(row.id)">
+                                <td class="td-checkbox" @click.stop>
+                                    <input type="checkbox" class="ff-checkbox" :checked="selectedIds.includes(row.id)" @change="toggleSelect(row.id)">
                                 </td>
                                 <td x-text="row.name"></td>
                                 <td x-text="row.email"></td>
