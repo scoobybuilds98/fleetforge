@@ -54,7 +54,8 @@ $sortMap = [
 ];
 $orderBy = $sortMap[$sort];
 
-$where  = $showAll ? '1=1' : 'y.is_active = 1';
+// Always exclude soft-deleted yards; optionally include inactive (is_active=0) ones
+$where  = $showAll ? 'y.deleted_at IS NULL' : 'y.is_active = 1 AND y.deleted_at IS NULL';
 
 $yards = db_select(
     "SELECT

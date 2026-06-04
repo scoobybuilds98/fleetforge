@@ -2802,6 +2802,8 @@ CREATE TABLE `invoices` (
   `gst_exempt_snapshot` tinyint(1) NOT NULL DEFAULT '0',
   `pst_exempt_snapshot` tinyint(1) NOT NULL DEFAULT '0',
   `tax_exempt_number_snapshot` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `gst_exempt_number_snapshot` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `pst_exempt_number_snapshot` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `po_number` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `currency` enum('CAD','USD') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'CAD',
   `exchange_rate_to_cad` decimal(10,6) DEFAULT NULL,
@@ -3895,9 +3897,11 @@ CREATE TABLE `yards` (
   `is_active` tinyint(1) NOT NULL DEFAULT '1',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL COMMENT 'Soft-delete timestamp (D5). NULL = not deleted.',
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`),
   UNIQUE KEY `slug` (`slug`),
   KEY `manager_id` (`manager_id`),
+  KEY `idx_deleted` (`deleted_at`),
   CONSTRAINT `yards_ibfk_1` FOREIGN KEY (`manager_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

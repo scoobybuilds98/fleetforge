@@ -205,10 +205,16 @@ require_once FF_ROOT . '/includes/header.php';
                     @click="bulkActivate()" :disabled="bulkWorking">
                 Activate
             </button>
-            <!-- Deactivate selected yards (soft delete via is_active=0) -->
+            <!-- Deactivate selected yards (is_active=0) -->
             <button class="ff-bulk-btn" style="color:var(--text-secondary);"
                     @click="bulkDeactivate()" :disabled="bulkWorking">
                 Deactivate
+            </button>
+            <div class="ff-bulk-bar-sep"></div>
+            <!-- Permanently delete selected yards -->
+            <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDeleteYards()" :disabled="bulkWorking">
+                <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+                Delete
             </button>
             <button class="ff-bulk-btn ff-bulk-btn-clear" @click="clearSelection()"
                     title="Clear" aria-label="Clear selection">
@@ -305,6 +311,14 @@ require_once FF_ROOT . '/includes/header.php';
                                                 Activate
                                             </button>
                                         </template>
+                                        <!-- Delete (permanent, soft-delete) -->
+                                        <button class="btn btn-ghost btn-xs"
+                                                style="color:var(--color-danger);opacity:0.7;"
+                                                :disabled="actionBusy === yard.id"
+                                                @click="deleteYard(yard)"
+                                                title="Permanently delete yard">
+                                            <svg width="13" height="13" viewBox="0 0 12 13" fill="currentColor"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
+                                        </button>
                                     </div>
                                 </td>
                                 <?php endif; ?>
@@ -850,6 +864,55 @@ function FF_YardsManager() {
             } finally {
                 this.actionBusy = null;
             }
+        },
+
+        // ── Permanently delete a single yard ──────────────────────────
+        async deleteYard(yard) {
+            const confirmed = await FF_Confirm.ask(
+                `Permanently delete yard '${yard.name}'?\n\nThis cannot be undone. Active or upcoming reservations will block deletion.`
+            );
+            if (!confirmed) return;
+            this.actionBusy  = yard.id;
+            this.actionError = '';
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/yards/destroy') ?>', { id: yard.id });
+                if (!res.success) throw new Error(res.error?.message || 'Failed to delete yard.');
+                await this.load();
+                FF_Toast.success(`Yard '${yard.name}' deleted.`);
+            } catch (e) {
+                this.actionError = e.message;
+                FF_Toast.error(e.message);
+            } finally {
+                this.actionBusy = null;
+            }
+        },
+
+        // ── Bulk permanent delete ──────────────────────────────────────
+        async bulkDeleteYards() {
+            if (!this.selectedIds.length || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const confirmed = await FF_Confirm.ask(
+                `Permanently delete ${count} yard${count === 1 ? '' : 's'}? This cannot be undone.\n\nYards with active reservations will be skipped.`
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            let deleted = 0, skipped = 0;
+            const errors = [];
+            for (const id of this.selectedIds) {
+                try {
+                    const res = await FF_Api.post('<?= base_url('api/v1/yards/destroy') ?>', { id });
+                    if (res.success) deleted++;
+                    else { skipped++; errors.push(res.error?.message || 'Unknown error'); }
+                } catch (e) {
+                    skipped++;
+                    errors.push(e.message);
+                }
+            }
+            this.clearSelection();
+            await this.load();
+            if (deleted > 0) FF_Toast.success(deleted + ' yard' + (deleted === 1 ? '' : 's') + ' deleted' + (skipped > 0 ? ', ' + skipped + ' skipped' : '') + '.');
+            if (errors.length) FF_Toast.error(errors.slice(0, 2).join('; ') + (errors.length > 2 ? '…' : ''));
+            this.bulkWorking = false;
         },
     };
 }
