@@ -18,7 +18,7 @@ declare(strict_types=1);
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/damage_claims/create.php
  * @decisions D5/D16/D30/D32
- * @session  S012
+ * @session  S012, S-FORM-INTEGRITY-FIX-FK-FIELDS
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -28,9 +28,29 @@ require_auth();
 require_permission('maintenance', 'create');
 
 // Pre-populate from query string (e.g., linked from equipment/show or lease/show)
-$preUnitId    = clean_int($_GET['equipment_unit_id'] ?? null);
-$preLeaseId   = clean_int($_GET['lease_id'] ?? null);
+$preUnitId     = clean_int($_GET['equipment_unit_id'] ?? null);
+$preLeaseId    = clean_int($_GET['lease_id'] ?? null);
 $preCustomerId = clean_int($_GET['customer_id'] ?? null);
+
+// Pre-load lease label so the picker shows the correct selected state on pre-populated load.
+$preLeaseLabel = null;
+if ($preLeaseId) {
+    $preLease = db_row(
+        "SELECT id, contract_number, company_name_snapshot, status
+         FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$preLeaseId]
+    );
+    if ($preLease) {
+        $preLeaseLabel = $preLease['contract_number'];
+        if ($preLease['company_name_snapshot']) {
+            $preLeaseLabel .= ' — ' . $preLease['company_name_snapshot'];
+        }
+    } else {
+        // Pre-populated ID doesn't match a real lease — silently drop it so the
+        // form doesn't submit a garbage FK.
+        $preLeaseId = null;
+    }
+}
 
 // Load equipment units for dropdown — brand/model from template (unit has no make/model column).
 // [SELECTOR-1] Pull status so the option label shows it inline and
@@ -178,16 +198,31 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
 
-            <!-- Optional: Lease link -->
+            <!-- Optional: Lease link — FF_RecordPicker (D-FK-INTEGRITY-PICKERS).
+                 WHY picker not number input: a bare number field lets a typo create a
+                 silent orphan (damage_claims.lease_id is a FK to leases.id). The picker
+                 constrains to real leases and the API already validates existence
+                 server-side as belt-and-suspenders. -->
             <div class="form-group">
-                <label class="form-label" for="lease_id">Linked Lease ID <span class="form-hint" style="display:inline;font-size:0.8rem;">(optional)</span></label>
-                <input type="number" min="0"
-                       id="lease_id"
-                       name="lease_id"
-                       class="form-control"
-                       style="max-width:200px;"
-                       placeholder="Lease ID"
-                       x-model.number="form.lease_id">
+                <label class="form-label">Linked Lease <span class="form-hint" style="display:inline;font-size:0.8rem;">(optional)</span></label>
+                <?php
+                $pickerConfig   = [
+                    'endpoint'    => base_url('api/v1/leases/index.php'),
+                    'searchParam' => 'search',
+                    'resultKey'   => 'items',
+                    'perPage'     => 10,
+                    'placeholder' => 'Search by contract #, customer, or unit…',
+                    'mapResult'   => "r => ({ id: r.id, label: r.contract_number + (r.customer_display_name ? ' — ' + r.customer_display_name : ''), sublabel: (r.unit_display_number ? 'Unit ' + r.unit_display_number + ' · ' : '') + r.status, raw: r })",
+                ];
+                if ($preLeaseId && $preLeaseLabel) {
+                    $pickerConfig['initialId']    = (int) $preLeaseId;
+                    $pickerConfig['initialLabel'] = $preLeaseLabel;
+                }
+                $pickerOnPicked  = 'form.lease_id = $event.detail.id';
+                $pickerOnCleared = "form.lease_id = ''";
+                $pickerError     = 'false';
+                require FF_ROOT . '/includes/partials/record-picker.php';
+                ?>
                 <div class="field-error" data-error-for="lease_id"></div>
             </div>
 

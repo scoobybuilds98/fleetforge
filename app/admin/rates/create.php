@@ -169,6 +169,11 @@ require_once FF_ROOT . '/includes/header.php';
                                 <template x-for="(item, idx) in items" :key="idx">
                                     <tr>
                                         <td>
+                                            <!-- KNOWN ISSUE (S-RATES-UI-CATEGORY-DEDUP): stores template name
+                                                 into rate_card_items.equipment_type, but lookup_rates.php
+                                                 matches by template category slug — these rows silently miss
+                                                 until S-RATES-UI-CATEGORY-DEDUP resolves the name/category
+                                                 mismatch. FK migration to template_id blocked by same issue. -->
                                             <select class="form-select form-select-sm"
                                                     x-model="item.equipment_type"
                                                     @change="onTypeChange(idx)">

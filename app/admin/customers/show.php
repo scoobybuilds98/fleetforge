@@ -1082,7 +1082,15 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 <div x-show="rateModal.error" class="alert alert-danger" x-text="rateModal.error" style="margin-bottom:12px;"></div>
 
                 <div class="form-grid">
-                    <!-- Equipment Type -->
+                    <!-- Equipment Type.
+                         KNOWN ISSUE (S-RATES-UI-CATEGORY-DEDUP): This <select> stores the
+                         equipment_template name string into customer_equipment_rates.equipment_type.
+                         However api/v1/leases/lookup_rates.php matches against the template
+                         CATEGORY enum (e.g. "dry_van"), not the name — so rate overrides stored
+                         here silently fail to match the lookup unless the stored value is a
+                         category slug. FK migration to template_id is blocked by this name/category
+                         mismatch; the full fix is tracked as S-RATES-UI-CATEGORY-DEDUP. The
+                         <select> already prevents free-text typos. -->
                     <div class="form-group form-group--full">
                         <label class="form-label">Equipment Type <span class="text-danger">*</span></label>
                         <select class="form-select" x-model="rateModal.form.equipment_type" :disabled="!!rateModal.id">

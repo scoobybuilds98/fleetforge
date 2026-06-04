@@ -296,8 +296,12 @@ require_once FF_ROOT . '/includes/header.php';
                 <!-- RIGHT: Pickup Yard (promoted to main form — visible immediately) -->
                 <div class="form-group">
                     <label class="form-label" for="res-yard">Pickup Yard:</label>
-                    <!-- WHY select: yard_location is driven by the yards table.
-                         Value stored is yard.name (string) to match historical text snapshots. -->
+                    <!-- D-FK-SNAPSHOT-YARD: reservations.yard_location intentionally stores
+                         yards.name as a snapshot string, not a numeric FK. Deactivating a yard
+                         preserves historical reservation records (see api/v1/yards/delete.php).
+                         reservations/show.php already handles orphaned yard names with an
+                         "(inactive/legacy)" label. No FK migration planned. The <select>
+                         prevents typos by constraining to active yard names. -->
                     <select id="res-yard" class="form-select" x-model="form.yard_location">
                         <option value="">— Select yard —</option>
                         <template x-for="y in yards" :key="y.id">
