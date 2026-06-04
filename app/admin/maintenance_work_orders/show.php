@@ -21,7 +21,7 @@ declare(strict_types=1);
  *           api/v1/maintenance_work_orders/{show,update,update_status,delete}.php
  *           api/v1/maintenance_work_orders/line_items/{add,update,delete}.php
  * @decisions D5/D7/D19/D30/D32
- * @session  S015
+ * @session  S015, S-DROPDOWN-RETROFIT-2B-FINISH-FORMS
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -69,11 +69,6 @@ $lineItems = db_select(
     [$woId]
 );
 
-// Vendors for edit dropdown
-$vendors = db_select("SELECT id, name FROM vendors WHERE deleted_at IS NULL ORDER BY name ASC");
-
-// Users for assigned_to dropdown
-$assignableUsers = db_select("SELECT id, name FROM users WHERE deleted_at IS NULL ORDER BY name ASC");
 
 // Status machine: valid next states
 $transitions = [
@@ -399,12 +394,24 @@ function priorityBadgeClass(string $p): string {
 
                     <div class="form-group" style="margin-top:12px;">
                         <label class="form-label" for="edit_vendor_id">Vendor</label>
-                        <select id="edit_vendor_id" name="vendor_id" class="form-select" x-model="editForm.vendor_id">
-                            <option value="">— No Vendor —</option>
-                            <?php foreach ($vendors as $v): ?>
-                            <option value="<?= e($v['id']) ?>"><?= e($v['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                        <?php
+                        $pickerConfig   = [
+                            'endpoint'    => base_url('api/v1/vendors/index.php'),
+                            'searchParam' => 'q',
+                            'resultKey'   => 'items',
+                            'perPage'     => 10,
+                            'placeholder' => 'Search vendors…',
+                            'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.vendor_type || '', raw: r })",
+                        ];
+                        if ($wo['vendor_id'] && $wo['vendor_name']) {
+                            $pickerConfig['initialId']    = (int) $wo['vendor_id'];
+                            $pickerConfig['initialLabel'] = $wo['vendor_name'];
+                        }
+                        $pickerOnPicked  = 'editForm.vendor_id = $event.detail.id';
+                        $pickerOnCleared = "editForm.vendor_id = ''";
+                        $pickerError     = 'false';
+                        require FF_ROOT . '/includes/partials/record-picker.php';
+                        ?>
                         <div class="field-error" data-error-for="vendor_id"></div>
                     </div>
 
@@ -429,12 +436,26 @@ function priorityBadgeClass(string $p): string {
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="edit_assigned_to">Assigned To</label>
-                            <select id="edit_assigned_to" name="assigned_to" class="form-select" x-model="editForm.assigned_to">
-                                <option value="">— Unassigned —</option>
-                                <?php foreach ($assignableUsers as $u): ?>
-                                <option value="<?= e($u['id']) ?>"><?= e($u['name']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <?php
+                            // D-PICKER-USER-VARIANT: user picker — no role/status filter,
+                            // matching the original dropdown which showed all non-deleted users.
+                            $pickerConfig   = [
+                                'endpoint'    => base_url('api/v1/users/index.php'),
+                                'searchParam' => 'q',
+                                'resultKey'   => 'items',
+                                'perPage'     => 10,
+                                'placeholder' => 'Search users…',
+                                'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.role_name || '', raw: r })",
+                            ];
+                            if ($wo['assigned_to'] && $wo['assigned_to_name']) {
+                                $pickerConfig['initialId']    = (int) $wo['assigned_to'];
+                                $pickerConfig['initialLabel'] = $wo['assigned_to_name'];
+                            }
+                            $pickerOnPicked  = 'editForm.assigned_to = $event.detail.id';
+                            $pickerOnCleared = "editForm.assigned_to = ''";
+                            $pickerError     = 'false';
+                            require FF_ROOT . '/includes/partials/record-picker.php';
+                            ?>
                             <div class="field-error" data-error-for="assigned_to"></div>
                         </div>
                     </div>

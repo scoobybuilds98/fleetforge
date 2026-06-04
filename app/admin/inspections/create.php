@@ -15,7 +15,7 @@ declare(strict_types=1);
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/inspections/create.php
  * @decisions D7/D30/D32
- * @session  S016
+ * @session  S016, S-DROPDOWN-RETROFIT-2B-FINISH-FORMS
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -52,19 +52,23 @@ if ($preUnitId) {
     }
 }
 
-// ── Load active/pending leases for optional lease linkage
-$leases = db_select(
-    "SELECT l.id, l.contract_number, c.company_name
-     FROM leases l
-     LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
-     WHERE l.deleted_at IS NULL AND l.status IN ('pending','active')
-     ORDER BY l.contract_number ASC"
-);
-
-// ── Load staff users for inspector dropdown
-$users = db_select(
-    "SELECT id, name FROM users WHERE deleted_at IS NULL ORDER BY name ASC"
-);
+// Pre-load lease label for picker pre-population when ?lease_id=N is set.
+$preLeaseLabel = null;
+if ($preLeaseId) {
+    $preLease = db_row(
+        "SELECT id, contract_number, company_name_snapshot
+         FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$preLeaseId]
+    );
+    if ($preLease) {
+        $preLeaseLabel = $preLease['contract_number'];
+        if ($preLease['company_name_snapshot']) {
+            $preLeaseLabel .= ' — ' . $preLease['company_name_snapshot'];
+        }
+    } else {
+        $preLeaseId = null;
+    }
+}
 
 $pageTitle = 'New Inspection';
 $helpModuleSlug = 'inspections';
@@ -136,15 +140,24 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="form-row-2">
             <div class="form-group">
                 <label class="form-label">Linked Lease <span class="text-secondary">(optional)</span></label>
-                <select class="form-control" :class="errors.lease_id ? 'is-invalid' : ''"
-                        x-model="form.lease_id">
-                    <option value="">— None —</option>
-                    <?php foreach ($leases as $l): ?>
-                    <option value="<?= e($l['id']) ?>">
-                        <?= e($l['contract_number']) ?> — <?= e($l['company_name'] ?? 'Unknown') ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
+                <?php
+                $pickerConfig   = [
+                    'endpoint'    => base_url('api/v1/leases/index.php'),
+                    'searchParam' => 'search',
+                    'resultKey'   => 'items',
+                    'perPage'     => 10,
+                    'placeholder' => 'Search by contract #, customer, or unit…',
+                    'mapResult'   => "r => ({ id: r.id, label: r.contract_number + (r.customer_display_name ? ' — ' + r.customer_display_name : ''), sublabel: (r.unit_display_number ? 'Unit ' + r.unit_display_number + ' · ' : '') + r.status, raw: r })",
+                ];
+                if ($preLeaseId && $preLeaseLabel) {
+                    $pickerConfig['initialId']    = (int) $preLeaseId;
+                    $pickerConfig['initialLabel'] = $preLeaseLabel;
+                }
+                $pickerOnPicked  = 'form.lease_id = $event.detail.id';
+                $pickerOnCleared = 'form.lease_id = null';
+                $pickerError     = 'false';
+                require FF_ROOT . '/includes/partials/record-picker.php';
+                ?>
                 <div class="field-error" x-show="errors.lease_id" x-text="errors.lease_id" x-cloak></div>
             </div>
             <div class="form-group">
@@ -173,13 +186,22 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
             <div class="form-group">
                 <label class="form-label">Inspector (User)</label>
-                <select class="form-control" :class="errors.inspected_by_user_id ? 'is-invalid' : ''"
-                        x-model="form.inspected_by_user_id">
-                    <option value="">— Not a system user —</option>
-                    <?php foreach ($users as $u): ?>
-                    <option value="<?= e($u['id']) ?>"><?= e($u['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?php
+                // D-PICKER-USER-VARIANT: user picker — no role/status filter, matching
+                // original dropdown which showed all non-deleted users (any status).
+                $pickerConfig   = [
+                    'endpoint'    => base_url('api/v1/users/index.php'),
+                    'searchParam' => 'q',
+                    'resultKey'   => 'items',
+                    'perPage'     => 10,
+                    'placeholder' => 'Search users…',
+                    'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.role_name || '', raw: r })",
+                ];
+                $pickerOnPicked  = 'form.inspected_by_user_id = $event.detail.id';
+                $pickerOnCleared = 'form.inspected_by_user_id = null';
+                $pickerError     = 'false';
+                require FF_ROOT . '/includes/partials/record-picker.php';
+                ?>
                 <div class="field-error" x-show="errors.inspected_by_user_id" x-text="errors.inspected_by_user_id" x-cloak></div>
             </div>
         </div>

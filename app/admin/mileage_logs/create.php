@@ -1,15 +1,18 @@
 <?php
 declare(strict_types=1);
 
-// ============================================================
-// /mileage_logs/create — Record a mileage log entry
-//
-// Supports pre-population from query string:
-//   ?equipment_unit_id=N  — pre-select unit
-//   ?lease_id=N           — pre-select lease
-//
-// Permission: maintenance create
-// ============================================================
+/**
+ * app/admin/mileage_logs/create.php
+ *
+ * Record a mileage log entry.
+ * Supports pre-population from query string:
+ *   ?equipment_unit_id=N  — pre-select unit (FF_RecordPicker, vanilla-JS bridge)
+ *   ?lease_id=N           — pre-select lease (FF_RecordPicker, vanilla-JS bridge)
+ *
+ * Permission: maintenance create
+ *
+ * @session S-DROPDOWN-RETROFIT-2-EQUIPMENT, S-DROPDOWN-RETROFIT-2B-FINISH-FORMS
+ */
 
 require_once dirname(__DIR__, 3) . '/includes/auth.php';
 require_auth();
@@ -42,16 +45,23 @@ if ($preUnitId) {
     }
 }
 
-// ── Load active leases for dropdown (only active ones make sense for mileage)
-$leases = db_select(
-    "SELECT l.id, l.contract_number, eu.unit_number, c.company_name
-     FROM leases l
-     JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
-     JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
-     WHERE l.status IN ('active','pending') AND l.deleted_at IS NULL
-     ORDER BY l.contract_number ASC",
-    []
-);
+// Pre-load lease label for picker pre-population when ?lease_id=N is set.
+$preLeaseLabel = null;
+if ($preLeaseId) {
+    $preLease = db_row(
+        "SELECT id, contract_number, company_name_snapshot
+         FROM leases WHERE id = ? AND deleted_at IS NULL",
+        [$preLeaseId]
+    );
+    if ($preLease) {
+        $preLeaseLabel = $preLease['contract_number'];
+        if ($preLease['company_name_snapshot']) {
+            $preLeaseLabel .= ' — ' . $preLease['company_name_snapshot'];
+        }
+    } else {
+        $preLeaseId = null;
+    }
+}
 
 $pageTitle      = 'Record Mileage';
 $helpModuleSlug = 'mileage-logs';
@@ -115,23 +125,36 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                     <div class="field-error" id="err-equipment_unit_id"></div>
                 </div>
 
-                <!-- Lease (optional) -->
+                <!-- Lease (optional) — D-DROPDOWN-RETROFIT-PATTERN: FF_RecordPicker.
+                     Vanilla-JS bridge: picker updates hidden <input id="lease_id"> that
+                     the submit FormData reads. -->
                 <div class="form-group">
                     <label class="form-label" for="lease_id">
                         Linked Lease
                         <span style="color:var(--text-secondary);font-weight:400;">(optional)</span>
                     </label>
-                    <select class="form-control" id="lease_id" name="lease_id">
-                        <option value="">— None —</option>
-                        <?php foreach ($leases as $l): ?>
-                        <option value="<?= e($l['id']) ?>"
-                            <?= ($preLeaseId === (int)$l['id']) ? 'selected' : '' ?>>
-                            <?= e($l['contract_number']) ?> — <?= e($l['unit_number']) ?> (<?= e($l['company_name']) ?>)
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <?php
+                    $pickerConfig   = [
+                        'endpoint'    => base_url('api/v1/leases/index.php'),
+                        'searchParam' => 'search',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search by contract #, customer, or unit…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.contract_number + (r.customer_display_name ? ' — ' + r.customer_display_name : ''), sublabel: (r.unit_display_number ? 'Unit ' + r.unit_display_number + ' · ' : '') + r.status, raw: r })",
+                    ];
+                    if ($preLeaseId && $preLeaseLabel) {
+                        $pickerConfig['initialId']    = (int) $preLeaseId;
+                        $pickerConfig['initialLabel'] = $preLeaseLabel;
+                    }
+                    $pickerOnPicked  = "document.getElementById('lease_id').value = \$event.detail.id";
+                    $pickerOnCleared = "document.getElementById('lease_id').value = ''";
+                    $pickerError     = 'false';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
+                    <input type="hidden" id="lease_id" name="lease_id"
+                           value="<?= e((string)($preLeaseId ?? '')) ?>">
                     <div style="font-size:.8rem;color:var(--text-secondary);margin-top:.25rem;">
-                        Only active/pending leases shown. Links this reading to the lease's mileage history.
+                        Links this reading to a lease's mileage history.
                     </div>
                     <div class="field-error" id="err-lease_id"></div>
                 </div>

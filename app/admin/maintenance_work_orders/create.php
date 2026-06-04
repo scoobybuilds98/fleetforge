@@ -13,7 +13,7 @@ declare(strict_types=1);
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/maintenance_work_orders/create.php
  * @decisions D5/D7/D30/D32, D16 (bcmath — no billing on create), Trap 3 (no CSRF on GET)
- * @session  S015
+ * @session  S015, S-DROPDOWN-RETROFIT-2B-FINISH-FORMS
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -46,16 +46,6 @@ if ($prefilledUnitId) {
     }
 }
 
-// Load vendors for dropdown
-$vendors = db_select(
-    "SELECT id, name, vendor_type FROM vendors
-     WHERE deleted_at IS NULL ORDER BY name ASC"
-);
-
-// Load users for assigned_to dropdown
-$assignableUsers = db_select(
-    "SELECT id, name FROM users WHERE deleted_at IS NULL ORDER BY name ASC"
-);
 
 $pageTitle = 'New Work Order';
 $helpModuleSlug = 'maintenance';
@@ -116,12 +106,20 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <div class="form-group">
                     <label class="form-label" for="vendor_id">Vendor <span class="text-secondary">(optional)</span></label>
-                    <select id="vendor_id" name="vendor_id" class="form-select" x-model="form.vendor_id">
-                        <option value="">— No Vendor —</option>
-                        <?php foreach ($vendors as $v): ?>
-                        <option value="<?= e($v['id']) ?>"><?= e($v['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <?php
+                    $pickerConfig   = [
+                        'endpoint'    => base_url('api/v1/vendors/index.php'),
+                        'searchParam' => 'q',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search vendors…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.vendor_type || '', raw: r })",
+                    ];
+                    $pickerOnPicked  = 'form.vendor_id = $event.detail.id';
+                    $pickerOnCleared = "form.vendor_id = ''";
+                    $pickerError     = 'false';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                     <div class="field-error" data-error-for="vendor_id"></div>
                 </div>
             </div>
@@ -251,12 +249,22 @@ require_once FF_ROOT . '/includes/header.php';
 
             <div class="form-group">
                 <label class="form-label" for="assigned_to">Assigned To</label>
-                <select id="assigned_to" name="assigned_to" class="form-select" x-model="form.assigned_to">
-                    <option value="">— Unassigned —</option>
-                    <?php foreach ($assignableUsers as $u): ?>
-                    <option value="<?= e($u['id']) ?>"><?= e($u['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?php
+                // D-PICKER-USER-VARIANT: user picker — no role/status filter, matching original
+                // dropdown which showed all non-deleted users (any status).
+                $pickerConfig   = [
+                    'endpoint'    => base_url('api/v1/users/index.php'),
+                    'searchParam' => 'q',
+                    'resultKey'   => 'items',
+                    'perPage'     => 10,
+                    'placeholder' => 'Search users…',
+                    'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.role_name || '', raw: r })",
+                ];
+                $pickerOnPicked  = 'form.assigned_to = $event.detail.id';
+                $pickerOnCleared = "form.assigned_to = ''";
+                $pickerError     = 'false';
+                require FF_ROOT . '/includes/partials/record-picker.php';
+                ?>
                 <div class="field-error" data-error-for="assigned_to"></div>
             </div>
 

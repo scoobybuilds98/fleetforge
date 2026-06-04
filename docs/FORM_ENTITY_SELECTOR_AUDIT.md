@@ -98,9 +98,9 @@
 | Form | Field label | Entity → FK column | Control | Typing? | Create-new? | URL param? | Category |
 |------|-------------|-------------------|---------|---------|-------------|------------|----------|
 | Create | Equipment Unit *(required)* | `equipment_units` → `equipment_unit_id` | native `<select>` (PHP-rendered) | no | no | yes — `?equipment_unit_id=N` | ⚠️ S |
-| Create | Customer | `customers` → `customer_id` | native `<select>` + companion free-text `<input>` for `customer_name` | no (select) | no | yes — `?customer_id=N` | ⚠️ S |
-| Create | Vendor Sent To *(optional)* | `vendors` → `vendor_id` | native `<select>` (PHP-rendered) | no | no | no | ⚠️ S |
-| Create | Linked Lease ID | `leases` → `lease_id` | **`<input type="number">`** (raw ID field) | no | no | yes — `?lease_id=N` | ⚠️ M |
+| Create | Customer | `customers` → `customer_id` | **FF_RecordPicker** (autocomplete, `/api/v1/customers/index.php`; companion free-text for `customer_name` kept) | yes | no | yes — `?customer_id=N` | ✅ |
+| Create | Vendor Sent To *(optional)* | `vendors` → `vendor_id` | **FF_RecordPicker** (autocomplete, `/api/v1/vendors/index.php`) | yes | no | no | ✅ |
+| Create | Linked Lease ID | `leases` → `lease_id` | **FF_RecordPicker** (integrity session S-FORM-INTEGRITY-FIX-FK-FIELDS) | yes | no | yes — `?lease_id=N` | ✅ |
 
 **Note on Linked Lease ID:** Bare numeric input — user must know the lease database ID. No validation that the ID exists. This is the clearest integrity risk in the codebase: a typo silently orphans the claim.
 
@@ -111,7 +111,7 @@
 | Form | Field label | Entity → FK column | Control | Typing? | Create-new? | URL param? | Category |
 |------|-------------|-------------------|---------|---------|-------------|------------|----------|
 | Create | Equipment Unit *(required)* | `equipment_units` → `equipment_unit_id` | native `<select>` (PHP-rendered) | no | no | yes — `?equipment_unit_id=N` | ⚠️ S |
-| Create | Linked Lease *(optional)* | `leases` → `lease_id` | native `<select>` (PHP-rendered, active/pending only) | no | no | yes — `?lease_id=N` | ⚠️ S |
+| Create | Linked Lease *(optional)* | `leases` → `lease_id` | **FF_RecordPicker** (autocomplete, `/api/v1/leases/index.php`; vanilla-JS bridge) | yes | no | yes — `?lease_id=N` | ✅ |
 
 ---
 
@@ -119,11 +119,11 @@
 
 | Form | Field label | Entity → FK column | Control | Typing? | Create-new? | URL param? | Category |
 |------|-------------|-------------------|---------|---------|-------------|------------|----------|
-| Create | Equipment Unit *(required)* | `equipment_units` → `equipment_unit_id` | native `<select>` (PHP-rendered) | no | no | yes — `?unit_id=N` | ⚠️ S |
-| Create | Vendor *(optional)* | `vendors` → `vendor_id` | native `<select>` (PHP-rendered) | no | no | no | ⚠️ S |
-| Create | Assigned To *(optional)* | `users` → `assigned_to` | native `<select>` (PHP-rendered) | no | no | no | ⚠️ S |
-| Show — inline edit mode | Vendor *(edit)* | `vendors` → `vendor_id` | native `<select>` (PHP-rendered, inside `x-if="editing"`) | no | no | no (from record) | ⚠️ S |
-| Show — inline edit mode | Assigned To *(edit)* | `users` → `assigned_to` | native `<select>` (PHP-rendered, inside `x-if="editing"`) | no | no | no (from record) | ⚠️ S |
+| Create | Equipment Unit *(required)* | `equipment_units` → `equipment_unit_id` | **FF_RecordPicker** (Batch 2) | yes | no | yes — `?unit_id=N` | ✅ |
+| Create | Vendor *(optional)* | `vendors` → `vendor_id` | **FF_RecordPicker** (autocomplete, `/api/v1/vendors/index.php`) | yes | no | no | ✅ |
+| Create | Assigned To *(optional)* | `users` → `assigned_to` | **FF_RecordPicker** (autocomplete, `/api/v1/users/index.php`; D-PICKER-USER-VARIANT) | yes | no | no | ✅ |
+| Show — inline edit mode | Vendor *(edit)* | `vendors` → `vendor_id` | **FF_RecordPicker** (autocomplete, `/api/v1/vendors/index.php`; initialId from `$wo`) | yes | no | no (from record) | ✅ |
+| Show — inline edit mode | Assigned To *(edit)* | `users` → `assigned_to` | **FF_RecordPicker** (autocomplete, `/api/v1/users/index.php`; initialId from `$wo`; D-PICKER-USER-VARIANT) | yes | no | no (from record) | ✅ |
 
 ---
 
@@ -131,9 +131,9 @@
 
 | Form | Field label | Entity → FK column | Control | Typing? | Create-new? | URL param? | Category |
 |------|-------------|-------------------|---------|---------|-------------|------------|----------|
-| Create | Equipment Unit *(required)* | `equipment_units` → `equipment_unit_id` | native `<select>` (PHP-rendered) | no | no | yes — `?unit_id=N` | ⚠️ S |
-| Create | Linked Lease *(optional)* | `leases` → `lease_id` | native `<select>` (PHP-rendered, active/pending only) | no | no | yes — `?lease_id=N` | ⚠️ S |
-| Create | Inspector (User) *(optional)* | `users` → `inspected_by_user_id` | native `<select>` (PHP-rendered) | no | no | no | ⚠️ S |
+| Create | Equipment Unit *(required)* | `equipment_units` → `equipment_unit_id` | **FF_RecordPicker** (Batch 2) | yes | no | yes — `?unit_id=N` | ✅ |
+| Create | Linked Lease *(optional)* | `leases` → `lease_id` | **FF_RecordPicker** (autocomplete, `/api/v1/leases/index.php`; shows all non-deleted leases) | yes | no | yes — `?lease_id=N` | ✅ |
+| Create | Inspector (User) *(optional)* | `users` → `inspected_by_user_id` | **FF_RecordPicker** (autocomplete, `/api/v1/users/index.php`; D-PICKER-USER-VARIANT) | yes | no | no | ✅ |
 
 **Note:** "Inspected By (Name)" free-text field is a separate plain string field, not a FK — excluded from scope.
 
@@ -254,11 +254,14 @@ No FK entity-selection fields in any settings tab. Role/user checkboxes in Intel
 | Category | Count |
 |----------|-------|
 | **Total FK entity-selection fields audited** | **52** |
-| ✅ Already searchable (FF_RecordPicker / FF_LookupPicker) | **10** |
-| ⚠️ S — Selector-only, no typing (native `<select>`) | **38** |
-| ⚠️ M — Manual-only / free-text on FK (integrity risk) | **4** |
+| ✅ Already searchable or converted (FF_RecordPicker / FF_LookupPicker) | **31** |
+| ⚠️ S — Selector-only, no typing (native `<select>`) — remaining | **22** |
+| ⚠️ M → ✅ — Was manual FK, now picker (integrity session) | **1** |
+| ⚠️ M — Manual-only / free-text on FK (integrity risk) | **3** |
 
-### Already-searchable fields (10 — the good examples)
+*Retrofit progress: 16 of 38 selector-only fields converted (Batch 1: 3; Batch 2: 4; Batch 2B: 9). Last updated S-DROPDOWN-RETROFIT-2B-FINISH-FORMS 2026-06-05.*
+
+### Already-searchable / converted fields (31 — includes all retrofit batches)
 
 | Module | Fields |
 |--------|--------|
@@ -267,6 +270,10 @@ No FK entity-selection fields in any settings tab. Role/user checkboxes in Intel
 | Reservations / Create | Customer — Existing mode (FF_RecordPicker) |
 | Fixed Assets / Create | Asset Acct, Accum Depr Acct, Depr Expense Acct, Equipment Unit (FF_LookupPicker × 4) |
 | Fixed Assets / Edit | Equipment Unit (FF_LookupPicker) |
+| **Batch 1 (S-DROPDOWN-RETROFIT-1)** | Leases/Create: Customer, Equipment Unit; Invoices/Create: Lease (3 fields) |
+| **Batch 2 (S-DROPDOWN-RETROFIT-2)** | Equipment Unit on Damage Claims/WOs/Inspections/Mileage Logs Create (4 fields) |
+| **Batch 2B (S-DROPDOWN-RETROFIT-2B)** | Damage Claims/Create: Customer, Vendor; WOs/Create: Vendor, Assigned To; WOs/Show-edit: Vendor, Assigned To; Inspections/Create: Linked Lease, Inspector User; Mileage/Create: Linked Lease (9 fields) |
+| **Integrity session** | Damage Claims/Create: Linked Lease (was ⚠️ M raw-ID, now picker) |
 
 ### Integrity-risk fields (4 — free-text on FK)
 

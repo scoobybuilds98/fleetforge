@@ -18,7 +18,7 @@ declare(strict_types=1);
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/damage_claims/create.php
  * @decisions D5/D16/D30/D32
- * @session  S012, S-FORM-INTEGRITY-FIX-FK-FIELDS
+ * @session  S012, S-FORM-INTEGRITY-FIX-FK-FIELDS, S-DROPDOWN-RETROFIT-2B-FINISH-FORMS
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -73,21 +73,19 @@ if ($preUnitId) {
     }
 }
 
-// Load active customers for dropdown
-$customers = db_select(
-    "SELECT id, company_name
-     FROM customers
-     WHERE status = 'active' AND deleted_at IS NULL
-     ORDER BY company_name ASC"
-);
-
-// Load vendors for dropdown
-$vendors = db_select(
-    "SELECT id, name, vendor_type
-     FROM vendors
-     WHERE deleted_at IS NULL
-     ORDER BY name ASC"
-);
+// Pre-load customer label for picker pre-population when ?customer_id=N is set.
+$preCustomerLabel = null;
+if ($preCustomerId) {
+    $preCustomerRow = db_row(
+        "SELECT id, company_name FROM customers WHERE id = ? AND deleted_at IS NULL",
+        [$preCustomerId]
+    );
+    if ($preCustomerRow) {
+        $preCustomerLabel = $preCustomerRow['company_name'];
+    } else {
+        $preCustomerId = null;
+    }
+}
 
 $pageTitle = 'New Damage Claim';
 $helpModuleSlug = 'damage-claims';
@@ -149,13 +147,25 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <div class="form-group">
                     <label class="form-label" for="customer_id">Customer</label>
-                    <select id="customer_id" name="customer_id" class="form-select" x-model="form.customer_id"
-                            @change="if(form.customer_id) form.customer_name = ''">
-                        <option value="">— Select existing —</option>
-                        <?php foreach ($customers as $c): ?>
-                        <option value="<?= e($c['id']) ?>"><?= e($c['company_name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <?php
+                    $pickerConfig   = [
+                        'endpoint'    => base_url('api/v1/customers/index.php'),
+                        'searchParam' => 'search',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search customers…',
+                        'extraParams' => 'status=active',
+                        'mapResult'   => "r => ({ id: r.id, label: r.company_name, sublabel: r.city || '', raw: r })",
+                    ];
+                    if ($preCustomerId && $preCustomerLabel) {
+                        $pickerConfig['initialId']    = (int) $preCustomerId;
+                        $pickerConfig['initialLabel'] = $preCustomerLabel;
+                    }
+                    $pickerOnPicked  = "form.customer_id = \$event.detail.id; form.customer_name = ''";
+                    $pickerOnCleared = "form.customer_id = ''";
+                    $pickerError     = 'false';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                     <input type="text" name="customer_name" class="form-control" style="margin-top:6px;"
                            placeholder="Or type customer name…"
                            x-model="form.customer_name"
@@ -168,12 +178,20 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="form-row form-row-2" style="margin-bottom:0;">
                 <div class="form-group">
                     <label class="form-label" for="vendor_id">Vendor Sent To</label>
-                    <select id="vendor_id" name="vendor_id" class="form-select" x-model="form.vendor_id">
-                        <option value="">— None —</option>
-                        <?php foreach ($vendors as $v): ?>
-                        <option value="<?= e($v['id']) ?>"><?= e($v['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <?php
+                    $pickerConfig   = [
+                        'endpoint'    => base_url('api/v1/vendors/index.php'),
+                        'searchParam' => 'q',
+                        'resultKey'   => 'items',
+                        'perPage'     => 10,
+                        'placeholder' => 'Search vendors…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.vendor_type || '', raw: r })",
+                    ];
+                    $pickerOnPicked  = 'form.vendor_id = $event.detail.id';
+                    $pickerOnCleared = "form.vendor_id = ''";
+                    $pickerError     = 'false';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
                     <div class="field-error" data-error-for="vendor_id"></div>
                 </div>
                 <div class="form-group"><!-- intentionally blank --></div>

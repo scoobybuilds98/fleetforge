@@ -184,6 +184,38 @@ When the picker's API doesn't return all the data the handler needs (e.g., compl
 
 ---
 
+## User-picker variant (D-PICKER-USER-VARIANT)
+
+When the FK references the `users` table, use FF_RecordPicker against `api/v1/users/index.php`:
+
+```php
+$pickerConfig = [
+    'endpoint'    => base_url('api/v1/users/index.php'),
+    'searchParam' => 'q',           // users API uses 'q' (not 'search')
+    'resultKey'   => 'items',
+    'perPage'     => 10,
+    'placeholder' => 'Search users…',
+    'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.role_name || '', raw: r })",
+];
+$pickerOnPicked  = 'form.assigned_to = $event.detail.id';
+$pickerOnCleared = "form.assigned_to = ''";
+$pickerError     = 'false';
+require FF_ROOT . '/includes/partials/record-picker.php';
+```
+
+**CRITICAL — preserve the original dropdown's role/active filter:**
+- If the original `<select>` showed only mechanics (e.g. `WHERE role_id = N`), add `'extraParams' => 'role_id=N'` to the picker config.
+- If the original showed ALL non-deleted users (no role/status filter), use NO extraParams — the users API excludes soft-deleted users by default.
+- Never widen the user selection. Check the PHP `db_select()` in the original form before converting.
+
+**Users API search param:** `q` (not `search`). The API also accepts `status` and `role_id` filters.
+
+**Vendors API search param:** `q` (not `search`).
+
+**Leases API search param:** `search`. Supports a single `status=` filter; cannot accept comma-separated statuses.
+
+---
+
 ## What NOT to do
 
 - **Don't keep the PHP `db_select()` preload** after the select is replaced — it's dead code.
@@ -200,9 +232,10 @@ When the picker's API doesn't return all the data the handler needs (e.g., compl
 |-------|---------|--------|-----------------|
 | 1 — Leases + Invoices | S-DROPDOWN-RETROFIT-1-LEASES-INVOICES | ✅ DONE | Customer (leases/create), Equipment Unit (leases/create), Lease (invoices/create) — 3/38 |
 | 2 — Equipment Unit (4 forms) | S-DROPDOWN-RETROFIT-2-EQUIPMENT | ✅ DONE | Equipment Unit on Damage Claims/Create, Maintenance WOs/Create, Inspections/Create, Mileage Logs/Create — 4 fields; vanilla-JS hidden-input bridge for Mileage Logs — 7/38 |
-| 3 — Remaining selector fields | TBD | — | Lease + Inspector User (inspections); Lease + Equipment (mileage); Vendor + Assigned To (WOs/Damage Claims); Customer fields on various forms; Equipment Create yard; QBO Mapping; Accounting per-line pickers |
+| 2B — Finish maintenance/inspection forms | S-DROPDOWN-RETROFIT-2B-FINISH-FORMS | ✅ DONE | All remaining entity selectors on the 4 Batch-2 forms: Customer + Vendor (DC/Create); Vendor + Assigned To on WO/Create AND WO/Show inline-edit; Linked Lease + Inspector User (Inspections/Create); Linked Lease (Mileage/Create). Establishes D-PICKER-USER-VARIANT (user pickers preserve original role/active filter). — 16/38 |
+| 3 — Remaining selector fields | TBD | — | Reservations (Trailer Type, Unit#, Pickup Yard); Equipment Units Create (Template, Yard); Customers Rate Override; Rates per-row; Accounting (JE Account, Bills Vendor+GL+Bank, Recurring Account, Fixed Assets CCA, Bank Accounts GL+Transfer+Manual GL); QBO Mapping (QBO+FF Customer); Users Role |
 
-*Total: 38 selector-only fields. 7 converted. 31 remaining.*
+*Total: 38 selector-only fields. 16 converted. 22 remaining.*
 
 ---
 
