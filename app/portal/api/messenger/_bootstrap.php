@@ -21,9 +21,26 @@ require_once dirname(__DIR__, 4) . '/config/app.php';
 require_once FF_ROOT . '/app/portal/includes/auth.php';
 require_once FF_ROOT . '/lib/Messenger/MessengerService.php';
 
+// ── Sentry error monitoring ───────────────────────────────────
+// Idempotent — no-op if already initialised by config/app.php.
+// No-op when SENTRY_DSN is blank.
+\FleetForge\Observability\Sentry::init();
+
 header('Content-Type: application/json; charset=UTF-8');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 header('X-Content-Type-Options: nosniff');
+
+// ── Global exception handler ─────────────────────────────────
+// Catches any unhandled Throwable and returns a JSON error
+// instead of leaking an HTML stack trace or blank 500 body.
+set_exception_handler(function (Throwable $e): void {
+    error_log('[FF Portal Messenger API] Unhandled exception: ' . $e->getMessage() .
+        ' in ' . $e->getFile() . ':' . $e->getLine());
+    \FleetForge\Observability\Sentry::captureException($e);
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => ['code' => 'INTERNAL_ERROR', 'message' => 'An unexpected error occurred.']]);
+    exit;
+});
 
 /**
  * Emit a 2xx success envelope and exit.

@@ -41,7 +41,8 @@ $lease = db_row(
             l.unit_number_snapshot, l.template_name_snapshot,
             l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
             l.outstanding_balance, l.total_invoiced, l.total_paid, l.po_number,
-            l.created_at, l.closed_at,
+            l.created_at, l.closed_at, l.created_by,
+            creator.name AS created_by_name,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
             COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number,
             -- S-UNIT-STATUS-COLOR 2026-05-14: live unit status for the
@@ -52,6 +53,7 @@ $lease = db_row(
      FROM leases l
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
+     LEFT JOIN users creator ON creator.id = l.created_by
      WHERE l.id = ? AND l.deleted_at IS NULL",
     [$leaseId]
 );
@@ -271,6 +273,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 @click="tab = 'documents'; loadDocuments()" :aria-selected="tab === 'documents'" role="tab">Documents
             <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
         </button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'activity' }"
+                @click="tab = 'activity'" :aria-selected="tab === 'activity'" role="tab">Activity</button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -312,6 +316,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                         </tr>
                                         <tr x-show="lease.po_number"><td class="text-secondary">PO Number</td><td class="font-mono" x-text="lease.po_number"></td></tr>
                                         <tr x-show="lease.next_billing_date"><td class="text-secondary">Next Billing</td><td x-text="formatDate(lease.next_billing_date)"></td></tr>
+                                        <tr x-show="lease.created_by_name"><td class="text-secondary">Created by</td><td x-text="lease.created_by_name"></td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -1661,6 +1666,25 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             </template>
         </div>
     </template>
+
+    <!-- ── TAB: ACTIVITY ─────────────────────────────────────────── -->
+    <!-- WHY x-show not x-if: Alpine does not re-execute <script> tags inserted
+         via x-if templates, so FF_ActivityLog() would never be defined. x-show
+         renders the element (and its scripts) on page load while keeping it
+         hidden until the tab is active — same pattern as every other tab. -->
+    <div x-show="tab === 'activity'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+        <div class="card">
+            <div class="card-body">
+                <?php
+                $activityEntityType = 'lease';
+                $activityEntityId   = $leaseId;
+                $activityOriginAt   = $lease['created_at'];
+                $activityOriginBy   = $lease['created_by_name'] ?? null;
+                ?>
+                <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+            </div>
+        </div>
+    </div><!-- /activity tab -->
 
 </div><!-- /x-data -->
 

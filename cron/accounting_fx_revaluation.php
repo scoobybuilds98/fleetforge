@@ -130,6 +130,7 @@ try {
     exit(0);
 } catch (\Throwable $e) {
     error_log('cron/accounting_fx_revaluation: ' . $e->getMessage());
+    \FleetForge\Observability\Sentry::captureException($e);
     try {
         db_insert('audit_log', [
             'user_id'     => null,

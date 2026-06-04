@@ -3,21 +3,23 @@
 # FleetForge — Production deploy runner
 #
 # Operator-facing post-`git push` deploy sequence. Always runs
-# 3 commands in order, no decision-tree (per E-DEPLOY-RUNBOOK
+# 4 commands in order, no decision-tree (per E-DEPLOY-RUNBOOK
 # in docs/FLEETFORGE_PREDEPLOY_CHECKLIST.md and the 2026-05-20
 # rule revision):
 #
 #   1. git pull origin main
-#   2. migrate.php --apply
-#   3. systemctl reload php8.2-fpm
+#   2. composer install --no-dev
+#   3. migrate.php --apply
+#   4. systemctl reload php8.2-fpm
 #
 # Why no decision-tree: each command is safe + cheap to run when
 # "not strictly needed" (git pull on already-current → no-op,
+# composer install with nothing new → ~1s lock-file verify,
 # migrate --apply with nothing pending → ~50ms idempotent verify,
 # systemctl reload → graceful sub-second, no requests dropped).
 # The 2026-05-19 S-PERM-SESSION-REFRESH incident happened because
 # an earlier version of this script let operators skip steps based
-# on the diff — and they skipped wrong. Always-run-all-3 removes
+# on the diff — and they skipped wrong. Always-run-all-4 removes
 # the decision point entirely.
 #
 # Schema quick-ref regeneration (per F-SCHEMA-REF-1) is a SEPARATE
@@ -38,6 +40,7 @@
 # is a hassle):
 #   cd /var/www/fleetforge
 #   sudo -u www-data git pull origin main
+#   sudo -u www-data composer install --no-dev --optimize-autoloader --no-interaction
 #   sudo -u www-data php bin/migrate.php --apply
 #   sudo systemctl reload php8.2-fpm
 #
@@ -91,17 +94,22 @@ else
     git log --oneline "$BEFORE_SHA..$AFTER_SHA" | sed 's/^/    /'
 fi
 
-# ── Step 2 — migrate apply (always, idempotent) ──────────────
+# ── Step 2 — composer install (always, idempotent) ───────────
 echo
-echo "── [2/3] migrate apply (idempotent — no-op when nothing pending) ──"
+echo "── [2/4] composer install --no-dev ─────────────────────────"
+sudo -u "$WEB_USER" composer install --no-dev --optimize-autoloader --no-interaction
+
+# ── Step 3 — migrate apply (always, idempotent) ──────────────
+echo
+echo "── [3/4] migrate apply (idempotent — no-op when nothing pending) ──"
 sudo -u "$WEB_USER" php bin/migrate.php --apply
 echo
 echo "    verify:"
 sudo -u "$WEB_USER" php bin/migrate.php --verify | sed 's/^/      /'
 
-# ── Step 3 — systemctl reload php-fpm (always) ───────────────
+# ── Step 4 — systemctl reload php-fpm (always) ───────────────
 echo
-echo "── [3/3] systemctl reload $FPM_UNIT ───────────────────────"
+echo "── [4/4] systemctl reload $FPM_UNIT ───────────────────────"
 systemctl reload "$FPM_UNIT"
 systemctl is-active --quiet "$FPM_UNIT" && echo "  ✓ $FPM_UNIT is active" || {
     echo "  ✖ $FPM_UNIT is NOT active after reload — falling back to restart"

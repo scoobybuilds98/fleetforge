@@ -35,7 +35,10 @@ if (!$customerId || $customerId <= 0) {
 
 // ── Load customer ─────────────────────────────────────────────
 $customer = db_row(
-    "SELECT * FROM customers WHERE id = ? AND deleted_at IS NULL",
+    "SELECT c.*, creator.name AS created_by_name
+     FROM customers c
+     LEFT JOIN users creator ON creator.id = c.created_by
+     WHERE c.id = ? AND c.deleted_at IS NULL",
     [$customerId]
 );
 
@@ -298,6 +301,10 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             Email History
             <span class="tab-badge" x-show="tabCounts.emails > 0" x-text="tabCounts.emails"></span>
         </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'activity' }"
+                @click="activeTab = 'activity'" :aria-selected="activeTab === 'activity'" role="tab">
+            Activity
+        </button>
     </div>
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
@@ -500,6 +507,10 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     <dl style="display:grid; grid-template-columns:max-content 1fr; gap:8px 20px; margin:0;">
                         <dt class="text-secondary text-sm">Created</dt>
                         <dd style="margin:0;" class="font-mono"><?= e(format_datetime($customer['created_at'])) ?></dd>
+                        <?php if (!empty($customer['created_by_name'])): ?>
+                        <dt class="text-secondary text-sm">Created by</dt>
+                        <dd style="margin:0;"><?= e($customer['created_by_name']) ?></dd>
+                        <?php endif; ?>
                         <dt class="text-secondary text-sm">Last Updated</dt>
                         <dd style="margin:0;" class="font-mono"><?= e(format_datetime($customer['updated_at'])) ?></dd>
                     </dl>
@@ -1382,6 +1393,16 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         </div>
 
     </div><!-- /emails tab -->
+
+    <!-- ── TAB: ACTIVITY ─────────────────────────────────────────── -->
+    <div x-show="activeTab === 'activity'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
+        <div class="card">
+            <div class="card-body">
+                <?php $activityEntityType = 'customer'; $activityEntityId = $customerId; ?>
+                <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+            </div>
+        </div>
+    </div><!-- /activity tab -->
 
     <!-- ── Document Upload Modal ────────────────────────────────── -->
     <?php if (can('customers', 'edit')): ?>

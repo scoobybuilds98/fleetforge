@@ -76,6 +76,7 @@ try {
             $msg = "template=" . (int) $t['id'] . " " . $t['name'] . ": " . $e->getMessage();
             $failureMessages[] = $msg;
             error_log("cron/accounting_recurring_entries: {$msg}");
+            \FleetForge\Observability\Sentry::captureException($e);
             echo "FAIL    {$msg}\n";
             // Continue to next template — one failure must not abort the batch.
         }
@@ -192,6 +193,7 @@ try {
     exit(0);
 } catch (\Throwable $e) {
     error_log('cron/accounting_recurring_entries: ' . $e->getMessage());
+    \FleetForge\Observability\Sentry::captureException($e);
     try {
         db_insert('audit_log', [
             'user_id'     => null,

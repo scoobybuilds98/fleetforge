@@ -71,9 +71,12 @@ $user = db_row(
          u.theme_preference, u.last_login_at, u.last_login_ip,
          u.invite_sent_at, u.created_at, u.updated_at,
          u.mfa_enabled, u.mfa_required, u.mfa_enabled_at,
+         u.created_by,
+         creator.name AS created_by_name,
          ur.id AS role_id, ur.name AS role_name, ur.slug AS role_slug
      FROM users u
      JOIN user_roles ur ON ur.id = u.role_id
+     LEFT JOIN users creator ON creator.id = u.created_by
      WHERE u.id = ? AND u.deleted_at IS NULL",
     [$userId]
 );
@@ -744,6 +747,20 @@ async function changeStatus(newStatus) {
             <button class="btn btn-secondary btn-md" onclick="closeDeleteModal()">Cancel</button>
             <button class="btn btn-danger btn-md" id="btn-confirm-delete" onclick="executeDelete()">Delete</button>
         </div>
+    </div>
+</div>
+
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card" style="margin-top:24px;">
+    <div class="card-header"><h3 class="card-title">Activity</h3></div>
+    <div class="card-body">
+        <?php
+        $activityEntityType = 'user';
+        $activityEntityId   = $userId;
+        $activityOriginAt   = $user['created_at'];
+        $activityOriginBy   = $user['created_by_name'] ?? null;
+        ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
     </div>
 </div>
 

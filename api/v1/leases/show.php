@@ -112,6 +112,7 @@ $lease = db_row(
         l.cancellation_reason,
         l.created_at,
         l.updated_at,
+        creator.name AS created_by_name,
         COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
         COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number,
         -- S-UNIT-STATUS-COLOR 2026-05-14: live unit status for the lease show
@@ -139,6 +140,7 @@ $lease = db_row(
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      LEFT JOIN equipment_templates t ON t.id = u.template_id AND t.deleted_at IS NULL
+     LEFT JOIN users creator ON creator.id = l.created_by
      WHERE l.id = ? AND l.deleted_at IS NULL",
     [$id]
 );

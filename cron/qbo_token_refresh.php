@@ -99,6 +99,9 @@ try {
     } catch (\Throwable $e) {
         // Failure branch — refreshAccessToken already wrote
         // connection_status='error'/'expired' + connection_error.
+        // Capture in Sentry so the team sees rotation failures even
+        // when the operator hasn't checked the in-app notification bell.
+        \FleetForge\Observability\Sentry::captureException($e);
         // We additionally:
         //   1. Flip explicitly to 'expired' (override 'error' if
         //      refreshAccessToken set that). Once we get into the
@@ -152,6 +155,10 @@ try {
         // Exit 0 — the failure has been recorded + operators notified.
         // Exiting non-zero would mostly just spam the cron log.
     }
+} catch (\Throwable $e) {
+    // Unexpected outer error (e.g. DB down, settings_get failure).
+    error_log('cron/qbo_token_refresh: unexpected error: ' . $e->getMessage());
+    \FleetForge\Observability\Sentry::captureException($e);
 } finally {
     db_execute("SELECT RELEASE_LOCK('ff_qbo_token_refresh')", []);
 }

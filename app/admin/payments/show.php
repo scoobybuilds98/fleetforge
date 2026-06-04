@@ -544,4 +544,13 @@ function FF_PaymentActions() {
 }
 </script>
 
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card" style="margin-top:24px;">
+    <div class="card-header"><h3 class="card-title">Activity</h3></div>
+    <div class="card-body">
+        <?php $activityEntityType = 'payment'; $activityEntityId = $id; ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+    </div>
+</div>
+
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

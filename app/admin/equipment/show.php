@@ -290,6 +290,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             ['key' => 'inspections',    'label' => 'Inspections'],
             ['key' => 'documents',      'label' => 'Documents'],
             ['key' => 'tracking',       'label' => 'Samsara Mapping'],
+            ['key' => 'activity',       'label' => 'Activity'],
         ];
         foreach ($tabs as $tab):
         ?>
@@ -1862,6 +1863,16 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             </div>
         </template>
     </div>
+
+    <!-- ── TAB: ACTIVITY ─────────────────────────────────────────── -->
+    <div x-show="activeTab === 'activity'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+        <div class="card">
+            <div class="card-body">
+                <?php $activityEntityType = 'equipment_unit'; $activityEntityId = $unitId; ?>
+                <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+            </div>
+        </div>
+    </div><!-- /activity tab -->
 
 </div><!-- /x-data -->
 

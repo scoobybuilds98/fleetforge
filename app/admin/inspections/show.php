@@ -669,4 +669,19 @@ async function deleteInspection() {
 }
 </script>
 
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card" style="margin-top:24px;">
+    <div class="card-header"><h3 class="card-title">Activity</h3></div>
+    <div class="card-body">
+        <?php
+        $activityEntityType = 'inspection';
+        $activityEntityId   = $id;
+        $activityOriginAt   = $insp['created_at'];
+        // inspections has no created_by FK; use the linked inspector name as the origin label.
+        $activityOriginBy   = $insp['inspected_by_user_name'] ?? $insp['inspected_by'] ?? null;
+        ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+    </div>
+</div>
+
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>
