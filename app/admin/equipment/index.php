@@ -244,6 +244,18 @@ require_once FF_ROOT . '/includes/header.php';
              class="ff-bulk-bar">
             <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
             <div class="ff-bulk-bar-sep"></div>
+            <button class="ff-bulk-btn" style="background:rgba(34,197,94,0.12);color:#4ade80;" @click="bulkSetStatus('available')" :disabled="bulkWorking">
+                <svg width="11" height="12" viewBox="0 0 11 12" fill="currentColor"><path d="M1 1l9 5-9 5V1z"/></svg>
+                Available
+            </button>
+            <button class="ff-bulk-btn" style="background:rgba(234,179,8,0.12);color:#fbbf24;" @click="bulkSetStatus('maintenance')" :disabled="bulkWorking">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8.5 1a3 3 0 0 1 0 5L3 11.5A1 1 0 0 1 1.5 10L7 4.5A3 3 0 0 1 8.5 1z"/></svg>
+                Maintenance
+            </button>
+            <button class="ff-bulk-btn" style="background:rgba(107,114,128,0.15);color:#9ca3af;" @click="bulkSetStatus('inactive')" :disabled="bulkWorking">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1" width="3" height="10" rx="1"/><rect x="7" y="1" width="3" height="10" rx="1"/></svg>
+                Inactive
+            </button>
             <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
                 <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor" aria-hidden="true"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
                 Delete
@@ -628,6 +640,33 @@ function FF_Equipment() {
                 }
             } catch (e) {
                 FF_Toast.error('Network error during bulk delete.');
+            } finally {
+                this.bulkWorking = false;
+            }
+        },
+
+        async bulkSetStatus(newStatus) {
+            if (this.selectedIds.length === 0 || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const label = { available: 'Available', maintenance: 'Maintenance', inactive: 'Inactive' }[newStatus] || newStatus;
+            const confirmed = await FF_Confirm.ask(
+                'Set ' + count + ' unit' + (count === 1 ? '' : 's') + ' to ' + label + '? Units that cannot transition to this status will be skipped.'
+            );
+            if (!confirmed) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/equipment/units/bulk_update_status') ?>', { ids: this.selectedIds, new_status: newStatus });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.actioned > 0) FF_Toast.success(d.actioned + ' unit' + (d.actioned === 1 ? '' : 's') + ' → ' + label + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' failed: ' + d.errors.slice(0,3).map(e => e.reason).join('; ') + (d.errors.length > 3 ? '…' : ''));
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Status update failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error during status update.');
             } finally {
                 this.bulkWorking = false;
             }

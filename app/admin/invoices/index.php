@@ -270,6 +270,12 @@ require_once FF_ROOT . '/includes/header.php';
              class="ff-bulk-bar">
             <span class="ff-bulk-bar-count" x-text="selectedIds.length + ' selected'"></span>
             <div class="ff-bulk-bar-sep"></div>
+            <button class="ff-bulk-btn"
+                    style="background:rgba(249,115,22,0.12);color:var(--color-primary-text,#fb923c);"
+                    @click="bulkVoid()" :disabled="bulkWorking">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="4.5"/><line x1="2.5" y1="9.5" x2="9.5" y2="2.5"/></svg>
+                Void
+            </button>
             <button class="ff-bulk-btn ff-bulk-btn-delete" @click="bulkDelete()" :disabled="bulkWorking">
                 <svg width="12" height="13" viewBox="0 0 12 13" fill="currentColor" aria-hidden="true"><path d="M4.5 1h3a.5.5 0 0 1 .5.5v.5H4v-.5A.5.5 0 0 1 4.5 1ZM3 2h6l-.4 7.2A1.5 1.5 0 0 1 7.1 10.5H4.9a1.5 1.5 0 0 1-1.5-1.3L3 2Z"/><path d="M1 2h10" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/></svg>
                 Delete
@@ -703,6 +709,34 @@ function FF_Invoices() {
         clearSelection() {
             this.selectedIds = [];
             this.selectAll   = false;
+        },
+        async bulkVoid() {
+            if (this.selectedIds.length === 0 || this.bulkWorking) return;
+            const count = this.selectedIds.length;
+            const reason = await FF_Confirm.askText({
+                title: 'Void ' + count + ' invoice' + (count === 1 ? '' : 's'),
+                message: 'Enter a void reason (required). Only draft and sent invoices will be voided.',
+                confirmLabel: 'Void invoices',
+                placeholder: 'e.g. Duplicate, customer cancelled...',
+            });
+            if (!reason) return;
+            this.bulkWorking = true;
+            try {
+                const res = await FF_Api.post('<?= base_url('api/v1/invoices/bulk_void') ?>', { ids: this.selectedIds, void_reason: reason });
+                if (res.success) {
+                    const d = res.data;
+                    if (d.actioned > 0) FF_Toast.success(d.actioned + ' invoice' + (d.actioned === 1 ? '' : 's') + ' voided' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
+                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' could not be voided: ' + d.errors.slice(0,3).map(e => e.reason).join('; ') + (d.errors.length > 3 ? '…' : ''));
+                    this.clearSelection();
+                    await this.load();
+                } else {
+                    FF_Toast.error(res.error?.message || 'Bulk void failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error during bulk void.');
+            } finally {
+                this.bulkWorking = false;
+            }
         },
         async bulkDelete() {
             if (this.selectedIds.length === 0 || this.bulkWorking) return;
