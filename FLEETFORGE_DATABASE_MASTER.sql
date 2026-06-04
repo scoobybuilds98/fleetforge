@@ -2533,7 +2533,7 @@ CREATE TABLE `equipment_templates` (
   `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `slug` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
-  `category` enum('chassis','dry_van','reefer','container','flatbed','step_deck','lowboy','tanker','dump','other') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category` enum('chassis','dry_van','reefer','container','flatbed','step_deck','lowboy','tanker','dump','combo','other') COLLATE utf8mb4_unicode_ci NOT NULL,
   `brand` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `model` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `default_length_ft` decimal(6,2) DEFAULT NULL,

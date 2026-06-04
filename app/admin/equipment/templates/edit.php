@@ -119,6 +119,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <option value="lowboy">Lowboy</option>
                                 <option value="tanker">Tanker</option>
                                 <option value="dump">Dump</option>
+                                <option value="combo">Combo</option>
                                 <option value="other">Other</option>
                             </select>
                             <div class="field-error" data-error-for="category"></div>
