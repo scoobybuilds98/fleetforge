@@ -115,7 +115,7 @@ foreach ($cleanIds as $id) {
         ): void {
             // Load the customer; skip if not found or already soft-deleted
             $customer = db_row(
-                "SELECT id, company_name, status, active_lease_count
+                "SELECT id, company_name, status
                    FROM customers
                   WHERE id = ? AND deleted_at IS NULL",
                 [$id]
@@ -139,11 +139,11 @@ foreach ($cleanIds as $id) {
             }
 
             // Block deactivation when the customer has active leases.
-            // WHY: check the denormalized counter; a separate live-count guard
-            // is not added here (unlike bulk_delete) because the counter is
-            // kept in sync by lease activate/close paths and is sufficient for
-            // a status change (softer than a delete).
-            if ($targetStatus === 'inactive' && (int) $customer['active_lease_count'] > 0) {
+            // active_lease_count is never maintained — use the live COUNT.
+            if ($targetStatus === 'inactive' && db_count(
+                "SELECT COUNT(*) FROM leases WHERE customer_id = ? AND status = 'active' AND deleted_at IS NULL",
+                [$id]
+            ) > 0) {
                 $skipped++;
                 $errors[] = [
                     'id'     => $id,

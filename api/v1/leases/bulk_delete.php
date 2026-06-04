@@ -63,7 +63,7 @@ $errors  = [];
 foreach ($clean_ids as $id) {
     // Fetch the lease — must exist and not already be soft-deleted
     $lease = db_row(
-        "SELECT id, status, contract_number, equipment_unit_id
+        "SELECT id, status, contract_number, customer_id, equipment_unit_id
          FROM leases WHERE id = ? AND deleted_at IS NULL",
         [$id]
     );
@@ -97,6 +97,14 @@ foreach ($clean_ids as $id) {
                 "UPDATE leases SET deleted_at = NOW(), updated_by = ? WHERE id = ?",
                 [$uid, $id]
             );
+
+            // Decrement denormalized lease_count on customer and unit
+            if ($lease['customer_id']) {
+                db_execute("UPDATE customers SET lease_count = GREATEST(0, lease_count - 1), updated_at = NOW() WHERE id = ?", [$lease['customer_id']]);
+            }
+            if ($lease['equipment_unit_id']) {
+                db_execute("UPDATE equipment_units SET lease_count = GREATEST(0, lease_count - 1), updated_at = NOW() WHERE id = ?", [$lease['equipment_unit_id']]);
+            }
 
             // Release a reserved unit back to 'available' when a pending lease
             // is deleted — prevents the unit from being permanently locked.

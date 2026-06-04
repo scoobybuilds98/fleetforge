@@ -80,7 +80,7 @@ foreach ($cleanIds as $id) {
     try {
         // Load the customer; skip quietly if already deleted or never existed
         $customer = db_row(
-            "SELECT id, company_name, active_lease_count
+            "SELECT id, company_name
                FROM customers
               WHERE id = ? AND deleted_at IS NULL",
             [$id]
@@ -95,8 +95,8 @@ foreach ($cleanIds as $id) {
             continue;
         }
 
-        // Block if denormalized counter OR a real live count shows active leases
-        // (double-check guards against stale denormalized counter)
+        // active_lease_count is never maintained by lease endpoints — rely solely
+        // on the live COUNT, which is the authoritative source.
         $activeLeasesActual = db_count(
             "SELECT COUNT(*)
                FROM leases
@@ -104,7 +104,7 @@ foreach ($cleanIds as $id) {
             [$id]
         );
 
-        if ((int) $customer['active_lease_count'] > 0 || $activeLeasesActual > 0) {
+        if ($activeLeasesActual > 0) {
             $skipped++;
             $errors[] = [
                 'id'     => $id,

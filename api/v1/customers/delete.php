@@ -6,8 +6,8 @@ declare(strict_types=1);
  *
  * @file        api/v1/customers/delete.php
  * @description Soft-deletes a customer by setting deleted_at to NOW().
- *              Blocks deletion if the customer has active_lease_count > 0
- *              (cannot delete a customer with live leases — HAS_ACTIVE_LEASES).
+ *              Blocks deletion if the customer has any active leases
+ *              (live COUNT query — HAS_ACTIVE_LEASES).
  *              Logs to audit_log.
  *
  * @method      POST
@@ -40,7 +40,7 @@ if (!$id || $id <= 0) {
 
 // ── Load existing record ────────────────────────────────────────
 $customer = db_row(
-    "SELECT id, company_name, active_lease_count FROM customers WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, company_name FROM customers WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
 
@@ -49,13 +49,13 @@ if (!$customer) {
 }
 
 // ── Block if active leases exist ────────────────────────────────
-// FIX #14: also run a direct count query as a safety net in case the
-// denormalized active_lease_count is stale (e.g., due to a failed transaction).
+// active_lease_count is never maintained by lease endpoints — rely solely
+// on the live COUNT, which is the authoritative source.
 $activeLeasesActual = db_count(
     "SELECT COUNT(*) FROM leases WHERE customer_id = ? AND status = 'active' AND deleted_at IS NULL",
     [$id]
 );
-if ((int) $customer['active_lease_count'] > 0 || $activeLeasesActual > 0) {
+if ($activeLeasesActual > 0) {
     json_error(
         'HAS_ACTIVE_LEASES',
         'This customer has active leases and cannot be deleted. Close or transfer all active leases first.',

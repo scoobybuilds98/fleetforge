@@ -75,7 +75,7 @@ $result = null;
 db_transaction(function() use ($id, $newStatus, $reason, $resNotes, &$result) {
     // Lock the work order row for update
     $wo = db_row(
-        "SELECT id, work_order_number, status, vendor_id, total_cost
+        "SELECT id, work_order_number, status, vendor_id, equipment_unit_id, total_cost
          FROM maintenance_work_orders
          WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$id]
@@ -117,13 +117,21 @@ db_transaction(function() use ($id, $newStatus, $reason, $resNotes, &$result) {
     $setParams[] = $id;
     db_execute("UPDATE maintenance_work_orders SET $setClause WHERE id = ?", $setParams);
 
-    // Trap 6 — update vendors.total_spent in the SAME transaction on completion
-    if ($newStatus === 'completed' && $wo['vendor_id'] !== null) {
+    // Trap 6 — update denormalized counters in the SAME transaction on completion
+    if ($newStatus === 'completed') {
         $totalCost = $wo['total_cost'] ?? '0.00';
-        db_execute(
-            "UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?",
-            [$totalCost, $wo['vendor_id']]
-        );
+        if ($wo['vendor_id'] !== null) {
+            db_execute(
+                "UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?",
+                [$totalCost, $wo['vendor_id']]
+            );
+        }
+        if ($wo['equipment_unit_id'] !== null) {
+            db_execute(
+                "UPDATE equipment_units SET total_maintenance_cost = total_maintenance_cost + ?, updated_at = NOW() WHERE id = ?",
+                [$totalCost, $wo['equipment_unit_id']]
+            );
+        }
     }
 
     // Audit log — status_change action

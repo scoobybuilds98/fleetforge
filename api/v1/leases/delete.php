@@ -35,7 +35,7 @@ if (!$id) {
 }
 
 $lease = db_row(
-    "SELECT id, status, contract_number, company_name_snapshot, equipment_unit_id
+    "SELECT id, status, contract_number, company_name_snapshot, customer_id, equipment_unit_id
      FROM leases WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -56,6 +56,14 @@ db_transaction(function () use ($id, $lease) {
         "UPDATE leases SET deleted_at = NOW(), updated_by = ? WHERE id = ?",
         [current_user_id(), $id]
     );
+
+    // Decrement denormalized lease_count (tracks total leases regardless of status)
+    if ($lease['customer_id']) {
+        db_execute("UPDATE customers SET lease_count = GREATEST(0, lease_count - 1), updated_at = NOW() WHERE id = ?", [$lease['customer_id']]);
+    }
+    if ($lease['equipment_unit_id']) {
+        db_execute("UPDATE equipment_units SET lease_count = GREATEST(0, lease_count - 1), updated_at = NOW() WHERE id = ?", [$lease['equipment_unit_id']]);
+    }
 
     // FIX #25: when a pending lease is deleted, the equipment unit was set to
     // 'reserved' at lease creation. Release it back to 'available' so it can

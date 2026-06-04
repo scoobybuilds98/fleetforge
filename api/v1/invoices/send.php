@@ -155,7 +155,8 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
     // S-FIX-2 Path B: outstanding_balance increments on draft -> sent.
     // Drafts do not contribute to OB; only sent/partially_paid/overdue do.
     // Both the lease counter and the customer counter advance together.
-    $balanceDue = (string) $invoice['balance_due'];
+    $balanceDue  = (string) $invoice['balance_due'];
+    $totalAmount = (string) $invoice['total_amount'];
     if ($invoice['lease_id']) {
         db_execute(
             "UPDATE leases SET outstanding_balance = outstanding_balance + ?, updated_at = NOW() WHERE id = ?",
@@ -164,8 +165,19 @@ db_transaction(function () use ($id, $invoice, $sentToEmail, $now) {
     }
     if ($invoice['customer_id']) {
         db_execute(
-            "UPDATE customers SET outstanding_balance = outstanding_balance + ?, updated_at = NOW() WHERE id = ?",
-            [$balanceDue, $invoice['customer_id']]
+            "UPDATE customers SET outstanding_balance = outstanding_balance + ?,
+                                  total_revenue       = total_revenue       + ?,
+                                  updated_at = NOW() WHERE id = ?",
+            [$balanceDue, $totalAmount, $invoice['customer_id']]
+        );
+    }
+    // total_revenue: invoice sent amount (not payment received)
+    if ($invoice['lease_id']) {
+        db_execute(
+            "UPDATE equipment_units eu
+               JOIN leases l ON l.id = ? AND l.equipment_unit_id = eu.id AND l.deleted_at IS NULL
+                SET eu.total_revenue = eu.total_revenue + ?, eu.updated_at = NOW()",
+            [$invoice['lease_id'], $totalAmount]
         );
     }
 

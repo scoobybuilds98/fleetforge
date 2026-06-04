@@ -137,9 +137,20 @@ foreach ($ids as $id) {
                 db_execute(
                     "UPDATE customers
                      SET outstanding_balance = outstanding_balance - ?,
+                         total_revenue       = total_revenue       - ?,
                          updated_at = NOW()
                      WHERE id = ?",
-                    [$decOb, $invoice['customer_id']]
+                    [$decOb, $decTotalInvoiced, $invoice['customer_id']]
+                );
+            }
+
+            // total_revenue mirrors $decTotalInvoiced — zero for void/written_off (already reversed)
+            if ($decTotalInvoiced !== '0.00' && $invoice['lease_id']) {
+                db_execute(
+                    "UPDATE equipment_units eu
+                       JOIN leases l ON l.id = ? AND l.equipment_unit_id = eu.id AND l.deleted_at IS NULL
+                            SET eu.total_revenue = eu.total_revenue - ?, eu.updated_at = NOW()",
+                    [$invoice['lease_id'], $decTotalInvoiced]
                 );
             }
 

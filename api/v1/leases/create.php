@@ -688,6 +688,10 @@ db_transaction(function () use (
         'updated_by'               => current_user_id(),
     ]);
 
+    // Increment denormalized lease_count on both customer and unit (any status)
+    db_execute("UPDATE customers SET lease_count = lease_count + 1, updated_at = NOW() WHERE id = ?", [$customerId]);
+    db_execute("UPDATE equipment_units SET lease_count = lease_count + 1, updated_at = NOW() WHERE id = ?", [$unitId]);
+
     // ── FIX #16: Reserve unit — prevents a second pending lease ──
     // Unit status: available → reserved. Activate moves it to on_lease.
     // Cancel moves it back to available. This ensures UNIT_UNAVAILABLE
