@@ -1415,15 +1415,14 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         <!-- email-preview-frame: styled border + "PREVIEW" label strip -->
                         <div class="email-preview-frame">
                             <div class="email-preview-label">Preview</div>
-                            <!-- click.capture: {credit_application_url} is substituted with
-                                 "[Credit Application Link]" in previews (Trap-7 / D-CCA-1 — no
-                                 token pre-generated). That placeholder becomes a broken href that
-                                 resolves to a 404.  Capture + preventDefault makes every anchor
-                                 inside the preview inert without altering the rendered HTML.
-                                 (FIXPACK-EMAIL-PREVIEW fix B) -->
+                            <!-- Primary guard: preview.php strips all href="..." to
+                                 href="javascript:void(0)" before returning body_html, so no anchor
+                                 in the rendered HTML can navigate (FIXPACK-EMAIL-SCROLL-BTN).
+                                 Belt-and-suspenders: @click.capture.prevent stops any click that
+                                 reaches this container regardless of href content. -->
                             <div class="email-preview-body"
                                  x-html="creditPreviewModal.body_html"
-                                 @click.capture="if ($event.target.closest('a')) $event.preventDefault()"></div>
+                                 @click.capture.prevent></div>
                         </div>
                         <p class="text-sm text-secondary" style="margin:12px 0 0;">
                             The credit application link in this preview is a placeholder — the real tokenized link is generated when you click Send.

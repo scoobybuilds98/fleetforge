@@ -7667,12 +7667,13 @@ table td {
     background: #ffffff;
     font-size: 13px;
     line-height: 1.6;
-    /* FIXPACK-EMAIL-PREVIEW: was 320px — enlarged so the full email is
-       readable without the preview frame being clipped. The modal-body
-       flex:1 + overflow-y:auto governs the outer scroll; this inner cap
-       lets the frame grow to ~65vh before adding its own scrollbar. */
-    max-height: 65vh;
-    overflow-y: auto;
+    /* FIXPACK-EMAIL-SCROLL-BTN: removed max-height + overflow-y.
+       Root cause: email-preview-frame has overflow:hidden (for border-radius);
+       that clips the scrollbar of a bounded inner div entirely — no scroll
+       handle appears and the email is hard-cut.  Fix: render email-preview-body
+       at natural height; modal-body (flex:1 + overflow-y:auto) is the ONE
+       scroll container.  email-preview-frame overflow:hidden is harmless
+       because the frame has no bounded height — it simply wraps its content. */
 }
 
 /* History tab on customer / invoice show pages ---------------- */

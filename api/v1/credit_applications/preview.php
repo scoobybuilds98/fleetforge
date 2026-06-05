@@ -58,8 +58,18 @@ $compiled = EmailService::compileTemplate(
     ]
 );
 
+// FIXPACK-EMAIL-SCROLL-BTN: neutralise all href attributes before returning.
+// The credit_application_url placeholder compiles to "[Credit Application Link]"
+// in both <a href> and visible text; square brackets fail resolve_route()'s
+// /^[a-zA-Z0-9_\-.]+$/ guard → ff_not_found() → 404 on click.  Any other href
+// in the template is equally unsafe in a preview context (no real token exists).
+// Replacing with javascript:void(0) prevents navigation for all anchors.
+// Belt-and-suspenders: the preview-body div also carries @click.capture/prevent.
+$bodyHtml = EmailService::renderEmailHtml($compiled['body_html']);
+$bodyHtml = (string) preg_replace('/ href="[^"]*"/i', ' href="javascript:void(0)"', $bodyHtml);
+
 json_success([
-    'subject'  => $compiled['subject'],
-    'body_html' => EmailService::renderEmailHtml($compiled['body_html']),
-    'to_email' => $toEmail,
+    'subject'   => $compiled['subject'],
+    'body_html' => $bodyHtml,
+    'to_email'  => $toEmail,
 ]);
