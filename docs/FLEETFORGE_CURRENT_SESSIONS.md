@@ -74,6 +74,11 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-PERM-TEST-WIRING** — IN-FLIGHT
+  Started: 2026-06-05T UTC by desktop-1
+  Touching: includes/auth.php, tests/_smoke_permissions_rigorous.php
+  Scope: Close two test-fidelity gaps in the permission smoke: (1) drive the real update+read endpoints via subprocess instead of mirroring their DB writes; (2) replace perm_inline_freshness() mirror with a call to the extracted _ff_refresh_permission_overrides_if_stale() core in auth.php. No feature change — auth refactor is behavior-identical.
+
 **S-CCA-1** — IN-FLIGHT
   Started: 2026-06-05T04:33 UTC by desktop-1
   Touching: db_migrations/, FLEETFORGE_DATABASE_MASTER.sql, includes/db.php, database/seeds/004_settings.sql, database/seeds/008_email_templates.sql, app/admin/customers/show.php, api/v1/credit_applications/
