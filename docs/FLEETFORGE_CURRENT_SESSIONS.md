@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-CCA-4** — IN-FLIGHT
+  Started: 2026-06-05T00:00 UTC by claude-opus-4
+  Touching: api/v1/credit_applications/review.php, api/v1/credit_applications/send.php, app/admin/credit_applications/show.php, app/admin/customers/show.php, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
+
 **S-CCA-3** — SHIPPED 2026-06-05 (see PROGRESS.md SESSION LOG row). **Phase CCA session 3 of 4 — Credit Application: frozen HTML snapshot + mPDF PDF + notifications + admin view.** NEW `includes/partials/credit_application_render.php` (mPDF-safe render partial; inline signature data URI; D-CCA-3-B/C). EXTEND `app/admin/credit-application.php` (post-commit block: rendered_html → PDF → documents row → generated_pdf_document_id → notifications; D-CCA-3-A/D/E). NEW `api/v1/credit_applications/generate_pdf.php` (idempotent regenerate; D-CCA-3-G). NEW `app/admin/credit_applications/show.php` (customers:view; iframe snapshot + metadata sidebar + Download PDF signed URL + Regenerate PDF; D-CCA-3-F). PATCH `app/admin/customers/show.php` (wired View link). smoke 17/17 PASS. D131 96/0/0. 7 decisions locked D-CCA-3-A..G. **Next: S-CCA-4** (review workflow: approve/decline/needs_info + credit_limit write + re-send polish).
 
 **S-PERM-TEST-WIRING** — SHIPPED 2026-06-05 (see PROGRESS.md SESSION LOG row).
