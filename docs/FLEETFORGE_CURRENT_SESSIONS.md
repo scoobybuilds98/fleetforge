@@ -74,6 +74,11 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-DEPLOY-SAFETY-1** — IN-FLIGHT
+  Started: 2026-06-05T10:38 UTC by claude-opus-4-8
+  Touching: api/v1/health.php, bin/migrate.php, bin/deploy.sh, docs/runbooks/deploy.md, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
+  Scope: deploy-safety half of the schema-hardening arc — additively harden the existing bin/deploy.sh (clean-tree precheck, fetch+show-incoming+confirm, DB backup before migrate, assert-0-pending, health gate, deploy-log, --dry-run, staging/prod params) + extend health.php with migrate-state (pending count) + critical-tables presence (D-DEPLOY-2). **Concurrent disjoint run** alongside S-SENTRY-SCRUBFIX (desktop-1) — code-disjoint (health.php/migrate.php/deploy.sh vs their lib/Observability/Sentry.php); I deliberately AVOID editing CLAUDE_CODE_REFERENCE.md (their one shared code-adjacent doc) to remove all collision risk — deploy docs live in the self-contained docs/runbooks/deploy.md. 2 write IN-FLIGHT is EXPECTED/operator-approved per the established concurrent-disjoint policy (precedent: S-AUTH-FAILOPEN-1 ‖ S-CCA-BTN-SETTINGS). Specific-path git add only; never touches their files.
+
 **S-SENTRY-SCRUBFIX** — IN-FLIGHT
   Started: 2026-06-05T00:00 UTC by desktop-1
   Touching: lib/Observability/Sentry.php, docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
