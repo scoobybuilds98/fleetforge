@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-CLASS4-COUNTER-FIX** — IN-FLIGHT
+  Started: 2026-06-05T00:00 UTC by desktop-1
+  Touching: tests/_smoke_doc_freshness.php, docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
+
 **S-DEPLOY-SAFETY-1** — SHIPPED 2026-06-05 (see PROGRESS.md SESSION LOG row). **Deploy-safety half of the schema-hardening arc — one atomic, gated, abort-on-failure deploy + a health migrate-state assertion so a schema lag is caught AT DEPLOY TIME, not at first request. Arc complete: detection (S-SCHEMA-GUARD-1) + resilience (S-AUTH-FAILOPEN-1) + deploy-safety (this).** **K-22 correction:** the prompt's "current deploy pulls nothing/no migrate" was the operator's ad-hoc command — on-disk `bin/deploy.sh` already pulled+migrated+reloaded since the 2026-05-20 E-DEPLOY-RUNBOOK; this is ADDITIVE hardening (operator-approved), not a rewrite. `api/v1/health.php` += `migrations{pending,ok}` + `schema{ok}` (pending>0 or missing critical table → degraded, D-DEPLOY-2); NEW `bin/migrate.php --assert-applied` (exit 4 on pending; --status contract intact); `bin/deploy.sh` hardened to 10 gated steps (clean-tree → fetch → show+confirm[--yes] → pull --ff-only → backup via cron/backup_db.php → composer → migrate+assert → reload → health gate → deploy-log), `FF_DEPLOY_*`-parameterized for staging+prod + `--dry-run`; NEW `docs/runbooks/deploy.md` (usage + rollback). SC1-SC5 verified (bash -n; health 200; negative pending→degraded+exit4; dry-run full sequence; dirty-tree→abort). MUST validate on staging first (no e2e off-prod). **Queued:** S-SCHEMA-BASELINE (000_baseline). Commits: `81f92b6` (C1) + `8a602d1` (C2 health+migrate) + `7a767bf` (C3 deploy.sh+runbook) + this commit (C4 docs).
 
 **S-SENTRY-SCRUBFIX** — SHIPPED 2026-06-05 (see PROGRESS.md SESSION LOG row). **Fix Sentry before_send scrubber crash (SDK 4.x getRequest()=array, Frame immutable).** lib/Observability/Sentry.php + REFERENCE Trap 70 + PROGRESS SESSION LOG. Commits: `5d71654` (C1 IN-FLIGHT) + this commit (C2 fix+docs).
