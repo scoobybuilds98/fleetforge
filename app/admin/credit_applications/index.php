@@ -4,26 +4,17 @@ declare(strict_types=1);
 /**
  * app/admin/credit_applications/index.php
  *
- * Credit Applications — comprehensive module index.
+ * Credit Applications — module index page.
  *
- * Shows KPI tiles (sent/opened/submitted/reviewed/total), a filterable and
- * sortable table of all applications across all customers, and quick-action
- * links to the individual application view and the customer profile.
+ * Alpine.js component (FF_CreditApps) backed by api/v1/credit_applications/all.php.
+ * Displays 4 KPI tiles + a filterable, sortable, paginated table of all applications
+ * across all customers.
  *
- * Filters applied via GET params so they survive page reload and can be
- * bookmarked / shared:
- *   ?status=submitted   — filter by lifecycle status
- *   ?outcome=approved   — filter by review outcome
- *   ?q=Fraser           — search customer company_name or applicant name
- *   ?date_from=2026-01-01 / ?date_to=2026-12-31
- *   ?sort=submitted_at&dir=ASC
- *   ?page=2
+ * Trap 7: token_hash / signature_path / form_data / rendered_html / submitted_ip
+ * never selected, never rendered — enforced in the API endpoint.
  *
  * Permission: customers:view (credit applications are a customer sub-resource
  * per D-CCA-PERM).
- *
- * Trap 7: token_hash / signature_path / form_data / rendered_html / submitted_ip
- * never selected, never rendered.
  *
  * @session S-CCA-MODULE
  */
@@ -34,176 +25,16 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('customers', 'view');
 
-// ── KPI tiles (server-rendered counts) ───────────────────────────────────────
-$kpis = [
-    'awaiting_review' => db_count(
-        "SELECT COUNT(*) FROM customer_credit_applications
-          WHERE status = 'submitted' AND deleted_at IS NULL"
-    ),
-    'submitted_total' => db_count(
-        "SELECT COUNT(*) FROM customer_credit_applications
-          WHERE status IN ('submitted','reviewed') AND deleted_at IS NULL"
-    ),
-    'active' => db_count(
-        "SELECT COUNT(*) FROM customer_credit_applications
-          WHERE status IN ('sent','opened') AND deleted_at IS NULL"
-    ),
-    'reviewed' => db_count(
-        "SELECT COUNT(*) FROM customer_credit_applications
-          WHERE status = 'reviewed' AND deleted_at IS NULL"
-    ),
-    'total' => db_count(
-        "SELECT COUNT(*) FROM customer_credit_applications WHERE deleted_at IS NULL"
-    ),
-];
-
-// ── Filters ───────────────────────────────────────────────────────────────────
-$filterStatus    = clean_string($_GET['status']    ?? '');
-$filterOutcome   = clean_string($_GET['outcome']   ?? '');
-$filterQ         = clean_string($_GET['q']         ?? '');
-$filterDateFrom  = clean_string($_GET['date_from'] ?? '');
-$filterDateTo    = clean_string($_GET['date_to']   ?? '');
-
-// Validate sort column against a whitelist (SQL injection guard)
-$sortAllowed = ['sent_at','submitted_at','reviewed_at','created_at','company_name','status'];
-$sort = in_array(clean_string($_GET['sort'] ?? ''), $sortAllowed, true)
-    ? clean_string($_GET['sort'])
-    : 'created_at';
-$dir  = (clean_string($_GET['dir'] ?? '') === 'ASC') ? 'ASC' : 'DESC';
-
-$perPage = 50;
-$page    = max(1, (int)($_GET['page'] ?? 1));
-$offset  = ($page - 1) * $perPage;
-
-// ── Build WHERE clause ────────────────────────────────────────────────────────
-$where  = ['ca.deleted_at IS NULL'];
-$params = [];
-
-if ($filterStatus !== '') {
-    $where[]  = 'ca.status = ?';
-    $params[] = $filterStatus;
-}
-if ($filterOutcome !== '') {
-    $where[]  = 'ca.review_outcome = ?';
-    $params[] = $filterOutcome;
-}
-if ($filterQ !== '') {
-    $where[]  = '(c.company_name LIKE ? OR ca.print_name_first LIKE ? OR ca.print_name_last LIKE ?)';
-    $like     = '%' . $filterQ . '%';
-    $params[] = $like;
-    $params[] = $like;
-    $params[] = $like;
-}
-if ($filterDateFrom !== '') {
-    $where[]  = 'DATE(ca.created_at) >= ?';
-    $params[] = $filterDateFrom;
-}
-if ($filterDateTo !== '') {
-    $where[]  = 'DATE(ca.created_at) <= ?';
-    $params[] = $filterDateTo;
-}
-
-$whereSql = 'WHERE ' . implode(' AND ', $where);
-
-// ── Counts for pagination ─────────────────────────────────────────────────────
-$totalRows = db_count(
-    "SELECT COUNT(*)
-       FROM customer_credit_applications ca
-       JOIN customers c ON c.id = ca.customer_id
-     $whereSql",
-    $params
-);
-$totalPages = max(1, (int) ceil($totalRows / $perPage));
-$page       = min($page, $totalPages);
-$offset     = ($page - 1) * $perPage;
-
-// ── Fetch rows ────────────────────────────────────────────────────────────────
-// Trap 7: token_hash, signature_path, form_data, rendered_html, submitted_ip excluded.
-$sortCol = $sort === 'company_name' ? 'c.company_name' : 'ca.' . $sort;
-$rows = db_select(
-    "SELECT ca.id, ca.status, ca.review_outcome,
-            ca.sent_at, ca.opened_at, ca.submitted_at, ca.reviewed_at,
-            ca.created_at, ca.token_expires_at,
-            ca.approved_credit_limit,
-            ca.print_name_first, ca.print_name_last,
-            (ca.generated_pdf_document_id IS NOT NULL) AS has_pdf,
-            c.id   AS customer_id,
-            c.company_name,
-            sb.name AS sent_by_name,
-            rb.name AS reviewed_by_name
-       FROM customer_credit_applications ca
-       JOIN customers c ON c.id = ca.customer_id
-       LEFT JOIN users sb ON sb.id = ca.sent_by
-       LEFT JOIN users rb ON rb.id = ca.reviewed_by
-     $whereSql
-     ORDER BY $sortCol $dir
-     LIMIT ? OFFSET ?",
-    array_merge($params, [$perPage, $offset])
-);
-
-// Derive is_expired for 'sent' rows
-$now = time();
-foreach ($rows as &$row) {
-    $row['is_expired'] = ($row['status'] === 'sent'
-        && !empty($row['token_expires_at'])
-        && strtotime((string) $row['token_expires_at']) < $now);
-}
-unset($row);
-
-// ── Page render ───────────────────────────────────────────────────────────────
 $pageTitle      = 'Credit Applications';
 $helpModuleSlug = 'credit-applications';
 require_once FF_ROOT . '/includes/header.php';
-
-// Helper — build current URL with modified params
-function cca_url(array $overrides = []): string {
-    $params = array_filter([
-        'status'    => $_GET['status']    ?? '',
-        'outcome'   => $_GET['outcome']   ?? '',
-        'q'         => $_GET['q']         ?? '',
-        'date_from' => $_GET['date_from'] ?? '',
-        'date_to'   => $_GET['date_to']   ?? '',
-        'sort'      => $_GET['sort']      ?? '',
-        'dir'       => $_GET['dir']       ?? '',
-        'page'      => $_GET['page']      ?? '',
-    ], static fn($v) => $v !== '');
-    foreach ($overrides as $k => $v) {
-        if ($v === '') { unset($params[$k]); } else { $params[$k] = $v; }
-    }
-    $qs = http_build_query($params);
-    return base_url('credit_applications') . ($qs ? '?' . $qs : '');
-}
-
-// Helper — sort link
-function cca_sort_url(string $col): string {
-    $current = $_GET['sort'] ?? 'created_at';
-    $dir     = ($current === $col && ($_GET['dir'] ?? 'DESC') === 'DESC') ? 'ASC' : 'DESC';
-    return cca_url(['sort' => $col, 'dir' => $dir, 'page' => '1']);
-}
-function cca_sort_icon(string $col): string {
-    $current = $_GET['sort'] ?? 'created_at';
-    if ($current !== $col) return '<span style="opacity:.3;">↕</span>';
-    return ($_GET['dir'] ?? 'DESC') === 'DESC' ? '↓' : '↑';
-}
-
-// Status badge config
-$statusBadge = [
-    'sent'      => ['label' => 'Sent',      'class' => 'badge-info'],
-    'opened'    => ['label' => 'Opened',    'class' => 'badge-warning'],
-    'submitted' => ['label' => 'Submitted', 'class' => 'badge-primary'],
-    'reviewed'  => ['label' => 'Reviewed',  'class' => 'badge-success'],
-];
-
-// Outcome badge config
-$outcomeBadge = [
-    'approved'   => ['label' => 'Approved',   'color' => '#16a34a'],
-    'declined'   => ['label' => 'Declined',   'color' => '#dc2626'],
-    'needs_info' => ['label' => 'Needs Info', 'color' => '#d97706'],
-];
 ?>
 
+<!-- ============================================================
+     Page header
+     ============================================================ -->
 <div class="page-header">
-    <h1 class="page-header-title">Credit Applications</h1>
+    <h1 class="page-header-title h4">Credit Applications</h1>
     <div class="page-header-actions">
         <a href="<?= base_url('settings?tab=credit_application') ?>"
            class="btn btn-ghost btn-sm">⚙ Settings</a>
@@ -211,196 +42,443 @@ $outcomeBadge = [
     </div>
 </div>
 
-<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<!-- ============================================================
+     CREDIT APPLICATIONS ALPINE COMPONENT
+     ============================================================ -->
+<div x-data="FF_CreditApps()" x-init="init()">
 
-    <a href="<?= cca_url(['status' => 'submitted', 'page' => '1']) ?>"
-       class="stat-card stat-card--amber" style="text-decoration:none;cursor:pointer;">
-        <span class="stat-icon stat-icon--amber">
-            <?= heroicon('clipboard-document-check') ?>
-        </span>
-        <div class="stat-label">Awaiting Review</div>
-        <div class="stat-value font-mono"><?= e((string)$kpis['awaiting_review']) ?></div>
-        <div class="stat-delta">submitted, not yet reviewed</div>
-    </a>
+    <!-- ── KPI TILES ─────────────────────────────────────────── -->
+    <div class="stat-grid">
 
-    <a href="<?= cca_url(['status' => '', 'outcome' => '', 'page' => '1']) ?>"
-       class="stat-card stat-card--blue" style="text-decoration:none;cursor:pointer;">
-        <span class="stat-icon stat-icon--blue">
-            <?= heroicon('document-text') ?>
-        </span>
-        <div class="stat-label">Total Submitted</div>
-        <div class="stat-value font-mono"><?= e((string)$kpis['submitted_total']) ?></div>
-        <div class="stat-delta">submitted + reviewed</div>
-    </a>
+        <div class="stat-card stat-card--amber" style="cursor:pointer;"
+             :class="{ 'ring-active': filters.status === 'submitted' }"
+             @click="setStatusFilter('submitted')">
+            <span class="stat-icon stat-icon--amber">
+                <?= heroicon('clipboard-document-check') ?>
+            </span>
+            <div class="stat-label">Awaiting Review</div>
+            <template x-if="kpisLoaded">
+                <div>
+                    <div class="stat-value font-mono" x-text="kpis.awaiting_review"></div>
+                    <div class="stat-delta">submitted, not yet reviewed</div>
+                </div>
+            </template>
+            <template x-if="!kpisLoaded">
+                <div class="skeleton skeleton-text-lg" style="width:50%;margin-top:8px;"></div>
+            </template>
+        </div>
 
-    <a href="<?= cca_url(['status' => 'reviewed', 'page' => '1']) ?>"
-       class="stat-card stat-card--teal" style="text-decoration:none;cursor:pointer;">
-        <span class="stat-icon stat-icon--teal">
-            <?= heroicon('shield-check') ?>
-        </span>
-        <div class="stat-label">Reviewed</div>
-        <div class="stat-value font-mono"><?= e((string)$kpis['reviewed']) ?></div>
-        <div class="stat-delta">approved / declined / needs info</div>
-    </a>
+        <div class="stat-card stat-card--blue" style="cursor:pointer;"
+             :class="{ 'ring-active': filters.status === '' && !filters.outcome }"
+             @click="setStatusFilter('')">
+            <span class="stat-icon stat-icon--blue">
+                <?= heroicon('document-text') ?>
+            </span>
+            <div class="stat-label">Total Submitted</div>
+            <template x-if="kpisLoaded">
+                <div>
+                    <div class="stat-value font-mono" x-text="kpis.submitted_total"></div>
+                    <div class="stat-delta">submitted + reviewed</div>
+                </div>
+            </template>
+            <template x-if="!kpisLoaded">
+                <div class="skeleton skeleton-text-lg" style="width:50%;margin-top:8px;"></div>
+            </template>
+        </div>
 
-    <a href="<?= cca_url(['status' => '', 'page' => '1']) ?>"
-       class="stat-card stat-card--purple" style="text-decoration:none;cursor:pointer;">
-        <span class="stat-icon stat-icon--purple">
-            <?= heroicon('clipboard-document-list') ?>
-        </span>
-        <div class="stat-label">All Applications</div>
-        <div class="stat-value font-mono"><?= e((string)$kpis['total']) ?></div>
-        <div class="stat-delta">across all customers</div>
-    </a>
+        <div class="stat-card stat-card--teal" style="cursor:pointer;"
+             :class="{ 'ring-active': filters.status === 'reviewed' }"
+             @click="setStatusFilter('reviewed')">
+            <span class="stat-icon stat-icon--teal">
+                <?= heroicon('shield-check') ?>
+            </span>
+            <div class="stat-label">Reviewed</div>
+            <template x-if="kpisLoaded">
+                <div>
+                    <div class="stat-value font-mono" x-text="kpis.reviewed"></div>
+                    <div class="stat-delta">approved / declined / needs info</div>
+                </div>
+            </template>
+            <template x-if="!kpisLoaded">
+                <div class="skeleton skeleton-text-lg" style="width:50%;margin-top:8px;"></div>
+            </template>
+        </div>
 
-</div>
+        <div class="stat-card stat-card--purple" style="cursor:pointer;"
+             :class="{ 'ring-active': !filters.status && !filters.q && !filters.outcome }"
+             @click="clearFilters()">
+            <span class="stat-icon stat-icon--purple">
+                <?= heroicon('clipboard-document-list') ?>
+            </span>
+            <div class="stat-label">All Applications</div>
+            <template x-if="kpisLoaded">
+                <div>
+                    <div class="stat-value font-mono" x-text="kpis.total"></div>
+                    <div class="stat-delta">across all customers</div>
+                </div>
+            </template>
+            <template x-if="!kpisLoaded">
+                <div class="skeleton skeleton-text-lg" style="width:50%;margin-top:8px;"></div>
+            </template>
+        </div>
 
-<!-- ── Table ─────────────────────────────────────────────────────────────── -->
-<div class="card">
-    <!-- Filter bar -->
-    <form method="GET" action="<?= base_url('credit_applications') ?>"
-          style="padding:16px 20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border-default);">
-
-        <input type="text" name="q" class="form-input form-input-sm"
-               style="max-width:200px;" placeholder="Search customer / applicant…"
-               value="<?= e($filterQ) ?>">
-
-        <select name="status" class="form-select form-select-sm">
-            <option value="">All Statuses</option>
-            <?php foreach (['sent' => 'Sent', 'opened' => 'Opened', 'submitted' => 'Submitted', 'reviewed' => 'Reviewed'] as $val => $lbl): ?>
-            <option value="<?= e($val) ?>"<?= $filterStatus === $val ? ' selected' : '' ?>><?= e($lbl) ?></option>
-            <?php endforeach; ?>
-        </select>
-
-        <select name="outcome" class="form-select form-select-sm">
-            <option value="">All Outcomes</option>
-            <?php foreach (['approved' => 'Approved', 'declined' => 'Declined', 'needs_info' => 'Needs Info'] as $val => $lbl): ?>
-            <option value="<?= e($val) ?>"<?= $filterOutcome === $val ? ' selected' : '' ?>><?= e($lbl) ?></option>
-            <?php endforeach; ?>
-        </select>
-
-        <input type="date" name="date_from" class="form-input form-input-sm"
-               title="Sent from" value="<?= e($filterDateFrom) ?>"
-               placeholder="From">
-        <input type="date" name="date_to" class="form-input form-input-sm"
-               title="Sent to" value="<?= e($filterDateTo) ?>"
-               placeholder="To">
-
-        <button type="submit" class="btn btn-secondary btn-sm">Filter</button>
-        <a href="<?= base_url('credit_applications') ?>" class="btn btn-ghost btn-sm">Reset</a>
-
-        <span style="margin-left:auto;font-size:0.8125rem;color:var(--text-secondary);">
-            <?= e((string)$totalRows) ?> result<?= $totalRows === 1 ? '' : 's' ?>
-        </span>
-    </form>
-
-    <!-- Table -->
-    <?php if (empty($rows)): ?>
-    <div style="padding:40px;text-align:center;color:var(--text-secondary);">
-        <p style="margin:0;font-size:0.9375rem;">No credit applications match your filters.</p>
-        <?php if ($filterStatus || $filterOutcome || $filterQ || $filterDateFrom || $filterDateTo): ?>
-        <a href="<?= base_url('credit_applications') ?>" style="font-size:0.875rem;">Clear filters</a>
-        <?php endif; ?>
-    </div>
-    <?php else: ?>
-
-    <div style="overflow-x:auto;">
-    <table class="data-table" style="width:100%;font-size:0.8125rem;">
-        <thead>
-            <tr>
-                <th><a href="<?= cca_sort_url('company_name') ?>" style="color:inherit;text-decoration:none;">Customer <?= cca_sort_icon('company_name') ?></a></th>
-                <th><a href="<?= cca_sort_url('status') ?>" style="color:inherit;text-decoration:none;">Status <?= cca_sort_icon('status') ?></a></th>
-                <th>Sent By</th>
-                <th><a href="<?= cca_sort_url('sent_at') ?>" style="color:inherit;text-decoration:none;">Sent <?= cca_sort_icon('sent_at') ?></a></th>
-                <th><a href="<?= cca_sort_url('submitted_at') ?>" style="color:inherit;text-decoration:none;">Submitted <?= cca_sort_icon('submitted_at') ?></a></th>
-                <th>Outcome</th>
-                <th>Approved Limit</th>
-                <th style="text-align:right;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($rows as $row): ?>
-        <?php
-            $sb    = $statusBadge[$row['status']]  ?? ['label' => ucfirst((string)$row['status']), 'class' => 'badge-secondary'];
-            $ob    = $row['review_outcome'] ? ($outcomeBadge[$row['review_outcome']] ?? null) : null;
-            $name  = trim(((string)($row['print_name_first'] ?? '')) . ' ' . ((string)($row['print_name_last'] ?? '')));
-            // Expired sent link
-            $isExpired = $row['is_expired'] ?? false;
-        ?>
-        <tr>
-            <td>
-                <a href="<?= base_url('customers/' . (int)$row['customer_id']) ?>"
-                   style="font-weight:500;"><?= e($row['company_name']) ?></a>
-                <?php if ($name): ?>
-                <div style="font-size:0.73rem;color:var(--text-secondary);margin-top:1px;"><?= e($name) ?></div>
-                <?php endif; ?>
-            </td>
-            <td>
-                <span class="badge <?= e($sb['class']) ?>"><?= e($sb['label']) ?></span>
-                <?php if ($isExpired): ?>
-                <span style="font-size:0.7rem;color:var(--text-secondary);display:block;">expired</span>
-                <?php endif; ?>
-            </td>
-            <td style="color:var(--text-secondary);"><?= e($row['sent_by_name'] ?? '—') ?></td>
-            <td style="white-space:nowrap;color:var(--text-secondary);font-size:0.75rem;">
-                <?= $row['sent_at'] ? e(date('M j, Y', strtotime($row['sent_at']))) : '—' ?>
-            </td>
-            <td style="white-space:nowrap;color:var(--text-secondary);font-size:0.75rem;">
-                <?= $row['submitted_at'] ? e(date('M j, Y', strtotime($row['submitted_at']))) : '—' ?>
-            </td>
-            <td>
-                <?php if ($ob): ?>
-                <span style="font-size:0.78rem;font-weight:600;color:<?= e($ob['color']) ?>;"><?= e($ob['label']) ?></span>
-                <?php else: ?><span style="color:var(--text-secondary);">—</span>
-                <?php endif; ?>
-            </td>
-            <td style="font-size:0.78rem;">
-                <?php if ($row['approved_credit_limit'] !== null): ?>
-                $<?= e(number_format((float)$row['approved_credit_limit'], 2)) ?>
-                <?php else: ?><span style="color:var(--text-secondary);">—</span>
-                <?php endif; ?>
-            </td>
-            <td style="text-align:right;white-space:nowrap;">
-                <?php if ($row['has_pdf']): ?>
-                <a href="<?= base_url('credit_applications/show') ?>?id=<?= (int)$row['id'] ?>"
-                   class="btn btn-ghost btn-xs">View Form</a>
-                <?php endif; ?>
-                <a href="<?= base_url('customers/' . (int)$row['customer_id']) ?>"
-                   class="btn btn-ghost btn-xs">Customer →</a>
-            </td>
-        </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
     </div>
 
-    <!-- Pagination -->
-    <?php if ($totalPages > 1): ?>
-    <div style="padding:14px 20px;display:flex;gap:8px;align-items:center;justify-content:center;border-top:1px solid var(--border-default);">
-        <?php if ($page > 1): ?>
-        <a href="<?= cca_url(['page' => (string)($page - 1)]) ?>" class="btn btn-ghost btn-sm">← Prev</a>
-        <?php endif; ?>
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────── -->
+    <div class="table-toolbar">
 
-        <?php
-        $start = max(1, $page - 2);
-        $end   = min($totalPages, $page + 2);
-        for ($p = $start; $p <= $end; $p++): ?>
-        <a href="<?= cca_url(['page' => (string)$p]) ?>"
-           class="btn btn-sm<?= $p === $page ? ' btn-primary' : ' btn-ghost' ?>"><?= $p ?></a>
-        <?php endfor; ?>
+        <div class="table-toolbar-left">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search customer or applicant…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="resetPage()"
+                   maxlength="255"
+                   style="min-width:220px;"
+                   aria-label="Search credit applications">
 
-        <?php if ($page < $totalPages): ?>
-        <a href="<?= cca_url(['page' => (string)($page + 1)]) ?>" class="btn btn-ghost btn-sm">Next →</a>
-        <?php endif; ?>
+            <select class="form-select form-control-sm"
+                    x-model="filters.status"
+                    @change="resetPage()"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="sent">Sent</option>
+                <option value="opened">Opened</option>
+                <option value="submitted">Submitted</option>
+                <option value="reviewed">Reviewed</option>
+            </select>
 
-        <span style="font-size:0.8125rem;color:var(--text-secondary);margin-left:8px;">
-            Page <?= $page ?> of <?= $totalPages ?> &nbsp;·&nbsp; <?= $totalRows ?> total
-        </span>
+            <select class="form-select form-control-sm"
+                    x-model="filters.outcome"
+                    @change="resetPage()"
+                    aria-label="Filter by outcome">
+                <option value="">All Outcomes</option>
+                <option value="approved">Approved</option>
+                <option value="declined">Declined</option>
+                <option value="needs_info">Needs Info</option>
+            </select>
+
+            <input type="date"
+                   class="form-control form-control-sm"
+                   x-model="filters.date_from"
+                   @change="resetPage()"
+                   title="From date"
+                   aria-label="From date"
+                   style="width:auto;">
+            <input type="date"
+                   class="form-control form-control-sm"
+                   x-model="filters.date_to"
+                   @change="resetPage()"
+                   title="To date"
+                   aria-label="To date"
+                   style="width:auto;">
+
+            <button class="btn btn-ghost btn-sm"
+                    x-show="hasActiveFilters()"
+                    @click="clearFilters()">
+                Clear
+            </button>
+        </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="pagination.total !== undefined
+                      ? pagination.total + ' application' + (pagination.total !== 1 ? 's' : '')
+                      : ''">
+            </span>
+
+            <select class="form-select form-control-sm"
+                    x-model="filters.sort"
+                    @change="resetPage()"
+                    aria-label="Sort by">
+                <optgroup label="Date">
+                    <option value="created_at">Date created</option>
+                    <option value="sent_at">Date sent</option>
+                    <option value="submitted_at">Date submitted</option>
+                    <option value="reviewed_at">Date reviewed</option>
+                </optgroup>
+                <optgroup label="Other">
+                    <option value="company_name">Customer name</option>
+                    <option value="status">Status</option>
+                </optgroup>
+            </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.dir"
+                    @change="resetPage()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+        </div>
+
     </div>
-    <?php endif; ?>
-    <?php endif; ?>
 
-</div><!-- /card -->
+    <!-- ── TABLE CARD ─────────────────────────────────────────── -->
+    <div class="card">
+
+        <!-- Loading skeleton -->
+        <template x-if="loading">
+            <div aria-busy="true" aria-label="Loading credit applications…">
+                <template x-for="n in 6" :key="n">
+                    <div class="skeleton skeleton-row"></div>
+                </template>
+            </div>
+        </template>
+
+        <!-- Error state -->
+        <template x-if="!loading && loadError">
+            <div class="empty-state">
+                <div class="empty-state-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                </div>
+                <p class="empty-state-title">Failed to load credit applications</p>
+                <p class="empty-state-text" x-text="loadError"></p>
+                <button class="btn btn-secondary btn-sm" @click="load()">Retry</button>
+            </div>
+        </template>
+
+        <!-- Empty state -->
+        <template x-if="!loading && !loadError && apps.length === 0">
+            <div class="empty-state">
+                <div class="empty-state-icon">
+                    <?= heroicon('clipboard-document-list', 'width="48" height="48" stroke-width="1.5"') ?>
+                </div>
+                <p class="empty-state-title">No credit applications found</p>
+                <p class="empty-state-text"
+                   x-text="hasActiveFilters() ? 'Try adjusting your filters.' : 'Send a credit application from a customer profile to get started.'">
+                </p>
+                <button class="btn btn-ghost btn-sm"
+                        x-show="hasActiveFilters()"
+                        @click="clearFilters()">
+                    Clear filters
+                </button>
+            </div>
+        </template>
+
+        <!-- Table -->
+        <template x-if="!loading && !loadError && apps.length > 0">
+            <div style="overflow-x:auto;">
+                <table class="table" aria-label="Credit Applications">
+                    <thead>
+                        <tr>
+                            <th scope="col">Customer</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Sent By</th>
+                            <th scope="col">Sent</th>
+                            <th scope="col">Submitted</th>
+                            <th scope="col">Outcome</th>
+                            <th scope="col">Approved Limit</th>
+                            <th scope="col" style="width:1%;white-space:nowrap;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="app in apps" :key="app.id">
+                            <tr>
+                                <td>
+                                    <a :href="'<?= base_url('customers/show') ?>?id=' + app.customer_id"
+                                       class="link font-medium"
+                                       x-text="app.company_name"></a>
+                                    <div class="text-xs text-secondary"
+                                         x-show="app.print_name_first || app.print_name_last"
+                                         x-text="[app.print_name_first, app.print_name_last].filter(Boolean).join(' ')">
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge" :class="statusBadgeClass(app.status)"
+                                          x-text="statusLabel(app.status)"></span>
+                                    <div class="text-xs text-secondary"
+                                         x-show="app.is_expired">expired</div>
+                                </td>
+                                <td class="text-secondary" x-text="app.sent_by_name || '—'"></td>
+                                <td class="text-secondary" style="font-size:0.75rem;white-space:nowrap;"
+                                    x-text="formatDate(app.sent_at)"></td>
+                                <td class="text-secondary" style="font-size:0.75rem;white-space:nowrap;"
+                                    x-text="formatDate(app.submitted_at)"></td>
+                                <td>
+                                    <span x-show="app.review_outcome"
+                                          style="font-size:0.78rem;font-weight:600;"
+                                          :style="'color:' + outcomeColor(app.review_outcome)"
+                                          x-text="outcomeLabel(app.review_outcome)"></span>
+                                    <span x-show="!app.review_outcome"
+                                          class="text-secondary">—</span>
+                                </td>
+                                <td style="font-size:0.78rem;"
+                                    x-text="app.approved_credit_limit ? formatMoney(app.approved_credit_limit) : '—'">
+                                </td>
+                                <td style="text-align:right;white-space:nowrap;">
+                                    <a x-show="app.has_pdf"
+                                       :href="'<?= base_url('credit_applications/show') ?>?id=' + app.id"
+                                       class="btn btn-ghost btn-xs">View Form</a>
+                                    <a :href="'<?= base_url('customers/show') ?>?id=' + app.customer_id"
+                                       class="btn btn-ghost btn-xs">Customer →</a>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+
+        <!-- Pagination -->
+        <template x-if="!loading && pagination.total_pages > 1">
+            <div class="pagination">
+                <span class="pagination-info"
+                      x-text="'Page ' + pagination.page + ' of ' + pagination.total_pages">
+                </span>
+                <div class="pagination-controls">
+                    <button class="page-btn"
+                            :disabled="pagination.page <= 1"
+                            @click="goToPage(pagination.page - 1)">← Prev</button>
+                    <button class="page-btn"
+                            :disabled="!pagination.has_more"
+                            @click="goToPage(pagination.page + 1)">Next →</button>
+                </div>
+            </div>
+        </template>
+
+    </div><!-- /card -->
+
+</div><!-- /x-data -->
+
+<script>
+function FF_CreditApps() {
+    return {
+        apps:        [],
+        pagination:  {},
+        kpis:        {},
+        kpisLoaded:  false,
+        filters: {
+            q:         '',
+            status:    '',
+            outcome:   '',
+            date_from: '',
+            date_to:   '',
+            sort:      'created_at',
+            dir:       'DESC',
+        },
+        page:      1,
+        loading:   true,
+        loadError: null,
+
+        init() {
+            this.load();
+        },
+
+        async load() {
+            this.loading   = true;
+            this.loadError = null;
+
+            const params = new URLSearchParams();
+            if (this.filters.q)         params.set('q',         this.filters.q);
+            if (this.filters.status)    params.set('status',    this.filters.status);
+            if (this.filters.outcome)   params.set('outcome',   this.filters.outcome);
+            if (this.filters.date_from) params.set('date_from', this.filters.date_from);
+            if (this.filters.date_to)   params.set('date_to',   this.filters.date_to);
+            if (this.filters.sort)      params.set('sort',       this.filters.sort);
+            if (this.filters.dir)       params.set('dir',        this.filters.dir);
+            params.set('page',     this.page);
+            params.set('per_page', 25);
+
+            try {
+                const res  = await fetch(
+                    `<?= base_url('api/v1/credit_applications/all') ?>?` + params.toString(),
+                    { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
+                );
+                const json = await res.json();
+
+                if (!res.ok || !json.success) {
+                    this.loadError = json.error?.message ?? 'Failed to load credit applications.';
+                    return;
+                }
+
+                this.apps       = json.data.items;
+                this.pagination = json.data.pagination;
+
+                // KPIs are always global counts — load once and cache.
+                if (!this.kpisLoaded && json.data.kpis) {
+                    this.kpis      = json.data.kpis;
+                    this.kpisLoaded = true;
+                }
+            } catch (e) {
+                this.loadError = 'Network error. Please try again.';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        resetPage() {
+            this.page = 1;
+            this.load();
+        },
+
+        goToPage(n) {
+            this.page = n;
+            this.load();
+        },
+
+        // WHY: clicking a KPI tile toggles the status filter so the tile acts
+        // as a drill-down shortcut — click twice to clear back to "all".
+        setStatusFilter(status) {
+            this.filters.status = (this.filters.status === status) ? '' : status;
+            this.resetPage();
+        },
+
+        clearFilters() {
+            this.filters.q         = '';
+            this.filters.status    = '';
+            this.filters.outcome   = '';
+            this.filters.date_from = '';
+            this.filters.date_to   = '';
+            this.resetPage();
+        },
+
+        hasActiveFilters() {
+            return !!(this.filters.q || this.filters.status || this.filters.outcome
+                   || this.filters.date_from || this.filters.date_to);
+        },
+
+        formatDate(dt) {
+            if (!dt) return '—';
+            // Parse as local time by replacing space with T for ISO 8601 compatibility.
+            const d = new Date(dt.replace(' ', 'T'));
+            return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' });
+        },
+
+        formatMoney(val) {
+            const n = parseFloat(val);
+            if (isNaN(n)) return '—';
+            return '$' + n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        // WHY: badge variants match the status lifecycle colour convention.
+        statusBadgeClass(status) {
+            return {
+                'badge-info':    status === 'sent',
+                'badge-warning': status === 'opened',
+                'badge-primary': status === 'submitted',
+                'badge-success': status === 'reviewed',
+            };
+        },
+
+        statusLabel(status) {
+            const map = { sent: 'Sent', opened: 'Opened', submitted: 'Submitted', reviewed: 'Reviewed' };
+            return map[status] || status;
+        },
+
+        outcomeColor(outcome) {
+            const map = { approved: '#16a34a', declined: '#dc2626', needs_info: '#d97706' };
+            return map[outcome] || 'var(--text-secondary)';
+        },
+
+        outcomeLabel(outcome) {
+            if (!outcome) return '—';
+            const map = { approved: 'Approved', declined: 'Declined', needs_info: 'Needs Info' };
+            return map[outcome] || outcome;
+        },
+    };
+}
+</script>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>
