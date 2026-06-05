@@ -68,7 +68,7 @@ require_permission($permModule, 'edit');
 $docTypesByEntity = [
     'equipment_unit' => ['cvi', 'registration', 'insurance', 'other'],
     'lease'          => ['contract', 'inspection_in', 'inspection_out', 'amendment', 'other'],
-    'customer'       => ['tax_exemption', 'credit_agreement', 'other'],
+    'customer'       => ['tax_exemption', 'credit_agreement', 'credit_application', 'other'],
     'inspection'     => ['report', 'other'],
     'damage_claim'   => ['estimate', 'repair_invoice', 'other'],
 ];
@@ -154,8 +154,9 @@ $titleDefaults = [
     'inspection_in'    => 'Pre-Lease Inspection',
     'inspection_out'   => 'Post-Lease Inspection',
     'amendment'        => 'Lease Amendment',
-    'tax_exemption'    => 'Tax Exemption Certificate',
-    'credit_agreement' => 'Credit Agreement',
+    'tax_exemption'      => 'Tax Exemption Certificate',
+    'credit_agreement'   => 'Credit Agreement',
+    'credit_application' => 'Credit Application Document',
     'estimate'         => 'Repair Estimate',
     'repair_invoice'   => 'Repair Invoice',
     'report'           => 'Inspection Report',
