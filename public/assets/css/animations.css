@@ -131,17 +131,13 @@
     box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.18);
 }
 
-/* Auto-apply hover-lift to standard stat-card components — no
-   per-page change needed. Dashboard KPI tiles + any future
-   .stat-card usage gets the lift behavior free. */
+/* Apple-style stat-card hover — in-place scale, not lift */
 .stat-card {
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    transition: transform 0.20s ease, box-shadow 0.20s ease;
 }
 .stat-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.18);
+    transform: scale(1.018);
 }
-/* Skip hover-lift on the loading state to avoid jitter. */
 .stat-card--error:hover,
 .stat-card[aria-busy="true"]:hover {
     transform: none;

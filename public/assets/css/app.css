@@ -2138,44 +2138,27 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .stat-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    /* WHY: padding tightened from 20/60/20/28 → 14/16/14/22.
-       The big-ticket change is dropping the 60px right reservation
-       (icon shrunk from 42px → 30px and is allowed to overlap the
-       label row only — the value below uses the full content width). */
-    padding: 14px 16px 14px 22px;
-    box-shadow: var(--shadow-sm);
+    /* Apple HIG: glass material — subtle top shimmer over the surface colour */
+    background: linear-gradient(160deg, rgba(255,255,255,0.045) 0%, transparent 55%),
+                var(--bg-surface);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.20);
     position: relative;
     overflow: hidden;
-    /* WHY: lets the card shrink inside CSS grid so its children
-       can use min-width:0 / ellipsis without forcing the column. */
     min-width: 0;
-    transition: box-shadow var(--transition-base), border-color var(--transition-base),
-                transform var(--transition-base);
+    transition: box-shadow 200ms ease, transform 200ms ease;
 }
 
-/* Left accent bar — uses per-card --stat-accent or defaults to primary */
+/* Left accent bar removed — accent colour now lives in the icon only */
 .stat-card::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    background: linear-gradient(
-        to bottom,
-        var(--stat-accent, var(--color-primary)),
-        color-mix(in srgb, var(--stat-accent, var(--color-primary)) 50%, transparent)
-    );
-    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+    display: none;
 }
 
 .stat-card:hover {
-    box-shadow: var(--shadow-md);
-    border-color: var(--border-color-strong);
-    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.50), 0 2px 6px rgba(0,0,0,0.28);
+    transform: scale(1.018);
 }
 
 /* Per-card accent color variants */
@@ -2192,20 +2175,19 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
    below the dashboard variants block. */
 .stat-icon {
     position: absolute;
-    top: 12px;
-    right: 12px;
-    /* WHY: shrunk 42→30 so it stops eating the value's horizontal room. */
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
+    top: 14px;
+    right: 14px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
 }
 .stat-icon svg {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
 }
 .stat-icon--green  { background: rgba(34,197,94,0.12);  color: #22c55e; }
 .stat-icon--blue   { background: rgba(59,130,246,0.12); color: #60a5fa; }
@@ -2216,17 +2198,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .stat-icon--slate  { background: rgba(100,116,139,0.12);color: #94a3b8; }
 
 .stat-label {
-    font-size: 0.6875rem;            /* 11px — was 12px */
-    font-weight: 600;
+    font-size: 0.75rem;              /* 12px */
+    font-weight: 500;
     color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     line-height: 1.3;
-    margin-bottom: 6px;              /* was 10px */
-    /* WHY: reserve horizontal room so the absolute icon at right:12 / w:30
-       doesn't overlap multi-word labels like "TOTAL REVENUE YTD". */
+    margin-bottom: 4px;
+    /* WHY: reserve room for absolute .stat-icon in legacy tile structure */
     padding-right: 38px;
-    /* Cap at 2 lines, ellipsis if it overflows. */
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -2234,18 +2212,12 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .stat-value {
-    /* WHY: dropped 1.875rem (~30px) → 1.375rem (~22px). At 22px DM Mono
-       each char is ~12px, so $1,234,567.89 (13 chars) ≈ 156px which
-       fits comfortably in the ~170px content area of a 200px tile. */
-    font-size: 1.375rem;
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--text-primary);
     font-family: 'DM Mono', monospace;
     line-height: 1.2;
-    margin-bottom: 4px;              /* was 8px */
-    /* WHY: allow the line to shrink inside grid; never wrap mid-currency.
-       If a value still won't fit (e.g. 9-figure totals) we ellipsis it
-       instead of letting it crash through the tile boundary. */
+    margin-bottom: 4px;
     min-width: 0;
     white-space: nowrap;
     overflow: hidden;
@@ -4723,17 +4695,15 @@ html.is-mac .non-mac-only { display: none; }
     gap: 8px;
 }
 .stat-card__icon {
-    /* WHY: shrunk 38→30 to match the legacy .stat-icon size and
-       free up horizontal room for the value below. */
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
 }
-.stat-card__icon svg { width: 16px; height: 16px; }
+.stat-card__icon svg { width: 18px; height: 18px; }
 .stat-card__icon--primary { background: var(--color-primary-light);  color: var(--color-primary-text); }
 .stat-card__icon--success { background: var(--color-success-light);  color: var(--color-success-text); }
 .stat-card__icon--warning { background: var(--color-warning-light);  color: var(--color-warning-text); }
@@ -6049,6 +6019,16 @@ dl.detail-grid dd {
 }
 [data-theme="light"] .topbar-theme-btn svg { color: var(--text-primary); }
 [data-theme="dark"]  .topbar-theme-btn svg { color: var(--text-primary); }
+
+/* Apple-style light-mode stat cards: pure white, crisp shadow, soft border */
+[data-theme="light"] .stat-card {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.07);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 14px rgba(0,0,0,0.05);
+}
+[data-theme="light"] .stat-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10), 0 8px 28px rgba(0,0,0,0.08);
+}
 
 /* ── FIX 2 — Shared utility classes (new, non-conflicting) ─── */
 
@@ -10236,30 +10216,23 @@ tr.ff-row-selected > td {
         gap: 10px;
     }
     #kpi-grid .stat-card {
-        /* Tighter than desktop 14/16/14/22; left padding kept ≥16px
-           so text doesn't collide with the 4px accent bar. */
-        padding: 12px 12px 12px 18px;
+        padding: 14px;
     }
     #kpi-grid .stat-value {
-        /* Smaller value font so common amounts like $1,234,567.89
-           don't trigger text-overflow:ellipsis in the narrow tile.
-           Spec asked 1.5rem but that's larger than the desktop 1.375rem
-           and would clip on iPhone SE (320px); 1.125rem keeps every
-           realistic KPI value on one line. */
         font-size: 1.125rem;
     }
     #kpi-grid .stat-label {
-        font-size: 0.625rem;       /* 10px — was 11px */
-        padding-right: 32px;       /* room for the icon at right */
+        font-size: 0.6875rem;
+        padding-right: 32px;
         margin-bottom: 4px;
     }
     #kpi-grid .stat-card__icon {
-        width: 28px;
-        height: 28px;
+        width: 30px;
+        height: 30px;
     }
     #kpi-grid .stat-card__icon svg {
-        width: 14px;
-        height: 14px;
+        width: 15px;
+        height: 15px;
     }
     #kpi-grid .stat-delta {
         font-size: 0.6875rem;
