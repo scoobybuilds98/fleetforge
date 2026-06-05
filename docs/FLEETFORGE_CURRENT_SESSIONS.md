@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-CCA-3** — IN-FLIGHT
+  Started: 2026-06-05T00:00 UTC by desktop-opus
+  Touching: app/admin/credit-application.php, app/admin/credit_applications/show.php (NEW), api/v1/credit_applications/generate_pdf.php (NEW), includes/partials/credit_application_render.php (NEW), app/admin/customers/show.php (View link wire-up), docs/
+
 **S-PERM-TEST-WIRING** — SHIPPED 2026-06-05 (see PROGRESS.md SESSION LOG row).
 
 **S-CCA-2** — SHIPPED 2026-06-05 (see PROGRESS.md SESSION LOG row). **Phase CCA session 2 of 4 — Customer Credit Application: public token-gated form + submit.** NEW `app/admin/credit-application.php` (public GET/POST form, 9 sections §1–§9, CSRF + rate-limit + optimistic-lock submit, signature PNG via StorageClient, customer doc uploads → documents rows entity_type='customer' document_type='credit_application', form_data JSON snapshot, POST-Redirect-GET confirmation, branded state pages for invalid/expired/submitted_already). NEW `public/assets/js/signature-pad.js` (minimal canvas pad, no CDN). NEW `db_migrations/202606060004` (credit_application.disclaimer_html setting, migrate 95→96). PATCH `api/v1/documents/upload.php` (add 'credit_application' to customer allowlist). D-CCA-2-A..G locked. **Seam update:** S-CCA-3 scope = PDF generation + rendered_html + mPDF + manager notifications + admin View link. **Next: S-CCA-3** (submit notifications + PDF + admin view).
