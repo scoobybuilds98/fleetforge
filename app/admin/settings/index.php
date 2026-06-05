@@ -911,9 +911,9 @@ if (!empty($grouped['currency'])) {
                     <?php endif; ?>
                 </td>
                 <td style="text-align:right;white-space:nowrap;">
-                    <?php if ($_cca['has_pdf']): ?>
-                    <a href="<?= base_url('credit_applications/show') ?>?id=<?= (int)$_cca['id'] ?>"
-                       class="btn btn-ghost btn-xs">View Form</a>
+                    <?php if (in_array($_cca['status'], ['submitted', 'reviewed'], true)): ?>
+                    <a href="<?= base_url('credit_applications/show') ?>?id=<?= (int)$_cca['id'] ?>&from=customer"
+                       class="btn btn-ghost btn-xs">View</a>
                     <?php endif; ?>
                     <a href="<?= base_url('customers/' . (int)$_cca['customer_id']) ?>"
                        class="btn btn-ghost btn-xs">Customer</a>

@@ -308,9 +308,12 @@ require_once FF_ROOT . '/includes/header.php';
                                     x-text="app.approved_credit_limit ? formatMoney(app.approved_credit_limit) : '—'">
                                 </td>
                                 <td style="text-align:right;white-space:nowrap;">
-                                    <a x-show="app.has_pdf"
-                                       :href="'<?= base_url('credit_applications/show') ?>?id=' + app.id"
-                                       class="btn btn-ghost btn-xs">View Form</a>
+                                    <!-- Show "View" for submitted/reviewed (filed) apps.
+                                         show.php renders rendered_html snapshot + review panel
+                                         for any app in these statuses, with or without a PDF. -->
+                                    <a x-show="app.status === 'submitted' || app.status === 'reviewed'"
+                                       :href="'<?= base_url('credit_applications/show') ?>?id=' + app.id + '&from=module'"
+                                       class="btn btn-ghost btn-xs">View</a>
                                     <a :href="'<?= base_url('customers/show') ?>?id=' + app.customer_id"
                                        class="btn btn-ghost btn-xs">Customer →</a>
                                 </td>

@@ -1361,7 +1361,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 <td style="white-space:nowrap;">
                                     <!-- View: wired S-CCA-3 — links to admin view page for submitted/reviewed apps -->
                                     <template x-if="app.status === 'submitted' || app.status === 'reviewed'">
-                                        <a :href="'<?= base_url('credit_applications/show') ?>?id=' + app.id"
+                                        <a :href="'<?= base_url('credit_applications/show') ?>?id=' + app.id + '&from=customer'"
                                            class="btn btn-xs btn-ghost">View</a>
                                     </template>
                                     <template x-if="app.status !== 'submitted' && app.status !== 'reviewed'">

@@ -126,16 +126,27 @@ $helpModuleSlug = 'customers';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
+<?php
+// Detect whether we came from the module index or the customer profile.
+// ?from=customer  → back button goes to customers/show?tab=credit_applications
+// default (or ?from=module) → back button goes to credit_applications module
+$fromCustomer = ($_GET['from'] ?? '') === 'customer';
+$backUrl = $fromCustomer
+    ? base_url('customers/show') . '?id=' . (int)$app['customer_id'] . '&tab=credit_applications'
+    : base_url('credit_applications');
+$backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
+?>
+
 <nav class="breadcrumb">
     <a href="<?= base_url('dashboard') ?>">Dashboard</a>
     <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('customers') ?>">Customers</a>
+    <a href="<?= base_url('credit_applications') ?>">Credit Applications</a>
     <span class="breadcrumb-sep">/</span>
     <a href="<?= base_url('customers/show') . '?id=' . (int)$app['customer_id'] ?>">
         <?= e($app['customer_company_name']) ?>
     </a>
     <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Credit Application #<?= (int)$appId ?></span>
+    <span class="breadcrumb-current">Application #<?= (int)$appId ?></span>
 </nav>
 
 <div class="page-header">
@@ -160,8 +171,8 @@ require_once FF_ROOT . '/includes/header.php';
         </button>
         <?php endif; ?>
         <?php endif; ?>
-        <a href="<?= base_url('customers/show') . '?id=' . (int)$app['customer_id'] ?>&tab=credit_applications" class="btn btn-ghost">
-            &larr; Back to Customer
+        <a href="<?= e($backUrl) ?>" class="btn btn-ghost">
+            <?= e($backLabel) ?>
         </a>
     </div>
 </div>
