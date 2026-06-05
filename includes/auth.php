@@ -512,14 +512,83 @@ function _ff_refresh_user_permissions(int $userId): void
 }
 
 /**
+ * D-PERM-FRESHNESS-CORE-EXTRACTED: guard-free staleness comparison + reload.
+ *
+ * Contains ONLY the staleness comparison logic and override reload — no static
+ * guard, no super_admin short-circuit, no $_SESSION superglobal access.
+ * Operates entirely on the passed-by-reference session-user array so callers
+ * can drive it with any source (live $_SESSION or a test-constructed array).
+ *
+ * Returns true if it refreshed the override maps, false if the session was
+ * already current or the DB timestamp was NULL (no override ever applied).
+ *
+ * Called by:
+ *   - _ff_check_permission_freshness()  (production path — wraps with static
+ *     guard + super_admin short-circuit before delegating here)
+ *   - tests/_smoke_permissions_rigorous.php  (test harness — calls directly
+ *     on a synthetic session array, bypassing the static guard so the check
+ *     can run for each test user in a loop)
+ *
+ * WHY extracted: the static guard inside _ff_check_permission_freshness()
+ * limits it to one call per PHP process, which prevents multi-user loop tests.
+ * Extracting the core lets tests drive the real staleness logic without
+ * modifying the production wrapper's behavior. (S-PERM-TEST-WIRING)
+ */
+function _ff_refresh_permission_overrides_if_stale(array &$sessionUser): bool
+{
+    if (!isset($sessionUser['id'])) return false;
+
+    $userId      = (int) $sessionUser['id'];
+    $row         = db_row("SELECT permissions_updated_at FROM users WHERE id = ?", [$userId]);
+    $dbTimestamp = $row['permissions_updated_at'] ?? null;
+
+    // DB never stamped (column NULL) → no override change has happened.
+    if ($dbTimestamp === null) return false;
+
+    // WHY identity comparison, not strtotime() >:
+    // Storing the ACTUAL DB timestamp we last saw and comparing by string
+    // identity avoids the same-second timing bug where both the override
+    // save and the session login happen within the same calendar second —
+    // `strtotime(T) > strtotime(T)` is false, so the session would never
+    // refresh. Comparing the exact string value we last read means any
+    // change that advances the timestamp is detected reliably.
+    //
+    // Fall back to the old time-comparison for sessions that pre-date this
+    // change (they store permissions_loaded_at, not permissions_db_ts).
+    $sessionDbTs = $sessionUser['permissions_db_ts'] ?? null;
+
+    if ($sessionDbTs !== null) {
+        $isStale = ($sessionDbTs !== $dbTimestamp);
+    } else {
+        $sessionLoadedAt = $sessionUser['permissions_loaded_at'] ?? null;
+        $isStale = ($sessionLoadedAt === null)
+                || (strtotime($dbTimestamp) > strtotime($sessionLoadedAt));
+    }
+
+    if (!$isStale) return false;
+
+    // Reload override maps and stamp the new DB timestamp so the next
+    // call uses identity comparison.
+    $sessionUser['permission_overrides']      = _ff_load_user_overrides($userId);
+    $roleId = (int) ($sessionUser['role_id'] ?? 0);
+    if ($roleId) {
+        $sessionUser['role_permission_overrides'] = _ff_load_role_overrides($roleId);
+    }
+    $sessionUser['permissions_db_ts']    = $dbTimestamp;
+    $sessionUser['permissions_loaded_at'] = date('Y-m-d H:i:s'); // keep for compat
+    return true;
+}
+
+/**
  * S-PERM-SESSION-REFRESH: detect + auto-refresh stale permission snapshots.
  *
  * Called from `require_auth()` + `require_auth_api()` at the top of every
- * authenticated request. Compares `users.permissions_updated_at` (DB) to
- * `$_SESSION['ff_user']['permissions_loaded_at']` (session, set at login).
- * If DB is newer, re-loads the override map from DB and stamps the session
- * with the new load timestamp — the current request then sees the fresh
- * overrides without requiring the user to log out + log back in.
+ * authenticated request. Thin wrapper around
+ * _ff_refresh_permission_overrides_if_stale() that adds:
+ *   - static $checked guard: runs at most once per PHP process
+ *   - super_admin short-circuit: their can() returns true regardless of
+ *     the override map (D-PERM-REFRESH-4), so the DB read is skipped
+ *   - $_SESSION superglobal coupling: passes $_SESSION['ff_user'] by ref
  *
  * Performance: static `$checked` flag ensures at most ONE timestamp SELECT
  * per request (handles multiple require_auth* calls within a single PHP
@@ -551,50 +620,5 @@ function _ff_check_permission_freshness(): void
     // super_admin short-circuits can() regardless of overrides (D-PERM-REFRESH-4).
     if (($_SESSION['ff_user']['role_slug'] ?? null) === 'super_admin') return;
 
-    $userId = (int) $_SESSION['ff_user']['id'];
-    $row = db_row(
-        "SELECT permissions_updated_at FROM users WHERE id = ?",
-        [$userId]
-    );
-    $dbTimestamp = $row['permissions_updated_at'] ?? null;
-
-    // DB never stamped (column NULL) → no override change has happened;
-    // nothing to refresh.
-    if ($dbTimestamp === null) return;
-
-    // WHY identity comparison, not strtotime() >:
-    // Storing the ACTUAL DB timestamp we last saw and comparing by string
-    // identity avoids the same-second timing bug where both the override
-    // save and the session login happen within the same calendar second —
-    // `strtotime(T) > strtotime(T)` is false, so the session would never
-    // refresh. Comparing the exact string value we last read means ANY
-    // change (even same-second) is detected reliably.
-    //
-    // Fall back to the old time-comparison for sessions that pre-date this
-    // change (they store permissions_loaded_at, not permissions_db_ts).
-    $sessionDbTs = $_SESSION['ff_user']['permissions_db_ts'] ?? null;
-
-    if ($sessionDbTs !== null) {
-        // New path: compare exact DB timestamp we last stored in session.
-        $isStale = ($sessionDbTs !== $dbTimestamp);
-    } else {
-        // Legacy path: pre-existing sessions only have permissions_loaded_at.
-        $sessionLoadedAt = $_SESSION['ff_user']['permissions_loaded_at'] ?? null;
-        $isStale = ($sessionLoadedAt === null)
-                || (strtotime($dbTimestamp) > strtotime($sessionLoadedAt));
-    }
-
-    if (!$isStale) return;
-
-    // Refresh override map and store the exact DB timestamp so the next
-    // request uses identity comparison (not time comparison).
-    $_SESSION['ff_user']['permission_overrides'] = _ff_load_user_overrides($userId);
-    // S-ROLE-PERM-OVERRIDE: also refresh role-level overrides so a
-    // role permission change takes effect on the next request without re-login.
-    $roleId = (int) ($_SESSION['ff_user']['role_id'] ?? 0);
-    if ($roleId) {
-        $_SESSION['ff_user']['role_permission_overrides'] = _ff_load_role_overrides($roleId);
-    }
-    $_SESSION['ff_user']['permissions_db_ts']    = $dbTimestamp;
-    $_SESSION['ff_user']['permissions_loaded_at'] = date('Y-m-d H:i:s'); // keep for compat
+    _ff_refresh_permission_overrides_if_stale($_SESSION['ff_user']);
 }
