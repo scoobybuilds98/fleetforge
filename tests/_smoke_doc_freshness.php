@@ -281,9 +281,18 @@ echo "\n";
 // ────────────────────────────────────────────────────────────────────────────
 // CLASS 4 — IN-FLIGHT discipline (D136)
 //
-// Parse CURRENT_SESSIONS.md ### IN-FLIGHT block. Count **S-LABEL** — IN-FLIGHT
-// write-mode entries (IN-FLIGHT-RO does not count toward the limit).
-// At most one write-mode IN-FLIGHT may be registered concurrently.
+// Extracts ALL ### IN-FLIGHT blocks (global preg_match_all — the original
+// preg_match only captured the FIRST block, so a second session registered
+// in a separate ### IN-FLIGHT block was invisible and stacked writes never
+// tripped the ≤1 rule; S-CLASS4-COUNTER-FIX 2026-06-05).
+//
+// Policy (D-CLASS4-1):
+//   ≤1 write-mode IN-FLIGHT entry → GREEN.
+//   ≥2 write-mode entries, ALL carrying "D136-CONCURRENT: approved" in their
+//     metadata block → GREEN (operator-approved disjoint concurrency).
+//   ≥2 write-mode entries with ANY missing that annotation → RED.
+//
+// IN-FLIGHT-RO entries never count toward the write-mode limit.
 // ────────────────────────────────────────────────────────────────────────────
 
 echo "Class 4 — IN-FLIGHT write-mode discipline (D136: ≤1 IN-FLIGHT)\n";
@@ -294,15 +303,14 @@ if (!is_readable($currentSessionsPath)) {
 } else {
     $raw = file_get_contents($currentSessionsPath);
 
-    // Extract the IN-FLIGHT block: from `### IN-FLIGHT` to the next `###` or
-    // `---` separator. This isolates the active-IN-FLIGHT section from any
-    // pre-block format-documentation that also uses the word IN-FLIGHT.
-    $inFlightBlock = '';
-    if (preg_match('/^### IN-FLIGHT\s*\n(.*?)(?=^###\s|^---\s*$)/ms', $raw, $m)) {
-        $inFlightBlock = $m[1];
+    // Collect ALL ### IN-FLIGHT blocks (global). Concurrent sessions may register
+    // in separate blocks separated by ---; preg_match would miss all but the first.
+    $allInFlightContent = '';
+    if (preg_match_all('/^### IN-FLIGHT\s*\n(.*?)(?=^###\s|^---\s*$|\z)/ms', $raw, $allBlockMatches)) {
+        $allInFlightContent = implode("\n", $allBlockMatches[1]);
     }
 
-    if ($inFlightBlock === '') {
+    if ($allInFlightContent === '') {
         record(
             'C4: IN-FLIGHT block locatable in CURRENT_SESSIONS',
             false,
@@ -311,31 +319,54 @@ if (!is_readable($currentSessionsPath)) {
     } else {
         record('C4: IN-FLIGHT block locatable in CURRENT_SESSIONS', true);
 
-        // Match **S-LABEL** — IN-FLIGHT entries (NOT IN-FLIGHT-RO).
-        // The negative-lookahead (?!-RO) excludes IN-FLIGHT-RO matches.
-        $inFlightCount = 0;
-        $inFlightLabels = [];
-        if (preg_match_all(
-            '/^\*\*(S-[A-Z0-9][A-Z0-9\-]*)\*\*\s+—\s+IN-FLIGHT(?!-RO)\b/m',
-            $inFlightBlock,
-            $matches
-        )) {
-            $inFlightCount = count($matches[1]);
-            $inFlightLabels = $matches[1];
+        // Split combined content on **S-LABEL** — entry boundaries so each
+        // segment contains exactly one entry's metadata (Touching, D136-CONCURRENT,
+        // etc.). We split on ANY entry boundary, not just IN-FLIGHT ones, so
+        // the segment for entry A ends where entry B begins.
+        $segments = preg_split('/(?=^\*\*S-[A-Z0-9][A-Z0-9\-]*\*\*\s+—\s)/m', $allInFlightContent);
+
+        // Classify write-mode entries and check for D136-CONCURRENT: approved.
+        $writeEntries = [];   // ['label' => string, 'approved' => bool]
+        foreach ($segments as $seg) {
+            if (preg_match('/^\*\*(S-[A-Z0-9][A-Z0-9\-]*)\*\*\s+—\s+IN-FLIGHT(?!-RO)\b/m', $seg, $mm)) {
+                $writeEntries[] = [
+                    'label'    => $mm[1],
+                    'approved' => (bool) preg_match('/D136-CONCURRENT:\s*approved/i', $seg),
+                ];
+            }
         }
 
-        $label = "C4: ≤1 write-mode IN-FLIGHT session (D136 single-agent serialization)";
-        if ($inFlightCount <= 1) {
-            $detail = $inFlightCount === 0
-                ? '0 IN-FLIGHT entries (queue empty)'
-                : "1 IN-FLIGHT entry: {$inFlightLabels[0]}";
-            record($label . " [{$detail}]", true);
+        $writeCount  = count($writeEntries);
+        $writeLabels = array_column($writeEntries, 'label');
+        $checkLabel  = "C4: ≤1 write-mode IN-FLIGHT session (D136 single-agent serialization)";
+
+        if ($writeCount === 0) {
+            record($checkLabel . ' [0 IN-FLIGHT entries (queue empty)]', true);
+        } elseif ($writeCount === 1) {
+            record($checkLabel . " [1 IN-FLIGHT entry: {$writeLabels[0]}]", true);
         } else {
-            record(
-                $label,
-                false,
-                "{$inFlightCount} IN-FLIGHT entries found: " . implode(', ', $inFlightLabels)
+            // ≥2 write-mode entries: passes only if every entry carries the
+            // operator-approved-concurrent annotation (D-CLASS4-1).
+            $unannotated = array_column(
+                array_filter($writeEntries, fn($e) => !$e['approved']),
+                'label'
             );
+            if (empty($unannotated)) {
+                $labelsStr = implode(', ', $writeLabels);
+                record(
+                    $checkLabel . " [{$writeCount} IN-FLIGHT, all D136-CONCURRENT: approved — {$labelsStr}]",
+                    true
+                );
+            } else {
+                $allStr  = implode(', ', $writeLabels);
+                $bareStr = implode(', ', $unannotated);
+                record(
+                    $checkLabel,
+                    false,
+                    "{$writeCount} write-mode IN-FLIGHT entries: {$allStr}. " .
+                    "Missing D136-CONCURRENT: approved annotation on: {$bareStr}."
+                );
+            }
         }
     }
 }
