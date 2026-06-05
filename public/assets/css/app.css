@@ -3214,6 +3214,12 @@ textarea.form-input {
     padding: 20px;
     overflow-y: auto;
     flex: 1;
+    /* FIXPACK-EMAIL-SCROLL-BTN: flex items default to min-height:auto, which
+       means the body refuses to shrink below content height even with flex:1.
+       The parent modal's overflow:hidden then clips the excess instead of the
+       modal-body scrolling.  min-height:0 lets the flex child shrink to fit its
+       allocated slot so overflow-y:auto actually fires a scrollbar. */
+    min-height: 0;
 }
 
 .modal-footer {
