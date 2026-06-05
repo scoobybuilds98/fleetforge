@@ -141,7 +141,7 @@ foreach ($cleanIds as $id) {
     }
 }
 
-// D-SAMSARA-DELETE-1: bulk delete does NOT propagate to Samsara (use samsara/unlink.php to intentionally decouple).
+// D-SAMSARA-DELETE-1: unit delete does NOT propagate to Samsara (use samsara/unlink.php to intentionally decouple).
 
 if ($deleted > 0) {
     invalidate_dashboard_cache();
