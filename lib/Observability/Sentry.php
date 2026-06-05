@@ -114,41 +114,34 @@ class Sentry
     // ----------------------------------------------------------------
     public static function scrubEvent(\Sentry\Event $event, ?\Sentry\EventHint $hint): ?\Sentry\Event
     {
-        // Scrub request body
+        // Request — SDK 4.x: getRequest() returns an ARRAY (never null), keys: data/cookies/headers.
         $request = $event->getRequest();
-        if ($request !== null) {
-            $data = $request->getData();
-            if (is_array($data)) {
-                $event->getRequest()->setData(self::scrubArray($data));
+        if (is_array($request) && $request !== []) {
+            foreach (['data', 'cookies', 'headers'] as $rk) {
+                if (isset($request[$rk]) && is_array($request[$rk])) {
+                    $request[$rk] = self::scrubArray($request[$rk]);
+                }
             }
-            // Scrub cookies
-            $cookies = $request->getCookies();
-            if (!empty($cookies)) {
-                $event->getRequest()->setCookies(self::scrubArray($cookies));
-            }
-            // Scrub headers
-            $headers = $request->getHeaders();
-            if (!empty($headers)) {
-                $event->getRequest()->setHeaders(self::scrubArray($headers));
-            }
+            $event->setRequest($request);
         }
 
-        // Scrub stack frame local variables
-        $exception = $event->getExceptions();
-        if (!empty($exception)) {
-            foreach ($exception as $ex) {
-                $stacktrace = $ex->getStacktrace();
-                if ($stacktrace === null) continue;
-                foreach ($stacktrace->getFrames() as $frame) {
-                    $vars = $frame->getVars();
-                    if (!empty($vars)) {
-                        $frame->setVars(self::scrubArray($vars));
-                    }
+        // Stack frame local vars — SDK 4.x Frame is immutable (no setVars) and the PHP SDK does not
+        // populate frame-local vars by default, so getVars() is empty in practice. Guard the setter so
+        // this can never fatal and still scrubs if a future SDK exposes a mutator (no D76 regression).
+        foreach ($event->getExceptions() as $ex) {
+            $stacktrace = $ex->getStacktrace();
+            if ($stacktrace === null) {
+                continue;
+            }
+            foreach ($stacktrace->getFrames() as $frame) {
+                $vars = $frame->getVars();
+                if (!empty($vars) && method_exists($frame, 'setVars')) {
+                    $frame->setVars(self::scrubArray($vars));
                 }
             }
         }
 
-        // Scrub extra context
+        // Extra context — already array-based in SDK 4.x, leave as-is.
         $extra = $event->getExtra();
         if (!empty($extra)) {
             $event->setExtra(self::scrubArray($extra));

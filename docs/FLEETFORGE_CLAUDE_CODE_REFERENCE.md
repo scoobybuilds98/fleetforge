@@ -2086,6 +2086,39 @@ ALTER TABLE `vendors`
 
 **Detected**: S-VENDOR-CURRENCY-COLUMN 2026-05-27 — initial migration attempt failed at parse time; verified no partial state via SHOW COLUMNS; reordered COMMENT before AFTER; second attempt applied successfully (67→68/0/0).
 
+### Trap 70: `before_send` Sentry scrubber is latent on blank-DSN dev — SDK 4.x `Event::getRequest()` is an array, `Frame` is immutable
+
+**Context:** `lib/Observability/Sentry.php::scrubEvent()` is the `before_send` callback registered in `Sentry::init()`. On a blank `SENTRY_DSN` the entire `init()` is a no-op — no SDK, no `before_send` — so `scrubEvent()` NEVER runs in development. The first call happens on the first real Sentry event in production.
+
+**SDK 4.x API changes that break a 2.x-authored scrubber:**
+
+1. `Event::getRequest()` returns an **array** (keys: `data`, `cookies`, `headers`, `url`, `method`, `env`) not a Request object. Calling object methods on it (e.g. `->getData()`, `->setCookies()`) throws `Call to a member function getData() on array` — fatal on first prod event.
+2. `Frame` is **immutable** — no `setVars()` method. The PHP SDK does not populate frame-local vars by default (`getVars()` is empty); calling `$frame->setVars(…)` fatals with a method-not-found error.
+
+**Fix pattern (SDK 4.x):**
+
+```php
+// Request: array-based, mutate and write back via setRequest()
+$request = $event->getRequest();
+if (is_array($request) && $request !== []) {
+    foreach (['data', 'cookies', 'headers'] as $rk) {
+        if (isset($request[$rk]) && is_array($request[$rk])) {
+            $request[$rk] = self::scrubArray($request[$rk]);
+        }
+    }
+    $event->setRequest($request);
+}
+
+// Frame vars: guard with method_exists so this never fatals even if SDK changes again
+if (!empty($vars) && method_exists($frame, 'setVars')) {
+    $frame->setVars(self::scrubArray($vars));
+}
+```
+
+**Why it's a trap:** the blank-DSN dev environment is the safest-feeling environment and the one where integration tests run — but it's structurally incapable of exercising `before_send`. A 2.x-to-4.x SDK bump silently introduces a fatal that only surfaces under a real live DSN on prod, at the worst possible moment (the first exception prod captures). Always verify `scrubEvent()` against `composer.lock sentry/sentry` version after any `composer update` that touches the Sentry SDK.
+
+**Detected:** S-SENTRY-SCRUBFIX 2026-06-05 — setting a real `SENTRY_DSN` on prod surfaced the fatal; confirmed `sentry/sentry 4.27.0` in `composer.lock`; scrubber rewritten to SDK 4.x array API + `method_exists` guard.
+
 **Applies to**: every future migration adding a column with both COMMENT and positional placement. MODIFY COLUMN is unaffected (no positional clause possible).
 
 ---
