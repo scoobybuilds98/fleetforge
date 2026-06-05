@@ -3167,11 +3167,12 @@ textarea.form-input {
     z-index: calc(var(--z-modal) + 1);
 }
 
-.modal-sm   { max-width: 420px; }
-.modal-md   { max-width: 560px; }                           /* FIX #29 */
-.modal-lg   { max-width: 720px; }
-.modal-full { max-width: min(90vw, 1100px); }               /* FIX #29 */
-.modal-xl   { max-width: 960px; }
+.modal-sm    { max-width: 420px; }
+.modal-md    { max-width: 560px; }                           /* FIX #29 */
+.modal-lg    { max-width: 720px; }
+.modal-full  { max-width: min(90vw, 1100px); }               /* FIX #29 */
+.modal-xl    { max-width: 960px; }
+.modal-email { max-width: min(1000px, 92vw); }               /* FIXPACK-EMAIL-PREVIEW: email compose + preview */
 
 .modal-header {
     display: flex;
@@ -7666,7 +7667,11 @@ table td {
     background: #ffffff;
     font-size: 13px;
     line-height: 1.6;
-    max-height: 320px;
+    /* FIXPACK-EMAIL-PREVIEW: was 320px — enlarged so the full email is
+       readable without the preview frame being clipped. The modal-body
+       flex:1 + overflow-y:auto governs the outer scroll; this inner cap
+       lets the frame grow to ~65vh before adding its own scrollbar. */
+    max-height: 65vh;
     overflow-y: auto;
 }
 

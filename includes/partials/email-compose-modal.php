@@ -32,7 +32,7 @@ declare(strict_types=1);
     <!-- Click-outside backdrop -->
     <div class="modal-backdrop" @click="close()" aria-hidden="true"></div>
 
-    <div class="modal modal-lg" @click.stop style="max-height: calc(100vh - 32px);">
+    <div class="modal modal-email" @click.stop style="max-height: 90vh;">
 
         <!-- Header -->
         <div class="modal-header">

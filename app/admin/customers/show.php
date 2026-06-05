@@ -1381,14 +1381,30 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
     </div><!-- /credit applications tab -->
 
-    <!-- Credit Application Preview Modal -->
+    <!-- Credit Application Preview Modal (FIXPACK-EMAIL-PREVIEW) -->
+    <!-- modal-email: min(1000px, 92vw); max-height:90vh; Subject/To pinned above scrolling body -->
     <div x-show="creditPreviewModal.open" x-cloak class="modal-overlay" style="z-index:var(--z-modal);">
         <div class="modal-backdrop" @click="creditPreviewModal.open = false"></div>
-        <div class="modal modal-lg" @click.stop style="max-height:calc(100vh - 32px);">
+        <div class="modal modal-email" @click.stop style="max-height:90vh;">
+
+            <!-- Pinned: title + close -->
             <div class="modal-header">
                 <h3 class="modal-title">Credit Application Invite Preview</h3>
                 <button class="modal-close-btn" aria-label="Close" @click="creditPreviewModal.open = false">×</button>
             </div>
+
+            <!-- Pinned: Subject / To metadata bar (visible once data loads) -->
+            <div x-show="!creditPreviewModal.loading && !creditPreviewModal.error && creditPreviewModal.subject"
+                 style="padding:10px 20px;border-bottom:1px solid var(--border-color);background:var(--bg-surface-2);flex-shrink:0;">
+                <dl style="display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0;font-size:12.5px;">
+                    <dt class="text-secondary">Subject:</dt>
+                    <dd style="margin:0;font-weight:600;" x-text="creditPreviewModal.subject"></dd>
+                    <dt class="text-secondary">To:</dt>
+                    <dd style="margin:0;" x-text="creditPreviewModal.to_email"></dd>
+                </dl>
+            </div>
+
+            <!-- Scrolling: loading / error / email body -->
             <div class="modal-body">
                 <div x-show="creditPreviewModal.loading" class="text-center" style="padding:32px;">Loading preview…</div>
                 <template x-if="!creditPreviewModal.loading && creditPreviewModal.error">
@@ -1396,14 +1412,18 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 </template>
                 <template x-if="!creditPreviewModal.loading && !creditPreviewModal.error && creditPreviewModal.subject">
                     <div>
-                        <dl style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0 0 16px;">
-                            <dt class="text-secondary text-sm">Subject:</dt>
-                            <dd style="margin:0;font-weight:600;" x-text="creditPreviewModal.subject"></dd>
-                            <dt class="text-secondary text-sm">To:</dt>
-                            <dd style="margin:0;" x-text="creditPreviewModal.to_email"></dd>
-                        </dl>
-                        <div style="border:1px solid var(--color-border);border-radius:6px;overflow:auto;max-height:60vh;padding:16px;">
-                            <div class="email-preview-body" x-html="creditPreviewModal.body_html"></div>
+                        <!-- email-preview-frame: styled border + "PREVIEW" label strip -->
+                        <div class="email-preview-frame">
+                            <div class="email-preview-label">Preview</div>
+                            <!-- click.capture: {credit_application_url} is substituted with
+                                 "[Credit Application Link]" in previews (Trap-7 / D-CCA-1 — no
+                                 token pre-generated). That placeholder becomes a broken href that
+                                 resolves to a 404.  Capture + preventDefault makes every anchor
+                                 inside the preview inert without altering the rendered HTML.
+                                 (FIXPACK-EMAIL-PREVIEW fix B) -->
+                            <div class="email-preview-body"
+                                 x-html="creditPreviewModal.body_html"
+                                 @click.capture="if ($event.target.closest('a')) $event.preventDefault()"></div>
                         </div>
                         <p class="text-sm text-secondary" style="margin:12px 0 0;">
                             The credit application link in this preview is a placeholder — the real tokenized link is generated when you click Send.
@@ -1411,6 +1431,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     </div>
                 </template>
             </div>
+
+            <!-- Pinned: footer -->
             <div class="modal-footer">
                 <button class="btn btn-ghost" @click="creditPreviewModal.open = false">Close</button>
             </div>
@@ -1489,10 +1511,10 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
             </div>
         </div>
 
-        <!-- Email view modal -->
+        <!-- Email view modal (FIXPACK-EMAIL-PREVIEW: modal-email for wider email display) -->
         <div x-show="emailViewModal.open" x-cloak class="modal-overlay" style="z-index:var(--z-modal);">
             <div class="modal-backdrop" @click="emailViewModal.open = false"></div>
-            <div class="modal modal-lg" @click.stop style="max-height:calc(100vh - 32px);">
+            <div class="modal modal-email" @click.stop style="max-height:90vh;">
                 <div class="modal-header">
                     <h3 class="modal-title">Email Details</h3>
                     <button class="modal-close-btn" aria-label="Close" @click="emailViewModal.open = false">×</button>
