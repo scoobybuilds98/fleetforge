@@ -405,7 +405,9 @@ foreach ($allSettings as $s) {
     $grouped[$s['group_name']][] = $s;
 }
 
-$primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards', 'credit_application'];
+// S-CCA-BTN-SETTINGS: credit_application listed FIRST so its card
+// is immediately visible at the top of the General tab without scrolling.
+$primaryGroups   = ['credit_application', 'company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
 // S-SETTINGS-CLEANUP: 'security' added so the MFA card renders alongside
 // gps/ai/email/storage/aws in the Integrations tab via the existing render loop.
 // S-INTEL-TAB: 'ai' removed from Integrations — it now renders in the
@@ -686,11 +688,11 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
         </form>
     </div>
 </div>
-<?php endforeach; ?>
 
-<!-- S-CCA-BTN-SETTINGS: admin shortcut to preview the credit application form layout.
-     Opens credit-application.php?admin_preview=1 which is gated on is_logged_in()
-     + can('customers','view') — no token generated, submission disabled. -->
+<?php if ($grp === 'credit_application'): ?>
+<!-- S-CCA-BTN-SETTINGS: preview card rendered immediately after the credit_application
+     settings card so they appear as a paired unit. Opens ?admin_preview=1 which is
+     gated on is_logged_in() + can('customers','view') — no token generated. -->
 <div class="card" style="margin-bottom:20px;">
     <div class="card-header" style="font-weight:600;">Preview Credit Application Form</div>
     <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
@@ -706,6 +708,9 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
         </a>
     </div>
 </div>
+<?php endif; ?>
+
+<?php endforeach; ?>
 
 <!-- CURRENCY-MARKUP-1: custom card — step=0.0001, max=20, % suffix, old/new audit -->
 <?php

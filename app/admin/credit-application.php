@@ -66,7 +66,8 @@ $minReqHtml      = (string)(settings_get('credit_application.minimum_requirement
 // Linked from: email preview modal CTA + Settings > Credit Application card.
 $isAdminPreview = isset($_GET['admin_preview']);
 if ($isAdminPreview) {
-    ff_session_start();
+    // auth.php (included above) calls _ff_session_start() automatically at load time —
+    // no explicit session call needed here. Just verify the operator is authenticated.
     if (!is_logged_in() || !can('customers', 'view')) {
         ff_not_found(); // silent 404 — do not expose admin-mode existence to public
     }
