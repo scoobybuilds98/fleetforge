@@ -8,6 +8,8 @@
 
 **Status:** LIVING DOCUMENT. Updated session-by-session as work lands. Each session's row in this doc moves from `📋 PLANNED` → `🟡 QUEUED` → `🔄 IN-PROGRESS` → `✅ DONE` as it progresses.
 
+> **⏸ Phase QBO PAUSED 2026-06-05 for Phase CCA (Customer Credit Application, S-CCA-1..4).** All QBO build phases (QBO-1..QBO-13) have shipped machinery; **resume point = the live-cutover arc: S-QBO-27 LIVE historical pull (operator follow-up F29) + S-QBO-28/29/30 cutover** (all gated on the accountant-seeded sandbox + live OAuth). Phase CCA does not touch any QBO surface. Unpause by resuming that arc once Phase CCA ships.
+
 **v1.0 → v1.1 changelog at Section 19.**
 
 ---
