@@ -167,7 +167,7 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
         <?php elseif ($app['status'] === 'submitted' || $app['status'] === 'reviewed'): ?>
         <?php if (can('customers', 'edit')): ?>
         <button class="btn btn-ghost" id="btn-regen-pdf" onclick="regenPdf()">
-            Regenerate PDF
+            Generate PDF
         </button>
         <?php endif; ?>
         <?php endif; ?>
@@ -179,27 +179,45 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
 
 <div style="display:grid;grid-template-columns:1fr 280px;gap:20px;align-items:start;margin-top:20px;">
 
-    <!-- Left: rendered_html snapshot -->
+    <!-- Left: filed application HTML form -->
     <div class="card">
-        <div class="card-header">
-            <h3 class="card-title">Application Snapshot</h3>
-            <p class="text-sm text-secondary" style="margin:4px 0 0;">Frozen legal record at time of submission.</p>
-        </div>
-        <div class="card-body" style="padding: 0;">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div>
+                <h3 class="card-title">Filed Application</h3>
+                <p class="text-sm text-secondary" style="margin:4px 0 0;">
+                    The HTML form the customer submitted — frozen legal record.
+                </p>
+            </div>
             <?php if (!empty($app['rendered_html'])): ?>
+            <a href="<?= base_url('credit_applications/snapshot') ?>?id=<?= (int)$appId ?>"
+               target="_blank" rel="noopener"
+               class="btn btn-ghost btn-sm" title="Open form in new tab">
+                ↗ Open full page
+            </a>
+            <?php endif; ?>
+        </div>
+        <div class="card-body" style="padding:0;">
+            <?php if (!empty($app['rendered_html'])): ?>
+            <!-- WHY src not srcdoc: srcdoc stuffs the full HTML document into a
+                 single HTML attribute after htmlspecialchars escaping — causes
+                 browser size limits and double-encoding issues for large forms.
+                 snapshot.php serves rendered_html as a proper text/html response
+                 with tight CSP (no external resources, data: URIs only). -->
             <iframe
                 id="cca-snapshot-frame"
-                srcdoc="<?= htmlspecialchars((string)$app['rendered_html'], ENT_QUOTES, 'UTF-8') ?>"
-                style="width:100%;border:0;min-height:900px;"
-                sandbox="allow-same-origin"
-                title="Credit Application Snapshot">
+                src="<?= base_url('credit_applications/snapshot') ?>?id=<?= (int)$appId ?>"
+                style="width:100%;border:0;min-height:1000px;display:block;"
+                title="Filed Credit Application"
+                onload="this.style.minHeight = (this.contentWindow.document.body ? this.contentWindow.document.body.scrollHeight + 40 : 1000) + 'px'">
             </iframe>
             <?php else: ?>
             <div style="padding:40px;text-align:center;color:var(--text-secondary);">
-                <p>No snapshot available. The HTML render may not have completed at submit time.</p>
-                <?php if (can('customers', 'edit')): ?>
-                <p style="margin-top:8px;font-size:13px;">Use "Regenerate PDF" to re-attempt PDF generation from the stored data.</p>
-                <?php endif; ?>
+                <p style="margin:0 0 8px;font-size:0.9375rem;">No HTML snapshot stored for this application.</p>
+                <p style="font-size:0.8125rem;margin:0;">
+                    The form data is intact — use
+                    <?= can('customers', 'edit') ? '"Regenerate PDF"' : 'an admin' ?>
+                    to rebuild from stored form fields.
+                </p>
             </div>
             <?php endif; ?>
         </div>
@@ -401,20 +419,33 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
         </div>
         <?php endif; ?>
 
-        <!-- PDF card -->
+        <!-- PDF document card (separate from HTML form view above) -->
         <div class="card">
-            <div class="card-header"><h3 class="card-title">PDF</h3></div>
+            <div class="card-header">
+                <h3 class="card-title">PDF Document</h3>
+                <p class="text-sm text-secondary" style="margin:4px 0 0;">
+                    Stored in Documents — separate from the HTML form above.
+                </p>
+            </div>
             <div class="card-body" style="padding:16px;">
                 <?php if ($pdfUrl): ?>
-                <p style="font-size:13px;margin:0 0 10px;">PDF generated.</p>
-                <a href="<?= e($pdfUrl) ?>" target="_blank" rel="noopener" class="btn btn-sm btn-primary" style="width:100%;text-align:center;display:block;">
+                <p style="font-size:13px;color:var(--color-success,#16a34a);font-weight:600;margin:0 0 10px;">
+                    ✓ PDF stored in documents.
+                </p>
+                <a href="<?= e($pdfUrl) ?>" target="_blank" rel="noopener"
+                   class="btn btn-sm btn-primary" style="width:100%;text-align:center;display:block;">
                     Download PDF
                 </a>
                 <?php else: ?>
-                <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px;">No PDF generated yet.</p>
+                <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px;">
+                    PDF not yet generated.
+                    <?php if (!empty($app['rendered_html'])): ?>
+                    The HTML form above can be used to generate it.
+                    <?php endif; ?>
+                </p>
                 <?php if (($app['status'] === 'submitted' || $app['status'] === 'reviewed') && can('customers', 'edit')): ?>
-                <button class="btn btn-sm btn-ghost" style="width:100%;" onclick="regenPdf()" id="btn-regen-pdf-2">
-                    Regenerate PDF
+                <button class="btn btn-sm btn-secondary" style="width:100%;" onclick="regenPdf()" id="btn-regen-pdf-2">
+                    Generate PDF from HTML
                 </button>
                 <p id="regen-status" style="font-size:12px;color:var(--text-secondary);margin:8px 0 0;display:none;"></p>
                 <?php endif; ?>
