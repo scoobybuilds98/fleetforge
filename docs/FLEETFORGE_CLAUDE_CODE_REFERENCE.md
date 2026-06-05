@@ -1572,6 +1572,8 @@ php tests/_smoke_billing_invariants.php           php bin/smoke/billing_invarian
 php tests/_smoke_samsara_distance.php             php bin/smoke/samsara_distance.php
 php tests/_smoke_model_b_lifecycle.php            php bin/smoke/model_b_lifecycle.php
 php tests/_smoke_doc_freshness.php                php bin/smoke/doc_freshness.php
+php tests/_smoke_migrations_reproduce_master.php  php bin/smoke/migrations_reproduce_master.php
+php tests/_smoke_no_stray_schema_sql.php          php bin/smoke/no_stray_schema_sql.php
 php tests/_smoke_qbo_client.php                   php bin/smoke/qbo_client.php
 php tests/_smoke_qbo_queue.php                    php bin/smoke/qbo_queue.php
 php tests/_smoke_qbo_admin_ui.php                 php bin/smoke/qbo_admin_ui.php
@@ -2621,6 +2623,21 @@ The smoke test is hermetic vs the dev DB only (no live Samsara, no S3, no extern
 4. Diff. Substantive lines (non-noise +/- lines) → drift detected.
 
 Runs in ~5 seconds. Use `--print-full-diff` to see the entire normalized diff (not just substantive lines). Use `--keep-scratch-db` to inspect `fleetforge_master_validate_2` after the test.
+
+### Companion guards — `migrations ⊆ master` + `no stray schema sql` (S-SCHEMA-GUARD-1, 2026-06-05)
+
+The parity smoke above proves master matches the **live dev DB**. It does NOT prove master matches the **migrations** — a gap that caused the 2026-06-05 prod 500: `role_permission_overrides` was created by a migration filed in the UNSCANNED `database/migrations/` dir (6cda088), so it never reached master or a migrate-built DB, and the red parity gate was tolerated. Two static, hermetic guards close that class (locked **D-GUARD-1 / D-GUARD-2**; both wired into `scripts/precommit_doc_check.sh` and the D131 gate):
+
+```sh
+php tests/_smoke_migrations_reproduce_master.php   # D-GUARD-1 keystone
+# → "MIGRATE-PARITY OK — migrations reproduce master (43 tables + 704 columns reflected ⊆ master)"
+php tests/_smoke_no_stray_schema_sql.php           # D-GUARD-2 (PRIMARY net)
+# → "NO-STRAY-SCHEMA OK — 111 sql files scanned, 0 stray schema files"
+```
+
+- **D-GUARD-1 (`_smoke_migrations_reproduce_master.php`)** — STATIC parse, not a from-zero `migrate` build. `db_migrations/` holds incremental DELTAS, not a full schema: 112 of master's 153 tables (users, customers, leases, invoices, all `acc_*`) are created by NO migration and live only in master, and 40/90 migrations are non-idempotent (re-applying onto a master-loaded DB errors). So a from-zero build can't reproduce master and dynamic replay false-fails. The feasible invariant is the SUBSET relation: every table/column a migration introduces must be reflected in master (net of create-then-drop). Parsing rationale (incl. why a `\w`-anchored regex is safe against the `CONCAT('ALTER TABLE ', tbl, …)` idempotency-helper migrations, whose real targets are literal CALL args) lives in `tests/_smoke_schema_lib.php`.
+- **D-GUARD-2 (`_smoke_no_stray_schema_sql.php`)** — the PRIMARY net. ABSOLUTE, no whitelist: fails if `database/migrations/` exists OR any `*.sql` with `CREATE`/`ALTER TABLE` sits anywhere outside `db_migrations/` + `FLEETFORGE_DATABASE_MASTER.sql`. Forces every schema change to be a scanned `db_migrations/` delta. Pure data seeds (INSERT-only) are allowed. Deprecated historical SQL is kept on-disk neutered to `*.sql.txt` (see `scripts/archive/legacy_database_migrations/`).
+- **Residual gap (queued S-SCHEMA-GUARD-2):** the sub-case "a table EDITED into master with NO `db_migrations/` delta" is closed only by a `000_baseline` full-schema migration. Not done in S-SCHEMA-GUARD-1.
 
 ### The in-place-Edit gotcha (S-MILEAGE-1 drift root cause)
 

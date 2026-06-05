@@ -66,6 +66,8 @@ run_check() {
 
 run_check "doc_freshness (CLASSES 1-11)"   "php tests/_smoke_doc_freshness.php"
 run_check "master_schema_parity"           "php tests/_smoke_master_schema_parity.php"
+run_check "migrations_reproduce_master"    "php tests/_smoke_migrations_reproduce_master.php"
+run_check "no_stray_schema_sql"            "php tests/_smoke_no_stray_schema_sql.php"
 run_check "migrate --verify"               "php bin/migrate.php --verify"
 
 echo ""
