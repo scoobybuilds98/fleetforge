@@ -352,7 +352,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
     $postedGroup = isset($_POST['_group']) ? (string) $_POST['_group'] : '';
     if ($postedGroup !== '') {
         $groupToTab = [
-            // General tab (primary groups + currency + credit application)
+            // General tab
             'company'            => 'general',
             'invoices'           => 'general',
             'leases'             => 'general',
@@ -361,7 +361,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             'notifications'      => 'general',
             'yards'              => 'general',
             'currency'           => 'general',
-            'credit_application' => 'general',
+            // Credit Application tab — redirect back here after save
+            'credit_application' => 'credit_application',
             // Integrations tab (sensitive credential groups)
             'gps'           => 'integrations',
             'email'         => 'integrations',
@@ -405,9 +406,8 @@ foreach ($allSettings as $s) {
     $grouped[$s['group_name']][] = $s;
 }
 
-// S-CCA-BTN-SETTINGS: credit_application listed FIRST so its card
-// is immediately visible at the top of the General tab without scrolling.
-$primaryGroups   = ['credit_application', 'company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
+// credit_application has its own dedicated tab — not in the General loop.
+$primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
 // S-SETTINGS-CLEANUP: 'security' added so the MFA card renders alongside
 // gps/ai/email/storage/aws in the Integrations tab via the existing render loop.
 // S-INTEL-TAB: 'ai' removed from Integrations — it now renders in the
@@ -483,6 +483,29 @@ $userCount = db_count("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL");
 $portalUserCount = db_count("SELECT COUNT(*) FROM portal_users");
 $recentAuditCount = db_count("SELECT COUNT(*) FROM audit_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
 
+// ── Credit Application tab: application log + badge count ─────────────────────
+// Trap 7: token_hash / signature_path / form_data / rendered_html excluded.
+// Most recent 500 rows; admins can navigate to the customer page for full history.
+$ccaApplications = db_select(
+    "SELECT ca.id, ca.status, ca.review_outcome,
+            ca.sent_at, ca.opened_at, ca.submitted_at, ca.reviewed_at,
+            ca.approved_credit_limit,
+            ca.print_name_first, ca.print_name_last,
+            (ca.generated_pdf_document_id IS NOT NULL) AS has_pdf,
+            c.id   AS customer_id,
+            c.company_name,
+            sb.name AS sent_by_name,
+            rb.name AS reviewed_by_name
+       FROM customer_credit_applications ca
+       JOIN customers c ON c.id = ca.customer_id
+       LEFT JOIN users sb ON sb.id = ca.sent_by
+       LEFT JOIN users rb ON rb.id = ca.reviewed_by
+      WHERE ca.deleted_at IS NULL
+      ORDER BY ca.created_at DESC
+      LIMIT 500"
+);
+$ccaCount = count($ccaApplications);
+
 $pageTitle = 'Settings';
 $helpModuleSlug = 'settings';
 require_once FF_ROOT . '/includes/header.php';
@@ -501,14 +524,15 @@ $defaultTab = clean_string($_GET['tab'] ?? 'general');
 // an explicit grant via the Users permission editor.
 // Falls back to the first tab the user can view when the requested tab is not permitted.
 $tabPermMap = [
-    'general'      => 'settings_general',
-    'design'       => 'settings_design',
-    'users'        => 'settings_users',
-    'portal_users' => 'settings_portal',
-    'audit'        => 'settings_audit',
-    'system'       => 'settings_system',
-    'integrations' => 'settings_integrations',
-    'intelligence' => 'settings_intelligence',
+    'general'            => 'settings_general',
+    'design'             => 'settings_design',
+    'users'              => 'settings_users',
+    'portal_users'       => 'settings_portal',
+    'audit'              => 'settings_audit',
+    'system'             => 'settings_system',
+    'integrations'       => 'settings_integrations',
+    'intelligence'       => 'settings_intelligence',
+    'credit_application' => 'settings_general', // same permission as General
 ];
 $validTabs = array_keys($tabPermMap);
 if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
@@ -626,6 +650,13 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
         Intelligence<?= $_can ? '' : $_lockSvg ?>
     </button>
 
+    <?php $_can = can('settings_general', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'credit_application\' }" @click="activeTab = \'credit_application\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Credit Application settings"' ?>>
+        Credit Application<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$ccaCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
+    </button>
+
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -689,27 +720,6 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
     </div>
 </div>
 
-<?php if ($grp === 'credit_application'): ?>
-<!-- S-CCA-BTN-SETTINGS: preview card rendered immediately after the credit_application
-     settings card so they appear as a paired unit. Opens ?admin_preview=1 which is
-     gated on current_user() + can('customers','view') — no token generated. -->
-<div class="card" style="margin-bottom:20px;">
-    <div class="card-header" style="font-weight:600;">Preview Credit Application Form</div>
-    <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-        <p style="margin:0;color:var(--text-secondary);font-size:0.875rem;flex:1;min-width:220px;">
-            Open the credit application form in admin preview mode — see exactly what applicants see.
-            Form submission is disabled; the yellow banner confirms preview mode is active.
-        </p>
-        <a href="<?= base_url('credit-application') ?>?admin_preview=1"
-           target="_blank"
-           class="btn btn-secondary btn-sm"
-           style="white-space:nowrap;">
-            Preview Form Layout ↗
-        </a>
-    </div>
-</div>
-<?php endif; ?>
-
 <?php endforeach; ?>
 
 <!-- CURRENCY-MARKUP-1: custom card — step=0.0001, max=20, % suffix, old/new audit -->
@@ -759,6 +769,171 @@ if (!empty($grouped['currency'])) {
 </div>
 
 </div><!-- /general tab -->
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: CREDIT APPLICATION — settings + preview link + applications log   -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php if (can('settings_general', 'view')): ?>
+<div x-show="activeTab === 'credit_application'" x-transition:enter class="ff-tab-enter">
+
+<!-- Settings card — all 6 credit_application.* settings via the generic render pattern -->
+<?php if (!empty($grouped['credit_application'])): ?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;">Credit Application Settings</div>
+    <div class="card-body">
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="credit_application">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px 24px;">
+            <?php foreach ($grouped['credit_application'] as $_cca_s): ?>
+            <?php
+                $_cca_key   = $_cca_s['key'];
+                $_cca_val   = $_cca_s['value'] ?? '';
+                $_cca_vtype = $_cca_s['value_type'];
+                $_cca_label = $_cca_s['label'] ?? $_cca_key;
+                $_cca_desc  = $_cca_s['description'] ?? null;
+            ?>
+            <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="cca_<?= e($_cca_key) ?>"><?= e($_cca_label) ?></label>
+                <?php if ($_cca_vtype === 'text'): ?>
+                <textarea id="cca_<?= e($_cca_key) ?>" name="<?= e($_cca_key) ?>" class="form-control" rows="4"
+                          <?= !$canEdit ? 'readonly' : '' ?>><?= e($_cca_val) ?></textarea>
+                <?php elseif (in_array($_cca_vtype, ['integer', 'decimal'], true)): ?>
+                <input type="number" id="cca_<?= e($_cca_key) ?>" name="<?= e($_cca_key) ?>" class="form-control"
+                       value="<?= e($_cca_val) ?>" step="<?= $_cca_vtype === 'decimal' ? '0.01' : '1' ?>"
+                       min="0" <?= !$canEdit ? 'readonly' : '' ?>>
+                <?php else: ?>
+                <input type="text" id="cca_<?= e($_cca_key) ?>" name="<?= e($_cca_key) ?>" class="form-control"
+                       value="<?= e($_cca_val) ?>" maxlength="500" <?= !$canEdit ? 'readonly' : '' ?>>
+                <?php endif; ?>
+                <?php if ($_cca_desc): ?>
+                <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;"><?= e($_cca_desc) ?></p>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+            </div>
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save Credit Application Settings</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- Preview Form Layout card -->
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;">Preview Form Layout</div>
+    <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <p style="margin:0;color:var(--text-secondary);font-size:0.875rem;flex:1;min-width:220px;">
+            See exactly what applicants see when they open their invite link.
+            Opens in admin preview mode — submission is disabled, and a yellow banner confirms it.
+        </p>
+        <a href="<?= base_url('credit-application') ?>?admin_preview=1"
+           target="_blank"
+           class="btn btn-secondary btn-sm"
+           style="white-space:nowrap;">
+            Preview Form ↗
+        </a>
+    </div>
+</div>
+
+<!-- Applications Log -->
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+        <span>Applications Log</span>
+        <span style="font-size:0.8rem;font-weight:400;color:var(--text-secondary);"><?= e((string)$ccaCount) ?> total</span>
+    </div>
+    <div class="card-body" style="padding:0;">
+    <?php if (empty($ccaApplications)): ?>
+        <p style="padding:20px;margin:0;color:var(--text-secondary);font-size:0.875rem;">
+            No credit applications have been sent yet.
+        </p>
+    <?php else: ?>
+        <div style="overflow-x:auto;">
+        <table class="data-table" style="width:100%;font-size:0.8125rem;">
+            <thead>
+                <tr>
+                    <th>Customer</th>
+                    <th>Status</th>
+                    <th>Sent By</th>
+                    <th>Sent</th>
+                    <th>Submitted</th>
+                    <th>Outcome</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($ccaApplications as $_cca): ?>
+            <?php
+                // Status badge colour
+                $_cca_status_map = [
+                    'sent'      => ['label' => 'Sent',      'class' => 'badge-info'],
+                    'opened'    => ['label' => 'Opened',    'class' => 'badge-warning'],
+                    'submitted' => ['label' => 'Submitted', 'class' => 'badge-primary'],
+                    'reviewed'  => ['label' => 'Reviewed',  'class' => 'badge-success'],
+                ];
+                $_cca_sb = $_cca_status_map[$_cca['status']] ?? ['label' => ucfirst((string)$_cca['status']), 'class' => 'badge-secondary'];
+                // Outcome badge
+                $_cca_outcome_map = [
+                    'approved'   => ['label' => 'Approved',    'color' => '#16a34a'],
+                    'declined'   => ['label' => 'Declined',    'color' => '#dc2626'],
+                    'needs_info' => ['label' => 'Needs Info',  'color' => '#d97706'],
+                ];
+                $_cca_ob = $_cca['review_outcome'] ? ($_cca_outcome_map[$_cca['review_outcome']] ?? null) : null;
+                // Applicant name (if submitted)
+                $_cca_name = trim(((string)($_cca['print_name_first'] ?? '')) . ' ' . ((string)($_cca['print_name_last'] ?? '')));
+            ?>
+            <tr>
+                <td>
+                    <a href="<?= base_url('customers/' . (int)$_cca['customer_id']) ?>"
+                       style="font-weight:500;"><?= e($_cca['company_name']) ?></a>
+                    <?php if ($_cca_name): ?>
+                    <div style="font-size:0.75rem;color:var(--text-secondary);"><?= e($_cca_name) ?></div>
+                    <?php endif; ?>
+                </td>
+                <td><span class="badge <?= e($_cca_sb['class']) ?>"><?= e($_cca_sb['label']) ?></span></td>
+                <td style="color:var(--text-secondary);"><?= e($_cca['sent_by_name'] ?? '—') ?></td>
+                <td style="white-space:nowrap;color:var(--text-secondary);font-size:0.75rem;">
+                    <?= $_cca['sent_at'] ? e(date('M j, Y', strtotime($_cca['sent_at']))) : '—' ?>
+                </td>
+                <td style="white-space:nowrap;color:var(--text-secondary);font-size:0.75rem;">
+                    <?= $_cca['submitted_at'] ? e(date('M j, Y', strtotime($_cca['submitted_at']))) : '—' ?>
+                </td>
+                <td>
+                    <?php if ($_cca_ob): ?>
+                    <span style="font-size:0.75rem;font-weight:600;color:<?= e($_cca_ob['color']) ?>;">
+                        <?= e($_cca_ob['label']) ?>
+                    </span>
+                    <?php else: ?>
+                    <span style="color:var(--text-secondary);font-size:0.75rem;">—</span>
+                    <?php endif; ?>
+                </td>
+                <td style="text-align:right;white-space:nowrap;">
+                    <?php if ($_cca['has_pdf']): ?>
+                    <a href="<?= base_url('credit_applications/show') ?>?id=<?= (int)$_cca['id'] ?>"
+                       class="btn btn-ghost btn-xs">View Form</a>
+                    <?php endif; ?>
+                    <a href="<?= base_url('customers/' . (int)$_cca['customer_id']) ?>"
+                       class="btn btn-ghost btn-xs">Customer</a>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+        <?php if ($ccaCount >= 500): ?>
+        <p style="padding:12px 20px;margin:0;font-size:0.75rem;color:var(--text-secondary);border-top:1px solid var(--border-default);">
+            Showing most recent 500 applications. Use the customer page to see full history per customer.
+        </p>
+        <?php endif; ?>
+    <?php endif; ?>
+    </div>
+</div>
+
+</div><!-- /credit_application tab -->
+<?php endif; ?>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- TAB 1.5: DESIGN — brand color, logo, defaults, regional, PDF, UI (super_admin only) -->
