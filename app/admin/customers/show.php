@@ -75,6 +75,11 @@ $rateOverridesCount = (int) db_row(
     "SELECT COUNT(*) AS n FROM customer_equipment_rates WHERE customer_id = ?",
     [$customerId]
 )['n'];
+// S-CCA-1: server-preloaded credit-application count (active rows only, D-CCA-3).
+$creditAppsCount = (int) db_row(
+    "SELECT COUNT(*) AS n FROM customer_credit_applications WHERE customer_id = ? AND deleted_at IS NULL",
+    [$customerId]
+)['n'];
 $tags = array_column($tagRows, 'tag');
 
 // WHY: badge classes per FLEETFORGE_DESIGN_DETAILS.md §9
@@ -295,6 +300,11 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
             Documents
             <span class="tab-badge" x-show="tabCounts.documents > 0" x-text="tabCounts.documents"></span>
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'credit_applications' }"
+                @click="activeTab = 'credit_applications'" :aria-selected="activeTab === 'credit_applications'" role="tab">
+            Credit Application
+            <span class="tab-badge" x-show="tabCounts.credit_applications > 0" x-text="tabCounts.credit_applications"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'emails' }"
                 @click="activeTab = 'emails'; loadEmails()" :aria-selected="activeTab === 'emails'" role="tab">
@@ -1266,6 +1276,101 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
 
     </div><!-- /documents tab -->
 
+    <!-- ── TAB: CREDIT APPLICATION (S-CCA-1) ────────────────────── -->
+    <div x-show="activeTab === 'credit_applications'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
+
+        <div class="card" style="margin-bottom:1rem;">
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <div>
+                    <h3 class="card-title">Credit Application</h3>
+                    <p class="text-sm text-secondary" style="margin:4px 0 0;">
+                        Current status:
+                        <template x-if="creditApps.length === 0">
+                            <span class="badge badge-neutral">Not sent</span>
+                        </template>
+                        <template x-if="creditApps.length > 0">
+                            <span :class="creditApps[0].is_expired ? 'badge badge-danger' : creditAppStatusBadge(creditApps[0].status)"
+                                  x-text="creditApps[0].is_expired ? 'Expired' : creditAppStatusLabel(creditApps[0].status)"></span>
+                        </template>
+                    </p>
+                </div>
+                <?php if (can('customers', 'create')): ?>
+                <button class="btn btn-sm btn-primary"
+                        @click="sendCreditApp()" :disabled="sendingCreditApp">
+                    <span x-show="!sendingCreditApp" x-text="creditApps.length === 0 ? '+ Send Application' : 'Re-send Application'"></span>
+                    <span x-show="sendingCreditApp">Sending…</span>
+                </button>
+                <?php endif; ?>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="creditAppsLoading && creditApps.length === 0" class="card-body"
+                 style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading credit applications…</span>
+            </div>
+
+            <!-- Empty -->
+            <div x-show="creditAppsLoaded && !creditAppsLoading && creditApps.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No credit applications</p>
+                    <p class="empty-state-text">Send a secure, tokenized credit-application link to this customer. Each send is kept as a separate record.</p>
+                </div>
+            </div>
+
+            <!-- History table (newest first) -->
+            <div x-show="creditApps.length > 0" class="tab-table-container">
+                <div class="table-responsive">
+<table class="table">
+                    <thead>
+                        <tr>
+                            <th>Sent</th>
+                            <th>Status</th>
+                            <th>Submitted</th>
+                            <th>Outcome</th>
+                            <th>Expires</th>
+                            <th>Sent By</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="app in creditApps" :key="app.id">
+                            <tr>
+                                <td class="text-sm" x-text="app.sent_at ? formatDate(app.sent_at) : '—'"></td>
+                                <td>
+                                    <span :class="app.is_expired ? 'badge badge-danger' : creditAppStatusBadge(app.status)"
+                                          x-text="app.is_expired ? 'Expired' : creditAppStatusLabel(app.status)"></span>
+                                </td>
+                                <td class="text-sm" x-text="app.submitted_at ? formatDate(app.submitted_at) : '—'"></td>
+                                <td>
+                                    <template x-if="app.review_outcome">
+                                        <span :class="creditAppOutcomeBadge(app.review_outcome)"
+                                              x-text="creditAppOutcomeLabel(app.review_outcome)"></span>
+                                    </template>
+                                    <template x-if="!app.review_outcome"><span class="text-secondary">—</span></template>
+                                </td>
+                                <td class="text-sm text-secondary" x-text="app.token_expires_at ? formatDate(app.token_expires_at) : '—'"></td>
+                                <td class="text-sm text-secondary" x-text="app.sent_by_name || '—'"></td>
+                                <td style="white-space:nowrap;">
+                                    <!-- View wired in S-CCA-3 (renders the submitted application + PDF). -->
+                                    <template x-if="app.has_pdf">
+                                        <button class="btn btn-xs btn-ghost" disabled
+                                                title="Submitted application view ships in S-CCA-3">View</button>
+                                    </template>
+                                    <template x-if="!app.has_pdf"><span class="text-secondary">—</span></template>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+</div>
+            </div>
+            <div x-show="creditApps.length > 0" class="tab-table-footer">
+                <span x-text="creditApps.length + ' application' + (creditApps.length !== 1 ? 's' : '')"></span>
+            </div>
+        </div>
+
+    </div><!-- /credit applications tab -->
+
     <!-- ── TAB: EMAIL HISTORY (EMAIL-1) ─────────────────────────── -->
     <div x-show="activeTab === 'emails'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
 
@@ -1487,6 +1592,7 @@ function FF_CustomerProfile() {
             mileage_logs:  0,
             rates:         <?= (int) $rateOverridesCount ?>,      // server-preloaded
             documents:     0,
+            credit_applications: <?= (int) $creditAppsCount ?>, // server-preloaded
             emails:        0,
         },
 
@@ -1540,6 +1646,12 @@ function FF_CustomerProfile() {
         docsLoaded:      false,
         docsLoading:     false,
 
+        // ── Credit Applications (S-CCA-1) ─────────────────────────
+        creditApps:        [],
+        creditAppsLoaded:  false,
+        creditAppsLoading: false,
+        sendingCreditApp:  false,
+
         // ── Email History (EMAIL-1) ───────────────────────────────
         emails:          [],
         emailsLoaded:    false,
@@ -1589,6 +1701,7 @@ function FF_CustomerProfile() {
                 if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)    this.loadMileageLogs();
                 if (tab === 'rates'         && !this.rateOverridesLoaded)  this.loadRateOverrides();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
+                if (tab === 'credit_applications' && !this.creditAppsLoaded) this.loadCreditApps();
                 if (tab === 'emails'        && !this.emailsLoaded)            this.loadEmails();
             });
             // EMAIL-1: refresh email history when an email is sent globally
@@ -1920,6 +2033,83 @@ function FF_CustomerProfile() {
                 }
             } catch (e) { /* silent */ }
             this.docsLoading = false;
+        },
+
+        // ── Credit Applications (S-CCA-1) ─────────────────────────
+        async loadCreditApps() {
+            if (this.creditAppsLoading) return;
+            this.creditAppsLoading = true;
+            try {
+                const url  = '<?= base_url('api/v1/credit_applications') ?>?customer_id=<?= $customerId ?>';
+                const json = await (await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })).json();
+                if (json.success) {
+                    this.creditApps                    = json.data.items || [];
+                    this.tabCounts.credit_applications = this.creditApps.length;
+                    this.creditAppsLoaded              = true;
+                }
+            } catch (e) { /* silent */ }
+            this.creditAppsLoading = false;
+        },
+        async sendCreditApp() {
+            if (this.sendingCreditApp) return;
+            const resend = this.creditApps.length > 0;
+            if (resend && !confirm('Re-send a new credit-application link to this customer? The previous link stays on record.')) return;
+            this.sendingCreditApp = true;
+            try {
+                const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+                const res  = await fetch('<?= base_url('api/v1/credit_applications/send') ?>', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ customer_id: <?= $customerId ?> }),
+                });
+                const json = await res.json();
+                if (res.ok && json.success) {
+                    // Reload the history so the new row appears (newest first).
+                    this.creditAppsLoaded = false;
+                    await this.loadCreditApps();
+                    if (json.data.email_sent) {
+                        FF_Toast.success('Credit application link sent.');
+                    } else {
+                        FF_Toast.error('Application created, but the email could not be sent: ' + (json.data.email_error || 'unknown error'));
+                    }
+                } else {
+                    FF_Toast.error(json.error?.message ?? 'Failed to send credit application.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error. Please try again.');
+            } finally {
+                this.sendingCreditApp = false;
+            }
+        },
+        creditAppStatusBadge(status) {
+            return ({
+                sent:      'badge badge-info',
+                opened:    'badge badge-warning',
+                submitted: 'badge badge-success',
+                reviewed:  'badge badge-neutral',
+            })[status] || 'badge badge-neutral';
+        },
+        creditAppStatusLabel(status) {
+            return ({
+                sent:      'Sent',
+                opened:    'Opened',
+                submitted: 'Submitted',
+                reviewed:  'Reviewed',
+            })[status] || status;
+        },
+        creditAppOutcomeBadge(outcome) {
+            return ({
+                approved:   'badge badge-success',
+                declined:   'badge badge-danger',
+                needs_info: 'badge badge-warning',
+            })[outcome] || 'badge badge-neutral';
+        },
+        creditAppOutcomeLabel(outcome) {
+            return ({
+                approved:   'Approved',
+                declined:   'Declined',
+                needs_info: 'Needs Info',
+            })[outcome] || outcome;
         },
 
         // S-DOC-UPLOAD-ENTITY-TYPE-FIX: caller MUST pass entity_type+entity_id.
