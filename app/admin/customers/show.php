@@ -1357,12 +1357,14 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 <td class="text-sm text-secondary" x-text="app.token_expires_at ? formatDate(app.token_expires_at) : '—'"></td>
                                 <td class="text-sm text-secondary" x-text="app.sent_by_name || '—'"></td>
                                 <td style="white-space:nowrap;">
-                                    <!-- View wired in S-CCA-3 (renders the submitted application + PDF). -->
-                                    <template x-if="app.has_pdf">
-                                        <button class="btn btn-xs btn-ghost" disabled
-                                                title="Submitted application view ships in S-CCA-3">View</button>
+                                    <!-- View: wired S-CCA-3 — links to admin view page for submitted/reviewed apps -->
+                                    <template x-if="app.status === 'submitted' || app.status === 'reviewed'">
+                                        <a :href="'<?= base_url('credit_applications/show') ?>?id=' + app.id"
+                                           class="btn btn-xs btn-ghost">View</a>
                                     </template>
-                                    <template x-if="!app.has_pdf"><span class="text-secondary">—</span></template>
+                                    <template x-if="app.status !== 'submitted' && app.status !== 'reviewed'">
+                                        <span class="text-secondary">—</span>
+                                    </template>
                                 </td>
                             </tr>
                         </template>

@@ -24,9 +24,14 @@ declare(strict_types=1);
  */
 
 require_once FF_ROOT . '/includes/auth.php';
+require_once FF_ROOT . '/includes/partials/credit_application_render.php';
+require_once FF_ROOT . '/vendor/autoload.php';
 
 use FleetForge\Storage\StorageClient;
 use FleetForge\Security\RateLimiter;
+use FleetForge\Notifications\NotificationService;
+use Mpdf\Mpdf;
+use Mpdf\Output\Destination;
 
 // ── Brand / company settings ─────────────────────────────────────────────────
 $companyName  = (string)(settings_get('company.name') ?: 'FleetForge');
@@ -414,6 +419,133 @@ if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 'new_values'   => json_encode(['status' => 'submitted', 'company_name' => $company_name]),
                 'ip_address'   => $submittedIp,
             ]);
+
+            // ── Post-commit: rendered_html + PDF + notifications (D-CCA-3-A) ───────
+            // Core record already committed above. These steps are NON-FATAL: any
+            // failure logs to error_log/Sentry but NEVER rolls back the submission.
+
+            // Extract base64 signature for inline embedding (D-CCA-3-C, Trap 7)
+            $sigB64ForRender = str_replace('data:image/png;base64,', '', $signature_data);
+
+            $formDataArray = json_decode((string)$formDataJson, true) ?: [];
+
+            // 6g. Build + store rendered_html (D-CCA-3-B)
+            try {
+                $renderedHtml = cca_render_html([
+                    'app_id'           => (int)$app['id'],
+                    'customer_company' => (string)($app['customer_company_name'] ?? ''),
+                    'submitted_at'     => $now,
+                    'submitted_ip'     => $submittedIp,
+                    'print_name_first' => $print_name_first,
+                    'print_name_last'  => $print_name_last,
+                    'signed_date'      => $signed_date,
+                    'terms_accepted'   => $terms_accepted,
+                    'terms_version'    => 'snapshot',
+                    'form_data'        => $formDataArray,
+                    'signature_b64'    => $sigB64ForRender,
+                    'disclaimer_html'  => $disclaimerHtml,
+                    'min_req_html'     => $minReqHtml,
+                    'company_name'     => $companyName,
+                ]);
+                db_execute(
+                    "UPDATE customer_credit_applications SET rendered_html = ? WHERE id = ?",
+                    [$renderedHtml, (int)$app['id']]
+                );
+            } catch (\Throwable $e) {
+                error_log('[S-CCA-3] rendered_html build failed for app ' . $app['id'] . ': ' . $e->getMessage());
+                $renderedHtml = '';
+            }
+
+            // 6h. Generate PDF via mPDF → StorageClient → documents row (D-CCA-3-D)
+            if ($renderedHtml !== '') {
+                try {
+                    $tmpDir = FF_ROOT . '/storage/tmp';
+                    if (!is_dir($tmpDir)) {
+                        @mkdir($tmpDir, 0755, true);
+                    }
+                    $mpdf = new Mpdf([
+                        'mode'          => 'utf-8',
+                        'format'        => 'A4',
+                        'margin_top'    => 12,
+                        'margin_bottom' => 12,
+                        'margin_left'   => 12,
+                        'margin_right'  => 12,
+                        'default_font'  => 'dejavusans',
+                        'tempDir'       => $tmpDir,
+                    ]);
+                    $submittedDateLabel = $signed_date ?: date('Y-m-d');
+                    $mpdf->SetTitle('Credit Application — ' . ($app['customer_company_name'] ?? '') . ' ' . $submittedDateLabel);
+                    $mpdf->SetAuthor((string)(settings_get('company.name') ?: 'FleetForge'));
+                    $mpdf->WriteHTML($renderedHtml);
+                    $pdfBytes = $mpdf->Output('', Destination::STRING_RETURN);
+
+                    if ($pdfBytes !== '') {
+                        $tmpPdf = tempnam(sys_get_temp_dir(), 'ff_cca_');
+                        if ($tmpPdf !== false) {
+                            file_put_contents($tmpPdf, $pdfBytes);
+                            try {
+                                $pdfPath = 'credit_applications/' . $app['id'] . '/credit_application_' . date('Ymd') . '.pdf';
+                                StorageClient::upload($tmpPdf, $pdfPath);
+
+                                // D-CCA-3-D: title from FF customer record + submitted date
+                                $docTitle = 'Credit Application — '
+                                    . ($app['customer_company_name'] ?? 'Customer')
+                                    . ' (' . $submittedDateLabel . ')';
+                                $docId = db_insert('documents', [
+                                    'entity_type'   => 'customer',
+                                    'entity_id'     => (int)$app['customer_id'],
+                                    'document_type' => 'credit_application',
+                                    'title'         => substr($docTitle, 0, 255),
+                                    'file_path'     => $pdfPath,
+                                    'file_name'     => basename($pdfPath),
+                                    'file_size_kb'  => (int)ceil(strlen($pdfBytes) / 1024),
+                                    'mime_type'     => 'application/pdf',
+                                    'uploaded_by'   => null,
+                                ]);
+                                db_execute(
+                                    "UPDATE customer_credit_applications SET generated_pdf_document_id = ? WHERE id = ?",
+                                    [(int)$docId, (int)$app['id']]
+                                );
+                            } catch (\Throwable $e) {
+                                error_log('[S-CCA-3] PDF upload/documents row failed for app ' . $app['id'] . ': ' . $e->getMessage());
+                            } finally {
+                                @unlink($tmpPdf);
+                            }
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    error_log('[S-CCA-3] PDF generation failed for app ' . $app['id'] . ': ' . $e->getMessage());
+                }
+            }
+
+            // 6i. Notify manager + super_admin + accountant (D-CCA-3-E, D-CCA-8)
+            try {
+                $notifyRows = db_select(
+                    "SELECT DISTINCT u.id FROM users u
+                       JOIN user_roles r ON r.id = u.role_id
+                      WHERE r.slug IN ('super_admin','manager','accountant')
+                        AND u.deleted_at IS NULL
+                        AND u.status = 'active'"
+                );
+                $notifyIds = array_map(static fn($r) => (int)$r['id'], $notifyRows);
+
+                if (!empty($notifyIds)) {
+                    $viewUrl = base_url('credit_applications/show') . '?id=' . (int)$app['id'];
+                    NotificationService::notify(
+                        'customer.credit_application_submitted',
+                        'New Credit Application — ' . ($app['customer_company_name'] ?? 'Customer'),
+                        'A credit application was submitted by ' . trim($print_name_first . ' ' . $print_name_last)
+                            . ' (' . $company_name . '). Click to review.',
+                        'credit_application',
+                        (int)$app['id'],
+                        $viewUrl,
+                        $notifyIds,
+                        'info'
+                    );
+                }
+            } catch (\Throwable $e) {
+                error_log('[S-CCA-3] Notification dispatch failed for app ' . $app['id'] . ': ' . $e->getMessage());
+            }
 
             // 6f. POST-Redirect-GET — set flash then redirect
             $_SESSION['cca_confirmed_' . $app['id']] = true;
