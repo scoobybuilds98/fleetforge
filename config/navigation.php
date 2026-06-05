@@ -42,6 +42,14 @@ return [
         'badge'  => null,
     ],
     [
+        'label'        => 'Credit Applications',
+        'icon'         => 'clipboard-document-check',
+        'url'          => '/credit_applications',
+        'match_prefix' => '/credit_applications',
+        'module'       => 'customers', // sub-resource of customers (D-CCA-PERM)
+        'badge'        => 'pending_credit_apps',
+    ],
+    [
         'label'  => 'Equipment',
         'icon'   => 'truck',
         'url'    => '/equipment',

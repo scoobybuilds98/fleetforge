@@ -75,6 +75,12 @@ function sidebar_badge_count(string $key): int
                  WHERE status IN ('reported','assessed','repair_ordered') AND deleted_at IS NULL",
                 []
             ),
+            // Submitted credit applications awaiting admin review
+            'pending_credit_apps' => db_count(
+                "SELECT COUNT(*) FROM customer_credit_applications
+                  WHERE status = 'submitted' AND deleted_at IS NULL",
+                []
+            ),
             default => 0,
         };
     } catch (Throwable) {
