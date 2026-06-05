@@ -12,6 +12,7 @@ declare(strict_types=1);
  *   php bin/migrate.php --backfill       # one-time bootstrap of 5 historical files
  *   php bin/migrate.php --verify         # recompute checksums of every applied file
  *   php bin/migrate.php --status         # short status (counts only, exit 0)
+ *   php bin/migrate.php --assert-applied # deploy gate: "PENDING: N"/"DRIFT: M", exit 4 if not clean
  *   php bin/migrate.php --help
  *
  * Exit codes:
@@ -51,6 +52,7 @@ foreach ($args as $a) {
         case '--backfill': $mode = 'backfill'; break;
         case '--verify':   $mode = 'verify';   break;
         case '--status':   $mode = 'status';   break;
+        case '--assert-applied': $mode = 'assert-applied'; break;
         case '-h': case '--help': $showHelp = true; break;
         default:
             fwrite(STDERR, "Unknown argument: {$a}\nRun with --help for usage.\n");
@@ -77,7 +79,7 @@ $runner    = new Runner();
 $lockHeld  = false;
 
 try {
-    if ($mode !== 'verify' && $mode !== 'status') {
+    if ($mode !== 'verify' && $mode !== 'status' && $mode !== 'assert-applied') {
         $runner->acquireLock();
         $lockHeld = true;
     }
@@ -88,6 +90,7 @@ try {
         case 'backfill': $exitCode = cmd_backfill($runner, $cliUser); break;
         case 'verify':   $exitCode = cmd_verify($runner); break;
         case 'status':   $exitCode = cmd_status($runner); break;
+        case 'assert-applied': $exitCode = cmd_assert_applied($runner); break;
     }
 } catch (\Throwable $e) {
     $msg = $e->getMessage();
@@ -262,4 +265,23 @@ function cmd_status(Runner $runner): int
     echo "pending:   " . count($plan['to_apply']) . "\n";
     echo "drift:     " . count($plan['drift']) . "\n";
     return 0;
+}
+
+/**
+ * --assert-applied: machine-readable deploy gate (S-DEPLOY-SAFETY-1).
+ *
+ * Prints "PENDING: N" + "DRIFT: M" and exits NON-ZERO (4) when the schema is
+ * not fully applied + clean (pending>0 OR drift>0), else exits 0. Read-only,
+ * acquires no lock. Used by bin/deploy.sh step 7 to abort a deploy that left
+ * migrations unapplied. Distinct from --status (which is contractually exit-0
+ * and used by humans + tests/_smoke_cca4.php — left untouched).
+ */
+function cmd_assert_applied(Runner $runner): int
+{
+    $plan    = $runner->plan();
+    $pending = count($plan['to_apply']);
+    $drift   = count($plan['drift']);
+    echo "PENDING: {$pending}\n";
+    echo "DRIFT: {$drift}\n";
+    return ($pending > 0 || $drift > 0) ? 4 : 0;
 }
