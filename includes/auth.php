@@ -151,17 +151,17 @@ function require_role(string $role): void
 
 // can() — check if the current user has a permission
 //
-// PERM-1 layered permission resolution:
+// PERM-1 + S-ROLE-PERM-OVERRIDE layered permission resolution:
 //   1. super_admin always wins (returns true unconditionally).
-//   2. Per-user override (granted=1 → allow, granted=0 → deny).
-//      Overrides are loaded into the session at login as
-//      $_SESSION['ff_user']['permission_overrides'][module][action] = 0|1
-//   3. Fall through to the role default from config/permissions.php.
+//   2. Per-user override  — $_SESSION['ff_user']['permission_overrides'][m][a]
+//   3. Role-level override — $_SESSION['ff_user']['role_permission_overrides'][m][a]
+//      Set via the role_permissions admin page; stored in role_permission_overrides.
+//   4. Factory default from config/permissions.php.
 //
-// WHY: storing the resolved override in the session at login keeps can()
-// O(1) on every page load — no per-request DB query. The override map
-// is refreshed whenever an override row is added/removed/reset via the
-// permissions API endpoints (which call _ff_refresh_user_permissions()).
+// All three maps are loaded into the session at login so can() stays O(1)
+// per request. The override maps are refreshed on the freshness check
+// whenever users.permissions_updated_at advances (role-level changes
+// also touch permissions_updated_at for every user of that role).
 function can(string $module, string $action): bool
 {
     $user = current_user();
@@ -169,12 +169,19 @@ function can(string $module, string $action): bool
 
     if (($user['role_slug'] ?? '') === 'super_admin') return true;
 
-    // Per-user override takes precedence over role default.
+    // 2. Per-user override — highest precedence after super_admin.
     $override = $user['permission_overrides'][$module][$action] ?? null;
     if ($override !== null) {
         return (bool) $override;
     }
 
+    // 3. Role-level override — set by admin for an entire role baseline.
+    $roleOverride = $user['role_permission_overrides'][$module][$action] ?? null;
+    if ($roleOverride !== null) {
+        return (bool) $roleOverride;
+    }
+
+    // 4. Factory default from config/permissions.php.
     return (bool) ($user['permissions'][$module][$action] ?? false);
 }
 
@@ -222,14 +229,19 @@ function auth_login(array $user, bool $rememberMe = false): void
     // Stored as $overrides[module][action] = 0|1 — checked first by can().
     $overrides = _ff_load_user_overrides((int) $user['id']);
 
+    // S-ROLE-PERM-OVERRIDE: load role-level overrides (editable via admin UI).
+    // Checked by can() between per-user overrides and config/permissions.php.
+    $roleOverrides = _ff_load_role_overrides((int) $user['role_id']);
+
     $_SESSION['ff_user'] = [
-        'id'                   => (int) $user['id'],
-        'name'                 => $user['name'],
-        'email'                => $user['email'],
-        'role_id'              => (int) $user['role_id'],
-        'role_slug'            => $roleSlug,
-        'permissions'          => $permissions,
-        'permission_overrides' => $overrides,
+        'id'                      => (int) $user['id'],
+        'name'                    => $user['name'],
+        'email'                   => $user['email'],
+        'role_id'                 => (int) $user['role_id'],
+        'role_slug'               => $roleSlug,
+        'permissions'             => $permissions,
+        'permission_overrides'    => $overrides,
+        'role_permission_overrides' => $roleOverrides,
         // S-PERM-SESSION-REFRESH: identity-based freshness token.
         // _ff_check_permission_freshness() compares permissions_db_ts
         // (the exact users.permissions_updated_at value we last saw) by
@@ -454,6 +466,28 @@ function _ff_load_user_overrides(int $userId): array
 }
 
 /**
+ * S-ROLE-PERM-OVERRIDE: load role-level permission overrides from DB.
+ *
+ * Mirrors _ff_load_user_overrides() but keyed by role_id.
+ * The returned map is stored in $_SESSION['ff_user']['role_permission_overrides']
+ * and checked by can() between the per-user override and the config default.
+ */
+function _ff_load_role_overrides(int $roleId): array
+{
+    $rows = db_select(
+        "SELECT module, action, granted
+         FROM role_permission_overrides
+         WHERE role_id = ?",
+        [$roleId]
+    );
+    $map = [];
+    foreach ($rows as $r) {
+        $map[$r['module']][$r['action']] = (int) $r['granted'];
+    }
+    return $map;
+}
+
+/**
  * Refresh the in-session permission_overrides map for the CURRENT user.
  *
  * Call this from any endpoint that mutates user_permission_overrides
@@ -463,11 +497,18 @@ function _ff_load_user_overrides(int $userId): array
  * edit *another* user's overrides) only need to call this if the
  * super_admin happens to be editing themselves — but it's harmless to
  * always call it.
+ *
+ * Also refreshes role_permission_overrides so role-level changes made
+ * by an admin appear in the same request without requiring re-login.
  */
 function _ff_refresh_user_permissions(int $userId): void
 {
     if (current_user_id() !== $userId) return;
     $_SESSION['ff_user']['permission_overrides'] = _ff_load_user_overrides($userId);
+    $roleId = (int) ($_SESSION['ff_user']['role_id'] ?? 0);
+    if ($roleId) {
+        $_SESSION['ff_user']['role_permission_overrides'] = _ff_load_role_overrides($roleId);
+    }
 }
 
 /**
@@ -548,6 +589,12 @@ function _ff_check_permission_freshness(): void
     // Refresh override map and store the exact DB timestamp so the next
     // request uses identity comparison (not time comparison).
     $_SESSION['ff_user']['permission_overrides'] = _ff_load_user_overrides($userId);
+    // S-ROLE-PERM-OVERRIDE: also refresh role-level overrides so a
+    // role permission change takes effect on the next request without re-login.
+    $roleId = (int) ($_SESSION['ff_user']['role_id'] ?? 0);
+    if ($roleId) {
+        $_SESSION['ff_user']['role_permission_overrides'] = _ff_load_role_overrides($roleId);
+    }
     $_SESSION['ff_user']['permissions_db_ts']    = $dbTimestamp;
     $_SESSION['ff_user']['permissions_loaded_at'] = date('Y-m-d H:i:s'); // keep for compat
 }

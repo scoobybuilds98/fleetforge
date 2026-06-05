@@ -306,6 +306,12 @@ require_once FF_ROOT . '/includes/header.php';
             <?php if ($isActive): ?>
             <div class="perm-role-card-badge">Current role</div>
             <?php endif; ?>
+            <a href="<?= base_url('users/role_permissions') ?>?role=<?= e($role['slug']) ?>"
+               class="perm-role-defaults-link"
+               @click.stop>
+                Edit defaults
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:11px;height:11px;"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+            </a>
         </div>
         <?php endforeach; ?>
     </div>
@@ -695,6 +701,12 @@ require_once FF_ROOT . '/includes/header.php';
     color: var(--color-primary-text); background: var(--color-primary-light);
     padding: 2px 8px; border-radius: 999px; margin-top: 2px; width: fit-content;
 }
+.perm-role-defaults-link {
+    display: inline-flex; align-items: center; gap: 3px; margin-top: 6px;
+    font-size: 0.6875rem; font-weight: 500; color: var(--text-tertiary);
+    text-decoration: none; transition: color 140ms ease;
+}
+.perm-role-defaults-link:hover { color: var(--color-primary-text); }
 
 /* ── Two-column layout ─────────────────────────────────────── */
 .perm-layout { display: grid; grid-template-columns: 1fr 300px; gap: 18px; align-items: start; }
