@@ -74,6 +74,11 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-SCHEMA-GUARD-1** — IN-FLIGHT
+  Started: 2026-06-05T09:26 UTC by claude-opus-4-8
+  Touching: tests/_smoke_schema_lib.php, tests/_smoke_migrations_reproduce_master.php, tests/_smoke_no_stray_schema_sql.php, tests/_smoke_master_schema_parity.php, scripts/precommit_doc_check.sh, scripts/archive/legacy_database_migrations/, docs/FLEETFORGE_CLAUDE_CODE_REFERENCE.md, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
+  Scope: two static schema-integrity guards (migrations⊆master keystone + absolute no-stray-schema-sql) + neuter archived legacy migrations + wire into D131 gate. Code-disjoint from FIXPACK-EMAIL-SCROLL-BTN (shared-doc overlap only; append discipline per S-CCA-1 ∥ S-PERM-TEST-WIRING precedent).
+
 **FIXPACK-EMAIL-SCROLL-BTN** — IN-FLIGHT
   Started: 2026-06-05T10:30 UTC by claude-sonnet-4-5
   Touching: public/assets/css/app.css, api/v1/credit_applications/preview.php, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
