@@ -692,7 +692,7 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
 <?php if ($grp === 'credit_application'): ?>
 <!-- S-CCA-BTN-SETTINGS: preview card rendered immediately after the credit_application
      settings card so they appear as a paired unit. Opens ?admin_preview=1 which is
-     gated on is_logged_in() + can('customers','view') — no token generated. -->
+     gated on current_user() + can('customers','view') — no token generated. -->
 <div class="card" style="margin-bottom:20px;">
     <div class="card-header" style="font-weight:600;">Preview Credit Application Form</div>
     <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">

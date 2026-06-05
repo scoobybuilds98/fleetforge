@@ -68,7 +68,8 @@ $isAdminPreview = isset($_GET['admin_preview']);
 if ($isAdminPreview) {
     // auth.php (included above) calls _ff_session_start() automatically at load time —
     // no explicit session call needed here. Just verify the operator is authenticated.
-    if (!is_logged_in() || !can('customers', 'view')) {
+    // current_user() returns the ff_user session array, or null when not logged in.
+    if (!current_user() || !can('customers', 'view')) {
         ff_not_found(); // silent 404 — do not expose admin-mode existence to public
     }
     $pageState  = 'form';
