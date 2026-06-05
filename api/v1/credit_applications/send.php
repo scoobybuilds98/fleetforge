@@ -42,8 +42,11 @@ require_method('POST');
 require_auth_api();
 require_permission('customers', 'create');
 
-$body       = json_body();
-$customerId = clean_int($body['customer_id'] ?? null);
+$body         = json_body();
+$customerId   = clean_int($body['customer_id'] ?? null);
+// Optional admin note to include in the resend email (D-CCA-4-C: carried into invite)
+$resendNote   = clean_string($body['resend_note'] ?? null, 2000);
+if ($resendNote === '') { $resendNote = null; }
 if (!$customerId || $customerId <= 0) {
     json_error('INVALID_ID', 'A valid customer_id is required.', 400);
 }
@@ -111,14 +114,27 @@ db_transaction(function () use (&$appId, $customerId, $tokenHash, $expiresAt, $u
 $emailSent  = false;
 $emailError = null;
 try {
+    $minReqHtml = (string) settings_get('credit_application.minimum_requirements_html', '');
+
+    // If a reviewer included a note (e.g. needs_info resend), prepend it as a
+    // styled banner above the minimum requirements block (D-CCA-4-C).
+    if ($resendNote !== null) {
+        $noteHtml = '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;">'
+            . '<tr><td style="border-left:4px solid #3b82f6;background:#eff6ff;padding:12px 16px;border-radius:0 4px 4px 0;">'
+            . '<strong style="font-size:14px;color:#1e40af;">Note from our team:</strong><br>'
+            . '<span style="font-size:14px;color:#1e3a8a;">' . htmlspecialchars($resendNote, ENT_QUOTES, 'UTF-8') . '</span>'
+            . '</td></tr></table>';
+        $minReqHtml = $noteHtml . $minReqHtml;
+    }
+
     $result = EmailService::sendFromTemplate(
         'credit_application_invite',
         $toEmail,
         $toName,
         [
             'customer_name'             => $toName,
-            'credit_application_url'     => $publicUrl,
-            'minimum_requirements_html'  => (string) settings_get('credit_application.minimum_requirements_html', ''),
+            'credit_application_url'    => $publicUrl,
+            'minimum_requirements_html' => $minReqHtml,
         ],
         [
             'customer_id' => $customerId,

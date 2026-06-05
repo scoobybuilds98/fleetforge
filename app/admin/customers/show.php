@@ -1333,6 +1333,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                             <th>Status</th>
                             <th>Submitted</th>
                             <th>Outcome</th>
+                            <th>Reviewed</th>
                             <th>Expires</th>
                             <th>Sent By</th>
                             <th></th>
@@ -1354,6 +1355,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                     </template>
                                     <template x-if="!app.review_outcome"><span class="text-secondary">—</span></template>
                                 </td>
+                                <td class="text-sm text-secondary" x-text="app.reviewed_at ? formatDate(app.reviewed_at) : '—'"></td>
                                 <td class="text-sm text-secondary" x-text="app.token_expires_at ? formatDate(app.token_expires_at) : '—'"></td>
                                 <td class="text-sm text-secondary" x-text="app.sent_by_name || '—'"></td>
                                 <td style="white-space:nowrap;">

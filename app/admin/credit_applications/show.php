@@ -49,9 +49,14 @@ $app = db_row(
             ca.submitted_at, ca.submitted_ip, ca.submitted_user_agent,
             ca.opened_at, ca.created_at, ca.reviewed_at,
             ca.approved_credit_limit, ca.review_notes,
-            c.company_name AS customer_company_name
+            ca.updated_at, ca.form_data, ca.reviewed_by,
+            c.company_name AS customer_company_name,
+            c.updated_at AS customer_updated_at, c.credit_limit AS customer_credit_limit,
+            c.status AS customer_status,
+            rb.name AS reviewed_by_name
        FROM customer_credit_applications ca
        JOIN customers c ON c.id = ca.customer_id
+       LEFT JOIN users rb ON rb.id = ca.reviewed_by
       WHERE ca.id = ? AND ca.deleted_at IS NULL",
     [$appId]
 );
@@ -79,6 +84,18 @@ if ($app['generated_pdf_document_id'] !== null) {
         }
     }
 }
+
+// ── Extract credit_requested from form_data (read-only reference for reviewers) ──
+// D-CCA-4: never written back to customers — shown for REFERENCE ONLY in the review panel.
+$creditRequested = null;
+if (!empty($app['form_data'])) {
+    $fd = json_decode((string) $app['form_data'], true);
+    $creditRequested = $fd['credit_requested'] ?? null;
+}
+
+// ── Review panel visibility ─────────────────────────────────────────────────
+$canReview = can('customers', 'edit')
+    && in_array($app['status'], ['submitted', 'reviewed'], true);
 
 // ── Status badge helpers ────────────────────────────────────────────────────
 $statusLabels = [
@@ -247,6 +264,132 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+        <?php if ($canReview): ?>
+        <!-- Review panel (S-CCA-4) — D-CCA-4-A: allowed on submitted+reviewed -->
+        <div class="card" id="review-panel">
+            <div class="card-header">
+                <h3 class="card-title">Review</h3>
+                <?php if ($app['review_outcome']): ?>
+                <span class="badge <?= e($outcomeClasses[$app['review_outcome']] ?? 'badge-neutral') ?>">
+                    <?= e($outcomeLabels[$app['review_outcome']] ?? $app['review_outcome']) ?>
+                </span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body" style="padding:16px;">
+
+                <?php if ($creditRequested): ?>
+                <!-- D-CCA-4: customer-entered value shown REFERENCE ONLY — never pre-fills inputs -->
+                <div style="background:var(--color-surface-secondary);border:1px solid var(--color-border);border-radius:4px;padding:8px 12px;margin-bottom:14px;font-size:12px;">
+                    <span style="color:var(--text-secondary);">Credit Requested (applicant):</span>
+                    <strong style="margin-left:4px;"><?= e($creditRequested) ?></strong>
+                    <span style="color:var(--text-secondary);font-size:11px;display:block;margin-top:2px;">Reference only — enter your own approved amount below.</span>
+                </div>
+                <?php endif; ?>
+
+                <form id="review-form" onsubmit="submitReview(event)">
+                    <input type="hidden" id="review-app-id" value="<?= (int)$appId ?>">
+                    <input type="hidden" id="review-updated-at" value="<?= e($app['updated_at']) ?>">
+                    <input type="hidden" id="review-customer-updated-at" value="<?= e($app['customer_updated_at']) ?>">
+
+                    <!-- Outcome radio -->
+                    <div style="margin-bottom:12px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Outcome</label>
+                        <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:pointer;">
+                            <input type="radio" name="review_outcome" value="approved" onchange="reviewOutcomeChanged()"
+                                   <?= $app['review_outcome'] === 'approved' ? 'checked' : '' ?>>
+                            <span class="badge badge-success" style="pointer-events:none;">Approved</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:pointer;">
+                            <input type="radio" name="review_outcome" value="declined" onchange="reviewOutcomeChanged()"
+                                   <?= $app['review_outcome'] === 'declined' ? 'checked' : '' ?>>
+                            <span class="badge badge-danger" style="pointer-events:none;">Declined</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="radio" name="review_outcome" value="needs_info" onchange="reviewOutcomeChanged()"
+                                   <?= $app['review_outcome'] === 'needs_info' ? 'checked' : '' ?>>
+                            <span class="badge badge-warning" style="pointer-events:none;">Needs Info</span>
+                        </label>
+                    </div>
+
+                    <!-- Review notes -->
+                    <div style="margin-bottom:12px;">
+                        <label for="review_notes" style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Notes (internal)</label>
+                        <textarea id="review_notes" name="review_notes" rows="3"
+                                  style="width:100%;resize:vertical;font-size:13px;"
+                                  class="form-control" placeholder="Internal notes about this review…"><?= e($app['review_notes'] ?? '') ?></textarea>
+                    </div>
+
+                    <!-- Approved credit limit (always shown, more prominent when approved) -->
+                    <div style="margin-bottom:12px;" id="review-credit-section">
+                        <label for="approved_credit_limit" style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Approved Credit Limit ($)</label>
+                        <!-- D-CCA-4: input is EMPTY by default — never pre-filled from applicant data -->
+                        <input type="number" id="approved_credit_limit" name="approved_credit_limit"
+                               min="0" step="0.01"
+                               value="<?= $app['approved_credit_limit'] !== null ? e((string)$app['approved_credit_limit']) : '' ?>"
+                               class="form-control" style="font-size:13px;"
+                               placeholder="Enter your approved limit…">
+                    </div>
+
+                    <!-- Opt-in: apply credit limit to customer record -->
+                    <div style="margin-bottom:8px;padding:8px 10px;background:var(--color-surface-secondary);border-radius:4px;border:1px solid var(--color-border);">
+                        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="apply_credit_limit" name="apply_credit_limit" style="margin-top:2px;" onchange="reviewOptinChanged()">
+                            <span style="font-size:12px;">
+                                <strong>Apply credit limit to customer record</strong><br>
+                                <span style="color:var(--text-secondary);">Will update customers.credit_limit to the approved amount above.</span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <!-- Opt-in: update customer status -->
+                    <div style="margin-bottom:12px;padding:8px 10px;background:var(--color-surface-secondary);border-radius:4px;border:1px solid var(--color-border);">
+                        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:4px;">
+                            <input type="checkbox" id="apply_customer_status" name="apply_customer_status" style="margin-top:2px;" onchange="reviewOptinChanged()">
+                            <span style="font-size:12px;">
+                                <strong>Update customer status</strong><br>
+                                <span style="color:var(--text-secondary);">Current: <strong><?= e(ucfirst(str_replace('_', ' ', $app['customer_status'] ?? ''))) ?></strong></span>
+                            </span>
+                        </label>
+                        <select id="customer_status" name="customer_status"
+                                class="form-control" style="font-size:12px;margin-top:4px;display:none;"
+                                disabled>
+                            <?php foreach (['active','inactive','pending','suspended','credit_hold'] as $cs): ?>
+                            <option value="<?= $cs ?>" <?= $app['customer_status'] === $cs ? 'selected' : '' ?>>
+                                <?= ucfirst(str_replace('_', ' ', $cs)) ?>
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div id="review-error" style="display:none;color:var(--color-danger);font-size:12px;margin-bottom:8px;"></div>
+
+                    <button type="submit" class="btn btn-primary btn-sm" id="review-submit-btn" style="width:100%;">
+                        Save Review
+                    </button>
+
+                    <?php if ($app['review_outcome'] === 'needs_info'): ?>
+                    <!-- Re-send: D-CCA-4-C — creates a NEW application row, review_notes carried as note -->
+                    <button type="button" class="btn btn-ghost btn-sm" id="btn-resend"
+                            style="width:100%;margin-top:8px;" onclick="resendApplication()">
+                        Re-send Application Link
+                    </button>
+                    <p style="font-size:11px;color:var(--text-secondary);margin:4px 0 0;">
+                        Sends a fresh link. The notes above will be included in the email.
+                    </p>
+                    <?php endif; ?>
+
+                </form>
+
+                <?php if ($app['reviewed_at'] && $app['reviewed_by_name']): ?>
+                <p style="font-size:11px;color:var(--text-secondary);margin:12px 0 0;padding-top:10px;border-top:1px solid var(--color-border);">
+                    Last reviewed <?= e(date('M j, Y g:i A', strtotime($app['reviewed_at']))) ?>
+                    by <?= e($app['reviewed_by_name']) ?>
+                </p>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <!-- PDF card -->
         <div class="card">
             <div class="card-header"><h3 class="card-title">PDF</h3></div>
@@ -272,6 +415,126 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
+// ── Review panel helpers ──────────────────────────────────────────────────
+function reviewOutcomeChanged() {
+    // Show/hide the Re-send button dynamically when outcome changes.
+    // (The server-rendered Re-send button is shown based on the DB value;
+    //  this function handles the dynamic state after a successful save.)
+}
+
+function reviewOptinChanged() {
+    const applyStatus = document.getElementById('apply_customer_status');
+    const statusSel   = document.getElementById('customer_status');
+    if (!applyStatus || !statusSel) return;
+    if (applyStatus.checked) {
+        statusSel.style.display = '';
+        statusSel.disabled = false;
+    } else {
+        statusSel.style.display = 'none';
+        statusSel.disabled = true;
+    }
+}
+
+async function submitReview(e) {
+    e.preventDefault();
+    const btn = document.getElementById('review-submit-btn');
+    const err = document.getElementById('review-error');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+
+    const outcome = document.querySelector('input[name="review_outcome"]:checked')?.value;
+    if (!outcome) {
+        if (err) { err.style.display = ''; err.textContent = 'Please select an outcome.'; }
+        return;
+    }
+
+    const notes           = document.getElementById('review_notes')?.value ?? '';
+    const approvedLimit   = document.getElementById('approved_credit_limit')?.value ?? '';
+    const applyLimit      = document.getElementById('apply_credit_limit')?.checked ?? false;
+    const applyStatus     = document.getElementById('apply_customer_status')?.checked ?? false;
+    const custStatus      = document.getElementById('customer_status')?.value ?? '';
+    const appId           = parseInt(document.getElementById('review-app-id')?.value ?? '0', 10);
+    const updatedAt       = document.getElementById('review-updated-at')?.value ?? '';
+    const custUpdatedAt   = document.getElementById('review-customer-updated-at')?.value ?? '';
+
+    const payload = {
+        id:             appId,
+        updated_at:     updatedAt,
+        review_outcome: outcome,
+        review_notes:   notes || null,
+    };
+    if (approvedLimit !== '') { payload.approved_credit_limit = parseFloat(approvedLimit); }
+    if (applyLimit) {
+        payload.apply_credit_limit  = true;
+        payload.customer_updated_at = custUpdatedAt;
+    }
+    if (applyStatus) {
+        payload.apply_customer_status = true;
+        payload.customer_status       = custStatus;
+        payload.customer_updated_at   = custUpdatedAt;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        const res  = await fetch('<?= base_url('api/v1/credit_applications/review') ?>', {
+            method:  'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+            },
+            body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (res.ok && json.success) {
+            // Reload page to reflect updated state (new outcome badge, reviewed_at, Re-send button)
+            window.location.reload();
+        } else {
+            const msg = json.error?.message ?? 'Failed to save review.';
+            if (err) { err.style.display = ''; err.textContent = msg; }
+            if (btn) { btn.disabled = false; btn.textContent = 'Save Review'; }
+        }
+    } catch (ex) {
+        if (err) { err.style.display = ''; err.textContent = 'Network error. Please try again.'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Save Review'; }
+    }
+}
+
+async function resendApplication() {
+    const btn   = document.getElementById('btn-resend');
+    const notes = document.getElementById('review_notes')?.value ?? '';
+
+    if (!confirm('Send a new credit-application link to this customer? The previous application stays on record.')) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+    try {
+        const res  = await fetch('<?= base_url('api/v1/credit_applications/send') ?>', {
+            method:  'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+            },
+            body: JSON.stringify({
+                customer_id:  <?= (int)$app['customer_id'] ?>,
+                resend_note:  notes || null,
+            }),
+        });
+        const json = await res.json();
+        if (res.ok && json.success) {
+            const msg = json.data?.email_sent
+                ? 'New application link sent to customer.'
+                : 'Application created, but the email could not be sent: ' + (json.data?.email_error ?? 'unknown error');
+            alert(msg);
+            // Navigate to the customer's Credit Application tab to see the new row
+            window.location.href = '<?= base_url('customers/show') . '?id=' . (int)$app['customer_id'] ?>&tab=credit_applications';
+        } else {
+            alert(json.error?.message ?? 'Failed to send application.');
+            if (btn) { btn.disabled = false; btn.textContent = 'Re-send Application Link'; }
+        }
+    } catch (ex) {
+        alert('Network error. Please try again.');
+        if (btn) { btn.disabled = false; btn.textContent = 'Re-send Application Link'; }
+    }
+}
+
 function regenPdf() {
     const btns = document.querySelectorAll('#btn-regen-pdf, #btn-regen-pdf-2');
     btns.forEach(b => { b.disabled = true; b.textContent = 'Regenerating…'; });
