@@ -10,7 +10,7 @@ declare(strict_types=1);
  *   - Soft-delete (deleted_at + updated_by)
  *   - equipment_status_log entry ('deleted')
  *   - audit_log entry (action='delete', module='equipment')
- *   - Samsara trailer removal (non-blocking, after DB commit)
+ *   - D-SAMSARA-DELETE-1: does NOT propagate to Samsara (see @session note below)
  *
  * Blocked statuses (per FIX #5):
  *   - 'on_lease'  — unit is on an active lease; close the lease first
@@ -26,10 +26,12 @@ declare(strict_types=1);
  * @depends  api/bootstrap.php
  * @spec     FLEETFORGE_SPEC_FINAL.md §7.4, §5 SOFT_DELETE_TABLES
  * @session  S-BULK-DELETE
+ * @session  S-SAMSARA-DELETE-DECOUPLE — D-SAMSARA-DELETE-1: bulk delete no longer
+ *           propagates to Samsara (mirrors delete.php). Use api/v1/samsara/unlink.php
+ *           to intentionally decouple without destroying either record.
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
-require_once dirname(__DIR__, 4) . '/lib/GPS/SamsaraClient.php';
 
 require_method('POST');
 require_auth_api();
@@ -61,15 +63,10 @@ $deleted = 0;
 $skipped = 0;
 $errors  = [];
 
-// ── Collect Samsara trailers to remove after all DB work ───────
-// WHY deferred: commit every DB transaction first so FleetForge state is
-// consistent even if Samsara calls fail. Non-blocking, same policy as delete.php.
-$samsaraTrailersToDelete = [];
-
 foreach ($cleanIds as $id) {
     // ── Fetch unit — skip unknown / already-deleted IDs ────────
     $unit = db_row(
-        "SELECT id, unit_number, status, samsara_vehicle_id, samsara_entity_type
+        "SELECT id, unit_number, status
            FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
         [$id]
     );
@@ -137,13 +134,6 @@ foreach ($cleanIds as $id) {
         });
 
         $deleted++;
-
-        // Queue Samsara trailer deletion (executed after all DB work)
-        if (!empty($unit['samsara_vehicle_id'])
-            && ($unit['samsara_entity_type'] ?? 'vehicle') === 'trailer'
-        ) {
-            $samsaraTrailersToDelete[] = (string) $unit['samsara_vehicle_id'];
-        }
     } catch (\Throwable $e) {
         // DB failure on this ID — log it and continue with the rest
         $skipped++;
@@ -151,23 +141,7 @@ foreach ($cleanIds as $id) {
     }
 }
 
-// ── SAMSARA-3: Remove trailers from Samsara (non-blocking) ─────
-// WHY after the loop: all DB commits are done; Samsara failures cannot
-// roll back already-committed soft-deletes. Matches delete.php policy.
-if (!empty($samsaraTrailersToDelete)) {
-    try {
-        $samsara = new \FleetForge\GPS\SamsaraClient();
-        foreach ($samsaraTrailersToDelete as $vehicleId) {
-            try {
-                $samsara->deleteTrailer($vehicleId);
-            } catch (\Throwable) {
-                // Per-trailer Samsara failure is non-blocking — logged by SamsaraClient
-            }
-        }
-    } catch (\Throwable) {
-        // SamsaraClient construction failure — non-blocking
-    }
-}
+// D-SAMSARA-DELETE-1: bulk delete does NOT propagate to Samsara (use samsara/unlink.php to intentionally decouple).
 
 if ($deleted > 0) {
     invalidate_dashboard_cache();
