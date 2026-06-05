@@ -123,4 +123,6 @@ db_transaction(function () use ($id, $invoice) {
     ]);
 });
 
+invalidate_dashboard_cache();
+
 json_success(['id' => $id, 'deleted' => true]);

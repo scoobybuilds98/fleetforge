@@ -152,6 +152,10 @@ foreach ($clean_ids as $id) {
 // -----------------------------------------------------------------------
 // 3. Return partial-success envelope
 // -----------------------------------------------------------------------
+if ($deleted > 0) {
+    invalidate_dashboard_cache();
+}
+
 json_success([
     'deleted' => $deleted,
     'skipped' => $skipped,

@@ -165,6 +165,10 @@ foreach ($cleanIds as $id) {
     }
 }
 
+if ($deleted > 0) {
+    invalidate_dashboard_cache();
+}
+
 json_success([
     'deleted' => $deleted,
     'skipped' => $skipped,

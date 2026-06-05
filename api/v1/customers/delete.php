@@ -104,4 +104,6 @@ db_transaction(function () use ($id, $userId, $deletedAt, $customer): void {
     ]);
 });
 
+invalidate_dashboard_cache();
+
 json_success(['id' => $id, 'deleted_at' => $deletedAt]);

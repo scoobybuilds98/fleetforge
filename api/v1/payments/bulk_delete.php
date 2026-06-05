@@ -299,6 +299,10 @@ foreach ($ids as $id) {
     }
 }
 
+if ($actioned > 0) {
+    invalidate_dashboard_cache();
+}
+
 json_success([
     'actioned' => $actioned,
     'skipped'  => $skipped,

@@ -133,6 +133,10 @@ foreach ($ids as $id) {
 // -----------------------------------------------------------------------
 // 3. Return aggregate result
 // -----------------------------------------------------------------------
+if ($actioned > 0) {
+    invalidate_dashboard_cache();
+}
+
 json_success([
     'actioned' => $actioned,
     'skipped'  => $skipped,

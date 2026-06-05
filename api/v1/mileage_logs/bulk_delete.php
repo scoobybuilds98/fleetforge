@@ -113,6 +113,9 @@ foreach ($clean_ids as $id) {
 }
 
 // ── Response ──────────────────────────────────────────────────────────────────
+if ($actioned > 0) {
+    invalidate_dashboard_cache();
+}
 
 json_success([
     'actioned' => $actioned,

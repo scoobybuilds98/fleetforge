@@ -72,4 +72,6 @@ db_transaction(function() use ($id, $wo) {
     ]);
 });
 
+invalidate_dashboard_cache();
+
 json_success(['deleted' => true]);

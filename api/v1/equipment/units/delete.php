@@ -110,4 +110,6 @@ if (!empty($unit['samsara_vehicle_id'])
     }
 }
 
+invalidate_dashboard_cache();
+
 json_success(['id' => $id, 'deleted' => true]);

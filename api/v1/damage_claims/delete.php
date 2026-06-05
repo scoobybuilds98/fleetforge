@@ -79,4 +79,6 @@ db_transaction(function () use ($claimId, $claim) {
     ]);
 });
 
+invalidate_dashboard_cache();
+
 json_success(['deleted' => true]);

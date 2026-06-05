@@ -237,6 +237,8 @@ if (!empty($id)) {
     \FleetForge\QboPushers\PaymentEnqueuer::enqueue((int) $id, 'void');
 }
 
+invalidate_dashboard_cache();
+
 json_success([
     'id'                       => $id,
     'deleted'                  => true,

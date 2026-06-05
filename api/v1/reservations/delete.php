@@ -107,4 +107,6 @@ db_transaction(function () use ($id) {
     ]);
 });
 
+invalidate_dashboard_cache();
+
 json_success(['id' => $id]);

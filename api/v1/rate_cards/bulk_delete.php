@@ -121,6 +121,10 @@ foreach ($cleanIds as $id) {
 // -----------------------------------------------------------------------
 // 3. Return aggregated result
 // -----------------------------------------------------------------------
+if ($actioned > 0) {
+    invalidate_dashboard_cache();
+}
+
 json_success([
     'actioned' => $actioned,
     'skipped'  => $skipped,

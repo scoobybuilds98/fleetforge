@@ -784,3 +784,15 @@ function help_button(string $moduleSlug): string
          . 'How this works'
          . '</button>';
 }
+
+/**
+ * Invalidate all dashboard cache rows (KPIs + all 12 charts).
+ *
+ * Call after any write that changes KPI-relevant data so the next
+ * dashboard load reflects the change immediately rather than waiting
+ * for the TTL (5 min KPIs, 15 min charts) to expire naturally.
+ */
+function invalidate_dashboard_cache(): void
+{
+    db_execute("DELETE FROM report_cache WHERE report_type LIKE 'dashboard_%'");
+}
