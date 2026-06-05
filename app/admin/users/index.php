@@ -127,10 +127,16 @@ $portalCustomers = $canEditPortal
          ORDER BY company_name ASC")
     : [];
 
-// Default tab from ?tab= query param. Allowed: team (default), portal.
+// Default tab from ?tab= query param. Allowed: team (default), portal, defaults.
 $defaultTab = clean_string($_GET['tab'] ?? 'team');
-if (!in_array($defaultTab, ['team', 'portal'], true)) $defaultTab = 'team';
+if (!in_array($defaultTab, ['team', 'portal', 'defaults'], true)) $defaultTab = 'team';
 if ($defaultTab === 'portal' && !$canViewPortal) $defaultTab = 'team';
+if ($defaultTab === 'defaults' && !is_super_admin()) $defaultTab = 'team';
+
+// Roles for the Default Permissions tab
+$allRolesForDefaults = is_super_admin() ? db_select(
+    "SELECT id, name, slug, description FROM user_roles WHERE is_system = 1 AND slug != 'super_admin' ORDER BY id", []
+) : [];
 
 $pageTitle = 'Users';
 require_once FF_ROOT . '/includes/header.php';
@@ -164,6 +170,13 @@ require_once FF_ROOT . '/includes/header.php';
             role="tab">
         Portal Users
         <span class="tab-badge" style="font-size:0.7rem;"><?= e((string) $portalKpis['total']) ?></span>
+    </button>
+    <?php endif; ?>
+    <?php if (is_super_admin()): ?>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'defaults' }"
+            @click="activeTab = 'defaults'; history.replaceState(null, '', '<?= base_url('users') ?>?tab=defaults')"
+            role="tab">
+        Default Permissions
     </button>
     <?php endif; ?>
 </div>
@@ -624,6 +637,238 @@ require_once FF_ROOT . '/includes/header.php';
 </div><!-- /tab 2 portal -->
 <?php endif; ?>
 
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB 3: DEFAULT PERMISSIONS (super_admin only)                            -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php if (is_super_admin()): ?>
+<div x-show="activeTab === 'defaults'" x-transition:enter class="ff-tab-enter"
+     x-data="FF_RoleDefaults()" x-init="init()">
+
+    <!-- Role selector cards -->
+    <div class="rp-roles-card card" style="margin-bottom:18px;border-radius:16px;">
+        <div class="perm-apple-card-header">
+            <div class="perm-apple-card-icon" style="background:rgba(139,92,246,0.15);color:#a78bfa;width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:20px;height:20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg>
+            </div>
+            <div>
+                <div class="perm-apple-card-title">Role Default Permissions</div>
+                <div class="perm-apple-card-subtitle">Select a role to view and override its default permissions — affects every user with that role.</div>
+            </div>
+            <a href="<?= base_url('users/role_permissions') ?>" class="btn btn-secondary btn-sm" style="margin-left:auto;flex-shrink:0;">Full page view →</a>
+        </div>
+        <div class="perm-role-cards-row">
+            <?php
+            $roleIconMap = [
+                'manager'    => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 0 0 .75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 0 0-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0 1 12 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 0 1-.673-.38m0 0A2.18 2.18 0 0 1 3 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 0 1 3.413-.387m7.5 0V5.25A2.25 2.25 0 0 0 13.5 3h-3a2.25 2.25 0 0 0-2.25 2.25v.894m7.5 0a48.667 48.667 0 0 0-7.5 0M12 12.75h.008v.008H12v-.008Z"/></svg>',
+                'dispatcher' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>',
+                'accountant' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z"/></svg>',
+                'read_only'  => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>',
+            ];
+            $roleColorMap = [
+                'manager'    => ['bg' => 'rgba(59,130,246,0.15)',  'color' => '#60a5fa'],
+                'dispatcher' => ['bg' => 'rgba(34,197,94,0.15)',   'color' => '#4ade80'],
+                'accountant' => ['bg' => 'rgba(139,92,246,0.15)',  'color' => '#a78bfa'],
+                'read_only'  => ['bg' => 'rgba(100,116,139,0.15)', 'color' => '#94a3b8'],
+            ];
+            foreach ($allRolesForDefaults as $r):
+                $c = $roleColorMap[$r['slug']] ?? ['bg' => 'rgba(100,116,139,0.15)', 'color' => '#94a3b8'];
+                $ic = $roleIconMap[$r['slug']] ?? '';
+            ?>
+            <div class="perm-role-card" :class="selectedRoleId === <?= (int)$r['id'] ?> ? 'is-active' : ''"
+                 @click="selectRole(<?= (int)$r['id'] ?>, '<?= addslashes(e($r['name'])) ?>')">
+                <div class="perm-role-card-icon" style="background:<?= e($c['bg']) ?>;color:<?= e($c['color']) ?>;"><?= $ic ?></div>
+                <div class="perm-role-card-name"><?= e($r['name']) ?></div>
+                <div class="perm-role-card-desc"><?= e($r['description']) ?></div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <!-- Matrix area -->
+    <div x-show="!selectedRoleId" class="rp-no-role-selected">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" style="width:40px;height:40px;opacity:.25;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
+        <span>Select a role above to view and edit its default permissions</span>
+    </div>
+
+    <div x-show="loadingMatrix" class="rp-loading">
+        <div class="rp-loading-spinner"></div>
+        Loading matrix…
+    </div>
+
+    <!-- The role matrix (rendered after loading) -->
+    <div x-show="selectedRoleId && !loadingMatrix && modules.length > 0">
+
+        <!-- Matrix card -->
+        <div class="perm-layout">
+        <div class="card perm-matrix-card">
+            <div class="perm-matrix-card-header">
+                <div>
+                    <div class="perm-apple-card-title" style="font-size:1rem;" x-text="selectedRoleName + ' — Default Permissions'"></div>
+                    <div class="perm-apple-card-subtitle">Orange ring = override allow. Red = override deny. Green = config grants.</div>
+                </div>
+                <div class="perm-matrix-header-actions">
+                    <span class="perm-override-pill" x-show="overrideCount > 0">
+                        <span x-text="overrideCount"></span>&nbsp;override<span x-show="overrideCount !== 1">s</span>
+                    </span>
+                    <button class="btn btn-secondary btn-sm" @click="confirmReset()" :disabled="overrideCount === 0 || saving">Reset all</button>
+                </div>
+            </div>
+
+            <!-- Grouped sections -->
+            <template x-for="section in sections" :key="section.name">
+                <div class="perm-section">
+                    <div class="perm-section-header">
+                        <div class="perm-section-title">
+                            <span class="perm-section-dot" :style="'background:' + section.color"></span>
+                            <span x-text="section.name"></span>
+                        </div>
+                        <div class="perm-section-bulk-actions" x-show="section.bulkGroup">
+                            <button class="perm-bulk-btn" @click="openGroupMacro(section.bulkGroup, 'grant_view')" :disabled="saving">View</button>
+                            <button class="perm-bulk-btn" @click="openGroupMacro(section.bulkGroup, 'grant_read_write')" :disabled="saving">Read+Write</button>
+                            <button class="perm-bulk-btn perm-bulk-btn--danger" @click="openGroupMacro(section.bulkGroup, 'deny_all')" :disabled="saving">Deny All</button>
+                            <button class="perm-bulk-btn perm-bulk-btn--muted" @click="openGroupMacro(section.bulkGroup, 'clear')" :disabled="saving">Clear</button>
+                        </div>
+                    </div>
+                    <template x-for="slug in section.modules" :key="slug">
+                        <template x-if="moduleBySlug(slug)">
+                            <div class="perm-matrix-row">
+                                <div class="perm-matrix-row-header">
+                                    <span class="perm-matrix-row-label" x-text="moduleBySlug(slug).label"></span>
+                                </div>
+                                <div class="perm-matrix-row-cells">
+                                    <template x-for="action in moduleBySlug(slug).actions" :key="action">
+                                        <div class="perm-matrix-cell-col">
+                                            <div class="perm-matrix-cell-header" x-text="action"></div>
+                                            <div class="perm-ios-toggle"
+                                                 :class="toggleClass(slug, action)"
+                                                 @click="cycleCell(slug, action)"
+                                                 :title="cellTooltip(slug, action)">
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </template>
+                </div>
+            </template>
+        </div>
+
+        <!-- Sidebar: active overrides -->
+        <div class="perm-sidebar-col">
+            <div class="card perm-sidebar-card">
+                <div class="perm-apple-card-header perm-apple-card-header--sm">
+                    <div class="perm-apple-card-icon perm-apple-card-icon--sm" style="background:rgba(249,115,22,0.14);color:#fb923c;">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
+                    </div>
+                    <div class="perm-apple-card-title perm-apple-card-title--sm">Active Overrides</div>
+                    <span class="perm-badge-count" x-show="overrideCount > 0" x-text="overrideCount"></span>
+                </div>
+                <div x-show="overrideCount === 0" class="perm-empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" style="width:28px;height:28px;opacity:.28;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+                    <span>Using config defaults</span>
+                </div>
+                <ul x-show="overrideCount > 0" class="perm-override-list">
+                    <template x-for="ovr in overrideList" :key="ovr.module + ':' + ovr.action">
+                        <li class="perm-override-item">
+                            <div class="perm-override-item-head">
+                                <span class="perm-override-badge" :class="ovr.override===1?'perm-override-badge--allow':'perm-override-badge--deny'" x-text="ovr.override===1?'Allow':'Deny'"></span>
+                                <span class="perm-override-target"><span x-text="ovr.label"></span><span class="perm-override-action" x-text="' · '+ovr.action"></span></span>
+                                <button class="perm-override-clear-btn" @click="sendUpdate(ovr.module,ovr.action,null,null)" :disabled="saving">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" style="width:10px;height:10px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                            <div x-show="ovr.reason" class="perm-override-reason" x-text="ovr.reason"></div>
+                        </li>
+                    </template>
+                </ul>
+            </div>
+        </div>
+        </div><!-- /perm-layout -->
+
+    </div><!-- /matrix area -->
+
+    <!-- Reason modal -->
+    <div x-show="reasonModal.open" x-cloak class="modal-overlay"
+         @click.self="reasonModal.open=false" @keydown.escape.window="reasonModal.open&&(reasonModal.open=false)"
+         style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);">
+        <div class="modal" @click.stop>
+            <div class="modal-header">
+                <h3 class="modal-title" x-text="reasonModal.intent===1?'Grant to role':'Deny for role'"></h3>
+                <button class="modal-close-btn" @click="reasonModal.open=false">×</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0 0 6px;font-size:0.875rem;color:var(--text-secondary);">
+                    <span x-text="reasonModal.intent===1?'Grant':'Deny'"></span>
+                    <strong x-text="reasonModal.label"></strong> · <strong x-text="reasonModal.action"></strong>
+                    for all <strong x-text="selectedRoleName"></strong> users.
+                </p>
+                <div class="form-group" style="margin-top:12px;">
+                    <label class="form-label">Reason <span class="text-danger">*</span></label>
+                    <textarea class="form-control" rows="3" x-model="reasonModal.reason" maxlength="1000" placeholder="Why is this override needed?"></textarea>
+                </div>
+                <div x-show="reasonModal.error" x-text="reasonModal.error" style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="reasonModal.open=false">Cancel</button>
+                <button class="btn btn-primary" :class="reasonModal.intent===1?'':'btn-danger'"
+                        @click="confirmReason()" :disabled="saving||!(reasonModal.reason||'').trim()">
+                    <span x-show="!saving" x-text="reasonModal.intent===1?'Grant':'Deny'"></span>
+                    <span x-show="saving">Saving…</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group macro modal -->
+    <div x-show="groupMacroModal.open" x-cloak class="modal-overlay"
+         @click.self="groupMacroModal.open=false" @keydown.escape.window="groupMacroModal.open&&(groupMacroModal.open=false)"
+         style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);">
+        <div class="modal" @click.stop>
+            <div class="modal-header">
+                <h3 class="modal-title">Bulk: <span x-text="groupMacroModal.macroLabel"></span> · <span x-text="groupMacroModal.groupLabel"></span></h3>
+                <button class="modal-close-btn" @click="groupMacroModal.open=false">×</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0 0 12px;font-size:0.875rem;color:var(--text-secondary);" x-text="groupMacroModal.intro"></p>
+                <div class="form-group">
+                    <label class="form-label">Reason <span class="text-danger">*</span></label>
+                    <textarea class="form-control" rows="3" x-model="groupMacroModal.reason" maxlength="1000" placeholder="Why is this bulk change needed?"></textarea>
+                </div>
+                <div x-show="groupMacroModal.error" x-text="groupMacroModal.error" style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="groupMacroModal.open=false">Cancel</button>
+                <button class="btn" :class="groupMacroModal.macro==='deny_all'?'btn-danger':'btn-primary'"
+                        @click="confirmGroupMacro()" :disabled="saving||!(groupMacroModal.reason||'').trim()">
+                    <span x-show="!saving" x-text="groupMacroModal.submitLabel"></span>
+                    <span x-show="saving">Applying…</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset modal -->
+    <div x-show="resetModalOpen" x-cloak class="modal-overlay"
+         @click.self="resetModalOpen=false" style="background:rgba(0,0,0,0.70);backdrop-filter:blur(4px);">
+        <div class="modal" @click.stop>
+            <div class="modal-header">
+                <h3 class="modal-title">Reset all overrides?</h3>
+                <button class="modal-close-btn" @click="resetModalOpen=false">×</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0;font-size:0.875rem;">Remove all <strong x-text="overrideCount"></strong> overrides for <strong x-text="selectedRoleName"></strong> and revert to config defaults?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="resetModalOpen=false">Cancel</button>
+                <button class="btn btn-danger" @click="resetAll()" :disabled="saving"><span x-show="!saving">Reset all</span><span x-show="saving">Resetting…</span></button>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /tab 3 defaults -->
+<?php endif; ?>
+
 </div><!-- /x-data root tab container -->
 
 <script>
@@ -907,6 +1152,189 @@ function portalCreate() {
     };
 }
 <?php endif; ?>
+<?php endif; ?>
+
+<?php if (is_super_admin()): ?>
+function FF_RoleDefaults() {
+    const SECTION_DEFS = [
+        { name:'Fleet Operations',         color:'#22c55e', bulkGroup:'fleet_ops',  modules:['customers','equipment','leases','reservations','rates'] },
+        { name:'Maintenance & Compliance', color:'#f59e0b', bulkGroup:null,         modules:['maintenance','inspections','compliance'] },
+        { name:'Financial',                color:'#3b82f6', bulkGroup:'accounting', modules:['invoices','payments','chart_of_accounts','journal_entries','accounts_payable','bank_accounts','fixed_assets','tax_management','financial_reports','budgets','period_management','accounting_settings'] },
+        { name:'Analytics & Reports',      color:'#8b5cf6', bulkGroup:null,         modules:['reports','analytics','audit'] },
+        { name:'System',                   color:'#64748b', bulkGroup:null,         modules:['ai','users','settings','settings_general','settings_design','settings_users','settings_portal','settings_audit','settings_system','settings_integrations','settings_intelligence'] },
+        { name:'Integrations',             color:'#14b8a6', bulkGroup:'quickbooks', modules:['quickbooks'] },
+    ];
+    const PERM_GROUPS = {
+        fleet_ops:  { key:'fleet_ops',  label:'Fleet Operations', modules:['customers','equipment','leases','reservations','rates'] },
+        accounting: { key:'accounting', label:'Financial',        modules:['invoices','payments','chart_of_accounts','journal_entries','accounts_payable','bank_accounts','fixed_assets','tax_management','financial_reports','budgets','period_management','accounting_settings'] },
+        quickbooks: { key:'quickbooks', label:'Integrations',     modules:['quickbooks'] },
+    };
+    return {
+        selectedRoleId:   null,
+        selectedRoleName: '',
+        modules:          [],
+        actionDescriptions: {},
+        loadingMatrix:    false,
+        saving:           false,
+        sections:         SECTION_DEFS,
+        reasonModal:      { open:false, module:null, action:null, label:'', intent:null, reason:'', error:null },
+        groupMacroModal:  { open:false, group:null, groupLabel:'', macro:null, macroLabel:'', submitLabel:'Apply', intro:'', reason:'', error:null },
+        resetModalOpen:   false,
+
+        init() { /* role selected by clicking a card */ },
+
+        async selectRole(roleId, roleName) {
+            if (this.selectedRoleId === roleId) return;
+            this.selectedRoleId   = roleId;
+            this.selectedRoleName = roleName;
+            this.modules          = [];
+            this.loadingMatrix    = true;
+            try {
+                const res = await FF_Api.get(FF_Api.url('/api/v1/users/role_permissions/index.php?role_id=' + roleId));
+                if (res.success && res.data) {
+                    this.modules            = res.data.modules;
+                    this.actionDescriptions = res.data.action_descriptions || {};
+                }
+            } catch(e) { FF_Toast.error('Error', 'Could not load permissions.'); }
+            finally { this.loadingMatrix = false; }
+        },
+
+        moduleBySlug(slug) { return this.modules.find(m => m.slug === slug) || null; },
+
+        toggleClass(slug, action) {
+            const m = this.moduleBySlug(slug);
+            if (!m) return 'is-off';
+            const cell = m.permissions[action];
+            if (cell.override === 1) return 'ovr-allow';
+            if (cell.override === 0) return 'ovr-deny';
+            return cell.config ? 'is-on' : 'is-off';
+        },
+
+        cellTooltip(slug, action) {
+            const m = this.moduleBySlug(slug);
+            if (!m) return '';
+            const cell = m.permissions[action];
+            const cfgTxt = cell.config ? 'grants' : 'denies';
+            const desc   = this.actionDescriptions[action] || '';
+            const head   = cell.override === 1 ? `Override: ALLOW (config ${cfgTxt})`
+                         : cell.override === 0 ? `Override: DENY (config ${cfgTxt})`
+                         : `Config ${cfgTxt} by default`;
+            return desc ? `${head}\n${desc}` : head;
+        },
+
+        get overrideCount() {
+            let n = 0;
+            for (const row of this.modules) for (const a of row.actions) if (row.permissions[a].override !== null) n++;
+            return n;
+        },
+        get overrideList() {
+            const out = [];
+            for (const row of this.modules) for (const a of row.actions) {
+                const cell = row.permissions[a];
+                if (cell.override !== null) out.push({ module:row.slug, label:row.label, action:a, override:cell.override, reason:cell.reason||'' });
+            }
+            return out;
+        },
+
+        cycleCell(slug, action) {
+            if (this.saving) return;
+            const m    = this.moduleBySlug(slug);
+            const cell = m.permissions[action];
+            let nextIntent = cell.override === null ? 1 : cell.override === 1 ? 0 : null;
+            if (nextIntent === null) { this.sendUpdate(slug, action, null, null); return; }
+            this.reasonModal = { open:true, module:slug, action:action, label:m.label, intent:nextIntent, reason:'', error:null };
+        },
+        cancelReason() { this.reasonModal.open = false; },
+        async confirmReason() {
+            const reason = (this.reasonModal.reason || '').trim();
+            if (!reason) { this.reasonModal.error = 'A reason is required.'; return; }
+            await this.sendUpdate(this.reasonModal.module, this.reasonModal.action, this.reasonModal.intent, reason);
+        },
+        async sendUpdate(slug, action, granted, reason) {
+            this.saving = true;
+            try {
+                const res = await FF_Api.post(FF_Api.url('/api/v1/users/role_permissions/update.php'), {
+                    role_id: this.selectedRoleId, module: slug, action: action, granted: granted, reason: reason,
+                });
+                if (!res.success) {
+                    const msg = (res.error && res.error.message) || 'Save failed.';
+                    this.reasonModal.open ? (this.reasonModal.error = msg) : FF_Toast.error('Error', msg);
+                    return;
+                }
+                const m    = this.moduleBySlug(slug);
+                const cell = m.permissions[action];
+                cell.override  = granted; cell.reason = reason;
+                cell.effective = granted === null ? cell.config : Boolean(granted);
+                this.reasonModal.open = false;
+                FF_Toast.success('Saved', granted === null ? 'Override cleared.' : (granted === 1 ? 'Permission granted for role.' : 'Permission denied for role.'));
+            } catch(e) {
+                const msg = 'Network error. Please try again.';
+                this.reasonModal.open ? (this.reasonModal.error = msg) : FF_Toast.error('Error', msg);
+            } finally { this.saving = false; }
+        },
+        confirmReset() { if (this.overrideCount === 0) return; this.resetModalOpen = true; },
+        async resetAll() {
+            this.saving = true;
+            try {
+                const res = await FF_Api.post(FF_Api.url('/api/v1/users/role_permissions/reset.php'), { role_id: this.selectedRoleId });
+                if (!res.success) { FF_Toast.error('Error', (res.error && res.error.message) || 'Reset failed.'); return; }
+                for (const row of this.modules) for (const a of row.actions) { row.permissions[a].override = null; row.permissions[a].effective = row.permissions[a].config; }
+                this.resetModalOpen = false;
+                FF_Toast.success('Reset', `Cleared ${res.data.cleared_count} override${res.data.cleared_count===1?'':'s'}.`);
+            } catch(e) { FF_Toast.error('Error', 'Network error.'); }
+            finally { this.saving = false; }
+        },
+        _macroLabel(macro) { return {grant_view:'Grant View',grant_read_write:'Grant Read+Write',deny_all:'Deny All',clear:'Clear Overrides'}[macro]||macro; },
+        _macroSubmitLabel(macro) { return {grant_view:'Grant View',grant_read_write:'Grant Read+Write',deny_all:'Deny All',clear:'Clear'}[macro]||'Apply'; },
+        openGroupMacro(groupKey, macro) {
+            if (this.saving || !groupKey) return;
+            const grp = PERM_GROUPS[groupKey];
+            if (!grp) return;
+            const n    = grp.modules.length, noun = n===1?'module':'modules';
+            const role = this.selectedRoleName;
+            const intros = {
+                grant_view:       `Grant view on ${n} ${noun} in "${grp.label}" for all ${role} users.`,
+                grant_read_write: `Grant view+create+edit on ${n} ${noun} in "${grp.label}" for all ${role} users.`,
+                deny_all:         `Deny all actions on every module in "${grp.label}" for all ${role} users.`,
+                clear:            `Clear all overrides on ${n} ${noun} in "${grp.label}" — reverts to config defaults.`,
+            };
+            this.groupMacroModal = { open:true, group:groupKey, groupLabel:grp.label, macro, macroLabel:this._macroLabel(macro), submitLabel:this._macroSubmitLabel(macro), intro:intros[macro]||'', reason:'', error:null };
+        },
+        async confirmGroupMacro() {
+            const reason = (this.groupMacroModal.reason || '').trim();
+            if (!reason) { this.groupMacroModal.error = 'A reason is required.'; return; }
+            const grp  = PERM_GROUPS[this.groupMacroModal.group];
+            if (!grp)  { this.groupMacroModal.error = 'Group not found.'; return; }
+            const macro = this.groupMacroModal.macro;
+            this.saving = true;
+            try {
+                let applied = 0, cleared = 0;
+                for (const moduleName of grp.modules) {
+                    const row = this.moduleBySlug(moduleName);
+                    if (!row) continue;
+                    const actions = macro==='grant_view' ? ['view'] : macro==='grant_read_write' ? ['view','create','edit'] : row.actions;
+                    const granted = macro==='clear' ? null : (macro==='deny_all' ? 0 : 1);
+                    for (const a of actions) {
+                        const res = await FF_Api.post(FF_Api.url('/api/v1/users/role_permissions/update.php'), {
+                            role_id: this.selectedRoleId, module: moduleName, action: a, granted, reason,
+                        });
+                        if (res.success) {
+                            const cell = row.permissions[a];
+                            cell.override = granted; cell.reason = reason;
+                            cell.effective = granted===null ? cell.config : Boolean(granted);
+                            if (granted===null) cleared++; else applied++;
+                        }
+                    }
+                }
+                this.groupMacroModal.open = false;
+                FF_Toast.success('Bulk complete', macro==='clear'||cleared>0 ? `Cleared ${cleared} override${cleared===1?'':'s'}.` : `Applied ${applied} override${applied===1?'':'s'}.`);
+            } catch(e) { this.groupMacroModal.error = 'Network error.'; }
+            finally { this.saving = false; }
+        },
+    };
+}
+
+/* perm-* and rp-* CSS lives in app.css (S-PERM-APPLE-REDESIGN). */
 <?php endif; ?>
 </script>
 
