@@ -9,9 +9,11 @@ declare(strict_types=1);
  *              given customer and returns the rendered subject + body_html so
  *              the admin can preview what will be sent before clicking Send.
  *
- *              The public URL in the preview is a placeholder string — the real
- *              tokenized link is generated at send time (token never pre-created
- *              just for preview, per D-CCA-1 and Trap 7).
+ *              The CTA href in the preview points to ?admin_preview=1 on the
+ *              credit application form — clicking it lets the operator inspect
+ *              the form layout without a real token being generated (D-CCA-1 /
+ *              Trap 7: raw token never pre-created for preview; emailed once only
+ *              when the operator clicks Send).
  *
  * @method      GET
  * @query       customer_id (required int)
@@ -20,7 +22,7 @@ declare(strict_types=1);
  *              404 if customer not found
  *
  * @depends     api/bootstrap.php, lib/Email/EmailService.php
- * @session     S-CCA-1
+ * @session     S-CCA-1, S-CCA-BTN-SETTINGS
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -48,28 +50,23 @@ if (!$customer) {
 $toEmail = clean_string($customer['email'] ?: ($customer['billing_email'] ?? '')) ?: '(no email on file)';
 $toName  = (string) ($customer['contact_name'] ?: $customer['company_name']);
 
-// Compile the template with a placeholder URL — no token is generated for preview.
+// Compile the template.  The CTA href uses the admin-preview URL so operators
+// can click "Start Your Credit Application" in the preview and immediately see
+// the form layout (auth-gated via ?admin_preview=1 in credit-application.php).
+// No real token is generated here — Trap 7 / D-CCA-1.
+$adminPreviewUrl = base_url('credit-application') . '?admin_preview=1';
+
 $compiled = EmailService::compileTemplate(
     db_row("SELECT id FROM email_templates WHERE slug = 'credit_application_invite' AND is_active = 1 AND deleted_at IS NULL", [])['id'] ?? 0,
     [
-        'customer_name'            => $toName,
-        'credit_application_url'   => '[Credit Application Link]',
+        'customer_name'             => $toName,
+        'credit_application_url'    => $adminPreviewUrl,
         'minimum_requirements_html' => (string) settings_get('credit_application.minimum_requirements_html', ''),
     ]
 );
 
-// FIXPACK-EMAIL-SCROLL-BTN: neutralise all href attributes before returning.
-// The credit_application_url placeholder compiles to "[Credit Application Link]"
-// in both <a href> and visible text; square brackets fail resolve_route()'s
-// /^[a-zA-Z0-9_\-.]+$/ guard → ff_not_found() → 404 on click.  Any other href
-// in the template is equally unsafe in a preview context (no real token exists).
-// Replacing with javascript:void(0) prevents navigation for all anchors.
-// Belt-and-suspenders: the preview-body div also carries @click.capture/prevent.
-$bodyHtml = EmailService::renderEmailHtml($compiled['body_html']);
-$bodyHtml = (string) preg_replace('/ href="[^"]*"/i', ' href="javascript:void(0)"', $bodyHtml);
-
 json_success([
     'subject'   => $compiled['subject'],
-    'body_html' => $bodyHtml,
+    'body_html' => EmailService::renderEmailHtml($compiled['body_html']),
     'to_email'  => $toEmail,
 ]);

@@ -59,6 +59,34 @@ $termsUrl        = (string)(settings_get('credit_application.terms_url', '#'));
 $disclaimerHtml  = (string)(settings_get('credit_application.disclaimer_html',  ''));
 $minReqHtml      = (string)(settings_get('credit_application.minimum_requirements_html', ''));
 
+// ── Admin preview mode ────────────────────────────────────────────────────────
+// GET /credit-application?admin_preview=1 lets authenticated admins with
+// customers:view access inspect the full form layout without a real tokenized
+// invite.  POST in this mode is blocked — no data is ever written.
+// Linked from: email preview modal CTA + Settings > Credit Application card.
+$isAdminPreview = isset($_GET['admin_preview']);
+if ($isAdminPreview) {
+    ff_session_start();
+    if (!is_logged_in() || !can('customers', 'view')) {
+        ff_not_found(); // silent 404 — do not expose admin-mode existence to public
+    }
+    $pageState  = 'form';
+    $app        = [
+        'id'                    => 0,
+        'customer_id'           => 0,
+        'status'                => 'opened',
+        'deleted_at'            => null,
+        'updated_at'            => date('Y-m-d H:i:s'),
+        'token_expires_at'      => date('Y-m-d H:i:s', strtotime('+30 days')),
+        'customer_company_name' => $companyName,
+    ];
+    $tokenParam = '';
+    $tokenHash  = '';
+    $csrfToken  = bin2hex(random_bytes(16)); // dummy — submissions blocked below
+    $errors     = [];
+    $old        = [];
+} else {
+
 // ── Token resolution ─────────────────────────────────────────────────────────
 $tokenParam = trim((string)($_GET['token'] ?? $_POST['token'] ?? ''));
 $app        = null;
@@ -119,11 +147,13 @@ if (empty($_SESSION[$csrfKey])) {
 }
 $csrfToken = $_SESSION[$csrfKey];
 
+} // end !$isAdminPreview block (token resolution + CSRF)
+
 // ── POST handler ─────────────────────────────────────────────────────────────
 $errors = [];
 $old    = $_POST; // re-fill form inputs on validation error
 
-if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST' && !$isAdminPreview) {
 
     // 1. CSRF
     $submittedCsrf = (string)($_POST['csrf_token'] ?? '');
@@ -973,6 +1003,18 @@ $pageTitle = 'Credit Application — ' . e($companyName);
 </head>
 <body>
 
+<?php if ($isAdminPreview): ?>
+<!-- Admin preview banner — visible only when ?admin_preview=1 is set by an authenticated admin -->
+<div style="position:sticky;top:0;z-index:100;background:#fef9c3;color:#78350f;
+            padding:10px 20px;text-align:center;font-size:13px;font-weight:600;
+            border-bottom:2px solid #f59e0b;letter-spacing:.01em;">
+    ⚠ ADMIN PREVIEW — This is the layout customers see. Form submission is disabled.
+    <a href="<?= base_url('settings') ?>" style="margin-left:16px;font-weight:400;color:#92400e;text-decoration:underline;">
+        Back to Settings
+    </a>
+</div>
+<?php endif; ?>
+
 <!-- Header -->
 <header class="cca-header">
     <?php if ($logoUrl !== ''): ?>
@@ -1469,7 +1511,15 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             <?php if (isset($errors['signature'])): ?><div class="cca-error-msg"><?= e($errors['signature']) ?></div><?php endif; ?>
         </div>
 
+        <?php if ($isAdminPreview): ?>
+        <button type="button" class="cca-submit-btn" disabled
+                style="opacity:.45;cursor:not-allowed;"
+                title="Form submission is disabled in admin preview mode">
+            Submit Application (preview — disabled)
+        </button>
+        <?php else: ?>
         <button type="submit" class="cca-submit-btn">Submit Application</button>
+        <?php endif; ?>
     </div>
 
     <!-- §9 MINIMUM REQUIREMENTS ─────────────────────────────────────────── -->

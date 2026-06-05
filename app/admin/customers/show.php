@@ -1415,17 +1415,14 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         <!-- email-preview-frame: styled border + "PREVIEW" label strip -->
                         <div class="email-preview-frame">
                             <div class="email-preview-label">Preview</div>
-                            <!-- Primary guard: preview.php strips all href="..." to
-                                 href="javascript:void(0)" before returning body_html, so no anchor
-                                 in the rendered HTML can navigate (FIXPACK-EMAIL-SCROLL-BTN).
-                                 Belt-and-suspenders: @click.capture.prevent stops any click that
-                                 reaches this container regardless of href content. -->
+                            <!-- S-CCA-BTN-SETTINGS: preview.php sets credit_application_url to
+                                 ?admin_preview=1 so the CTA opens the form in admin-preview mode.
+                                 @click.capture.prevent removed — links are intentionally clickable. -->
                             <div class="email-preview-body"
-                                 x-html="creditPreviewModal.body_html"
-                                 @click.capture.prevent></div>
+                                 x-html="creditPreviewModal.body_html"></div>
                         </div>
                         <p class="text-sm text-secondary" style="margin:12px 0 0;">
-                            The credit application link in this preview is a placeholder — the real tokenized link is generated when you click Send.
+                            Click <em>Start Your Credit Application</em> to preview the form layout. The real tokenized link is generated when you click Send.
                         </p>
                     </div>
                 </template>

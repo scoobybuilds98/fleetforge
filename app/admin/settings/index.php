@@ -352,15 +352,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
     $postedGroup = isset($_POST['_group']) ? (string) $_POST['_group'] : '';
     if ($postedGroup !== '') {
         $groupToTab = [
-            // General tab (primary groups + currency)
-            'company'       => 'general',
-            'invoices'      => 'general',
-            'leases'        => 'general',
-            'maintenance'   => 'general',
-            'alerts'        => 'general',
-            'notifications' => 'general',
-            'yards'         => 'general',
-            'currency'      => 'general',
+            // General tab (primary groups + currency + credit application)
+            'company'            => 'general',
+            'invoices'           => 'general',
+            'leases'             => 'general',
+            'maintenance'        => 'general',
+            'alerts'             => 'general',
+            'notifications'      => 'general',
+            'yards'              => 'general',
+            'currency'           => 'general',
+            'credit_application' => 'general',
             // Integrations tab (sensitive credential groups)
             'gps'           => 'integrations',
             'email'         => 'integrations',
@@ -394,7 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio','credit_application')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -404,7 +405,7 @@ foreach ($allSettings as $s) {
     $grouped[$s['group_name']][] = $s;
 }
 
-$primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
+$primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards', 'credit_application'];
 // S-SETTINGS-CLEANUP: 'security' added so the MFA card renders alongside
 // gps/ai/email/storage/aws in the Integrations tab via the existing render loop.
 // S-INTEL-TAB: 'ai' removed from Integrations — it now renders in the
@@ -443,8 +444,9 @@ $groupLabels = [
     'gps'           => 'GPS Integration',
     'ai'            => 'AI / Machine Learning',
     'currency'      => 'Currency Conversion',
-    'yards'         => 'Yards',
-    'email'         => 'Email (SMTP / SES)',
+    'yards'              => 'Yards',
+    'credit_application' => 'Credit Application',
+    'email'              => 'Email (SMTP / SES)',
     'storage'       => 'Storage Driver',
     'aws'           => 'AWS Credentials (S3 + SES)',
     'security'      => 'Security / MFA',
@@ -685,6 +687,25 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
     </div>
 </div>
 <?php endforeach; ?>
+
+<!-- S-CCA-BTN-SETTINGS: admin shortcut to preview the credit application form layout.
+     Opens credit-application.php?admin_preview=1 which is gated on is_logged_in()
+     + can('customers','view') — no token generated, submission disabled. -->
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;">Preview Credit Application Form</div>
+    <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <p style="margin:0;color:var(--text-secondary);font-size:0.875rem;flex:1;min-width:220px;">
+            Open the credit application form in admin preview mode — see exactly what applicants see.
+            Form submission is disabled; the yellow banner confirms preview mode is active.
+        </p>
+        <a href="<?= base_url('credit-application') ?>?admin_preview=1"
+           target="_blank"
+           class="btn btn-secondary btn-sm"
+           style="white-space:nowrap;">
+            Preview Form Layout ↗
+        </a>
+    </div>
+</div>
 
 <!-- CURRENCY-MARKUP-1: custom card — step=0.0001, max=20, % suffix, old/new audit -->
 <?php
