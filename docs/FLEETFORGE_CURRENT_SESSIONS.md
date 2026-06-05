@@ -74,6 +74,11 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-AUTH-FAILOPEN-1** — IN-FLIGHT
+  Started: 2026-06-05T10:05 UTC by claude-opus-4-8
+  Touching: includes/auth.php, tests/_smoke_auth_failopen.php, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
+  Scope: fail-open wrap of the two permission-override loaders (_ff_load_user_overrides + _ff_load_role_overrides) so a missing/lagging override table degrades to factory defaults instead of fatalling auth (resilience half of the schema-hardening arc). **Concurrent disjoint run** alongside S-CCA-BTN-SETTINGS (Sonnet) — PREVENTIVE hardening, NOT an active incident (prod is UP; role_permission_overrides was hand-created during the 2026-06-05 incident and verified green); operator-approved; code-disjoint (includes/auth.php + a test vs their settings/button UI files). **doc_freshness CLASS 4 reading 2 write IN-FLIGHT until one ships is EXPECTED/deliberate per this annotation — not drift** (precedent: S-CCA-1 ‖ S-PERM-TEST-WIRING). Specific-path git add only; never touches their files.
+
 **S-CCA-BTN-SETTINGS** — IN-FLIGHT
   Started: 2026-06-05T11:00 UTC by claude-sonnet-4-5
   Touching: app/admin/credit-application.php, api/v1/credit_applications/preview.php, app/admin/customers/show.php, app/admin/settings/index.php, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
