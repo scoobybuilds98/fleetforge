@@ -3689,6 +3689,23 @@ CREATE TABLE `reservations` (
   CONSTRAINT `reservations_ibfk_3` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `reservations_ibfk_4` FOREIGN KEY (`marked_out_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `role_permission_overrides` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `role_id` int unsigned NOT NULL,
+  `module` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `granted` tinyint(1) NOT NULL COMMENT '1=allow 0=deny',
+  `updated_by` int unsigned NOT NULL,
+  `reason` text COLLATE utf8mb4_unicode_ci,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_role_module_action` (`role_id`,`module`,`action`),
+  KEY `idx_role` (`role_id`),
+  KEY `rpo_user_fk` (`updated_by`),
+  CONSTRAINT `rpo_role_fk` FOREIGN KEY (`role_id`) REFERENCES `user_roles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `rpo_user_fk` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Admin-editable role-level permission overrides. Sits between per-user overrides and config/permissions.php factory defaults.';
 CREATE TABLE `samsara_location_history` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `equipment_unit_id` int unsigned NOT NULL,
