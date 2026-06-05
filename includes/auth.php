@@ -451,18 +451,33 @@ function _ff_clear_remember_cookie(): void
  */
 function _ff_load_user_overrides(int $userId): array
 {
-    $rows = db_select(
-        "SELECT module, action, granted
-         FROM user_permission_overrides
-         WHERE user_id = ?",
-        [$userId]
-    );
+    try {
+        $rows = db_select(
+            "SELECT module, action, granted
+             FROM user_permission_overrides
+             WHERE user_id = ?",
+            [$userId]
+        );
 
-    $map = [];
-    foreach ($rows as $r) {
-        $map[$r['module']][$r['action']] = (int) $r['granted'];
+        $map = [];
+        foreach ($rows as $r) {
+            $map[$r['module']][$r['action']] = (int) $r['granted'];
+        }
+        return $map;
+    } catch (\Throwable $e) {
+        // D-FAILOPEN-1: a DB error loading per-user permission overrides (e.g. a
+        // missing/lagging user_permission_overrides table) must NEVER fatal auth.
+        // Fail OPEN — return an empty override set so can() falls through to the
+        // config/permissions.php factory defaults; login + session establishment
+        // are unaffected. Mirrors Mailer::isEmailDisabled()'s fail-open shape.
+        // LOUD per D-FAILOPEN-3 so the degraded window is alarmed, not silent.
+        // SECURITY NOTE: during the degraded window per-user DENY overrides are
+        // not enforced (effective perms = role factory defaults); super_admin is
+        // unchanged. Availability-favoring + temporary (operator-approved).
+        error_log('[auth] FAIL-OPEN _ff_load_user_overrides(table=user_permission_overrides, user_id=' . $userId . '): ' . $e->getMessage());
+        \FleetForge\Observability\Sentry::captureException($e);
+        return [];
     }
-    return $map;
 }
 
 /**
@@ -474,17 +489,33 @@ function _ff_load_user_overrides(int $userId): array
  */
 function _ff_load_role_overrides(int $roleId): array
 {
-    $rows = db_select(
-        "SELECT module, action, granted
-         FROM role_permission_overrides
-         WHERE role_id = ?",
-        [$roleId]
-    );
-    $map = [];
-    foreach ($rows as $r) {
-        $map[$r['module']][$r['action']] = (int) $r['granted'];
+    try {
+        $rows = db_select(
+            "SELECT module, action, granted
+             FROM role_permission_overrides
+             WHERE role_id = ?",
+            [$roleId]
+        );
+        $map = [];
+        foreach ($rows as $r) {
+            $map[$r['module']][$r['action']] = (int) $r['granted'];
+        }
+        return $map;
+    } catch (\Throwable $e) {
+        // D-FAILOPEN-1: this is the EXACT 2026-06-05 outage path — a missing
+        // role_permission_overrides table threw an uncaught PDOException on every
+        // session start and 500'd auth site-wide. Fail OPEN — return an empty
+        // override set so can() falls through to config/permissions.php factory
+        // defaults; authentication, login, and session establishment are
+        // unaffected. Mirrors Mailer::isEmailDisabled()'s fail-open shape.
+        // LOUD per D-FAILOPEN-3 so the degraded window is alarmed, not silent.
+        // SECURITY NOTE: during the degraded window role-level DENY overrides are
+        // not enforced (effective perms = role factory defaults); super_admin is
+        // unchanged. Availability-favoring + temporary (operator-approved).
+        error_log('[auth] FAIL-OPEN _ff_load_role_overrides(table=role_permission_overrides, role_id=' . $roleId . '): ' . $e->getMessage());
+        \FleetForge\Observability\Sentry::captureException($e);
+        return [];
     }
-    return $map;
 }
 
 /**
