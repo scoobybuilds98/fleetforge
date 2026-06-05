@@ -669,9 +669,11 @@ function permissionsMatrix() {
             const cell = this._cell(moduleSlug, action);
             const roleTxt = cell.role ? 'grants' : 'denies';
             const desc = this.actionDescription(action);
-            const head = cell.override === 1 ? `Override: ALLOW (role ${roleTxt})`
-                       : cell.override === 0 ? `Override: DENY (role ${roleTxt})`
-                       : `Role ${roleTxt} by default`;
+            let head;
+            if (cell.override === 1)      head = `Override: ALLOW (role ${roleTxt}) — click to clear`;
+            else if (cell.override === 0) head = `Override: DENY (role ${roleTxt}) — click to clear`;
+            else if (cell.effective)      head = `Role ${roleTxt} — click to override: DENY`;
+            else                          head = `Role ${roleTxt} — click to override: ALLOW`;
             return desc ? `${head}\n${desc}` : head;
         },
         actionDescription(action) { return this.actionDescriptions[action] || ''; },
@@ -681,8 +683,14 @@ function permissionsMatrix() {
             if (this.saving) return;
             const cell = this._cell(moduleSlug, action);
             const row  = this.modules.find(r => r.slug === moduleSlug);
-            let nextIntent = cell.override === null ? 1 : cell.override === 1 ? 0 : null;
-            if (nextIntent === null) { this.sendUpdate(moduleSlug, action, null, null); return; }
+            // If an override is active, clear it immediately (no modal needed).
+            if (cell.override !== null) {
+                this.sendUpdate(moduleSlug, action, null, null);
+                return;
+            }
+            // No override: intent is to flip the effective state.
+            // Effective ON → deny it.  Effective OFF → allow it.
+            const nextIntent = cell.effective ? 0 : 1;
             this.reasonModal = { open:true, module:moduleSlug, action:action, label:row.label, intent:nextIntent, reason:'', error:null };
         },
 

@@ -1216,9 +1216,11 @@ function FF_RoleDefaults() {
             const cell = m.permissions[action];
             const cfgTxt = cell.config ? 'grants' : 'denies';
             const desc   = this.actionDescriptions[action] || '';
-            const head   = cell.override === 1 ? `Override: ALLOW (config ${cfgTxt})`
-                         : cell.override === 0 ? `Override: DENY (config ${cfgTxt})`
-                         : `Config ${cfgTxt} by default`;
+            let head;
+            if (cell.override === 1)      head = `Override: ALLOW (config ${cfgTxt}) — click to clear`;
+            else if (cell.override === 0) head = `Override: DENY (config ${cfgTxt}) — click to clear`;
+            else if (cell.effective)      head = `Config ${cfgTxt} — click to override: DENY`;
+            else                          head = `Config ${cfgTxt} — click to override: ALLOW`;
             return desc ? `${head}\n${desc}` : head;
         },
 
@@ -1240,8 +1242,11 @@ function FF_RoleDefaults() {
             if (this.saving) return;
             const m    = this.moduleBySlug(slug);
             const cell = m.permissions[action];
-            let nextIntent = cell.override === null ? 1 : cell.override === 1 ? 0 : null;
-            if (nextIntent === null) { this.sendUpdate(slug, action, null, null); return; }
+            if (cell.override !== null) {
+                this.sendUpdate(slug, action, null, null);
+                return;
+            }
+            const nextIntent = cell.effective ? 0 : 1;
             this.reasonModal = { open:true, module:slug, action:action, label:m.label, intent:nextIntent, reason:'', error:null };
         },
         cancelReason() { this.reasonModal.open = false; },

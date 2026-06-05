@@ -552,9 +552,11 @@ function rolePermissionsMatrix() {
             const cell = this._cell(moduleSlug, action);
             const cfgTxt = cell.config ? 'grants' : 'denies';
             const desc   = this.actionDescriptions[action] || '';
-            const head   = cell.override === 1 ? `Role override: ALLOW (config ${cfgTxt})`
-                         : cell.override === 0 ? `Role override: DENY (config ${cfgTxt})`
-                         : `Config ${cfgTxt} by default`;
+            let head;
+            if (cell.override === 1)      head = `Override: ALLOW (config ${cfgTxt}) — click to clear`;
+            else if (cell.override === 0) head = `Override: DENY (config ${cfgTxt}) — click to clear`;
+            else if (cell.effective)      head = `Config ${cfgTxt} — click to override: DENY`;
+            else                          head = `Config ${cfgTxt} — click to override: ALLOW`;
             return desc ? `${head}\n${desc}` : head;
         },
 
@@ -566,8 +568,11 @@ function rolePermissionsMatrix() {
             if (this.saving) return;
             const cell = this._cell(moduleSlug, action);
             const row  = this.modules.find(r => r.slug === moduleSlug);
-            let nextIntent = cell.override === null ? 1 : cell.override === 1 ? 0 : null;
-            if (nextIntent === null) { this.sendUpdate(moduleSlug, action, null, null); return; }
+            if (cell.override !== null) {
+                this.sendUpdate(moduleSlug, action, null, null);
+                return;
+            }
+            const nextIntent = cell.effective ? 0 : 1;
             this.reasonModal = { open:true, module:moduleSlug, action:action, label:row.label, intent:nextIntent, reason:'', error:null };
         },
 
