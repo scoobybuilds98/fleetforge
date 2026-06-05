@@ -2392,7 +2392,7 @@ Exit codes: 0 ok / 1 error / 2 bad args / 3 lock contention / 4 checksum drift.
 ### What the runner does
 
 1. Acquires `GET_LOCK('ff_migrations', 0)` (timeout 0 — fail fast, like our `ff_cron_*` pattern per D21).
-2. Scans `db_migrations/` for `*.sql` files matching the safe regex.
+2. Scans `db_migrations/` for `*.sql` files matching the safe regex. **`db_migrations/` is the ONLY migration directory** — the deprecated `database/migrations/` dir (whose unscanned `role_permission_overrides.sql` caused the 2026-06-05 prod 500) is **deleted, and that whole class is now structurally closed by D-GUARD-2** (`tests/_smoke_no_stray_schema_sql.php` fails the gate if that dir reappears or if any schema `*.sql` lands outside `db_migrations/` + master — S-SCHEMA-GUARD-1, 2026-06-05). See §13.7 companion guards.
 3. SHA-256s each file; diffs against `schema_migrations` rows.
 4. Reports drift on already-applied files whose current SHA-256 differs from stored. Refuses `--apply` until drift is resolved.
 5. Applies pending files in filename-asc order by **shelling out to the `mysql` binary** via `proc_open` (NOT PDO multiquery — `S-LEASE-MILEAGE_schema.sql` uses `DELIMITER //` for stored procedures, which PDO does not understand).
