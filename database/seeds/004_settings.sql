@@ -99,3 +99,40 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 -- Yards
 -- ----------------------------------------------------------------
 ('yard.default', 'surrey', 'string', 'yards', 'Default Yard Slug', 'Slug of the yard pre-selected in all unit/lease dropdowns.', 0);
+
+-- ----------------------------------------------------------------
+-- Customer Credit Application (S-CCA-1, Phase CCA)
+-- Operator-overridable. minimum_requirements_html + terms_url hold the
+-- carrier insurance copy; the legal entity name "Mainland Truck and Trailer
+-- Sales Ltd." is VERBATIM legal text and is intentionally NOT tokenized.
+-- ----------------------------------------------------------------
+INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, description, is_public) VALUES
+('credit_application.token_expiry_days', '30',                     'integer', 'credit_application', 'Credit application link expiry (days)', 'Days a sent credit-application invite link stays valid before expiry. Default 30.',                          0),
+('credit_application.insurance_email',   'Rentals@mainlandtts.ca', 'string',  'credit_application', 'Insurance documents email',             'Email the applicant is directed to send insurance certificates to.',                                        0),
+('credit_application.references_email',  'Sales@mainlandtts.ca',   'string',  'credit_application', 'Trade references email',                'Email the applicant is directed to send trade references to.',                                              0),
+('credit_application.terms_url',         'https://mainlandtts.com/wp-content/uploads/2025/06/Carrier-Agrmt-carrier.pdf', 'string', 'credit_application', 'Carrier agreement (terms) URL', 'Public URL of the carrier-agreement PDF the applicant accepts. Snapshotted onto each submission for legal trail.', 0),
+('credit_application.minimum_requirements_html', '<h3>Non-Owned Trailer Insurance</h3>
+
+<p><strong>1) Liability</strong><br>
+Add Mainland Truck and Trailer Sales Ltd. as an <strong>ADDITIONAL INSURED</strong></p>
+<ul>
+  <li>a) $2,000,000 Automobile Liability</li>
+  <li>b) $2,000,000 Commercial General Liability</li>
+  <li>c) $2,000,000 Non-Owned Liability</li>
+</ul>
+
+<p><strong>2) Physical Damage Coverage for Non-Owned Trailers</strong><br>
+Maximum deductible: <strong>$2,500</strong></p>
+
+<p><strong>3) Loss Payee</strong><br>
+Add Mainland Truck and Trailer Sales Ltd. as a <strong>LOSS PAYEE</strong><br>
+9616 188 Street, Surrey, BC V4N 3M2</p>
+
+<p>If you do not have the appropriate coverage, Mainland Truck and Trailer Sales Ltd. will supply a physical damage waiver for:</p>
+<ul>
+  <li>$10.00 per day on regular equipment rentals, with a <strong>MAX of $10,000</strong> deductible.</li>
+</ul>
+
+<p>Proof of <strong>NON-OWNED PHYSICAL DAMAGE</strong> including coverage for all perils <strong>MUST</strong> be on file to rent to avoid the daily charge.</p>
+
+<p>Mainland Truck and Trailer Sales Ltd. requires notification <strong>30 days prior to cancellation</strong>.</p>', 'text', 'credit_application', 'Minimum requirements (HTML)', 'Carrier insurance minimum-requirements block. Rendered on the public form (S-CCA-2) and injected into the invite email via {minimum_requirements_html} (D-CCA-7). Legal entity name is verbatim — do NOT tokenize.', 0);

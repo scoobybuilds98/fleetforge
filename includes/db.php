@@ -33,6 +33,7 @@ const SOFT_DELETE_TABLES = [
     'rate_cards',
     'payments',
     'notifications',  // [NOTIF-1] in-app notifications support soft-delete so users can clear without losing audit
+    'customer_credit_applications',  // [S-CCA-1] D-CCA-3 — re-send retains full history; rows soft-delete, never hard-delete
 ];
 
 // ============================================================

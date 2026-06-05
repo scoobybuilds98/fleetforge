@@ -630,6 +630,62 @@ Sincerely,
   'invoice',
   '["customer_name","company_name","month","year","amount_due","company_phone","company_email","sender_name"]',
   1
+),
+
+-- ============================================================
+-- 11. CREDIT APPLICATION INVITE — public tokenized credit-app link (S-CCA-1)
+--     body-only; {minimum_requirements_html} is raw HTML injected verbatim by
+--     EmailService::substitute. category 'general' (no 'customer' enum value).
+-- ============================================================
+(
+  'Credit Application Invite',
+  'credit_application_invite',
+  'Credit Application from {company_name}',
+  '<h1 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#111827;line-height:1.3;">Credit Application</h1>
+<p style="margin:0 0 24px;font-size:13px;color:#6b7280;">{company_name}</p>
+
+<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#374151;">Dear {customer_name},</p>
+
+<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#374151;">Thank you for your interest in establishing a credit account with <strong>{company_name}</strong>. Please complete our secure online credit application using the button below. The form takes only a few minutes and lets you sign electronically.</p>
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
+  <tr><td align="center">
+    <table cellpadding="0" cellspacing="0" border="0">
+      <tr><td style="border-radius:6px;background-color:#F97316;">
+        <a href="{credit_application_url}" target="_blank" style="display:inline-block;padding:14px 32px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:6px;">Start Your Credit Application</a>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+
+<p style="margin:0 0 24px;font-size:13px;line-height:1.6;color:#6b7280;">If the button does not work, copy and paste this link into your browser:<br><a href="{credit_application_url}" target="_blank" style="color:#F97316;word-break:break-all;">{credit_application_url}</a></p>
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+  <tr><td style="border-left:4px solid #F97316;background:#fff7ed;padding:16px 20px;border-radius:0 6px 6px 0;">
+    {minimum_requirements_html}
+  </td></tr>
+</table>
+
+<p style="margin:24px 0 0;font-size:14px;line-height:1.6;color:#6b7280;">Questions? Reply to this email or call us at <strong>{company_phone}</strong>.</p>
+
+<p style="margin:32px 0 0;font-size:15px;line-height:1.6;color:#374151;">Sincerely,<br><strong>{sender_name}</strong><br>{company_name}</p>',
+  'Dear {customer_name},
+
+Thank you for your interest in establishing a credit account with {company_name}.
+
+Please complete our secure online credit application here:
+{credit_application_url}
+
+The form takes only a few minutes and lets you sign electronically.
+
+Questions? Reply to this email or call us at {company_phone}.
+
+Sincerely,
+{sender_name}
+{company_name}',
+  'general',
+  '["company_name","customer_name","credit_application_url","sender_name","minimum_requirements_html","company_phone"]',
+  1
 )
 
 ON DUPLICATE KEY UPDATE
