@@ -264,6 +264,11 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 @click="activeTab = 'overview'" :aria-selected="activeTab === 'overview'" role="tab">
             Overview
         </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'credit_applications' }"
+                @click="activeTab = 'credit_applications'" :aria-selected="activeTab === 'credit_applications'" role="tab">
+            Credit Application
+            <span class="tab-badge" x-show="tabCounts.credit_applications > 0" x-text="tabCounts.credit_applications"></span>
+        </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'notes' }"
                 @click="activeTab = 'notes'; loadNotes()" :aria-selected="activeTab === 'notes'" role="tab">
             Notes
@@ -300,11 +305,6 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
             Documents
             <span class="tab-badge" x-show="tabCounts.documents > 0" x-text="tabCounts.documents"></span>
-        </button>
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'credit_applications' }"
-                @click="activeTab = 'credit_applications'" :aria-selected="activeTab === 'credit_applications'" role="tab">
-            Credit Application
-            <span class="tab-badge" x-show="tabCounts.credit_applications > 0" x-text="tabCounts.credit_applications"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'emails' }"
                 @click="activeTab = 'emails'; loadEmails()" :aria-selected="activeTab === 'emails'" role="tab">
@@ -1294,13 +1294,19 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         </template>
                     </p>
                 </div>
-                <?php if (can('customers', 'create')): ?>
-                <button class="btn btn-sm btn-primary"
-                        @click="sendCreditApp()" :disabled="sendingCreditApp">
-                    <span x-show="!sendingCreditApp" x-text="creditApps.length === 0 ? '+ Send Application' : 'Re-send Application'"></span>
-                    <span x-show="sendingCreditApp">Sending…</span>
-                </button>
-                <?php endif; ?>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="btn btn-sm btn-ghost" @click="previewCreditApp()"
+                            title="Preview the invite email that will be sent to this customer">
+                        Preview
+                    </button>
+                    <?php if (can('customers', 'create')): ?>
+                    <button class="btn btn-sm btn-primary"
+                            @click="sendCreditApp()" :disabled="sendingCreditApp">
+                        <span x-show="!sendingCreditApp" x-text="creditApps.length === 0 ? '+ Send Application' : 'Re-send Application'"></span>
+                        <span x-show="sendingCreditApp">Sending…</span>
+                    </button>
+                    <?php endif; ?>
+                </div>
             </div>
 
             <!-- Loading -->
@@ -1370,6 +1376,42 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         </div>
 
     </div><!-- /credit applications tab -->
+
+    <!-- Credit Application Preview Modal -->
+    <div x-show="creditPreviewModal.open" x-cloak class="modal-overlay" style="z-index:var(--z-modal);">
+        <div class="modal-backdrop" @click="creditPreviewModal.open = false"></div>
+        <div class="modal modal-lg" @click.stop style="max-height:calc(100vh - 32px);">
+            <div class="modal-header">
+                <h3 class="modal-title">Credit Application Invite Preview</h3>
+                <button class="modal-close-btn" aria-label="Close" @click="creditPreviewModal.open = false">×</button>
+            </div>
+            <div class="modal-body">
+                <div x-show="creditPreviewModal.loading" class="text-center" style="padding:32px;">Loading preview…</div>
+                <template x-if="!creditPreviewModal.loading && creditPreviewModal.error">
+                    <p class="text-danger" x-text="creditPreviewModal.error"></p>
+                </template>
+                <template x-if="!creditPreviewModal.loading && !creditPreviewModal.error && creditPreviewModal.subject">
+                    <div>
+                        <dl style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0 0 16px;">
+                            <dt class="text-secondary text-sm">Subject:</dt>
+                            <dd style="margin:0;font-weight:600;" x-text="creditPreviewModal.subject"></dd>
+                            <dt class="text-secondary text-sm">To:</dt>
+                            <dd style="margin:0;" x-text="creditPreviewModal.to_email"></dd>
+                        </dl>
+                        <div style="border:1px solid var(--color-border);border-radius:6px;overflow:auto;max-height:60vh;padding:16px;">
+                            <div class="email-preview-body" x-html="creditPreviewModal.body_html"></div>
+                        </div>
+                        <p class="text-sm text-secondary" style="margin:12px 0 0;">
+                            The credit application link in this preview is a placeholder — the real tokenized link is generated when you click Send.
+                        </p>
+                    </div>
+                </template>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" @click="creditPreviewModal.open = false">Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- ── TAB: EMAIL HISTORY (EMAIL-1) ─────────────────────────── -->
     <div x-show="activeTab === 'emails'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
@@ -1651,6 +1693,7 @@ function FF_CustomerProfile() {
         creditAppsLoaded:  false,
         creditAppsLoading: false,
         sendingCreditApp:  false,
+        creditPreviewModal: { open: false, loading: false, error: null, subject: '', body_html: '', to_email: '' },
 
         // ── Email History (EMAIL-1) ───────────────────────────────
         emails:          [],
@@ -2036,6 +2079,24 @@ function FF_CustomerProfile() {
         },
 
         // ── Credit Applications (S-CCA-1) ─────────────────────────
+        async previewCreditApp() {
+            this.creditPreviewModal = { open: true, loading: true, error: null, subject: '', body_html: '', to_email: '' };
+            try {
+                const url  = '<?= base_url('api/v1/credit_applications/preview') ?>?customer_id=<?= $customerId ?>';
+                const json = await (await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })).json();
+                if (json.success) {
+                    this.creditPreviewModal.subject  = json.data.subject;
+                    this.creditPreviewModal.body_html = json.data.body_html;
+                    this.creditPreviewModal.to_email  = json.data.to_email;
+                } else {
+                    this.creditPreviewModal.error = json.error?.message ?? 'Failed to load preview.';
+                }
+            } catch (e) {
+                this.creditPreviewModal.error = 'Network error loading preview.';
+            } finally {
+                this.creditPreviewModal.loading = false;
+            }
+        },
         async loadCreditApps() {
             if (this.creditAppsLoading) return;
             this.creditAppsLoading = true;
