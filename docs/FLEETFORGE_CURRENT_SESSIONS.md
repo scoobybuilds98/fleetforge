@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-BACKUP-3a** — IN-FLIGHT
+  Started: 2026-06-06T06:30 UTC by desktop-1
+  Touching: cron/backup_storage.php, tests/_smoke_backup_storage.php, docs/
+
 **S-FIX-DROPBOX-CRON-DBVALUE** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: `cron/backup_dropbox.php` fataled on prod with "Call to undefined function db_value()" (line 57, GET_LOCK read).** No `db_value` helper exists — fixed to `db_row('... AS lock_result')['lock_result']`. Repo-wide grep: line 57 was the only caller; zero remain. `_smoke_backup_dropbox.php` C9 added — EXECUTES the cron as a subprocess down the fail-soft "no source artifact" path (exit 0, no fatal, dropbox failed row written), all fixtures restored; non-vacuous (FAILS when bug reintroduced). 25→28 checks. K-trap 72 added (php -l can't catch undefined functions; cron/CLI smokes must run the real script — completes the T70/71/72 cluster). Commits: `4dd6ad9` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
 
 **S-FIX-BACKUP-COLS** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: `scripts/dropbox_configure.php` fataled on prod with "Unknown column 'type'" — settings columns are `value_type`/`group_name`, not `type`/`group`.** Fixed both INSERTs; audit confirmed the configure CLI was the only occurrence (callback UPDATEs use `value`/`key` — clean; init writes no settings; migration seed already correct). `_smoke_backup_dropbox.php` C7 strengthened to schema-real coverage (column-validity vs SHOW COLUMNS + real configure write round-trip), 20→25 checks. K-trap 71 added (settings column names + bootstrap-CLI/callback smoke-coverage class, sibling to Trap 70 Sentry blank-DSN). Commits: `5c9ae38` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
