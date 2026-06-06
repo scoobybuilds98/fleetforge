@@ -428,6 +428,120 @@ try {
     db_execute("DELETE FROM backup_runs WHERE id > ? AND destination='dropbox'", [$c9MaxIdBefore]);
 }
 
+// ── C10: --type argument resolution (S-FIX-DROPBOX-ARGS regression guard) ────
+// The parser must accept BOTH `--type=storage` and `--type storage` (space
+// form — which the cron's own docblock + crontab use), default to 'db' only
+// when no --type token is present, and FAIL LOUD (exit 1, no row) on an
+// unrecognized value — never silently default to 'db'.
+//
+// Observability: with enabled+token set and BOTH s3 success types hidden,
+// lastSuccess('s3', <type>) returns null → the cron hits the fail-soft branch
+// and writes a dropbox/<resolved-type> 'failed' row. The row's backup_type IS
+// the resolved type, so it's directly assertable without a live upload.
+//
+// Non-vacuous: the old equals-only parser resolved `--type storage` (space) to
+// 'db', so the space-form case below FAILS against it.
+echo "\nC10: --type resolution (accept space + equals forms; fail loud on invalid)\n";
+$cronPath10 = dirname(__DIR__) . '/cron/backup_dropbox.php';
+
+$c10OrigEnabled = (string) settings_get('dropbox.enabled', '0');
+$c10OrigToken   = (string) settings_get('dropbox.refresh_token', '');
+
+// Hide s3 successes for BOTH types so lastSuccess() returns null whichever type resolves.
+$c10HiddenIds = array_map(
+    'intval',
+    array_column(
+        db_select(
+            "SELECT id FROM backup_runs WHERE destination='s3' AND backup_type IN ('db','storage') AND status='success'",
+            []
+        ),
+        'id'
+    )
+);
+$c10MaxIdBefore = (int) (db_row("SELECT COALESCE(MAX(id),0) AS m FROM backup_runs", [])['m'] ?? 0);
+
+/**
+ * Run the cron with the given raw argument string; return the dropbox
+ * backup_type the run resolved to (from the failed row it wrote), plus exit
+ * code and whether a new dropbox row was created.
+ */
+$c10Run = function (string $argStr) use ($cronPath10): array {
+    $mark = (int) (db_row("SELECT COALESCE(MAX(id),0) AS m FROM backup_runs", [])['m'] ?? 0);
+    $out  = [];
+    $code = null;
+    exec('php ' . escapeshellarg($cronPath10) . ' ' . $argStr . ' 2>&1', $out, $code);
+    $row = db_row(
+        "SELECT backup_type, status FROM backup_runs
+         WHERE id > ? AND destination='dropbox' ORDER BY id DESC LIMIT 1",
+        [$mark]
+    );
+    return [
+        'exit'        => $code,
+        'output'      => implode("\n", $out),
+        'backup_type' => $row['backup_type'] ?? null,
+        'row_created' => $row !== null,
+    ];
+};
+
+try {
+    db_execute("UPDATE settings SET `value`='1' WHERE `key`='dropbox.enabled'");
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.refresh_token'", ['smoke-dummy-refresh-token']);
+    if (!empty($c10HiddenIds)) {
+        $in = implode(',', $c10HiddenIds);
+        db_execute("UPDATE backup_runs SET destination='manual' WHERE id IN ({$in})");
+    }
+
+    // (1) SPACE form `--type storage` → MUST resolve to storage (regression guard).
+    $r = $c10Run('--type storage');
+    if ($r['exit'] === 0 && $r['backup_type'] === 'storage') {
+        ok("`--type storage` (space form) resolves to 'storage'");
+    } else {
+        ko('`--type storage` did not resolve to storage', 'exit=' . var_export($r['exit'], true) . ' type=' . var_export($r['backup_type'], true) . ' out=' . trim($r['output']));
+    }
+
+    // (2) EQUALS form `--type=storage` → storage.
+    $r = $c10Run('--type=storage');
+    if ($r['exit'] === 0 && $r['backup_type'] === 'storage') {
+        ok("`--type=storage` (equals form) resolves to 'storage'");
+    } else {
+        ko('`--type=storage` did not resolve to storage', 'exit=' . var_export($r['exit'], true) . ' type=' . var_export($r['backup_type'], true));
+    }
+
+    // (3) SPACE form `--type db` → db.
+    $r = $c10Run('--type db');
+    if ($r['exit'] === 0 && $r['backup_type'] === 'db') {
+        ok("`--type db` (space form) resolves to 'db'");
+    } else {
+        ko('`--type db` did not resolve to db', 'exit=' . var_export($r['exit'], true) . ' type=' . var_export($r['backup_type'], true));
+    }
+
+    // (4) No --type token → default db.
+    $r = $c10Run('');
+    if ($r['exit'] === 0 && $r['backup_type'] === 'db') {
+        ok("no --type token defaults to 'db'");
+    } else {
+        ko('no-arg did not default to db', 'exit=' . var_export($r['exit'], true) . ' type=' . var_export($r['backup_type'], true));
+    }
+
+    // (5) Invalid value → exit 1, STDERR, NO row written (never silent-default).
+    $r = $c10Run('--type bogus');
+    if ($r['exit'] === 1 && !$r['row_created'] && stripos($r['output'], "invalid --type") !== false) {
+        ok("`--type bogus` fails loud (exit 1, error on STDERR, no backup_runs row)");
+    } else {
+        ko('`--type bogus` did not fail loud', 'exit=' . var_export($r['exit'], true) . ' row_created=' . var_export($r['row_created'], true) . ' out=' . trim($r['output']));
+    }
+} catch (\Throwable $e) {
+    ko('C10 threw unexpectedly', $e->getMessage());
+} finally {
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.enabled'", [$c10OrigEnabled]);
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.refresh_token'", [$c10OrigToken]);
+    if (!empty($c10HiddenIds)) {
+        $in = implode(',', $c10HiddenIds);
+        db_execute("UPDATE backup_runs SET destination='s3' WHERE id IN ({$in})");
+    }
+    db_execute("DELETE FROM backup_runs WHERE id > ? AND destination='dropbox'", [$c10MaxIdBefore]);
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 $total = $pass + $fail;
 echo "\n=== {$pass}/{$total} PASS" . ($fail > 0 ? ", {$fail} FAIL" : '') . " ===\n";

@@ -2157,6 +2157,18 @@ if (!empty($vars) && method_exists($frame, 'setVars')) {
 
 **Detected:** S-BACKUP-3a 2026-06-06 — prod storage backup verified producing 0 files / 0 MB (local `storage/uploads` = 4 K). Rewritten to gather via `StorageClient::listByPrefix('')` + `download()` into a staging dir (D-BACKUP-6); `tests/_smoke_backup_storage.php` added (C1 pure filter + C2–C5 subprocess execution; 10/10; confirmed non-vacuous). Manual before/after: 0 files → 129 content keys / 21.82 MB.
 
+### Trap 74: CLI arg parsers must fail loud on unrecognized/missing values — never silently default — and must match their own documented usage
+
+**Context:** `cron/backup_dropbox.php` parsed `--type` with `preg_match('/^--type=(db|storage)$/')` — equals form ONLY. The space form `--type storage` (the form the cron's own docblock + crontab examples used) matched nothing, so `$type` fell through to its `'db'` default. Result: the weekly **storage** mirror silently backed up the **database** instead of documents. Verified on prod: `--type storage` logged `backup_dropbox:db`; `--type=storage` worked.
+
+**Two failures, both silent:**
+1. **Parser ≠ its own docs.** The docblock/crontab used the space form the parser rejected. A parser and the usage it ships with must agree — accept both `--flag=value` and `--flag value`, or document exactly one and reject the other loudly.
+2. **Unrecognized/missing value silently defaults.** A typo or unsupported value (`--type stroage`) fell through to `'db'`. In a backup/data-protection path that means "back up the wrong thing and report success" — the worst kind of silent wrong.
+
+**Same class as Traps 70–73** — wrong behavior that looks like success and is never surfaced. **Fix the class:** any CLI/cron arg parser must (a) accept the forms its own docs advertise; (b) default ONLY on genuine absence of the flag; (c) on a present-but-invalid value, write to STDERR and `exit(1)` — never silently default, especially for destructive/data-protection operations; (d) run that validation before config gates so a bad invocation fails fast. Prove it with a subprocess smoke that asserts the resolved behavior per form (per Trap 72), including the fail-loud path (exit 1, no side-effect row).
+
+**Detected:** S-FIX-DROPBOX-ARGS 2026-06-06 — fixed to accept both forms + `exit(1)` on invalid `--type`; `tests/_smoke_backup_dropbox.php` C10 added (subprocess type-resolution across both forms + no-arg + invalid; 28→33 checks; confirmed non-vacuous — old parser resolved `--type storage` → 'db').
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)

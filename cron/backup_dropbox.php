@@ -35,12 +35,34 @@ use FleetForge\Backup\DropboxClient;
 use FleetForge\Storage\StorageClient;
 
 // ── Parse --type argument ─────────────────────────────────────────────────
-$type = 'db';
-foreach ($argv as $arg) {
-    if (preg_match('/^--type=(db|storage)$/', (string) $arg, $m)) {
-        $type = $m[1];
+// Accept BOTH `--type=storage` (equals form) AND `--type storage` (space form,
+// which this file's own docblock + crontab examples use). Default to 'db' ONLY
+// when no --type token is present at all. If a --type token IS present but its
+// value is not exactly 'db' or 'storage', FAIL LOUD (STDERR + exit 1) — never
+// silently fall back to 'db', or a typo would back up the database in place of
+// the documents it was asked to mirror.
+$type     = 'db';
+$rawType  = null;   // null = no --type token seen; otherwise the value supplied
+$argvList = $argv;
+$argc     = count($argvList);
+for ($i = 1; $i < $argc; $i++) {
+    $arg = (string) $argvList[$i];
+    if (str_starts_with($arg, '--type=')) {
+        $rawType = substr($arg, strlen('--type='));
         break;
     }
+    if ($arg === '--type') {
+        // Space form: value is the next token (may be absent → empty string).
+        $rawType = (string) ($argvList[$i + 1] ?? '');
+        break;
+    }
+}
+if ($rawType !== null) {
+    if ($rawType !== 'db' && $rawType !== 'storage') {
+        fwrite(STDERR, "[CRON backup_dropbox] Invalid --type '{$rawType}' (expected 'db' or 'storage').\n");
+        exit(1);
+    }
+    $type = $rawType;
 }
 
 // ── Enabled / configured check — exit 0 cleanly if not set up ────────────
