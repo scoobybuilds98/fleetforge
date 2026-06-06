@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-SENTRY-CHECKLIST-CLOSE** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Docs-only: flipped PREDEPLOY_CHECKLIST B3 (SENTRY_DSN) + I1 (alert routing) to DONE — Sentry prod verified live, event 3a4278ea ingested env=production, alert routing confirmed. No schema/code motion.**
+
 **S-SAMSARA-SYNC-VERIFY** — VERIFIED 2026-06-06 (read-only; D-SAMSARA-DELETE-1 confirmed intact — delete one-way FF-only, create+update write-backs present, zero stray deleteTrailer callers, no deviation found).
 
 **S-FIX-CREDIT-APP-SHOW-MOBILE** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Credit-application show page responsive fix — two-column grid collapses to single column at <768px; iframe snapshot contained with `min-width:0` + `overflow-x:auto`.** CSS-only; no schema, no API. Single commit (code+docs).
