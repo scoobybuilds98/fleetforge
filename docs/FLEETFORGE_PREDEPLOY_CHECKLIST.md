@@ -558,6 +558,36 @@ ITEM D-YE-2 | 2026-05-19 | D — AWS infrastructure | Verify ZipArchive PHP exte
   Status: PENDING
 ```
 
+```
+ITEM D-AI-DIGEST | 2026-06-07 | D — AWS infrastructure | Deploy digest param-fix + AI brief crontab/recipients go-live
+  Originating session: S-AI-DIGEST-PARAM-FIX (root cause from S-AI-EMAIL-DIAGNOSE-2)
+  Surfaced into checklist: S-AI-DIGEST-PARAM-FIX
+  Detail: The morning briefing email had NEVER sent in prod — a param-order bug in
+    cron/notification_digest.php run_morning_digest_emails() bound the role string to the
+    hour-gate placeholders and the integer hour to `ur.slug IN (?)` → `ur.slug IN (7)` →
+    0 recipients on every hourly run. Fixed via the digest_select_recipients() seam +
+    non-force-path smoke (tests/_smoke_notification_digest_recipients.php).
+    DONE in-session (prod, deployment-independent):
+      • ai.briefing_recipient_roles = ["super_admin","manager"] (was ["super_admin"]).
+      • SC8 test users (id 19 sc8_test@, id 20 sc8_mfa@) morning_briefing_opt_in=0 (opt-out only).
+      • cron/ai_weekly_brief.php added to the www-data crontab (hourly) — see crontab_accounting.md.
+    PENDING (this checklist item):
+      • DEPLOY cron/notification_digest.php (the fix) to prod — the scheduled digest selects 0
+        recipients until the fixed file lands. After deploy, the next digest_hour tick
+        (07:00 America/Vancouver) dispatches.
+      • SES sandbox (see D6): the broadened "manager" set currently includes seed/test accounts
+        with @fleetforge.test addresses (Alice/Bob/Carol/T1) that will hard-bounce until SES is
+        out of sandbox AND those test accounts are removed/opted-out at go-live. Real recipients
+        with verified/production-deliverable addresses are unaffected.
+  Action: Operator deploys main to prod (git pull + standard deploy sequence, E-DEPLOY-RUNBOOK).
+    Then optional live check: temporarily set notifications.digest_hour = current local hour,
+    `sudo -u www-data php /var/www/fleetforge/cron/notification_digest.php`, confirm
+    notification_log gets 'morning_digest' rows, RESTORE digest_hour. Target only deliverable
+    recipients (consider opting out the remaining @fleetforge.test seed managers first).
+  Owner: Operator (deploy) + Code Desktop (fix shipped)
+  Status: PENDING (deploy) — in-session prod data/crontab changes DONE
+```
+
 ### E — Data migrations
 
 ```

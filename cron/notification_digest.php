@@ -159,6 +159,68 @@ try {
 // =======================================================================
 
 /**
+ * digest_select_recipients() — resolve which users get the morning briefing
+ * RIGHT NOW. Extracted from run_morning_digest_emails() as a testable seam
+ * (S-AI-DIGEST-PARAM-FIX) so smokes can exercise the NON-force path against
+ * seeded data — the gap that hid the param-order bug below.
+ *
+ * D-DIGEST-PARAM-FIX: $sqlParams MUST be built in the EXACT order the
+ * placeholders appear in the SQL — the hour-gate (3 `?`) precedes
+ * `ur.slug IN (...)`. The prior code did `$sqlParams = $roles` then APPENDED
+ * the hour params, so the role value(s) bound to the hour-gate placeholders
+ * and the integer hour bound to the IN-clause → `ur.slug IN (7)` matched no
+ * role → ZERO recipients on every non-forced run (the daily morning digest
+ * had NEVER sent). The force path was unaffected (hourGate='1=1' has no
+ * placeholders, so $roles bound to the IN-clause correctly) — which is why
+ * force-only test coverage hid this. Hour params first (only when !force),
+ * then every role value (count matches the IN placeholders, so N roles bind
+ * correctly too — closes the latent multi-role binding bug as well).
+ *
+ * @param string[] $roles      Sanitized user_roles.slug allow-list (non-empty).
+ * @param bool     $force      true → bypass the per-user hour gate (manual/test).
+ * @param int      $localHour  Current hour (0..23) in company.timezone.
+ * @param int      $globalHour Global notifications.digest_hour fallback.
+ * @return array<int,array<string,mixed>>  Recipient rows (id, name, email, …, slug).
+ */
+function digest_select_recipients(array $roles, bool $force, int $localHour, int $globalHour): array
+{
+    if (empty($roles)) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($roles), '?'));
+
+    $hourGate = $force
+        ? '1=1'
+        : "(u.briefing_hour = ? OR (u.briefing_hour IS NULL AND ? = ?))";
+
+    // EXACT SQL placeholder order: hour-gate params first (only when !force),
+    // then the role values for the IN-clause. See D-DIGEST-PARAM-FIX above.
+    $sqlParams = [];
+    if (!$force) {
+        $sqlParams[] = $localHour;   // u.briefing_hour = ?
+        $sqlParams[] = $localHour;   // (u.briefing_hour IS NULL AND ? = ?) ← localHour
+        $sqlParams[] = $globalHour;  //                                   = ? ← globalHour
+    }
+    foreach ($roles as $r) {
+        $sqlParams[] = $r;           // ur.slug IN ($placeholders)
+    }
+
+    return db_select(
+        "SELECT u.id, u.name, u.email, u.briefing_sections,
+                u.briefing_channels, u.slack_user_id, u.phone_e164, ur.slug
+         FROM users u
+         JOIN user_roles ur ON ur.id = u.role_id
+         WHERE u.deleted_at IS NULL AND u.status = 'active'
+           AND u.morning_briefing_opt_in = 1
+           AND (u.briefing_snoozed_until IS NULL OR u.briefing_snoozed_until <= NOW())
+           AND {$hourGate}
+           AND ur.slug IN ({$placeholders})",
+        $sqlParams
+    );
+}
+
+/**
  * S-INTEL-TAB / D-INTEL-2 — Three-gate filter precedence:
  *   (1) settings.ai.briefing_enabled — master toggle (separate from
  *       ai.enabled so the briefing can pause without taking down AI
@@ -203,8 +265,6 @@ function run_morning_digest_emails(): array
         return [0, 0, 0];
     }
 
-    $placeholders = implode(',', array_fill(0, count($roles), '?'));
-
     // ── Gate 3: per-user opt-in (D-INTEL-2). ─────────────────────
     // morning_briefing_opt_in column added by S-INTEL-TAB migration;
     // existing super_admin/manager/accountant users were backfilled
@@ -224,33 +284,12 @@ function run_morning_digest_emails(): array
     $localHour  = (int)  ($GLOBALS['ff_current_local_hour'] ?? 0);
     $globalHour = (int)  ($GLOBALS['ff_global_digest_hour'] ?? 7);
 
-    $hourGate = $force
-        ? '1=1'
-        : "(u.briefing_hour = ? OR (u.briefing_hour IS NULL AND ? = ?))";
-
-    $sqlParams = $roles;
-    if (!$force) {
-        // Append the 3 hour params (briefing_hour=?, ?, ?=?) → (localHour, localHour, globalHour).
-        // SQL: (u.briefing_hour = ? OR (u.briefing_hour IS NULL AND ? = ?))
-        //                          ↑ localHour              ↑ localHour ↑ globalHour
-        $sqlParams[] = $localHour;
-        $sqlParams[] = $localHour;
-        $sqlParams[] = $globalHour;
-    }
-
     // S-INTEL-V2 Phase D: pull per-user channels + slack/sms identifiers.
-    $recipients = db_select(
-        "SELECT u.id, u.name, u.email, u.briefing_sections,
-                u.briefing_channels, u.slack_user_id, u.phone_e164, ur.slug
-         FROM users u
-         JOIN user_roles ur ON ur.id = u.role_id
-         WHERE u.deleted_at IS NULL AND u.status = 'active'
-           AND u.morning_briefing_opt_in = 1
-           AND (u.briefing_snoozed_until IS NULL OR u.briefing_snoozed_until <= NOW())
-           AND {$hourGate}
-           AND ur.slug IN ({$placeholders})",
-        $sqlParams
-    );
+    // Recipient selection lives in digest_select_recipients() — a testable
+    // seam (S-AI-DIGEST-PARAM-FIX) so smokes can exercise the NON-force path
+    // against seeded data. The force-only coverage that preceded it is exactly
+    // what let the param-order bug ship undetected.
+    $recipients = digest_select_recipients($roles, $force, $localHour, $globalHour);
 
     if (empty($recipients)) {
         return [0, 0, 0];

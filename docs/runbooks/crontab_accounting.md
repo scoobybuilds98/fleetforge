@@ -65,6 +65,38 @@ sudo chmod 0644 /var/log/fleetforge-cron.log
 
 ---
 
+## AI / briefing crons (S-AI-DIGEST-PARAM-FIX, 2026-06-07)
+
+Installed under the **`www-data`** crontab (NOT the `ubuntu` login crontab —
+`crontab -l` as `ubuntu` shows nothing; always use `sudo -u www-data crontab -l`).
+These self-gate internally (each exits early unless its settings toggle + hour
+match), so they are all scheduled hourly or daily and filter at runtime.
+
+| Cron file | Schedule | Purpose | Advisory lock key |
+|---|---|---|---|
+| `ai_fleet_brief.php`       | `0 4 * * *` | Generate the cached morning brief (Claude) | `ff_cron_ai_fleet_brief` |
+| `notification_digest.php`  | `0 * * * *` | Hourly; dispatches the morning briefing email to users whose effective hour == this hour | `ff_cron_notification_digest` |
+| `ai_weekly_brief.php`      | `0 * * * *` | Hourly; dispatches the weekly digest on `ai.weekly_brief_day`/`_hour` to `weekly_brief_opt_in=1` users | (see file) |
+| `ai_anomaly_scan.php`      | `30 4 * * *` | Nightly anomaly detection | `ff_cron_ai_anomaly_scan` |
+
+```cron
+# FleetForge AI brief / digest block (installed under www-data)
+0  4 * * * /usr/bin/php /var/www/fleetforge/cron/ai_fleet_brief.php      >> /var/www/fleetforge/logs/cron.log 2>&1
+0  * * * * /usr/bin/php /var/www/fleetforge/cron/notification_digest.php >> /var/www/fleetforge/logs/cron.log 2>&1
+0  * * * * /usr/bin/php /var/www/fleetforge/cron/ai_weekly_brief.php     >> /var/www/fleetforge/logs/cron.log 2>&1
+30 4 * * * /usr/bin/php /var/www/fleetforge/cron/ai_anomaly_scan.php     >> /var/www/fleetforge/logs/cron.log 2>&1
+```
+
+`ai_weekly_brief.php` was added to the prod crontab on 2026-06-07 (S-AI-DIGEST-PARAM-FIX);
+the other three were already present.
+
+> **DEPLOY DEPENDENCY:** `notification_digest.php` carries the S-AI-DIGEST-PARAM-FIX
+> recipient-SELECT fix. The morning digest selects **0 recipients on every run**
+> until the fixed file is deployed to prod. After deploying, the next matching
+> hourly tick (digest_hour, default 7 America/Vancouver) will dispatch.
+
+---
+
 ## Per-cron detail
 
 ### accounting_generate_periods.php
