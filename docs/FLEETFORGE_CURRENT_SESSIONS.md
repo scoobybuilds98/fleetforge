@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-BACKUP-3c** — IN-FLIGHT
+  Started: 2026-06-06T08:00 UTC by desktop-1
+  Touching: api/v1/settings/backup/ (enqueue/status/download), cron/backup_manual_worker.php, app/admin/settings/backup.php, tests/, docs/
+
 **S-BACKUP-3b** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Backup & Storage settings tab (3-destination status + history + Dropbox mgmt) + 2 callback fixes.** NEW `app/admin/settings/backup.php` (AWS S3 / Dropbox / Manual cards + 50-row history table; freshness dots; Manual is display-only — generate deferred to S-BACKUP-3c). Backup tab wired into `settings/index.php` (`settings_system` gate). NEW `api/v1/settings/dropbox/{save,disconnect}.php` (settings.edit + CSRF-via-bootstrap; app_secret encrypted, blank-keeps-existing, never logged). Callback fixed: redirect → `base_url('settings?tab=backup')` (was 404 `admin/settings`); `connected_account` → friendly `getCurrentAccount()` value. `_smoke_backup_settings_tab.php` 17/17 (incl. masked-secret-never-rendered + Trap 71/73 column validity). Commits: `385581a` (C1 IN-FLIGHT) + this commit (C2 code+docs).
 
 **S-FIX-DROPBOX-ARGS** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: `cron/backup_dropbox.php` only matched `--type=storage`; the space form `--type storage` (its own docblock/crontab usage) silently defaulted to 'db' → weekly storage mirror backed up the DB.** Now accepts both forms; defaults to 'db' only on absent flag; invalid value → STDERR + exit 1 (never silent-default). `_smoke_backup_dropbox.php` C10 (NEW, 28→33): subprocess type-resolution across space/equals/no-arg/invalid; confirmed non-vacuous (old parser resolved `--type storage`→'db'). K-trap 74 added (completes T70–74 cluster). Commits: `ac98d3a` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
