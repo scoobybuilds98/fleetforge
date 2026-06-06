@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-FIX-DROPBOX-CRON-DBVALUE** — IN-FLIGHT
+  Started: 2026-06-06T06:00 UTC by desktop-1
+  Touching: cron/backup_dropbox.php, tests/_smoke_backup_dropbox.php, docs/
+
 **S-FIX-BACKUP-COLS** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: `scripts/dropbox_configure.php` fataled on prod with "Unknown column 'type'" — settings columns are `value_type`/`group_name`, not `type`/`group`.** Fixed both INSERTs; audit confirmed the configure CLI was the only occurrence (callback UPDATEs use `value`/`key` — clean; init writes no settings; migration seed already correct). `_smoke_backup_dropbox.php` C7 strengthened to schema-real coverage (column-validity vs SHOW COLUMNS + real configure write round-trip), 20→25 checks. K-trap 71 added (settings column names + bootstrap-CLI/callback smoke-coverage class, sibling to Trap 70 Sentry blank-DSN). Commits: `5c9ae38` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
 
 **S-BACKUP-2** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Dropbox backup engine — DropboxClient + OAuth connect/callback + StorageClient::download() + daily mirror cron.** Migration 98→99 (`acc_oauth_states.provider` ENUM += 'dropbox'). `lib/Backup/DropboxClient.php` (AES-256-CBC encryption via APP_SECRET; refresh-token grant; single-shot + upload-session). `StorageClient::download()`. OAuth endpoints `app/admin/oauth/dropbox/{init,callback}.php`. `scripts/dropbox_configure.php` + `cron/backup_dropbox.php`. `_smoke_backup_dropbox.php` 20/20. D-BACKUP-4/5 locked. CANONICAL REDIRECT URI: `https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php`. Commits: `0371371` (C1 IN-FLIGHT) + this commit (C2 code+docs).
