@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-FIX-BACKUP-PROGRESS-MIGRATION** — IN-FLIGHT
+  Started: 2026-06-06T09:00 UTC by desktop-1
+  Touching: db_migrations/, docs/
+
 **S-BACKUP-3c-PROGRESS** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Stage-based progress bar for the manual backup (extends S-BACKUP-3c).** Migration 100 adds `backup_runs.progress_pct` + `progress_stage`. `BackupRun::progress()` (fail-soft, clamp 0–100); worker stamps 5/15/40/75/90 → success=100. `status.php` returns the progress fields; Manual card renders a progress bar (filled div over a track, `var(--color-primary)`) + stage label, polls every 2s, null→8% indeterminate. `_smoke_backup_manual.php` 12/12 (cols exist; completed row=100; status exposes fields). Commits: `1ea6231` (C1 IN-FLIGHT) + this commit (C2 code+docs).
 
 **S-BACKUP-3c** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Async manual "download everything" full backup — closes the 3-destination arc (D-BACKUP-3/7).** backup_runs row IS the job record: enqueue → worker bundles latest s3/db + s3/storage into `backups/manual/manual_<ts>.tar` → UI polls → fresh presigned download. NEW `api/v1/settings/backup/{enqueue,status,download}.php` (enqueue settings.edit + concurrency guard; status/download settings.view; download = strict manual/full/success gate + 5-min presigned url + audit). NEW `cron/backup_manual_worker.php` (advisory lock, no-source fail-soft, retention default 5). Manual card wired in backup.php (generate → poll → download). `_smoke_backup_manual.php` 10/10 (C2/C3 execute the worker). **Operator: add `* * * * * php cron/backup_manual_worker.php` to prod crontab.** Commits: `5f0f331` (C1 IN-FLIGHT) + this commit (C2 code+docs).
