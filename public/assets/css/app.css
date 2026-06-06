@@ -6240,7 +6240,22 @@ dl.detail-grid dd {
     .topbar-search-btn {
         display: none;
     }
-    /* Keep existing .topbar-menu-btn logic too (inherited) */
+    /* S-FIX-DOUBLE-HAMBURGER-MOBILE: hide the legacy hamburger on mobile so only
+       `.hamburger-btn` shows. The button is `class="topbar-menu-btn btn-icon"`, and
+       the base `.topbar-menu-btn { display:none }` (line ~1200) was silently
+       overridden by `.btn-icon { display:inline-flex }` (equal specificity, declared
+       later) — so the legacy plain hamburger rendered alongside the boxed
+       `.hamburger-btn`, giving TWO hamburgers at phone widths. `.hamburger-btn` has
+       no `.btn-icon` class so it was never clobbered. The `.topbar-left` scope
+       (0,2,0) outranks `.btn-icon` (0,1,0) to win the cascade here.
+       NOTE: this is deliberately MOBILE-ONLY — on desktop (≥1024px) a COLLAPSED
+       sidebar hides its own `.sidebar-collapse-btn` chevron and relies on
+       `.topbar-menu-btn` as its expand control (see the rule at the
+       `.sidebar:not(.is-open) .sidebar-collapse-btn` block), so the legacy button
+       must stay available there; tablet already hides both (permanent rail). */
+    .topbar-left .topbar-menu-btn {
+        display: none;
+    }
     .topbar {
         padding: 0 12px;
     }
