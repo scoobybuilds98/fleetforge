@@ -97,6 +97,50 @@ run() {
     fi
 }
 
+# ── Maintenance-mode gate (FLEETFORGE-C) ─────────────────────────────────────
+# The deploy mutates the live checkout in place (git pull, step 4) while php-fpm
+# keeps serving. opcache (validate_timestamps=On) only clears at the step-8
+# reload, so a request landing in the pull→migrate→reload window can compile a
+# freshly-pulled functions.php against stale opcode → "Cannot redeclare ...".
+# Flipping MAINTENANCE_MODE=true in .env (read at runtime, NOT opcode-cached;
+# .env is gitignored so the pull never clobbers it) makes public/index.php serve
+# a 503 to web traffic for that window. CLI deploy steps (backup/composer/migrate)
+# are unaffected — the gate is web-only. Fail-CLOSED: if the deploy aborts after
+# enabling maintenance, the on_exit trap leaves the site in maintenance (don't
+# serve half-migrated state) and prints how to clear it.
+MAINT_ON=0
+ENV_FILE="$REPO_DIR/.env"
+
+set_maintenance() {
+    local val="$1"   # true | false
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would set MAINTENANCE_MODE=$val in $ENV_FILE"
+        return 0
+    fi
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "  ⚠ $ENV_FILE not found — cannot toggle maintenance mode"
+        return 1
+    fi
+    local owner; owner="$(stat -c '%U:%G' "$ENV_FILE" 2>/dev/null || true)"
+    if grep -qE '^MAINTENANCE_MODE=' "$ENV_FILE"; then
+        sed -i "s/^MAINTENANCE_MODE=.*/MAINTENANCE_MODE=$val/" "$ENV_FILE"
+    else
+        printf '\nMAINTENANCE_MODE=%s\n' "$val" >> "$ENV_FILE"
+    fi
+    [ -n "$owner" ] && chown "$owner" "$ENV_FILE" 2>/dev/null || true
+}
+
+on_exit() {
+    if [ "$MAINT_ON" -eq 1 ]; then
+        echo ""
+        echo "⚠⚠⚠  SITE IS STILL IN MAINTENANCE MODE — deploy did not complete cleanly  ⚠⚠⚠"
+        echo "  The public site is serving 503 (fail-closed: half-deployed state is not served)."
+        echo "  After verifying DB/code state, clear it with:"
+        echo "    sudo sed -i 's/^MAINTENANCE_MODE=.*/MAINTENANCE_MODE=false/' $ENV_FILE"
+    fi
+}
+trap on_exit EXIT
+
 # ── Pre-flight ────────────────────────────────────────────────
 if [ "$DRY_RUN" -ne 1 ] && [ "$(id -u)" -ne 0 ]; then
     echo "✖ deploy.sh must be run as root (uses sudo -u ${WEB_USER} internally)"
@@ -163,6 +207,13 @@ if [ "$ASSUME_YES" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
 elif [ "$DRY_RUN" -eq 1 ]; then
     echo "    [dry-run] would prompt: Ship these commits? [y/N]  (--yes skips)"
 fi
+
+# ── maintenance ON — protect the opcache-inconsistent window (FLEETFORGE-C) ──
+echo
+echo "── maintenance ON (covers the pull→migrate→reload window) ──"
+set_maintenance true
+[ "$DRY_RUN" -eq 1 ] || MAINT_ON=1
+[ "$DRY_RUN" -eq 1 ] || echo "  ✓ MAINTENANCE_MODE=true — public traffic gets 503; CLI deploy steps continue"
 
 # ── [4/10] git pull --ff-only ────────────────────────────────
 echo
@@ -248,6 +299,16 @@ else
         echo "  ✓ $FPM_UNIT restarted"
     fi
 fi
+
+# ── maintenance OFF — reload done, new bytecode live, opcache cleared ────────
+# Safe to expose now: the pull→migrate→reload window (the opcache-inconsistent
+# zone) is closed. The health gate below then validates the LIVE (non-maintenance)
+# site. If the gate fails, the abort message tells the operator to re-gate.
+echo
+echo "── maintenance OFF (new code live + opcache cleared) ──"
+set_maintenance false
+[ "$DRY_RUN" -eq 1 ] || MAINT_ON=0
+[ "$DRY_RUN" -eq 1 ] || echo "  ✓ MAINTENANCE_MODE=false — site live"
 
 # ── [9/10] health gate ───────────────────────────────────────
 echo
