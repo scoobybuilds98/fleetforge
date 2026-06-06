@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-BACKUP-3b** — IN-FLIGHT
+  Started: 2026-06-06T07:30 UTC by desktop-1
+  Touching: app/admin/settings/index.php, app/admin/settings/backup.php, api/v1/quickbooks|settings (dropbox endpoints), app/admin/oauth/dropbox/callback.php, tests/, docs/
+
 **S-FIX-DROPBOX-ARGS** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: `cron/backup_dropbox.php` only matched `--type=storage`; the space form `--type storage` (its own docblock/crontab usage) silently defaulted to 'db' → weekly storage mirror backed up the DB.** Now accepts both forms; defaults to 'db' only on absent flag; invalid value → STDERR + exit 1 (never silent-default). `_smoke_backup_dropbox.php` C10 (NEW, 28→33): subprocess type-resolution across space/equals/no-arg/invalid; confirmed non-vacuous (old parser resolved `--type storage`→'db'). K-trap 74 added (completes T70–74 cluster). Commits: `ac98d3a` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
 
 **S-BACKUP-3a** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Make `cron/backup_storage.php` gather user content via StorageClient (driver-correct).** Prod (s3) was tarring the EMPTY local `storage/uploads/` → 0-file backup. Now lists via `StorageClient::listByPrefix('')` + downloads via `::download()` into a staging dir, excludes `backups/`+`db-backups/` (pure `ff_storage_backup_should_include`), tars + uploads (unchanged dest/retention/lock/BackupRun). NO STORAGE_DRIVER branch (D-BACKUP-6). 0 content = success (valid empty tarball). `_smoke_backup_storage.php` (NEW, 10/10): C1 pure filter + C2–C5 execute the cron as a subprocess; non-vacuous. K-trap 73 added (completes the T70/71/72/73 cluster). Commits: `f5c4903` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
