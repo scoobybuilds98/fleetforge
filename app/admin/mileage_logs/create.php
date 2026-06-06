@@ -102,7 +102,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                     <label class="form-label" for="equipment_unit_id">Equipment Unit <span style="color:var(--danger);">*</span></label>
                     <?php
                     $pickerConfig   = [
-                        'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                        'endpoint'    => '/api/v1/equipment/units/index.php',
                         'searchParam' => 'search',
                         'resultKey'   => 'items',
                         'perPage'     => 10,
@@ -135,7 +135,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                     </label>
                     <?php
                     $pickerConfig   = [
-                        'endpoint'    => base_url('api/v1/leases/index.php'),
+                        'endpoint'    => '/api/v1/leases/index.php',
                         'searchParam' => 'search',
                         'resultKey'   => 'items',
                         'perPage'     => 10,

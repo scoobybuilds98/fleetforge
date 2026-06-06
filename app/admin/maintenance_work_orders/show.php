@@ -396,7 +396,7 @@ function priorityBadgeClass(string $p): string {
                         <label class="form-label" for="edit_vendor_id">Vendor</label>
                         <?php
                         $pickerConfig   = [
-                            'endpoint'    => base_url('api/v1/vendors/index.php'),
+                            'endpoint'    => '/api/v1/vendors/index.php',
                             'searchParam' => 'q',
                             'resultKey'   => 'items',
                             'perPage'     => 10,
@@ -440,7 +440,7 @@ function priorityBadgeClass(string $p): string {
                             // D-PICKER-USER-VARIANT: user picker — no role/status filter,
                             // matching the original dropdown which showed all non-deleted users.
                             $pickerConfig   = [
-                                'endpoint'    => base_url('api/v1/users/index.php'),
+                                'endpoint'    => '/api/v1/users/index.php',
                                 'searchParam' => 'q',
                                 'resultKey'   => 'items',
                                 'perPage'     => 10,

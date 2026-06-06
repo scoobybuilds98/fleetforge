@@ -104,7 +104,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <label class="form-label">Equipment Unit <span class="text-danger">*</span></label>
                 <?php
                 $pickerConfig   = [
-                    'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                    'endpoint'    => '/api/v1/equipment/units/index.php',
                     'searchParam' => 'search',
                     'resultKey'   => 'items',
                     'perPage'     => 10,
@@ -142,7 +142,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <label class="form-label">Linked Lease <span class="text-secondary">(optional)</span></label>
                 <?php
                 $pickerConfig   = [
-                    'endpoint'    => base_url('api/v1/leases/index.php'),
+                    'endpoint'    => '/api/v1/leases/index.php',
                     'searchParam' => 'search',
                     'resultKey'   => 'items',
                     'perPage'     => 10,
@@ -190,7 +190,7 @@ require_once FF_ROOT . '/includes/header.php';
                 // D-PICKER-USER-VARIANT: user picker — no role/status filter, matching
                 // original dropdown which showed all non-deleted users (any status).
                 $pickerConfig   = [
-                    'endpoint'    => base_url('api/v1/users/index.php'),
+                    'endpoint'    => '/api/v1/users/index.php',
                     'searchParam' => 'q',
                     'resultKey'   => 'items',
                     'perPage'     => 10,

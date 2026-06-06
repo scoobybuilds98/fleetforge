@@ -81,7 +81,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label required">Customer</label>
                         <?php
                         $pickerConfig   = [
-                            'endpoint'    => base_url('api/v1/customers/index.php'),
+                            'endpoint'    => '/api/v1/customers/index.php',
                             'searchParam' => 'search',
                             'resultKey'   => 'items',
                             'perPage'     => 10,
@@ -106,7 +106,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label required">Equipment Unit</label>
                         <?php
                         $pickerConfig   = [
-                            'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                            'endpoint'    => '/api/v1/equipment/units/index.php',
                             'searchParam' => 'search',
                             'resultKey'   => 'items',
                             'perPage'     => 10,

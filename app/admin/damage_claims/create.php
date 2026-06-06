@@ -126,7 +126,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </label>
                     <?php
                     $pickerConfig   = [
-                        'endpoint'    => base_url('api/v1/equipment/units/index.php'),
+                        'endpoint'    => '/api/v1/equipment/units/index.php',
                         'searchParam' => 'search',
                         'resultKey'   => 'items',
                         'perPage'     => 10,
@@ -149,7 +149,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <label class="form-label" for="customer_id">Customer</label>
                     <?php
                     $pickerConfig   = [
-                        'endpoint'    => base_url('api/v1/customers/index.php'),
+                        'endpoint'    => '/api/v1/customers/index.php',
                         'searchParam' => 'search',
                         'resultKey'   => 'items',
                         'perPage'     => 10,
@@ -180,7 +180,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <label class="form-label" for="vendor_id">Vendor Sent To</label>
                     <?php
                     $pickerConfig   = [
-                        'endpoint'    => base_url('api/v1/vendors/index.php'),
+                        'endpoint'    => '/api/v1/vendors/index.php',
                         'searchParam' => 'q',
                         'resultKey'   => 'items',
                         'perPage'     => 10,
@@ -237,7 +237,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <label class="form-label">Linked Lease <span class="form-hint" style="display:inline;font-size:0.8rem;">(optional)</span></label>
                 <?php
                 $pickerConfig   = [
-                    'endpoint'    => base_url('api/v1/leases/index.php'),
+                    'endpoint'    => '/api/v1/leases/index.php',
                     'searchParam' => 'search',
                     'resultKey'   => 'items',
                     'perPage'     => 10,

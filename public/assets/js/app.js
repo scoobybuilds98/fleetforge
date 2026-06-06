@@ -235,8 +235,20 @@ const FF_Api = {
         return res.json();
     },
 
-    /** Build an absolute URL under FF_BASE_PATH */
+    /** Build an absolute URL under FF_BASE_PATH.
+     *
+     * Idempotent guard (S-FIX-SELECTORS-EMPTY): if the caller already passed a
+     * fully-qualified URL (e.g. PHP base_url('api/v1/…') → https://host/fleetforge/…),
+     * return it untouched. Prepending FF_BASE_PATH again produced the malformed
+     * `/fleetforgehttps://host/fleetforge/api/v1/…` that 404'd, which FF_RecordPicker's
+     * try/catch swallowed into an empty result set — making customer/equipment/etc.
+     * selectors render empty on every create/edit form. The contract is still
+     * "pass a root-relative path"; this guard just stops a base_url() slip from
+     * silently breaking a picker. */
     url(path) {
+        if (typeof path === 'string' && /^https?:\/\//i.test(path)) {
+            return path;
+        }
         return (window.FF_BASE_PATH ?? '') + path;
     },
 };
