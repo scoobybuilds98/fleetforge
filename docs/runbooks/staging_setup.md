@@ -45,7 +45,8 @@ Follow the same provisioning checklist used for production:
 - Copy `.env.example` → `.env` and fill in staging-specific values (see Section 3)
 - Run `composer install --no-dev`
 - Configure Nginx virtual host with the staging subdomain
-- Run database migrations: `php scripts/migrate.php`
+- Run database migrations: `php bin/migrate.php --apply`
+  (fresh DB: apply `000_baseline.sql` first, which creates all tables + seeds schema_migrations)
 - Run seed data if desired: `php scripts/seed.php`
 - Configure logrotate (see `docs/runbooks/logrotate_setup.md`)
 - Install SSL certificate via Certbot for the staging subdomain

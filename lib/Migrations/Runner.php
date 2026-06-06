@@ -116,12 +116,25 @@ class Runner
      */
     public function listApplied(): array
     {
-        $rows = db_select(
-            "SELECT version, filename, checksum, applied_at, applied_by, execution_ms
-               FROM schema_migrations
-              ORDER BY version ASC",
-            []
-        );
+        // D-BASELINE-3: on a completely fresh DB (000_baseline not yet applied)
+        // schema_migrations doesn't exist yet. Catch the "table doesn't exist"
+        // exception and return [] so plan() shows all files as pending, letting
+        // 000_baseline run first — it creates schema_migrations and seeds it.
+        try {
+            $rows = db_select(
+                "SELECT version, filename, checksum, applied_at, applied_by, execution_ms
+                   FROM schema_migrations
+                  ORDER BY version ASC",
+                []
+            );
+        } catch (\Throwable $e) {
+            if (str_contains($e->getMessage(), "schema_migrations") ||
+                str_contains($e->getMessage(), "doesn't exist") ||
+                str_contains($e->getMessage(), "Table") && str_contains($e->getMessage(), "exist")) {
+                return [];
+            }
+            throw $e;
+        }
         $byFilename = [];
         foreach ($rows as $r) {
             $byFilename[(string) $r['filename']] = [
@@ -360,6 +373,13 @@ class Runner
         foreach ($applied as $filename => $row) {
             $path = $this->migrationsDir . DIRECTORY_SEPARATOR . $filename;
             if (!is_file($path)) {
+                // D-BASELINE-2: pre-baseline migrations are archived as *.sql.txt
+                // after the baseline is introduced. If the .sql.txt sibling exists
+                // the file was deliberately superseded — not a missing/corrupt file.
+                if (is_file($path . '.txt')) {
+                    $ok[] = $filename;
+                    continue;
+                }
                 $missing[] = $filename;
                 continue;
             }

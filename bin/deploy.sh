@@ -189,7 +189,36 @@ run sudo -u "$WEB_USER" composer install --no-dev --optimize-autoloader --no-int
 # ── [7/10] migrate --apply + assert 0 pending ───────────────
 echo
 echo "── [7/10] migrate --apply, then assert 0 pending ───────────"
+# D-BASELINE-3 guard: if 000_baseline.sql is present but NOT yet in schema_migrations,
+# this deploy MUST NOT run migrate --apply automatically — the operator must pre-mark it
+# applied first (INSERT ... 000_baseline) to prevent CREATE TABLE IF NOT EXISTS running
+# in the wrong order. See docs/runbooks/baseline_reconcile.md for the exact one-time
+# manual sequence: pull → pre-mark INSERT → migrate --apply → reload → health check.
+BASELINE_FILE="$REPO_DIR/db_migrations/000_baseline.sql"
+if [ -f "$BASELINE_FILE" ] && [ "$DRY_RUN" -ne 1 ]; then
+    BASELINE_MARKED="$(sudo -u "$WEB_USER" php -r "
+        require_once '$REPO_DIR/config/app.php';
+        try {
+            \$rows = db_select(\"SELECT 1 FROM schema_migrations WHERE filename = '000_baseline.sql' LIMIT 1\", []);
+            echo count(\$rows) > 0 ? 'yes' : 'no';
+        } catch (\Throwable \$e) {
+            echo 'no';
+        }
+    " 2>/dev/null || echo 'no')"
+    if [ "$BASELINE_MARKED" != "yes" ]; then
+        abort "000_baseline.sql is present but NOT marked applied in schema_migrations.
+  This deploy must follow the SPECIAL one-time baseline reconcile procedure:
+    1. git pull  (already done)
+    2. Run the pre-mark INSERT: see docs/runbooks/baseline_reconcile.md
+    3. php bin/migrate.php --apply
+    4. systemctl reload php8.2-fpm
+    5. Verify health + migrate --status
+  Do NOT re-run deploy.sh until step 2 is complete."
+    fi
+    echo "  ✓ 000_baseline.sql pre-marked in schema_migrations (baseline reconcile done)"
+fi
 if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would check: 000_baseline.sql pre-marked in schema_migrations"
     echo "    [dry-run] would run: sudo -u $WEB_USER php bin/migrate.php --apply"
     echo "    [dry-run] would run: sudo -u $WEB_USER php bin/migrate.php --assert-applied  (abort if exit≠0)"
 else
