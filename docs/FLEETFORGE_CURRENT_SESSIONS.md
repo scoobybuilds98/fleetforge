@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-BACKUP-1** — IN-FLIGHT
+Started: 2026-06-06T00:00Z  Agent: claude-sonnet-4-6
+Touching: db_migrations/, lib/Backup/, cron/backup_db.php, cron/backup_storage.php, tests/, FLEETFORGE_DATABASE_MASTER.sql, docs/FLEETFORGE_SCHEMA_QUICK_REF.md
+
 **S-SENTRY-CHECKLIST-CLOSE** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Docs-only: flipped PREDEPLOY_CHECKLIST B3 (SENTRY_DSN) + I1 (alert routing) to DONE — Sentry prod verified live, event 3a4278ea ingested env=production, alert routing confirmed. No schema/code motion.**
 
 **S-SAMSARA-SYNC-VERIFY** — VERIFIED 2026-06-06 (read-only; D-SAMSARA-DELETE-1 confirmed intact — delete one-way FF-only, create+update write-backs present, zero stray deleteTrailer callers, no deviation found).
