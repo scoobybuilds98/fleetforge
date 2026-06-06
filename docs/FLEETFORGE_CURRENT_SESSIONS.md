@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-FIX-BACKUP-COLS** — IN-FLIGHT
+  Started: 2026-06-06T05:30 UTC by desktop-1
+  Touching: scripts/dropbox_configure.php, app/admin/oauth/dropbox/, tests/_smoke_backup_dropbox.php, docs/
+
 **S-BACKUP-2** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Dropbox backup engine — DropboxClient + OAuth connect/callback + StorageClient::download() + daily mirror cron.** Migration 98→99 (`acc_oauth_states.provider` ENUM += 'dropbox'). `lib/Backup/DropboxClient.php` (AES-256-CBC encryption via APP_SECRET; refresh-token grant; single-shot + upload-session). `StorageClient::download()`. OAuth endpoints `app/admin/oauth/dropbox/{init,callback}.php`. `scripts/dropbox_configure.php` + `cron/backup_dropbox.php`. `_smoke_backup_dropbox.php` 20/20. D-BACKUP-4/5 locked. CANONICAL REDIRECT URI: `https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php`. Commits: `0371371` (C1 IN-FLIGHT) + this commit (C2 code+docs).
 
 **S-BACKUP-1** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Foundation session for 3-destination backup arc.** NEW `backup_runs` table (migration 98) + `lib/Backup/BackupRun.php` (fail-soft history helper) + retrofitted `cron/backup_db.php` + `cron/backup_storage.php` with BackupRun::start/success/fail calls + seeded 6 `dropbox.*` settings keys (app_secret + refresh_token is_sensitive=1; labels=NULL per D196). Decisions D-BACKUP-1/2/3 locked. `_smoke_backup_runs.php` 62/62. Commits: `a80cc07` (C1 IN-FLIGHT) + this commit (C2 code+docs).
