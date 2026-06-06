@@ -2132,6 +2132,21 @@ if (!empty($vars) && method_exists($frame, 'setVars')) {
 
 **Detected:** S-FIX-BACKUP-COLS 2026-06-06 — `scripts/dropbox_configure.php` fataled on prod ("Unknown column 'type'"); both INSERTs used `type`/`group`; escaped because S-BACKUP-2 C7 only tested encrypt/decrypt. Fixed to `value_type`/`group_name` + C7 strengthened to schema-real coverage (20→25 checks).
 
+### Trap 72: `php -l` does NOT catch undefined-function calls — cron/CLI/script smokes MUST execute the real script as a subprocess
+
+**Context:** `php -l` (lint) only parses syntax. It does NOT resolve function names, so a call to a function that doesn't exist — e.g. `db_value(...)` when the DB layer only defines `db_select/db_row/db_insert/db_update/db_execute/db_count/db_exists/db_transaction` — lints CLEAN and only fatals at runtime with `Call to undefined function db_value()`. **Scalar reads use `db_row('SELECT … AS x', $p)['x']`, NOT a `db_value` helper (there is none).**
+
+**Why it's a trap:** for a cron, bootstrap CLI, or webhook script, the runtime path that would surface the undefined function never runs in a dev smoke that only does `php -l` + offline unit checks (autoload, encrypt/decrypt, schema introspection). The fatal first fires **on prod, when the scheduler/operator actually runs the script** — the worst possible time and place.
+
+**Same class as Traps 70 + 71** — three prod fatals, one root cause (a real integration path the dev smokes never exercise):
+- **T70** Sentry `before_send` scrubber: no-op on blank-DSN dev → SDK-4.x array-API fatal only on first prod event.
+- **T71** `settings` columns `type`/`group`: smoke stopped at encrypt/decrypt, never ran the real INSERT.
+- **T72** `db_value()` in `cron/backup_dropbox.php`: lint-clean, smoke never executed the cron.
+
+**Fix the class, not just the instance:** any smoke covering a cron/CLI/script MUST **execute the real script as a subprocess** (`exec('php ' . escapeshellarg($script) . ' … 2>&1', $out, $code)`) against the real `db.php` + schema, then assert: `$code === 0` (or the expected code), output contains NO `undefined function`/`Fatal`, and the expected DB side-effect occurred. Drive it down a deterministic, network-free branch (set fixtures so it reaches a fail-soft path), and restore ALL fixture state in `finally`. Make it non-vacuous — verify it FAILS when the bug is reintroduced. See `tests/_smoke_backup_dropbox.php` C9 for the canonical pattern (hides the `s3` success rows so `lastSuccess()` returns null → fail-soft "no source artifact" branch → exit 0).
+
+**Detected:** S-FIX-DROPBOX-CRON-DBVALUE 2026-06-06 — `cron/backup_dropbox.php:57` called `db_value()` at the GET_LOCK read; lint-clean, fataled on prod's first scheduled run. Fixed to `db_row(... AS lock_result)['lock_result']`; C9 added (subprocess execution; 25→28 checks; confirmed non-vacuous).
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)

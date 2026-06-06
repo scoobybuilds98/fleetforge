@@ -54,7 +54,8 @@ if ($rawRefreshToken === '') {
 
 // ── Advisory lock — prevents overlapping cron runs per type ──────────────
 $lockName = 'ff_cron_backup_dropbox_' . $type;
-$lockResult = db_value('SELECT GET_LOCK(?, 0)', [$lockName]);
+$lockRow = db_row('SELECT GET_LOCK(?, 0) AS lock_result', [$lockName]);
+$lockResult = $lockRow['lock_result'] ?? null;
 if (!$lockResult) {
     error_log("[CRON backup_dropbox:{$type}] Already running (lock held). Skipping.");
     exit(0);

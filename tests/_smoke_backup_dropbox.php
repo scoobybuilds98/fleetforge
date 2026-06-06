@@ -334,6 +334,100 @@ try {
     ko('C8 DB check threw', $e->getMessage());
 }
 
+// ── C9: cron executes end-to-end down the fail-soft path (regression guard) ──
+// S-FIX-DROPBOX-CRON-DBVALUE: cron/backup_dropbox.php called the undefined
+// db_value() at the GET_LOCK read and fataled on prod. php -l does NOT catch
+// undefined-function calls, and the prior smoke never EXECUTED the cron, so it
+// shipped. This sub-check runs the REAL cron as a subprocess against the real
+// db.php + schema, driven down a deterministic, network-free path:
+//   enabled+token gate passes → lock acquired (exercises the FIXED line) →
+//   BackupRun::lastSuccess('s3', type) returns null → fail-soft "no source
+//   artifact" branch → dropbox failed row written → exit 0.
+// Non-vacuous: if line 57 still calls db_value, the subprocess fatals BEFORE
+// reaching the no-artifact branch — exit != 0, "undefined function" in output,
+// and no failed row created — so all three assertions fail.
+echo "\nC9: cron/backup_dropbox.php executes end-to-end (S-FIX-DROPBOX-CRON-DBVALUE regression guard)\n";
+$cronType = 'db';
+$cronPath = dirname(__DIR__) . '/cron/backup_dropbox.php';
+
+// Save fixture state so the dev DB is left exactly as found.
+$c9OrigEnabled = (string) settings_get('dropbox.enabled', '0');
+$c9OrigToken   = (string) settings_get('dropbox.refresh_token', '');
+
+// Capture the s3 success rows for the test type — we hide them (destination
+// → 'manual') so lastSuccess('s3', type) returns null for the cron run, then
+// restore them in finally.
+$c9HiddenIds = array_map(
+    'intval',
+    array_column(
+        db_select(
+            "SELECT id FROM backup_runs WHERE destination='s3' AND backup_type=? AND status='success'",
+            [$cronType]
+        ),
+        'id'
+    )
+);
+
+// High-water mark to identify + clean up exactly the rows this test creates.
+$c9MaxIdBefore = (int) (db_row("SELECT COALESCE(MAX(id),0) AS m FROM backup_runs", [])['m'] ?? 0);
+
+try {
+    // Fixtures: enabled + non-empty token so the cron passes the gate checks.
+    db_execute("UPDATE settings SET `value`='1' WHERE `key`='dropbox.enabled'");
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.refresh_token'", ['smoke-dummy-refresh-token']);
+
+    // Hide existing s3 successes for this type → lastSuccess() returns null.
+    if (!empty($c9HiddenIds)) {
+        $in = implode(',', $c9HiddenIds);
+        db_execute("UPDATE backup_runs SET destination='manual' WHERE id IN ({$in})");
+    }
+
+    // Execute the REAL cron (subprocess). 2>&1 so PHP fatals land in $cronOut.
+    $outLines = [];
+    $exitCode = null;
+    exec('php ' . escapeshellarg($cronPath) . ' --type=' . $cronType . ' 2>&1', $outLines, $exitCode);
+    $cronOut = implode("\n", $outLines);
+
+    // Assertion 1: no undefined-function / fatal (this is what db_value emitted).
+    if (stripos($cronOut, 'undefined function') === false && stripos($cronOut, 'Fatal') === false) {
+        ok('cron subprocess: no "undefined function"/"Fatal" in output');
+    } else {
+        ko('cron subprocess emitted a fatal', trim($cronOut));
+    }
+
+    // Assertion 2: clean exit 0 (fail-soft "no source artifact" path).
+    if ($exitCode === 0) {
+        ok('cron subprocess exited 0 (fail-soft path reached + lock line executed)');
+    } else {
+        ko('cron subprocess exit code', 'expected 0, got ' . var_export($exitCode, true) . ' — output: ' . trim($cronOut));
+    }
+
+    // Assertion 3: a dropbox/<type> failed row was written with the no-artifact message.
+    $testRow = db_row(
+        "SELECT id, status, error_message FROM backup_runs
+         WHERE id > ? AND destination='dropbox' AND backup_type=?
+         ORDER BY id DESC LIMIT 1",
+        [$c9MaxIdBefore, $cronType]
+    );
+    if ($testRow && $testRow['status'] === 'failed' && $testRow['error_message'] === 'no source artifact') {
+        ok("cron wrote a dropbox/{$cronType} 'failed' row with error_message='no source artifact'");
+    } else {
+        ko('expected dropbox failed row not found', 'got: ' . json_encode($testRow));
+    }
+} catch (\Throwable $e) {
+    ko('C9 threw unexpectedly', $e->getMessage());
+} finally {
+    // Restore ALL fixture state — leave the dev DB exactly as found.
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.enabled'", [$c9OrigEnabled]);
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.refresh_token'", [$c9OrigToken]);
+    if (!empty($c9HiddenIds)) {
+        $in = implode(',', $c9HiddenIds);
+        db_execute("UPDATE backup_runs SET destination='s3' WHERE id IN ({$in})");
+    }
+    // Delete only the rows this test created (id past the high-water mark).
+    db_execute("DELETE FROM backup_runs WHERE id > ? AND destination='dropbox'", [$c9MaxIdBefore]);
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 $total = $pass + $fail;
 echo "\n=== {$pass}/{$total} PASS" . ($fail > 0 ? ", {$fail} FAIL" : '') . " ===\n";
