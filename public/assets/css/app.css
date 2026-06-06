@@ -11099,7 +11099,19 @@ tr.ff-row-selected > td {
 
 /* ── Mobile: full-width overlay ─────────────────────────────── */
 @media (max-width: 1023px) {
-    .help-drawer-panel { width: 100vw; border-left: none; }
+    /* Mobile is an OVERLAY (backdrop visible), so the panel MUST sit above the
+       backdrop. The default panel z-index (calc(--z-topbar) - 2 = 28) is for the
+       DESKTOP push layout where it stays below the topbar/page-header and the
+       backdrop is display:none. On mobile that low value left the panel BENEATH
+       its own backdrop (calc(--z-modal) - 3 = 57) — the panel rendered dimmed
+       and every tap landed on the backdrop (closing the drawer) instead of the
+       content. Lift the panel to one above the backdrop, still below real modals
+       (60) and toasts (70). [S-FIX-HELP-DRAWER-MOBILE] */
+    .help-drawer-panel {
+        width: 100vw;
+        border-left: none;
+        z-index: calc(var(--z-modal) - 2); /* 58 — above backdrop (57) */
+    }
 }
 
 /* ============================================================
