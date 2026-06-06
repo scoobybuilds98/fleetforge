@@ -1966,6 +1966,27 @@ CREATE TABLE `audit_log_archive` (
   KEY `idx_created` (`created_at`),
   KEY `idx_action` (`action`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `backup_runs` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `destination` enum('s3','dropbox','manual') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `backup_type` enum('db','storage','full') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status` enum('in_progress','success','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'in_progress',
+  `file_key` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `file_size_bytes` bigint unsigned DEFAULT NULL,
+  `started_at` datetime NOT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `duration_ms` int unsigned DEFAULT NULL,
+  `error_message` text COLLATE utf8mb4_unicode_ci,
+  `initiated_by` int unsigned DEFAULT NULL,
+  `trigger_source` enum('cron','manual') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'cron',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_dest_status` (`destination`,`status`),
+  KEY `idx_created` (`created_at`),
+  KEY `idx_type` (`backup_type`),
+  KEY `fk_backup_runs_user` (`initiated_by`),
+  CONSTRAINT `fk_backup_runs_user` FOREIGN KEY (`initiated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `chat_attachments` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `message_id` int unsigned NOT NULL,

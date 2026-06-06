@@ -24,6 +24,7 @@ require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
 use FleetForge\Storage\StorageClient;
+use FleetForge\Backup\BackupRun;
 
 // ── Advisory lock (D21) ───────────────────────────────────────────────────────
 $lock = db_row("SELECT GET_LOCK('ff_cron_backup_storage', 0) AS ok", []);
@@ -31,8 +32,9 @@ if (!$lock || (int)$lock['ok'] !== 1) {
     exit(0);
 }
 
-$tmpFile = '';
-$start   = time();
+$tmpFile     = '';
+$start       = time();
+$backupRunId = BackupRun::start('s3', 'storage');
 
 try {
     // ── Log cron start ───────────────────────────────────────────────────────
@@ -162,6 +164,7 @@ try {
     ]);
 
     error_log("[CRON backup_storage] Backup complete: {$s3Key} ({$sizeMb}MB, {$fileCount} files, {$duration}s)");
+    BackupRun::success($backupRunId, $s3Key, $rawSize);
 
     // ── Retention cleanup ────────────────────────────────────────────────────
     ff_backup_storage_retention();
@@ -174,6 +177,7 @@ try {
 
     $msg = $e->getMessage();
     error_log("[CRON backup_storage] FAILED: {$msg}");
+    BackupRun::fail($backupRunId, $msg);
 
     db_insert('audit_log', [
         'user_id'      => null,

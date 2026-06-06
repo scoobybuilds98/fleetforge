@@ -36,6 +36,7 @@ require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
 use FleetForge\Storage\StorageClient;
+use FleetForge\Backup\BackupRun;
 
 // ── Advisory lock (D21) — prevents overlapping runs ──────────────────────────
 $lock = db_row("SELECT GET_LOCK('ff_cron_backup_db', 0) AS ok", []);
@@ -43,9 +44,10 @@ if (!$lock || (int)$lock['ok'] !== 1) {
     exit(0); // Another instance running — exit silently
 }
 
-$dryRun  = in_array('--dry-run', $argv ?? [], true);
-$tmpFile = '';
-$start   = time();
+$dryRun    = in_array('--dry-run', $argv ?? [], true);
+$tmpFile   = '';
+$start     = time();
+$backupRunId = $dryRun ? 0 : BackupRun::start('s3', 'db');
 
 try {
     // ── Log cron start ───────────────────────────────────────────────────────
@@ -182,6 +184,7 @@ try {
         ]);
 
         error_log("[CRON backup_db] Backup complete: {$s3Key} ({$sizeMb}MB, {$duration}s)");
+        BackupRun::success($backupRunId, $s3Key, $rawSize);
     }
 
     // ── Retention cleanup (runs in both normal and dry-run modes) ────────────
@@ -195,6 +198,7 @@ try {
 
     $msg = $e->getMessage();
     error_log("[CRON backup_db] FAILED: {$msg}");
+    BackupRun::fail($backupRunId, $msg);
 
     db_insert('audit_log', [
         'user_id'      => null,

@@ -74,9 +74,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-BACKUP-1** — IN-FLIGHT
-Started: 2026-06-06T00:00Z  Agent: claude-sonnet-4-6
-Touching: db_migrations/, lib/Backup/, cron/backup_db.php, cron/backup_storage.php, tests/, FLEETFORGE_DATABASE_MASTER.sql, docs/FLEETFORGE_SCHEMA_QUICK_REF.md
+**S-BACKUP-1** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Foundation session for 3-destination backup arc.** NEW `backup_runs` table (migration 98) + `lib/Backup/BackupRun.php` (fail-soft history helper) + retrofitted `cron/backup_db.php` + `cron/backup_storage.php` with BackupRun::start/success/fail calls + seeded 6 `dropbox.*` settings keys (app_secret + refresh_token is_sensitive=1; labels=NULL per D196). Decisions D-BACKUP-1/2/3 locked. `_smoke_backup_runs.php` 62/62. Commits: `a80cc07` (C1 IN-FLIGHT) + this commit (C2 code+docs).
 
 **S-SENTRY-CHECKLIST-CLOSE** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Docs-only: flipped PREDEPLOY_CHECKLIST B3 (SENTRY_DSN) + I1 (alert routing) to DONE — Sentry prod verified live, event 3a4278ea ingested env=production, alert routing confirmed. No schema/code motion.**
 
@@ -527,6 +525,10 @@ Outcome: Self-hosted all 4 CDN-delivered front-end dependencies — eliminates e
 ---
 
 ## Recent ship history (rolling — older entries archived to PROGRESS.md)
+
+**2026-06-06:**
+- S-BACKUP-1 SHIPPED — **Foundation for 3-destination backup arc: `backup_runs` table + `BackupRun.php` helper + S3 cron retrofit + Dropbox config seed.** Migration 97→98 (`backup_runs`: destination/backup_type/status ENUMs, file_key, file_size_bytes, duration_ms, error_message, initiated_by FK→users, trigger_source). `lib/Backup/BackupRun.php` fail-soft helper (start/success/fail/lastSuccess, all catch \Throwable). Cron retrofit: additive only — BackupRun::start/success/fail around existing success/failure paths; advisory lock + retention + audit_log untouched. 6 dropbox.* settings seeded (app_secret + refresh_token is_sensitive=1; labels=NULL per D196). _smoke_backup_runs 62/62. D-BACKUP-1/2/3 locked. Commits: `a80cc07` (C1) + this (C2).
+- S-SAMSARA-SYNC-VERIFY VERIFIED — **Read-only audit: confirmed D-SAMSARA-DELETE-1 intact.** Zero `deleteTrailer()` callers remain in any .php file; delete.php + bulk_delete.php carry the tombstone comment; create/update write-backs intact. No deviation found. Commit: `2d76ee2`.
 
 **2026-06-05:**
 - S-CCA-BTN-SETTINGS SHIPPED — **Clickable CTA + Credit Application settings card.** `credit-application.php` `?admin_preview=1` mode (auth-gated, POST blocked, yellow admin banner, disabled submit). `preview.php` CTA now links to `?admin_preview=1` (href-stripping removed). `customers/show.php` `@click.capture.prevent` removed; helper text updated. `settings/index.php` Credit Application card (6 settings) + "Preview Form Layout ↗" action card added to General tab. No migration. Commits: `8d3949c` + `9b06533` + this (C3 docs).

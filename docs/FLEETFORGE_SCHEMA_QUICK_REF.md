@@ -2121,6 +2121,24 @@ _71 tables._
 | `notes` | text |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
 
+## `backup_runs`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `destination` | enum('s3','dropbox','manual') |  | NO |
+| `backup_type` | enum('db','storage','full') |  | NO |
+| `status` | enum('in_progress','success','failed') |  | NO |
+| `file_key` | varchar(512) |  | YES |
+| `file_size_bytes` | bigint unsigned |  | YES |
+| `started_at` | datetime |  | NO |
+| `completed_at` | datetime |  | YES |
+| `duration_ms` | int unsigned |  | YES |
+| `error_message` | text |  | YES |
+| `initiated_by` | int unsigned | MUL | YES |
+| `trigger_source` | enum('cron','manual') |  | NO |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
+
 ## `chat_attachments`
 
 | Column | Type | Key | Nullable |
