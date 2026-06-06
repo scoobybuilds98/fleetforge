@@ -47,7 +47,28 @@ class BackupRun
     }
 
     /**
+     * Record stage-based progress (manual backup worker). Fail-soft: a
+     * progress-write failure MUST NEVER abort the build. $pct is clamped 0-100.
+     *
+     * @session S-BACKUP-3c-PROGRESS
+     */
+    public static function progress(int $id, int $pct, string $stage): void
+    {
+        if ($id === 0) return;
+        $pct = max(0, min(100, $pct));
+        try {
+            db_execute(
+                'UPDATE backup_runs SET progress_pct = ?, progress_stage = ? WHERE id = ?',
+                [$pct, mb_substr($stage, 0, 40), $id]
+            );
+        } catch (\Throwable $e) {
+            error_log('[BackupRun::progress] ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Mark a run successful; record file key, size, and wall-clock duration.
+     * Also stamps progress 100/'Complete' so a polling UI sees a finished bar.
      */
     public static function success(int $id, ?string $fileKey, ?int $sizeBytes): void
     {
@@ -59,9 +80,11 @@ class BackupRun
                         completed_at    = UTC_TIMESTAMP(),
                         duration_ms     = TIMESTAMPDIFF(SECOND, started_at, UTC_TIMESTAMP()) * 1000,
                         file_key        = ?,
-                        file_size_bytes = ?
+                        file_size_bytes = ?,
+                        progress_pct    = 100,
+                        progress_stage  = ?
                   WHERE id = ?',
-                ['success', $fileKey, $sizeBytes, $id]
+                ['success', $fileKey, $sizeBytes, 'Complete', $id]
             );
         } catch (\Throwable $e) {
             error_log('[BackupRun::success] ' . $e->getMessage());

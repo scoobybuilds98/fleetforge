@@ -27,14 +27,14 @@ $runId = isset($_GET['run_id']) ? (int) $_GET['run_id'] : 0;
 
 if ($runId > 0) {
     $row = db_row(
-        "SELECT id, status, file_key, file_size_bytes, completed_at, error_message
+        "SELECT id, status, progress_pct, progress_stage, file_key, file_size_bytes, completed_at, error_message
            FROM backup_runs
           WHERE id = ? AND destination = 'manual' AND backup_type = 'full' LIMIT 1",
         [$runId]
     );
 } else {
     $row = db_row(
-        "SELECT id, status, file_key, file_size_bytes, completed_at, error_message
+        "SELECT id, status, progress_pct, progress_stage, file_key, file_size_bytes, completed_at, error_message
            FROM backup_runs
           WHERE destination = 'manual' AND backup_type = 'full'
           ORDER BY id DESC LIMIT 1",
@@ -49,10 +49,12 @@ if (!$row) {
 $downloadable = $row['status'] === 'success' && !empty($row['file_key']);
 
 json_success([
-    'run_id'       => (int) $row['id'],
-    'status'       => (string) $row['status'],
-    'size'         => $row['file_size_bytes'] !== null ? (int) $row['file_size_bytes'] : null,
-    'completed_at' => $row['completed_at'],
-    'downloadable' => $downloadable,
-    'error'        => $row['status'] === 'failed' ? (string) ($row['error_message'] ?? '') : null,
+    'run_id'         => (int) $row['id'],
+    'status'         => (string) $row['status'],
+    'progress_pct'   => $row['progress_pct'] !== null ? (int) $row['progress_pct'] : null,
+    'progress_stage' => $row['progress_stage'] !== null ? (string) $row['progress_stage'] : null,
+    'size'           => $row['file_size_bytes'] !== null ? (int) $row['file_size_bytes'] : null,
+    'completed_at'   => $row['completed_at'],
+    'downloadable'   => $downloadable,
+    'error'          => $row['status'] === 'failed' ? (string) ($row['error_message'] ?? '') : null,
 ]);

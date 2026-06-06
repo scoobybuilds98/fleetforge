@@ -43,11 +43,18 @@ $maxIdBefore = (int) (db_row("SELECT COALESCE(MAX(id),0) AS m FROM backup_runs",
 $seededKeys  = [];          // storage keys to delete in finally
 $flippedIds  = [];          // s3 success rows temporarily hidden in C3
 
-/** Delete manual/full rows this test created (keeps tests independent). */
-$clearManual = function () use ($maxIdBefore): void {
+/**
+ * Clear transient manual/full job records (in_progress + failed) so each phase
+ * starts clean and the worker's "claim oldest in_progress" is deterministic.
+ * A stale in_progress manual row (no live worker — the smoke runs the worker
+ * synchronously) is safe to drop; 'success' rows are history and left intact
+ * (finally still removes any this test created via the id>maxIdBefore sweep).
+ */
+$clearManual = function (): void {
     db_execute(
-        "DELETE FROM backup_runs WHERE id > ? AND destination='manual' AND backup_type='full'",
-        [$maxIdBefore]
+        "DELETE FROM backup_runs
+          WHERE destination='manual' AND backup_type='full' AND status IN ('in_progress','failed')",
+        []
     );
 };
 /** Run the worker subprocess; returns [exitCode, output]. */
@@ -129,7 +136,7 @@ try {
     $clearManual();
     $rid2 = BackupRun::start('manual', 'full', null, 'manual');
     [$c2code, $c2out] = $runWorker();
-    $row2 = db_row("SELECT status, file_key, file_size_bytes FROM backup_runs WHERE id = ?", [$rid2]);
+    $row2 = db_row("SELECT status, file_key, file_size_bytes, progress_pct, progress_stage FROM backup_runs WHERE id = ?", [$rid2]);
 
     if (stripos($c2out, 'Fatal') === false && stripos($c2out, 'undefined function') === false) {
         ok('worker subprocess: no "undefined function"/"Fatal"');
@@ -147,6 +154,12 @@ try {
         ok("row flipped to success with bundle key + size ({$bundleKey})");
     } else {
         ko('worker did not flip the row to success', json_encode($row2));
+    }
+    // S-BACKUP-3c-PROGRESS: success stamps 100/'Complete'.
+    if ($row2 && (int) $row2['progress_pct'] === 100) {
+        ok("completed row has progress_pct=100 (stage='" . ($row2['progress_stage'] ?? '') . "')");
+    } else {
+        ko('completed row progress_pct != 100', 'got ' . var_export($row2['progress_pct'] ?? null, true));
     }
     if ($bundleKey !== '') {
         $seededKeys[] = $bundleKey;
@@ -194,10 +207,20 @@ try {
     // ── C5: column validity (Trap 71/73) ─────────────────────────────────────
     echo "\nC5: backup_runs + settings column identifiers exist (Trap 71/73)\n";
     $brCols  = array_map(fn($r) => (string) $r['Field'], db_select("SHOW COLUMNS FROM backup_runs", []));
-    $needBr  = ['id', 'destination', 'backup_type', 'status', 'file_key', 'file_size_bytes', 'completed_at', 'started_at', 'error_message', 'initiated_by', 'trigger_source'];
+    $needBr  = ['id', 'destination', 'backup_type', 'status', 'progress_pct', 'progress_stage', 'file_key', 'file_size_bytes', 'completed_at', 'started_at', 'error_message', 'initiated_by', 'trigger_source'];
     $badBr   = array_diff($needBr, $brCols);
-    if (empty($badBr)) { ok('backup_runs columns all exist: ' . implode(', ', $needBr)); }
+    if (empty($badBr)) { ok('backup_runs columns all exist (incl. progress_pct/progress_stage): ' . implode(', ', $needBr)); }
     else { ko('nonexistent backup_runs columns', implode(', ', $badBr)); }
+
+    // ── C6: status endpoint returns progress fields ──────────────────────────
+    echo "\nC6: status.php exposes progress_pct + progress_stage\n";
+    $stSrc = (string) file_get_contents($root . '/api/v1/settings/backup/status.php');
+    if (str_contains($stSrc, 'progress_pct') && str_contains($stSrc, 'progress_stage')
+        && preg_match('/SELECT[^;]*progress_pct[^;]*progress_stage/s', $stSrc)) {
+        ok('status.php SELECTs + returns progress_pct + progress_stage');
+    } else {
+        ko('status.php does not expose progress fields');
+    }
 
 } catch (\Throwable $e) {
     ko('smoke threw', $e->getMessage());

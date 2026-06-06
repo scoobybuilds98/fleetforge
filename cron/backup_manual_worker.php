@@ -56,6 +56,7 @@ try {
         exit(0);
     }
     $runId = (int) $job['id'];
+    BackupRun::progress($runId, 5, 'Starting');
 
     // ── Locate the source artifacts (D-BACKUP-7) ─────────────────────────────
     $s3Db      = BackupRun::lastSuccess('s3', 'db');
@@ -79,13 +80,16 @@ try {
         throw new \RuntimeException("Could not create staging dir: {$tmpDir}");
     }
 
+    BackupRun::progress($runId, 15, 'Downloading database');
     StorageClient::download($dbKey, $tmpDir . '/' . basename($dbKey));
+    BackupRun::progress($runId, 40, 'Downloading documents');
     StorageClient::download($storageKey, $tmpDir . '/' . basename($storageKey));
 
     // ── tar the staged members (NO -z — they're already gzipped) ─────────────
     $tmpFile = sys_get_temp_dir() . "/ff_manual_{$ts}.tar";
     $s3Key   = "backups/manual/manual_{$ts}.tar";
 
+    BackupRun::progress($runId, 75, 'Bundling');
     $tarCmd = ['tar', '-cf', $tmpFile, '-C', $tmpDir, '.'];
     $tarProc = proc_open($tarCmd, [
         0 => ['pipe', 'r'],
@@ -136,6 +140,7 @@ try {
     }
 
     // ── Upload + verify ──────────────────────────────────────────────────────
+    BackupRun::progress($runId, 90, 'Uploading');
     StorageClient::upload($tmpFile, $s3Key);
     $tmpFile = ''; // upload() deletes the local temp on success
     if (!StorageClient::exists($s3Key)) {

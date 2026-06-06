@@ -2129,6 +2129,8 @@ _71 tables._
 | `destination` | enum('s3','dropbox','manual') |  | NO |
 | `backup_type` | enum('db','storage','full') |  | NO |
 | `status` | enum('in_progress','success','failed') |  | NO |
+| `progress_pct` | tinyint unsigned |  | YES |
+| `progress_stage` | varchar(40) |  | YES |
 | `file_key` | varchar(512) |  | YES |
 | `file_size_bytes` | bigint unsigned |  | YES |
 | `started_at` | datetime |  | NO |

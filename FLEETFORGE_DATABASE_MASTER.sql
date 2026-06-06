@@ -1971,6 +1971,8 @@ CREATE TABLE `backup_runs` (
   `destination` enum('s3','dropbox','manual') COLLATE utf8mb4_unicode_ci NOT NULL,
   `backup_type` enum('db','storage','full') COLLATE utf8mb4_unicode_ci NOT NULL,
   `status` enum('in_progress','success','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'in_progress',
+  `progress_pct` tinyint unsigned DEFAULT NULL,
+  `progress_stage` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `file_key` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `file_size_bytes` bigint unsigned DEFAULT NULL,
   `started_at` datetime NOT NULL,

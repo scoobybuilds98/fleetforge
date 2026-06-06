@@ -269,8 +269,13 @@ $history = db_select(
                 <a class="btn btn-primary btn-sm" x-show="status === 'success' && downloadable" x-cloak
                    :href="downloadUrl" style="white-space:nowrap;">Download</a>
             </div>
-            <div x-show="status === 'in_progress'" x-cloak style="color:#b45309;font-size:0.8125rem;margin-top:8px;">
-                Bundling the latest database + storage backups… this can take a few minutes.
+            <div x-show="status === 'in_progress'" x-cloak style="margin-top:10px;">
+                <div style="height:8px;background:var(--border-default);border-radius:4px;overflow:hidden;">
+                    <div :style="'height:100%;background:var(--color-primary);border-radius:4px;transition:width .4s ease;width:' + (progressPct !== null ? progressPct : 8) + '%'"></div>
+                </div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
+                    <span x-text="progressStage || 'Working…'"></span><span x-show="progressPct !== null" x-text="' (' + progressPct + '%)'"></span>
+                </div>
             </div>
             <div x-show="status === 'failed'" x-cloak style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;" x-text="errorMsg"></div>
             <div x-show="flash" x-cloak style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;" x-text="flash"></div>
@@ -375,6 +380,8 @@ function FF_ManualBackup() {
         status:      <?= json_encode($manualInProgress ? 'in_progress' : ($manualFull ? 'success' : 'idle')) ?>,
         downloadable: <?= $manualFull ? 'true' : 'false' ?>,
         downloadUrl: '',
+        progressPct:  null,   // null → indeterminate/low bar, not 0%-stuck
+        progressStage: '',
         working:     false,
         flash:       '',
         errorMsg:    '',
@@ -396,7 +403,10 @@ function FF_ManualBackup() {
                 if (r.success) {
                     this.runId  = r.data.run_id;
                     this.status = 'in_progress';
+                    this.progressPct = null;
+                    this.progressStage = 'Starting';
                     this.downloadUrl = FF_Api.url('/api/v1/settings/backup/download.php') + '?run_id=' + this.runId;
+                    this.poll();          // immediate first read so the bar appears fast
                     this.startPolling();
                 } else {
                     this.flash = r.error?.message || 'Could not start the backup.';
@@ -409,7 +419,7 @@ function FF_ManualBackup() {
 
         startPolling() {
             if (this._timer) clearInterval(this._timer);
-            this._timer = setInterval(() => this.poll(), 4000);
+            this._timer = setInterval(() => this.poll(), 2000);
         },
 
         async poll() {
@@ -418,6 +428,8 @@ function FF_ManualBackup() {
                 if (r.success) {
                     this.status       = r.data.status;
                     this.downloadable = !!r.data.downloadable;
+                    this.progressPct  = (r.data.progress_pct === null || r.data.progress_pct === undefined) ? null : r.data.progress_pct;
+                    this.progressStage = r.data.progress_stage || '';
                     if (this.status === 'success') {
                         this.downloadUrl = FF_Api.url('/api/v1/settings/backup/download.php') + '?run_id=' + this.runId;
                         clearInterval(this._timer); this._timer = null;
