@@ -49,7 +49,7 @@ $appSecret = trim($argv[2]);
 $encSecret = DropboxClient::encrypt($appSecret);
 
 db_execute(
-    "INSERT INTO settings (`key`, `value`, `type`, `group`, `is_public`, `is_sensitive`, `label`, `description`)
+    "INSERT INTO settings (`key`, `value`, `value_type`, `group_name`, `is_public`, `is_sensitive`, `label`, `description`)
      VALUES ('dropbox.app_key', ?, 'string', 'dropbox', 0, 0, NULL,
              'Dropbox API app key from the Dropbox App Console. Required to initiate OAuth flow.')
      ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
@@ -57,7 +57,7 @@ db_execute(
 );
 
 db_execute(
-    "INSERT INTO settings (`key`, `value`, `type`, `group`, `is_public`, `is_sensitive`, `label`, `description`)
+    "INSERT INTO settings (`key`, `value`, `value_type`, `group_name`, `is_public`, `is_sensitive`, `label`, `description`)
      VALUES ('dropbox.app_secret', ?, 'string', 'dropbox', 0, 1, NULL,
              'Dropbox API app secret. Masked in UI. Required for OAuth token exchange.')
      ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",

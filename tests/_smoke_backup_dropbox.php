@@ -157,14 +157,141 @@ try {
     ko('C6 DB check threw', $e->getMessage());
 }
 
-// ── C7: cron/backup_dropbox.php is PHP syntax-valid ─────────────────────
-echo "\nC7: cron/backup_dropbox.php PHP syntax\n";
+// ── C7: schema-real settings-write coverage (regression guard) ──────────────
+// S-FIX-BACKUP-COLS: dropbox_configure.php fataled on prod with
+// "Unknown column 'type'" — the settings table columns are `value_type`
+// and `group_name`, not `type`/`group`. The original C7 only exercised
+// encrypt/decrypt, never the real settings INSERT, so the typo escaped to
+// prod. These sub-checks assert that EVERY column identifier in the
+// configure CLI's INSERTs and the OAuth callback's settings writes actually
+// exists in `SHOW COLUMNS FROM settings`, AND that the configure writes
+// execute end-to-end (write → read back → decrypt).
+echo "\nC7: schema-real settings-write coverage (S-FIX-BACKUP-COLS regression guard)\n";
+
+// cron syntax check retained
 $cronFile = dirname(__DIR__) . '/cron/backup_dropbox.php';
 $out = shell_exec('php -l ' . escapeshellarg($cronFile) . ' 2>&1');
 if (str_contains((string) $out, 'No syntax errors')) {
     ok("backup_dropbox.php: php -l PASS");
 } else {
     ko("backup_dropbox.php: php -l FAIL", trim((string) $out));
+}
+
+/**
+ * Extract backtick-quoted column identifiers from the column-list of every
+ * `INSERT INTO settings (...)` and from the `SET ... WHERE` of every
+ * `UPDATE settings ...` statement in a PHP source file. Returns a flat,
+ * de-duplicated list of column names referenced as real table columns.
+ *
+ * VALUES(`col`) references and the `key`= in WHERE clauses are columns too,
+ * so a naive backtick scan over the matched statements is correct — every
+ * identifier must be a real column.
+ */
+function ff_extract_settings_columns(string $file): array
+{
+    $src  = (string) file_get_contents($file);
+    $cols = [];
+
+    // INSERT INTO settings ( ... )  — capture the column list inside parens
+    if (preg_match_all('/INSERT\s+INTO\s+settings\s*\(([^)]*)\)/i', $src, $m)) {
+        foreach ($m[1] as $list) {
+            if (preg_match_all('/`([a-z_]+)`/i', $list, $cm)) {
+                foreach ($cm[1] as $c) { $cols[$c] = true; }
+            }
+        }
+    }
+
+    // UPDATE settings SET `col`=... WHERE `col`=...  — the SQL lives inside a
+    // double-quoted PHP string, so capture everything up to the closing ".
+    if (preg_match_all('/UPDATE\s+settings\s+SET\s+([^"]*)"/i', $src, $um)) {
+        foreach ($um[1] as $stmt) {
+            if (preg_match_all('/`([a-z_]+)`/i', $stmt, $cm)) {
+                foreach ($cm[1] as $c) { $cols[$c] = true; }
+            }
+        }
+    }
+
+    return array_keys($cols);
+}
+
+try {
+    $colRows = db_select("SHOW COLUMNS FROM settings", []);
+    $realCols = array_map(fn($r) => (string) $r['Field'], $colRows);
+
+    // C7a: configure CLI column validity
+    $cfgFile = dirname(__DIR__) . '/scripts/dropbox_configure.php';
+    $cfgCols = ff_extract_settings_columns($cfgFile);
+    if (empty($cfgCols)) {
+        ko('could not extract any settings columns from dropbox_configure.php');
+    } else {
+        $badCfg = array_diff($cfgCols, $realCols);
+        if (empty($badCfg)) {
+            ok('dropbox_configure.php INSERT columns all exist in settings: ' . implode(', ', $cfgCols));
+        } else {
+            ko('dropbox_configure.php references nonexistent settings columns', implode(', ', $badCfg));
+        }
+    }
+
+    // C7b: callback column validity
+    $cbFile = dirname(__DIR__) . '/app/admin/oauth/dropbox/callback.php';
+    $cbCols = ff_extract_settings_columns($cbFile);
+    if (empty($cbCols)) {
+        ko('could not extract any settings columns from callback.php');
+    } else {
+        $badCb = array_diff($cbCols, $realCols);
+        if (empty($badCb)) {
+            ok('callback.php settings-write columns all exist in settings: ' . implode(', ', $cbCols));
+        } else {
+            ko('callback.php references nonexistent settings columns', implode(', ', $badCb));
+        }
+    }
+
+    // C7c: execute the REAL configure writes end-to-end, read back, decrypt.
+    // ON DUPLICATE KEY UPDATE only touches `value`, so we save + restore the
+    // pre-test values to keep the dev DB clean.
+    $origKey    = (string) settings_get('dropbox.app_key', '');
+    $origSecret = (string) settings_get('dropbox.app_secret', '');
+
+    $testKey    = 'test_app_key_' . bin2hex(random_bytes(4));
+    $testSecret = 'test_app_secret_' . bin2hex(random_bytes(8));
+
+    $cfgOut = shell_exec(
+        'php ' . escapeshellarg($cfgFile) . ' ' .
+        escapeshellarg($testKey) . ' ' . escapeshellarg($testSecret) . ' 2>&1'
+    );
+
+    if (str_contains((string) $cfgOut, 'Unknown column')) {
+        ko('dropbox_configure.php fataled on a settings column', trim((string) $cfgOut));
+    } else {
+        // Read back the freshly-written rows (bypass any static settings cache
+        // by querying the table directly).
+        $keyRow    = db_row("SELECT `value` FROM settings WHERE `key`='dropbox.app_key'", []);
+        $secretRow = db_row("SELECT `value` FROM settings WHERE `key`='dropbox.app_secret'", []);
+
+        if (($keyRow['value'] ?? null) === $testKey) {
+            ok('configure write round-trip: dropbox.app_key persisted + read back correctly');
+        } else {
+            ko('dropbox.app_key did not round-trip', 'got: ' . ($keyRow['value'] ?? 'null'));
+        }
+
+        $storedSecret = (string) ($secretRow['value'] ?? '');
+        if (str_starts_with($storedSecret, 'ENC:')) {
+            ok('configure write round-trip: dropbox.app_secret stored ENC:-encrypted');
+        } else {
+            ko('dropbox.app_secret not ENC:-encrypted', 'got prefix: ' . substr($storedSecret, 0, 8));
+        }
+        if (DropboxClient::decrypt($storedSecret) === $testSecret) {
+            ok('configure write round-trip: dropbox.app_secret decrypts back to the input value');
+        } else {
+            ko('dropbox.app_secret did not decrypt back to input');
+        }
+    }
+
+    // Restore original values
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.app_key'", [$origKey]);
+    db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.app_secret'", [$origSecret]);
+} catch (\Throwable $e) {
+    ko('C7 threw unexpectedly', $e->getMessage());
 }
 
 // ── C8: 6 required dropbox.* settings keys present with correct sensitivity

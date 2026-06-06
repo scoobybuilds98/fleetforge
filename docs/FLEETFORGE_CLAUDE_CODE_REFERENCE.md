@@ -2122,6 +2122,16 @@ if (!empty($vars) && method_exists($frame, 'setVars')) {
 
 **Applies to**: every future migration adding a column with both COMMENT and positional placement. MODIFY COLUMN is unaffected (no positional clause possible).
 
+### Trap 71: `settings` table columns are `value_type` / `group_name` — NOT `type` / `group`; raw INSERTs must match `SHOW COLUMNS`
+
+**Context:** The `settings` table columns are: `id, key, value, value_type, group_name, label, description, is_public, is_sensitive, updated_by, updated_at`. There is NO `type` column and NO `group` column. Any hand-written `INSERT INTO settings (...)` that uses `\`type\`` or `\`group\`` fatals at runtime with `Unknown column 'type' in 'field list'`.
+
+**Why it's a trap:** the column names are *almost* what you'd guess — `type` and `group` are the natural short names, and `group` is also a reserved word that "looks DB-ish" when backtick-quoted, so the typo passes code review. Migrations seed the table with the CORRECT names (they apply cleanly or the migration fails loudly), so reading a migration won't reveal the trap — only a hand-written INSERT in a script or callback does. The fatal only fires when the real INSERT path runs, which in a bootstrap CLI or OAuth callback is **on prod, by the operator**, never in a dev smoke that stops at encrypt/decrypt.
+
+**Same class as Trap 70 (Sentry blank-DSN scrubber):** a real integration path (settings INSERT / `before_send`) that the dev smokes never exercise. Encrypt/decrypt round-trips, class-autoload checks, and `php -l` all pass while the one statement that talks to the real schema is untested. **Fix the class, not just the instance:** any smoke covering a bootstrap CLI or an OAuth/webhook callback must (a) parse the column identifiers out of every `INSERT INTO settings (...)` / `UPDATE settings SET ...` and assert each appears in `SHOW COLUMNS FROM settings`, AND (b) execute the real write path end-to-end (write → read back → decrypt sensitive values), restoring originals afterward. See `tests/_smoke_backup_dropbox.php` C7 for the canonical pattern.
+
+**Detected:** S-FIX-BACKUP-COLS 2026-06-06 — `scripts/dropbox_configure.php` fataled on prod ("Unknown column 'type'"); both INSERTs used `type`/`group`; escaped because S-BACKUP-2 C7 only tested encrypt/decrypt. Fixed to `value_type`/`group_name` + C7 strengthened to schema-real coverage (20→25 checks).
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
