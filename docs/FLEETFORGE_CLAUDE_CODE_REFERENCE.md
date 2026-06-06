@@ -2169,6 +2169,19 @@ if (!empty($vars) && method_exists($frame, 'setVars')) {
 
 **Detected:** S-FIX-DROPBOX-ARGS 2026-06-06 — fixed to accept both forms + `exit(1)` on invalid `--type`; `tests/_smoke_backup_dropbox.php` C10 added (subprocess type-resolution across both forms + no-arg + invalid; 28→33 checks; confirmed non-vacuous — old parser resolved `--type storage` → 'db').
 
+### Trap 75: a NEW column needs a real, APPLIED incremental migration — editing master/code alone leaves incrementally-migrated prod without it (reinforces K-20)
+
+**Context:** S-BACKUP-3c-PROGRESS added `backup_runs.progress_pct` + `progress_stage` via a real migration (`202606060102`) AND updated `FLEETFORGE_DATABASE_MASTER.sql` + SCHEMA_QUICK_REF. Dev applied the migration and had the columns, so the 3c smoke passed. But **prod is migrated incrementally and had not deployed/applied that migration**, so the live prod DB never got the columns — and the status endpoint the manual-backup UI polls fataled with `Unknown column 'progress_pct'`, hanging the progress bar even though the worker succeeded.
+
+**Why it's a trap:** the master schema file and the code both reference the column, so everything *looks* consistent in the repo and a fresh-from-master dev DB works perfectly. The gap is invisible until you query a DB that was built by *replaying incremental migrations* (prod) rather than loading master (dev). "Master lists it" ≠ "every live DB has it."
+
+**Fix the class:**
+- A column referenced by code/UI MUST be added by a real incremental migration that actually runs in the deploy pipeline — not by editing master alone, and not by a code-only change.
+- Verify a new column exists via `SHOW COLUMNS` (or `INFORMATION_SCHEMA.COLUMNS`) on a **migrated** DB (the prod-shaped path), not just by confirming the master file lists it. The `migrations_reproduce_master` keystone catches master-vs-from-zero divergence, but a column that's in BOTH master and a migration still won't reach prod until that migration is *deployed + applied*.
+- A migration is already-checksummed once applied anywhere — you can NOT edit it to fix a gap (that drifts `migrate --verify`). Ship a NEW corrective migration, and make corrective column-adds IDEMPOTENT (MySQL 8 has no `ADD COLUMN IF NOT EXISTS` → guard with an `INFORMATION_SCHEMA.COLUMNS` count + `PREPARE/EXECUTE`) so they no-op on DBs that already have the column and add it where missing.
+
+**Detected:** S-FIX-BACKUP-PROGRESS-MIGRATION 2026-06-06 — prod missing `backup_runs.progress_pct`/`progress_stage` (status endpoint fatal); 202606060102 applied on dev only. Added idempotent corrective `202606060103`; scratch-DB tested both add-when-missing + no-op-when-present.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
