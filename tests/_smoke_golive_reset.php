@@ -30,7 +30,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/app.php';
 
 // Number of KEEP tables the script defines — must match KEEP_TABLES in the script.
-const SMOKE_KEEP_COUNT = 42;
+const SMOKE_KEEP_COUNT = 43;
 
 $pass = 0;
 $fail = 0;

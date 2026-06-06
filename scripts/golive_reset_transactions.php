@@ -113,6 +113,8 @@ const KEEP_TABLES = [
     'rate_card_items',
     // Schema integrity
     'schema_migrations',
+    // Infra/ops — backup run history is operational config, not test transaction data
+    'backup_runs',
 ];
 
 // ── WIPE table list (D-GOLIVE-2) ─────────────────────────────────────────────
@@ -244,7 +246,6 @@ const WIPE_TABLES = [
     // Session / auth transient
     'password_reset_tokens',
     'rate_limit_attempts',
-    'backup_runs',
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
