@@ -1725,6 +1725,84 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                 <a href="<?= base_url('ai') ?>" style="font-size:0.875rem;">Open AI Assistant &rarr;</a>
             </div>
         </div>
+
+        <?php
+        // ── Claude credit remaining (INTERNAL ESTIMATE — S-AI-CREDIT-TILE) ──
+        // baseline − spend-since-baseline, recomputed from ai_query_log tokens ×
+        // editable lib/AI/Pricing.php. NOT authoritative (Console is). Super-admin
+        // only (this whole card is gated by can('settings','delete')).
+        $aiCredit = \FleetForge\AI\CreditEstimator::summary();
+        ?>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default);"
+             x-data="FF_AiCreditBalance()">
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px;">
+                Claude Credit &mdash; internal estimate, USD
+                <span title="Estimate only — the Anthropic Console is authoritative. Computed as the balance you entered minus token spend since, priced from lib/AI/Pricing.php." style="cursor:help;color:var(--text-muted);">&#9432;</span>
+            </div>
+
+            <?php if (!$aiCredit['has_baseline']): ?>
+                <!-- No baseline set → CTA -->
+                <div style="font-size:0.9375rem;color:var(--text-secondary);margin-bottom:10px;">
+                    No balance set &mdash; enter your current Anthropic Console balance to track burn-down.
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" @click="openForm('')" x-show="!editing">
+                    Set your Claude balance
+                </button>
+            <?php else: ?>
+                <?php
+                    $remaining = (string) $aiCredit['remaining'];                 // bc string, may be negative
+                    $remDisp   = \FleetForge\AI\CreditEstimator::round2($remaining);
+                    $isNeg     = bccomp($remaining, '0', 6) <= 0;                 // <= 0 → warn
+                    $remMoney  = str_starts_with($remDisp, '-')
+                               ? '-$' . ltrim($remDisp, '-')
+                               : '$' . $remDisp;
+                    $spentDisp = \FleetForge\AI\CreditEstimator::round2((string) $aiCredit['spent']);
+                    $baseDisp  = number_format((float) $aiCredit['baseline'], 2);
+                    $asOfDisp  = format_datetime($aiCredit['as_of_utc']);         // tz-correct (NOT raw UTC)
+                    $nUnpriced = count($aiCredit['unpriced_models']);
+                ?>
+                <div style="font-size:1.25rem;font-weight:700;<?= $isNeg ? 'color:var(--color-danger);' : '' ?>">
+                    Claude credit: &asymp; <?= e($remMoney) ?> remaining
+                </div>
+                <div style="font-size:0.8125rem;color:var(--text-muted);margin-top:3px;">
+                    $<?= e($baseDisp) ?> set <?= e($asOfDisp) ?>, &asymp; $<?= e($spentDisp) ?> spent since
+                    <?php if ($nUnpriced > 0): ?>
+                        <span style="color:var(--color-warning);">(excludes <?= (int) $nUnpriced ?> unpriced model<?= $nUnpriced === 1 ? '' : 's' ?>)</span>
+                    <?php endif; ?>
+                </div>
+                <?php if ($isNeg): ?>
+                    <div style="font-size:0.8125rem;color:var(--color-danger);margin-top:4px;font-weight:600;">
+                        Estimated balance exhausted &mdash; top up in the Anthropic Console, then update below.
+                    </div>
+                <?php endif; ?>
+                <button type="button" class="btn btn-secondary btn-sm" style="margin-top:10px;"
+                        @click="openForm('<?= e($baseDisp) ?>')" x-show="!editing">
+                    Update balance
+                </button>
+            <?php endif; ?>
+
+            <!-- Inline update form (shared by CTA + Update) -->
+            <div x-show="editing" x-cloak style="margin-top:10px;max-width:340px;">
+                <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">
+                    Current Console balance (USD)
+                </label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <span style="color:var(--text-muted);">$</span>
+                    <input type="number" min="0" step="0.01" x-model="balance"
+                           class="form-input" style="max-width:140px;" placeholder="250.00"
+                           @keydown.enter.prevent="save()">
+                    <button type="button" class="btn btn-primary btn-sm" @click="save()" :disabled="saving">
+                        <span x-show="!saving">Save</span>
+                        <span x-show="saving" x-cloak>Saving&hellip;</span>
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-sm" @click="editing=false;error=''" :disabled="saving">Cancel</button>
+                </div>
+                <div x-show="error" x-cloak style="color:var(--color-danger);font-size:0.8125rem;margin-top:6px;" x-text="error"></div>
+                <p style="font-size:0.75rem;color:var(--text-muted);margin:8px 0 0;">
+                    Stamps "as of" to now; spend is estimated from this moment forward.
+                </p>
+            </div>
+        </div>
     </div>
 </div>
 <?php endif; ?>
@@ -2193,6 +2271,43 @@ function FF_AiTest() {
                 this.connected = false; this.message = 'Network error.';
             }
             this.tested = true; this.testing = false;
+        },
+    };
+}
+
+// S-AI-CREDIT-TILE: set/update the internal Claude credit baseline.
+// On success we reload so the server re-renders the estimate (incl. tz-correct
+// "as of" date and recomputed remaining) — no client-side money math.
+function FF_AiCreditBalance() {
+    return {
+        editing: false,
+        balance: '',
+        saving: false,
+        error: '',
+        openForm(current) {
+            this.balance = current || '';
+            this.error = '';
+            this.editing = true;
+        },
+        async save() {
+            this.error = '';
+            const val = String(this.balance).trim();
+            if (val === '' || isNaN(Number(val)) || Number(val) < 0) {
+                this.error = 'Enter a valid USD balance (0 or more).';
+                return;
+            }
+            this.saving = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/settings/ai/update_balance') ?>', { balance: val });
+                if (r && r.success) {
+                    window.location.reload();
+                    return;
+                }
+                this.error = (r && r.error && r.error.message) ? r.error.message : 'Could not save balance.';
+            } catch (e) {
+                this.error = 'Network error saving balance.';
+            }
+            this.saving = false;
         },
     };
 }
