@@ -2362,7 +2362,7 @@ function FF_BriefingControl() {
                         this.genFlash = { message: 'Cache hit (used recent brief). ' + d.message, type: 'success' };
                     } else {
                         this.genFlash = {
-                            message: '<strong>Brief generated</strong> — tokens=' + d.tokens_used.toLocaleString() + ', cost=$' + d.cost_usd.toFixed(4) + ', latency=' + d.latency_ms + 'ms.<br><div style="background:#f7f7f6;padding:10px;border-radius:4px;margin-top:6px;font-size:0.78rem;white-space:pre-wrap;">' + this.escapeHtml(d.brief_preview) + '&hellip;</div>',
+                            message: '<strong>Brief generated</strong> — tokens=' + d.tokens_used.toLocaleString() + ', cost=$' + d.cost_usd.toFixed(4) + ', latency=' + d.latency_ms + 'ms.<br><div style="background:#f7f7f6;color:#1a1a1a;padding:10px;border-radius:4px;margin-top:6px;font-size:0.78rem;white-space:pre-wrap;">' + this.escapeHtml(d.brief_preview) + '&hellip;</div>',
                             type: 'success'
                         };
                     }

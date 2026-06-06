@@ -146,6 +146,20 @@ try {
         json_error('AI_EMPTY_RESPONSE', 'Claude returned an empty response.', 502);
     }
 
+    // S-FIX-BRIEF-GEN-DISPLAY: ClaudeClient::sendMessage() returns the RAW
+    // Anthropic response, whose usage block has input_tokens + output_tokens
+    // but NO total_tokens, and no top-level cost_usd (those are computed
+    // internally by ClaudeClient for logging and not injected back). Reading
+    // $response['usage']['total_tokens'] / $response['cost_usd'] therefore
+    // always yielded 0 → the UI showed "tokens=0, cost=$0.0000" despite a
+    // real billed call. Compute them here exactly as cron/ai_fleet_brief.php
+    // and ClaudeClient do (Sonnet pricing ~$3/M in, ~$15/M out).
+    $usage            = $response['usage'] ?? [];
+    $promptTokens     = (int) ($usage['input_tokens'] ?? 0);
+    $completionTokens = (int) ($usage['output_tokens'] ?? 0);
+    $totalTokens      = $promptTokens + $completionTokens;
+    $costUsd          = ($promptTokens * 3.0 / 1_000_000) + ($completionTokens * 15.0 / 1_000_000);
+
     // ── Cache the result (24h TTL same as cron) ──
     // S-INTEL-FIX2: report_cache columns are parameters_hash + generated_at,
     // NOT cache_key + created_at. Schema mismatch made every insert error
@@ -181,8 +195,8 @@ try {
         'entity_label' => 'Manual brief generation',
         'notes'        => sprintf(
             'Manual generation by operator. tokens=%d cost=$%.4f latency=%dms model=%s',
-            (int) ($response['usage']['total_tokens'] ?? 0),
-            (float) ($response['cost_usd'] ?? 0),
+            $totalTokens,
+            $costUsd,
             $latencyMs,
             $model
         ),
@@ -195,8 +209,8 @@ try {
         'cache_id'        => (int) $cacheId,
         'brief_preview'   => mb_substr($briefText, 0, 400),
         'brief_full'      => $briefText,
-        'tokens_used'     => (int) ($response['usage']['total_tokens'] ?? 0),
-        'cost_usd'        => (float) ($response['cost_usd'] ?? 0),
+        'tokens_used'     => $totalTokens,
+        'cost_usd'        => $costUsd,
         'latency_ms'      => $latencyMs,
         'message'         => 'Brief generated. The next morning digest cron will email this brief to recipients.',
     ]);
