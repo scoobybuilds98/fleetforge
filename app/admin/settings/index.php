@@ -1930,6 +1930,15 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                         <span x-show="!generating">Generate brief now</span>
                         <span x-show="generating" x-cloak>Generating (calling Claude)&hellip;</span>
                     </button>
+                    <!-- S-INTEL-BRIEF-SEND-NOW: dispatch today's cached brief to
+                         ALL current recipients immediately (bypasses the digest
+                         hour gate; role/opt-in/snooze/23h-dedup still apply). -->
+                    <button class="btn btn-secondary btn-sm" @click="sendToAllNow()"
+                            :disabled="sendingAll || !history.cache_active || !history.ai_enabled || !history.briefing_enabled"
+                            :title="!history.ai_enabled ? 'AI Features Enabled is off — turn it on in AI Core above' : (!history.briefing_enabled ? 'Morning Briefing is disabled' : (!history.cache_active ? 'No cached brief to send — generate one first' : 'Emails the cached brief to every current recipient now'))">
+                        <span x-show="!sendingAll">Send to all recipients now</span>
+                        <span x-show="sendingAll" x-cloak>Sending to all&hellip;</span>
+                    </button>
                 </div>
                 <!-- S-INTEL-UX-1: x-effect scrolls the alert into view the
                      moment a flash message appears, so error responses don't
@@ -1946,6 +1955,12 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
                      :class="genFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
                      style="margin-top:10px;font-size:0.8125rem;"
                      x-html="genFlash.message"></div>
+                <div x-show="sendAllFlash.message" x-cloak
+                     x-ref="sendAllFlashEl"
+                     x-effect="if (sendAllFlash.message && $refs.sendAllFlashEl) $refs.sendAllFlashEl.scrollIntoView({behavior:'smooth', block:'center'})"
+                     :class="sendAllFlash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
+                     style="margin-top:10px;font-size:0.8125rem;"
+                     x-text="sendAllFlash.message"></div>
             </div>
 
             <div>
@@ -2317,8 +2332,10 @@ function FF_BriefingControl() {
         history: { runs: [], current_recipient_count: 0, briefing_enabled: false, cache_active: false, last_brief_generated_at: null },
         testSending: false,
         generating: false,
+        sendingAll: false,
         testFlash: { message: '', type: '' },
         genFlash: { message: '', type: '' },
+        sendAllFlash: { message: '', type: '' },
         contentModal: { open: false, loading: false, date: '', data: null, error: '' },
 
         async loadHistory() {
@@ -2362,7 +2379,7 @@ function FF_BriefingControl() {
                         this.genFlash = { message: 'Cache hit (used recent brief). ' + d.message, type: 'success' };
                     } else {
                         this.genFlash = {
-                            message: '<strong>Brief generated</strong> — tokens=' + d.tokens_used.toLocaleString() + ', cost=$' + d.cost_usd.toFixed(4) + ', latency=' + d.latency_ms + 'ms.<br><div style="background:#f7f7f6;color:#1a1a1a;padding:10px;border-radius:4px;margin-top:6px;font-size:0.78rem;white-space:pre-wrap;">' + this.escapeHtml(d.brief_preview) + '&hellip;</div>',
+                            message: '<strong>Brief generated</strong> — tokens=' + d.tokens_used.toLocaleString() + ', cost=$' + d.cost_usd.toFixed(4) + ', latency=' + d.latency_ms + 'ms.<br><div style="background:#f7f7f6;color:#1a1a1a;padding:12px 14px;border-radius:6px;margin-top:8px;font-size:0.8125rem;line-height:1.55;white-space:pre-wrap;max-height:55vh;overflow:auto;">' + this.escapeHtml(d.brief_full || d.brief_preview) + '</div>',
                             type: 'success'
                         };
                     }
@@ -2374,6 +2391,26 @@ function FF_BriefingControl() {
                 this.genFlash = { message: e.message || 'Network error', type: 'error' };
             } finally {
                 this.generating = false;
+            }
+        },
+
+        async sendToAllNow() {
+            const n = this.history.current_recipient_count || 0;
+            if (!confirm('Send today\'s brief to ALL current recipients (' + n + ' user(s)) right now?\n\nThis emails every opted-in recipient immediately, bypassing the scheduled send hour. Users who already received today\'s digest are skipped.')) return;
+            this.sendingAll = true;
+            this.sendAllFlash = { message: '', type: '' };
+            try {
+                const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/send_brief_now.php'), {});
+                if (j.success) {
+                    this.sendAllFlash = { message: j.data.message || 'Brief dispatched.', type: 'success' };
+                    await this.loadHistory();
+                } else {
+                    this.sendAllFlash = { message: (j.error && j.error.message) || 'Send failed', type: 'error' };
+                }
+            } catch (e) {
+                this.sendAllFlash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.sendingAll = false;
             }
         },
 
