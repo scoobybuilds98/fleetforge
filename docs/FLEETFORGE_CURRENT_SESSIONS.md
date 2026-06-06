@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-GOLIVE-RESET-TXN** — IN-FLIGHT
+  Started: 2026-06-06T15:28 UTC by desktop-1
+  Touching: scripts/golive_reset_transactions.php, tests/_smoke_golive_reset.php, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
+
 **S-FIX-BACKUP-PROGRESS-MIGRATION** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: prod missing `backup_runs.progress_pct`/`progress_stage` → manual-backup status endpoint fataled "Unknown column", progress bar hung.** Root cause: 202606060102 (S-BACKUP-3c-PROGRESS) added them + was applied on dev, but incrementally-migrated prod never deployed/applied it (K-20). Can't edit the checksummed 202606060102 → NEW idempotent corrective migration `202606060103` (INFORMATION_SCHEMA guard + PREPARE/EXECUTE; adds where missing, no-op where present). Scratch-DB tested both cases; no code change. K-trap 75 added (reinforces K-20). **Operator: deploy + migrate on prod.** Commits: `1de7f1f` (C1 IN-FLIGHT) + this commit (C2 migration+docs).
 
 **S-BACKUP-3c-PROGRESS** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Stage-based progress bar for the manual backup (extends S-BACKUP-3c).** Migration 100 adds `backup_runs.progress_pct` + `progress_stage`. `BackupRun::progress()` (fail-soft, clamp 0–100); worker stamps 5/15/40/75/90 → success=100. `status.php` returns the progress fields; Manual card renders a progress bar (filled div over a track, `var(--color-primary)`) + stage label, polls every 2s, null→8% indeterminate. `_smoke_backup_manual.php` 12/12 (cols exist; completed row=100; status exposes fields). Commits: `1ea6231` (C1 IN-FLIGHT) + this commit (C2 code+docs).
