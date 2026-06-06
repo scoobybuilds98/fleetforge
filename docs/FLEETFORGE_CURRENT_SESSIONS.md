@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-FIX-DROPBOX-ARGS** — IN-FLIGHT
+  Started: 2026-06-06T07:00 UTC by desktop-1
+  Touching: cron/backup_dropbox.php, tests/_smoke_backup_dropbox.php, docs/
+
 **S-BACKUP-3a** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Make `cron/backup_storage.php` gather user content via StorageClient (driver-correct).** Prod (s3) was tarring the EMPTY local `storage/uploads/` → 0-file backup. Now lists via `StorageClient::listByPrefix('')` + downloads via `::download()` into a staging dir, excludes `backups/`+`db-backups/` (pure `ff_storage_backup_should_include`), tars + uploads (unchanged dest/retention/lock/BackupRun). NO STORAGE_DRIVER branch (D-BACKUP-6). 0 content = success (valid empty tarball). `_smoke_backup_storage.php` (NEW, 10/10): C1 pure filter + C2–C5 execute the cron as a subprocess; non-vacuous. K-trap 73 added (completes the T70/71/72/73 cluster). Commits: `f5c4903` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
 
 **S-FIX-DROPBOX-CRON-DBVALUE** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: `cron/backup_dropbox.php` fataled on prod with "Call to undefined function db_value()" (line 57, GET_LOCK read).** No `db_value` helper exists — fixed to `db_row('... AS lock_result')['lock_result']`. Repo-wide grep: line 57 was the only caller; zero remain. `_smoke_backup_dropbox.php` C9 added — EXECUTES the cron as a subprocess down the fail-soft "no source artifact" path (exit 0, no fatal, dropbox failed row written), all fixtures restored; non-vacuous (FAILS when bug reintroduced). 25→28 checks. K-trap 72 added (php -l can't catch undefined functions; cron/CLI smokes must run the real script — completes the T70/71/72 cluster). Commits: `4dd6ad9` (C1 IN-FLIGHT) + this commit (C2 fix+smoke+docs).
