@@ -2147,6 +2147,16 @@ if (!empty($vars) && method_exists($frame, 'setVars')) {
 
 **Detected:** S-FIX-DROPBOX-CRON-DBVALUE 2026-06-06 — `cron/backup_dropbox.php:57` called `db_value()` at the GET_LOCK read; lint-clean, fataled on prod's first scheduled run. Fixed to `db_row(... AS lock_result)['lock_result']`; C9 added (subprocess execution; 25→28 checks; confirmed non-vacuous).
 
+### Trap 73: backups must gather through the StorageClient abstraction — a hardcoded local dir silently captures NOTHING under the s3 driver
+
+**Context:** `cron/backup_storage.php` originally tarred the LOCAL `storage/uploads/` directory. In dev (`STORAGE_DRIVER=local`) that's where uploads live, so the backup looked correct. In prod (`STORAGE_DRIVER=s3`) uploads live in S3 and the local `storage/uploads/` is **empty** — so the cron produced a 0-file / 0-MB tarball and reported success. The Dropbox storage mirror (S-BACKUP-2) and the future manual "download everything" both inherited the emptiness.
+
+**Why it's a trap:** the dev environment uses the local driver, so a local-dir backup passes every dev test while being completely wrong under the driver prod actually runs. The bug is invisible until someone inspects a prod backup's *contents* (size/file-count), which nobody does until a restore is needed.
+
+**Same class as Traps 70/71/72** — the real prod path (s3 driver) is never exercised in dev. **Fix the class:** anything that reads or writes bulk stored content (backup, export, bulk-download, migration) MUST go through `StorageClient` (`listByPrefix('')` to enumerate, `download()`/`upload()` to move bytes), NEVER a hardcoded `FF_ROOT/storage/...` path. This makes one code path serve both drivers AND lets the dev smoke (local driver) exercise the same gather logic prod runs. Put any include/exclude rule in a pure function so the smoke can unit-test it (`ff_storage_backup_should_include`), and EXECUTE the cron as a subprocess in the smoke (per Trap 72) to prove the gather actually runs. Always exclude `backups/` + `db-backups/` so a storage backup never tars itself.
+
+**Detected:** S-BACKUP-3a 2026-06-06 — prod storage backup verified producing 0 files / 0 MB (local `storage/uploads` = 4 K). Rewritten to gather via `StorageClient::listByPrefix('')` + `download()` into a staging dir (D-BACKUP-6); `tests/_smoke_backup_storage.php` added (C1 pure filter + C2–C5 subprocess execution; 10/10; confirmed non-vacuous). Manual before/after: 0 files → 129 content keys / 21.82 MB.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)

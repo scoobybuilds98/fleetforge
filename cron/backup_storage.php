@@ -5,8 +5,15 @@ declare(strict_types=1);
  * cron/backup_storage.php
  *
  * Weekly storage tarball cron — runs Sunday 03:00 UTC.
- * Archives storage/uploads/ into a gzipped tarball and uploads via StorageClient
- * (S3 in production, local storage/backups/storage/ in development).
+ * Gathers ALL user content through the StorageClient abstraction (NOT a
+ * hardcoded local dir), tars it into a gzipped archive, and uploads via
+ * StorageClient (S3 in production, local storage/backups/storage/ in dev).
+ *
+ * D-BACKUP-6 (driver-agnostic gather): content is listed + downloaded via
+ * StorageClient::listByPrefix('') + ::download(), so dev (local driver) and
+ * prod (s3 driver) run the SAME code path. There is NO STORAGE_DRIVER branch.
+ * The previous version tarred the LOCAL storage/uploads/ dir, which is EMPTY
+ * on prod (real uploads live in S3) — so the backup silently captured nothing.
  *
  * Crontab (production): 0 3 * * 0  /usr/bin/php /var/www/fleetforge/cron/backup_storage.php >> /var/www/fleetforge/logs/cron.log 2>&1
  * Local test:           php /Users/avi/Documents/fleetforge/cron/backup_storage.php
@@ -16,7 +23,7 @@ declare(strict_types=1);
  * Retention: 12 months of weekly tarballs (configurable via
  *            BACKUP_STORAGE_RETENTION_MONTHS env, default 12).
  *
- * Decisions: D9 (StorageClient abstraction), D21 (advisory lock)
+ * Decisions: D9 (StorageClient abstraction), D21 (advisory lock), D-BACKUP-6
  * Audit findings resolved: #9 (no storage backup cron)
  */
 
@@ -26,6 +33,14 @@ require_once dirname(__DIR__) . '/config/app.php';
 use FleetForge\Storage\StorageClient;
 use FleetForge\Backup\BackupRun;
 
+// When required by a test harness purely to access the pure helpers below
+// (ff_storage_backup_should_include), define the functions but DO NOT run the
+// backup. Top-level function declarations are hoisted, so the early return
+// still leaves every helper in this file callable.
+if (defined('FF_BACKUP_STORAGE_LIB_ONLY')) {
+    return;
+}
+
 // ── Advisory lock (D21) ───────────────────────────────────────────────────────
 $lock = db_row("SELECT GET_LOCK('ff_cron_backup_storage', 0) AS ok", []);
 if (!$lock || (int)$lock['ok'] !== 1) {
@@ -33,6 +48,7 @@ if (!$lock || (int)$lock['ok'] !== 1) {
 }
 
 $tmpFile     = '';
+$stageDir    = '';
 $start       = time();
 $backupRunId = BackupRun::start('s3', 'storage');
 
@@ -50,12 +66,6 @@ try {
         'ip_address'   => '127.0.0.1',
     ]);
 
-    // ── Ensure uploads directory exists ─────────────────────────────────────
-    $uploadsDir = FF_ROOT . '/storage/uploads';
-    if (!is_dir($uploadsDir)) {
-        mkdir($uploadsDir, 0755, true);
-    }
-
     // ── Generate backup paths ────────────────────────────────────────────────
     $now      = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
     $monthDir = $now->format('Y-m');
@@ -63,14 +73,44 @@ try {
     $s3Key    = "backups/storage/{$monthDir}/storage_{$dateStr}.tar.gz";
     $tmpFile  = sys_get_temp_dir() . "/ff_storage_{$now->format('YmdHis')}.tar.gz";
 
+    // ── Gather user content via StorageClient (D-BACKUP-6, driver-agnostic) ───
+    // List EVERY key under the storage root, then keep only user content —
+    // excluding any backups so the storage backup never tars itself. This runs
+    // identically under the local (dev) and s3 (prod) drivers.
+    $allEntries  = StorageClient::listByPrefix('');
+    $contentKeys = [];
+    foreach ($allEntries as $entry) {
+        $key = (string) ($entry['key'] ?? '');
+        if ($key !== '' && ff_storage_backup_should_include($key)) {
+            $contentKeys[] = $key;
+        }
+    }
+
+    // ── Stage content into a temp dir, preserving relative key paths ─────────
+    // Each key becomes a sub-path under the staging dir so the tarball mirrors
+    // the storage layout (uploads/x.pdf, customers/42/contract.pdf, ...).
+    $stageDir = sys_get_temp_dir() . '/ff_storage_backup_' . getmypid() . '_' . $now->format('YmdHis');
+    if (!is_dir($stageDir) && !mkdir($stageDir, 0700, true) && !is_dir($stageDir)) {
+        throw new \RuntimeException("Could not create staging dir: {$stageDir}");
+    }
+    foreach ($contentKeys as $key) {
+        $dest    = $stageDir . '/' . $key;
+        $destDir = dirname($dest);
+        if (!is_dir($destDir) && !mkdir($destDir, 0700, true) && !is_dir($destDir)) {
+            throw new \RuntimeException("Could not create staging subdir: {$destDir}");
+        }
+        StorageClient::download($key, $dest);
+    }
+
     // ── Create tar.gz via proc_open array form (no shell — no injection risk) ─
-    // -C changes to the storage directory so paths inside the tarball are relative
-    // (uploads/file.pdf instead of /absolute/path/storage/uploads/file.pdf).
+    // -C changes to the staging dir so paths inside the tarball are relative.
+    // '.' archives the whole staged tree (empty content set → a valid, near-empty
+    // tarball, which is a SUCCESS, not an error — see the size guard below).
     $tarCmd = [
         'tar',
         '-czf', $tmpFile,
-        '-C', FF_ROOT . '/storage',
-        'uploads',
+        '-C', $stageDir,
+        '.',
     ];
 
     $tarProc = proc_open($tarCmd, [
@@ -103,13 +143,21 @@ try {
         throw new \RuntimeException("tar exited {$tarExit}: {$tarStderr}");
     }
 
-    // ── Verify tarball is non-empty and structurally valid ───────────────────
+    // ── Verify tarball was produced and is structurally valid ────────────────
+    // A tarball is always expected (even for 0 content keys → a near-empty but
+    // valid archive). The "suspiciously small" floor only applies when there IS
+    // content to capture — 0 content keys legitimately produces a tiny tarball.
     clearstatcache();
     $rawSize = file_exists($tmpFile) ? (int) filesize($tmpFile) : 0;
-    if ($rawSize < 32) {
+    if ($rawSize === 0) {
         @unlink($tmpFile);
         $tmpFile = '';
-        throw new \RuntimeException("Tarball suspiciously small ({$rawSize} bytes)");
+        throw new \RuntimeException('Tarball was not created (0 bytes)');
+    }
+    if (count($contentKeys) > 0 && $rawSize < 32) {
+        @unlink($tmpFile);
+        $tmpFile = '';
+        throw new \RuntimeException("Tarball suspiciously small ({$rawSize} bytes) for " . count($contentKeys) . ' content keys');
     }
 
     // Quick integrity check — list tarball contents (SC8)
@@ -149,7 +197,8 @@ try {
         throw new \RuntimeException("Post-upload verification failed — not found at: {$s3Key}");
     }
 
-    $duration = time() - $start;
+    $duration     = time() - $start;
+    $contentCount = count($contentKeys); // actual user-content files (tar -tzf count includes dir entries)
 
     db_insert('audit_log', [
         'user_id'      => null,
@@ -159,11 +208,11 @@ try {
         'entity_type'  => 'cron',
         'entity_id'    => null,
         'entity_label' => 'backup_storage',
-        'notes'        => "Storage backup successful: {$s3Key} ({$sizeMb}MB, {$fileCount} files archived, {$duration}s)",
+        'notes'        => "Storage backup successful: {$s3Key} ({$sizeMb}MB, {$contentCount} files archived, {$duration}s)",
         'ip_address'   => '127.0.0.1',
     ]);
 
-    error_log("[CRON backup_storage] Backup complete: {$s3Key} ({$sizeMb}MB, {$fileCount} files, {$duration}s)");
+    error_log("[CRON backup_storage] Backup complete: {$s3Key} ({$sizeMb}MB, {$contentCount} files, {$duration}s)");
     BackupRun::success($backupRunId, $s3Key, $rawSize);
 
     // ── Retention cleanup ────────────────────────────────────────────────────
@@ -194,7 +243,43 @@ try {
     exit(1);
 
 } finally {
+    // Always remove the staging tree, even on failure.
+    if ($stageDir !== '' && is_dir($stageDir)) {
+        ff_rrmdir($stageDir);
+    }
     db_execute("SELECT RELEASE_LOCK('ff_cron_backup_storage')", []);
+}
+
+// ── Pure include/exclude filter (unit-tested by the smoke; D-BACKUP-6) ───────
+// Decides whether a storage key belongs in the storage backup. Excludes any
+// backup artifacts so the storage backup never recursively captures backups.
+// Pure: no I/O, no globals — safe to call in isolation.
+function ff_storage_backup_should_include(string $key): bool
+{
+    if (str_starts_with($key, 'backups/') || str_starts_with($key, 'db-backups/')) {
+        return false;
+    }
+    return true;
+}
+
+// ── Recursive directory removal (staging-dir teardown) ───────────────────────
+function ff_rrmdir(string $dir): void
+{
+    if (!is_dir($dir)) {
+        return;
+    }
+    $items = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($items as $item) {
+        if ($item->isDir()) {
+            @rmdir($item->getPathname());
+        } else {
+            @unlink($item->getPathname());
+        }
+    }
+    @rmdir($dir);
 }
 
 // ── 12-month retention cleanup for storage tarballs ──────────────────────────
