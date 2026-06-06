@@ -24,7 +24,15 @@ function heroicon(string $name, string $class = 'nav-icon'): string
     $file = FF_ROOT . '/public/assets/icons/' . $name . '.svg';
 
     if (!file_exists($file)) {
-        // Placeholder until icon files are created in the assets phase
+        // Fall back to a raster image (jpg/png) for brand logos like QuickBooks
+        foreach (['jpg', 'jpeg', 'png', 'gif', 'webp'] as $ext) {
+            $imgFile = FF_ROOT . '/public/assets/icons/' . $name . '.' . $ext;
+            if (file_exists($imgFile)) {
+                $src = asset_url('assets/icons/' . $name . '.' . $ext);
+                $cache[$name] = '<img src="' . e($src) . '" class="' . e($class) . '" alt="" aria-hidden="true" loading="lazy">';
+                return $cache[$name];
+            }
+        }
         $cache[$name] = '<span class="' . e($class) . ' icon-missing" aria-hidden="true"></span>';
         return $cache[$name];
     }
