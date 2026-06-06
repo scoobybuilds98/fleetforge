@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-BACKUP-2** — IN-FLIGHT
+  Started: 2026-06-06T00:00 UTC by desktop-1
+  Touching: lib/Backup/DropboxClient.php, lib/Storage/StorageClient.php, app/admin/oauth/dropbox/, cron/backup_dropbox.php, scripts/dropbox_configure.php, tests/_smoke_backup_dropbox.php, db_migrations/202606060101_S-BACKUP-2.sql, docs/
+
 **S-BACKUP-1** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Foundation session for 3-destination backup arc.** NEW `backup_runs` table (migration 98) + `lib/Backup/BackupRun.php` (fail-soft history helper) + retrofitted `cron/backup_db.php` + `cron/backup_storage.php` with BackupRun::start/success/fail calls + seeded 6 `dropbox.*` settings keys (app_secret + refresh_token is_sensitive=1; labels=NULL per D196). Decisions D-BACKUP-1/2/3 locked. `_smoke_backup_runs.php` 62/62. Commits: `a80cc07` (C1 IN-FLIGHT) + this commit (C2 code+docs).
 
 **S-SENTRY-CHECKLIST-CLOSE** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Docs-only: flipped PREDEPLOY_CHECKLIST B3 (SENTRY_DSN) + I1 (alert routing) to DONE — Sentry prod verified live, event 3a4278ea ingested env=production, alert routing confirmed. No schema/code motion.**
