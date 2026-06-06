@@ -124,6 +124,17 @@ if ($manualFull && !empty($manualFull['initiated_by'])) {
     $manualBy = $mrow['name'] ?? 'system';
 }
 
+// S-BACKUP-3c: latest manual/full run (any status) seeds the UI poll, and the
+// in_progress check disables the Generate button + starts polling on load.
+$latestManual = db_row(
+    "SELECT id, status FROM backup_runs
+      WHERE destination = 'manual' AND backup_type = 'full'
+      ORDER BY id DESC LIMIT 1",
+    []
+);
+$manualInProgress  = $latestManual && $latestManual['status'] === 'in_progress';
+$latestManualRunId = $latestManual ? (int) $latestManual['id'] : 0;
+
 // ── Recent history (newest first) ─────────────────────────────────────────────
 $history = db_select(
     "SELECT br.id, br.destination, br.backup_type, br.status, br.file_size_bytes,
@@ -234,8 +245,8 @@ $history = db_select(
         </div>
     </div>
 
-    <!-- Manual (DISPLAY ONLY this session) -->
-    <div class="card">
+    <!-- Manual full backup (async — S-BACKUP-3c) -->
+    <div class="card" x-data="FF_ManualBackup()" x-init="init()">
         <div class="card-header" style="font-weight:600;">Manual Backup <span style="font-weight:400;color:var(--text-muted);font-size:0.8125rem;">— on-demand</span></div>
         <div class="card-body" style="font-size:0.875rem;">
             <?php if ($manualFull): ?>
@@ -243,14 +254,30 @@ $history = db_select(
                 <strong>Last manual full:</strong> <?= e(ff_backup_fmt_when($manualFull['completed_at'] ?? null)) ?>
                 <span style="color:var(--text-muted);">(<?= e(ff_backup_fmt_bytes(isset($manualFull['file_size_bytes']) ? (int) $manualFull['file_size_bytes'] : null)) ?>)</span>
             </div>
-            <div style="color:var(--text-muted);">By: <?= e($manualBy) ?></div>
+            <div style="color:var(--text-muted);margin-bottom:12px;">By: <?= e($manualBy) ?></div>
             <?php else: ?>
-            <p style="color:var(--text-muted);margin:0 0 8px;">No manual backup has been generated yet.</p>
+            <p style="color:var(--text-muted);margin:0 0 12px;">No manual backup has been generated yet.</p>
             <?php endif; ?>
-            <?php /* TODO(S-BACKUP-3c): wire the async "Generate full backup now" button here.
-                     Intentionally NO button this session — the generate endpoint does not exist yet. */ ?>
+
+            <?php if ($canEdit): ?>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-sm" @click="generate()"
+                        :disabled="status === 'in_progress' || working" style="white-space:nowrap;">
+                    <span x-show="status !== 'in_progress' && !working">Generate full backup</span>
+                    <span x-show="status === 'in_progress' || working" x-cloak>Building…</span>
+                </button>
+                <a class="btn btn-primary btn-sm" x-show="status === 'success' && downloadable" x-cloak
+                   :href="downloadUrl" style="white-space:nowrap;">Download</a>
+            </div>
+            <div x-show="status === 'in_progress'" x-cloak style="color:#b45309;font-size:0.8125rem;margin-top:8px;">
+                Bundling the latest database + storage backups… this can take a few minutes.
+            </div>
+            <div x-show="status === 'failed'" x-cloak style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;" x-text="errorMsg"></div>
+            <div x-show="flash" x-cloak style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;" x-text="flash"></div>
+            <?php endif; ?>
+
             <div style="color:var(--text-muted);font-size:0.75rem;border-top:1px solid var(--border-default);padding-top:8px;margin-top:8px;">
-                On-demand full backup &amp; download — coming soon.
+                Bundles the latest S3 database + storage backups into one downloadable archive.
             </div>
         </div>
     </div>
@@ -338,6 +365,68 @@ function FF_DropboxConfig() {
                 this.flash = 'Network error. Could not reach the server.';
                 this.saving = false;
             }
+        },
+    };
+}
+
+function FF_ManualBackup() {
+    return {
+        runId:       <?= (int) $latestManualRunId ?>,
+        status:      <?= json_encode($manualInProgress ? 'in_progress' : ($manualFull ? 'success' : 'idle')) ?>,
+        downloadable: <?= $manualFull ? 'true' : 'false' ?>,
+        downloadUrl: '',
+        working:     false,
+        flash:       '',
+        errorMsg:    '',
+        _timer:      null,
+
+        init() {
+            if (this.runId > 0) {
+                this.downloadUrl = FF_Api.url('/api/v1/settings/backup/download.php') + '?run_id=' + this.runId;
+            }
+            // Resume polling if a build is already running when the page loads.
+            if (this.status === 'in_progress') this.startPolling();
+        },
+
+        async generate() {
+            if (this.status === 'in_progress' || this.working) return;
+            this.working = true; this.flash = ''; this.errorMsg = '';
+            try {
+                const r = await FF_Api.post(FF_Api.url('/api/v1/settings/backup/enqueue.php'), {});
+                if (r.success) {
+                    this.runId  = r.data.run_id;
+                    this.status = 'in_progress';
+                    this.downloadUrl = FF_Api.url('/api/v1/settings/backup/download.php') + '?run_id=' + this.runId;
+                    this.startPolling();
+                } else {
+                    this.flash = r.error?.message || 'Could not start the backup.';
+                }
+            } catch (e) {
+                this.flash = 'Network error. Could not reach the server.';
+            }
+            this.working = false;
+        },
+
+        startPolling() {
+            if (this._timer) clearInterval(this._timer);
+            this._timer = setInterval(() => this.poll(), 4000);
+        },
+
+        async poll() {
+            try {
+                const r = await FF_Api.get(FF_Api.url('/api/v1/settings/backup/status.php') + '?run_id=' + this.runId);
+                if (r.success) {
+                    this.status       = r.data.status;
+                    this.downloadable = !!r.data.downloadable;
+                    if (this.status === 'success') {
+                        this.downloadUrl = FF_Api.url('/api/v1/settings/backup/download.php') + '?run_id=' + this.runId;
+                        clearInterval(this._timer); this._timer = null;
+                    } else if (this.status === 'failed') {
+                        this.errorMsg = r.data.error || 'Backup failed.';
+                        clearInterval(this._timer); this._timer = null;
+                    }
+                }
+            } catch (e) { /* transient — keep polling */ }
         },
     };
 }
