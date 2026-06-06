@@ -34,8 +34,11 @@ use FleetForge\OAuth\StateManager;
  */
 function ff_dropbox_redirect(string $flashType, string $message): never
 {
+    // Real settings route is `settings` (NOT `admin/settings`, which 404s).
+    // Land the operator back on the Backup tab. Mirrors the PRG redirect in
+    // app/admin/settings/index.php which builds `base_url('settings?tab=...')`.
     $param = $flashType === 'success' ? 'flash_success' : 'flash_error';
-    header('Location: ' . base_url('admin/settings') . '?' . $param . '=' . rawurlencode($message));
+    header('Location: ' . base_url('settings?tab=backup') . '&' . $param . '=' . rawurlencode($message));
     exit;
 }
 
@@ -105,7 +108,26 @@ $accountId         = (string) ($tokens['account_id'] ?? '');
 
 db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.refresh_token'", [$encRefreshToken]);
 db_execute("UPDATE settings SET `value`='1' WHERE `key`='dropbox.enabled'");
-db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.connected_account'", [$accountId]);
+
+// Friendly connected-account label (email / display name), NOT the raw
+// dbid:... account id. Fail-soft: if the lookup fails, fall back to the
+// account id so the connection still succeeds.
+$friendly = $accountId;
+try {
+    $acct = (new DropboxClient())->getCurrentAccount();
+    $email   = (string) ($acct['email'] ?? '');
+    $display = (string) ($acct['name']['display_name'] ?? '');
+    if ($email !== '' && $display !== '') {
+        $friendly = $display . ' <' . $email . '>';
+    } elseif ($email !== '') {
+        $friendly = $email;
+    } elseif ($display !== '') {
+        $friendly = $display;
+    }
+} catch (\Throwable $acctErr) {
+    error_log('[dropbox callback] getCurrentAccount failed: ' . $acctErr->getMessage());
+}
+db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.connected_account'", [$friendly]);
 
 db_insert('audit_log', [
     'user_id'      => $initiatedUserId,
@@ -113,7 +135,7 @@ db_insert('audit_log', [
     'action'       => 'create',
     'module'       => 'dropbox',
     'entity_type'  => 'dropbox_oauth_connection',
-    'entity_label' => $accountId ? 'Account ' . $accountId : 'connected',
+    'entity_label' => $friendly !== '' ? $friendly : 'connected',
     'notes'        => 'Dropbox OAuth connection established.',
     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
 ]);

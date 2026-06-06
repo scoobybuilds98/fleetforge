@@ -533,6 +533,7 @@ $tabPermMap = [
     'integrations'       => 'settings_integrations',
     'intelligence'       => 'settings_intelligence',
     'credit_application' => 'settings_general', // same permission as General
+    'backup'             => 'settings_system',  // S-BACKUP-3b — backups are a system concern
 ];
 $validTabs = array_keys($tabPermMap);
 if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
@@ -634,6 +635,13 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
             <?= $_can ? ':class="{ \'is-active\': activeTab === \'system\' }" @click="activeTab = \'system\'"' : '' ?>
             role="tab" <?= $_can ? '' : 'title="You don\'t have access to System settings"' ?>>
         System<?= $_can ? '' : $_lockSvg ?>
+    </button>
+
+    <?php $_can = can('settings_system', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'backup\' }" @click="activeTab = \'backup\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Backup settings"' ?>>
+        Backup<?= $_can ? '' : $_lockSvg ?>
     </button>
 
     <?php $_can = can('settings_integrations', 'view'); ?>
@@ -1165,6 +1173,13 @@ if (!empty($grouped['currency'])) {
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <div x-show="activeTab === 'system'" x-transition:enter class="ff-tab-enter">
     <?php require_once __DIR__ . '/system.php'; ?>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: BACKUP & STORAGE (S-BACKUP-3b)                                     -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div x-show="activeTab === 'backup'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/backup.php'; ?>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
