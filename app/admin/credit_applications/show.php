@@ -137,6 +137,28 @@ $backUrl = $fromCustomer
 $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
 ?>
 
+<style>
+/* Credit-application show: two-column layout + mobile collapse (S-FIX-CREDIT-APP-SHOW-MOBILE) */
+.cca-show-grid {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 20px;
+    align-items: start;
+    margin-top: 20px;
+}
+@media (max-width: 767px) {
+    .cca-show-grid {
+        grid-template-columns: 1fr;
+    }
+    /* WHY: grid child won't shrink below iframe content width without min-width:0
+       (the classic CSS grid blowout fix — iframe has an intrinsic width that
+       overrides the 1fr constraint unless the column itself opts out of it). */
+    .cca-snapshot-col {
+        min-width: 0;
+    }
+}
+</style>
+
 <nav class="breadcrumb">
     <a href="<?= base_url('dashboard') ?>">Dashboard</a>
     <span class="breadcrumb-sep">/</span>
@@ -177,10 +199,10 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
     </div>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 280px;gap:20px;align-items:start;margin-top:20px;">
+<div class="cca-show-grid">
 
     <!-- Left: filed application HTML form -->
-    <div class="card">
+    <div class="card cca-snapshot-col">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
                 <h3 class="card-title">Filed Application</h3>
@@ -196,7 +218,7 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
             </a>
             <?php endif; ?>
         </div>
-        <div class="card-body" style="padding:0;">
+        <div class="card-body" style="padding:0;overflow-x:auto;">
             <?php if (!empty($app['rendered_html'])): ?>
             <!-- WHY src not srcdoc: srcdoc stuffs the full HTML document into a
                  single HTML attribute after htmlspecialchars escaping — causes
