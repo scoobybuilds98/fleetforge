@@ -960,7 +960,7 @@ CREATE TABLE `acc_journal_entry_lines` (
 CREATE TABLE `acc_oauth_states` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `state_token` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `provider` enum('quickbooks') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'quickbooks',
+  `provider` enum('quickbooks','dropbox') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'quickbooks',
   `initiated_by_user_id` int unsigned DEFAULT NULL,
   `initiated_ip` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `initiated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,

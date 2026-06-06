@@ -1,0 +1,121 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * app/admin/oauth/dropbox/callback.php
+ *
+ * Step 2 of the Dropbox OAuth 2.0 authorization-code grant. Receives
+ * ?code=...&state=... from Dropbox, verifies the state token, exchanges
+ * the code for access + refresh tokens, encrypts and persists them, then
+ * sets dropbox.enabled='1'.
+ *
+ * URL: https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php
+ * — must match the Redirect URI registered in the Dropbox App Console exactly.
+ *
+ * On success: flash_success → redirect to admin/settings.
+ * On failure: dropbox.connection_status='error' + flash_error redirect.
+ *
+ * Auth model (D-QBO-OAUTH-FIX-2 principle applied to Dropbox): intentionally
+ * public — no require_auth, no require_permission. The state token IS the
+ * authentication proof. The initiating user_id is recovered from acc_oauth_states
+ * for audit_log attribution without needing an active session.
+ *
+ * Session: S-BACKUP-2
+ */
+
+require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
+require_once FF_ROOT . '/includes/auth.php';
+
+use FleetForge\Backup\DropboxClient;
+use FleetForge\OAuth\StateManager;
+
+/**
+ * Redirect to the settings page with a flash message and exit.
+ */
+function ff_dropbox_redirect(string $flashType, string $message): never
+{
+    $param = $flashType === 'success' ? 'flash_success' : 'flash_error';
+    header('Location: ' . base_url('admin/settings') . '?' . $param . '=' . rawurlencode($message));
+    exit;
+}
+
+/**
+ * Resolve a user id to a display name for audit attribution.
+ * Returns 'system' when the user is null or no longer exists.
+ */
+function ff_dropbox_user_name(?int $userId): string
+{
+    if ($userId === null) {
+        return 'system';
+    }
+    $row = db_row('SELECT name FROM users WHERE id = ?', [$userId]);
+    return $row['name'] ?? 'system';
+}
+
+// ── State verification (DB-backed, single-use; K-22 Trap #59) ──────────────
+$state        = (string) ($_GET['state'] ?? '');
+$stateContext = StateManager::verifyAndConsume(
+    $state,
+    'dropbox',
+    $_SERVER['REMOTE_ADDR'] ?? null
+);
+
+if ($stateContext === null) {
+    http_response_code(400);
+    ff_dropbox_redirect('error', 'OAuth state invalid or expired — please retry the connect flow.');
+}
+
+$initiatedUserId   = $stateContext['initiated_by_user_id'] ?? null;
+$initiatedUserName = ff_dropbox_user_name($initiatedUserId);
+
+// Dropbox sends ?error=access_denied when the operator cancels.
+if (!empty($_GET['error'])) {
+    $errDescription = (string) ($_GET['error_description'] ?? $_GET['error']);
+    ff_dropbox_redirect('error', 'Dropbox returned an error: ' . $errDescription);
+}
+
+$code = (string) ($_GET['code'] ?? '');
+if ($code === '') {
+    http_response_code(400);
+    ff_dropbox_redirect('error', 'OAuth callback missing code — please retry.');
+}
+
+$redirectUri = 'https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php';
+
+// ── Exchange the auth code for tokens ────────────────────────────────────────
+try {
+    $tokens = DropboxClient::exchangeCode($code, $redirectUri);
+} catch (\Throwable $e) {
+    $msg = 'OAuth token exchange failed: ' . $e->getMessage();
+    db_insert('audit_log', [
+        'user_id'     => $initiatedUserId,
+        'user_name'   => $initiatedUserName,
+        'action'      => 'update',
+        'module'      => 'dropbox',
+        'entity_type' => 'dropbox_oauth_connection',
+        'notes'       => mb_substr($msg, 0, 65535),
+        'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? null,
+    ]);
+    ff_dropbox_redirect('error', 'OAuth token exchange failed — check error logs.');
+}
+
+// ── Persist encrypted tokens (D-BACKUP-1) ───────────────────────────────────
+$encRefreshToken   = DropboxClient::encrypt((string) ($tokens['refresh_token'] ?? ''));
+$accountId         = (string) ($tokens['account_id'] ?? '');
+
+db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.refresh_token'", [$encRefreshToken]);
+db_execute("UPDATE settings SET `value`='1' WHERE `key`='dropbox.enabled'");
+db_execute("UPDATE settings SET `value`=? WHERE `key`='dropbox.connected_account'", [$accountId]);
+
+db_insert('audit_log', [
+    'user_id'      => $initiatedUserId,
+    'user_name'    => $initiatedUserName,
+    'action'       => 'create',
+    'module'       => 'dropbox',
+    'entity_type'  => 'dropbox_oauth_connection',
+    'entity_label' => $accountId ? 'Account ' . $accountId : 'connected',
+    'notes'        => 'Dropbox OAuth connection established.',
+    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
+]);
+
+ff_dropbox_redirect('success', 'Dropbox connected successfully.');

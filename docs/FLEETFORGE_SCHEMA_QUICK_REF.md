@@ -1268,7 +1268,7 @@ _71 tables._
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `state_token` | varchar(128) | UNI | NO |
-| `provider` | enum('quickbooks') | MUL | NO |
+| `provider` | enum('quickbooks','dropbox') | MUL | NO |
 | `initiated_by_user_id` | int unsigned | MUL | YES |
 | `initiated_ip` | varchar(45) |  | YES |
 | `initiated_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |

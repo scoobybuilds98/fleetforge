@@ -123,6 +123,25 @@ class StorageClient
     }
 
     // ============================================================
+    // download() — download a stored file to a local filesystem path
+    //
+    // $key      — the storage key (as returned by upload())
+    // $destPath — absolute filesystem path where the file should be saved
+    //
+    // Throws RuntimeException on failure (file not found, cURL error,
+    // write error, etc.).
+    // ============================================================
+    public static function download(string $key, string $destPath): void
+    {
+        self::validateStoragePath($key);
+        if (self::driver() === 's3') {
+            self::downloadS3($key, $destPath);
+        } else {
+            self::downloadLocal($key, $destPath);
+        }
+    }
+
+    // ============================================================
     // listByPrefix() — list all stored files under a path prefix.
     //
     // Returns array of:
@@ -302,6 +321,21 @@ class StorageClient
         return $results;
     }
 
+    private static function downloadLocal(string $key, string $destPath): void
+    {
+        $src = FF_ROOT . '/storage/' . $key;
+        if (!file_exists($src)) {
+            throw new RuntimeException(
+                "StorageClient: local file not found for key '{$key}'."
+            );
+        }
+        if (!copy($src, $destPath)) {
+            throw new RuntimeException(
+                "StorageClient: could not copy '{$src}' to '{$destPath}'."
+            );
+        }
+    }
+
     // ----------------------------------------------------------
     // S3 DRIVER — private implementation
     // ----------------------------------------------------------
@@ -455,6 +489,21 @@ class StorageClient
             throw new RuntimeException("StorageClient S3 list failed: " . $e->getMessage());
         }
         return $results;
+    }
+
+    private static function downloadS3(string $key, string $destPath): void
+    {
+        try {
+            self::s3()->getObject([
+                'Bucket' => self::bucket(),
+                'Key'    => $key,
+                'SaveAs' => $destPath,
+            ]);
+        } catch (S3Exception $e) {
+            throw new RuntimeException(
+                "StorageClient S3 download failed: " . $e->getMessage()
+            );
+        }
     }
 
     // ----------------------------------------------------------
