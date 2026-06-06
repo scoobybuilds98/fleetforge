@@ -74,9 +74,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-GOLIVE-RESET-TXN** — IN-FLIGHT
-  Started: 2026-06-06T15:28 UTC by desktop-1
-  Touching: scripts/golive_reset_transactions.php, tests/_smoke_golive_reset.php, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md
+**S-GOLIVE-RESET-TXN** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Pre-go-live production transaction reset.** 157 tables classified 42 KEEP + 115 WIPE (D-GOLIVE-1/2). `scripts/golive_reset_transactions.php`: `--dry-run` default; `--confirm-prod` + typed "yes wipe transactions" required for live run; wipes inside `db_transaction()` + `SET FK_CHECKS=0`; resets customer/equipment counters; INFORMATION_SCHEMA guard (fail-safe not fail-open); audit row `action='manual_trigger'`. `tests/_smoke_golive_reset.php` 29/29 PASS (dry-run, wrong string refused, live wipe, idempotency). No migration. Commits: `e82638d` (C1 IN-FLIGHT) + this commit (C2 script+smoke+docs).
 
 **S-FIX-BACKUP-PROGRESS-MIGRATION** — SHIPPED 2026-06-06 (see PROGRESS.md SESSION LOG row). **Hotfix: prod missing `backup_runs.progress_pct`/`progress_stage` → manual-backup status endpoint fataled "Unknown column", progress bar hung.** Root cause: 202606060102 (S-BACKUP-3c-PROGRESS) added them + was applied on dev, but incrementally-migrated prod never deployed/applied it (K-20). Can't edit the checksummed 202606060102 → NEW idempotent corrective migration `202606060103` (INFORMATION_SCHEMA guard + PREPARE/EXECUTE; adds where missing, no-op where present). Scratch-DB tested both cases; no code change. K-trap 75 added (reinforces K-20). **Operator: deploy + migrate on prod.** Commits: `1de7f1f` (C1 IN-FLIGHT) + this commit (C2 migration+docs).
 
