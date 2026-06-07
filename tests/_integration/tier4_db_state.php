@@ -77,7 +77,9 @@ function test_DB_006(): void {
         [$c, $l] = _db_mk();
         $inv = Fixtures::generateInvoice($l, '2026-03-28', '2026-03-31', 'partial_start');
         $row = db_row("SELECT invoice_date FROM invoices WHERE id=?", [$inv['invoice_id']]);
-        Assert::equal(date('Y-m-d'), (string)$row['invoice_date']);
+        // S-INVOICE-DATING-FIX: invoice_date derives from the billing period
+        // (advance: issue = billing_period_start), NOT the generation timestamp.
+        Assert::equal('2026-03-28', (string)$row['invoice_date']);
     });
 }
 function test_DB_007(): void {

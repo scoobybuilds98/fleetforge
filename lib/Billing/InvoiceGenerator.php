@@ -1026,10 +1026,20 @@ class InvoiceGenerator
             // --- Generate invoice number (D15: gap-free, D20: FOR UPDATE) ---
             $invoiceNumber = $this->generateInvoiceNumber();
 
-            // Due date from settings
-            $dueDays = (int)(settings_get('invoice.due_days_default', '30') ?? 30);
-            $invoiceDate = date('Y-m-d');
-            $dueDate = date('Y-m-d', strtotime("+{$dueDays} days"));
+            // S-INVOICE-DATING-FIX: issue/due derive from THIS invoice's own
+            // billing period, NOT the generation timestamp. Advance-billing
+            // cadence (lease.next_billing_date = period start; cron bills
+            // [Y-m-01, Y-m-t] at period start) → issue_date = billing_period_start.
+            // due_date = issue_date + payment-terms net days
+            // (settings.invoice.due_days_default; customers.payment_terms is a
+            // free-text field and intentionally NOT used here). created_at (DB
+            // CURRENT_TIMESTAMP) stays the real generation time. This makes each
+            // fanned-out segment carry its own period-appropriate dates, and the
+            // GL/AR posting follows the period via D-GL-REVREC-1 (AutoEntryBridge).
+            $dueDays     = (int)(settings_get('invoice.due_days_default', '30') ?? 30);
+            $invoiceDate = $periodStart;
+            $dueDate     = (new \DateTimeImmutable($periodStart))
+                               ->modify("+{$dueDays} days")->format('Y-m-d');
 
             // Exchange rate for USD invoices — exchange_rates has no is_active/effective_date
             // columns, just from_currency/to_currency/rate/rate_date. Pull the latest rate by

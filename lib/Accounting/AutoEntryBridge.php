@@ -221,8 +221,30 @@ class AutoEntryBridge
             ];
         }
 
-        // Resolve period — use invoice_date, fall back to earliest open if closed
-        $entryDate = $invoice['sent_date'] ?? $invoice['invoice_date'];
+        // D-GL-REVREC-1 (S-INVOICE-DATING-FIX): rental revenue recognizes in its
+        // BILLING PERIOD, not on the send action. entry_date = the invoice's
+        // issue_date (= billing_period_start) — the `sent_date ??` fallback is
+        // dropped, so a March-period invoice posts to March no matter when it's
+        // sent. resolvePeriod() still redirects a closed/missing target period to
+        // the earliest open one (audited).
+        //
+        // Future guard: never post revenue into a FUTURE period. If issue_date is
+        // after business-local today (advance-dated rows, e.g. far-future test
+        // invoices), post on today and let resolvePeriod() map it to the current
+        // open period. "Today" is computed in the BUSINESS timezone
+        // (settings.company.timezone, the cron's source) — NOT raw UTC — so a
+        // late-evening month boundary can't roll the period (the known UTC/local
+        // write skew). True deferred-revenue treatment for advance billing is out
+        // of scope (D-GL-REVREC-2; only if advance_billing_periods is enabled).
+        $issueDate = (string) $invoice['invoice_date'];
+        $tzName    = (string) (settings_get('company.timezone', APP_TIMEZONE) ?? APP_TIMEZONE);
+        try {
+            $bizTz = new \DateTimeZone($tzName);
+        } catch (\Throwable) {
+            $bizTz = new \DateTimeZone(APP_TIMEZONE);
+        }
+        $todayLocal = (new \DateTimeImmutable('now', $bizTz))->format('Y-m-d');
+        $entryDate  = ($issueDate > $todayLocal) ? $todayLocal : $issueDate;
         $periodInfo = self::resolvePeriod($entryDate);
 
         return JournalEntryService::create([
