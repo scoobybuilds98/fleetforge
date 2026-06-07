@@ -94,12 +94,16 @@ if (!in_array($invoiceType, $validInvoiceTypes)) {
 // it by default. An operator who genuinely intends a reconciliation can resend
 // with allow_overlap=true.
 //
-// Scope: only invoice types that actually emit a base_rental line. mileage_only
-// carries NO base_rental (immune to the misleading-top-up bug) and overlapping a
-// rental period is the NORMAL case for a mileage reconciliation; 'adjustment'
-// invoices likewise legitimately share a period. Skip the guard for those.
+// Scope: only invoices that actually emit a base_rental line — which is driven
+// by BILLING_TYPE, not invoice_type. InvoiceGenerator skips base_rental only when
+// billing_type === 'mileage_only' (lib/Billing/InvoiceGenerator.php). invoice_type
+// (regular/final/adjustment/mileage_only) is just a label and does NOT suppress
+// base_rental, so an 'adjustment'/'mileage_only' invoice with a normal billing_type
+// still produces a base_rental top-up and must be guarded. The only true no-base-
+// rental path is billing_type='mileage_only' (used by the lease-close advance
+// mileage caller, never by this manual form).
 $allowOverlap   = !empty($body['allow_overlap']);
-$guardThisType  = in_array($invoiceType, ['regular', 'final'], true);
+$guardThisType  = ($billingType !== 'mileage_only');
 if (!$allowOverlap && $guardThisType) {
     $overlap = \FleetForge\Billing\InvoiceGenerator::findOverlappingInvoice(
         $leaseId, $periodStart, $periodEnd

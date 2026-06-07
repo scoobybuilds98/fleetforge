@@ -89,6 +89,29 @@ db_transaction(function () use ($id, $invoice) {
             "UPDATE leases SET total_invoiced = total_invoiced - ?, outstanding_balance = outstanding_balance - ?, updated_at = NOW() WHERE id = ?",
             [$decTotalInvoiced, $decOb, $invoice['lease_id']]
         );
+
+        // Walk the billing-coverage anchor back to the latest STILL-LIVE invoice.
+        // last_billed_date is monotonic on create (GREATEST in InvoiceGenerator),
+        // so soft-deleting the most-recent invoice would otherwise leave it pointing
+        // PAST real coverage. Mirrors api/v1/invoices/void.php. close.php already
+        // recomputes coverage from live invoices (deleted_at IS NULL), but keep the
+        // denormalized anchor honest for reports/other readers. The just-deleted row
+        // now has deleted_at set above, so it is excluded. NULL when none remain.
+        $cov = db_row(
+            "SELECT i2.billing_period_end AS max_end, i2.id AS inv_id
+               FROM invoices i2
+              WHERE i2.lease_id = ?
+                AND i2.deleted_at IS NULL
+                AND i2.status <> 'void'
+                AND i2.billing_period_end IS NOT NULL
+              ORDER BY i2.billing_period_end DESC, i2.id DESC
+              LIMIT 1",
+            [$invoice['lease_id']]
+        );
+        db_execute(
+            "UPDATE leases SET last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
+            [$cov['max_end'] ?? null, $cov['inv_id'] ?? null, $invoice['lease_id']]
+        );
     }
     if ($invoice['customer_id']) {
         db_execute(
