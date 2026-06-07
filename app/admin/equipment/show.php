@@ -526,7 +526,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         </div>
         <?php else: ?>
 
-        <!-- ── Header bar: link to full fixed-asset detail page ──── -->
+        <!-- ── Header bar: links to full payoff page + fixed-asset ── -->
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
             <div>
                 <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
@@ -542,8 +542,13 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     Acquired <span class="font-mono"><?= e($linkedAsset['acquisition_date']) ?></span>
                 </div>
             </div>
-            <div style="display:flex;gap:8px;">
-                <a href="<?= base_url('accounting/fixed-assets') ?>?asset=<?= (int) $linkedAsset['id'] ?>" class="btn btn-secondary btn-sm">Open in Fixed Assets →</a>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <!-- WHY: Primary CTA goes to the dedicated full-detail payoff page
+                         (equipment/payoff.php) that shows leases, work orders,
+                         damage claims, monthly P&L, depreciation, and utilisation
+                         in a single view — rather than bouncing to Fixed Assets. -->
+                <a href="<?= base_url('equipment/payoff') ?>?id=<?= $unitId ?>" class="btn btn-primary btn-sm">View Full Analysis →</a>
+                <a href="<?= base_url('accounting/fixed-assets') ?>?asset=<?= (int) $linkedAsset['id'] ?>" class="btn btn-secondary btn-sm">Fixed Assets</a>
             </div>
         </div>
 
