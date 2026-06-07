@@ -11,6 +11,9 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 
+use FleetForge\Notifications\Mailer;
+use FleetForge\Email\EmailService;
+
 if (portal_user()) {
     header('Location: ' . base_url('portal'));
     exit;
@@ -54,19 +57,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Build reset URL
                 $resetUrl = base_url('portal/auth/reset_password') . '?token=' . $token . '&email=' . urlencode($user['email']);
 
-                // Log email (dev mode — no SES configured)
-                $mailLog = FF_ROOT . '/logs/mail.log';
-                $logDir  = dirname($mailLog);
-                if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
-
-                $logEntry = sprintf(
-                    "[%s] PORTAL PASSWORD RESET\nTo: %s\nName: %s\nReset URL: %s\n---\n",
-                    date('Y-m-d H:i:s'),
-                    $user['email'],
-                    $user['name'],
-                    $resetUrl
+                // S-FIX-PORTAL-FORGOT-EMAIL: send via the shared Mailer (SES in
+                // production, logs/mail.log in dev automatically — isLogMode()
+                // === false when APP_ENV==='production'). This was previously a
+                // mail.log-only STUB ("dev mode — no SES configured") that never
+                // reached SES, so portal users got no reset email in prod. We
+                // only send inside this `if ($user)` block, so the page still
+                // shows the same generic success message either way (no email
+                // enumeration). Mailer::send returns false (never throws) on a
+                // bad/disabled address, so a send failure can't reveal account
+                // existence or break the page.
+                $resetBody = EmailService::renderEmailHtml(
+                    '<h2 style="margin:0 0 16px;">Reset your portal password</h2>'
+                    . '<p>Hi ' . e($user['name']) . ',</p>'
+                    . '<p>We received a request to reset the password for your ' . e($_companyName)
+                    . ' portal account. Click the button below to set a new password.</p>'
+                    . '<p style="margin:24px 0;"><a href="' . e($resetUrl) . '" '
+                    . 'style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;'
+                    . 'padding:12px 24px;border-radius:6px;font-weight:600;">Set a new password</a></p>'
+                    . '<p style="color:#64748b;font-size:13px;">This link expires in 2 hours. If you didn\'t '
+                    . 'request this, you can safely ignore this email — your current password stays valid. '
+                    . 'If the button doesn\'t work, paste this URL into your browser:<br>'
+                    . '<span style="word-break:break-all;">' . e($resetUrl) . '</span></p>'
                 );
-                @file_put_contents($mailLog, $logEntry, FILE_APPEND | LOCK_EX);
+                Mailer::send((string) $user['email'], (string) $user['name'], 'Reset your portal password', $resetBody);
             }
         }
     }

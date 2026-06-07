@@ -16,8 +16,11 @@ declare(strict_types=1);
  *   C4  Behavioral: Mailer::send() is callable and, in this (dev) env, takes the
  *       log branch (returns true + appends to logs/mail.log) — proves the wired
  *       path executes end-to-end and dev behavior is preserved.
+ *   C5  app/portal/auth/forgot_password.php (portal self-service reset) calls
+ *       Mailer::send() AND no longer writes via file_put_contents(...mail.log...)
+ *       (S-FIX-PORTAL-FORGOT-EMAIL — same stub class).
  *
- * @session S-FIX-PORTAL-INVITE-EMAIL
+ * @session S-FIX-PORTAL-INVITE-EMAIL / S-FIX-PORTAL-FORGOT-EMAIL
  */
 
 $root = dirname(__DIR__);
@@ -28,11 +31,12 @@ use FleetForge\Email\EmailService;
 
 $failures = [];
 $pass     = 0;
-$total    = 4;
+$total    = 5;
 
 $create = (string) file_get_contents($root . '/api/v1/portal_users/create.php');
 $reset  = (string) file_get_contents($root . '/api/v1/portal_users/reset_password.php');
 $mailer = (string) file_get_contents($root . '/lib/Notifications/Mailer.php');
+$forgot = (string) file_get_contents($root . '/app/portal/auth/forgot_password.php');
 
 // Detect the old stub: a file_put_contents() writing to mail.log as the send.
 $stubRe = '/file_put_contents\s*\([^;]*mail\.log/s';
@@ -77,6 +81,13 @@ if (empty($err)) {
     echo "PASS C4 Mailer::send() callable; " . (APP_ENV === 'production' ? 'prod (SES path)' : 'dev log-mode appended to mail.log') . "\n";
     $pass++;
 } else { echo "FAIL C4 " . implode('; ', $err) . "\n"; $failures[] = 'C4'; }
+
+// ── C5: portal self-service forgot_password.php uses Mailer, not the stub ──
+$err = [];
+if (!str_contains($forgot, 'Mailer::send(')) $err[] = 'forgot_password.php does not call Mailer::send()';
+if (preg_match($stubRe, $forgot))            $err[] = 'forgot_password.php still writes to mail.log via file_put_contents (stub not removed)';
+if (empty($err)) { echo "PASS C5 portal forgot-password routes through Mailer::send(), no mail.log stub\n"; $pass++; }
+else { echo "FAIL C5 " . implode('; ', $err) . "\n"; $failures[] = 'C5'; }
 
 if (!empty($failures)) {
     echo "\nportal_invite_email_smoke: {$pass}/{$total} PASS — failures: " . implode(', ', $failures) . "\n";
