@@ -77,6 +77,19 @@ if (!empty($_portalUser['name'])) {
         $_initials .= strtoupper(mb_substr(end($parts), 0, 1));
     }
 }
+
+// ── Topbar greeting: time-of-day salutation + first name + date ──────────────
+// WHY: we use the company timezone so the greeting matches the operator's locale,
+// not the server's default UTC. DateTimeImmutable is used (not date()) so tz
+// is applied without mutating the global default.
+$_tz       = settings_get('company.timezone', APP_TIMEZONE);
+$_now      = new DateTimeImmutable('now', new DateTimeZone($_tz));
+$_hour     = (int) $_now->format('G');
+$_salute   = $_hour < 12 ? 'Good morning' : ($_hour < 18 ? 'Good afternoon' : 'Good evening');
+$_firstName = !empty($_portalUser['name'])
+    ? (preg_split('/\s+/', trim((string) $_portalUser['name']))[0] ?? '')
+    : '';
+$_dateLabel = $_now->format('l, F j, Y'); // e.g. "Sunday, June 7, 2026"
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="<?= e($_theme) ?>">
@@ -117,6 +130,15 @@ if (!empty($_portalUser['name'])) {
                 <h1 class="portal-topbar-title"><?= e($_pageTitle) ?></h1>
             </div>
             <div class="portal-topbar-right">
+                <!-- Greeting: hidden on mobile via CSS; date rendered server-side in company tz -->
+                <?php if ($_firstName): ?>
+                <div class="portal-topbar-greeting" aria-label="<?= e($_salute . ', ' . $_firstName) ?>">
+                    <span class="portal-topbar-greeting-name"><?= e($_salute) ?>, <?= e($_firstName) ?></span>
+                    <span class="portal-topbar-greeting-sep">&middot;</span>
+                    <span class="portal-topbar-greeting-date"><?= e($_dateLabel) ?></span>
+                </div>
+                <?php endif; ?>
+
                 <!-- [NOTIF-1] Portal notifications bell — uses FF_PortalNotifications() factory -->
                 <div class="notif-wrapper"
                      x-data="FF_PortalNotifications()"
@@ -213,5 +235,6 @@ if (!empty($_portalUser['name'])) {
 
         <div class="portal-content">
 <?php
-unset($_theme, $_pageTitle, $_companyName, $_initials, $_overdueCount, $_overdueTotal, $_portalUnread);
+unset($_theme, $_pageTitle, $_companyName, $_initials, $_overdueCount, $_overdueTotal, $_portalUnread,
+      $_tz, $_now, $_hour, $_salute, $_firstName, $_dateLabel);
 ?>

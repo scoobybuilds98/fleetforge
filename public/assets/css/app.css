@@ -5034,6 +5034,31 @@ dl.detail-grid dd {
     align-items: center;
     gap: 8px;
 }
+/* ── Topbar greeting (name + date) ─────────────────────────────────────────── */
+.portal-topbar-greeting {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 12px;
+    border-right: 1px solid var(--border-color);
+    margin-right: 4px;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    line-height: 1;
+}
+.portal-topbar-greeting-name {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.portal-topbar-greeting-sep {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+.portal-topbar-greeting-date {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
 .portal-mobile-toggle {
     display: none;
     align-items: center;
@@ -5943,6 +5968,10 @@ dl.detail-grid dd {
     }
     .portal-topbar {
         padding: 0 16px;
+    }
+    /* Greeting hidden on mobile — topbar too narrow for name + date + icons */
+    .portal-topbar-greeting {
+        display: none;
     }
     .portal-equip-meta {
         grid-template-columns: 1fr;
