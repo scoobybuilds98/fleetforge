@@ -1265,14 +1265,45 @@ class InvoiceGenerator
             }
 
             // --- Insert billing period record ---
+            // lease_billing_periods.period_type is a NARROW enum of base-rental
+            // period shapes: partial_start / full_month / partial_end / single_period.
+            // createFromLease, however, also accepts adjustment-style billing types
+            // (mileage_only — used by the lease-close advance path; adjustment;
+            // credit_note) that carry NO base-rental period. Writing those raw into
+            // period_type truncates under STRICT_TRANS_TABLES (1265 "Data truncated"),
+            // which aborted the ENTIRE lease-close transaction — a hard fatal when
+            // closing an advance lease that has a mileage overage line. Prod runs
+            // STRICT_TRANS_TABLES too, so this affected production. Map any non-period
+            // billing type to 'single_period' (these invoices cover a single point/
+            // date) so the ledger row is still recorded without truncating.
+            // NOTE: period_type is write-only in this codebase (nothing reads it for
+            // logic), so the mapped value is a faithful-enough ledger label.
+            $periodTypeForLedger = in_array(
+                $billingType,
+                ['partial_start', 'full_month', 'partial_end', 'single_period'],
+                true
+            ) ? $billingType : 'single_period';
+
+            // lease_billing_periods.rate_method is enum('daily','weekly',
+            // 'weekly_capped','monthly') — note it has NO 'none' member (unlike the
+            // wider invoices.rate_method_used). mileage_only sets $rateMethod='none'
+            // (no base rental), and the holistic engine maps a 'none' tier to 'none'
+            // too; either would truncate this enum under STRICT_TRANS_TABLES and abort
+            // the transaction. Map any out-of-enum value to 'daily' for the ledger row.
+            $rateMethodForLedger = in_array(
+                $rateMethod ?? '',
+                ['daily', 'weekly', 'weekly_capped', 'monthly'],
+                true
+            ) ? $rateMethod : 'daily';
+
             db_insert('lease_billing_periods', [
                 'lease_id'            => $leaseId,
                 'invoice_id'          => $invoiceId,
                 'period_start'        => $periodStart,
                 'period_end'          => $periodEnd,
                 'period_days'         => $days,
-                'period_type'         => $billingType,
-                'rate_method'         => $rateMethod ?? 'daily',
+                'period_type'         => $periodTypeForLedger,
+                'rate_method'         => $rateMethodForLedger,
                 'rate_method_explanation' => json_encode($explanation ?? []),
                 'base_amount'         => $rentalAmount,
                 'discount_amount'     => $discountAmount,
