@@ -284,40 +284,45 @@ function fetch_audit_columns(int $invoiceId): ?array {
     );
 }
 
-// ── INT 1: Boss's exact example (spec §11) — Mar 28 → Apr 30 ──
+// ── INT 1: Boss's exact example (Revision 2) — Mar 28 → Apr 30 ──
+// end_date Apr 30 is KNOWN, so the lease is a 34-day monthly lease that spans
+// Mar→Apr. R2 prorates the partial start month immediately at monthly÷30 and
+// bills the complete month flat: $93.33 + $700 = $793.33. (The original spec's
+// $200/$593.33 split was the open-lease escalating behaviour — see RR-001 in
+// tier1_reconciliation.php, where no end_date is set and the split is preserved.)
 $pdo->beginTransaction();
 try {
     $leaseId = spawn_test_lease('2026-03-28', '2026-04-30');
 
-    // Invoice 1: Mar 28-31, activation (partial_start)
+    // Invoice 1: Mar 28-31, partial start month (4 days × $700/30 = $93.33)
     $inv1 = gen_invoice($leaseId, '2026-03-28', '2026-03-31', 'partial_start');
     $lines1 = fetch_base_rental_lines($inv1['invoice_id']);
     $audit1 = fetch_audit_columns($inv1['invoice_id']);
 
     eq("BOSS Invoice 1 line count", 1, count($lines1));
-    eq("BOSS Invoice 1 amount", '200.00', $lines1[0]['amount']);
+    eq("BOSS Invoice 1 amount", '93.33', $lines1[0]['amount']);
     eq("BOSS Invoice 1 type", 'base_rental', $lines1[0]['item_type']);
     eq("BOSS Invoice 1 total_days", '4', (string)$audit1['total_days_at_period_end']);
-    eq("BOSS Invoice 1 cumulative_correct", '200.00', $audit1['cumulative_correct_amount']);
+    eq("BOSS Invoice 1 cumulative_correct", '93.33', $audit1['cumulative_correct_amount']);
     eq("BOSS Invoice 1 already_billed", '0.00', $audit1['already_billed_before_this']);
 
-    // Invoice 2: Apr 1-30, full month — total_days = 34
+    // Invoice 2: Apr 1-30, complete calendar month → flat $700. total_days = 34
     $inv2 = gen_invoice($leaseId, '2026-04-01', '2026-04-30', 'full_month');
     $lines2 = fetch_base_rental_lines($inv2['invoice_id']);
     $audit2 = fetch_audit_columns($inv2['invoice_id']);
 
     eq("BOSS Invoice 2 line count", 1, count($lines2));
-    eq("BOSS Invoice 2 amount", '593.33', $lines2[0]['amount']);
+    eq("BOSS Invoice 2 amount", '700.00', $lines2[0]['amount']);
     eq("BOSS Invoice 2 type", 'base_rental', $lines2[0]['item_type']);
     eq("BOSS Invoice 2 total_days", '34', (string)$audit2['total_days_at_period_end']);
     eq("BOSS Invoice 2 cumulative_correct", '793.33', $audit2['cumulative_correct_amount']);
-    eq("BOSS Invoice 2 already_billed", '200.00', $audit2['already_billed_before_this']);
+    eq("BOSS Invoice 2 already_billed", '93.33', $audit2['already_billed_before_this']);
 
     $bossTotal = bcadd($lines1[0]['amount'], $lines2[0]['amount'], 2);
     eq("BOSS lease total", '793.33', $bossTotal);
-    $out[] = "        ┌─ BOSS EXAMPLE VERIFIED ──────────────";
-    $out[] = "        │  Invoice 1 (Mar 28-31):  \$200.00";
-    $out[] = "        │  Invoice 2 (Apr 1-30):   \$593.33";
+    $out[] = "        ┌─ BOSS EXAMPLE VERIFIED (Revision 2) ──";
+    $out[] = "        │  Invoice 1 (Mar 28-31):  \$93.33";
+    $out[] = "        │  Invoice 2 (Apr 1-30):   \$700.00";
     $out[] = "        │  Lease total:            \$793.33";
     $out[] = "        └──────────────────────────────────────";
 } finally {
@@ -407,11 +412,14 @@ try {
 $pdo->beginTransaction();
 try {
     $leaseId = spawn_test_lease('2025-01-01', '2025-12-31');
+    // R2: a full calendar year is 12 COMPLETE calendar months billed flat —
+    // 12 × $700 = $8,400.00 ("a month is a month"). The original 30-day-block
+    // math charged $8,516.67 (12×30 + 5 leftover days); that is removed.
     $inv1 = gen_invoice($leaseId, '2025-01-01', '2025-12-31', 'single_period');
     $lines1 = fetch_base_rental_lines($inv1['invoice_id']);
     // 365 days monthly_math: 12 × $700 + 5 × $23.3333 = $8516.67 (engine precision; spec §35.7 allows ±$0.02)
     // Activation invoice — whichever pays more: A = $8516.67; B = 365 × $23.3333 = $8516.67. Equal → A.
-    eq("365-day lease amount", '8516.67', $lines1[0]['amount']);
+    eq("365-day lease amount", '8400.00', $lines1[0]['amount']);
 } finally {
     $pdo->rollBack();
 }
@@ -434,21 +442,20 @@ try {
         $amounts[] = $lns[0]['amount'];
     }
 
-    eq("6mo Invoice 1 (Mar 28-31, 4d)",  '200.00', $amounts[0]);
-    eq("6mo Invoice 2 (Apr, 34d total)",  '593.33', $amounts[1]);
-    // Cumulative for 65 days monthly_math = $1516.67 (engine) → delta from $793.33 = $723.34
-    // Spec §12 table shows $723.32 using their pre-rounded $23.33 (precision band per §35.7).
-    eq("6mo Invoice 3 (May, 65d total)",  '723.34', $amounts[2]);
-    // Cumulative for 95 days = 3 × $700 + 5 × $23.3333 = $2216.67 → delta from $1516.67 = $700.00
-    eq("6mo Invoice 4 (Jun, 95d total)",  '700.00', $amounts[3]);
-    // Cumulative for 126 days = 4 × $700 + 6 × $23.3333 = $2940.00 → delta from $2216.67 = $723.33
-    eq("6mo Invoice 5 (Jul, 126d total)", '723.33', $amounts[4]);
-    // Cumulative for 138 days = 4 × $700 + 18 × $23.3333 = $3220.00 → delta from $2940.00 = $280.00
-    eq("6mo Invoice 6 (Aug close, 138d)", '280.00', $amounts[5]);
+    // R2 calendar-month billing (end_date Aug 12 known → 34+-day monthly lease
+    // spanning Mar→Aug): partial start month $93.33, four complete months flat
+    // at $700 each, partial end month Aug 1-12 = 12 × $700/30 = $280.00.
+    eq("6mo Invoice 1 (Mar 28-31, partial)", '93.33',  $amounts[0]);
+    eq("6mo Invoice 2 (Apr complete month)", '700.00', $amounts[1]);
+    eq("6mo Invoice 3 (May complete month)", '700.00', $amounts[2]);
+    eq("6mo Invoice 4 (Jun complete month)", '700.00', $amounts[3]);
+    eq("6mo Invoice 5 (Jul complete month)", '700.00', $amounts[4]);
+    eq("6mo Invoice 6 (Aug 1-12, partial)",  '280.00', $amounts[5]);
 
     $total = '0.00';
     foreach ($amounts as $a) { $total = bcadd($total, $a, 2); }
-    eq("6mo lease total (cumulative at day 138)", '3220.00', $total);
+    // $93.33 + 4 × $700 + $280.00 = $3,173.33
+    eq("6mo lease total (cumulative at day 138)", '3173.33', $total);
 } finally {
     $pdo->rollBack();
 }
@@ -600,8 +607,10 @@ try {
     } else {
         ok("Holistic audit_log present: " . substr($audit['notes'], 0, 80) . "...");
         $j = json_decode($audit['new_values'], true);
-        eq("Holistic audit_log tier", 'daily', $j['tier']);
-        eq("Holistic audit_log delta", '200.00', $j['delta']);
+        // R2: lease end_date Apr 30 known → 34-day monthly lease; the Mar 28-31
+        // partial start month bills at monthly÷30 = 4 × $23.3333 = $93.33.
+        eq("Holistic audit_log tier", 'monthly', $j['tier']);
+        eq("Holistic audit_log delta", '93.33', $j['delta']);
     }
 } finally {
     $pdo->rollBack();

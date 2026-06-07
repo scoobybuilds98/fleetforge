@@ -184,22 +184,30 @@ class InvoiceGenerator
                     [$leaseId]
                 );
 
-                // Spec §35.3: activation = first invoice on this lease (i.e.
-                // already_billed = 0.00). The engine itself confirms this
-                // against ground truth; we pass true when billing_type is
-                // partial_start (the typical activation signature) and let
-                // the engine veto if already_billed > 0.
-                $callerActivationGuess = in_array($billingType, ['partial_start', 'full_month', 'single_period'], true);
+                // Revision 2 §6–§7: the engine bills on the lease's KNOWN
+                // EXTENT E = actual_return (closed) · end_date (expected, if
+                // set) · else this invoice's period_end (truly open — the
+                // billing date IS the extent). E decides the tier and the
+                // single-vs-spans split; the per-invoice cumulative still
+                // sums through period_end. There is no longer an activation
+                // "whichever pays more" branch (R2 supersedes §17) — the
+                // single-month-flat rule + running reconciliation replace it.
+                $extentEnd = $periodEnd;
+                if (!empty($lease['actual_return_date'])) {
+                    $extentEnd = (string)$lease['actual_return_date'];
+                } elseif (!empty($lease['end_date'])) {
+                    $extentEnd = (string)$lease['end_date'];
+                }
 
                 $engineResult = $this->holistic->calculateForInvoice([
                     'lease_id'             => $leaseId,
                     'start_date'           => (string)$lease['start_date'],
                     'period_start'         => $periodStart,
                     'period_end'           => $periodEnd,
+                    'extent_end'           => $extentEnd,
                     'daily_rate'           => (string)$lease['daily_rate'],
                     'weekly_rate'          => (string)$lease['weekly_rate'],
                     'monthly_rate'         => (string)$lease['monthly_rate'],
-                    'is_activation_invoice'=> $callerActivationGuess,
                 ]);
 
                 // Capture audit-column values for the invoices INSERT and
@@ -1429,6 +1437,224 @@ class InvoiceGenerator
     }
 
     /**
+     * Revision 2 §9 — calendar-month fan-out orchestrator for manual
+     * generation. Given a lease and a requested start, emit the correct
+     * SEQUENCE of invoices for the lease's known extent:
+     *
+     *   • short / weekly / single-calendar-month leases → ONE invoice for
+     *     [fan_start, target] (billing_type single_period); no fan-out.
+     *   • spanning monthly leases → one invoice PER calendar-month segment
+     *     from fan_start to target (partial_start / full_month / partial_end),
+     *     each reconciled against already_billed by the engine.
+     *
+     *   fan_start = the requested period_start (the create form pre-fills
+     *               this as latest-non-void-period_end + 1, else lease.start).
+     *   target    = the KNOWN EXTENT E = actual_return (closed) · end_date
+     *               (set) · else the requested period_end (truly open).
+     *
+     * The whole run is ONE db_transaction (the nested createFromLease() and
+     * findOverlappingInvoice() calls join it via the db.php nesting guard);
+     * a mid-loop failure rolls back every segment (§11 Atomic batch). Each
+     * createFromLease() takes FOR UPDATE on the lease row (holistic path) and
+     * mints its number under the FOR UPDATE counter (D15). Integrity gates
+     * (§11) are enforced per segment BEFORE any insert: duplicate-period
+     * overlap (unless allow_overlap), void-before-regenerate (a non-void
+     * overlap is immutable), and the inverted-date refusal (INV-27).
+     *
+     * Non-holistic (period_independent) and mileage_only leases never fan
+     * out — they bill exactly the submitted [period_start, period_end] as one
+     * invoice, honouring the submitted billing_type (legacy path untouched).
+     *
+     * @param array $params lease_id, period_start, period_end, billing_type,
+     *   invoice_type, allow_overlap, po_number, notes, internal_notes,
+     *   created_by, generation_source, and the optional odometer_* fields
+     *   (attached to the FINAL segment only, mirroring the cron).
+     * @return array{invoices: array<int,array>, count:int, fanned:bool,
+     *               billing_type:string}
+     */
+    public function generateForLease(array $params): array
+    {
+        $leaseId        = (int)$params['lease_id'];
+        $submittedStart = (string)$params['period_start'];
+        $submittedEnd   = (string)$params['period_end'];
+
+        return db_transaction(function () use ($leaseId, $submittedStart, $submittedEnd, $params) {
+            // FOR UPDATE on the lease row for the whole batch (D20) — the
+            // per-segment createFromLease() re-locks the same row harmlessly.
+            $lease = db_row(
+                "SELECT id, status, start_date, end_date, actual_return_date, engine_version,
+                        daily_rate, weekly_rate, monthly_rate
+                   FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                [$leaseId]
+            );
+            if (!$lease) {
+                json_error('NOT_FOUND', 'Lease not found.', 404);
+            }
+
+            $engineVersion = (string)($lease['engine_version'] ?? 'period_independent');
+            $billingType   = (string)($params['billing_type'] ?? 'single_period');
+            $invoiceType   = (string)($params['invoice_type'] ?? 'regular');
+            $allowOverlap  = !empty($params['allow_overlap']);
+
+            // ── INV-27 inverted-date refusal (§11) ──────────────────
+            if ($submittedStart > $submittedEnd) {
+                json_error(
+                    'INVERTED_PERIOD',
+                    "Period start ({$submittedStart}) is after period end ({$submittedEnd}).",
+                    422,
+                    ['fields' => ['period_end' => 'Due date cannot be before invoice date.']]
+                );
+            }
+
+            // Passthrough params common to every emitted invoice.
+            $common = [
+                'lease_id'          => $leaseId,
+                'po_number'         => $params['po_number'] ?? null,
+                'notes'             => $params['notes'] ?? null,
+                'internal_notes'    => $params['internal_notes'] ?? null,
+                'created_by'        => $params['created_by'] ?? null,
+                'generation_source' => $params['generation_source'] ?? 'manual',
+            ];
+            // Odometer is period-specific; attach only to the final segment
+            // (the most recent period), mirroring the monthly cron.
+            $odo = [
+                'odometer_at_period_start_km' => $params['odometer_at_period_start_km'] ?? null,
+                'odometer_at_period_end_km'   => $params['odometer_at_period_end_km']   ?? null,
+                'odometer_source'             => $params['odometer_source']             ?? null,
+                'odometer_fetched_at'         => $params['odometer_fetched_at']         ?? null,
+            ];
+
+            // ── Legacy / mileage_only → single invoice, honour the form ──
+            if ($engineVersion !== 'holistic' || $billingType === 'mileage_only') {
+                $this->assertNoOverlap($leaseId, $submittedStart, $submittedEnd, $allowOverlap, $billingType);
+                $inv = $this->createFromLease($common + $odo + [
+                    'period_start' => $submittedStart,
+                    'period_end'   => $submittedEnd,
+                    'billing_type' => $billingType,
+                    'invoice_type' => $invoiceType,
+                ]);
+                return ['invoices' => [$inv], 'count' => 1, 'fanned' => false, 'billing_type' => $billingType];
+            }
+
+            // ── Holistic: resolve the known extent (target) ──────────
+            $fanStart = $submittedStart;
+            $target   = $submittedEnd;
+            $extentDefinitive = false;
+            if (!empty($lease['actual_return_date'])) {
+                $target = (string)$lease['actual_return_date'];
+                $extentDefinitive = true;
+            } elseif (!empty($lease['end_date'])) {
+                $target = (string)$lease['end_date'];
+                $extentDefinitive = true;
+            }
+
+            // Fully-billed / inverted: the requested start is past the extent.
+            if ($target < $fanStart) {
+                json_error(
+                    'INVERTED_PERIOD',
+                    "Nothing to bill: the requested start ({$fanStart}) is past the lease's billable extent ({$target}). "
+                    . 'The lease is fully billed through ' . $target . '. To re-bill, void the relevant invoice and regenerate.',
+                    422,
+                    ['fields' => ['period_start' => "Past the lease extent ({$target})."]]
+                );
+            }
+
+            // Classify the FULL lease on its known extent. basis tells us
+            // whether monthly applies AND spans calendar months.
+            $cls = $this->holistic->cumulativeCorrect(
+                (string)$lease['start_date'], $target, $target,
+                (string)$lease['daily_rate'], (string)$lease['weekly_rate'], (string)$lease['monthly_rate']
+            );
+            $spanning = ($cls['basis'] === 'monthly_multi_month');
+
+            if (!$spanning) {
+                // ONE invoice for the whole [fan_start, target] span.
+                $this->assertNoOverlap($leaseId, $fanStart, $target, $allowOverlap, 'single_period');
+                $inv = $this->createFromLease($common + $odo + [
+                    'period_start' => $fanStart,
+                    'period_end'   => $target,
+                    'billing_type' => 'single_period',
+                    'invoice_type' => $extentDefinitive ? 'final' : 'regular',
+                ]);
+                return ['invoices' => [$inv], 'count' => 1, 'fanned' => false, 'billing_type' => 'single_period'];
+            }
+
+            // ── Fan out per calendar-month segment ──────────────────
+            $segments = $this->holistic->segmentsFor($fanStart, $target);
+            if (empty($segments)) {
+                json_error('INVERTED_PERIOD', "No billable calendar-month segments for {$fanStart}..{$target}.", 422);
+            }
+
+            $lastIdx  = count($segments) - 1;
+            $created  = [];
+            foreach ($segments as $i => $seg) {
+                $this->assertNoOverlap($leaseId, $seg['period_start'], $seg['period_end'], $allowOverlap, $seg['billing_type']);
+                $isLast    = ($i === $lastIdx);
+                $segParams = $common + [
+                    'period_start' => $seg['period_start'],
+                    'period_end'   => $seg['period_end'],
+                    'billing_type' => $seg['billing_type'],
+                    'invoice_type' => ($isLast && $extentDefinitive) ? 'final' : 'regular',
+                ];
+                if ($isLast) {
+                    $segParams += $odo; // odometer on the most-recent period only
+                }
+                $created[] = $this->createFromLease($segParams);
+            }
+
+            return [
+                'invoices'     => $created,
+                'count'        => count($created),
+                'fanned'       => true,
+                'billing_type' => 'multi_segment',
+            ];
+        });
+    }
+
+    /**
+     * §11 duplicate-period + void-before-regenerate gate. Refuses (409) when
+     * a NON-VOID invoice overlaps [start, end] unless allow_overlap is set.
+     * The conflicting invoice's status drives the message: a sent / non-draft
+     * invoice is immutable (D12/D14) and is named as such; a draft overlap is
+     * the ordinary "would only bill the reconciliation difference" guard.
+     * mileage_only never emits a base_rental, so it is not gated.
+     */
+    private function assertNoOverlap(
+        int $leaseId,
+        string $periodStart,
+        string $periodEnd,
+        bool $allowOverlap,
+        string $billingType
+    ): void {
+        if ($allowOverlap || $billingType === 'mileage_only') {
+            return;
+        }
+        $overlap = self::findOverlappingInvoice($leaseId, $periodStart, $periodEnd);
+        if (!$overlap) {
+            return;
+        }
+        $immutable = ($overlap['status'] !== 'draft');
+        $msg = $immutable
+            ? "This period ({$periodStart} to {$periodEnd}) overlaps invoice {$overlap['invoice_number']} "
+              . "({$overlap['billing_period_start']} to {$overlap['billing_period_end']}, status {$overlap['status']}), "
+              . 'which is immutable (D12/D14). Void it first to regenerate this period.'
+            : "This period ({$periodStart} to {$periodEnd}) overlaps invoice {$overlap['invoice_number']} "
+              . "({$overlap['billing_period_start']} to {$overlap['billing_period_end']}). "
+              . 'Creating it would only bill the reconciliation difference, not the full period. '
+              . 'Choose a non-overlapping period, void the conflict, or confirm to reconcile intentionally.';
+        json_error('PERIOD_OVERLAP', $msg, 409, [
+            'overlap' => [
+                'invoice_id'           => (int)$overlap['id'],
+                'invoice_number'       => $overlap['invoice_number'],
+                'status'               => $overlap['status'],
+                'billing_period_start' => $overlap['billing_period_start'],
+                'billing_period_end'   => $overlap['billing_period_end'],
+            ],
+            'fields' => ['period_start' => "Overlaps invoice {$overlap['invoice_number']}."],
+        ]);
+    }
+
+    /**
      * Generate an advance-billing batch for a lease at activation time.
      *
      * Produces Invoice 1 (current period — full_month if start is the 1st,
@@ -1958,7 +2184,8 @@ class InvoiceGenerator
             'weekly_flat'   => 'weekly',
             'weekly_math'   => 'weekly',
             'weekly_capped' => 'weekly_capped',
-            'monthly_math'  => 'monthly',
+            'monthly'       => 'monthly',  // R2: calendar-month flat / per-segment
+            'monthly_math'  => 'monthly',  // legacy tier name (applyTierFormula)
             default         => 'none',  // 'none' or any unknown
         };
     }

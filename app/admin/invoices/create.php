@@ -382,6 +382,7 @@ function FF_InvoiceCreate() {
 
         // S-INVOICE-CREATION-UX C2: period auto-fill state
         periodWarning:      '',       // banner text when auto-fill hits an edge case (catch-up, capped, etc.)
+        fullyBilled:        false,    // R2 §10: lease is fully billed through the ceiling (void-then-regenerate)
 
         // S-INVOICE-CREATION-UX C2 / C3: pre-populate from URL ?lease_id=N.
         // The picker's initialId/initialLabel shows the correct label immediately;
@@ -458,20 +459,6 @@ function FF_InvoiceCreate() {
 
             return warns;
         },
-        // period_start + 1 month - 1 day, with end-of-month clamping so
-        // Jan 31 → Feb 27 (not Mar 2) and Mar 30 → Apr 29 etc.
-        _addOneMonthMinusOneDay(dateStr) {
-            const d = new Date(dateStr + 'T00:00:00');
-            const day = d.getDate();
-            let targetMonth = d.getMonth() + 1;
-            let targetYear  = d.getFullYear();
-            if (targetMonth > 11) { targetMonth = 0; targetYear += 1; }
-            const lastDayOfTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-            const targetDay = Math.min(day, lastDayOfTargetMonth);
-            const target = new Date(targetYear, targetMonth, targetDay);
-            target.setDate(target.getDate() - 1);
-            return this._ymd(target);
-        },
         _earliest(...dates) {
             const valid = dates.filter(d => d && typeof d === 'string' && d.length === 10);
             if (!valid.length) return null;
@@ -487,8 +474,15 @@ function FF_InvoiceCreate() {
         // so it works with both the picker flow and the legacy init path.
         //
         //   ctx: { startDate, endDate, actualReturn, billingCycle, prevPeriodEnd }
+        // R2 §10 + §3.4: pre-fill Period Start / End / Billing Days / Billing Type /
+        // Invoice Type from the lease + its non-void history. Both date fields stay
+        // editable. The fully-invoiced edge (latest non-void invoice already at the
+        // lease ceiling) NO LONGER shows a future start / empty end / 0 days — it
+        // states the lease is fully billed through <date>, shows the lease's OWN
+        // dates for reference, and surfaces the void-then-regenerate recovery.
         _autoFillPeriodDatesFromCtx(ctx) {
             this.periodWarning = '';
+            this.fullyBilled   = false;
             const startDate    = ctx.startDate    || '';
             const endDate      = ctx.endDate      || '';
             const actualReturn = ctx.actualReturn || '';
@@ -496,23 +490,35 @@ function FF_InvoiceCreate() {
             const prevPeriodEnd = ctx.prevPeriodEnd || '';
             if (!startDate) return;
 
+            const ceiling = this._earliest(actualReturn || null, endDate || null);
+            const today   = this._today();
+
             let periodStart;
             if (prevPeriodEnd) {
                 periodStart = this._addDays(prevPeriodEnd, 1);
             } else {
                 periodStart = startDate;
             }
-            this.form.period_start = periodStart;
 
-            const ceiling = this._earliest(actualReturn || null, endDate || null);
-            const today   = this._today();
-
+            // ── Fully-invoiced / over-invoiced edge (R2 §10) ───────────
+            // The next period would start past the lease's billable ceiling —
+            // the lease is fully billed. Show the lease's own span (not a future
+            // start / empty end / 0 days) and the recovery path.
             if (ceiling && periodStart > ceiling) {
-                this.form.period_end = '';
-                this.periodWarning = 'Prior invoice ended on ' + prevPeriodEnd +
-                    ' which is past the lease ceiling (' + ceiling + ') — the lease appears to have been over-invoiced. Auto-fill skipped; enter the period manually after reviewing the invoice history.';
+                this.fullyBilled = true;
+                this.form.period_start = startDate;
+                this.form.period_end   = ceiling;
+                this.form.billing_type = 'single_period';
+                this.form.invoice_type = 'regular';
+                this.updateDays();
+                this.periodWarning = 'This lease is fully billed through ' + ceiling +
+                    ' (the last invoice ' + (prevPeriodEnd ? 'ends on ' + prevPeriodEnd : 'reaches the lease end') +
+                    '). The dates shown are the lease’s own span for reference. To re-bill a period, ' +
+                    'void the relevant invoice on the lease first, then regenerate.';
                 return;
             }
+
+            this.form.period_start = periodStart;
 
             let periodEnd;
             if (billingCycle === 'on_close_only') {
@@ -520,20 +526,52 @@ function FF_InvoiceCreate() {
             } else if (ceiling && ceiling < today && !prevPeriodEnd) {
                 periodEnd = ceiling;
             } else {
-                periodEnd = this._addOneMonthMinusOneDay(periodStart);
+                // R2 §10: Period End = last day of Period Start's calendar month,
+                // capped at the lease ceiling (LEAST(end_date, actual_return)) on
+                // the final segment.
+                periodEnd = this._lastDayOfMonth(periodStart);
                 if (ceiling && periodEnd > ceiling) {
                     periodEnd = ceiling;
                 }
             }
             this.form.period_end = periodEnd;
 
+            // R2 §10: pre-fill Billing Type + Invoice Type from the segment shape.
+            // (The generator authoritatively re-derives these per calendar-month
+            // segment on fan-out; these are the operator-facing preview values.)
+            const spansBeyond = !!(ceiling && periodEnd < ceiling) ||
+                                (!ceiling && billingCycle === 'monthly' && periodEnd === this._lastDayOfMonth(periodStart) && periodEnd < today);
+            this.form.billing_type = this._segmentBillingType(periodStart, periodEnd, spansBeyond);
+            this.form.invoice_type = (ceiling && periodEnd === ceiling) ? 'final' : 'regular';
+            this.updateDays();
+
             if (ceiling && ceiling < today && !prevPeriodEnd) {
                 this.periodWarning = 'Lease ended on ' + ceiling +
-                    ' and no prior invoices exist — this is a single catch-up invoice covering the full lease span. Multiple billing cycles would normally have been generated; verify the period before submitting.';
+                    ' and no prior invoices exist — generating will create the full calendar-month sequence (one invoice per month) up to this date. Verify before submitting.';
             } else if (ceiling && periodEnd === ceiling && billingCycle === 'monthly') {
                 this.periodWarning = 'Period end capped at ' + ceiling +
                     ' (lease ' + (actualReturn ? 'returned' : 'ends') + ' on this date). A full month would have ended later.';
             }
+        },
+        // Last calendar day of the month that contains dateStr (Y-m-d).
+        _lastDayOfMonth(dateStr) {
+            const d = new Date(dateStr + 'T00:00:00');
+            return this._ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+        },
+        // R2 §10 billing_type for a single segment: full_month when it is a whole
+        // calendar month; partial_start when it begins mid-month; partial_end when
+        // it begins on the 1st but ends mid-month; single_period when this invoice
+        // is the whole (non-spanning) bill.
+        _segmentBillingType(periodStart, periodEnd, spansBeyond) {
+            const d = new Date(periodStart + 'T00:00:00');
+            const firstOfMonth = this._ymd(new Date(d.getFullYear(), d.getMonth(), 1));
+            const lastOfMonth  = this._lastDayOfMonth(periodStart);
+            const startsFirst  = (periodStart === firstOfMonth);
+            const endsLast     = (periodEnd === lastOfMonth);
+            if (startsFirst && endsLast) return 'full_month';
+            if (!spansBeyond)            return 'single_period';
+            if (!startsFirst)            return 'partial_start';
+            return 'partial_end';
         },
         // ───────────────────────────────────────────────────────────
 

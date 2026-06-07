@@ -52,15 +52,16 @@ function test_RR_001(): void {
         Assert::auditLogged('invoice_holistic_reconciliation', $inv2['invoice_id']);
     });
 }
-// RR-002: Mar 28 → May 31 (3 months sequence: 4d / 30d / 31d = 65 cumulative).
-// Inv 3 cumulative = $1516.67 (engine precision). delta = $1516.67 - $793.33 = $723.34.
+// RR-002: Mar 28 → May 31 (open lease). R2: Inv 3 covers the complete calendar
+// month of May → flat $700. Cumulative through May 31 = $93.33 + $700 + $700 =
+// $1493.33; already billed $793.33 → delta $700.00.
 function test_RR_002(): void {
     DbState::inTransaction(function() {
         $lease = _rr_makeLease('2026-03-28');
         Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start');
         Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');
         $inv3 = Fixtures::generateInvoice($lease, '2026-05-01', '2026-05-31', 'full_month');
-        Assert::bcequal('723.34', _rr_lineAmount($inv3['invoice_id']));
+        Assert::bcequal('700.00', _rr_lineAmount($inv3['invoice_id']));
     });
 }
 // RR-003: 6-month sequence from spec §12 — engine precision yields slightly different
@@ -76,8 +77,8 @@ function test_RR_003(): void {
         $amts[] = _rr_lineAmount(Fixtures::generateInvoice($lease, '2026-07-01', '2026-07-31', 'full_month')['invoice_id']);
         $amts[] = _rr_lineAmount(Fixtures::generateInvoice($lease, '2026-08-01', '2026-08-12', 'partial_end')['invoice_id']);
         $total = '0.00'; foreach ($amts as $a) $total = bcadd($total, $a, 2);
-        // Spec §12 table says $3219.94; engine precision yields $3220.00.
-        Assert::bcequal('3220.00', $total);
+        // R2: $93.33 (Mar partial) + 4 × $700 (Apr–Jul complete) + $280.00 (Aug 1-12 partial) = $3,173.33.
+        Assert::bcequal('3173.33', $total);
     });
 }
 // RR-004: 12 monthly invoices for full 2026 year = $8516.67 (engine).
@@ -94,20 +95,20 @@ function test_RR_004(): void {
             $total = bcadd($total, _rr_lineAmount($inv['invoice_id']), 2);
             $cursor = (new DateTime($endDate))->modify('+1 day')->format('Y-m-d');
         }
-        Assert::bcequal('8516.67', $total);  // engine precision (Appendix A says $8516.65 — §35.7 band)
+        Assert::bcequal('8400.00', $total);  // R2: 12 complete calendar months × $700 ("a month is a month")
     });
 }
-// RR-005: Leap year — Feb 1, 2024 → Mar 5 (34 days, monthly_math, $793.33).
-// Inv 1 covers Feb (29 days, capped at $700 weekly_capped per WPM A).
-// WPM: A = applyTier(29 period days) = $700 (weekly_capped); B = 29 × $23.33 = $676.67. A wins → $700.
-// Inv 2 covers Mar 1-5: cumulative 34 days = $793.33. already_billed $700. delta = $93.33.
+// RR-005: Leap year — Feb 1, 2024 → Mar 5 (open lease). R2 "a month is a month":
+// Inv 1 covers the COMPLETE calendar month of February (29 days) → flat $700.
+// Inv 2 covers Mar 1-5: cumulative = $700 (Feb complete) + 5 × $23.3333 (Mar
+// partial) = $816.67; already billed $700 → delta $116.67.
 function test_RR_005(): void {
     DbState::inTransaction(function() {
         $lease = _rr_makeLease('2024-02-01');
         $inv1  = Fixtures::generateInvoice($lease, '2024-02-01', '2024-02-29', 'partial_start');
         $inv2  = Fixtures::generateInvoice($lease, '2024-03-01', '2024-03-05', 'partial_end');
         Assert::bcequal('700.00', _rr_lineAmount($inv1['invoice_id']));
-        Assert::bcequal('93.33',  _rr_lineAmount($inv2['invoice_id']));
+        Assert::bcequal('116.67', _rr_lineAmount($inv2['invoice_id']));
     });
 }
 // RR-006: First-of-month activation. Inv 1 covers Apr 1-30 (30 days, full_month). $700 flat.
@@ -180,12 +181,13 @@ function test_RR_012(): void {
         Assert::bcequal('700.00', $total);  // cumulative at day 30 (the entire run)
     });
 }
-// RR-013: One invoice covering all 365 days. WPM activation: A = applyTier(365) = $8516.67; B = 365×$23.33 = $8516.67. A wins.
+// RR-013: One invoice covering all 365 days of 2025. R2: a full calendar year is
+// 12 complete calendar months billed flat → 12 × $700 = $8,400.00.
 function test_RR_013(): void {
     DbState::inTransaction(function() {
         $lease = _rr_makeLease('2025-01-01');
         $inv1  = Fixtures::generateInvoice($lease, '2025-01-01', '2025-12-31', 'single_period');
-        Assert::bcequal('8516.67', _rr_lineAmount($inv1['invoice_id']));
+        Assert::bcequal('8400.00', _rr_lineAmount($inv1['invoice_id']));
     });
 }
 // RR-014: USD lease — engine produces same numeric value as CAD (FX is invoice-level).
@@ -217,13 +219,17 @@ function test_RR_015(): void {
 }
 
 // ── RR-020..029 reconciliation credit generation (10) ───────
-// RR-020: Lease that runs to cap. 4d activation ($200), then 15d total. cumulative=$700 capped. delta=$500.
+// RR-020: 15-day lease spanning Mar→Apr. R2 §4.2/§5: above the monthly crossover
+// (weeklyMath(15)=$750 > $700) AND spanning, with NO complete month → both partials
+// prorate at monthly÷30: Mar 28-31 (4d=$93.33) + Apr 1-11 (11d=$256.67) = $350.00
+// cumulative. Inv 1 billed $200 (4d daily) → delta $150.00. (A spanning sub-30-day
+// lease prorates BELOW the flat month — the "commit longer, better per-day" rule.)
 function test_RR_020(): void {
     DbState::inTransaction(function() {
         $lease = _rr_makeLease('2026-03-28');
         Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start');
         $inv2 = Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-11', 'partial_end');  // 15 cumulative
-        Assert::bcequal('500.00', _rr_lineAmount($inv2['invoice_id']));
+        Assert::bcequal('150.00', _rr_lineAmount($inv2['invoice_id']));
         // No reconciliation credit line (delta is positive).
         Assert::lineCount($inv2['invoice_id'], 'base_rental_reconciliation_credit', 0);
     });
@@ -303,12 +309,12 @@ function test_RR_024(): void {
 function test_RR_025(): void {
     DbState::inTransaction(function() {
         $lease = _rr_makeLease('2026-03-28');
-        Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start');  // $200
-        Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');     // $593.33
+        Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start');  // $93.33
+        Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');     // $700.00
         $inv3 = Fixtures::generateInvoice($lease, '2026-05-01', '2026-05-31', 'full_month');
-        // No reconciliation credit; delta stays positive across normal sequence.
+        // No reconciliation credit; delta stays positive. R2: May complete month flat $700.
         Assert::lineCount($inv3['invoice_id'], 'base_rental_reconciliation_credit', 0);
-        Assert::bcequal('723.34', _rr_lineAmount($inv3['invoice_id']));
+        Assert::bcequal('700.00', _rr_lineAmount($inv3['invoice_id']));
     });
 }
 // RR-026: Credit line correctly has is_credit=1 and positive amount.

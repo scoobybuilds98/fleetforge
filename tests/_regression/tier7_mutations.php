@@ -84,10 +84,12 @@ function test_MT_028(): void { _mt_run('return (int)$startDt->diff($endDt)->days
 function test_MT_029(): void { _mt_run('if (bccomp($weeklyMath, $monthly, 6) > 0) {', 'if (bccomp($weeklyMath, $monthly, 6) < 0) {'); }
 
 // ── MT-040..044 conditional mutations (5) ───────────────────
-// MT-040: Remove WPM activation gate (always run WPM regardless of activation status).
-//   Original: if ($isActivation) { $wpm = ... ; ... }
-//   Mutate the boolean to always true.
-function test_MT_040(): void { _mt_run('if ($isActivation) {', 'if (true) {'); }
+// MT-040: Break the Revision 2 single-vs-spans gate — always treat a monthly
+// lease as a single calendar month (flat monthly), never fanning the per-segment
+// proration. Killed by the spanning RR sequences (e.g. RR-002), whose cumulative
+// collapses to a flat $700 and breaks the reconciliation deltas.
+//   Original: if (self::sameCalendarMonth($start, $extentEnd)) {
+function test_MT_040(): void { _mt_run('if (self::sameCalendarMonth($start, $extentEnd)) {', 'if (true) {'); }
 // MT-041: Reverse tier 3 weekly_capped branch (the bccomp '> 0' → '<= 0').
 function test_MT_041(): void { _mt_run('if (bccomp($weeklyMath, $monthly, 6) > 0) {
                 $amount      = bcround($monthly, 2);', 'if (bccomp($weeklyMath, $monthly, 6) <= 0) {

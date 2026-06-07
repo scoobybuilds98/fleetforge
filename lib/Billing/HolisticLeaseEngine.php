@@ -7,27 +7,34 @@ declare(strict_types=1);
  * Running-reconciliation billing engine. Replaces ProRateCalculator
  * for leases marked engine_version='holistic' on the leases table.
  *
- * The core idea (spec §3): every invoice asks the same five questions —
- *   1. How many days has this lease been active in total (start_date
- *      through this invoice's period_end, inclusive)?
- *   2. Which tier does that total fall into? (same THE LAW thresholds
- *      as the old engine: 1-5 daily, 6-7 weekly_flat, 8-29 weekly_math,
- *      30+ monthly_math)
- *   3. What SHOULD the cumulative base_rental be at that tier?
- *   4. What has already been billed across all non-void prior invoices
- *      for this lease?
- *   5. delta = cumulative_correct - already_billed. That's THIS invoice's
- *      base_rental. Positive → emit base_rental line. Negative → emit
- *      base_rental_reconciliation_credit. Zero → no line.
+ * The core idea (Revision 2 §6–§7): every invoice asks the same questions —
+ *   1. Known extent E = actual_return (closed) · end_date (set) · else the
+ *      billing date. total = inclusiveDays(start_date, E).
+ *   2. Classify on total: ≤7 → cheaper-of daily/weekly ladder; weeklyMath ≤
+ *      monthly → weekly math; weeklyMath > monthly → MONTHLY applies.
+ *   3. cumulative_correct THROUGH this invoice's period_end:
+ *        sub-month tier → the whole-lease amount;
+ *        monthly, single calendar month → flat monthly (28/29/30/31);
+ *        monthly, spans → Σ calendar-month segments (complete months flat,
+ *        partial start/end months at days × monthly÷30).
+ *   4. already_billed = NET base_rental of all non-void prior invoices.
+ *   5. delta = cumulative_correct − already_billed. Positive → base_rental;
+ *      negative → base_rental_reconciliation_credit; zero → no line.
  *
- * Activation special case (spec §17): when this is the FIRST invoice
- * for the lease (already_billed = '0.00'), apply "whichever pays more"
- * — bill the HIGHER of (current-period tier formula) vs (monthly-prorated
- * for these days). Protects the company against quick returns on
- * long-term-priced leases.
+ * Revision 2 (2026-06-07) supersedes the original spec's month math and §17
+ * "whichever pays more" at activation. A full calendar month bills flat at
+ * the monthly rate regardless of length (the 30-day-block math that charged
+ * a 31-day month an extra day is removed). There is NO special first-invoice
+ * branch: the single-calendar-month-flat rule plus the running
+ * reconciliation give the same protection — a 22–30 day single-month lease
+ * pays the flat month; a lease known to span prorates its partial
+ * immediately; a span discovered later re-prorates the past month down to
+ * its /30 value via a reconciliation credit ("prorate in the past").
  *
  * Pure math + ONE read query (already_billed SUM); no DB writes (D3:
- * InvoiceGenerator is the sole DB writer in billing).
+ * InvoiceGenerator is the sole DB writer in billing). applyTierFormula() and
+ * whicheverPaysMore() remain as pure-math utilities (unit-tested directly)
+ * but are NOT on the calculateForInvoice() path post-Revision-2.
  *
  * Required by: lib/Billing/InvoiceGenerator.php
  * Requires:    includes/db.php (db_row), lib/Billing/BillingRateException.php
@@ -35,10 +42,11 @@ declare(strict_types=1);
  *
  * Decisions:   D14 (inclusive day counting), D16 (bcmath only),
  *              D20 (read uses FOR UPDATE caller-side), D132 (zero-rate
- *              backstop), K-16 (positive amount + is_credit=1 for credits)
- * Spec ref:    FleetForge_Holistic_Billing_Engine_Spec.docx §3, §5–§7,
- *              §11 (boss's worked example), §17 (whichever-pays-more),
- *              §19 (negative invoices), §30 (class shape)
+ *              backstop), K-16 (positive amount + is_credit=1 for credits),
+ *              D-R2-1..7 (Revision 2 locked decisions)
+ * Spec ref:    FleetForge_Holistic_Billing_Engine_Spec_Revision2_2026-06-07
+ *              §3 (ladder), §4 (two monthly cases), §6 (reconciliation),
+ *              §7 (computation), §9 (fan-out)
  */
 
 namespace FleetForge\Billing;
@@ -92,66 +100,57 @@ class HolisticLeaseEngine
         $daily        = (string)$params['daily_rate'];
         $weekly       = (string)$params['weekly_rate'];
         $monthly      = (string)$params['monthly_rate'];
-        $callerSaysActivation = (bool)($params['is_activation_invoice'] ?? false);
 
-        // ── Step 1: total days so far (spec §7.1) ─────────────────
-        // Inclusive day counting per D14. Lease starting Mar 28 and
-        // generating an invoice with period_end Apr 30 = 34 days.
+        // Revision 2 §6–§7: bill on the lease's KNOWN EXTENT E.
+        //   E = actual_return (closed) · end_date (expected, if set) ·
+        //       else the billing/period date (truly open).
+        // The caller (InvoiceGenerator) resolves E from the lease row and
+        // passes it as extent_end; a missing extent_end defaults to
+        // period_end — the truly-open case where the billing date IS the
+        // extent, which preserves the legacy single-invoice behaviour.
+        $extentEnd = (isset($params['extent_end']) && $params['extent_end'] !== null && $params['extent_end'] !== '')
+            ? (string)$params['extent_end']
+            : $periodEnd;
+
+        // ── Step 1: day counts (R2 §7.1, D14 inclusive) ───────────
+        // total_days_at_period_end is the forensic "days elapsed at this
+        // invoice's period end" — days from start through period_end. The
+        // tier/single-vs-spans REGIME is decided separately, inside
+        // cumulativeCorrect(), by the duration through the known extent E.
         $totalDays  = self::inclusiveDays($startDate, $periodEnd);
 
-        // Period days drive the "whichever pays more" activation
-        // computation; for non-activation invoices this is informational.
+        // Period days are informational for the line-item subtitle.
         $periodDays = self::inclusiveDays($periodStart, $periodEnd);
 
-        // ── Step 3 (run early): already_billed query (spec §7.3) ──
-        // Pulled before Step 2's tier math so the activation branch
-        // (spec §17) can confirm "is this really invoice 1?" from
-        // ground truth rather than trusting the caller's guess.
-        //
-        // Excludes void invoices and soft-deleted invoices. Includes
-        // BOTH 'base_rental' and 'base_rental_reconciliation_credit'
-        // lines — the reconciliation credit subtracts because it
-        // carries is_credit=1 in the aggregator, so for the holistic
-        // engine's purposes we treat already_billed as the NET base
-        // rental contributed by prior invoices.
+        // ── Step 3 (run early): already_billed (R2 §7.4 / D20) ────
+        // Excludes void + soft-deleted invoices. Includes BOTH
+        // 'base_rental' and 'base_rental_reconciliation_credit' lines —
+        // the credit subtracts (is_credit=1) so already_billed is the NET
+        // base rental contributed by prior invoices. Caller holds FOR
+        // UPDATE on the lease row across this read + the later counter
+        // writes (D20).
         $alreadyBilled = $this->sumAlreadyBilled($leaseId);
 
-        // Spec §35.3: activation invoice = first invoice for the lease
-        // where already_billed = '0.00'. The caller may pass
-        // is_activation_invoice=true based on billing_type, but ground
-        // truth is the SUM. Only run the "whichever pays more" branch
-        // when both agree.
-        $isActivation = $callerSaysActivation
-            && bccomp($alreadyBilled, '0', 2) === 0;
+        // ── Step 2: cumulative_correct THROUGH this invoice's period_end ──
+        // R2 §4 + §7: classify on E, then —
+        //   • sub-month tiers (daily / weekly) → the whole-lease amount;
+        //   • monthly, single calendar month → flat monthly (capped);
+        //   • monthly, spans → the SUM of calendar-month segments from
+        //     start through period_end (complete months flat at monthly,
+        //     partial start/end months at days × monthly÷30).
+        // Revision 2 supersedes the original §17 "whichever pays more" at
+        // activation: there is no special first-invoice branch — the
+        // single-month-flat rule plus this running reconciliation give the
+        // same protection (a 22–30 day single-month lease pays the flat
+        // month; a known span prorates immediately).
+        $cc = $this->cumulativeCorrect(
+            $startDate, $periodEnd, $extentEnd, $daily, $weekly, $monthly
+        );
+        $cumulativeCorrect = $cc['amount'];
+        $tier              = $cc['tier'];
+        $explanation       = $cc['explanation'];
 
-        // ── Step 2: tier formula on cumulative days (spec §7.2) ──
-        $tierResult = $this->applyTierFormula($totalDays, $daily, $weekly, $monthly);
-
-        $cumulativeCorrect = $tierResult['amount'];
-        $tier              = $tierResult['tier'];
-        $explanation       = $tierResult['explanation'];
-
-        // Spec §17 — Whichever Pays More (activation only).
-        // Compute both options for the current period only, pick the
-        // higher. Replaces $cumulativeCorrect for this single invoice
-        // because already_billed = 0.00 and the lease's eventual
-        // duration is unknown.
-        $activationMeta = null;
-        if ($isActivation) {
-            $wpm = $this->whicheverPaysMore($periodDays, $daily, $weekly, $monthly);
-            $activationMeta = $wpm;
-            $cumulativeCorrect = $wpm['chosen_amount'];
-            // The tier on the invoice reflects what we CHARGED, not
-            // the tier-by-day-count (which for a 4-day activation
-            // would be 'daily' — same answer here because daily-rate
-            // wins for 4 days at $50/$700 anyway). For activation we
-            // use the wpm-chosen tier so the line item description
-            // tells the truth about how the amount was derived.
-            $tier        = $wpm['chosen_tier'];
-            $explanation = $wpm['explanation'];
-        }
-
-        // ── Step 4: delta (spec §7.4) ─────────────────────────────
+        // ── Step 4: delta (R2 §7.5) ───────────────────────────────
         $delta = bcsub($cumulativeCorrect, $alreadyBilled, 2);
 
         // ── Step 5: emit line item (spec §7.5) ────────────────────
@@ -217,36 +216,37 @@ class HolisticLeaseEngine
         }
 
         // ── Audit meta: full payload for audit_log new_values JSON ──
-        // Spec §20.3 + Appendix C. The InvoiceGenerator writes ONE
-        // audit_log row per holistic-engine invoice using this payload.
+        // R2 §20.3 + Appendix C. The InvoiceGenerator writes ONE audit_log
+        // row per holistic-engine invoice using this payload. The added
+        // extent_end / basis fields let a future auditor replay the
+        // calendar-month classification without rebuilding it.
         $auditMeta = [
             'engine'             => 'holistic',
             'lease_id'           => $leaseId,
             'period_start'       => $periodStart,
             'period_end'         => $periodEnd,
             'period_days'        => $periodDays,
+            'extent_end'         => $extentEnd,
             'total_days_so_far'  => $totalDays,
             'tier'               => $tier,
+            'basis'              => $cc['basis'],
             'cumulative_correct' => $cumulativeCorrect,
             'already_billed'     => $alreadyBilled,
             'delta'              => $delta,
             'line_item_type'     => $lineItemType,
             'amount'             => $amount,
             'is_credit'          => $isCredit,
-            'rule'               => $isActivation ? 'whichever_pays_more' : 'running_reconciliation',
+            'rule'               => 'running_reconciliation',
             'rates'              => [
                 'daily'   => $daily,
                 'weekly'  => $weekly,
                 'monthly' => $monthly,
             ],
         ];
-        if ($activationMeta !== null) {
-            $auditMeta['activation_meta'] = [
-                'option_a_value' => $activationMeta['option_a_value'],
-                'option_b_value' => $activationMeta['option_b_value'],
-                'chosen_option'  => $activationMeta['chosen_option'],
-                'chosen_tier'    => $activationMeta['chosen_tier'],
-            ];
+        if (!empty($cc['segments'])) {
+            // For the spanning-monthly case, the per-segment breakdown that
+            // summed to cumulative_correct through this period_end.
+            $auditMeta['segments'] = $cc['segments'];
         }
 
         return [
@@ -262,6 +262,280 @@ class HolisticLeaseEngine
             'explanation'        => $explanation,
             'audit_meta'         => $auditMeta,
         ];
+    }
+
+    /**
+     * Revision 2 §4 + §7 — the cumulative_correct amount for a lease
+     * billed from start_date through $throughDate, given its known extent
+     * $extentEnd (E). Pure math; the only economic source of truth for the
+     * holistic engine post-Revision-2.
+     *
+     * Classification is on the TOTAL duration through E:
+     *   total ≤ 7       → cheaper-of ladder via the preserved sub-month tiers
+     *   weeklyMath ≤ M  → weekly math (full weeks × weekly + leftover × weekly÷7)
+     *   weeklyMath > M  → MONTHLY applies:
+     *        single calendar month (start & E in one month) → flat monthly
+     *        spans multiple months                          → Σ segments
+     *           complete calendar month  → flat monthly
+     *           partial start/end month  → days × (monthly ÷ 30)
+     *
+     * The crossover from weekly to monthly is rate-driven (weeklyMath vs
+     * monthly), never a hardcoded day count (R2 §3). The daily figure used
+     * for partial months is always monthly ÷ 30 (D-R2-5), independent of
+     * the calendar month's length.
+     *
+     * $throughDate is clamped to E — an invoice never bills past the known
+     * extent even if a caller passes a period_end beyond it (e.g. the
+     * monthly cron's Y-m-t end on a lease that returns mid-month).
+     *
+     * @return array{amount:string, tier:string, basis:string,
+     *               explanation:array<string>, segments:array}
+     */
+    public function cumulativeCorrect(
+        string $start,
+        string $throughDate,
+        string $extentEnd,
+        string $daily,
+        string $weekly,
+        string $monthly
+    ): array {
+        // Clamp the cumulative window to the known extent (never bill past E).
+        $through = (self::ymd($throughDate) > self::ymd($extentEnd))
+            ? $extentEnd : $throughDate;
+
+        // The REGIME (sub-month ladder vs monthly) and the single-vs-spans
+        // split are decided by the lease's TOTAL duration through E (R2 §7.1).
+        // The cumulative AMOUNT is for the span billed so far — start through
+        // period_end (R2 §7.3).
+        $total       = self::inclusiveDays($start, $extentEnd);
+        $daysThrough = self::inclusiveDays($start, $through);
+        if ($total <= 0) {
+            return ['amount' => '0.00', 'tier' => 'none', 'basis' => 'none',
+                    'explanation' => ['0 cumulative days — no charge'], 'segments' => []];
+        }
+
+        // Monthly applies iff weekly math over the full extent exceeds the
+        // monthly rate (R2 §3, rate-driven crossover — never a fixed day count).
+        $monthlyApplies = ($total > 7)
+            && bccomp($this->weeklyMath($total, $weekly), $monthly, 6) > 0;
+
+        if (!$monthlyApplies) {
+            // ── Sub-month ladder (R2 §3, preserved) ──────────────
+            // The ladder grows per accrued days: cumulative through period_end
+            // uses the day count THROUGH period_end, so a short lease billed in
+            // pieces (activation then close) reconciles correctly. Because the
+            // regime is sub-month, weeklyMath(daysThrough) ≤ weeklyMath(total)
+            // ≤ monthly — the monthly cap never trips here.
+            $n = max(1, $daysThrough);
+            if ($n <= 5) {
+                $amount = bcround(bcmul($daily, (string)$n, 6), 2);
+                return ['amount' => $amount, 'tier' => 'daily', 'basis' => 'daily',
+                        'explanation' => ["{$n} cumulative days × \${$daily}/day = \${$amount}"],
+                        'segments' => []];
+            }
+            if ($n <= 7) {
+                $amount = bcround($weekly, 2);
+                return ['amount' => $amount, 'tier' => 'weekly_flat', 'basis' => 'weekly_flat',
+                        'explanation' => ["{$n} cumulative days — weekly flat rate = \${$amount}"],
+                        'segments' => []];
+            }
+            $wm        = $this->weeklyMath($n, $weekly);
+            $amount    = bcround($wm, 2);
+            $fullWeeks = intdiv($n, 7);
+            $remainder = $n % 7;
+            $explanation = [];
+            if ($fullWeeks > 0) {
+                $explanation[] = "{$fullWeeks} week(s) × \${$weekly}";
+            }
+            if ($remainder > 0) {
+                $explanation[] = "{$remainder} remaining days × \$" . bcround(bcdiv($weekly, '7', 6), 4) . "/day (weekly÷7)";
+            }
+            $explanation[] = "Cumulative {$n} days = \${$amount} (weekly_math)";
+            return ['amount' => $amount, 'tier' => 'weekly_math', 'basis' => 'weekly_math',
+                    'explanation' => $explanation, 'segments' => []];
+        }
+
+        $weeklyMath = $this->weeklyMath($total, $weekly);
+
+        // ── Monthly applies (weeklyMath > monthly) ───────────────
+        if (self::sameCalendarMonth($start, $extentEnd)) {
+            // Single calendar month — flat monthly, capped (R2 §4.1). A
+            // 22–30 day lease inside one month bills the flat month, never
+            // prorated.
+            $amount = bcround($monthly, 2);
+            return ['amount' => $amount, 'tier' => 'monthly', 'basis' => 'monthly_single_month',
+                    'explanation' => [
+                        "{$total} cumulative days, single calendar month: weekly math \$" . bcround($weeklyMath, 2)
+                            . " exceeds monthly — flat monthly rate = \${$amount}",
+                    ],
+                    'segments' => []];
+        }
+
+        // Spans multiple calendar months — Σ segments from start through
+        // the (clamped) period_end (R2 §4.2 + §7.3).
+        $seg = $this->sumSegments($start, $through, $monthly);
+        return ['amount' => $seg['amount'], 'tier' => 'monthly', 'basis' => 'monthly_multi_month',
+                'explanation' => $seg['explanation'], 'segments' => $seg['segments']];
+    }
+
+    /**
+     * weeklyMath(n) per R2 §3 — full weeks at the weekly rate plus leftover
+     * days at weekly ÷ 7. Mathematically n × (weekly ÷ 7); split so the full
+     * weeks carry the exact weekly figure and only the remainder rounds.
+     * Returns scale-6 bcmath (caller rounds the final amount to 2dp, D16).
+     */
+    public function weeklyMath(int $days, string $weekly): string
+    {
+        if ($days <= 0) {
+            return '0.000000';
+        }
+        $fullWeeks      = intdiv($days, 7);
+        $remainder      = $days % 7;
+        $dailyFromWeekly = bcdiv($weekly, '7', 6);
+        $weeklyPart     = bcmul($weekly, (string)$fullWeeks, 6);
+        $remainderPart  = bcmul($dailyFromWeekly, (string)$remainder, 6);
+        return bcadd($weeklyPart, $remainderPart, 6);
+    }
+
+    /**
+     * Sum the calendar-month segments of [start, through] (R2 §4.2):
+     *   complete calendar month (1st..last fully inside the window) → flat monthly
+     *   partial month                                               → days × (monthly ÷ 30)
+     *
+     * "Complete" is judged against the [start, through] window: a month is
+     * complete only when both its 1st and last day fall within it. The role
+     * of E is solely in the tier/single-vs-spans decision upstream — this
+     * sum walks the window it is given.
+     *
+     * Pure math, no DB. Returns the 2dp amount plus a per-segment breakdown
+     * for the audit trail.
+     *
+     * @return array{amount:string, explanation:array<string>, segments:array}
+     */
+    private function sumSegments(string $start, string $through, string $monthly): array
+    {
+        $monthlyDaily = bcdiv($monthly, '30', 6);
+        $startDt   = new \DateTimeImmutable($start);
+        $throughDt = new \DateTimeImmutable($through);
+
+        $sum         = '0';
+        $segments    = [];
+        $explanation = [];
+
+        // Iterate calendar months from the start month's 1st up to through.
+        $monthFirst = $startDt->modify('first day of this month')->setTime(0, 0, 0);
+        $throughDay = $throughDt->setTime(0, 0, 0);
+
+        while ($monthFirst <= $throughDay) {
+            $monthLast = $monthFirst->modify('last day of this month');
+            $segStart  = ($startDt > $monthFirst)   ? $startDt   : $monthFirst;
+            $segEnd    = ($throughDt < $monthLast)   ? $throughDt : $monthLast;
+
+            if ($segStart <= $segEnd) {
+                $isComplete = ($segStart->format('Y-m-d') === $monthFirst->format('Y-m-d'))
+                           && ($segEnd->format('Y-m-d')   === $monthLast->format('Y-m-d'));
+                $segDays = self::inclusiveDays($segStart->format('Y-m-d'), $segEnd->format('Y-m-d'));
+
+                if ($isComplete) {
+                    $segAmount = bcround($monthly, 2);
+                    $sum = bcadd($sum, $monthly, 6);
+                    $explanation[] = $monthFirst->format('M Y') . " — complete month = \${$segAmount}";
+                } else {
+                    $segAmount = bcround(bcmul($monthlyDaily, (string)$segDays, 6), 2);
+                    $sum = bcadd($sum, bcmul($monthlyDaily, (string)$segDays, 6), 6);
+                    $explanation[] = $segStart->format('M j') . '–' . $segEnd->format('j')
+                        . " ({$segDays} days × \$" . bcround($monthlyDaily, 4) . "/day) = \${$segAmount}";
+                }
+
+                $segments[] = [
+                    'period_start' => $segStart->format('Y-m-d'),
+                    'period_end'   => $segEnd->format('Y-m-d'),
+                    'days'         => $segDays,
+                    'complete'     => $isComplete,
+                    'amount'       => $segAmount,
+                ];
+            }
+
+            $monthFirst = $monthFirst->modify('first day of next month');
+        }
+
+        return [
+            'amount'      => bcround($sum, 2),
+            'explanation' => $explanation,
+            'segments'    => $segments,
+        ];
+    }
+
+    /**
+     * Revision 2 §9 — calendar-month fan-out plan. Walks the calendar-month
+     * segments of [fanStart, target], one entry per month, for the
+     * InvoiceGenerator orchestrator to materialise one invoice per segment.
+     *
+     * fanStart = (latest non-void invoice's period_end + 1, else lease.start)
+     * target   = return / end_date / today (the known extent)
+     *
+     * billing_type per segment:
+     *   complete calendar month             → full_month
+     *   starts after the 1st (start partial) → partial_start
+     *   starts on the 1st but ends mid-month → partial_end
+     *
+     * Never emits a segment with period_start > period_end (INV-27 class):
+     * an inverted [fanStart, target] returns []. The caller refuses loudly.
+     *
+     * @return array<array{period_start:string, period_end:string,
+     *                     billing_type:string, complete:bool}>
+     */
+    public function segmentsFor(string $fanStart, string $target): array
+    {
+        $startDt  = new \DateTimeImmutable($fanStart);
+        $targetDt = new \DateTimeImmutable($target);
+        if ($targetDt < $startDt) {
+            return [];
+        }
+
+        $segments   = [];
+        $monthFirst = $startDt->modify('first day of this month')->setTime(0, 0, 0);
+        $targetDay  = $targetDt->setTime(0, 0, 0);
+
+        while ($monthFirst <= $targetDay) {
+            $monthLast = $monthFirst->modify('last day of this month');
+            $segStart  = ($startDt  > $monthFirst) ? $startDt  : $monthFirst;
+            $segEnd    = ($targetDt < $monthLast)  ? $targetDt : $monthLast;
+
+            if ($segStart <= $segEnd) {
+                $startsOnFirst = ($segStart->format('Y-m-d') === $monthFirst->format('Y-m-d'));
+                $endsOnLast    = ($segEnd->format('Y-m-d')   === $monthLast->format('Y-m-d'));
+                if ($startsOnFirst && $endsOnLast) {
+                    $btype = 'full_month';
+                } elseif (!$startsOnFirst) {
+                    $btype = 'partial_start';
+                } else {
+                    $btype = 'partial_end';
+                }
+                $segments[] = [
+                    'period_start' => $segStart->format('Y-m-d'),
+                    'period_end'   => $segEnd->format('Y-m-d'),
+                    'billing_type' => $btype,
+                    'complete'     => $startsOnFirst && $endsOnLast,
+                ];
+            }
+            $monthFirst = $monthFirst->modify('first day of next month');
+        }
+
+        return $segments;
+    }
+
+    /** True when both dates fall in the same calendar month + year. */
+    public static function sameCalendarMonth(string $a, string $b): bool
+    {
+        return (new \DateTimeImmutable($a))->format('Y-m')
+            === (new \DateTimeImmutable($b))->format('Y-m');
+    }
+
+    /** Normalise a date string to Y-m-d for safe lexical comparison. */
+    private static function ymd(string $d): string
+    {
+        return (new \DateTimeImmutable($d))->format('Y-m-d');
     }
 
     /**

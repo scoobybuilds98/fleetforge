@@ -90,9 +90,10 @@ function test_WPM_032(): void {
         db_execute("UPDATE invoices SET status='void' WHERE id=?", [$inv1['invoice_id']]);
         $inv2   = Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');
         $line   = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='base_rental'", [$inv2['invoice_id']]);
-        // After void, already_billed = 0. Inv 2 is the new "activation". WPM uses period_days (30).
-        // A = applyTier(30) = $700; B = 30 × ($700/30) = $700. Tie → A. Engine picks $700.
-        Assert::bcequal('700.00', (string)$line['amount']);
+        // R2: §17 whichever-pays-more is removed. After the void, already_billed = 0,
+        // so Inv 2 (Apr 1-30) bills the full cumulative through Apr 30 for the open
+        // lease started Mar 28: $93.33 (Mar partial) + $700 (Apr complete) = $793.33.
+        Assert::bcequal('793.33', (string)$line['amount']);
     });
 }
 // WPM-033: Inv 1 in DRAFT, Inv 2 → already_billed includes draft. WPM does NOT apply.
@@ -115,9 +116,10 @@ function test_WPM_034(): void {
         Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start');
         Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');
         $inv3 = Fixtures::generateInvoice($lease, '2026-05-01', '2026-05-31', 'full_month');
-        // 65 days cumulative → engine $1516.67. Already billed $200 + $593.33 = $793.33. delta = $723.34.
+        // R2: May is a complete calendar month → flat $700. Cumulative through May 31
+        // = $93.33 + $700 + $700 = $1493.33; already billed $200 + $593.33 = $793.33 → $700.
         $line = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='base_rental'", [$inv3['invoice_id']]);
-        Assert::bcequal('723.34', (string)$line['amount']);
+        Assert::bcequal('700.00', (string)$line['amount']);
     });
 }
 // WPM-035: Spec scenario "Inv 1 with $0 base (mileage_only)". InvoiceGenerator's
@@ -161,9 +163,10 @@ function test_WPM_035(): void {
         // Now run a real activation invoice.
         $inv2 = Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-04', 'partial_start');
         $line = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='base_rental'", [$inv2['invoice_id']]);
-        // already_billed = $0 (the manual line contributes $0). Engine sees this as activation.
-        // Period = 4 days. WPM: A = 4×$50 = $200, B = 4×$23.33 = $93.33 → A = $200.
-        Assert::bcequal('200.00', (string)$line['amount']);
+        // R2: already_billed = $0 (the manual line contributes $0). The lease is 8 days
+        // through Apr 4 (open), still under the monthly crossover → weekly_math(8) = $400.
+        // The $0 prior invoice billed nothing, so this invoice catches up the full $400.
+        Assert::bcequal('400.00', (string)$line['amount']);
     });
 }
 // WPM-036: full_month activation. Inv 1 covers 30 days. A = applyTier(30) = $700. B = 30×$23.33 = $700. Tie → A.
@@ -186,11 +189,10 @@ function test_WPM_037(): void {
         db_execute("UPDATE invoices SET status='void' WHERE id IN (?, ?)", [$inv1['invoice_id'], $inv2['invoice_id']]);
         $inv3   = Fixtures::generateInvoice($lease, '2026-05-01', '2026-05-04', 'partial_start');
         $line   = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='base_rental'", [$inv3['invoice_id']]);
-        // Period = 4 days (May 1-4). Total days cumulative = 68 (Mar 28 - May 4). But already_billed=0 (both voided).
-        // Engine: WPM A = applyTierFormula(4 period days) = $200. B = 4 × ($700/30) = $93.33. → $200.
-        // But cumulative_correct from total_days=68 = engine compute. WPM REPLACES that for activation.
-        // Engine chose: cumulative_correct = WPM($200) = $200. delta = $200 - 0 = $200.
-        Assert::bcequal('200.00', (string)$line['amount']);
+        // R2: §17 whichever-pays-more is removed. Both priors are voided → already_billed=0,
+        // so this invoice bills the full cumulative through May 4 for the open lease started
+        // Mar 28: $93.33 (Mar) + $700 (Apr complete) + $93.33 (May 1-4) = $886.67.
+        Assert::bcequal('886.67', (string)$line['amount']);
     });
 }
 

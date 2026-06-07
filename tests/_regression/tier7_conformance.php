@@ -78,7 +78,8 @@ function test_SC_004(): void {
             $row = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='base_rental'", [$inv['invoice_id']]);
             if ($row) $sum = bcadd($sum, (string)$row['amount'], 2);
         }
-        Assert::bcequal('3220.00', $sum);
+        // R2: $93.33 (Mar partial) + 4 × $700 (Apr–Jul complete) + $280.00 (Aug 1-12) = $3,173.33.
+        Assert::bcequal('3173.33', $sum);
     });
 }
 // SC-005: Engine spec §13 — 1-year lease at $8516.67 (engine precision; spec table $8516.65).
@@ -114,8 +115,10 @@ function test_SC_007(): void {
             $row = db_row("SELECT amount FROM invoice_line_items WHERE invoice_id=? AND item_type='base_rental'", [$inv['invoice_id']]);
             if ($row) $sum = bcadd($sum, (string)$row['amount'], 2);
         }
-        // Cumulative at day 80 = 80/30=2 r20: 2×$700+20×$23.3333 = $1400+$466.67 = $1866.67.
-        Assert::bcequal('1866.67', $sum);
+        // R2 calendar months: Mar partial $200 (4d daily) + Apr split [1-15 then 16-30, Apr
+        // resolves to a complete month $700] + May complete $700 + Jun 1-15 partial $350.
+        // Sum = $200 + $243.33 + $350 + $700 + $350 = $1,843.33.
+        Assert::bcequal('1843.33', $sum);
     });
 }
 // SC-008: Engine spec §16 — closed-early scenarios. Day 5 close → $250.

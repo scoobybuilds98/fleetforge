@@ -67,14 +67,16 @@ function test_ML_006(): void {
     DbState::inTransaction(function() {
         $lease = _ml_makeLease('2026-03-28');
         $inv = Fixtures::generateInvoice($lease, '2026-03-28', '2026-04-11', 'single_period');
-        Assert::bcequal('700.00', _ml_lineSum($inv['invoice_id']));  // 15d weekly_capped
+        // R2: 15d spans Mar→Apr (monthly applies, no complete month) → 15 × $700/30 = $350.00
+        Assert::bcequal('350.00', _ml_lineSum($inv['invoice_id']));
     });
 }
 function test_ML_007(): void {
     DbState::inTransaction(function() {
         $lease = _ml_makeLease('2026-03-28');
         $inv = Fixtures::generateInvoice($lease, '2026-03-28', '2026-04-25', 'single_period');
-        Assert::bcequal('700.00', _ml_lineSum($inv['invoice_id']));  // 29d weekly_capped
+        // R2: 29d spans Mar→Apr (no complete month) → Mar 28-31 ($93.33) + Apr 1-25 ($583.33) = $676.67
+        Assert::bcequal('676.67', _ml_lineSum($inv['invoice_id']));
     });
 }
 function test_ML_008(): void {
@@ -99,7 +101,8 @@ function test_ML_021(): void {
         $lease = _ml_makeLease('2026-03-01');
         $i1 = Fixtures::generateInvoice($lease, '2026-03-01', '2026-03-31', 'full_month');  // not 30 day
         $i2 = Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');
-        Assert::near(bcadd(_ml_lineSum($i1['invoice_id']), _ml_lineSum($i2['invoice_id']), 2), '1423.33', '0.10');
+        // R2: Mar + Apr are both complete calendar months → 2 × $700 = $1,400.00
+        Assert::near(bcadd(_ml_lineSum($i1['invoice_id']), _ml_lineSum($i2['invoice_id']), 2), '1400.00', '0.10');
     });
 }
 function test_ML_022(): void {
@@ -110,8 +113,8 @@ function test_ML_022(): void {
             $inv = Fixtures::generateInvoice($lease, $s, $e, $t);
             $sum = bcadd($sum, _ml_lineSum($inv['invoice_id']), 2);
         }
-        // 92 days monthly_math: 3×$700 + 2×$23.3333 = $2146.67.
-        Assert::bcequal('2146.67', $sum);
+        // R2: Mar + Apr + May are 3 complete calendar months → 3 × $700 = $2,100.00.
+        Assert::bcequal('2100.00', $sum);
     });
 }
 function test_ML_023(): void {
@@ -126,7 +129,8 @@ function test_ML_023(): void {
             $inv = Fixtures::generateInvoice($lease, $s, $e, $t);
             $sum = bcadd($sum, _ml_lineSum($inv['invoice_id']), 2);
         }
-        Assert::bcequal('3220.00', $sum);
+        // R2: $93.33 + 4 × $700 + $280.00 = $3,173.33.
+        Assert::bcequal('3173.33', $sum);
     });
 }
 function test_ML_024(): void {
@@ -141,22 +145,24 @@ function test_ML_024(): void {
             $inv = Fixtures::generateInvoice($lease, $s, $e, $t);
             $sum = bcadd($sum, _ml_lineSum($inv['invoice_id']), 2);
         }
-        Assert::bcequal('8516.67', $sum);
+        // R2: 12 complete calendar months × $700 = $8,400.00 ("a month is a month").
+        Assert::bcequal('8400.00', $sum);
     });
 }
 function test_ML_025(): void {
     DbState::inTransaction(function() {
         $lease = _ml_makeLease('2026-01-01');
         $sum = '0.00';
-        // 52 weekly invoices = 52 × 7 = 364 days. Engine cumulative at day 364 = 12×$700 + 4×$23.3333 = $8493.33.
-        // (Day 365 — the New Year's Eve "53rd" period — is a separate invoice in real life.)
+        // 52 weekly invoices = 52 × 7 = 364 days. R2: the telescoping cumulative through
+        // Dec 30 = 11 complete months (Jan–Nov, $7,700) + Dec 1-30 partial (30 × $23.3333 =
+        // $700) = $8,400.00. (Day 365 — New Year's Eve — is a separate period in real life.)
         for ($w = 0; $w < 52; $w++) {
             $start = (new DateTime('2026-01-01'))->modify("+{$w} weeks")->format('Y-m-d');
             $end   = (new DateTime($start))->modify("+6 days")->format('Y-m-d');
             $inv = Fixtures::generateInvoice($lease, $start, $end, $w === 0 ? 'partial_start' : ($w === 51 ? 'partial_end' : 'single_period'));
             $sum = bcadd($sum, _ml_lineSum($inv['invoice_id']), 2);
         }
-        Assert::near($sum, '8493.33', '0.10');  // 364-day total at engine precision
+        Assert::near($sum, '8400.00', '0.10');  // R2: 11 complete months + Dec 1-30 partial
     });
 }
 function test_ML_026(): void {
@@ -172,7 +178,8 @@ function test_ML_026(): void {
             $sum = bcadd($sum, _ml_lineSum($inv['invoice_id']), 2);
             $cursor->modify('first day of next month');
         }
-        Assert::bcequal('17033.33', $sum);
+        // R2: 24 complete calendar months × $700 = $16,800.00.
+        Assert::bcequal('16800.00', $sum);
     });
 }
 function test_ML_027(): void {
@@ -187,8 +194,8 @@ function test_ML_027(): void {
             $sum = bcadd($sum, _ml_lineSum($inv['invoice_id']), 2);
             $cursor->modify('first day of next month');
         }
-        // Engine: 5 years = ~1826 days (1 leap). 1826/30=60r26. 60×$700 + 26×$23.3333 = $42606.67.
-        Assert::near($sum, '42606.67', '0.10');
+        // R2: 60 complete calendar months × $700 = $42,000.00 (calendar months, not 30-day blocks).
+        Assert::near($sum, '42000.00', '0.10');
     });
 }
 function test_ML_028(): void {
@@ -223,8 +230,9 @@ function test_ML_041(): void {
         $i1 = Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start');
         db_execute("UPDATE invoices SET status='void' WHERE id=?", [$i1['invoice_id']]);
         $i2 = Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');
-        // already_billed = 0 (void) → engine treats as activation. WPM on 30d period: A=$700, B=$700. → $700.
-        Assert::bcequal('700.00', _ml_lineSum($i2['invoice_id']));
+        // R2: already_billed = 0 (Inv 1 void) → Inv 2 bills the full cumulative through Apr 30
+        // for the open lease started Mar 28: $93.33 (Mar partial) + $700 (Apr complete) = $793.33.
+        Assert::bcequal('793.33', _ml_lineSum($i2['invoice_id']));
     });
 }
 function test_ML_042(): void {
@@ -235,8 +243,9 @@ function test_ML_042(): void {
         $i2 = Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-30', 'full_month');
         db_execute("UPDATE invoices SET status='void' WHERE id=?", [$i1['invoice_id']]);
         $i3 = Fixtures::generateInvoice($lease, '2026-05-01', '2026-05-31', 'full_month');
-        // After void of i1: already_billed for i3 = i2 only = $593.33. cumulative_correct day 65 = $1516.67. delta = $923.34.
-        Assert::bcequal('923.34', _ml_lineSum($i3['invoice_id']));
+        // R2: after voiding i1, already_billed for i3 = i2 only = $593.33. Cumulative through
+        // May 31 = $93.33 + $700 + $700 = $1493.33 → delta $900.00 (May complete month flat).
+        Assert::bcequal('900.00', _ml_lineSum($i3['invoice_id']));
     });
 }
 function test_ML_043(): void {
