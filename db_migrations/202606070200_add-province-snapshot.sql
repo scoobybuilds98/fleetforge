@@ -23,7 +23,20 @@
 -- migration is safe to run against both dev (column already exists) and
 -- production (column missing).
 --
--- Session: S-PROD-PROVINCE-SNAPSHOT
+-- ORDER-SAFETY (S-PROD-SCHEMA-DRIFT-SNAPSHOT-COLS fix): the credit_notes
+-- statement below MUST anchor province_snapshot off `credit_note_number`,
+-- NOT off `billing_address_snapshot`. On a prod DB provisioned from an old
+-- baseline, credit_notes lacks ALL the snapshot columns — billing_address_snapshot
+-- does not exist yet (it is added later by 202606070300, which the runner
+-- applies AFTER this file because it sorts filenames ascending). Anchoring off
+-- a column this migration cannot guarantee exists made the ALTER fail with
+-- error 1054, aborting the whole migration batch and perpetually blocking
+-- 202606070300. credit_note_number is always present (it is the table's first
+-- business column), and once 202606070300 inserts company/customer_name/
+-- billing_address_snapshot between credit_note_number and province_snapshot,
+-- the final column order still matches FLEETFORGE_DATABASE_MASTER.sql exactly.
+--
+-- Session: S-PROD-PROVINCE-SNAPSHOT (order-safety fix: S-PROD-SCHEMA-DRIFT-SNAPSHOT-COLS)
 -- ============================================================
 
 -- ── invoices.province_snapshot ────────────────────────────────────────────
@@ -51,7 +64,9 @@ SET @col_exists_credit = (
 );
 SET @sql_credit = IF(
     @col_exists_credit = 0,
-    'ALTER TABLE `credit_notes` ADD COLUMN `province_snapshot` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL AFTER `billing_address_snapshot`',
+    -- Anchor off credit_note_number (always present) — NOT billing_address_snapshot,
+    -- which does not exist on an old-baseline prod credit_notes. See ORDER-SAFETY note.
+    'ALTER TABLE `credit_notes` ADD COLUMN `province_snapshot` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL AFTER `credit_note_number`',
     'SELECT ''credit_notes.province_snapshot already exists -- skipping'' AS migration_note'
 );
 PREPARE _stmt FROM @sql_credit;

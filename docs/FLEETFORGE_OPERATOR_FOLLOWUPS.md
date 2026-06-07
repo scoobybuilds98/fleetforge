@@ -18,6 +18,23 @@
 
 ## 🔴 BLOCKING — live test cannot proceed without operator action
 
+### F31 — Deploy + run pending migrations on prod to end the lease-activation schema-drift cascade 🔴 BLOCKING (LIVE NOW)
+
+**Surfaced by:** S-PROD-SCHEMA-DRIFT-SNAPSHOT-COLS (2026-06-07) — operator reported "production keeps failing to activate lease MTTS-9CMH3U-2026 Pending"; Sentry FLEETFORGE-E cascaded province_snapshot → gst_exempt_number_snapshot.
+**Affects:** ALL lease activation (and credit-note / overpayment / late-fee paths) on production — currently HARD-FATALING live.
+**Root cause:** prod was provisioned from an OLD baseline; 9 columns that exist in `FLEETFORGE_DATABASE_MASTER.sql` were only ever added to the baseline, never as incremental ALTER migrations, so prod never received them. A full prod-vs-master diff (all 157 tables) found EXACTLY 9 missing columns (`invoices`: gst_exempt_number_snapshot, pst_exempt_number_snapshot, late_fee_rule_id, late_fee_rule_snapshot; `credit_notes`: company_name_snapshot, customer_name_snapshot, billing_address_snapshot, province_snapshot, customer_email_snapshot) — 0 missing tables, 0 type/enum drift, 0 reverse drift.
+**Operator action:**
+1. Deploy the latest `main` to prod (pulls migrations `202606070200` [fixed] + `202606070300`).
+2. Run migrations as the deploy user: `php /var/www/fleetforge/bin/migrate.php --dry-run` then `php /var/www/fleetforge/bin/migrate.php --apply`.
+3. Verify both ran: `php /var/www/fleetforge/bin/migrate.php --status` should report `pending: 0`.
+4. Verify the columns landed:
+   `SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='invoices' AND COLUMN_NAME IN ('gst_exempt_number_snapshot','pst_exempt_number_snapshot','late_fee_rule_id','late_fee_rule_snapshot')) OR (TABLE_NAME='credit_notes' AND COLUMN_NAME IN ('company_name_snapshot','customer_name_snapshot','billing_address_snapshot','province_snapshot','customer_email_snapshot')));`  — must return **9**.
+5. Re-attempt activation of MTTS-9CMH3U-2026 — should now succeed.
+**Why blocking:** until the migrations run on prod, every lease-activation INSERT into `invoices` references columns that don't exist → SQLSTATE[42S22] 1054 → the whole activation transaction aborts.
+**Note on the prior half-applied state:** prod already has `invoices.province_snapshot` (migration `202606070200` half-applied earlier and died on a bad AFTER-anchor in its credit_notes statement). `202606070200` was fixed to anchor off `credit_note_number`; both migrations are idempotent and were proven via an ordered schema-real test against a prod-shaped scratch DB (35/35) plus adversarial review. The operator does NOT need to clean up the half-applied state — the idempotent guards handle it.
+
+---
+
 ### F1 — `quickbooks.webhook_verifier_token` is EMPTY
 
 **Surfaced by:** S-QBO-13 (2026-05-27, commit 0d7175f) — payment pull webhook
