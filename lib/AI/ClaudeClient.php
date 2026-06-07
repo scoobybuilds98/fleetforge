@@ -798,12 +798,24 @@ class ClaudeClient
     // ────────────────────────────────────────────────────────────
     // log() — append timestamped line to logs/ai.log
     // Never throws — logging failure is swallowed silently.
+    // WHY pre-check: Sentry's global error handler intercepts PHP
+    // warnings (like "Permission denied") BEFORE try/catch can
+    // suppress them, producing spurious Sentry events. By checking
+    // writability first we avoid calling file_put_contents when it
+    // would fail, so no warning fires and no Sentry noise is emitted.
     // ────────────────────────────────────────────────────────────
     private function log(string $level, string $message): void
     {
         try {
             $logPath = $this->projectRoot . '/' . self::LOG_FILE;
-            $line    = sprintf("[%s] [%s] %s\n", date('Y-m-d H:i:s'), $level, $message);
+            // Only attempt the write when the path is actually writable.
+            $canWrite = file_exists($logPath)
+                ? is_writable($logPath)
+                : is_writable(dirname($logPath));
+            if (!$canWrite) {
+                return;
+            }
+            $line = sprintf("[%s] [%s] %s\n", date('Y-m-d H:i:s'), $level, $message);
             file_put_contents($logPath, $line, FILE_APPEND | LOCK_EX);
         } catch (\Throwable) {
             // Logging failure must never crash the application

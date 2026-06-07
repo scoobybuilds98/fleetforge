@@ -769,6 +769,11 @@ function unit_status_badge_class(?string $status): string
 // Alpine x-data scope (page headers are often outside the main
 // Alpine component). The drawer partial listens via @ff-help-drawer.window.
 // ============================================================
+// WHY guard: functions.php is occasionally included via two different
+// resolved paths (absolute vs symlinked) in CLI scripts, triggering a
+// fatal "Cannot redeclare" without this guard. All other functions in
+// this file follow the same pattern (see e(), base_url(), etc. above).
+if (!function_exists('help_button')):
 function help_button(string $moduleSlug): string
 {
     $slug  = preg_replace('/[^a-z0-9_-]/', '', strtolower($moduleSlug));
@@ -784,6 +789,7 @@ function help_button(string $moduleSlug): string
          . 'How this works'
          . '</button>';
 }
+endif; // function_exists('help_button')
 
 /**
  * Invalidate all dashboard cache rows (KPIs + all 12 charts).

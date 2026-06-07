@@ -36,6 +36,10 @@ if ($tokenParam !== '') {
 
     if ($user && $user['password_reset_expiry'] && strtotime($user['password_reset_expiry']) > time()) {
         $tokenValid = true;
+        // WHY: $emailParam feeds the hidden email field below so password managers
+        // can associate the new password with the correct account. The POST handler
+        // re-derives the user via token alone — this is display-only context.
+        $emailParam = $user['email'] ?? '';
     } else {
         $error = 'This reset link has expired or is invalid. Please request a new one.';
     }
