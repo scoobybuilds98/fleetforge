@@ -236,15 +236,11 @@ class AutoEntryBridge
         // late-evening month boundary can't roll the period (the known UTC/local
         // write skew). True deferred-revenue treatment for advance billing is out
         // of scope (D-GL-REVREC-2; only if advance_billing_periods is enabled).
-        $issueDate = (string) $invoice['invoice_date'];
-        $tzName    = (string) (settings_get('company.timezone', APP_TIMEZONE) ?? APP_TIMEZONE);
-        try {
-            $bizTz = new \DateTimeZone($tzName);
-        } catch (\Throwable) {
-            $bizTz = new \DateTimeZone(APP_TIMEZONE);
-        }
-        $todayLocal = (new \DateTimeImmutable('now', $bizTz))->format('Y-m-d');
-        $entryDate  = ($issueDate > $todayLocal) ? $todayLocal : $issueDate;
+        // Single source of truth (D-GL-REVREC-1 + D-QBO-DATING-1): the future-
+        // guarded recognition date lives in AccountingService::recognitionDate so
+        // the GL JE and the QBO TxnDate (InvoicePusher) can't drift. resolvePeriod
+        // then maps it to the FF open period (closed/missing → earliest open).
+        $entryDate  = AccountingService::recognitionDate((string) $invoice['invoice_date']);
         $periodInfo = self::resolvePeriod($entryDate);
 
         return JournalEntryService::create([

@@ -29,6 +29,8 @@ require_once __DIR__ . '/helpers/Fixtures.php';
 
 use FleetForge\Billing\InvoiceGenerator;
 use FleetForge\Accounting\AutoEntryBridge;
+use FleetForge\Accounting\AccountingService;
+use FleetForge\QboPushers\InvoicePusher;
 use FleetForge\Tests\DbState;
 use FleetForge\Tests\Fixtures;
 
@@ -145,6 +147,39 @@ DbState::inTransaction(function () use ($gen, $today) {
     ok(($je['entry_date'] ?? '9999') <= $today, 'T3b future issue guarded — GL entry_date <= today (not 2027)');
     ok(($je['entry_date'] ?? '') !== '2027-03-28', 'T3b GL did NOT post into the future period');
 });
+
+// ── T6: D-QBO-DATING-1 — QBO TxnDate uses the SAME future-guarded source ──
+// AccountingService::recognitionDate is the single source of truth; both the
+// GL JE entry_date and the QBO Invoice TxnDate derive from it.
+eqs('2026-05-31', AccountingService::recognitionDate('2026-05-31'), 'T6 recognitionDate past = issue_date (unchanged)');
+eqs($today, AccountingService::recognitionDate('2027-03-28'), 'T6 recognitionDate future = today (guarded)');
+
+$qboPayload = static function (string $issue): array {
+    $invoice = [
+        'id' => 999991, 'invoice_number' => 'INV-TEST-DATING', 'invoice_date' => $issue,
+        'due_date' => $issue, 'currency' => 'CAD',
+        'tax_gst_amount' => '0.00', 'tax_pst_amount' => '0.00', 'tax_hst_amount' => '0.00',
+        'total_amount' => '100.00',
+    ];
+    $customer = ['id' => 1, 'gps_revenue_presentation' => 'net'];
+    $lines = [['item_type' => 'base_rental', 'description' => 'X', 'amount' => '100.00', 'unit_price' => '100.00', 'quantity' => 1, 'sort_order' => 1]];
+    return InvoicePusher::buildQboPayload($invoice, $customer, $lines, ['qbo_customer_id' => 'TEST']);
+};
+// Current/past invoice → TxnDate unchanged (guard never fires).
+eqs('2026-05-31', $qboPayload('2026-05-31')['TxnDate'] ?? '', 'T6 QBO TxnDate (past) = invoice_date');
+// Future invoice → TxnDate guarded to today, NEVER the future date.
+$futTxn = $qboPayload('2027-03-28')['TxnDate'] ?? '';
+eqs($today, $futTxn, 'T6 QBO TxnDate (future) guarded to today');
+ok($futTxn !== '2027-03-28', 'T6 QBO never pushes a future TxnDate (no future-period revenue)');
+// Single source: QBO TxnDate == the recognition date (== what the GL JE used in T3b).
+eqs(AccountingService::recognitionDate('2027-03-28'), $futTxn, 'T6 QBO TxnDate == GL recognition date (single source, no drift)');
+
+// Static: both paths derive from AccountingService::recognitionDate.
+$bridge  = file_get_contents(dirname(__DIR__) . '/lib/Accounting/AutoEntryBridge.php');
+$pusher  = file_get_contents(dirname(__DIR__) . '/lib/QboPushers/InvoicePusher.php');
+ok(str_contains($bridge, 'AccountingService::recognitionDate'), 'T6 GL JE uses AccountingService::recognitionDate');
+ok(str_contains($pusher, 'AccountingService::recognitionDate'), 'T6 QBO TxnDate uses AccountingService::recognitionDate');
+ok(!str_contains($pusher, "'TxnDate'      => (string) \$invoice['invoice_date']"), 'T6 QBO no longer uses raw invoice_date for TxnDate');
 
 echo "\n----------------------------------------------------------------------\n";
 echo "TOTAL: {$pass} pass / {$fail} fail   (net terms +{$dueDays}d, today {$today})\n";

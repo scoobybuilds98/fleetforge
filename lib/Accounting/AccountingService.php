@@ -97,6 +97,38 @@ class AccountingService
     }
 
     /**
+     * D-GL-REVREC-1 / D-QBO-DATING-1 — the SINGLE SOURCE OF TRUTH for an
+     * invoice's revenue-recognition date. Both the internal GL JE
+     * (AutoEntryBridge::onInvoiceSent → entry_date) and the QBO push
+     * (InvoicePusher → TxnDate) derive their posting date from here so they
+     * can never drift.
+     *
+     * Returns the invoice's issue_date (= billing_period_start) future-guarded:
+     * if the issue_date is AFTER business-local today, the recognition date is
+     * today — revenue is never posted into a FUTURE accounting period (FF or
+     * QBO). "Today" is computed in the BUSINESS timezone
+     * (settings.company.timezone, the cron's source), NOT raw UTC, so a
+     * late-evening month boundary can't roll the period (the known UTC/local
+     * write skew). For normal current-period invoices the guard never fires and
+     * the recognition date IS the issue_date.
+     *
+     * Pure (settings read only); no posting, no FF-period redirect — callers
+     * apply resolvePeriod() themselves where the FF ledger needs it.
+     */
+    public static function recognitionDate(string $issueDate): string
+    {
+        $tzName = (string) (\settings_get('company.timezone', \APP_TIMEZONE) ?? \APP_TIMEZONE);
+        try {
+            $tz = new \DateTimeZone($tzName);
+        } catch (\Throwable) {
+            $tz = new \DateTimeZone(\APP_TIMEZONE);
+        }
+        $today = (new \DateTimeImmutable('now', $tz))->format('Y-m-d');
+
+        return ($issueDate > $today) ? $today : $issueDate;
+    }
+
+    /**
      * Validate that a period is open for posting.
      * Returns error string if posting is blocked, null if OK.
      *

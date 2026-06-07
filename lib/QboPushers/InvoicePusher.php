@@ -375,7 +375,14 @@ class InvoicePusher
         $payload = [
             'Line'         => InvoiceLineBuilder::build($invoice, $customer, $lines),
             'CustomerRef'  => ['value' => (string) ($customerMap['qbo_customer_id'] ?? '')],
-            'TxnDate'      => (string) $invoice['invoice_date'],
+            // D-QBO-DATING-1 (extends D-GL-REVREC-1): a QBO Invoice posts
+            // Dr A/R / Cr Income on TxnDate, so TxnDate IS the QBO recognition
+            // date. Derive it from the SAME future-guarded source as the internal
+            // GL JE (AccountingService::recognitionDate) — never recomputed here —
+            // so FF and QBO recognize in the same period and a future-dated
+            // billing_period_start can never push a future TxnDate. For normal
+            // current-period invoices this equals invoice_date (guard never fires).
+            'TxnDate'      => \FleetForge\Accounting\AccountingService::recognitionDate((string) $invoice['invoice_date']),
             'DocNumber'    => (string) $invoice['invoice_number'],
             'TxnTaxDetail' => InvoiceTaxOverride::buildTxnTaxDetail($invoice),
             'PrivateNote'  => self::buildPrivateNoteJson($invoice),
