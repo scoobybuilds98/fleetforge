@@ -17,6 +17,8 @@ declare(strict_types=1);
  *   T8  CCA page uses cca_badge() for status rendering (function present)
  *   T9  payments page source references initiate_qbo_payment endpoint
  *   T10 payments page contains portalPayBtn() Alpine component
+ *   T11 credit-applications/view.php file exists
+ *   T12 view.php is Trap-7/8 compliant + uses StorageClient for PDF URL
  *
  * Strategy: manufactures a PHP portal session in /var/tmp (Herd's session dir)
  * using a real portal_user + customer from the DB, then GETs both pages with
@@ -35,7 +37,7 @@ require_once FF_ROOT . '/includes/functions.php';
 
 $pass     = 0;
 $failures = [];
-$total    = 10;
+$total    = 12;
 
 function smoke_record(string $label, bool $ok, string $detail = ''): void
 {
@@ -257,6 +259,43 @@ smoke_record(
     'T10 payments/index.php defines portalPayBtn() Alpine component',
     str_contains($pmtSrc, 'function portalPayBtn('),
     'portalPayBtn() function not found in payments/index.php'
+);
+
+// ── T11: view.php exists and is Trap-7/Trap-8 compliant (static analysis) ────
+// We test the source rather than HTTP because the page needs a real CCA row
+// to render (no submitted CCA exists in the hermetic fixture).  HTTP 200
+// would require manufacturing a CCA row too — deferred to integration tests.
+$viewSrcPath = FF_ROOT . '/app/portal/credit-applications/view.php';
+$viewSrc     = is_file($viewSrcPath) ? (string) file_get_contents($viewSrcPath) : '';
+
+smoke_record(
+    'T11 credit-applications/view.php exists',
+    !empty($viewSrc),
+    'app/portal/credit-applications/view.php not found or empty'
+);
+
+// Trap-7: privileged fields never echoed in view.php
+$viewLeaks = [];
+$viewBadFields = ['token_hash', 'signature_path', 'review_notes', 'submitted_ip', 'submitted_user_agent'];
+foreach ($viewBadFields as $lp) {
+    if (preg_match('/echo\s+.*\$app\s*\[\s*[\'"]' . preg_quote($lp, '/') . '[\'"]\s*\]/', $viewSrc)) {
+        $viewLeaks[] = "source-echo:{$lp}";
+    }
+    if (preg_match('/e\s*\(\s*\$app\s*\[\s*[\'"]' . preg_quote($lp, '/') . '[\'"]\s*\]\s*\)/', $viewSrc)) {
+        $viewLeaks[] = "source-e():{$lp}";
+    }
+}
+// Trap-8: customer_id filter must be in the query
+$viewTrap8 = str_contains($viewSrc, 'customer_id = ?') || str_contains($viewSrc, 'customer_id=?');
+// PDF: file_path must not be emitted; must use StorageClient::url
+$viewPdfOk = str_contains($viewSrc, 'StorageClient::url(') && !preg_match('/echo\s+.*file_path/', $viewSrc);
+
+smoke_record(
+    'T12 view.php Trap-7 (no privileged field echoed) + Trap-8 (customer_id filter) + StorageClient PDF URL',
+    empty($viewLeaks) && $viewTrap8 && $viewPdfOk,
+    (!empty($viewLeaks) ? 'Trap-7 leak: ' . implode(', ', $viewLeaks) . '; ' : '') .
+    (!$viewTrap8 ? 'Trap-8 customer_id filter missing; ' : '') .
+    (!$viewPdfOk ? 'StorageClient::url() missing or file_path echoed; ' : '')
 );
 
 // ── Summary ───────────────────────────────────────────────────────────────────

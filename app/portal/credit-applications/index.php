@@ -222,6 +222,18 @@ function cca_badge(string $status, ?string $outcome): array
         </div>
         <?php endif; ?>
 
+        <!-- View Application link — only for submitted/reviewed (rendered_html populated) -->
+        <?php if ($isSubmitted): ?>
+        <div style="margin-top:16px;<?= ($app['print_name_first'] || $app['print_name_last']) ? '' : 'padding-top:16px;border-top:1px solid var(--border-color);' ?>text-align:right;">
+            <a href="<?= e(base_url('portal/credit-applications/view?id=' . (int)$app['id'])) ?>"
+               class="btn btn-secondary btn-sm"
+               style="display:inline-flex;align-items:center;gap:6px;">
+                View Submitted Application
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:14px;height:14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/></svg>
+            </a>
+        </div>
+        <?php endif; ?>
+
     </div><!-- /section-body -->
 </div><!-- /portal-section -->
 
