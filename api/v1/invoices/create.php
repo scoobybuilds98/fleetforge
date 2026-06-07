@@ -85,6 +85,46 @@ if (!in_array($invoiceType, $validInvoiceTypes)) {
     $invoiceType = 'regular';
 }
 
+// ── Overlapping-period guard ───────────────────────────────────
+// WHY: the holistic running-reconciliation engine is blind to overlap and will
+// silently bill only the cumulative base-rental delta when a manual invoice
+// re-covers days an existing non-void invoice already billed (e.g. activation
+// invoice 06-07..06-30 then a manual 06-07..07-07 yielding a confusing $50
+// "31 billing days" line). That is almost always an operator mistake, so block
+// it by default. An operator who genuinely intends a reconciliation can resend
+// with allow_overlap=true.
+//
+// Scope: only invoice types that actually emit a base_rental line. mileage_only
+// carries NO base_rental (immune to the misleading-top-up bug) and overlapping a
+// rental period is the NORMAL case for a mileage reconciliation; 'adjustment'
+// invoices likewise legitimately share a period. Skip the guard for those.
+$allowOverlap   = !empty($body['allow_overlap']);
+$guardThisType  = in_array($invoiceType, ['regular', 'final'], true);
+if (!$allowOverlap && $guardThisType) {
+    $overlap = \FleetForge\Billing\InvoiceGenerator::findOverlappingInvoice(
+        $leaseId, $periodStart, $periodEnd
+    );
+    if ($overlap) {
+        json_error(
+            'PERIOD_OVERLAP',
+            "This period ({$periodStart} to {$periodEnd}) overlaps invoice {$overlap['invoice_number']} "
+            . "({$overlap['billing_period_start']} to {$overlap['billing_period_end']}). "
+            . 'Creating it will only bill the reconciliation difference, not the full period. '
+            . 'Choose a non-overlapping period, or confirm to reconcile intentionally.',
+            409,
+            [
+                'overlap' => [
+                    'invoice_id'           => (int) $overlap['id'],
+                    'invoice_number'       => $overlap['invoice_number'],
+                    'billing_period_start' => $overlap['billing_period_start'],
+                    'billing_period_end'   => $overlap['billing_period_end'],
+                ],
+                'fields' => ['period_start' => "Overlaps invoice {$overlap['invoice_number']}."],
+            ]
+        );
+    }
+}
+
 // ── SAMSARA-3: optional odometer fields ────────────────────────
 // All four are optional — invoices can still be created without any
 // odometer data. The UI populates these when the user fills the

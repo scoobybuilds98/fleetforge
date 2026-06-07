@@ -794,7 +794,29 @@ function FF_InvoiceCreate() {
             if (payload.odometer_fetched_at === null) delete payload.odometer_fetched_at;
 
             try {
-                const r = await FF_Api.post('<?= base_url('api/v1/invoices/create') ?>', payload);
+                const _url = '<?= base_url('api/v1/invoices/create') ?>';
+                let r = await FF_Api.post(_url, payload);
+
+                // PERIOD_OVERLAP: the period overlaps an existing invoice, so the
+                // engine would only bill the reconciliation difference. Offer an
+                // explicit confirm-and-resend instead of dead-ending the operator.
+                if (!r.success && r.error?.code === 'PERIOD_OVERLAP') {
+                    const ov  = r.error.overlap || {};
+                    const ref = ov.invoice_number
+                        ? `${ov.invoice_number} (${ov.billing_period_start} → ${ov.billing_period_end})`
+                        : 'an existing invoice';
+                    const ok = await FF_Confirm.ask({
+                        title:        'Overlapping invoice period',
+                        message:      `This period overlaps ${ref}. Only the reconciliation difference `
+                                    + `will be billed, not the full period. Create it anyway?`,
+                        confirmLabel: 'Reconcile anyway',
+                        dangerMode:   true,
+                    });
+                    if (!ok) { this.submitting = false; return; }
+                    payload.allow_overlap = true;
+                    r = await FF_Api.post(_url, payload);
+                }
+
                 if (r.success) {
                     this.result = r.data;
                     this.showSuccessOverlay = true;

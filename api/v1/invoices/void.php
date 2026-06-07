@@ -86,6 +86,30 @@ db_transaction(function () use ($id, $invoice, $voidReason) {
             "UPDATE leases SET total_invoiced = total_invoiced - ?, outstanding_balance = outstanding_balance - ?, updated_at = NOW() WHERE id = ?",
             [$totalAmount, $decOb, $invoice['lease_id']]
         );
+
+        // Walk the billing-coverage anchor back to the latest STILL-LIVE invoice.
+        // last_billed_date is monotonic on create (GREATEST in InvoiceGenerator),
+        // so without this a voided most-recent invoice would leave the anchor
+        // pointing PAST real coverage. close.php now derives coverage from live
+        // invoices directly (belt), but keep the denormalized anchor honest for
+        // reports and any other reader (suspenders). The just-voided row is
+        // already status='void' above, so MAX excludes it. NULL when no live
+        // invoice remains (lease reverts to never-billed).
+        $cov = db_row(
+            "SELECT i2.billing_period_end AS max_end, i2.id AS inv_id
+               FROM invoices i2
+              WHERE i2.lease_id = ?
+                AND i2.deleted_at IS NULL
+                AND i2.status <> 'void'
+                AND i2.billing_period_end IS NOT NULL
+              ORDER BY i2.billing_period_end DESC, i2.id DESC
+              LIMIT 1",
+            [$invoice['lease_id']]
+        );
+        db_execute(
+            "UPDATE leases SET last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
+            [$cov['max_end'] ?? null, $cov['inv_id'] ?? null, $invoice['lease_id']]
+        );
     }
     if ($invoice['customer_id']) {
         db_execute(

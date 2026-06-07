@@ -953,17 +953,39 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
         }
 
         if (!$skipPartialEnd) {
-            // Per spec §12 [PASS-3:2C]: final period = day after last_billed_date (or
-            // start_date if never billed) through actual_return_date. Pro-rated.
-            $periodStart = $lease['last_billed_date']
-                ? date('Y-m-d', strtotime($lease['last_billed_date'] . ' +1 day'))
+            // Per spec §12 [PASS-3:2C]: final period = day after the last billed day
+            // through actual_return_date, pro-rated.
+            //
+            // Derive the coverage anchor from ACTUAL live-invoice coverage —
+            // MAX(billing_period_end) over the lease's non-void, non-deleted
+            // invoices — rather than the denormalized leases.last_billed_date.
+            // The denormalized anchor is monotonic (GREATEST in InvoiceGenerator)
+            // and is NOT walked back everywhere on void/delete, so it can point
+            // PAST real coverage after the most-recent invoice is voided; trusting
+            // it here would skip this final period and lose revenue. The live MAX
+            // is authoritative. written_off counts as covered (the period was
+            // billed; non-payment is a collections matter, not a re-bill), so we
+            // exclude only 'void' — matching HolisticLeaseEngine::sumAlreadyBilled.
+            $coverageRow = db_row(
+                "SELECT MAX(billing_period_end) AS max_end
+                   FROM invoices
+                  WHERE lease_id = ?
+                    AND deleted_at IS NULL
+                    AND status <> 'void'
+                    AND billing_period_end IS NOT NULL",
+                [$id]
+            );
+            $coverageEnd = $coverageRow['max_end'] ?? ($lease['last_billed_date'] ?: null);
+
+            $periodStart = $coverageEnd
+                ? date('Y-m-d', strtotime($coverageEnd . ' +1 day'))
                 : $lease['start_date'];
 
-            // S-FIX-2 Bug #6: guard against date inversion. If last_billed_date is
-            // greater than or equal to actual_return_date, the previous invoice
-            // already covered (or extended past) the close date and there is no
-            // new period to bill. Skip partial_end generation rather than emit
-            // an invoice with period_end < period_start.
+            // S-FIX-2 Bug #6: guard against date inversion. If billing coverage
+            // already reaches (or extends past) the close date, the previous
+            // invoice covers it and there is no new period to bill. Skip
+            // partial_end generation rather than emit an invoice with
+            // period_end < period_start.
             if ($periodStart > $actualReturnDate) {
                 db_insert('audit_log', [
                     'user_id'      => current_user_id(),
@@ -973,12 +995,12 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
                     'entity_type'  => 'lease',
                     'entity_id'    => $id,
                     'entity_label' => $lease['contract_number'],
-                    'notes'        => "S-FIX-2 Bug #6: lease closed within an already-billed period (last_billed_date {$lease['last_billed_date']} >= actual_return_date {$actualReturnDate}). No partial_end invoice generated.",
+                    'notes'        => "S-FIX-2 Bug #6: lease closed within an already-billed period (billing coverage through {$coverageEnd} >= actual_return_date {$actualReturnDate}). No partial_end invoice generated.",
                     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
                 ]);
                 $advanceActions[] = [
                     'action' => 'partial_end_skipped',
-                    'reason' => "last_billed_date ({$lease['last_billed_date']}) >= actual_return_date ({$actualReturnDate}); previous invoice already covers the closing date.",
+                    'reason' => "billing coverage ({$coverageEnd}) >= actual_return_date ({$actualReturnDate}); previous invoice already covers the closing date.",
                 ];
             } else {
                 $invoiceResult = $generator->createFromLease([

@@ -238,10 +238,46 @@ class InvoiceGenerator
                 // we go through a parallel append so the description and
                 // detail_lines reflect the running reconciliation.
                 if ($engineResult['line_item_type'] !== 'none') {
-                    $holisticDescription = $engineResult['line_item_type'] === 'base_rental'
-                        ? "Base rental: {$periodStart} to {$periodEnd} ({$days} days, lease day "
-                          . max(1, $holisticTotalDays - $days + 1) . "-{$holisticTotalDays})"
-                        : "Base rental reconciliation credit: prior periods overcharged at lower tier (lease day {$holisticTotalDays} cumulative \${$holisticCumulativeCorrect} vs already billed \${$holisticAlreadyBilled})";
+                    // ── Honest line-item presentation ───────────────────
+                    // A positive base_rental delta can be one of two things:
+                    //   (1) a FRESH charge for new days at the end of the
+                    //       cumulative window (sequential billing) — the
+                    //       "lease day X-Y" framing is correct; or
+                    //   (2) a RECONCILIATION TOP-UP where this invoice's
+                    //       period OVERLAPS days an earlier non-void invoice
+                    //       already billed. Here the amount is just the
+                    //       cumulative delta (e.g. $50), and presenting it as
+                    //       "{N} billing days · Monthly rate · 1 period" is
+                    //       misleading — it reads as a whole period billed for
+                    //       a few dollars. Detect the overlap and label the
+                    //       delta honestly instead, suppressing the per-line
+                    //       day/rate subtitle (the cumulative basis lives in
+                    //       the description + detail_lines).
+                    $overlapInv = ($engineResult['line_item_type'] === 'base_rental')
+                        ? self::findOverlappingInvoice($leaseId, $periodStart, $periodEnd)
+                        : null;
+                    $isReconcileTopUp = $overlapInv !== null
+                        && bccomp($holisticAlreadyBilled, '0', 2) > 0;
+
+                    if ($engineResult['line_item_type'] !== 'base_rental') {
+                        // Negative-delta reconciliation credit (unchanged wording).
+                        $holisticDescription =
+                            "Base rental reconciliation credit: prior periods overcharged at lower tier "
+                            . "(lease day {$holisticTotalDays} cumulative \${$holisticCumulativeCorrect} "
+                            . "vs already billed \${$holisticAlreadyBilled})";
+                    } elseif ($isReconcileTopUp) {
+                        // Honest reconciliation top-up wording.
+                        $holisticDescription =
+                            "Base rental reconciliation: cumulative \${$holisticCumulativeCorrect} "
+                            . "for {$holisticTotalDays} days through {$periodEnd}; \${$holisticAlreadyBilled} "
+                            . "already billed (overlaps {$overlapInv['invoice_number']}) "
+                            . "\u{2192} +\${$engineResult['amount']} this invoice";
+                    } else {
+                        // Fresh sequential charge — original framing is correct.
+                        $holisticDescription =
+                            "Base rental: {$periodStart} to {$periodEnd} ({$days} days, lease day "
+                            . max(1, $holisticTotalDays - $days + 1) . "-{$holisticTotalDays})";
+                    }
 
                     $holisticLineItem = [
                         'sort_order'   => $sortOrder++,
@@ -249,13 +285,18 @@ class InvoiceGenerator
                         'description'  => $holisticDescription,
                         'detail_lines' => json_encode($holisticAuditMeta),
                         'quantity'     => '1.0000',
-                        'unit'         => 'period',
+                        // Reconciliation top-ups are an adjustment, not a sold
+                        // "period"; sequential charges keep the period unit.
+                        'unit'         => $isReconcileTopUp ? 'adjustment' : 'period',
                         'unit_price'   => $engineResult['amount'],
                         'amount'       => $engineResult['amount'],
                         'is_credit'    => $engineResult['is_credit'],
                         'taxable'      => 1,
-                        'billing_days' => $days,
-                        'rate_method'  => $lineRateMethod,
+                        // Suppress the misleading "{N} billing days · {tier} rate"
+                        // subtitle on reconciliation top-ups (the days/tier describe
+                        // the cumulative basis, not this $delta line).
+                        'billing_days' => $isReconcileTopUp ? null : $days,
+                        'rate_method'  => $isReconcileTopUp ? null : $lineRateMethod,
                         'period_start' => $periodStart,
                         'period_end'   => $periodEnd,
                     ];
@@ -1248,9 +1289,22 @@ class InvoiceGenerator
             // S-FIX-2 Path B: total_invoiced INCLUDES drafts (lease-internal total).
             // outstanding_balance on the lease is being kept in sync with the customer
             // counter for now — both increment only at draft -> sent transition (send.php).
+            // last_billed_date must track BILLING COVERAGE (period_end), not the
+            // creation date. close.php derives the final period as last_billed_date
+            // + 1 day (api/v1/leases/close.php), so a creation-date anchor caused it
+            // to re-bill or skip days whenever an invoice was created off-cycle.
+            // GREATEST(COALESCE(...)) keeps it MONOTONIC — an out-of-order / earlier
+            // correction invoice can never drag the coverage anchor backwards.
             db_execute(
-                "UPDATE leases SET total_invoiced = total_invoiced + ?, last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
-                [$totalAmount, $invoiceDate, $invoiceId, $leaseId]
+                "UPDATE leases
+                    SET total_invoiced = total_invoiced + ?,
+                        last_billed_invoice_id = CASE
+                            WHEN ? >= COALESCE(last_billed_date, '1900-01-01')
+                            THEN ? ELSE last_billed_invoice_id END,
+                        last_billed_date = GREATEST(COALESCE(last_billed_date, '1900-01-01'), ?),
+                        updated_at = NOW()
+                  WHERE id = ?",
+                [$totalAmount, $periodEnd, $invoiceId, $periodEnd, $leaseId]
             );
 
             // S-FIX-2 Path B: drafts do NOT touch outstanding_balance.
@@ -1733,6 +1787,58 @@ class InvoiceGenerator
     }
 
     /**
+     * Find a non-void invoice whose billing period OVERLAPS [periodStart, periodEnd]
+     * for the same lease.
+     *
+     * WHY: The holistic running-reconciliation engine keys off period_END only and
+     * is BLIND to overlap by design — if a second invoice re-covers days an earlier
+     * invoice already billed, the engine silently absorbs the overlap and bills only
+     * the cumulative delta (e.g. a $50 top-up presented as "31 billing days"). That is
+     * mathematically correct but confusing, and an overlapping MANUAL invoice is almost
+     * always an operator mistake. This helper lets callers detect/guard the overlap and
+     * lets the line-item presenter label a genuine reconciliation top-up honestly.
+     *
+     * Closed-interval overlap test (both ends inclusive, matching D14 inclusive
+     * day counting — so adjacent periods like 06-30 / 07-01 do NOT overlap):
+     *   existing.start <= new.end  AND  existing.end >= new.start
+     *
+     * Status filter intentionally mirrors HolisticLeaseEngine::sumAlreadyBilled —
+     * exclude only 'void' (and soft-deleted). A written_off invoice STILL counts
+     * as billed coverage (its amount remains in already_billed), so it must also
+     * count as overlap; otherwise the presentation gate (isReconcileTopUp) and the
+     * cumulative math would disagree and a written-off overlap would re-introduce
+     * the misleading "fresh full-period" label.
+     *
+     * @param  int      $leaseId
+     * @param  string   $periodStart        Y-m-d
+     * @param  string   $periodEnd          Y-m-d
+     * @param  int|null $excludeInvoiceId   Ignore this invoice id (e.g. self on edit)
+     * @return array|null  The first overlapping invoice row, or null when none.
+     */
+    public static function findOverlappingInvoice(
+        int $leaseId,
+        string $periodStart,
+        string $periodEnd,
+        ?int $excludeInvoiceId = null
+    ): ?array {
+        return db_row(
+            "SELECT id, invoice_number, status, billing_period_start, billing_period_end
+               FROM invoices
+              WHERE lease_id = ?
+                AND deleted_at IS NULL
+                AND status <> 'void'
+                AND billing_period_start IS NOT NULL
+                AND billing_period_end   IS NOT NULL
+                AND billing_period_start <= ?
+                AND billing_period_end   >= ?
+                AND (? IS NULL OR id <> ?)
+              ORDER BY billing_period_start ASC, id ASC
+              LIMIT 1",
+            [$leaseId, $periodEnd, $periodStart, $excludeInvoiceId, $excludeInvoiceId]
+        );
+    }
+
+    /**
      * Generate a gap-free sequential invoice number.
      *
      * Uses atomic counter in settings table with FOR UPDATE lock (D15, D20).
@@ -1756,6 +1862,33 @@ class InvoiceGenerator
         );
 
         $next = $row ? (int)$row['value'] : 1;
+
+        // ── Drift guard ────────────────────────────────────────────
+        // Reconcile the counter against the highest invoice_number that
+        // ACTUALLY exists for this prefix+year. The counter can fall behind
+        // reality when invoices are inserted out-of-band — data imports,
+        // migrations, or seed scripts that mint via the separate
+        // generate_id() ('inv.next_number.*') counter rather than this one.
+        // A behind counter would mint a duplicate invoice_number, hit the
+        // UNIQUE(invoice_number) constraint, and abort the whole enclosing
+        // transaction — e.g. lease activation surfacing as "failed to
+        // activate lease". Taking max(counter, existingMax + 1) keeps
+        // numbering gap-free in the normal case (where they're equal) and
+        // self-heals when drift exists. The FOR UPDATE above still
+        // serializes concurrent minters. SUBSTRING_INDEX(...,'-',-1) pulls
+        // the trailing numeric run regardless of dashes in the prefix; we
+        // count ALL rows (incl. soft-deleted) because the UNIQUE index does.
+        $maxRow = db_row(
+            "SELECT MAX(CAST(SUBSTRING_INDEX(invoice_number, '-', -1) AS UNSIGNED)) AS max_suffix
+               FROM invoices
+              WHERE invoice_number LIKE ?",
+            ["{$prefix}-{$year}-%"]
+        );
+        $existingNext = (int)($maxRow['max_suffix'] ?? 0) + 1;
+        if ($existingNext > $next) {
+            $next = $existingNext;
+        }
+
         $invoiceNumber = sprintf("%s-%s-%05d", $prefix, $year, $next);
 
         // Increment atomically
