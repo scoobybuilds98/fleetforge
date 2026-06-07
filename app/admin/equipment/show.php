@@ -2105,7 +2105,11 @@ function FF_UnitDetail() {
             } catch(e) { /* page already rendered server-side */ }
             this.loading = false;
 
-            this.$watch('activeTab', (tab) => {
+            // ── Tab persistence (FF_TabHash) ─────────────────────────────────
+            // Shared helper: trigger lazy-loads for a tab on first visit.
+            // Called both from $watch (user click) and directly after hash-
+            // restore so data loads even when the tab is set without a click.
+            const _onTabEnter = (tab) => {
                 if (tab === 'status_log'    && !this.statusLog.length)       this.loadStatusLog();
                 if (tab === 'leases'        && !this.leasesLoaded)           this.loadLeaseHistory();
                 if (tab === 'damage_claims' && !this.damageClaimsLoaded)     this.loadDamageClaims();
@@ -2114,18 +2118,40 @@ function FF_UnitDetail() {
                 if (tab === 'inspections'   && !this.inspectionsLoaded)      this.loadInspections();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
                 // SAMSARA-1: open Samsara tab — load picker if unmapped,
-                // mount the live map if mapped. Either way, no fetch is
-                // needed because the unit row already carries every
-                // samsara_* column from the page-load API call.
+                // mount the live map if mapped.
                 if (tab === 'tracking') this.openSamsaraTab();
                 // PAYOFF-1: only call the API when an asset is actually
                 // linked — otherwise the PHP empty state handles it.
                 if (tab === 'payoff' && this.linkedAssetId && !this.payoffLoaded) this.loadPayoff();
-                // When re-entering the tab, re-render the chart because
-                // ApexCharts won't repaint while the element is display:none.
+                // When re-entering the payoff tab, re-render the chart
+                // because ApexCharts won't repaint while display:none.
                 if (tab === 'payoff' && this.payoff) {
                     this.$nextTick(() => this.renderPayoffChart());
                 }
+            };
+
+            // Valid tab keys — must match every x-show="activeTab === '...'" above.
+            const _tabs = ['overview','payoff','compliance','leases','damage_claims',
+                           'mileage_logs','status_log','maintenance','inspections',
+                           'documents','tracking','activity'];
+
+            // Restore tab from URL hash BEFORE registering $watch so the
+            // initial assignment does not trigger the watcher.
+            const _initTab = FF_TabHash.init(_tabs, 'overview');
+            this.activeTab = _initTab;
+            FF_TabHash.write(_initTab);
+            _onTabEnter(_initTab);  // lazy-load data for the restored tab
+
+            // Save scroll on unload; restore position after Alpine renders.
+            FF_TabHash.watchUnload(() => this.activeTab);
+            this.$nextTick(() => FF_TabHash.restoreScroll(_initTab));
+
+            // Track previous tab so onSwitch can save its scroll.
+            let _prevTab = _initTab;
+            this.$watch('activeTab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+                _onTabEnter(tab);
             });
         },
 

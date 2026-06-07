@@ -770,6 +770,18 @@ function FF_JournalEntries() {
 
         // -- Init ---------------------------------------------------------
         async init() {
+            // Restore tab from hash — must happen before loadEntries() so the
+            // correct tab's entries are fetched on initial page load.
+            const _tabs = ['pending','draft','posted','reversed','all'];
+            const _initTab = FF_TabHash.init(_tabs, 'pending');
+            this.activeTab = _initTab;
+            FF_TabHash.write(_initTab);
+            FF_TabHash.watchUnload(() => this.activeTab);
+            let _prevTab = _initTab;
+            this.$watch('activeTab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+            });
             this.loadEntries();
             this.loadAccounts();
         },

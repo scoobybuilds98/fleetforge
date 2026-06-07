@@ -544,16 +544,27 @@ function FF_Invoices() {
 
             // When a status param is passed alongside lease/customer context,
             // switch to the 'all' tab with that status so the filter applies.
+            // WHY: URL params take precedence over hash so deep-links from
+            // other pages still land in the right filtered view.
             if (urlStatus) {
                 this.activeTab      = 'all';
                 this.filters.status = urlStatus;
+            } else {
+                // Restore last-visited tab from URL hash (no URL params present).
+                const _h = FF_TabHash.init(['outstanding','paid','all'], 'outstanding');
+                if (_h !== this.activeTab) this.activeTab = _h;
+                FF_TabHash.write(this.activeTab);
+                FF_TabHash.watchUnload(() => this.activeTab);
+                this.$nextTick(() => FF_TabHash.restoreScroll(this.activeTab));
             }
 
             await this.load();
         },
 
         setTab(tab) {
+            FF_TabHash.save(this.activeTab); // persist scroll before leaving tab
             this.activeTab      = tab;
+            FF_TabHash.write(tab);           // keep hash in sync
             this.filters.status = '';
             this.filters.aging  = '';   // TILES-1: clear aging drill when switching tabs
             // Also reset the tile active-ring state held in invoicesKpis()

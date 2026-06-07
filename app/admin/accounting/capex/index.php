@@ -315,7 +315,7 @@ require_once FF_ROOT . '/includes/header.php';
                         @click="startRequest()">Start Work</button>
                 <button class="btn btn-success btn-sm"
                         x-show="detailReq && (detailReq.status === 'approved' || detailReq.status === 'in_progress')"
-                        @click="openComplete()">Complete + Create Asset…</button>
+                        @click="openComplete()">Complete + Create Asset</button>
                 <?php endif; ?>
                 <button class="btn btn-secondary btn-sm" @click="detailOpen = false">Close</button>
             </div>

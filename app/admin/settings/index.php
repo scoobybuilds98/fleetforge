@@ -544,9 +544,23 @@ if (!can($tabPermMap[$defaultTab], 'view')) {
         if (can($perm, 'view')) { $defaultTab = $tab; break; }
     }
 }
+
+// WHY: tabs the current user may actually view — passed to FF_TabHash so a
+// stale/forged URL hash can never restore a tab the user has no access to.
+$permittedTabs = [];
+foreach ($tabPermMap as $tab => $perm) {
+    if (can($perm, 'view')) { $permittedTabs[] = $tab; }
+}
 ?>
 
-<div x-data="{ activeTab: '<?= e($defaultTab) ?>' }">
+<div x-data="{ activeTab: '<?= e($defaultTab) ?>' }"
+     x-init="
+        const _t = FF_TabHash.initWithQuery(<?= htmlspecialchars(json_encode($permittedTabs), ENT_QUOTES) ?>, activeTab);
+        activeTab = _t;
+        FF_TabHash.watchUnload(() => activeTab);
+        let _p = _t;
+        $watch('activeTab', (v) => { FF_TabHash.onSwitch(_p, v); _p = v; });
+     ">
 
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
     <div>

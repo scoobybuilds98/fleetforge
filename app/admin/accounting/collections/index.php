@@ -424,6 +424,17 @@ function collectionsPage() {
         },
 
         init() {
+            // Restore tab from hash — must happen BEFORE $watch registration.
+            const _tabs = ['notes','promises','dunning','writeoffs'];
+            const _initTab = FF_TabHash.init(_tabs, 'notes');
+            this.tab = _initTab;
+            FF_TabHash.write(_initTab);
+            FF_TabHash.watchUnload(() => this.tab);
+            let _prevTab = _initTab;
+            this.$watch('tab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+            });
             const urlCust = new URLSearchParams(window.location.search).get('customer_id');
             if (urlCust) { this.customerId = urlCust; this.loadAll(); }
         },

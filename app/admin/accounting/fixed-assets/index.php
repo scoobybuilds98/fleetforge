@@ -656,10 +656,10 @@ require_once FF_ROOT . '/includes/header.php';
                         @click="openEdit()">Edit</button>
                 <button class="btn btn-warning btn-sm"
                         x-show="detailAsset && detailAsset.status === 'active'"
-                        @click="openDispose()">Dispose…</button>
+                        @click="openDispose()">Dispose Asset</button>
                 <button class="btn btn-warning btn-sm"
                         x-show="detailAsset && detailAsset.status === 'active'"
-                        @click="openImpair()">Impair…</button>
+                        @click="openImpair()">Impair Asset</button>
                 <?php endif; ?>
                 <button class="btn btn-secondary btn-sm" @click="detailOpen = false">Close</button>
             </div>

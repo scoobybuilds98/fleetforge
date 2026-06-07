@@ -219,6 +219,14 @@ for ($m = $cursor; $m >= $mStart; $m = $m->modify('-1 month')) {
     $monthlyPnl[] = ['ym' => $ym, 'rev' => $rev, 'mnt' => $mnt, 'dmg' => $dmg, 'net' => $net];
 }
 
+// WHY: The table only renders months that have activity. Pre-filter here so the
+// paginator below has an accurate row count and stable zero-based indices.
+$monthlyPnlRows = array_values(array_filter($monthlyPnl, static function (array $row): bool {
+    return bccomp($row['rev'], '0', 2) !== 0
+        || bccomp($row['mnt'], '0', 2) !== 0
+        || bccomp($row['dmg'], '0', 2) !== 0;
+}));
+
 // ── Maintenance work orders ───────────────────────────────────────────────────
 $workOrders = db_select(
     "SELECT wo.id, wo.work_order_number, wo.work_type, wo.description,
@@ -242,7 +250,7 @@ $damageClaims = db_select(
     "SELECT dc.id, dc.claim_number, dc.severity, dc.status,
             dc.estimated_repair_cost, dc.actual_repair_cost,
             dc.customer_liable_amount, dc.insurance_claim_amount,
-            dc.created_at, dc.resolved_at,
+            dc.created_at, dc.updated_at,
             c.company_name AS customer_name,
             l.contract_number AS lease_number
        FROM damage_claims dc
@@ -553,7 +561,7 @@ function pa_lease_badge(string $s): string {
      SECTION 2 — Cost Structure (server-rendered)
      ══════════════════════════════════════════════════════════════════════════ -->
 <h2 style="font-size:1rem;font-weight:700;margin:0 0 12px;">Cost Structure</h2>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:24px;">
+<div class="cost-structure-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:24px;">
 
     <!-- Acquisition cost -->
     <div class="card" style="margin-bottom:0;">
@@ -683,31 +691,31 @@ function pa_lease_badge(string $s): string {
         </div>
     </div>
 
-</div><!-- /grid cost structure -->
-
-<!-- ══════════════════════════════════════════════════════════════════════════
-     SECTION 3 — Earnings & Expenses Summary
-     ══════════════════════════════════════════════════════════════════════════ -->
-<h2 style="font-size:1rem;font-weight:700;margin:0 0 12px;">Earnings &amp; Expenses Summary</h2>
-<div class="card" style="margin-bottom:24px;">
-    <div class="card-body" style="padding:0;">
-        <table class="spec-table" style="max-width:500px;">
-            <tr><td class="spec-label">Gross Revenue</td><td class="font-mono text-right text-success" style="font-weight:600;"><?= e(pa_money($payoffData['totalRevenue'])) ?></td></tr>
-            <tr><td class="spec-label">− Maintenance Costs</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalMaint'])) ?></td></tr>
-            <tr><td class="spec-label">− Damage Claims</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalDamage'])) ?></td></tr>
-            <tr><td class="spec-label">− Financing Paid</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalFinancingPaid'])) ?></td></tr>
-            <tr><td class="spec-label">− Fixed Costs Paid (<?= $payoffData['monthsSince'] ?> mo @ <?= e(pa_money($payoffData['monthlyFixed'])) ?>)</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalFixedPaid'])) ?></td></tr>
-            <tr style="font-weight:700;background:var(--bg-secondary);border-top:2px solid var(--border-color);">
-                <td class="spec-label">= Net Revenue to Date</td>
-                <td class="font-mono text-right" style="color:<?= bccomp($payoffData['netRevenue'], '0', 2) >= 0 ? 'var(--color-success)' : 'var(--color-danger)' ?>;"><?= e(pa_money($payoffData['netRevenue'])) ?></td>
-            </tr>
-            <tr style="font-weight:700;">
-                <td class="spec-label">Still to Recover</td>
-                <td class="font-mono text-right" style="color:var(--color-warning);"><?= e(pa_money($payoffData['stillToRecover'])) ?></td>
-            </tr>
-        </table>
+    <!-- Earnings & Expenses Summary (sits next to Depreciation in the grid) -->
+    <div class="card earnings-summary" style="margin-bottom:0;">
+        <div class="card-header" style="padding:12px 16px;">
+            <div class="card-title">Earnings &amp; Expenses Summary</div>
+        </div>
+        <div class="card-body" style="padding:0;">
+            <table class="spec-table">
+                <tr><td class="spec-label">Gross Revenue</td><td class="font-mono text-right text-success" style="font-weight:600;"><?= e(pa_money($payoffData['totalRevenue'])) ?></td></tr>
+                <tr><td class="spec-label">− Maintenance Costs</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalMaint'])) ?></td></tr>
+                <tr><td class="spec-label">− Damage Claims</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalDamage'])) ?></td></tr>
+                <tr><td class="spec-label">− Financing Paid</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalFinancingPaid'])) ?></td></tr>
+                <tr><td class="spec-label">− Fixed Costs Paid (<?= $payoffData['monthsSince'] ?> mo @ <?= e(pa_money($payoffData['monthlyFixed'])) ?>)</td><td class="font-mono text-right text-danger">−<?= e(pa_money($payoffData['totalFixedPaid'])) ?></td></tr>
+                <tr style="font-weight:700;background:var(--bg-secondary);border-top:2px solid var(--border-color);">
+                    <td class="spec-label">= Net Revenue to Date</td>
+                    <td class="font-mono text-right" style="color:<?= bccomp($payoffData['netRevenue'], '0', 2) >= 0 ? 'var(--color-success)' : 'var(--color-danger)' ?>;"><?= e(pa_money($payoffData['netRevenue'])) ?></td>
+                </tr>
+                <tr style="font-weight:700;">
+                    <td class="spec-label">Still to Recover</td>
+                    <td class="font-mono text-right" style="color:var(--color-warning);"><?= e(pa_money($payoffData['stillToRecover'])) ?></td>
+                </tr>
+            </table>
+        </div>
     </div>
-</div>
+
+</div><!-- /grid cost structure -->
 
 <!-- ══════════════════════════════════════════════════════════════════════════
      SECTION 4 — Revenue by Lease
@@ -719,7 +727,7 @@ function pa_lease_badge(string $s): string {
 <?php if (empty($revenueByLease)): ?>
 <div class="card" style="margin-bottom:24px;padding:32px;text-align:center;color:var(--text-muted);font-size:0.875rem;">No leases on record for this unit.</div>
 <?php else: ?>
-<div class="card" style="margin-bottom:24px;overflow:hidden;">
+<div class="card" style="margin-bottom:24px;overflow:hidden;" x-data="ffPager(<?= count($revenueByLease) ?>)">
     <div class="table-responsive">
         <table class="admin-table">
             <thead>
@@ -735,10 +743,11 @@ function pa_lease_badge(string $s): string {
             <tbody>
                 <?php
                 $leaseRevTotal = '0.00';
+                $lrIdx = 0;
                 foreach ($revenueByLease as $lr):
                     $leaseRevTotal = bcadd($leaseRevTotal, (string)$lr['revenue'], 2);
                 ?>
-                <tr>
+                <tr x-show="onPage(<?= $lrIdx ?>)"<?= $lrIdx >= 10 ? ' style="display:none;"' : '' ?>>
                     <td><a href="<?= e(base_url('leases/show?id=' . (int)$lr['id'])) ?>" class="table-link font-mono"><?= e($lr['contract_number']) ?></a></td>
                     <td><?= e($lr['customer_name']) ?></td>
                     <td class="font-mono text-sm"><?= e($lr['start_date'] ? format_date($lr['start_date']) : '—') ?></td>
@@ -746,7 +755,7 @@ function pa_lease_badge(string $s): string {
                     <td><span class="badge <?= e(pa_lease_badge($lr['status'])) ?>"><?= e(ucfirst($lr['status'])) ?></span></td>
                     <td class="text-right font-mono<?= bccomp((string)$lr['revenue'], '0', 2) > 0 ? ' text-success' : '' ?>" style="font-weight:600;"><?= e(pa_money((string)$lr['revenue'])) ?></td>
                 </tr>
-                <?php endforeach; ?>
+                <?php $lrIdx++; endforeach; ?>
             </tbody>
             <tfoot>
                 <tr style="font-weight:700;background:var(--bg-secondary);">
@@ -755,6 +764,18 @@ function pa_lease_badge(string $s): string {
                 </tr>
             </tfoot>
         </table>
+    </div>
+    <?php /* Pagination — 10 rows/page, shown only when there's more than one page */ ?>
+    <div class="table-pager" x-show="pages > 1" x-cloak
+         style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--border-color);flex-wrap:wrap;">
+        <span style="font-size:0.8125rem;color:var(--text-secondary);">
+            Showing <span x-text="rangeStart"></span>–<span x-text="rangeEnd"></span> of <span x-text="total"></span>
+        </span>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <button class="btn btn-secondary btn-sm" @click="prev()" :disabled="page === 1">Prev</button>
+            <span style="font-size:0.8125rem;color:var(--text-secondary);">Page <span x-text="page"></span> / <span x-text="pages"></span></span>
+            <button class="btn btn-secondary btn-sm" @click="next()" :disabled="page === pages">Next</button>
+        </div>
     </div>
 </div>
 <?php endif; ?>
@@ -766,7 +787,7 @@ function pa_lease_badge(string $s): string {
     <h2 style="font-size:1rem;font-weight:700;margin:0;">Monthly P&amp;L</h2>
     <span style="font-size:0.8125rem;color:var(--text-secondary);">Last 24 months · revenue minus maintenance &amp; damage (excl. fixed costs)</span>
 </div>
-<div class="card" style="margin-bottom:24px;overflow:hidden;">
+<div class="card" style="margin-bottom:24px;overflow:hidden;"<?= !empty($monthlyPnlRows) ? ' x-data="ffPager(' . count($monthlyPnlRows) . ')"' : '' ?>>
     <div class="table-responsive">
         <table class="admin-table">
             <thead>
@@ -780,29 +801,38 @@ function pa_lease_badge(string $s): string {
             </thead>
             <tbody>
                 <?php
-                $anyData = false;
-                foreach ($monthlyPnl as $row):
-                    $hasData = bccomp($row['rev'], '0', 2) !== 0
-                        || bccomp($row['mnt'], '0', 2) !== 0
-                        || bccomp($row['dmg'], '0', 2) !== 0;
-                    if (!$hasData) continue;
-                    $anyData = true;
+                $pnlIdx = 0;
+                foreach ($monthlyPnlRows as $row):
                     $netPos = bccomp($row['net'], '0', 2) >= 0;
                 ?>
-                <tr>
+                <tr x-show="onPage(<?= $pnlIdx ?>)"<?= $pnlIdx >= 10 ? ' style="display:none;"' : '' ?>>
                     <td class="font-mono"><?= e($row['ym']) ?></td>
                     <td class="text-right font-mono<?= bccomp($row['rev'], '0', 2) > 0 ? ' text-success' : '' ?>"><?= e(pa_money($row['rev'])) ?></td>
                     <td class="text-right font-mono<?= bccomp($row['mnt'], '0', 2) > 0 ? ' text-danger' : '' ?>"><?= bccomp($row['mnt'], '0', 2) > 0 ? '−' . e(pa_money($row['mnt'])) : e(pa_money($row['mnt'])) ?></td>
                     <td class="text-right font-mono<?= bccomp($row['dmg'], '0', 2) > 0 ? ' text-danger' : '' ?>"><?= bccomp($row['dmg'], '0', 2) > 0 ? '−' . e(pa_money($row['dmg'])) : e(pa_money($row['dmg'])) ?></td>
                     <td class="text-right font-mono" style="font-weight:600;color:<?= $netPos ? 'var(--color-success)' : 'var(--color-danger)' ?>;"><?= e(pa_money($row['net'])) ?></td>
                 </tr>
-                <?php endforeach; ?>
-                <?php if (!$anyData): ?>
+                <?php $pnlIdx++; endforeach; ?>
+                <?php if (empty($monthlyPnlRows)): ?>
                 <tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.875rem;">No revenue or cost data recorded in the last 24 months.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
     </div>
+    <?php if (!empty($monthlyPnlRows)): ?>
+    <?php /* Pagination — 10 rows/page, shown only when there's more than one page */ ?>
+    <div class="table-pager" x-show="pages > 1" x-cloak
+         style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--border-color);flex-wrap:wrap;">
+        <span style="font-size:0.8125rem;color:var(--text-secondary);">
+            Showing <span x-text="rangeStart"></span>–<span x-text="rangeEnd"></span> of <span x-text="total"></span>
+        </span>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <button class="btn btn-secondary btn-sm" @click="prev()" :disabled="page === 1">Prev</button>
+            <span style="font-size:0.8125rem;color:var(--text-secondary);">Page <span x-text="page"></span> / <span x-text="pages"></span></span>
+            <button class="btn btn-secondary btn-sm" @click="next()" :disabled="page === pages">Next</button>
+        </div>
+    </div>
+    <?php endif; ?>
 </div>
 
 <?php endif; /* /if asset */?>
@@ -1057,5 +1087,30 @@ function renderPayoffCharts(p) {
 }
 </script>
 <?php endif; ?>
+
+<script>
+// ── ffPager — client-side table paginator ──────────────────────────────────
+// WHY: The Revenue-by-Lease and Monthly P&L tables render every row server-side.
+// This Alpine component shows `perPage` rows at a time (default 10) and reveals
+// the rest via Prev/Next — lighter DOM on screen and a tidier page. Rows are
+// shown/hidden by zero-based index through onPage(i); totals in <tfoot> stay
+// visible across pages.
+function ffPager(total, perPage = 10) {
+    return {
+        page: 1,
+        perPage: perPage,
+        total: total,
+        get pages() { return Math.max(1, Math.ceil(this.total / this.perPage)); },
+        onPage(i) {
+            const start = (this.page - 1) * this.perPage;
+            return i >= start && i < start + this.perPage;
+        },
+        get rangeStart() { return this.total === 0 ? 0 : (this.page - 1) * this.perPage + 1; },
+        get rangeEnd() { return Math.min(this.page * this.perPage, this.total); },
+        next() { if (this.page < this.pages) this.page++; },
+        prev() { if (this.page > 1) this.page--; },
+    };
+}
+</script>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

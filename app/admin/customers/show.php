@@ -1759,15 +1759,33 @@ function FF_CustomerProfile() {
 
         init() {
             this.loadTabCounts();
-            this.$watch('activeTab', (tab) => {
-                if (tab === 'leases'        && !this.leasesLoaded)         this.loadLeases();
-                if (tab === 'invoices'      && !this.invoicesLoaded)       this.loadInvoices();
-                if (tab === 'damage_claims' && !this.damageClaimsLoaded)   this.loadDamageClaims();
-                if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)    this.loadMileageLogs();
-                if (tab === 'rates'         && !this.rateOverridesLoaded)  this.loadRateOverrides();
+
+            // ── Tab persistence (FF_TabHash) ─────────────────────────────────
+            const _onTabEnter = (tab) => {
+                if (tab === 'leases'        && !this.leasesLoaded)           this.loadLeases();
+                if (tab === 'invoices'      && !this.invoicesLoaded)         this.loadInvoices();
+                if (tab === 'damage_claims' && !this.damageClaimsLoaded)     this.loadDamageClaims();
+                if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)      this.loadMileageLogs();
+                if (tab === 'rates'         && !this.rateOverridesLoaded)    this.loadRateOverrides();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
                 if (tab === 'credit_applications' && !this.creditAppsLoaded) this.loadCreditApps();
-                if (tab === 'emails'        && !this.emailsLoaded)            this.loadEmails();
+                if (tab === 'emails'        && !this.emailsLoaded)           this.loadEmails();
+            };
+            const _tabs = ['overview','notes','leases','invoices','damage_claims',
+                           'mileage_logs','rates','documents','credit_applications',
+                           'emails','activity'];
+            const _initTab = FF_TabHash.init(_tabs, 'overview');
+            this.activeTab = _initTab;
+            FF_TabHash.write(_initTab);
+            _onTabEnter(_initTab);
+            FF_TabHash.watchUnload(() => this.activeTab);
+            this.$nextTick(() => FF_TabHash.restoreScroll(_initTab));
+            let _prevTab = _initTab;
+
+            this.$watch('activeTab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+                _onTabEnter(tab);
             });
             // EMAIL-1: refresh email history when an email is sent globally
             window.addEventListener('ff-email-sent', (ev) => {

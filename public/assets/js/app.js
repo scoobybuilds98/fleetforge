@@ -4560,13 +4560,17 @@ window.openEmailCompose = function (opts) {
 
 
 // ============================================================
-// RESPONSIVE-1 — ApexCharts global responsive patch
+// RESPONSIVE-1 — ApexCharts global responsive + theme patch
 //
 // Monkey-patches the ApexCharts constructor so every chart instance
-// automatically receives a `responsive` breakpoint that trims height,
-// moves legends to the bottom, and disables dataLabels on mobile.
-// Keeps page-level chart code untouched while guaranteeing mobile
-// behaviour across all dashboards.
+// automatically receives:
+//   1. a `responsive` breakpoint that trims height, moves legends to the
+//      bottom, and disables dataLabels on mobile; and
+//   2. a `theme.mode` + `tooltip.theme` matching the active app theme, so
+//      hover tooltips are legible in dark mode (ApexCharts otherwise
+//      defaults to a light tooltip — white text on white = unreadable in
+//      night mode). Fixes it across EVERY chart in one place.
+// Keeps page-level chart code untouched.
 // ============================================================
 (function patchApexChartsForResponsive() {
     if (typeof window === 'undefined' || typeof window.ApexCharts !== 'function') return;
@@ -4581,6 +4585,12 @@ window.openEmailCompose = function (opts) {
         },
     }];
 
+    // WHY: 'dark' is the default theme; only an explicit 'light' attribute
+    // flips us to light mode. Read at construction time.
+    function _isDarkTheme() {
+        return (document.documentElement.getAttribute('data-theme') || 'dark') !== 'light';
+    }
+
     const Original = window.ApexCharts;
     function Patched(el, opts) {
         try {
@@ -4589,6 +4599,33 @@ window.openEmailCompose = function (opts) {
             const hasMobile = existing.some((r) => r && r.breakpoint && r.breakpoint <= 768);
             if (!hasMobile) {
                 opts.responsive = existing.concat(DEFAULT_RESPONSIVE);
+            }
+
+            // ── Tooltip legibility ──────────────────────────────────
+            // ApexCharts defaults tooltips to a LIGHT theme (light bg +
+            // pale text) → unreadable in night mode. Match the tooltip to
+            // the app theme unless the page explicitly set its own, so we
+            // never clobber intentional config. Scoped to the tooltip only
+            // (bars/axes already render correctly in dark mode).
+            const dark = _isDarkTheme();
+            opts.tooltip = opts.tooltip || {};
+            if (typeof opts.tooltip.theme === 'undefined') {
+                opts.tooltip.theme = dark ? 'dark' : 'light';
+            }
+
+            // ── Data-label legibility ───────────────────────────────
+            // ApexCharts bar data labels default to white text with no
+            // shadow — readable inside a colored bar, but invisible when a
+            // short bar pushes the label onto a light background (light
+            // mode). Add a subtle dark halo so labels stay legible on ANY
+            // background, in both themes. Only injected when the chart did
+            // not set its own dropShadow, and never changes label colors or
+            // whether labels are enabled — so it can't alter other charts.
+            opts.dataLabels = opts.dataLabels || {};
+            if (typeof opts.dataLabels.dropShadow === 'undefined') {
+                opts.dataLabels.dropShadow = {
+                    enabled: true, top: 0, left: 0, blur: 2, color: '#000', opacity: 0.5,
+                };
             }
         } catch (_e) { /* noop — never break chart rendering */ }
         return new Original(el, opts);
@@ -4600,6 +4637,137 @@ window.openEmailCompose = function (opts) {
     window.ApexCharts = Patched;
 })();
 
+
+// ============================================================
+// 09b. FF_TabHash — URL-hash tab persistence + scroll restoration
+// ============================================================
+// WHY: Alpine's x-show tab components default to 'overview' on every
+// page load.  This module persists the active tab in the URL hash
+// (e.g. equipment/show?id=1#maintenance) and saves per-tab scroll
+// positions in sessionStorage so a refresh brings the user back to
+// exactly where they were.
+//
+// Usage pattern (in each Alpine component's init() / loadXxx()):
+//
+//   const TABS = ['overview', 'leases', ...];
+//   const _init = FF_TabHash.init(TABS, 'overview');  // read hash
+//   this.activeTab = _init;               // set BEFORE $watch so watcher
+//   FF_TabHash.write(_init);              //   doesn't fire for this change
+//   _onTabEnter(_init);                   // trigger lazy-load
+//   FF_TabHash.watchUnload(() => this.activeTab);
+//   this.$nextTick(() => FF_TabHash.restoreScroll(_init));
+//   let _prev = _init;
+//   this.$watch('activeTab', (tab) => {
+//       FF_TabHash.onSwitch(_prev, tab);  // save scroll, write hash, scroll top
+//       _prev = tab;
+//       _onTabEnter(tab);
+//   });
+//
+// For index pages that use a setTab(tab) method:
+//   setTab(tab) {
+//       FF_TabHash.save(this.activeTab);  // save before changing
+//       this.activeTab = tab;
+//       FF_TabHash.write(tab);
+//       // ... clear filters, this.load() etc.
+//   }
+window.FF_TabHash = (function () {
+    'use strict';
+
+    function _key(tab) {
+        // Path+search scopes keys so different pages never collide.
+        return 'ffscroll:' + location.pathname + location.search + ':' + tab;
+    }
+
+    return {
+        /**
+         * Read the URL hash and return the matching tab, or defaultTab.
+         * Call at the TOP of init(), BEFORE registering $watch, so the
+         * initial assignment does not trigger the watcher.
+         */
+        init: function (validTabs, defaultTab) {
+            var h = location.hash.slice(1);
+            return (h && validTabs.indexOf(h) !== -1) ? h : defaultTab;
+        },
+
+        /**
+         * Like init(), but for pages that ALSO accept a server-side `?tab=`
+         * deep-link (e.g. Settings, linked to as settings?tab=integrations).
+         *
+         * - If `?tab=` is present, it is authoritative: we promote it into the
+         *   URL hash and STRIP the query param, so every subsequent refresh is
+         *   driven by the hash (and reflects the user's later tab clicks).
+         * - Otherwise we restore from the hash, falling back to serverDefault.
+         *
+         * `serverDefault` is the PHP-validated initial tab (already
+         * permission-checked), used as the value when `?tab=` is present.
+         */
+        initWithQuery: function (validTabs, serverDefault) {
+            var params = new URLSearchParams(location.search);
+            if (params.has('tab')) {
+                params.delete('tab');
+                var qs = params.toString();
+                history.replaceState(
+                    null, '',
+                    location.pathname + (qs ? '?' + qs : '') + '#' + serverDefault
+                );
+                return serverDefault;
+            }
+            var t = this.init(validTabs, serverDefault);
+            this.write(t);
+            return t;
+        },
+
+        /** Write tab into the URL hash — no navigation, no scroll jump. */
+        write: function (tab) {
+            if (tab) history.replaceState(null, '', '#' + tab);
+        },
+
+        /** Persist scrollY for `tab` to sessionStorage. */
+        save: function (tab) {
+            if (!tab) return;
+            try { sessionStorage.setItem(_key(tab), String(Math.round(window.scrollY))); } catch (_) {}
+        },
+
+        /**
+         * Restore saved scroll for `tab`.
+         * Call from $nextTick so x-show content is painted before scrollTo.
+         * Uses double-RAF to survive CSS transition completion timing.
+         */
+        restoreScroll: function (tab) {
+            var y = parseInt(sessionStorage.getItem(_key(tab)) || '0', 10);
+            requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                    window.scrollTo({ top: y, behavior: 'instant' });
+                });
+            });
+        },
+
+        /**
+         * Called inside $watch on a user-initiated tab switch.
+         * Saves old tab's scroll, writes new hash, scrolls page to top
+         * so the user sees the start of the incoming tab's content.
+         */
+        onSwitch: function (prevTab, nextTab) {
+            this.save(prevTab);
+            this.write(nextTab);
+            requestAnimationFrame(function () {
+                window.scrollTo({ top: 0, behavior: 'instant' });
+            });
+        },
+
+        /**
+         * Register a pagehide listener that saves scrollY before leaving.
+         * @param {Function} getTab  Returns the current tab name string.
+         */
+        watchUnload: function (getTab) {
+            window.addEventListener('pagehide', function () {
+                var tab = getTab();
+                if (!tab) return;
+                try { sessionStorage.setItem(_key(tab), String(Math.round(window.scrollY))); } catch (_) {}
+            });
+        },
+    };
+}());
 
 // ============================================================
 // 10. DOM-ready boot

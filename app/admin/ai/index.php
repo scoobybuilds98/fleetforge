@@ -713,11 +713,24 @@ function FF_AiChat() {
         // ���═══════════════════════════════════
 
         async init() {
+            // Restore tab from hash — must happen BEFORE $watch registration so
+            // the watcher doesn't fire for the initial restore.
+            const _aiTabs = ['chat','reports','documents','alerts','usage'];
+            const _initTab = FF_TabHash.init(_aiTabs, 'chat');
+            this.activeTab = _initTab;
+            FF_TabHash.write(_initTab);
+            FF_TabHash.watchUnload(() => this.activeTab);
+            let _prevTab = _initTab;
+
             // WHY: Hide the page header on chat tab to give Claude/ChatGPT-style
             // full-viewport space; show it on every other tab where the title +
             // settings link are useful. The header lives OUTSIDE x-data, so we
             // toggle it imperatively and re-toggle whenever activeTab changes.
-            this.$watch('activeTab', tab => this._togglePageHeader(tab));
+            this.$watch('activeTab', tab => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+                this._togglePageHeader(tab);
+            });
             this._togglePageHeader(this.activeTab);
 
             await this.loadSessions();

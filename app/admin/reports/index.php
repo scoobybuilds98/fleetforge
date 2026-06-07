@@ -72,7 +72,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         <button class="tab-btn" :class="{'is-active':mainTab==='customer'}"   @click="switchMainTab('customer')"><svg width="14" height="14"><use href="#icon-user-group"/></svg> Customers</button>
         <button class="tab-btn" :class="{'is-active':mainTab==='compliance'}" @click="switchMainTab('compliance')"><svg width="14" height="14"><use href="#icon-shield-check"/></svg> Compliance</button>
         <?php if (can('ai', 'view')): ?>
-        <button class="tab-btn" :class="{'is-active':mainTab==='ai'}" @click="mainTab='ai'" style="margin-left:auto;">
+        <button class="tab-btn" :class="{'is-active':mainTab==='ai'}" @click="switchMainTab('ai')" style="margin-left:auto;">
             <span style="font-size:0.875rem;">&#10024;</span> AI Generate
         </button>
         <?php endif; ?>
@@ -529,7 +529,26 @@ function FF_Reports() {
             compliance: {loading:false, viewLoading:false, kpis:null, view:'timeline',    viewData:{}, chartsRendered:{}},
         },
 
-        init() { this.loadTab('financial'); },
+        init() {
+            // Restore two-level tab from hash (format: #mainTab:view, e.g. #financial:period).
+            const _mainTabs = ['financial','fleet','customer','compliance','ai'];
+            const h = location.hash.slice(1);
+            const _parts = h ? h.split(':') : [];
+            const _initMain = (_mainTabs.indexOf(_parts[0]) !== -1) ? _parts[0] : 'financial';
+            const _initView  = _parts[1] || null;
+            this.mainTab = _initMain;
+            // Restore sub-view if valid (tabs object only covers non-AI tabs)
+            if (_initView && this.tabs[_initMain] && this.tabs[_initMain].view !== _initView) {
+                this.tabs[_initMain].view = _initView;
+            }
+            const _hashKey = () => {
+                const m = this.mainTab;
+                return m === 'ai' ? 'ai' : m + ':' + (this.tabs[m] ? this.tabs[m].view : '');
+            };
+            FF_TabHash.write(_hashKey());
+            FF_TabHash.watchUnload(_hashKey);
+            if (_initMain !== 'ai') this.loadTab(_initMain);
+        },
 
         isLoading() { return this.tabs[this.mainTab]?.loading || this.tabs[this.mainTab]?.viewLoading; },
 
@@ -554,6 +573,9 @@ function FF_Reports() {
 
         switchMainTab(tab) {
             this.mainTab = tab;
+            // Write two-level hash; AI tab has no sub-view
+            FF_TabHash.write(tab === 'ai' ? 'ai' : tab + ':' + this.tabs[tab].view);
+            if (tab === 'ai') return; // AI tab renders statically — no data load needed
             if (!this.tabs[tab].kpis) this.loadTab(tab);
             else if (!this.tabs[tab].viewData[this.tabs[tab].view]) this.loadView(tab, this.tabs[tab].view);
             else this.$nextTick(() => this.initChart(tab, this.tabs[tab].view, this.tabs[tab].viewData[this.tabs[tab].view]));
@@ -562,6 +584,8 @@ function FF_Reports() {
         switchView(tab, view) {
             this.tabs[tab].view = view;
             this.tabs[tab].chartsRendered = {};
+            // Update hash with current mainTab + new sub-view
+            FF_TabHash.write(this.mainTab + ':' + view);
             if (this.tabs[tab].viewData[view]) this.$nextTick(() => this.initChart(tab, view, this.tabs[tab].viewData[view]));
             else this.loadView(tab, view);
         },

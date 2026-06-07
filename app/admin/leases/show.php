@@ -1817,6 +1817,33 @@ function FF_LeaseDetail() {
 
         async init() {
             await this.loadLease();
+
+            // ── Tab persistence (FF_TabHash) ─────────────────────────────────
+            // Tab clicks use @click="tab='x'; loadX()" — those continue to
+            // handle lazy-loading. We only need the manual trigger here for
+            // the hash-restored initial tab (bypasses the click path).
+            const _tabs = ['overview','status_log','amendments','invoices',
+                           'damage_claims','mileage_logs','inspections','documents','activity'];
+            const _initTab = FF_TabHash.init(_tabs, 'overview');
+            this.tab = _initTab;
+            FF_TabHash.write(_initTab);
+            // Trigger lazy-loads for hash-restored tab (mirrors @click handlers)
+            if (_initTab === 'amendments'    && !this.amendmentsLoaded)  this.loadAmendments();
+            if (_initTab === 'invoices'      )                            this.loadInvoices();
+            if (_initTab === 'damage_claims' )                            this.loadDamageClaims();
+            if (_initTab === 'mileage_logs'  )                            this.loadMileageLogs();
+            if (_initTab === 'inspections'   )                            this.loadInspections();
+            if (_initTab === 'documents'     )                            this.loadDocuments();
+
+            FF_TabHash.watchUnload(() => this.tab);
+            this.$nextTick(() => FF_TabHash.restoreScroll(_initTab));
+
+            // $watch handles hash write + scroll only; lazy-loading is in @click.
+            let _prevTab = _initTab;
+            this.$watch('tab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+            });
         },
 
         // ── Amendments (AMEND-1) ─────────────────────────────────

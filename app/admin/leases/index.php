@@ -437,6 +437,13 @@ function FF_Leases() {
         bulkWorking: false,
 
         async init() {
+            // Restore last-visited tab from URL hash.
+            const _h = FF_TabHash.init(['open','closed','all'], 'open');
+            if (_h !== this.activeTab) this.activeTab = _h;
+            FF_TabHash.write(this.activeTab);
+            FF_TabHash.watchUnload(() => this.activeTab);
+            this.$nextTick(() => FF_TabHash.restoreScroll(this.activeTab));
+
             this.load();
             this.loadKpis();
             // Clear selection whenever pagination changes
@@ -469,7 +476,9 @@ function FF_Leases() {
         },
 
         setTab(tab) {
+            FF_TabHash.save(this.activeTab); // persist scroll before leaving
             this.activeTab      = tab;
+            FF_TabHash.write(tab);           // keep hash in sync
             this.filters.status = '';
             this.currentPage    = 1;
             this.load();

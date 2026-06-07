@@ -718,6 +718,19 @@ function profilePage() {
             };
         },
 
+        init() {
+            const _tabs = ['profile','display','login_history'];
+            const _initTab = FF_TabHash.init(_tabs, 'profile');
+            this.tab = _initTab;
+            FF_TabHash.write(_initTab);
+            FF_TabHash.watchUnload(() => this.tab);
+            let _prevTab = _initTab;
+            this.$watch('tab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+            });
+        },
+
         async saveProfile() {
             this.editError = null;
 

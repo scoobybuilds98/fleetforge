@@ -631,8 +631,18 @@ function FF_AcctSettings() {
         },
 
         init() {
-            // WHY: Component is fully initialized from server-rendered data.
-            // No API call needed on load.
+            // WHY: Component is fully initialized from server-rendered data —
+            // no API call needed on load. Just restore tab state from the URL hash.
+            const _tabs = ['general','gl_mapping','revenue_mapping','depreciation','tax_filing'];
+            const _initTab = FF_TabHash.init(_tabs, 'general');
+            this.activeTab = _initTab;
+            FF_TabHash.write(_initTab);
+            FF_TabHash.watchUnload(() => this.activeTab);
+            let _prevTab = _initTab;
+            this.$watch('activeTab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+            });
         },
 
         // ── Filter accounts by type for dropdowns ──────────────

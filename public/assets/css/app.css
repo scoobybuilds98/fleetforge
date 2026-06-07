@@ -2062,6 +2062,39 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .spec-table .spec-value { color: var(--text-primary); font-weight: 500; }
 .spec-table td.text-right { text-align: right; }
 
+/* ── Cost Structure cards (equipment payoff) ───────────────
+   The global 160px fixed label column starved the value cell on
+   these narrow auto-fit cards, so values containing a space
+   ("$1,380.00 /mo", "May 1, 2026") wrapped — or, once forced to a
+   single line, overflowed the card edge and got clipped. Fix:
+   the grid (set inline) uses a larger 320px minimum so cards break
+   to fewer columns before getting too tight; here we trim the label
+   column + padding + font so the label and value comfortably share
+   one readable line. */
+.cost-structure-grid .spec-table td {
+    padding: 11px 14px;
+    font-size: 0.8125rem;
+}
+.cost-structure-grid .spec-table .spec-label {
+    width: auto;          /* hug content instead of a fixed 160px */
+    padding-right: 10px;
+}
+.cost-structure-grid .spec-table td.text-right {
+    white-space: nowrap;  /* keep "$1,380.00 /mo" and dates on one line */
+    padding-left: 10px;
+}
+/* Very small screens: relax nowrap so a single full-width column can
+   never clip a value off the card edge. */
+@media (max-width: 359px) {
+    .cost-structure-grid .spec-table td.text-right { white-space: normal; }
+}
+/* Earnings & Expenses card: its labels are long descriptive phrases
+   ("− Fixed Costs Paid (22 mo @ $627.00)") that would clip under the
+   nowrap label rule, so let them wrap; the value stays on one line. */
+.cost-structure-grid .earnings-summary .spec-table .spec-label {
+    white-space: normal;
+}
+
 /* ── Section header inside a card or modal ──────────────────
    Slim divider with an uppercase eyebrow label. Used to break
    up long forms (Create/Edit modals) into visual groups. */
@@ -3230,6 +3263,13 @@ textarea.form-input {
     padding: 14px 20px;
     border-top: 1px solid var(--border-color);
     background: var(--bg-surface-2);
+    flex-shrink: 0;
+    flex-wrap: wrap;   /* prevent buttons from overflowing on narrow viewports */
+}
+/* Ensure every modal-footer button shows its full label — no truncation. */
+.modal-footer .btn {
+    white-space: nowrap;
+    min-width: max-content;
     flex-shrink: 0;
 }
 
@@ -6428,6 +6468,17 @@ dl.detail-grid dd {
         border-radius: 16px 16px 0 0;
         max-height: 90vh;
         overflow-y: auto;
+    }
+    /* On mobile (bottom-sheet), stack modal footer buttons full-width
+       in reverse order so the primary action stays at the top. */
+    .modal-footer {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+    .modal-footer .btn {
+        width: 100%;
+        justify-content: center;
+        min-width: 0;
     }
 
     /* Tabs — horizontal scroll, hide scrollbar */

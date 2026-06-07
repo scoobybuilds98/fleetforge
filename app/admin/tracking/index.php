@@ -496,9 +496,25 @@ function FF_FleetTracking() {
             this.loadDismissed();
             await this.refresh();
 
-            // Mount the map after first paint so the #tracking-map
-            // div is in the DOM with non-zero dimensions.
-            this.$nextTick(() => this.initMap());
+            // Restore tab from hash — must happen before map init so we know
+            // which tab is active before conditionally mounting the map.
+            const _tabs = ['map','list','unlinked'];
+            const _initTab = FF_TabHash.init(_tabs, 'map');
+            this.activeTab = _initTab;
+            FF_TabHash.write(_initTab);
+            FF_TabHash.watchUnload(() => this.activeTab);
+            let _prevTab = _initTab;
+            this.$watch('activeTab', (tab) => {
+                FF_TabHash.onSwitch(_prevTab, tab);
+                _prevTab = tab;
+            });
+
+            // WHY: Only mount map immediately when on the map tab — if restoring
+            // to list/unlinked, skip init now (clicking the map tab later calls
+            // initMap() via its @click handler, which is idempotent).
+            if (_initTab === 'map') {
+                this.$nextTick(() => this.initMap());
+            }
 
             this.$watch('autoRefresh', (val) => {
                 if (val) this.startAutoRefresh();
