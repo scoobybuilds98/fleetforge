@@ -7,14 +7,16 @@ declare(strict_types=1);
  * S-PORTAL-PAYMENTS-CCA smoke test — verifies the two new customer portal
  * sections render without fatal errors:
  *
- *   T1  portal/payments         — payment history list (HTTP 200, no fatal)
- *   T2  portal/credit-applications — CCA status page (HTTP 200, no fatal)
+ *   T1  portal/payments              — HTTP 200, no fatal
+ *   T2  portal/credit-applications   — HTTP 200, no fatal
  *   T3  sidebar contains "Payments" nav link
  *   T4  sidebar contains "Credit Application" nav link
  *   T5  payments query is Trap-8-safe (customer_id filter present)
  *   T6  CCA query is Trap-8-safe (customer_id filter present)
  *   T7  No token_hash / signature_path / review_notes leaked in CCA page source
  *   T8  CCA page uses cca_badge() for status rendering (function present)
+ *   T9  payments page source references initiate_qbo_payment endpoint
+ *   T10 payments page contains portalPayBtn() Alpine component
  *
  * Strategy: manufactures a PHP portal session in /var/tmp (Herd's session dir)
  * using a real portal_user + customer from the DB, then GETs both pages with
@@ -33,7 +35,7 @@ require_once FF_ROOT . '/includes/functions.php';
 
 $pass     = 0;
 $failures = [];
-$total    = 8;
+$total    = 10;
 
 function smoke_record(string $label, bool $ok, string $detail = ''): void
 {
@@ -241,6 +243,20 @@ smoke_record(
     'T8 CCA page defines cca_badge() status helper',
     str_contains($ccaSrc, 'function cca_badge('),
     'cca_badge() not found in credit-applications/index.php'
+);
+
+// ── T9: payments page references the QBO payment initiation endpoint ─────────
+smoke_record(
+    'T9 payments/index.php references initiate_qbo_payment endpoint',
+    str_contains($pmtSrc, 'initiate_qbo_payment'),
+    'initiate_qbo_payment endpoint reference missing from payments/index.php'
+);
+
+// ── T10: payments page defines the portalPayBtn() Alpine component ────────────
+smoke_record(
+    'T10 payments/index.php defines portalPayBtn() Alpine component',
+    str_contains($pmtSrc, 'function portalPayBtn('),
+    'portalPayBtn() function not found in payments/index.php'
 );
 
 // ── Summary ───────────────────────────────────────────────────────────────────
