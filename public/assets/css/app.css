@@ -1162,6 +1162,24 @@ kbd {
     text-overflow: ellipsis;
 }
 
+/* S-TOPBAR-MODULE-LINK — the page title links back to its module's dashboard.
+   Inherits the title look; reveals it's clickable on hover/focus. */
+.topbar-title-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    border-radius: 4px;
+}
+.topbar-title-link:hover,
+.topbar-title-link:focus-visible {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.topbar-title-link:focus-visible {
+    outline: 2px solid var(--color-primary, #2563eb);
+    outline-offset: 2px;
+}
+
 /* S-DESIGN-LOGO-TOPBAR — company name as breadcrumb root in topbar.
    Sized so it reads as the dominant brand element on every page;
    page title (.topbar-title) sits to the right as a secondary label

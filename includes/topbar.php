@@ -90,6 +90,33 @@ if (can('payments', 'create')) {
 }
 
 $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
+
+// S-TOPBAR-MODULE-LINK: make the topbar title a link to the current module's
+// dashboard. Resolve the active module from the request path's first segment
+// and match it against the navigation config (config/navigation.php), whose
+// `url` is each module's main page (e.g. /invoices, /accounting/dashboard).
+$_moduleHref  = null;
+$_moduleLabel = null;
+$_navPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
+$_navRel  = ltrim((string) substr($_navPath, strlen(FF_BASE_PATH)), '/'); // e.g. 'invoices/create'
+$_navSeg  = $_navRel === '' ? '' : (explode('/', $_navRel)[0] ?? '');      // 'invoices'
+if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
+    foreach ((array) (require FF_ROOT . '/config/navigation.php') as $_ni) {
+        if (!empty($_ni['separator']) || empty($_ni['url'])) {
+            continue;
+        }
+        if ((explode('/', ltrim((string) $_ni['url'], '/'))[0] ?? '') === $_navSeg) {
+            // Only link when the user may view the module (defensive — if they're
+            // on the page they already can; null module = always visible).
+            $_mod = $_ni['module'] ?? null;
+            if ($_mod === null || can($_mod, 'view')) {
+                $_moduleHref  = base_url(ltrim((string) $_ni['url'], '/'));
+                $_moduleLabel = $_ni['label'] ?? null;
+            }
+            break;
+        }
+    }
+}
 ?>
 
 <header class="topbar" role="banner">
@@ -123,7 +150,14 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
         </a>
 
         <?php if ($_topbarTitle !== ''): ?>
-            <h1 class="topbar-title"><?= e($_topbarTitle) ?></h1>
+            <h1 class="topbar-title">
+                <?php if ($_moduleHref !== null): ?>
+                    <a href="<?= e($_moduleHref) ?>" class="topbar-title-link"
+                       title="Open <?= e($_moduleLabel ?? 'module') ?> dashboard"><?= e($_topbarTitle) ?></a>
+                <?php else: ?>
+                    <?= e($_topbarTitle) ?>
+                <?php endif; ?>
+            </h1>
         <?php endif; ?>
 
     </div>
