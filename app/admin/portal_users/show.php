@@ -250,7 +250,11 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-body" style="padding:16px;">
                 <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 12px;">
                     Generates a new password reset link valid for 24 hours.
+                    <?php if (APP_ENV === 'production'): ?>
+                    The link is emailed to the portal user.
+                    <?php else: ?>
                     In dev, the link is written to <code style="font-size:0.7rem;">logs/mail.log</code>.
+                    <?php endif; ?>
                 </p>
                 <div x-show="msg" x-text="msg" x-cloak
                      :style="err ? 'color:var(--color-danger);' : 'color:var(--color-success);'"
@@ -264,7 +268,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 const r = await FF_Api.post(FF_Api.url('/api/v1/portal_users/reset_password.php'), { id: <?= (int) $puId ?> });
                                 if (r.success) {
                                     this.err = false;
-                                    this.msg = 'Reset link generated. Check logs/mail.log.';
+                                    this.msg = r.data?.message || 'Reset link generated.';
                                 } else {
                                     this.err = true;
                                     this.msg = r.error?.message ?? 'Failed.';

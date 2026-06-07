@@ -28,6 +28,9 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
+use FleetForge\Notifications\Mailer;
+use FleetForge\Email\EmailService;
+
 require_method('POST');
 require_auth_api();
 require_permission('settings', 'edit');
@@ -63,16 +66,29 @@ $resetUrl = base_url('portal/auth/reset_password')
     . '?token=' . $plainToken
     . '&email=' . urlencode($target['email']);
 
-$logDir = FF_ROOT . '/logs';
-if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
-@file_put_contents($logDir . '/mail.log', sprintf(
-    "[%s] ADMIN-INITIATED PORTAL PASSWORD RESET: To: %s | Name: %s | Company: %s | URL: %s\n",
-    date('Y-m-d H:i:s'),
-    $target['email'],
-    $target['name'],
-    $target['company_name'],
-    $resetUrl
-), FILE_APPEND);
+// S-FIX-PORTAL-INVITE-EMAIL: send via the shared Mailer (SES in production,
+// logs/mail.log in dev). Previously a mail.log-only STUB that never reached SES.
+$subject  = 'Reset your ' . (string) $target['company_name'] . ' portal password';
+$bodyHtml = EmailService::renderEmailHtml(
+    '<h2 style="margin:0 0 16px;">Reset your portal password</h2>'
+    . '<p>Hi ' . e($target['name']) . ',</p>'
+    . '<p>A password reset was requested for your ' . e((string) $target['company_name'])
+    . ' portal account. Click the button below to set a new password.</p>'
+    . '<p style="margin:24px 0;"><a href="' . e($resetUrl) . '" '
+    . 'style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;'
+    . 'padding:12px 24px;border-radius:6px;font-weight:600;">Set a new password</a></p>'
+    . '<p style="color:#64748b;font-size:13px;">This link expires in 24 hours. If you didn\'t '
+    . 'request this, you can ignore this email — your current password stays valid. If the button '
+    . 'doesn\'t work, paste this URL into your browser:<br>'
+    . '<span style="word-break:break-all;">' . e($resetUrl) . '</span></p>'
+);
+$emailSent = Mailer::send((string) $target['email'], (string) $target['name'], $subject, $bodyHtml);
+
+$resetMsg = $emailSent
+    ? (APP_ENV === 'production'
+        ? 'Reset link emailed to ' . $target['email'] . '.'
+        : 'Reset link written to logs/mail.log (dev).')
+    : 'Reset link generated, but the email failed to send — see logs.';
 
 db_insert('audit_log', [
     'user_id'      => current_user_id(),
@@ -84,11 +100,14 @@ db_insert('audit_log', [
     'entity_label' => $target['name'] . ' (' . $target['company_name'] . ')',
     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
-    'notes'        => "Admin initiated password reset for portal user {$target['email']}",
+    'notes'        => "Admin initiated password reset for portal user {$target['email']}"
+                      . ' (reset email ' . ($emailSent ? 'sent' : 'FAILED') . ')',
 ]);
 
 json_success([
     'id'         => $id,
     'email'      => $target['email'],
     'expires_at' => $expiry,
+    'email_sent' => $emailSent,
+    'message'    => $resetMsg,
 ]);

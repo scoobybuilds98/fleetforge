@@ -41,6 +41,9 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
+use FleetForge\Notifications\Mailer;
+use FleetForge\Email\EmailService;
+
 require_method('POST');
 require_auth_api();
 require_permission('settings', 'edit');
@@ -110,19 +113,35 @@ $newId = db_insert('portal_users', [
     'invite_sent_at'        => date('Y-m-d H:i:s'),
 ]);
 
-// Dev-mode mail-log entry. Production wires a real mailer here.
+// S-FIX-PORTAL-INVITE-EMAIL: send the invite via the shared Mailer. Mailer
+// routes to AWS SES in production and to logs/mail.log in dev automatically
+// (isLogMode() === false when APP_ENV==='production'). This path was previously
+// a mail.log-only STUB ("Production wires a real mailer here") that never
+// reached SES, so prod invites silently produced no email.
 $resetUrl = base_url('portal/auth/reset_password')
     . '?token=' . $plainToken . '&email=' . urlencode($email);
-$logDir = FF_ROOT . '/logs';
-if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
-@file_put_contents($logDir . '/mail.log', sprintf(
-    "[%s] ADMIN PORTAL INVITE: To: %s | Name: %s | Customer: %s | Set Password URL: %s\n",
-    date('Y-m-d H:i:s'),
-    $email,
-    $name,
-    $customer['company_name'],
-    $resetUrl
-), FILE_APPEND);
+$company  = (string) $customer['company_name'];
+$subject  = 'You\'re invited to the ' . $company . ' portal';
+$bodyHtml = EmailService::renderEmailHtml(
+    '<h2 style="margin:0 0 16px;">Welcome to the ' . e($company) . ' portal</h2>'
+    . '<p>Hi ' . e($name) . ',</p>'
+    . '<p>An account has been created for you to access the ' . e($company)
+    . ' customer portal. Click the button below to set your password and sign in.</p>'
+    . '<p style="margin:24px 0;"><a href="' . e($resetUrl) . '" '
+    . 'style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;'
+    . 'padding:12px 24px;border-radius:6px;font-weight:600;">Set your password</a></p>'
+    . '<p style="color:#64748b;font-size:13px;">This link expires in 7 days. If the button '
+    . 'doesn\'t work, paste this URL into your browser:<br>'
+    . '<span style="word-break:break-all;">' . e($resetUrl) . '</span></p>'
+);
+$emailSent = Mailer::send($email, $name, $subject, $bodyHtml);
+
+// Environment-accurate status (don't claim "sent" when dev only logged).
+$inviteMsg = $emailSent
+    ? (APP_ENV === 'production'
+        ? 'Portal user created. Invite emailed to ' . $email . '.'
+        : 'Portal user created. Invite written to logs/mail.log (dev).')
+    : 'Portal user created, but the invite email failed to send — see logs.';
 
 db_insert('audit_log', [
     'user_id'      => current_user_id(),
@@ -134,7 +153,8 @@ db_insert('audit_log', [
     'entity_label' => $name . ' (' . $customer['company_name'] . ')',
     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
-    'notes'        => "Created portal user {$email} for customer #{$customerId}",
+    'notes'        => "Created portal user {$email} for customer #{$customerId}"
+                      . ' (invite email ' . ($emailSent ? 'sent' : 'FAILED') . ')',
 ]);
 
 json_success([
@@ -144,4 +164,6 @@ json_success([
     'email'       => $email,
     'status'      => 'invited',
     'is_primary'  => $isPrimary,
+    'email_sent'  => $emailSent,
+    'message'     => $inviteMsg,
 ], 201);

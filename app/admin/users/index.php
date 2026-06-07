@@ -1134,7 +1134,7 @@ function portalCreate() {
                 );
                 if (r.success) {
                     this.err = false;
-                    this.msg = 'Portal user created. Invite sent (check logs/mail.log in dev).';
+                    this.msg = r.data?.message || 'Portal user created.';
                     this.form = { customer_id: '', name: '', email: '' };
                     // Reload the Alpine portal list scope by dispatching event.
                     // Caller-scoped reload is cleaner than poking into a sibling scope.
