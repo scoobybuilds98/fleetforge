@@ -320,9 +320,10 @@ require_once FF_ROOT . '/includes/header.php';
                             </th>
                             <th scope="col">Customer</th>
                             <th scope="col">Lease / Unit</th>
-                            <th scope="col">Period</th>
-                            <th scope="col" class="th-sortable" @click="setSort('invoice_date')">
-                                Date
+                            <th scope="col" title="This invoice's own billing period (the calendar-month segment it bills)">Billing Period</th>
+                            <th scope="col" class="th-sortable" @click="setSort('invoice_date')"
+                                title="Date the invoice was issued — not the billing period">
+                                Issued
                                 <span x-show="filters.sort === 'invoice_date'"
                                       x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                             </th>

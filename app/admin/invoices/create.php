@@ -149,6 +149,51 @@ require_once FF_ROOT . '/includes/header.php';
              x-text="warn.text"></div>
     </template>
 
+    <!-- R2 §3.6: in-order calendar-month picker (holistic leases). Lists the
+         lease's billable months with status; only the next-due (first unbilled)
+         month is selectable (gate 4.5); selecting it sets the period to that one
+         calendar-month segment and generates only that month. -->
+    <template x-if="monthsLoaded && billableMonths.length">
+        <div style="margin-bottom:20px;">
+            <label class="form-label">Billing Month</label>
+            <div class="text-secondary text-sm" style="margin-bottom:8px;">
+                Bill one calendar month at a time, in order.
+                <template x-if="monthsFullyBilled">
+                    <span class="text-success">This lease is fully billed through <span x-text="monthsExtent"></span> — nothing new to generate.</span>
+                </template>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <template x-for="m in billableMonths" :key="m.index">
+                    <div :class="{ 'ff-month-row--selected': selectedMonthIndex === m.index }"
+                         style="display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border); border-radius:8px;"
+                         :style="monthSelectable(m) ? 'cursor:pointer;' : 'opacity:0.75;'"
+                         @click="monthSelectable(m) && pickMonth(m.index)">
+                        <input type="radio" name="ff_billing_month" class="ff-radio"
+                               :checked="selectedMonthIndex === m.index"
+                               :disabled="!monthSelectable(m)"
+                               @change="pickMonth(m.index)" @click.stop>
+                        <div style="flex:1;">
+                            <div class="font-medium" x-text="m.label"></div>
+                            <div class="text-secondary text-sm">
+                                <span x-text="fmtDate(m.period_start)"></span> →
+                                <span x-text="fmtDate(m.period_end)"></span>
+                                <span x-text="'· ' + m.days + ' days'"></span>
+                                <span x-show="m.is_final"> · final</span>
+                            </div>
+                        </div>
+                        <span class="badge badge-no-dot" :class="monthStatusClass(m)" x-text="monthStatusLabel(m)"></span>
+                        <a x-show="m.invoice_id"
+                           :href="'<?= base_url('invoices/show') ?>?id=' + m.invoice_id"
+                           class="link text-sm" @click.stop>view</a>
+                    </div>
+                </template>
+            </div>
+            <div class="text-secondary text-sm" style="margin-top:6px;">
+                Earlier months must be billed first. The period fields below reflect the selected month and stay editable.
+            </div>
+        </div>
+    </template>
+
     <!-- Period Dates -->
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
         <div>
@@ -361,9 +406,18 @@ function FF_InvoiceCreate() {
             odometer_at_period_end_km:   '',
             odometer_source:             null,   // 'gps' | 'manual' | null
             odometer_fetched_at:         null,   // ISO datetime when GPS fetched end value
+            single_segment:              false,  // R2 §3.6: picker bills ONE calendar-month segment
         },
         selectedLease:      null,
         days:               0,
+
+        // R2 §3.6 in-order month picker state (api/v1/leases/billable_months.php)
+        billableMonths:     [],       // [{index,label,period_start,period_end,days,billing_type,is_final,status,invoice_number,invoice_id}]
+        monthsLoaded:       false,    // true once billable_months has been fetched for the selected lease
+        monthsNextDue:      null,     // index of the first unbilled month (the only generatable one — gate 4.5)
+        monthsFullyBilled:  false,    // every billable month already has a non-void invoice
+        monthsExtent:       '',       // the known extent the months run through
+        selectedMonthIndex: null,     // which month the operator has selected (drives the form period)
         submitting:         false,
         showSuccessOverlay: false,
         error:              null,
@@ -573,6 +627,73 @@ function FF_InvoiceCreate() {
             if (!startsFirst)            return 'partial_start';
             return 'partial_end';
         },
+
+        // ── R2 §3.6 in-order month picker ────────────────────────────
+        // Fetch the lease's billable calendar months + per-month status from
+        // api/v1/leases/billable_months.php and default-select the next-due
+        // (first unbilled) month. Holistic leases only — the period-independent
+        // legacy path keeps the plain period inputs.
+        async _fetchBillableMonths(leaseId) {
+            this.monthsLoaded       = false;
+            this.billableMonths     = [];
+            this.monthsNextDue      = null;
+            this.monthsFullyBilled  = false;
+            this.selectedMonthIndex = null;
+            this.form.single_segment = false;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/leases/billable_months') ?>?id=' + leaseId);
+                const d = r.data || {};
+                if (d.engine_version !== 'holistic') return; // legacy path: no picker
+                this.billableMonths    = Array.isArray(d.months) ? d.months : [];
+                this.monthsNextDue     = (d.next_due_index === undefined ? null : d.next_due_index);
+                this.monthsFullyBilled = !!d.fully_billed;
+                this.monthsExtent      = d.extent || '';
+                this.monthsLoaded      = this.billableMonths.length > 0;
+                // Default = next due month (in-order). When fully billed, leave
+                // the fully-billed banner from _autoFillPeriodDatesFromCtx as-is.
+                if (this.monthsNextDue !== null && this.billableMonths[this.monthsNextDue]) {
+                    this.pickMonth(this.monthsNextDue);
+                }
+            } catch (e) {
+                // Non-fatal — the operator can still type a period manually.
+                this.monthsLoaded = false;
+            }
+        },
+        // Gate 4.5 (in-order only): only the next-due month is selectable; billed
+        // and void months are informational, and a later month can't be picked
+        // before the earlier ones are billed. Selecting sets the form to that
+        // single calendar-month segment and flags single-segment generation.
+        pickMonth(idx) {
+            const m = this.billableMonths[idx];
+            if (!m || m.status !== 'unbilled' || idx !== this.monthsNextDue) return;
+            this.selectedMonthIndex  = idx;
+            this.form.period_start   = m.period_start;
+            this.form.period_end     = m.period_end;
+            this.form.billing_type   = m.billing_type;
+            this.form.invoice_type   = m.is_final ? 'final' : 'regular';
+            this.form.single_segment = true;   // generate ONLY this month
+            this.fullyBilled         = false;
+            this.periodWarning       = '';
+            this.updateDays();
+        },
+        monthStatusLabel(m) {
+            if (m.status === 'billed') return 'Billed · ' + (m.invoice_number || '');
+            if (m.status === 'void')   return 'Void · ' + (m.invoice_number || '') + ' (re-billable)';
+            return (m.index === this.monthsNextDue) ? 'Next to bill' : 'Upcoming';
+        },
+        monthStatusClass(m) {
+            if (m.status === 'billed') return 'badge-success';
+            if (m.status === 'void')   return 'badge-secondary';
+            return (m.index === this.monthsNextDue) ? 'badge-primary' : 'badge-no-dot';
+        },
+        monthSelectable(m) {
+            return m.status === 'unbilled' && m.index === this.monthsNextDue;
+        },
+        fmtDate(s) {
+            if (!s) return '';
+            const d = new Date(s + 'T00:00:00');
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        },
         // ───────────────────────────────────────────────────────────
 
         // D-DROPDOWN-RETROFIT-PATTERN: called by FF_RecordPicker @record-picked.
@@ -631,6 +752,11 @@ function FF_InvoiceCreate() {
                 });
                 this.updateDays();
 
+                // R2 §3.6: load the in-order month picker (holistic leases). If a
+                // next-due month exists it overrides the auto-fill with that exact
+                // calendar-month segment and flags single-segment generation.
+                await this._fetchBillableMonths(leaseId);
+
                 // Reset end side — user always fetches or enters fresh
                 this.form.odometer_at_period_end_km = '';
                 this.form.odometer_fetched_at       = null;
@@ -670,6 +796,14 @@ function FF_InvoiceCreate() {
             this._leaseStartOdo     = null;
             this._leaseStartDate    = '';
             this.periodWarning      = '';
+            this.fullyBilled        = false;
+            // R2 §3.6 picker reset
+            this.billableMonths     = [];
+            this.monthsLoaded       = false;
+            this.monthsNextDue      = null;
+            this.monthsFullyBilled  = false;
+            this.selectedMonthIndex = null;
+            this.form.single_segment = false;
         },
 
         // Live-calculated period distance (end - start)

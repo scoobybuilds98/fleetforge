@@ -1524,6 +1524,25 @@ class InvoiceGenerator
                 'odometer_fetched_at'         => $params['odometer_fetched_at']         ?? null,
             ];
 
+            // ── Single-segment mode (R2 §3.6 month picker) ──────────
+            // The in-order month picker generates ONE calendar-month segment at
+            // a time: bill exactly the submitted [period_start, period_end] and
+            // do NOT fan out to the lease extent. The engine still reconciles
+            // against already_billed (so a known span re-prorates correctly),
+            // and the §11 overlap gate blocks re-billing an already-billed
+            // month. Applies to every engine — for a holistic lease the segment
+            // dates come straight from billable_months.php.
+            if (!empty($params['single_segment'])) {
+                $this->assertNoOverlap($leaseId, $submittedStart, $submittedEnd, $allowOverlap, $billingType);
+                $inv = $this->createFromLease($common + $odo + [
+                    'period_start' => $submittedStart,
+                    'period_end'   => $submittedEnd,
+                    'billing_type' => $billingType,
+                    'invoice_type' => $invoiceType,
+                ]);
+                return ['invoices' => [$inv], 'count' => 1, 'fanned' => false, 'billing_type' => $billingType];
+            }
+
             // ── Legacy / mileage_only → single invoice, honour the form ──
             if ($engineVersion !== 'holistic' || $billingType === 'mileage_only') {
                 $this->assertNoOverlap($leaseId, $submittedStart, $submittedEnd, $allowOverlap, $billingType);

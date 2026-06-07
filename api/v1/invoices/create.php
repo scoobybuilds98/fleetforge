@@ -162,6 +162,9 @@ db_transaction(function () use (
         'billing_type'      => $billingType,
         'invoice_type'      => $invoiceType,
         'allow_overlap'     => $allowOverlap,
+        // R2 §3.6: the in-order month picker bills exactly ONE calendar-month
+        // segment (the submitted period) instead of fanning out to the extent.
+        'single_segment'    => !empty($body['single_segment']),
         'po_number'         => clean_string($body['po_number'] ?? null),
         'notes'             => clean_string($body['notes'] ?? null, 2000),
         'internal_notes'    => clean_string($body['internal_notes'] ?? null, 2000),
