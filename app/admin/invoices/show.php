@@ -121,6 +121,131 @@ foreach ($lineItems as &$item) {
 }
 unset($item);
 
+/**
+ * S-BILLING-INVOICE-CALC-DISPLAY — render a clean, detailed calculation
+ * breakdown for a line item's decoded detail_lines.
+ *
+ * Holistic-engine base-rental/credit lines store a structured audit_meta
+ * object ({engine,tier,basis,rates,segments,cumulative_correct,already_billed,
+ * delta,...}); previously the template JSON-dumped it, which was unreadable.
+ * This renders the calendar-month segments + the running reconciliation
+ * (cumulative_correct − already_billed = this invoice) in plain terms. Legacy
+ * (period_independent / ProRateCalculator) details — a flat list of
+ * explanation strings — render as a simple list. Returns escaped HTML.
+ */
+function ff_calc_breakdown_html($detail): string
+{
+    if (!is_array($detail) || $detail === []) {
+        return '';
+    }
+
+    $isHolistic = (($detail['engine'] ?? '') === 'holistic') || isset($detail['basis']);
+
+    if (!$isHolistic) {
+        // Legacy: {explanation:[...]} or a flat array of strings.
+        $lines = $detail['explanation'] ?? $detail;
+        if (!is_array($lines)) {
+            return '';
+        }
+        $h = '<ul class="calc-list">';
+        foreach ($lines as $l) {
+            $h .= '<li>' . e(is_string($l) ? $l : json_encode($l)) . '</li>';
+        }
+        return $h . '</ul>';
+    }
+
+    $money   = static fn ($v) => '$' . number_format((float) $v, 2);
+    $shortDt = static function ($d) {
+        $t = strtotime((string) $d);
+        return $t ? date('M j', $t) : e((string) $d);
+    };
+
+    $basis   = (string) ($detail['basis'] ?? '');
+    $monthly = $detail['rates']['monthly'] ?? null;
+    $daily   = $detail['rates']['daily'] ?? null;
+    $weekly  = $detail['rates']['weekly'] ?? null;
+    $perDay  = ($monthly !== null) ? bcdiv((string) $monthly, '30', 2) : null;
+    $isCredit = !empty($detail['is_credit']);
+
+    $basisLabel = match ($basis) {
+        'daily'                => 'Daily rate',
+        'weekly_flat'          => 'Weekly flat rate',
+        'weekly_math'          => 'Weekly rate (full weeks + leftover days)',
+        'monthly_single_month' => 'Monthly rate · single calendar month (flat)',
+        'monthly_multi_month'  => 'Monthly rate · spans calendar months',
+        default                => ucfirst(str_replace('_', ' ', $basis ?: ($detail['tier'] ?? 'rate'))),
+    };
+
+    ob_start();
+    ?>
+    <div class="calc-breakdown">
+        <div class="calc-head"><?= $isCredit ? 'Reconciliation credit' : 'How this charge was calculated' ?> — Holistic engine (Revision 2)</div>
+        <div class="calc-sub">
+            Basis: <?= e($basisLabel) ?>.
+            <?php if ($monthly !== null): ?>
+                Rates: <?= e($money($daily)) ?>/day · <?= e($money($weekly)) ?>/week · <?= e($money($monthly)) ?>/month
+                <?php if ($perDay !== null && str_starts_with($basis, 'monthly')): ?>
+                    — partial months prorated at <?= e($money($perDay)) ?>/day (monthly ÷ 30)
+                <?php endif; ?>.
+            <?php endif; ?>
+            <?php if (!empty($detail['extent_end'])): ?>
+                Billed through <?= $shortDt($detail['extent_end']) ?> · <?= (int) ($detail['total_days_so_far'] ?? 0) ?> cumulative lease-days.
+            <?php endif; ?>
+        </div>
+
+        <?php if (!empty($detail['segments']) && is_array($detail['segments'])): ?>
+            <table class="calc-seg">
+                <thead>
+                    <tr><th>Calendar-month segment</th><th>Days</th><th>Basis</th><th class="amt">Amount</th></tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($detail['segments'] as $seg):
+                        $complete = !empty($seg['complete']);
+                        $segBasis = $complete
+                            ? 'full month (flat)'
+                            : ((int) ($seg['days'] ?? 0)) . ' × ' . ($perDay !== null ? $money($perDay) : '/30') . '/day';
+                    ?>
+                        <tr class="<?= $complete ? 'complete' : '' ?>">
+                            <td><?= $shortDt($seg['period_start']) ?> – <?= $shortDt($seg['period_end']) ?></td>
+                            <td><?= (int) ($seg['days'] ?? 0) ?></td>
+                            <td><?= e($segBasis) ?></td>
+                            <td class="amt"><?= e($money($seg['amount'] ?? 0)) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="3">Cumulative correct through <?= $shortDt($detail['period_end'] ?? $detail['extent_end'] ?? '') ?></td>
+                        <td class="amt"><?= e($money($detail['cumulative_correct'] ?? 0)) ?></td>
+                    </tr>
+                </tfoot>
+            </table>
+        <?php elseif ($basis === 'monthly_single_month'): ?>
+            <div class="calc-sub" style="margin:6px 0;">
+                Single calendar month — weekly math exceeds the month, so it is capped at the flat monthly rate
+                <?= e($money($monthly)) ?> (a 22–30 day lease inside one month is not prorated).
+            </div>
+        <?php endif; ?>
+
+        <div class="calc-recon">
+            <div class="calc-row">
+                <span>Cumulative correct (through <?= $shortDt($detail['period_end'] ?? $detail['extent_end'] ?? '') ?>)</span>
+                <span><?= e($money($detail['cumulative_correct'] ?? 0)) ?></span>
+            </div>
+            <div class="calc-row">
+                <span>− Already billed on prior invoices</span>
+                <span><?= e($money($detail['already_billed'] ?? 0)) ?></span>
+            </div>
+            <div class="calc-row calc-total">
+                <span>= This invoice (<?= $isCredit ? 'reconciliation credit' : 'base rental' ?>)</span>
+                <span><?= ($isCredit ? '−' : '') . e($money($detail['amount'] ?? $detail['delta'] ?? 0)) ?></span>
+            </div>
+        </div>
+    </div>
+    <?php
+    return (string) ob_get_clean();
+}
+
 /* ─── Load payment allocations with payment details ─────────────── */
 $invoicePayments = db_select(
     "SELECT
@@ -878,6 +1003,44 @@ require_once FF_ROOT . '/includes/header.php';
         padding-top: 4px;
         margin-top: 4px;
     }
+
+    /* S-BILLING-INVOICE-CALC-DISPLAY: the .hidden utility was never defined, so
+       every "Show calculation" toggle (which flips .hidden) silently no-op'd.
+       Page-scoped here so the existing toggles work and the breakdown collapses. */
+    .hidden { display: none !important; }
+
+    /* Holistic calculation breakdown — clean, detailed, readable */
+    .calc-breakdown { font-size: 12.5px; line-height: 1.55; }
+    .calc-breakdown .calc-head {
+        font-weight: 700; color: var(--text-primary); margin-bottom: 2px;
+    }
+    .calc-breakdown .calc-sub {
+        color: var(--text-secondary); margin-bottom: 10px;
+    }
+    .calc-breakdown table.calc-seg {
+        width: 100%; border-collapse: collapse; margin: 8px 0 10px;
+        font-family: 'DM Mono', ui-monospace, monospace; font-size: 12px;
+    }
+    .calc-breakdown table.calc-seg th {
+        text-align: left; font-weight: 600; color: var(--text-secondary);
+        border-bottom: 1px solid var(--border-color); padding: 3px 8px 3px 0;
+        font-family: var(--font-sans, inherit); font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
+    }
+    .calc-breakdown table.calc-seg td { padding: 3px 8px 3px 0; color: var(--text-secondary); }
+    .calc-breakdown table.calc-seg td.amt,
+    .calc-breakdown table.calc-seg th.amt { text-align: right; padding-right: 0; }
+    .calc-breakdown table.calc-seg tr.complete td { color: var(--text-primary); }
+    .calc-breakdown table.calc-seg tfoot td {
+        border-top: 1px dashed var(--border-color); font-weight: 600; color: var(--text-primary); padding-top: 5px;
+    }
+    .calc-recon { margin-top: 8px; max-width: 360px; font-family: 'DM Mono', ui-monospace, monospace; font-size: 12px; }
+    .calc-recon .calc-row { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; color: var(--text-secondary); }
+    .calc-recon .calc-row.calc-total {
+        border-top: 1px solid var(--border-color); margin-top: 4px; padding-top: 5px;
+        font-weight: 700; color: var(--text-primary);
+    }
+    .calc-breakdown ul.calc-list { margin: 0; padding: 0; }
+    .calc-breakdown ul.calc-list li { list-style: none; padding: 1px 0; color: var(--text-secondary); }
 
     /* Mileage detail block */
     .mileage-detail {
@@ -2201,16 +2364,7 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                                         Show calculation ▸
                                     </span>
                                     <div class="detail-expansion hidden">
-                                        <ul style="margin:0; padding:0;">
-                                            <?php
-                                            // WHY: detail_lines can be {amount, method, explanation:[]} or just an array of strings
-                                            $explanationLines = $item['_detail']['explanation'] ?? $item['_detail'];
-                                            if (is_array($explanationLines)):
-                                                foreach ($explanationLines as $line):
-                                            ?>
-                                                <li><?= e(is_string($line) ? $line : json_encode($line)) ?></li>
-                                            <?php endforeach; endif; ?>
-                                        </ul>
+                                        <?= ff_calc_breakdown_html($item['_detail']) ?>
                                     </div>
                                 </div>
                             <?php endif; ?>

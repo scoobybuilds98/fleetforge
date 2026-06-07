@@ -366,15 +366,24 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- VALID-2: form-level error banner injected by FF_Validate.banner() -->
     <div class="form-error-banner" data-form-error></div>
 
-    <!-- Submit -->
-    <div style="display:flex; gap:12px; align-items:center;">
-        <button type="submit" class="btn btn-primary" :disabled="submitting || !form.lease_id || !form.period_start || !form.period_end">
-            <span x-show="!submitting">Create Invoice</span>
-            <span x-show="submitting">Creating…</span>
+    <!-- Submit — R2 §3.6: primary generates the SELECTED month only (single
+         segment); "Generate all due" fans out the remaining months in order
+         (one atomic transaction) as an explicit choice, not the silent default. -->
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button type="submit" class="btn btn-primary"
+                :disabled="submitting || !form.lease_id || !form.period_start || !form.period_end || (monthsLoaded && monthsFullyBilled)">
+            <span x-show="!submitting" x-text="primaryGenerateLabel()"></span>
+            <span x-show="submitting">Generating…</span>
         </button>
+        <template x-if="monthsLoaded && unbilledCount > 1">
+            <button type="button" class="btn btn-secondary" :disabled="submitting"
+                    @click="submitAllDue()"
+                    x-text="'Generate all due (' + unbilledCount + ' months)'"></button>
+        </template>
         <a href="<?= base_url('invoices') ?>" class="btn btn-secondary">Cancel</a>
         <template x-if="result">
-            <span class="text-sm" style="color:var(--color-success);" x-text="'✓ Created ' + result.invoice_number"></span>
+            <span class="text-sm" style="color:var(--color-success);"
+                  x-text="(result.invoice_count > 1 ? '✓ Created ' + result.invoice_count + ' invoices' : '✓ Created ' + result.invoice_number)"></span>
         </template>
     </div>
 
@@ -694,6 +703,34 @@ function FF_InvoiceCreate() {
             const d = new Date(s + 'T00:00:00');
             return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         },
+        // Number of still-unbilled months in the picker (drives "Generate all due").
+        get unbilledCount() {
+            return this.billableMonths.filter(m => m.status === 'unbilled').length;
+        },
+        // Primary-button label: name the selected month when the picker is driving.
+        primaryGenerateLabel() {
+            if (this.monthsLoaded && this.monthsFullyBilled) return 'Fully billed';
+            if (this.selectedMonthIndex !== null && this.billableMonths[this.selectedMonthIndex]) {
+                return 'Generate ' + this.billableMonths[this.selectedMonthIndex].label;
+            }
+            return 'Create Invoice';
+        },
+        // R2 §3.6 (2.2): explicit catch-up — fan out every remaining billable month
+        // in order, atomically (the server's single-db_transaction fan-out path).
+        submitAllDue() {
+            if (this.monthsNextDue === null) return;
+            const first = this.billableMonths[this.monthsNextDue];
+            let lastEnd = first.period_end;
+            this.billableMonths.forEach(m => { if (m.status === 'unbilled') lastEnd = m.period_end; });
+            this.form.period_start   = first.period_start;
+            this.form.period_end     = lastEnd;
+            this.form.single_segment = false;   // fan out the whole remaining span
+            this.selectedMonthIndex  = null;
+            this.fullyBilled         = false;
+            this.periodWarning       = '';
+            this.updateDays();
+            this.submit();
+        },
         // ───────────────────────────────────────────────────────────
 
         // D-DROPDOWN-RETROFIT-PATTERN: called by FF_RecordPicker @record-picked.
@@ -992,9 +1029,17 @@ function FF_InvoiceCreate() {
                 if (r.success) {
                     this.result = r.data;
                     this.showSuccessOverlay = true;
-                    const _newId = r.data.id;
+                    // R2 §3.6 (2.3): land on a view showing ALL invoices created by
+                    // this action, already refreshed. A fan-out (>1 invoice) goes to
+                    // the lease's invoice list (every new invoice visible, no manual
+                    // refresh); a single invoice opens its own page.
+                    const _count   = r.data.invoice_count || 1;
+                    const _leaseId = this.form.lease_id;
+                    const _firstId = r.data.id;
                     setTimeout(() => {
-                        window.location.href = '<?= base_url('invoices/show') ?>?id=' + _newId;
+                        window.location.href = _count > 1
+                            ? '<?= base_url('invoices') ?>?lease_id=' + _leaseId
+                            : '<?= base_url('invoices/show') ?>?id=' + _firstId;
                     }, 3500);
                 } else if (r.error?.code === 'VALIDATION_ERROR' && r.error?.fields) {
                     FF_Validate.applyApi(f, r.error);

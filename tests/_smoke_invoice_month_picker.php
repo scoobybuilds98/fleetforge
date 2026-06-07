@@ -166,6 +166,48 @@ ok(str_contains($create, 'single_segment'), 'P7 form: single_segment flag presen
 ok(str_contains($create, 'billable_months'), 'P7 form: fetches billable_months endpoint');
 ok(str_contains($create, 'Billing Month'), 'P7 form: picker UI label rendered');
 
+// ── P8: generate flow — single-month default + Generate-all-due + redirect ─
+$create = file_get_contents(dirname(__DIR__) . '/app/admin/invoices/create.php');
+ok(str_contains($create, 'submitAllDue'), 'P8 submitAllDue() (explicit catch-up fan-out) present');
+ok(str_contains($create, 'Generate all due'), 'P8 "Generate all due" button present');
+ok(str_contains($create, 'primaryGenerateLabel'), 'P8 primary button names the selected month');
+ok(str_contains($create, 'single_segment = false'), 'P8 all-due fans out (single_segment=false)');
+ok(str_contains($create, 'invoice_count > 1') && str_contains($create, '?lease_id='),
+   'P8 redirect (2.3): fan-out lands on the lease invoice list (all visible)');
+
+// ── P9: calculation display (part 1) — toggle works + clean breakdown ──
+$show = file_get_contents(dirname(__DIR__) . '/app/admin/invoices/show.php');
+ok(str_contains($show, '.hidden { display: none'), 'P9 .hidden defined → Show/Hide calculation toggle works');
+ok(str_contains($show, 'function ff_calc_breakdown_html'), 'P9 detailed-breakdown renderer present');
+ok(str_contains($show, 'ff_calc_breakdown_html($item[\'_detail\'])'), 'P9 per-line detail uses the renderer');
+ok(!str_contains($show, "\$explanationLines = \$item['_detail']"), 'P9 old per-line raw-JSON dump removed');
+
+// Runtime: render the real audit_meta shape and assert it is clean + detailed.
+if (preg_match('/function ff_calc_breakdown_html.*?return \(string\) ob_get_clean\(\);\s*\}/s', $show, $fm)) {
+    eval($fm[0]);
+    $detail = [
+        'engine' => 'holistic', 'tier' => 'monthly', 'basis' => 'monthly_multi_month', 'is_credit' => 0,
+        'rates' => ['daily' => '100.00', 'weekly' => '500.00', 'monthly' => '1500.00'],
+        'segments' => [
+            ['days' => 24, 'amount' => '1200.00', 'complete' => false, 'period_start' => '2026-06-07', 'period_end' => '2026-06-30'],
+            ['days' => 7,  'amount' => '350.00',  'complete' => false, 'period_start' => '2026-07-01', 'period_end' => '2026-07-07'],
+        ],
+        'extent_end' => '2026-07-07', 'period_end' => '2026-07-07', 'total_days_so_far' => 31,
+        'already_billed' => '1200.00', 'cumulative_correct' => '1550.00', 'amount' => '350.00',
+    ];
+    $html = ff_calc_breakdown_html($detail);
+    ok(str_contains($html, '$1,550.00') && str_contains($html, '$1,200.00') && str_contains($html, '$350.00'),
+       'P9 breakdown shows cumulative ($1,550) − already-billed ($1,200) = this ($350)');
+    ok(str_contains($html, 'Jun 7') && str_contains($html, 'Jul 1'), 'P9 breakdown renders calendar-month segment rows');
+    ok(!str_contains($html, 'running_reconciliation') && !str_contains($html, '"segments"') && !str_contains($html, 'monthly_multi_month'),
+       'P9 breakdown is clean — no raw audit-meta keys dumped');
+    $legacy = ff_calc_breakdown_html(['7 days × $71.43/day = $500.00', 'weekly_math']);
+    ok(str_contains($legacy, '$500.00') && str_contains($legacy, 'calc-list'),
+       'P9 legacy (period_independent) explanation renders as a clean list');
+} else {
+    ok(false, 'P9 could not extract ff_calc_breakdown_html for runtime render');
+}
+
 echo "\n----------------------------------------------------------------------\n";
 echo "TOTAL: {$pass} pass / {$fail} fail\n";
 echo "----------------------------------------------------------------------\n";
