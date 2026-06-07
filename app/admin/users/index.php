@@ -463,7 +463,7 @@ require_once FF_ROOT . '/includes/header.php';
      x-data="portalCreate()">
     <div class="card-header" style="font-weight:600;">Create Portal User</div>
     <div class="card-body">
-        <div style="display:grid;grid-template-columns:240px 1fr 1fr auto;gap:12px;align-items:end;">
+        <div class="portal-create-grid">
             <div class="form-group" style="margin-bottom:0;">
                 <label class="form-label">Customer</label>
                 <select x-model="form.customer_id" class="form-control" required>

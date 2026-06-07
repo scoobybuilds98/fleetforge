@@ -103,7 +103,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;">
+<div class="portal-user-show-grid">
 
     <!-- ── Left: Detail card ──────────────────────────────────────────── -->
     <div class="card">

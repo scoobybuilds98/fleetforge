@@ -11349,3 +11349,45 @@ tr.ff-row-selected > td {
 .rp-loading { display:flex; align-items:center; justify-content:center; gap:10px; padding:60px 20px; color:var(--text-secondary); font-size:0.875rem; }
 .rp-loading-spinner { width:20px; height:20px; border-radius:50%; border:2px solid var(--border-color-strong); border-top-color:var(--color-primary); animation:ff-spin .7s linear infinite; }
 @keyframes ff-spin { to { transform:rotate(360deg); } }
+
+/* ============================================================
+   PORTAL-USERS MOBILE (S-FIX-PORTAL-USERS-MOBILE)
+   Two portal-users containers were inline-styled multi-column
+   grids that didn't stack at phone width → right-hand fields /
+   the info column ran off-screen and cropped. New portal-users-
+   SCOPED classes (not shared) carry the desktop grid + a ≤767px
+   single-column stack. Desktop layout unchanged.
+   ============================================================ */
+
+/* BUG A — "Create Portal User" form (app/admin/users/index.php, Portal tab).
+   Desktop: Customer | Name | Email | Create. Mobile: single column, each
+   field + the Create button full-width. */
+.portal-create-grid {
+    display: grid;
+    grid-template-columns: 240px 1fr 1fr auto;
+    gap: 12px;
+    align-items: end;
+}
+@media (max-width: 767px) {
+    .portal-create-grid {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+    .portal-create-grid > * { width: 100%; }
+    .portal-create-grid .btn { width: 100%; }
+}
+
+/* BUG B — portal-user profile (app/admin/portal_users/show.php).
+   Desktop: info column | 320px actions column. Mobile: stack vertically
+   (info card on top, action cards below), each full-width. */
+.portal-user-show-grid {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    align-items: start;
+}
+@media (max-width: 767px) {
+    .portal-user-show-grid {
+        grid-template-columns: 1fr;
+    }
+}
