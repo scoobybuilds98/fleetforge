@@ -8,7 +8,9 @@ declare(strict_types=1);
  *
  * Business rules:
  *   - name, email, role_id are required.
- *   - email must be unique among non-deleted users.
+ *   - email must be unique among non-deleted users. If the email belongs to a
+ *     SOFT-DELETED user, the invite revives that row in place (the users.email
+ *     UNIQUE index is global, so a fresh INSERT would 1062 — see FLEETFORGE-F).
  *   - role_id must reference a valid user_roles record.
  *   - User is created with status='invited'.
  *   - Invite token: plain = bin2hex(random_bytes(32)), stored = SHA-256 hash.
@@ -56,11 +58,23 @@ if (!$roleId) {
 }
 
 // -----------------------------------------------------------------------
-// 3. Uniqueness check — email must be unique among non-deleted users
+// 3. Uniqueness check — email is GLOBALLY unique in the DB (users.email
+//    UNIQUE index is NOT scoped to deleted_at), so we must consider
+//    soft-deleted rows too:
+//      - Active match (deleted_at IS NULL) → reject with 409 (unchanged).
+//      - Soft-deleted match                → REVIVE that row on re-invite.
+//
+//    WHY: a bare INSERT for an email belonging to a soft-deleted user hits a
+//    1062 duplicate-key violation → unhandled PDOException → HTTP 500. That
+//    was prod incident FLEETFORGE-F (invite → delete → re-invite). Reviving
+//    the tombstoned row in place honors the "reusable once deleted" rule
+//    without colliding with the global unique index.
 // -----------------------------------------------------------------------
-if (db_exists('users', 'email = ? AND deleted_at IS NULL', [$email])) {
+$existing = db_row("SELECT id, deleted_at FROM users WHERE email = ?", [$email]);
+if ($existing && $existing['deleted_at'] === null) {
     json_error('ALREADY_EXISTS', 'A user with that email already exists.', 409);
 }
+$reviveId = $existing['id'] ?? null;   // non-null → re-invite a soft-deleted user
 
 // -----------------------------------------------------------------------
 // 4. Validate role_id exists
@@ -88,22 +102,56 @@ $tokenHash  = hash('sha256', $plainToken);      // SHA-256 hash stored in DB
 // S-PROD-1B #67: set mfa_required based on the assigned role at invite time
 $mfaRequired = \FleetForge\Auth\MfaService::userRoleRequiresMfa($roleId) ? 1 : 0;
 
-$newId = db_transaction(function () use (
-    $name, $email, $roleId, $phone, $timezone, $tokenHash, $mfaRequired
+$createUser = function () use (
+    $name, $email, $roleId, $phone, $timezone, $tokenHash, $mfaRequired, $reviveId
 ) {
-    $id = db_insert('users', [
-        'name'                 => $name,
-        'email'                => $email,
-        'role_id'              => $roleId,
-        'phone'                => $phone,
-        'timezone'             => $timezone,
-        'status'               => 'invited',
-        'mfa_required'         => $mfaRequired,
-        'invite_token'         => $tokenHash,
-        'invite_token_expiry'  => date('Y-m-d H:i:s', strtotime('+7 days')),
-        'invite_sent_at'       => date('Y-m-d H:i:s'),
-        'created_by'           => current_user_id(),
-    ]);
+    if ($reviveId !== null) {
+        // Re-invite: revive the previously soft-deleted row in place so we
+        // don't violate the global users.email UNIQUE index. Reset profile,
+        // role, invite token and clear the soft-delete tombstone. Stale auth
+        // state from the deleted account is wiped so the revived user starts
+        // as a genuine fresh invite (no inherited password / MFA / lockout).
+        db_update('users', [
+            'name'                 => $name,
+            'role_id'              => $roleId,
+            'phone'                => $phone,
+            'timezone'             => $timezone,
+            'status'               => 'invited',
+            'mfa_required'         => $mfaRequired,
+            'invite_token'         => $tokenHash,
+            'invite_token_expiry'  => date('Y-m-d H:i:s', strtotime('+7 days')),
+            'invite_sent_at'       => date('Y-m-d H:i:s'),
+            'deleted_at'           => null,
+            'created_by'           => current_user_id(),
+            // wipe inherited credentials / session state from the old account
+            'password_hash'        => null,
+            'mfa_enabled'          => 0,
+            'mfa_secret'           => null,
+            'mfa_enabled_at'       => null,
+            'auth0_sub'            => null,
+            'login_attempts'       => 0,
+            'locked_until'         => null,
+            'password_reset_token' => null,
+            'password_reset_expiry'=> null,
+            'remember_token'       => null,
+            'mfa_verified_until'   => null,
+        ], 'id = ?', [$reviveId]);
+        $id = $reviveId;
+    } else {
+        $id = db_insert('users', [
+            'name'                 => $name,
+            'email'                => $email,
+            'role_id'              => $roleId,
+            'phone'                => $phone,
+            'timezone'             => $timezone,
+            'status'               => 'invited',
+            'mfa_required'         => $mfaRequired,
+            'invite_token'         => $tokenHash,
+            'invite_token_expiry'  => date('Y-m-d H:i:s', strtotime('+7 days')),
+            'invite_sent_at'       => date('Y-m-d H:i:s'),
+            'created_by'           => current_user_id(),
+        ]);
+    }
 
     // Audit log — user creation
     db_insert('audit_log', [
@@ -135,7 +183,20 @@ $newId = db_transaction(function () use (
     }
 
     return $id;
-});
+};
+
+// Belt-and-suspenders for the TOCTOU race: two concurrent invites for the
+// same email can both pass the step-3 pre-check, then collide on the global
+// users.email UNIQUE index. Translate that 1062 into the same friendly 409
+// instead of letting the PDOException surface as an HTTP 500 (FLEETFORGE-F).
+try {
+    $newId = db_transaction($createUser);
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000') {
+        json_error('ALREADY_EXISTS', 'A user with that email already exists.', 409);
+    }
+    throw $e;
+}
 
 // -----------------------------------------------------------------------
 // 8. Send invite email (dev: logs to logs/mail.log — no exception thrown)
