@@ -2189,13 +2189,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .stat-card {
-    /* Apple HIG: glass material — subtle top shimmer over the surface colour */
-    background: linear-gradient(160deg, rgba(255,255,255,0.045) 0%, transparent 55%),
-                var(--bg-surface);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    /* Cream tile (Apple light-card look) — pops against the dark app shell.
+       Light theme overrides to white for contrast (see [data-theme="light"]). */
+    background: #f7f5f0;
+    border: 1px solid rgba(0, 0, 0, 0.06);
     border-radius: 16px;
     padding: 18px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.20);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.18);
     position: relative;
     overflow: hidden;
     min-width: 0;
@@ -2208,9 +2208,15 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .stat-card:hover {
-    box-shadow: 0 8px 24px rgba(0,0,0,0.50), 0 2px 6px rgba(0,0,0,0.28);
-    transform: scale(1.018);
+    background: #fffefb;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.28);
+    transform: translateY(-2px);
 }
+
+/* Dark text so labels/values read on the cream (dark mode) and white (light mode) tile. */
+.stat-card .stat-label { color: #6e6e73; }
+.stat-card .stat-value { color: #1c1c1e; }
+.stat-card .stat-delta { color: #8a8a8e; }
 
 /* Per-card accent color variants */
 .stat-card--green  { --stat-accent: #22c55e; }
@@ -4776,6 +4782,23 @@ html.is-mac .non-mac-only { display: none; }
 .stat-card__icon--info    { background: var(--color-info-light);     color: var(--color-info-text);    }
 .stat-card__icon--purple  { background: rgba(139,92,246,0.14);       color: #a78bfa;                   }
 
+/* Tiles are light (cream in dark mode, white in day mode), so the accent
+   icons need darker, saturated glyphs — the default light-on-dark colours
+   ('#4ade80', '#fb923c', …) wash out on a light tile. Applies to both the
+   modern (__icon) and legacy (.stat-icon) structures, both themes. */
+.stat-card__icon--primary, .stat-icon--primary { background: rgba(249,115,22,0.15); color: #c2410c; }
+.stat-card__icon--success, .stat-icon--success,
+.stat-icon--green                               { background: rgba(34,197,94,0.16);  color: #15803d; }
+.stat-card__icon--warning, .stat-icon--warning,
+.stat-icon--amber                               { background: rgba(245,158,11,0.18); color: #b45309; }
+.stat-card__icon--danger,  .stat-icon--danger,
+.stat-icon--red                                 { background: rgba(239,68,68,0.15);  color: #b91c1c; }
+.stat-card__icon--info,    .stat-icon--info,
+.stat-icon--blue                                { background: rgba(59,130,246,0.15); color: #1d4ed8; }
+.stat-card__icon--purple,  .stat-icon--purple   { background: rgba(139,92,246,0.16); color: #6d28d9; }
+.stat-icon--teal                                { background: rgba(20,184,166,0.16); color: #0f766e; }
+.stat-icon--slate                               { background: rgba(100,116,139,0.16);color: #475569; }
+
 /* ── Chart card accent borders ───────────────────────────── */
 .card--accent-primary { border-top: 3px solid var(--color-primary); }
 .card--accent-success { border-top: 3px solid var(--color-success); }
@@ -6114,14 +6137,16 @@ dl.detail-grid dd {
 [data-theme="light"] .topbar-theme-btn svg { color: var(--text-primary); }
 [data-theme="dark"]  .topbar-theme-btn svg { color: var(--text-primary); }
 
-/* Apple-style light-mode stat cards: pure white, crisp shadow, soft border */
+/* Day mode: white cards with a crisp shadow so they lift off the light
+   (#f8fafc) page — cream would blend, so contrast comes from elevation. */
 [data-theme="light"] .stat-card {
     background: #ffffff;
-    border-color: rgba(0, 0, 0, 0.07);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 14px rgba(0,0,0,0.05);
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.07), 0 6px 18px rgba(0,0,0,0.06);
 }
 [data-theme="light"] .stat-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.10), 0 8px 28px rgba(0,0,0,0.08);
+    background: #ffffff;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12), 0 10px 30px rgba(0,0,0,0.09);
 }
 
 /* ── FIX 2 — Shared utility classes (new, non-conflicting) ─── */
