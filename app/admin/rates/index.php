@@ -88,38 +88,7 @@ require_once FF_ROOT . '/includes/header.php';
                              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rate-cust-tile .rct-count { font-size: 0.8125rem; font-weight: 500; margin-top: 8px; color: #44464c; }
 
-/* Rate cards — cream cards matching the tiles. */
-.rate-item-card {
-    background: #f7f5f0;
-    color: #16161a;
-    border: 1px solid rgba(0,0,0,0.06);
-    border-radius: 14px;
-    overflow: hidden;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.28), 0 1px 2px rgba(0,0,0,0.16);
-    transition: transform .16s ease, box-shadow .16s ease;
-}
-.rate-item-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.42); }
-.rate-item-card__head {
-    display: flex; justify-content: space-between; align-items: center; gap: 8px;
-    padding: 13px 15px; border-bottom: 1px solid rgba(0,0,0,0.08);
-}
-.rate-item-card__type { font-weight: 600; font-size: 0.9375rem; line-height: 1.25; color: #16161a; }
-.rate-item-card__rows { padding: 14px 15px; display: grid; grid-template-columns: auto 1fr; gap: 9px 16px;
-                        font-size: 0.9rem; align-items: baseline; }
-.rate-item-card__k    { color: #44464c; font-weight: 500; }
-.rate-item-card__v    { text-align: right; color: #16161a; font-variant-numeric: tabular-nums; }
-.rate-item-card__foot { padding: 11px 15px; border-top: 1px solid rgba(0,0,0,0.08); display: flex; gap: 8px; }
-/* Dark "Edit" button reads well on the light card (Apple primary-on-white). */
-.rate-item-card__foot .btn-secondary { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
-.rate-item-card__foot .btn-secondary:hover { background: #000; border-color: #000; }
-/* Truncating card name in the head. */
-.rate-item-card__type--name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Status pills tuned to read on the light card (saturated text, soft fill). */
-.rate-item-card__pill { font-size: 0.68rem; font-weight: 700; letter-spacing: .02em;
-                        border-radius: 999px; padding: 3px 9px; flex-shrink: 0; white-space: nowrap; }
-.rate-item-card__pill--active   { background: rgba(34,197,94,0.18);  color: #15803d; }
-.rate-item-card__pill--inactive { background: rgba(0,0,0,0.06);      color: #55565b; }
-.rate-item-card__pill--default  { background: rgba(59,130,246,0.18); color: #1d4ed8; }
+/* (.rate-item-card styles now live in app.css — shared with rates/show.php) */
 
 /* iOS-style toggle switch */
 .ios-toggle { position: relative; display: inline-block; width: 48px; height: 29px; flex-shrink: 0; }
@@ -133,10 +102,9 @@ require_once FF_ROOT . '/includes/header.php';
 .ios-toggle input:checked ~ .knob  { transform: translateX(19px); }
 .ios-toggle input:focus-visible ~ .track { box-shadow: 0 0 0 3px rgba(52,199,89,0.35); }
 
-/* Day mode: cream blends into the light page, so the cream cards flip to
-   white + crisp shadow for contrast (matching the global .stat-card). */
-[data-theme="light"] .rate-cust-tile,
-[data-theme="light"] .rate-item-card {
+/* Day mode: cream blends into the light page, so the customer tiles flip to
+   white + crisp shadow for contrast (.rate-item-card handled in app.css). */
+[data-theme="light"] .rate-cust-tile {
     background: #ffffff;
     border-color: rgba(0,0,0,0.08);
     box-shadow: 0 1px 3px rgba(0,0,0,0.07), 0 6px 18px rgba(0,0,0,0.06);
@@ -144,8 +112,6 @@ require_once FF_ROOT . '/includes/header.php';
 [data-theme="light"] .rate-cust-tile:hover { background: #ffffff;
     box-shadow: 0 6px 16px rgba(0,0,0,0.12), 0 10px 30px rgba(0,0,0,0.09); }
 [data-theme="light"] .rate-cust-tile.is-selected { background: #ffffff; }
-[data-theme="light"] .rate-item-card:hover {
-    box-shadow: 0 8px 22px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.08); }
 </style>
 
 <div x-data="FF_RatesManager()" x-init="init()">

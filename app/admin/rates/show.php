@@ -246,19 +246,17 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-body" style="padding-top:8px;">
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
                     <template x-for="(item, idx) in items" :key="idx">
-                        <div style="border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);overflow:hidden;">
+                        <div>
 
-                            <!-- ── VIEW MODE ─────────────────────────────────── -->
+                            <!-- ── VIEW MODE — cream card (shared .rate-item-card) ─ -->
                             <template x-if="!item.editing">
-                                <div>
+                                <div class="rate-item-card">
                                     <!-- Header: type name + currency + edit/delete -->
-                                    <div style="padding:14px 16px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                                    <div class="rate-item-card__head">
                                         <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-                                            <span class="font-semibold"
-                                                  x-text="categoryLabel(item.equipment_type)"
-                                                  style="font-size:0.9375rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
-                                            <span class="badge badge-neutral" style="font-size:0.7rem;flex-shrink:0;"
-                                                  x-text="item.currency || 'CAD'"></span>
+                                            <span class="rate-item-card__type rate-item-card__type--name"
+                                                  x-text="categoryLabel(item.equipment_type)"></span>
+                                            <span class="rate-item-card__cur" x-text="item.currency || 'CAD'"></span>
                                         </div>
                                         <?php if (can('rates', 'edit')): ?>
                                         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
@@ -272,33 +270,33 @@ require_once FF_ROOT . '/includes/header.php';
                                         <?php endif; ?>
                                     </div>
                                     <!-- Body: rate key-value pairs -->
-                                    <div style="padding:16px;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:0.875rem;align-items:baseline;">
-                                        <span x-show="item.daily_rate" class="text-secondary">Daily</span>
-                                        <span x-show="item.daily_rate" class="font-mono" style="text-align:right;"
+                                    <div class="rate-item-card__rows">
+                                        <span class="rate-item-card__k" x-show="item.daily_rate">Daily</span>
+                                        <span class="rate-item-card__v font-mono" x-show="item.daily_rate"
                                               x-text="item.daily_rate ? '$' + parseFloat(item.daily_rate).toFixed(2) : ''"></span>
 
-                                        <span x-show="item.weekly_rate" class="text-secondary">Weekly</span>
-                                        <span x-show="item.weekly_rate" class="font-mono" style="text-align:right;"
+                                        <span class="rate-item-card__k" x-show="item.weekly_rate">Weekly</span>
+                                        <span class="rate-item-card__v font-mono" x-show="item.weekly_rate"
                                               x-text="item.weekly_rate ? '$' + parseFloat(item.weekly_rate).toFixed(2) : ''"></span>
 
-                                        <span x-show="item.monthly_rate" class="text-secondary">Monthly</span>
-                                        <span x-show="item.monthly_rate" class="font-mono" style="text-align:right;"
+                                        <span class="rate-item-card__k" x-show="item.monthly_rate">Monthly</span>
+                                        <span class="rate-item-card__v font-mono" x-show="item.monthly_rate"
                                               x-text="item.monthly_rate ? '$' + parseFloat(item.monthly_rate).toFixed(2) : ''"></span>
 
-                                        <span x-show="item.mileage_rate" class="text-secondary">Mileage</span>
-                                        <span x-show="item.mileage_rate" class="font-mono" style="text-align:right;"
+                                        <span class="rate-item-card__k" x-show="item.mileage_rate">Mileage</span>
+                                        <span class="rate-item-card__v font-mono" x-show="item.mileage_rate"
                                               x-text="item.mileage_rate ? '$' + parseFloat(item.mileage_rate).toFixed(4) + ' / ' + item.mileage_unit : ''"></span>
 
                                         <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate">
-                                            <span class="text-secondary" style="grid-column:1/-1;font-style:italic;">No rates set</span>
+                                            <span class="rate-item-card__empty">No rates set</span>
                                         </template>
                                     </div>
                                 </div>
                             </template>
 
-                            <!-- ── EDIT MODE ─────────────────────────────────── -->
+                            <!-- ── EDIT MODE — dark card (form) ──────────────── -->
                             <template x-if="item.editing">
-                                <div>
+                                <div style="border:1px solid var(--border-color);border-radius:14px;background:var(--bg-secondary);overflow:hidden;">
                                     <!-- Header: type selector + currency + remove -->
                                     <div style="padding:14px 16px;border-bottom:1px solid var(--border-color);">
                                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
