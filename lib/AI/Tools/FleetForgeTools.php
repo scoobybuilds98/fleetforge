@@ -1001,8 +1001,9 @@ class FleetForgeTools
     // ────────────────────────────────────────────────────────────
     // getCustomerRates
     //
-    // Custom negotiated rates for a specific customer (overrides
-    // the standard rate card).
+    // Customer-specific negotiated rates, read from that customer's
+    // rate cards (S-RATES-CONSOLIDATE: per-type overrides retired —
+    // customer pricing lives on customer-owned rate cards).
     // ────────────────────────────────────────────────────────────
     private static function getCustomerRates(array $input): array|string
     {
@@ -1010,12 +1011,13 @@ class FleetForgeTools
         if ($customerId <= 0) return 'Error: customer_id is required.';
 
         return db_select(
-            "SELECT id, equipment_type, daily_rate, weekly_rate, monthly_rate,
-                    mileage_rate, mileage_unit, currency, minimum_charge,
-                    effective_from, effective_to, notes
-             FROM customer_equipment_rates
-             WHERE customer_id = ?
-             ORDER BY equipment_type ASC, effective_from DESC",
+            "SELECT rci.equipment_type, rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
+                    rci.mileage_rate, rci.mileage_unit, rci.currency,
+                    rc.name AS rate_card, rc.effective_from, rc.effective_to
+             FROM rate_card_items rci
+             JOIN rate_cards rc ON rc.id = rci.rate_card_id
+             WHERE rc.customer_id = ? AND rc.deleted_at IS NULL
+             ORDER BY rci.equipment_type ASC, rc.effective_from DESC",
             [$customerId]
         );
     }
