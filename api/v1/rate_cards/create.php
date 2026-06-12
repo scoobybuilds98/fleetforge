@@ -177,6 +177,23 @@ if ($itemErrors) {
 }
 
 // -----------------------------------------------------------------------
+// 5b. Hard guard — a customer may not have two active cards covering the
+//     same equipment type over an overlapping period (S-RATES-CARD-
+//     CONFLICT-GUARD). Global cards are exempt. See lib/RateCards/ConflictGuard.
+// -----------------------------------------------------------------------
+$conflicts = \FleetForge\RateCards\ConflictGuard::conflicts(
+    $customerId,
+    array_column($itemsToInsert, 'equipment_type'),
+    $effectiveFrom,
+    $effectiveTo,
+    null
+);
+if ($conflicts) {
+    $msg = \FleetForge\RateCards\ConflictGuard::message($conflicts);
+    json_validation_error(['items' => $msg], $msg);
+}
+
+// -----------------------------------------------------------------------
 // 6. Insert inside transaction + items + audit log
 // -----------------------------------------------------------------------
 $newId = db_transaction(function() use (

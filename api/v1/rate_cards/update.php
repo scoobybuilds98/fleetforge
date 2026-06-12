@@ -217,6 +217,34 @@ if ($itemErrors) {
 }
 
 // -----------------------------------------------------------------------
+// 4b. Hard guard — a customer may not have two active cards covering the
+//     same equipment type over an overlapping period (S-RATES-CARD-
+//     CONFLICT-GUARD). Re-checked on every update because changing the
+//     card's customer_id OR effective window can create a collision even
+//     when items[] is untouched. Types checked = the post-update item set:
+//     the replacement items when items[] is provided, else the card's
+//     current items. Self is excluded. Global cards are exempt.
+// -----------------------------------------------------------------------
+$typesToCheck = $replaceItems
+    ? array_column($itemsToInsert, 'equipment_type')
+    : array_column(
+        db_select("SELECT equipment_type FROM rate_card_items WHERE rate_card_id = ?", [$id]),
+        'equipment_type'
+      );
+
+$conflicts = \FleetForge\RateCards\ConflictGuard::conflicts(
+    $customerId,
+    $typesToCheck,
+    $effectiveFrom,
+    $effectiveTo,
+    $id
+);
+if ($conflicts) {
+    $msg = \FleetForge\RateCards\ConflictGuard::message($conflicts);
+    json_validation_error(['items' => $msg], $msg);
+}
+
+// -----------------------------------------------------------------------
 // 5. Update inside transaction + audit log
 // -----------------------------------------------------------------------
 $newValues = [
