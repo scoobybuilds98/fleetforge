@@ -15,7 +15,8 @@
  *   rate_card_items        (~50 rows)
  *   customers              (50 rows — all 5 statuses + currency / exempt / discount mix)
  *   customer_contacts      (~50 rows)
- *   customer_equipment_rates (~25 rows — custom per-customer rates)
+ *   customer rate cards     (~12 customer-bound cards — per-customer pricing;
+ *                            S-RATES-CONSOLIDATE, overrides retired)
  *   equipment_units        (80 rows — all 6 statuses, 3 ownership_types)
  *   leases                 (60 rows — all 4 statuses)
  *   invoices               (~100 rows — all 7 statuses + 6 invoice_types)
@@ -532,37 +533,51 @@ foreach ($createdCustomerIds as $i => $c) {
 }
 echo "  + $contactsBuilt customer_contacts inserted\n";
 
-// ── customer_equipment_rates (25 custom rates)
-echo "\n5c) customer_equipment_rates\n";
-for ($i = 0; $i < 25; $i++) {
-    $c = $createdCustomerIds[$i % count($createdCustomerIds)];
-    $cat = pick(['dry_van', 'reefer', 'flatbed', 'chassis', 'step_deck']);
-    $base = match ($cat) {
-        'dry_van' => 110, 'reefer' => 145, 'flatbed' => 120, 'chassis' => 70, 'step_deck' => 130,
-    };
-    $daily   = (string) ($base + rnd(-10, 10)) . '.00';
-    $weekly  = (string) (($base + rnd(-10, 10)) * 6) . '.00';
-    $monthly = (string) (($base + rnd(-10, 10)) * 24) . '.00';
-    ins('customer_equipment_rates', [
-        'customer_id'  => $c['id'],
-        'equipment_type' => $cat,
-        'daily_rate'   => $daily,
-        'weekly_rate'  => $weekly,
-        'monthly_rate' => $monthly,
-        'mileage_rate' => $cat === 'reefer' ? '0.1400' : '0.0000',
-        'mileage_unit' => $cat === 'reefer' ? 'km' : 'miles',
-        'currency' => $c['currency'],
-        'minimum_charge' => money(500, 2000),
-        'notes' => "Seed custom rate for {$c['name']}. " . SEED_TAG,
+// ── customer-specific rate cards (S-RATES-CONSOLIDATE — overrides retired;
+//    per-customer pricing now lives on a customer-bound rate card).
+echo "\n5c) customer rate cards\n";
+$custCardCats = ['dry_van', 'reefer', 'flatbed', 'chassis', 'step_deck'];
+$builtCustCards = 0;
+foreach ($createdCustomerIds as $i => $c) {
+    if ($i >= 12) break;   // ~12 customers get their own card
+    $cardId = ins('rate_cards', [
+        'name'           => $c['name'] . ' — Custom Rates',
+        'customer_id'    => $c['id'],
+        'is_default'     => 0,
+        'description'    => "Seed customer rate card. " . SEED_TAG,
         'effective_from' => pastDate(30, 365),
-        'effective_to' => null,
-        'created_by' => 1,
-        'created_at' => nowStr(),
-        'updated_at' => nowStr(),
+        'effective_to'   => null,
+        'created_by'     => 1,
+        'created_at'     => nowStr(),
+        'updated_at'     => nowStr(),
     ]);
-    bump('customer_equipment_rates');
+    bump('rate_cards');
+
+    // 2–3 DISTINCT category items (prefix slice → no dup category per card,
+    // satisfies the uq_card_type unique key).
+    foreach (array_slice($custCardCats, 0, rnd(2, 3)) as $cat) {
+        $base = match ($cat) {
+            'dry_van' => 110, 'reefer' => 145, 'flatbed' => 120, 'chassis' => 70, 'step_deck' => 130,
+            default   => 100,
+        };
+        ins('rate_card_items', [
+            'rate_card_id'  => $cardId,
+            'equipment_type'=> $cat,
+            'daily_rate'    => (string) ($base) . '.00',
+            'weekly_rate'   => (string) ($base * 6) . '.00',
+            'monthly_rate'  => (string) ($base * 24) . '.00',
+            'mileage_rate'  => $cat === 'reefer' ? '0.1400' : '0.0000',
+            'mileage_unit'  => $cat === 'reefer' ? 'km' : 'miles',
+            'currency'      => $c['currency'],
+            'notes'         => SEED_TAG,
+            'created_at'    => nowStr(),
+            'updated_at'    => nowStr(),
+        ]);
+        bump('rate_card_items');
+    }
+    $builtCustCards++;
 }
-echo "  + " . $counts['customer_equipment_rates'] . " customer_equipment_rates inserted\n";
+echo "  + {$builtCustCards} customer rate cards inserted\n";
 
 // ════════════════════════════════════════════════════════════════
 // 6. EQUIPMENT UNITS (80 rows distributed across 12 templates)

@@ -3,63 +3,45 @@
 /**
  * tests/_smoke_lookup_rates.php
  *
- * S-LOOKUP-RATES-NAMESPACE — smoke test for api/v1/leases/lookup_rates.php.
- * Verifies the rate-lookup priority chain end-to-end across all 4 sources:
+ * S-RATES-CONSOLIDATE — end-to-end smoke for api/v1/leases/lookup_rates.php.
  *
- *   T1, T2 — Priority 1 (customer_equipment_rates) for two known
- *            customer/template pairs that have cer rows.
- *   T3     — Priority 2 (rate_card_items) for a customer with zero cer rows
- *            (customer 9 SMOKE-S4 test co) — proves the chain falls through
- *            cleanly past Priority 1 and lands on Priority 2.
- *   T4     — Priority 3 (equipment_templates default rates) using a
- *            temporary template with category='other' + non-null defaults.
- *   T5     — Priority 4 (none) using a temporary template with category='other'
- *            + NULL defaults.
+ * Verifies the post-consolidation rate-lookup priority chain (overrides
+ * retired). Self-seeding: the parent inserts its own temp customers, rate
+ * cards, items and templates (SMOKE-tagged), runs the real endpoint in a
+ * child process for each tier, asserts the result, and deletes everything
+ * in a finally — so it needs no external seed dataset and is verifiable on
+ * any DB.
  *
- * The two temp templates with category='other' are inserted by the parent,
- * IDs are passed to the children, and templates are deleted in a finally
- * block regardless of test outcome (test-pollution discipline).
+ *   T1 — customer-specific rate card wins (source='customer').
+ *   T2 — falls through to a global rate card (source='rate_card').
+ *   T3 — falls through to equipment_templates defaults (source='template').
+ *   T4 — nothing matches (source='none').
+ *   T5 — customer card is preferred over a global card for the SAME type.
  *
- * Each test forks a child PHP process because the endpoint exits via
- * json_response(); pattern borrowed from tests/_smoke_payoff_api.php.
+ * The endpoint exits via json_response(), so each lookup runs in a forked
+ * child (pattern borrowed from the prior version of this smoke).
  *
- * Pre-S-LOOKUP-RATES-NAMESPACE this entire chain was broken: lookup queried
- * by template name ("53ft Dry Van") but data stored category ("dry_van"),
- * so Priority 1 + 2 always returned 0 rows. Post-fix, T1/T2/T3 prove the
- * fix landed; T4/T5 prove the fall-through paths are still wired.
+ * Usage:  php tests/_smoke_lookup_rates.php
+ * Exit:   0 all pass, 1 on failure.
  *
- * Usage:
- *   php tests/_smoke_lookup_rates.php           # parent — runs all tests
- *   php tests/_smoke_lookup_rates.php <cust> <tmpl>   # child — runs one query
- *
- * Spec: S-LOOKUP-RATES-NAMESPACE
+ * @session S-RATES-CONSOLIDATE
  */
 
-// ── CHILD MODE ──────────────────────────────────────────────
+// ── CHILD MODE: run the endpoint with a super_admin session ─────────────
 if (isset($argv[1], $argv[2]) && ctype_digit($argv[1]) && ctype_digit($argv[2])) {
     $custId = (int) $argv[1];
     $tmplId = (int) $argv[2];
 
-    $_SERVER['HTTPS']           = 'on';
-    $_SERVER['HTTP_HOST']       = 'fleetforge.test';
     $_SERVER['REQUEST_METHOD']  = 'GET';
-    $_SERVER['REQUEST_URI']     = "/api/v1/leases/lookup_rates.php?customer_id={$custId}&equipment_template_id={$tmplId}";
-    $_SERVER['SCRIPT_NAME']     = '/api/v1/leases/lookup_rates.php';
     $_SERVER['REMOTE_ADDR']     = '127.0.0.1';
-    $_SERVER['HTTP_USER_AGENT'] = 'ff-smoke-cli';
     $_GET = ['customer_id' => $custId, 'equipment_template_id' => $tmplId];
 
     require_once __DIR__ . '/../config/app.php';
     require_once FF_ROOT . '/includes/db.php';
     require_once FF_ROOT . '/includes/auth.php';
     $_SESSION['ff_user'] = [
-        'id'          => 1,
-        'name'        => 'Smoke Admin',
-        'email'       => 'smoke@fleetforge.test',
-        'role_id'     => 1,
-        'role_slug'   => 'super_admin',
-        'permissions' => [],
-        'theme'       => 'dark',
+        'id' => 1, 'name' => 'Smoke Admin', 'email' => 'smoke@fleetforge.test',
+        'role_id' => 1, 'role_slug' => 'super_admin', 'permissions' => [], 'theme' => 'dark',
     ];
     $_SESSION['ff_last_activity'] = time();
 
@@ -67,154 +49,124 @@ if (isset($argv[1], $argv[2]) && ctype_digit($argv[1]) && ctype_digit($argv[2]))
     exit(0); // unreached — endpoint exits via json_response
 }
 
-// ── PARENT MODE ─────────────────────────────────────────────
+// ── PARENT MODE ─────────────────────────────────────────────────────────
 require_once __DIR__ . '/../config/app.php';
 require_once FF_ROOT . '/includes/db.php';
 
-echo "FleetForge — lookup_rates.php smoke test (S-LOOKUP-RATES-NAMESPACE)\n";
-echo str_repeat('═', 78), "\n";
+echo "FleetForge — lookup_rates.php smoke (S-RATES-CONSOLIDATE)\n";
+echo str_repeat('=', 70), "\n";
 
 $self = __FILE__;
 $php  = PHP_BINARY;
+$TAG  = '__SMOKE_LOOKUP_RATES__';
 
-// Insert two temporary templates with category='other' for T4 + T5.
-// Both deleted in finally regardless of outcome.
-$tmplWithDefaults = db_insert('equipment_templates', [
-    'name'                 => '__SMOKE_LOOKUP_RATES_TEMPLATE_HIT__',
-    'slug'                 => '__smoke_lookup_rates_template_hit__',
-    'category'             => 'other',
-    'default_daily_rate'   => '99.00',
-    'default_weekly_rate'  => '550.00',
-    'default_monthly_rate' => '1900.00',
-    'default_mileage_rate' => '0.1100',
-    'default_currency'     => 'CAD',
-    'default_mileage_unit' => 'km',
-    'is_active'            => 1,
-    'sort_order'           => 999,
-]);
-$tmplNullDefaults = db_insert('equipment_templates', [
-    'name'             => '__SMOKE_LOOKUP_RATES_NONE_HIT__',
-    'slug'             => '__smoke_lookup_rates_none_hit__',
-    'category'         => 'other',
-    'default_currency' => 'CAD',
-    'default_mileage_unit' => 'km',
-    'is_active'        => 1,
-    'sort_order'       => 999,
-]);
+// IDs to clean up regardless of outcome.
+$custWith = $custWithout = 0;
+$cardCust = $cardGlobal = 0;
+$tmplDryVan = $tmplDefaults = $tmplNull = 0;
 
-$cleanup = function () use ($tmplWithDefaults, $tmplNullDefaults) {
-    db_execute("DELETE FROM equipment_templates WHERE id IN (?, ?)", [$tmplWithDefaults, $tmplNullDefaults]);
-};
-
-$run = function (int $custId, int $tmplId) use ($php, $self): array {
-    $cmd = escapeshellarg($php) . ' ' . escapeshellarg($self) . ' '
-         . (int)$custId . ' ' . (int)$tmplId . ' 2>&1';
-    $out = shell_exec($cmd);
-    $json = json_decode($out, true);
-    if (!is_array($json)) {
-        return ['_raw' => trim((string)$out), '_parse_error' => true];
-    }
-    return $json;
-};
-
-$pass = 0;
-$fail = 0;
+$pass = 0; $fail = 0;
 $report = function (string $name, bool $ok, string $detail) use (&$pass, &$fail) {
     if ($ok) { $pass++; echo "  PASS  {$name}  {$detail}\n"; }
     else     { $fail++; echo "  FAIL  {$name}  {$detail}\n"; }
 };
 
+$run = function (int $custId, int $tmplId) use ($php, $self): array {
+    $cmd = escapeshellarg($php) . ' ' . escapeshellarg($self) . ' '
+         . (int)$custId . ' ' . (int)$tmplId . ' 2>/dev/null';
+    $out = shell_exec($cmd);
+    $start = is_string($out) ? strpos($out, '{"success"') : false;
+    if ($start !== false) $out = substr($out, $start);
+    $json = json_decode(trim((string)$out), true);
+    return is_array($json) ? $json : ['_parse_error' => true, '_raw' => trim((string)$out)];
+};
+
 try {
-    // ── T1 — Priority 1 customer hit (LP Logistics + 53ft Dry Van) ──
-    $r = $run(1, 1);
-    $report(
-        'T1 customer hit (cust=1 LP Logistics + tmpl=1 53ft Dry Van)',
-        ($r['data']['source'] ?? null) === 'customer'
-            && (string)($r['data']['mileage_rate'] ?? '') === '0.1800',
-        sprintf('source=%s mileage_rate=%s',
-            (string)($r['data']['source'] ?? '?'),
-            (string)($r['data']['mileage_rate'] ?? '?')
-        )
-    );
+    $today = date('Y-m-d');
+    $from  = date('Y-m-d', strtotime('-30 days'));
 
-    // ── T2 — Priority 1 customer hit (Avi Trucking + 53ft Chassis) ──
-    $r = $run(4, 5);
-    $report(
-        'T2 customer hit (cust=4 Avi Trucking + tmpl=5 53ft Chassis)',
-        ($r['data']['source'] ?? null) === 'customer'
-            && (string)($r['data']['mileage_rate'] ?? '') === '0.1300',
-        sprintf('source=%s mileage_rate=%s',
-            (string)($r['data']['source'] ?? '?'),
-            (string)($r['data']['mileage_rate'] ?? '?')
-        )
-    );
+    // ── Seed: two customers (one with a custom card, one without) ──────────
+    $custWith    = db_insert('customers', ['company_name' => "SMOKE With Card {$TAG}"]);
+    $custWithout = db_insert('customers', ['company_name' => "SMOKE No Card {$TAG}"]);
 
-    // ── T3 — Priority 2 rate_card hit (cust w/ no cer rows) ──
-    // Customer 9 SMOKE-S4 test co has zero cer rows; falls through Priority 1.
-    // Template 1 (dry_van) has rate_card_items rows → Priority 2 fires.
-    $r = $run(9, 1);
-    $report(
-        'T3 rate_card hit (cust=9 SMOKE Test Co [no cer] + tmpl=1 dry_van)',
-        ($r['data']['source'] ?? null) === 'rate_card',
-        sprintf('source=%s source_label=%s',
-            (string)($r['data']['source'] ?? '?'),
-            (string)($r['data']['source_label'] ?? '?')
-        )
-    );
+    // Templates: a dry_van (no defaults → forces card tiers) + two 'other'.
+    $tmplDryVan = db_insert('equipment_templates', [
+        'name' => "SMOKE DryVan {$TAG}", 'slug' => '__smoke_lr_dryvan__', 'category' => 'dry_van',
+        'is_active' => 1, 'sort_order' => 999,
+    ]);
+    $tmplDefaults = db_insert('equipment_templates', [
+        'name' => "SMOKE Defaults {$TAG}", 'slug' => '__smoke_lr_def__', 'category' => 'other',
+        'default_daily_rate' => '99.00', 'default_weekly_rate' => '550.00', 'default_monthly_rate' => '1900.00',
+        'default_mileage_rate' => '0.1100', 'default_currency' => 'CAD', 'default_mileage_unit' => 'km',
+        'is_active' => 1, 'sort_order' => 999,
+    ]);
+    $tmplNull = db_insert('equipment_templates', [
+        'name' => "SMOKE Null {$TAG}", 'slug' => '__smoke_lr_null__', 'category' => 'other',
+        'default_currency' => 'CAD', 'default_mileage_unit' => 'km', 'is_active' => 1, 'sort_order' => 999,
+    ]);
 
-    // ── T4 — Priority 3 template hit (cust w/ no cer + tmpl w/ no card match) ──
-    // Customer 9 + temp 'other' template with non-null defaults.
-    // No cer match (cust 9 has zero rows). No rci match ('other' has zero rci).
-    // Template defaults exist → Priority 3 fires.
-    $r = $run(9, $tmplWithDefaults);
-    $report(
-        "T4 template hit (cust=9 + tmpl_id={$tmplWithDefaults} other-with-defaults)",
-        ($r['data']['source'] ?? null) === 'template'
-            && (string)($r['data']['mileage_rate'] ?? '') === '0.1100',
-        sprintf('source=%s mileage_rate=%s',
-            (string)($r['data']['source'] ?? '?'),
-            (string)($r['data']['mileage_rate'] ?? '?')
-        )
-    );
+    // Global card with a dry_van item (mileage 0.0500).
+    $cardGlobal = db_insert('rate_cards', [
+        'name' => "SMOKE Global {$TAG}", 'customer_id' => null, 'is_default' => 0,
+        'effective_from' => $from, 'effective_to' => null, 'created_by' => null,
+    ]);
+    db_insert('rate_card_items', [
+        'rate_card_id' => $cardGlobal, 'equipment_type' => 'dry_van',
+        'daily_rate' => '120.00', 'mileage_rate' => '0.0500', 'mileage_unit' => 'km', 'currency' => 'CAD',
+    ]);
 
-    // ── T5 — Priority 4 none-found ──
-    // Customer 9 + temp 'other' template with NULL defaults. Nothing matches.
-    $r = $run(9, $tmplNullDefaults);
-    $report(
-        "T5 none-found (cust=9 + tmpl_id={$tmplNullDefaults} other-null-defaults)",
+    // Customer-specific card for $custWith, dry_van item (mileage 0.1800).
+    $cardCust = db_insert('rate_cards', [
+        'name' => "SMOKE Custom {$TAG}", 'customer_id' => $custWith, 'is_default' => 0,
+        'effective_from' => $from, 'effective_to' => null, 'created_by' => null,
+    ]);
+    db_insert('rate_card_items', [
+        'rate_card_id' => $cardCust, 'equipment_type' => 'dry_van',
+        'daily_rate' => '150.00', 'mileage_rate' => '0.1800', 'mileage_unit' => 'km', 'currency' => 'CAD',
+    ]);
+
+    // ── T1 — customer card wins ────────────────────────────────────────────
+    $r = $run($custWith, $tmplDryVan);
+    $report('T1 customer-specific card',
+        ($r['data']['source'] ?? null) === 'customer' && (string)($r['data']['mileage_rate'] ?? '') === '0.1800',
+        sprintf('source=%s mileage=%s', $r['data']['source'] ?? '?', $r['data']['mileage_rate'] ?? '?'));
+
+    // ── T2 — global card (customer has no custom card) ─────────────────────
+    $r = $run($custWithout, $tmplDryVan);
+    $report('T2 global card fallback',
+        ($r['data']['source'] ?? null) === 'rate_card' && (string)($r['data']['mileage_rate'] ?? '') === '0.0500',
+        sprintf('source=%s mileage=%s', $r['data']['source'] ?? '?', $r['data']['mileage_rate'] ?? '?'));
+
+    // ── T3 — template defaults (no card for category 'other') ──────────────
+    $r = $run($custWithout, $tmplDefaults);
+    $report('T3 template defaults',
+        ($r['data']['source'] ?? null) === 'template' && (string)($r['data']['mileage_rate'] ?? '') === '0.1100',
+        sprintf('source=%s mileage=%s', $r['data']['source'] ?? '?', $r['data']['mileage_rate'] ?? '?'));
+
+    // ── T4 — nothing matches ───────────────────────────────────────────────
+    $r = $run($custWithout, $tmplNull);
+    $report('T4 none-found',
         ($r['data']['source'] ?? null) === 'none'
             && array_key_exists('mileage_rate', $r['data'] ?? [])
             && $r['data']['mileage_rate'] === null,
-        sprintf('source=%s mileage_rate=%s',
-            (string)($r['data']['source'] ?? '?'),
-            !array_key_exists('mileage_rate', $r['data'] ?? []) ? 'unset'
-              : ($r['data']['mileage_rate'] === null ? 'null' : (string)$r['data']['mileage_rate'])
-        )
-    );
+        sprintf('source=%s mileage=%s', $r['data']['source'] ?? '?',
+            array_key_exists('mileage_rate', $r['data'] ?? []) ? ($r['data']['mileage_rate'] === null ? 'null' : $r['data']['mileage_rate']) : 'unset'));
 
-    // ── Control — pre-fix query shape returns ZERO rows on live data ──
-    // Sanity check that the bug WAS real and the fix flipped it. Pre-fix
-    // queried equipment_type IN (template names); post-fix queries
-    // equipment_type IN (categories).
-    $preBugCount = db_count(
-        "SELECT COUNT(*) FROM customer_equipment_rates
-         WHERE equipment_type IN ('53ft Dry Van','53ft Chassis','48ft Reefer','40ft Flatbed','20ft Container')"
-    );
-    $postFixCount = db_count(
-        "SELECT COUNT(*) FROM customer_equipment_rates
-         WHERE equipment_type IN ('dry_van','chassis','reefer','flatbed','container')"
-    );
-    $report(
-        'CONTROL pre-fix query shape (template names) returns 0 on live data',
-        $preBugCount === 0 && $postFixCount > 0,
-        "pre_form={$preBugCount}  post_form={$postFixCount}"
-    );
+    // ── T5 — customer card preferred over global for SAME type ─────────────
+    //    $custWith sees 0.1800 (custom), not 0.0500 (global) — already implied
+    //    by T1 vs T2, asserted explicitly here for the precedence guarantee.
+    $r = $run($custWith, $tmplDryVan);
+    $report('T5 customer card beats global',
+        (string)($r['data']['mileage_rate'] ?? '') === '0.1800' && (string)($r['data']['daily_rate'] ?? '') === '150.00',
+        sprintf('daily=%s mileage=%s', $r['data']['daily_rate'] ?? '?', $r['data']['mileage_rate'] ?? '?'));
 
 } finally {
-    $cleanup();
+    // ── Cleanup (rate_card_items cascade via FK on rate_card delete) ───────
+    foreach ([$cardCust, $cardGlobal] as $id) if ($id) db_execute("DELETE FROM rate_cards WHERE id = ?", [$id]);
+    foreach ([$tmplDryVan, $tmplDefaults, $tmplNull] as $id) if ($id) db_execute("DELETE FROM equipment_templates WHERE id = ?", [$id]);
+    foreach ([$custWith, $custWithout] as $id) if ($id) db_execute("DELETE FROM customers WHERE id = ?", [$id]);
 }
 
-echo "\n";
-echo str_repeat('═', 78), "\n";
+echo str_repeat('=', 70), "\n";
 echo "{$pass} passed, {$fail} failed\n";
 exit($fail === 0 ? 0 : 1);

@@ -19,7 +19,8 @@ $targets = [
     ['rate_card_items',           null],   // no tag col — count via parent
     ['customers',                 'internal_notes'],
     ['customer_contacts',         'notes'],
-    ['customer_equipment_rates',  'notes'],
+    // customer_equipment_rates retired (S-RATES-CONSOLIDATE) — per-customer
+    // pricing now lands in rate_cards / rate_card_items above.
     ['equipment_units',           'internal_notes'],
     ['leases',                    'notes'],
     ['invoices',                  'internal_notes'],
