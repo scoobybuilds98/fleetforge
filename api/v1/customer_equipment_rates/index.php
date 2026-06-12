@@ -4,10 +4,6 @@ declare(strict_types=1);
 /**
  * api/v1/customer_equipment_rates/index.php
  *
- * @deprecated S-RATES-CONSOLIDATE — customer pricing moved entirely onto rate
- *   cards. lookup_rates.php no longer reads this table and no UI calls this
- *   endpoint. Kept (with the table) for reversibility until a cleanup migration.
- *
  * List all custom rate overrides for a specific customer.
  *
  * Requires customer_id query parameter. Returns all active overrides

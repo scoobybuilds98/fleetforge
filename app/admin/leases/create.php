@@ -8,10 +8,9 @@ declare(strict_types=1);
  * @description New lease form. Customer dropdown auto-fills default rates and
  *              tax exemption from customer record. Equipment unit dropdown shows
  *              only 'available' units by default. Contract number is auto-suggested
- *              but editable. Rates section pre-fills via priority lookup
- *              (S-RATES-CONSOLIDATE): 1st customer-specific rate card, 2nd global
- *              rate card, 3rd template defaults. A source banner indicates which
- *              tier provided the rates.
+ *              but editable. Rates section pre-fills via S019 priority lookup:
+ *              1st customer_equipment_rates, 2nd rate_cards, 3rd template defaults.
+ *              A source banner indicates which tier provided the rates.
  *              Dual-unit mileage section (S-LEASE-UNITS): pill toggle selects
  *              primary unit (km/miles). Both rate and allowance fields stored
  *              in both units with live auto-conversion. Editable per-lease
@@ -24,7 +23,7 @@ declare(strict_types=1);
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases
  * @decisions   D16 (bcmath — rates as strings), D20 (FOR UPDATE on create),
  *              D30 (asset_url), D32 (CSS classes only from app.css)
- *              Rate priority (S-RATES-CONSOLIDATE): customer rate card → global rate card → template
+ *              S019 rate priority: customer_equipment_rates → rate_cards → template
  *              S-LEASE-UNITS: D-B (auto-reciprocate), D-C (sticky toggle), D-D (settings default)
  *              S-DROPDOWN-RETROFIT-1: D-DROPDOWN-RETROFIT-PATTERN
  * @session     S007, S019 (rate pre-fill upgrade), S-LEASE-UNITS, S-DROPDOWN-RETROFIT-1-LEASES-INVOICES

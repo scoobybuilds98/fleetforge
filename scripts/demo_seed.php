@@ -5,8 +5,7 @@
  * Creates a focused demo dataset for a live presentation:
  *   - 4 customers (Tonny Bhinder, Arsh Puar, Mike Lepore, Avi)
  *   - 2 bank accounts (CAD + USD)
- *   - 4 customer-specific rate cards (1 per customer; S-RATES-CONSOLIDATE — the
- *     card is the single source of customer pricing, no overrides seeded)
+ *   - 4 custom rate cards (1 per customer) + customer_equipment_rates overrides
  *   - 20 leases (5 per customer) with varied complexity
  *   - ~40 invoices covering historical + current billing periods
  *   - ~30 payments (paid, partial, overdue mix)
@@ -288,9 +287,6 @@ foreach ($rateCardDefs as $key => $def) {
         'name'           => $def['name'],
         'description'    => $def['description'],
         'is_default'     => 0,
-        // S-RATES-CONSOLIDATE: bind the card to its customer so lookup_rates.php
-        // prefers it per-customer (was previously a global card backed by overrides).
-        'customer_id'    => $customerIds[$key],
         'effective_from' => daysAgo(180),
         'created_by'     => $userId,
     ]);
@@ -309,9 +305,23 @@ foreach ($rateCardDefs as $key => $def) {
         ]);
     }
     printf("  Rate card id=%d for %s → %d items\n", $rcId, $key, count($def['items']));
-    // S-RATES-CONSOLIDATE: the customer-specific rate card above is now the
-    // single source of customer pricing — lookup_rates.php reads it directly,
-    // so no separate customer_equipment_rates rows are seeded.
+
+    // Also write customer_equipment_rates entries so the Create Lease page's
+    // rate-lookup API finds "customer" source and locks the rates
+    foreach ($def['items'] as $item) {
+        db_insert('customer_equipment_rates', [
+            'customer_id'     => $customerIds[$key],
+            'equipment_type'  => $item['equipment_type'],
+            'daily_rate'      => $item['daily'],
+            'weekly_rate'     => $item['weekly'],
+            'monthly_rate'    => $item['monthly'],
+            'mileage_rate'    => $item['mileage'],
+            'mileage_unit'    => $customerDefs[$key]['mileage_unit'],
+            'currency'        => $item['currency'],
+            'effective_from'  => daysAgo(180),
+            'created_by'      => $userId,
+        ]);
+    }
 }
 
 // ────────────────────────────────────────────────────────────

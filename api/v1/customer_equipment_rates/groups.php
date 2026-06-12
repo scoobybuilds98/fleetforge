@@ -4,9 +4,6 @@ declare(strict_types=1);
 /**
  * api/v1/customer_equipment_rates/groups.php
  *
- * @deprecated S-RATES-CONSOLIDATE — customer pricing moved onto rate cards;
- *   no UI calls this endpoint. Kept for reversibility until a cleanup migration.
- *
  * Paginated, name-searchable list of CUSTOMERS that have at least one
  * rate override — one row per customer with its override count.
  *

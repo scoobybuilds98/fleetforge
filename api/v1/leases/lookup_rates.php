@@ -6,23 +6,18 @@ declare(strict_types=1);
  *
  * Rate priority lookup for the lease create form.
  *
- * Priority order (S-RATES-CONSOLIDATE — overrides retired):
- *   1st — rate_cards: active card (effective_from <= today AND
+ * Priority order (CRITICAL — S019 session decision):
+ *   1st — customer_equipment_rates: customer + equipment_type match,
+ *          effective_from <= today AND (effective_to IS NULL OR effective_to >= today)
+ *   2nd — rate_cards: active card (effective_from <= today AND
  *          (effective_to IS NULL OR effective_to >= today) AND deleted_at IS NULL)
  *          with a rate_card_items row matching the equipment_type.
- *          Customer-specific card (customer_id = this customer) is preferred
- *          over a global card; then is_default=1, then latest effective_from.
- *   2nd — equipment_templates default rates (default_daily_rate etc.)
- *
- * HISTORY: customer_equipment_rates ("overrides") used to be Priority 1.
- * S-RATES-CONSOLIDATE folded every override into a customer-specific rate
- * card (scripts/migrate_overrides_to_rate_cards.php) and removed that block,
- * since a customer card already captures customer + equipment type + rates.
- * The override table is retained (unused) until a later cleanup migration.
+ *          If multiple active cards match, prefer is_default=1, then latest effective_from.
+ *   3rd — equipment_templates default rates (default_daily_rate etc.)
  *
  * Returns the rates found and the source so the UI can show the correct banner:
- *   "customer"  → green banner "Custom rates for this customer" (customer-specific card)
- *   "rate_card" → info banner "Standard rate card applied" (global card)
+ *   "customer" → green banner "Custom rates loaded for this customer"
+ *   "rate_card" → info banner "Standard rate card applied"
  *   "template"  → no banner / fields pre-filled but no badge
  *   "none"      → no banner / leave fields empty
  *
@@ -101,16 +96,45 @@ $equipmentType = $template['category'];
 $today         = date('Y-m-d');
 
 // -----------------------------------------------------------------------
-// 2. Priority 1 — active rate_cards with a matching item.
-//    Customer-specific card (customer_id = this customer) preferred first,
-//    then global (customer_id IS NULL) as fallback. D5: filter deleted_at.
-//    A customer-specific match reports source='customer' so the UI keeps
-//    showing the "custom rates for this customer" signal (overrides retired).
+// 2. Priority 1 — customer_equipment_rates
+// -----------------------------------------------------------------------
+$customerRate = db_row(
+    "SELECT daily_rate, weekly_rate, monthly_rate,
+            mileage_rate, mileage_unit, currency
+     FROM customer_equipment_rates
+     WHERE customer_id = ?
+       AND equipment_type = ?
+       AND effective_from <= ?
+       AND (effective_to IS NULL OR effective_to >= ?)
+     ORDER BY effective_from DESC
+     LIMIT 1",
+    [$customerId, $equipmentType, $today, $today]
+);
+
+if ($customerRate) {
+    $customer = db_row("SELECT company_name FROM customers WHERE id = ?", [$customerId]);
+    json_success([
+        'source'       => 'customer',
+        'source_label' => 'Custom rates for ' . ($customer['company_name'] ?? 'this customer'),
+        'daily_rate'   => $customerRate['daily_rate'],
+        'weekly_rate'  => $customerRate['weekly_rate'],
+        'monthly_rate' => $customerRate['monthly_rate'],
+        'mileage_rate' => $customerRate['mileage_rate'],
+        'mileage_unit' => $customerRate['mileage_unit'],
+        'currency'     => $customerRate['currency'],
+    ]);
+}
+
+// -----------------------------------------------------------------------
+// 3. Priority 2 — active rate_cards with matching item.
+//    2a. Customer-specific card (customer_id = this customer) preferred first.
+//    2b. Global card (customer_id IS NULL) as fallback.
+//    D5: rate_cards has deleted_at — always filter it.
 // -----------------------------------------------------------------------
 $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
             rci.mileage_rate, rci.mileage_unit, rci.currency,
-            rc.name AS card_name, rc.customer_id
+            rc.name AS card_name
      FROM rate_card_items rci
      JOIN rate_cards rc ON rc.id = rci.rate_card_id
      WHERE rci.equipment_type = ?
@@ -124,12 +148,9 @@ $rateCardItem = db_row(
 );
 
 if ($rateCardItem) {
-    $isCustomerCard = $rateCardItem['customer_id'] !== null;
     json_success([
-        'source'       => $isCustomerCard ? 'customer' : 'rate_card',
-        'source_label' => $isCustomerCard
-            ? 'Custom rate card: ' . $rateCardItem['card_name']
-            : 'Rate card: ' . $rateCardItem['card_name'],
+        'source'       => 'rate_card',
+        'source_label' => 'Rate card: ' . $rateCardItem['card_name'],
         'daily_rate'   => $rateCardItem['daily_rate'],
         'weekly_rate'  => $rateCardItem['weekly_rate'],
         'monthly_rate' => $rateCardItem['monthly_rate'],
@@ -140,7 +161,7 @@ if ($rateCardItem) {
 }
 
 // -----------------------------------------------------------------------
-// 3. Priority 2 — equipment_templates default rates
+// 4. Priority 3 — equipment_templates default rates
 // -----------------------------------------------------------------------
 $hasTemplateRates = (
     $template['default_daily_rate']   !== null ||
