@@ -227,7 +227,7 @@ require_once FF_ROOT . '/includes/header.php';
                       x-text="items.length + ' item' + (items.length === 1 ? '' : 's')"></span>
             </div>
             <?php if (can('rates', 'edit')): ?>
-            <button class="btn btn-secondary btn-sm" @click="addItem()">+ Add Row</button>
+            <button class="btn btn-secondary btn-sm" @click="addItem()">+ Add Type</button>
             <?php endif; ?>
         </div>
 
@@ -236,118 +236,176 @@ require_once FF_ROOT . '/includes/header.php';
                 <p class="text-secondary" style="font-size:0.875rem;margin:0;">No rate items yet.</p>
                 <?php if (can('rates', 'edit')): ?>
                 <p class="text-secondary" style="font-size:0.8125rem;margin:4px 0 0;">
-                    Click <strong>+ Add Row</strong> to define rates per equipment category.
+                    Click <strong>+ Add Type</strong> to define rates per equipment category.
                 </p>
                 <?php endif; ?>
             </div>
         </template>
 
         <template x-if="items.length > 0">
-            <div class="table-wrapper">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th style="min-width:130px;">Equipment Category</th>
-                            <th style="text-align:right;min-width:100px;">Daily ($)</th>
-                            <th style="text-align:right;min-width:100px;">Weekly ($)</th>
-                            <th style="text-align:right;min-width:105px;">Monthly ($)</th>
-                            <th style="text-align:right;min-width:90px;">Mileage</th>
-                            <th style="min-width:70px;">Unit</th>
-                            <th style="min-width:70px;">Currency</th>
-                            <?php if (can('rates', 'edit')): ?>
-                            <th style="text-align:right;white-space:nowrap;">Actions</th>
-                            <?php endif; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="(item, idx) in items" :key="idx">
-                            <tr>
-                                <!-- Equipment category -->
-                                <td>
-                                    <span x-show="!item.editing" class="badge badge-neutral"
-                                          style="font-size:0.8125rem;"
-                                          x-text="categoryLabel(item.equipment_type)"></span>
-                                    <template x-if="item.editing">
-                                        <select class="form-select form-select-sm" x-model="item.equipment_type">
-                                            <option value="">— Select —</option>
-                                            <?php foreach ($categories as $cat): ?>
-                                            <option value="<?= e($cat['category']) ?>">
-                                                <?= e($categoryLabels[$cat['category']] ?? ucfirst(str_replace('_', ' ', $cat['category']))) ?>
-                                            </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </template>
-                                </td>
-                                <!-- Daily -->
-                                <td class="font-mono" style="text-align:right;">
-                                    <span x-show="!item.editing"
-                                          x-text="item.daily_rate ? '$' + parseFloat(item.daily_rate).toFixed(2) : '—'"></span>
-                                    <input x-show="item.editing" type="number" class="form-control form-control-sm font-mono"
-                                           style="text-align:right;" x-model="item.daily_rate" step="0.01" min="0">
-                                </td>
-                                <!-- Weekly -->
-                                <td class="font-mono" style="text-align:right;">
-                                    <span x-show="!item.editing"
-                                          x-text="item.weekly_rate ? '$' + parseFloat(item.weekly_rate).toFixed(2) : '—'"></span>
-                                    <input x-show="item.editing" type="number" class="form-control form-control-sm font-mono"
-                                           style="text-align:right;" x-model="item.weekly_rate" step="0.01" min="0">
-                                </td>
-                                <!-- Monthly -->
-                                <td class="font-mono" style="text-align:right;">
-                                    <span x-show="!item.editing"
-                                          x-text="item.monthly_rate ? '$' + parseFloat(item.monthly_rate).toFixed(2) : '—'"></span>
-                                    <input x-show="item.editing" type="number" class="form-control form-control-sm font-mono"
-                                           style="text-align:right;" x-model="item.monthly_rate" step="0.01" min="0">
-                                </td>
-                                <!-- Mileage -->
-                                <td class="font-mono" style="text-align:right;">
-                                    <span x-show="!item.editing"
-                                          x-text="item.mileage_rate ? '$' + parseFloat(item.mileage_rate).toFixed(4) : '—'"></span>
-                                    <input x-show="item.editing" type="number" class="form-control form-control-sm font-mono"
-                                           style="text-align:right;" x-model="item.mileage_rate" step="0.0001" min="0">
-                                </td>
-                                <!-- Unit -->
-                                <td>
-                                    <span x-show="!item.editing" x-text="item.mileage_unit"></span>
-                                    <select x-show="item.editing" class="form-select form-select-sm" x-model="item.mileage_unit">
-                                        <option value="km">km</option>
-                                        <option value="miles">miles</option>
+            <div class="card-body" style="padding-top:8px;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+                    <template x-for="(item, idx) in items" :key="idx">
+                        <div style="border:1px solid var(--border-color);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+
+                            <!-- View mode: equipment type name + currency + edit/delete -->
+                            <template x-if="!item.editing">
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                                    <span class="font-semibold"
+                                          x-text="categoryLabel(item.equipment_type)"
+                                          style="font-size:0.9375rem;font-weight:600;"></span>
+                                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                                        <span class="badge badge-neutral" style="font-size:0.7rem;"
+                                              x-text="item.currency || 'CAD'"></span>
+                                        <?php if (can('rates', 'edit')): ?>
+                                        <button class="btn btn-secondary btn-sm"
+                                                style="padding:2px 10px;font-size:0.75rem;"
+                                                @click="item.editing = true">Edit</button>
+                                        <button style="background:none;border:none;cursor:pointer;color:var(--color-danger);font-size:1.1rem;line-height:1;padding:2px 4px;"
+                                                @click="removeItem(idx)" title="Remove">×</button>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Edit mode: equipment type selector + currency + remove -->
+                            <template x-if="item.editing">
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <select class="form-select form-select-sm"
+                                            x-model="item.equipment_type"
+                                            style="flex:1;min-width:0;">
+                                        <option value="">— Equipment Type —</option>
+                                        <?php foreach ($categories as $cat): ?>
+                                        <option value="<?= e($cat['category']) ?>">
+                                            <?= e($categoryLabels[$cat['category']] ?? ucfirst(str_replace('_', ' ', $cat['category']))) ?>
+                                        </option>
+                                        <?php endforeach; ?>
                                     </select>
-                                </td>
-                                <!-- Currency -->
-                                <td>
-                                    <span x-show="!item.editing" x-text="item.currency"></span>
-                                    <select x-show="item.editing" class="form-select form-select-sm" x-model="item.currency">
+                                    <select class="form-select form-select-sm"
+                                            x-model="item.currency"
+                                            style="width:75px;flex-shrink:0;">
                                         <option value="CAD">CAD</option>
                                         <option value="USD">USD</option>
                                     </select>
-                                </td>
-                                <?php if (can('rates', 'edit')): ?>
-                                <td style="text-align:right;white-space:nowrap;">
-                                    <button class="btn btn-secondary btn-sm" x-show="!item.editing"
-                                            @click="item.editing = true">Edit</button>
-                                    <button class="btn btn-primary btn-sm"   x-show="item.editing"
-                                            @click="saveItems()">Save All</button>
-                                    <button class="btn btn-secondary btn-sm" x-show="item.editing"
+                                    <?php if (can('rates', 'edit')): ?>
+                                    <button style="background:none;border:none;cursor:pointer;color:var(--color-danger);font-size:1.25rem;line-height:1;padding:2px 4px;flex-shrink:0;"
+                                            @click="removeItem(idx)" title="Remove">×</button>
+                                    <?php endif; ?>
+                                </div>
+                            </template>
+
+                            <!-- Divider -->
+                            <div style="border-top:1px solid var(--border-color);margin:0 -16px;"></div>
+
+                            <!-- View mode: rate key-value pairs -->
+                            <template x-if="!item.editing">
+                                <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:0.8125rem;align-items:baseline;">
+                                    <span x-show="item.daily_rate" class="text-secondary">Daily</span>
+                                    <span x-show="item.daily_rate" class="font-mono"
+                                          x-text="item.daily_rate ? '$' + parseFloat(item.daily_rate).toFixed(2) : ''"></span>
+
+                                    <span x-show="item.weekly_rate" class="text-secondary">Weekly</span>
+                                    <span x-show="item.weekly_rate" class="font-mono"
+                                          x-text="item.weekly_rate ? '$' + parseFloat(item.weekly_rate).toFixed(2) : ''"></span>
+
+                                    <span x-show="item.monthly_rate" class="text-secondary">Monthly</span>
+                                    <span x-show="item.monthly_rate" class="font-mono"
+                                          x-text="item.monthly_rate ? '$' + parseFloat(item.monthly_rate).toFixed(2) : ''"></span>
+
+                                    <span x-show="item.mileage_rate" class="text-secondary">Mileage</span>
+                                    <span x-show="item.mileage_rate" class="font-mono"
+                                          x-text="item.mileage_rate ? '$' + parseFloat(item.mileage_rate).toFixed(4) + '/' + item.mileage_unit : ''"></span>
+
+                                    <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate">
+                                        <span class="text-secondary" style="grid-column:1/-1;font-style:italic;">No rates set</span>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <!-- Edit mode: 2×2 rate input grid -->
+                            <template x-if="item.editing">
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+
+                                    <div>
+                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Daily Rate</div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.daily_rate" step="0.01" min="0" placeholder="0.00">
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Weekly Rate</div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.weekly_rate" step="0.01" min="0" placeholder="0.00">
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Monthly Rate</div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.monthly_rate" step="0.01" min="0" placeholder="0.00">
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                                            <span style="font-size:0.75rem;color:var(--text-secondary);">Mileage Rate</span>
+                                            <select class="form-select form-select-sm"
+                                                    x-model="item.mileage_unit"
+                                                    style="width:62px;height:22px;font-size:0.7rem;padding:1px 4px;">
+                                                <option value="km">/ km</option>
+                                                <option value="miles">/ mi</option>
+                                            </select>
+                                        </div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.mileage_rate" step="0.0001" min="0" placeholder="0.0000">
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </template>
+
+                            <!-- Edit mode: save/cancel actions -->
+                            <?php if (can('rates', 'edit')): ?>
+                            <template x-if="item.editing">
+                                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
+                                    <button class="btn btn-secondary btn-sm"
                                             @click="cancelItemEdit(idx)">Cancel</button>
-                                    <button class="btn btn-ghost btn-sm" style="color:var(--color-danger);"
-                                            @click="removeItem(idx)">×</button>
-                                </td>
-                                <?php endif; ?>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
+                                    <button class="btn btn-primary btn-sm"
+                                            :disabled="saving"
+                                            @click="saveItems()">
+                                        <span x-text="saving ? 'Saving…' : 'Save'"></span>
+                                    </button>
+                                </div>
+                            </template>
+                            <?php endif; ?>
+
+                        </div>
+                    </template>
+                </div>
+
+                <?php if (can('rates', 'edit')): ?>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
+                    <button class="btn btn-ghost btn-sm" @click="addItem()">+ Add another type</button>
+                    <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveItems()">
+                        <span x-text="saving ? 'Saving…' : 'Save All Items'"></span>
+                    </button>
+                </div>
+                <?php endif; ?>
             </div>
         </template>
-
-        <?php if (can('rates', 'edit')): ?>
-        <div class="card-footer" style="text-align:right;">
-            <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveItems()">
-                <span x-text="saving ? 'Saving…' : 'Save All Items'"></span>
-            </button>
-        </div>
-        <?php endif; ?>
     </div>
 
     <!-- ── Delete card button ─────────────────────────────────────────────── -->

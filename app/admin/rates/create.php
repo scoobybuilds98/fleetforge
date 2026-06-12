@@ -185,14 +185,14 @@ require_once FF_ROOT . '/includes/header.php';
                 <div>
                     <h3 class="card-title" style="margin:0;">Rate Items</h3>
                     <p class="text-secondary" style="font-size:0.8125rem;margin:2px 0 0;">
-                        One row per equipment category. Rates are used when creating leases.
+                        One card per equipment category. Rates are used when creating leases.
                     </p>
                 </div>
                 <button type="button" class="btn btn-secondary btn-sm"
                         @click="addItem()">+ Add Equipment Type</button>
             </div>
 
-            <!-- Empty state — shown only before any rows added -->
+            <!-- Empty state -->
             <template x-if="items.length === 0">
                 <div class="card-body" style="text-align:center;padding:40px 24px;">
                     <div style="width:44px;height:44px;border-radius:50%;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;">
@@ -203,96 +203,116 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </template>
 
-            <!-- Items table -->
+            <!-- Rate item cards -->
             <template x-if="items.length > 0">
-                <div class="table-wrapper">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th style="min-width:140px;">Equipment Category <span class="text-danger">*</span></th>
-                                <th style="text-align:right;min-width:100px;">Daily ($)</th>
-                                <th style="text-align:right;min-width:100px;">Weekly ($)</th>
-                                <th style="text-align:right;min-width:105px;">Monthly ($)</th>
-                                <th style="text-align:right;min-width:90px;">Mileage</th>
-                                <th style="min-width:75px;">Unit</th>
-                                <th style="min-width:75px;">Currency</th>
-                                <th style="width:40px;"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="(item, idx) in items" :key="item._key">
-                                <tr :class="item._error ? 'ff-row-error' : ''">
-                                    <td>
-                                        <select class="form-select form-select-sm"
-                                                x-model="item.equipment_type"
-                                                :class="item._error ? 'is-invalid' : ''"
-                                                @change="onTypeChange(idx)">
-                                            <option value="">— Select —</option>
-                                            <?php foreach ($categories as $cat): ?>
-                                            <option value="<?= e($cat['category']) ?>">
-                                                <?= e($categoryLabels[$cat['category']] ?? ucfirst(str_replace('_', ' ', $cat['category']))) ?>
-                                            </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                        <div class="invalid-feedback" x-show="item._error" x-text="item._error"></div>
-                                    </td>
-                                    <td>
-                                        <input type="number" class="form-control form-control-sm font-mono"
-                                               style="text-align:right;"
-                                               x-model="item.daily_rate"
-                                               step="0.01" min="0" placeholder="—">
-                                    </td>
-                                    <td>
-                                        <input type="number" class="form-control form-control-sm font-mono"
-                                               style="text-align:right;"
-                                               x-model="item.weekly_rate"
-                                               step="0.01" min="0" placeholder="—">
-                                    </td>
-                                    <td>
-                                        <input type="number" class="form-control form-control-sm font-mono"
-                                               style="text-align:right;"
-                                               x-model="item.monthly_rate"
-                                               step="0.01" min="0" placeholder="—">
-                                    </td>
-                                    <td>
-                                        <input type="number" class="form-control form-control-sm font-mono"
-                                               style="text-align:right;"
-                                               x-model="item.mileage_rate"
-                                               step="0.0001" min="0" placeholder="—">
-                                    </td>
-                                    <td>
-                                        <select class="form-select form-select-sm"
-                                                x-model="item.mileage_unit">
-                                            <option value="km">km</option>
-                                            <option value="miles">miles</option>
-                                        </select>
-                                    </td>
-                                    <td>
-                                        <select class="form-select form-select-sm"
-                                                x-model="item.currency">
-                                            <option value="CAD">CAD</option>
-                                            <option value="USD">USD</option>
-                                        </select>
-                                    </td>
-                                    <td style="text-align:center;">
-                                        <button type="button" class="btn btn-ghost btn-sm"
-                                                style="color:var(--color-danger);padding:4px 8px;"
-                                                @click="removeItem(idx)"
-                                                title="Remove row">×</button>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
-            </template>
+                <div class="card-body" style="padding-top:8px;">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+                        <template x-for="(item, idx) in items" :key="item._key">
+                            <div :style="item._error ? 'border:1px solid var(--color-danger);' : 'border:1px solid var(--border-color);'"
+                                 style="border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;">
 
-            <template x-if="items.length > 0">
-                <div class="card-footer" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;">
-                    <button type="button" class="btn btn-ghost btn-sm"
-                            @click="addItem()">+ Add another</button>
-                    <span class="text-secondary" style="font-size:0.8125rem;"
-                          x-text="items.length + ' item' + (items.length === 1 ? '' : 's')"></span>
+                                <!-- Equipment type + currency + remove -->
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <select class="form-select form-select-sm"
+                                            x-model="item.equipment_type"
+                                            :class="item._error ? 'is-invalid' : ''"
+                                            @change="onTypeChange(idx)"
+                                            style="flex:1;min-width:0;">
+                                        <option value="">— Equipment Type —</option>
+                                        <?php foreach ($categories as $cat): ?>
+                                        <option value="<?= e($cat['category']) ?>">
+                                            <?= e($categoryLabels[$cat['category']] ?? ucfirst(str_replace('_', ' ', $cat['category']))) ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <select class="form-select form-select-sm"
+                                            x-model="item.currency"
+                                            style="width:75px;flex-shrink:0;">
+                                        <option value="CAD">CAD</option>
+                                        <option value="USD">USD</option>
+                                    </select>
+                                    <button type="button"
+                                            style="background:none;border:none;cursor:pointer;color:var(--color-danger);font-size:1.25rem;line-height:1;padding:2px 4px;flex-shrink:0;"
+                                            @click="removeItem(idx)"
+                                            title="Remove">×</button>
+                                </div>
+
+                                <div x-show="item._error" class="text-danger" style="font-size:0.8rem;margin-top:-8px;"
+                                     x-text="item._error"></div>
+
+                                <!-- Divider -->
+                                <div style="border-top:1px solid var(--border-color);margin:0 -16px;"></div>
+
+                                <!-- Rate inputs 2×2 grid -->
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+
+                                    <!-- Daily -->
+                                    <div>
+                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Daily Rate</div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.daily_rate"
+                                                   step="0.01" min="0" placeholder="0.00">
+                                        </div>
+                                    </div>
+
+                                    <!-- Weekly -->
+                                    <div>
+                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Weekly Rate</div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.weekly_rate"
+                                                   step="0.01" min="0" placeholder="0.00">
+                                        </div>
+                                    </div>
+
+                                    <!-- Monthly -->
+                                    <div>
+                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Monthly Rate</div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.monthly_rate"
+                                                   step="0.01" min="0" placeholder="0.00">
+                                        </div>
+                                    </div>
+
+                                    <!-- Mileage -->
+                                    <div>
+                                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                                            <span style="font-size:0.75rem;color:var(--text-secondary);">Mileage Rate</span>
+                                            <select class="form-select form-select-sm"
+                                                    x-model="item.mileage_unit"
+                                                    style="width:62px;height:22px;font-size:0.7rem;padding:1px 4px;">
+                                                <option value="km">/ km</option>
+                                                <option value="miles">/ mi</option>
+                                            </select>
+                                        </div>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.8125rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control form-control-sm font-mono"
+                                                   style="padding-left:20px;"
+                                                   x-model="item.mileage_rate"
+                                                   step="0.0001" min="0" placeholder="0.0000">
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
+                        <button type="button" class="btn btn-ghost btn-sm"
+                                @click="addItem()">+ Add another type</button>
+                        <span class="text-secondary" style="font-size:0.8125rem;"
+                              x-text="items.length + ' item' + (items.length === 1 ? '' : 's')"></span>
+                    </div>
                 </div>
             </template>
         </div>
