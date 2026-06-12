@@ -37,9 +37,11 @@ $card = db_row(
     "SELECT
          rc.id, rc.name, rc.description, rc.is_default,
          rc.effective_from, rc.effective_to,
+         rc.customer_id, c.company_name AS customer_name,
          rc.created_by, rc.created_at, rc.updated_at,
          u.name AS created_by_name
      FROM rate_cards rc
+     LEFT JOIN customers c ON c.id = rc.customer_id AND c.deleted_at IS NULL
      LEFT JOIN users u ON u.id = rc.created_by AND u.deleted_at IS NULL
      WHERE rc.id = ? AND rc.deleted_at IS NULL",
     [$id]

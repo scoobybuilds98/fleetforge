@@ -5,21 +5,15 @@ declare(strict_types=1);
  * app/admin/rates/create.php
  *
  * Create a new rate card.
- *
- * Form collects: name, description, effective_from, effective_to, is_default,
- * and a dynamic items table (one row per equipment type with rate columns).
- *
- * On submit: POST to api/v1/rate_cards/create with items[] array.
- * On success: redirect to rates/show?id=<new_id>.
- *
- * D30: asset_url() / base_url().
- * D32: Only confirmed CSS classes.
- * D16: Rate fields use step="0.01" — bcmath validation happens server-side.
+ * Optional customer_id links the card to a specific customer; NULL = global.
+ * Equipment type stored as category slug (chassis|dry_van|…) matching
+ * lookup_rates.php — fixes S-RATES-UI-CATEGORY-DEDUP.
+ * No auto-added blank row on init — items added explicitly via button.
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
- *           api/v1/rate_cards/create.php, api/v1/equipment/templates/index.php
+ *           api/v1/rate_cards/create.php, includes/partials/record-picker.php
  * @decisions D7/D16/D30/D32
- * @session  S019
+ * @session  S019, S-RATES-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -28,16 +22,40 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('rates', 'create');
 
-// Load equipment templates for the items dropdown (active only)
-$templates = db_select(
-    "SELECT id, name, category, default_daily_rate, default_weekly_rate,
-            default_monthly_rate, default_mileage_rate, default_currency, default_mileage_unit
-     FROM equipment_templates
+// Distinct equipment categories from active templates — one rate per category
+$categories = db_select(
+    "SELECT DISTINCT category FROM equipment_templates
      WHERE deleted_at IS NULL AND is_active = 1
-     ORDER BY name ASC"
+     ORDER BY category ASC"
 );
 
-$pageTitle = 'New Rate Card';
+// Pre-fill customer if passed via query string (e.g. from customer profile)
+$preCustomerId    = clean_int($_GET['customer_id'] ?? null);
+$preCustomerLabel = '';
+if ($preCustomerId) {
+    $preCustomer = db_row("SELECT company_name FROM customers WHERE id = ? AND deleted_at IS NULL", [$preCustomerId]);
+    if ($preCustomer) {
+        $preCustomerLabel = $preCustomer['company_name'];
+    } else {
+        $preCustomerId = null;
+    }
+}
+
+// Friendly label map for category slugs
+$categoryLabels = [
+    'chassis'   => 'Chassis',
+    'dry_van'   => 'Dry Van',
+    'reefer'    => 'Reefer',
+    'container' => 'Container',
+    'flatbed'   => 'Flatbed',
+    'step_deck' => 'Step Deck',
+    'lowboy'    => 'Lowboy',
+    'tanker'    => 'Tanker',
+    'dump'      => 'Dump',
+    'other'     => 'Other',
+];
+
+$pageTitle      = 'New Rate Card';
 $helpModuleSlug = 'rates';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -57,6 +75,8 @@ require_once FF_ROOT . '/includes/header.php';
          style="margin-bottom:16px;" x-cloak></div>
 
     <form @submit.prevent="submit()">
+
+        <!-- ── Card Details ──────────────────────────────────────────────── -->
         <div class="card" style="margin-bottom:16px;">
             <div class="card-header">
                 <h3 class="card-title">Rate Card Details</h3>
@@ -66,13 +86,36 @@ require_once FF_ROOT . '/includes/header.php';
 
                     <!-- Name -->
                     <div class="form-group">
-                        <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+                        <label class="form-label" for="name">Card Name <span class="text-danger">*</span></label>
                         <input type="text" id="name" class="form-control"
                                :class="errors.name ? 'is-invalid' : ''"
                                x-model="form.name" maxlength="255"
                                placeholder="e.g. Standard 2025 Rates">
                         <div class="form-hint" style="text-align:right;" x-text="(form.name || '').length + ' / 255'"></div>
                         <div class="invalid-feedback" x-show="errors.name" x-text="errors.name"></div>
+                    </div>
+
+                    <!-- Customer picker (optional) -->
+                    <div class="form-group">
+                        <label class="form-label">Customer <span class="text-secondary" style="font-weight:400;">(optional)</span></label>
+                        <?php
+                        $pickerName     = 'customerPicker';
+                        $pickerConfig   = [
+                            'endpoint'    => '/api/v1/customers/index.php',
+                            'searchParam' => 'search',
+                            'resultKey'   => 'items',
+                            'mapResult'   => "r => ({ id: r.id, label: r.company_name, sublabel: (r.city ?? '') + (r.province ? ', ' + r.province : '') })",
+                            'placeholder' => 'Leave blank for a global rate card…',
+                            'initialId'   => $preCustomerId,
+                            'initialLabel'=> $preCustomerLabel,
+                        ];
+                        $pickerOnPicked  = 'form.customer_id = $event.detail.id';
+                        $pickerOnCleared = "form.customer_id = null";
+                        $pickerError     = 'errors.customer_id';
+                        require FF_ROOT . '/includes/partials/record-picker.php';
+                        ?>
+                        <div class="form-hint">Global rate cards apply to all customers. A customer-specific card takes priority for that customer.</div>
+                        <div class="invalid-feedback" x-show="errors.customer_id" x-text="errors.customer_id"></div>
                     </div>
 
                     <!-- Effective From -->
@@ -82,9 +125,9 @@ require_once FF_ROOT . '/includes/header.php';
                             <input type="date" id="effective_from" class="form-control"
                                    :class="errors.effective_from ? 'is-invalid' : ''"
                                    x-model="form.effective_from"
-                                   min="<?= date('Y-m-d') ?>"
                                    x-ref="rateEffFrom" style="flex:1;">
-                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.rateEffFrom.showPicker ? $refs.rateEffFrom.showPicker() : $refs.rateEffFrom.click()">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;"
+                                    @click="$refs.rateEffFrom.showPicker ? $refs.rateEffFrom.showPicker() : $refs.rateEffFrom.click()">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
                             </button>
                         </div>
@@ -100,7 +143,8 @@ require_once FF_ROOT . '/includes/header.php';
                                    x-model="form.effective_to"
                                    :min="form.effective_from || ''"
                                    x-ref="rateEffTo" style="flex:1;">
-                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.rateEffTo.showPicker ? $refs.rateEffTo.showPicker() : $refs.rateEffTo.click()">
+                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;"
+                                    @click="$refs.rateEffTo.showPicker ? $refs.rateEffTo.showPicker() : $refs.rateEffTo.click()">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
                             </button>
                         </div>
@@ -128,8 +172,8 @@ require_once FF_ROOT . '/includes/header.php';
 
                 </div>
 
-                <div class="form-hint" x-show="form.is_default" style="margin-top:8px;">
-                    ⚠ Setting this as default will remove default status from any existing default card.
+                <div class="alert alert-warning" x-show="form.is_default" style="margin-top:8px;padding:10px 14px;" x-cloak>
+                    Setting this as default will remove the default flag from any existing default card.
                 </div>
 
             </div>
@@ -138,108 +182,119 @@ require_once FF_ROOT . '/includes/header.php';
         <!-- ── Rate Items ─────────────────────────────────────────────────── -->
         <div class="card" style="margin-bottom:16px;">
             <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-                <h3 class="card-title">Rate Items</h3>
-                <button type="button" class="btn btn-secondary btn-sm"
-                        @click="addItem()">Add new +</button>
-            </div>
-            <div class="card-body">
-
-                <template x-if="items.length === 0">
-                    <p class="text-secondary" style="font-size:0.875rem;">
-                        No items yet. Add at least one equipment type to define rates.
+                <div>
+                    <h3 class="card-title" style="margin:0;">Rate Items</h3>
+                    <p class="text-secondary" style="font-size:0.8125rem;margin:2px 0 0;">
+                        One row per equipment category. Rates are used when creating leases.
                     </p>
-                </template>
-
-                <template x-if="items.length > 0">
-                    <div class="table-wrapper">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Equipment Type <span class="text-danger">*</span></th>
-                                    <th style="text-align:right;">Daily ($)</th>
-                                    <th style="text-align:right;">Weekly ($)</th>
-                                    <th style="text-align:right;">Monthly ($)</th>
-                                    <th style="text-align:right;">Mileage Rate</th>
-                                    <th>Unit</th>
-                                    <th>Currency</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <template x-for="(item, idx) in items" :key="idx">
-                                    <tr>
-                                        <td>
-                                            <!-- KNOWN ISSUE (S-RATES-UI-CATEGORY-DEDUP): stores template name
-                                                 into rate_card_items.equipment_type, but lookup_rates.php
-                                                 matches by template category slug — these rows silently miss
-                                                 until S-RATES-UI-CATEGORY-DEDUP resolves the name/category
-                                                 mismatch. FK migration to template_id blocked by same issue. -->
-                                            <select class="form-select form-select-sm"
-                                                    x-model="item.equipment_type"
-                                                    @change="onTypeChange(idx)">
-                                                <option value="">— Select —</option>
-                                                <?php foreach ($templates as $t): ?>
-                                                <option value="<?= e($t['name']) ?>"
-                                                        data-daily="<?= e($t['default_daily_rate'] ?? '') ?>"
-                                                        data-weekly="<?= e($t['default_weekly_rate'] ?? '') ?>"
-                                                        data-monthly="<?= e($t['default_monthly_rate'] ?? '') ?>"
-                                                        data-mileage="<?= e($t['default_mileage_rate'] ?? '') ?>"
-                                                        data-currency="<?= e($t['default_currency']) ?>"
-                                                        data-unit="<?= e($t['default_mileage_unit']) ?>">
-                                                    <?= e($t['name']) ?>
-                                                </option>
-                                                <?php endforeach; ?>
-                                            </select>
-                                        </td>
-                                        <td>
-                                            <input type="number" class="form-control font-mono"
-                                                   style="width:100px;text-align:right;"
-                                                   x-model="item.daily_rate"
-                                                   step="0.01" min="0" placeholder="0.00">
-                                        </td>
-                                        <td>
-                                            <input type="number" class="form-control font-mono"
-                                                   style="width:100px;text-align:right;"
-                                                   x-model="item.weekly_rate"
-                                                   step="0.01" min="0" placeholder="0.00">
-                                        </td>
-                                        <td>
-                                            <input type="number" class="form-control font-mono"
-                                                   style="width:110px;text-align:right;"
-                                                   x-model="item.monthly_rate"
-                                                   step="0.01" min="0" placeholder="0.00">
-                                        </td>
-                                        <td>
-                                            <input type="number" class="form-control font-mono"
-                                                   style="width:90px;text-align:right;"
-                                                   x-model="item.mileage_rate"
-                                                   step="0.0001" min="0" placeholder="0.0000">
-                                        </td>
-                                        <td>
-                                            <select class="form-select form-select-sm"
-                                                    x-model="item.mileage_unit" style="width:80px;">
-                                                <option value="km">km</option>
-                                                <option value="miles">miles</option>
-                                            </select>
-                                        </td>
-                                        <td>
-                                            <select class="form-select form-select-sm"
-                                                    x-model="item.currency" style="width:75px;">
-                                                <option value="CAD">CAD</option>
-                                                <option value="USD">USD</option>
-                                            </select>
-                                        </td>
-                                        <td>
-                                            <button type="button" class="btn btn-danger btn-sm"
-                                                    @click="removeItem(idx)">×</button>
-                                        </td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
-                </template>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm"
+                        @click="addItem()">+ Add Equipment Type</button>
             </div>
+
+            <!-- Empty state — shown only before any rows added -->
+            <template x-if="items.length === 0">
+                <div class="card-body" style="text-align:center;padding:40px 24px;">
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:22px;height:22px;color:var(--text-secondary);"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33"/></svg>
+                    </div>
+                    <p class="text-secondary" style="font-size:0.875rem;margin:0;">No rate items yet.</p>
+                    <p class="text-secondary" style="font-size:0.8125rem;margin:4px 0 0;">Click <strong>+ Add Equipment Type</strong> to define rates per category.</p>
+                </div>
+            </template>
+
+            <!-- Items table -->
+            <template x-if="items.length > 0">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th style="min-width:140px;">Equipment Category <span class="text-danger">*</span></th>
+                                <th style="text-align:right;min-width:100px;">Daily ($)</th>
+                                <th style="text-align:right;min-width:100px;">Weekly ($)</th>
+                                <th style="text-align:right;min-width:105px;">Monthly ($)</th>
+                                <th style="text-align:right;min-width:90px;">Mileage</th>
+                                <th style="min-width:75px;">Unit</th>
+                                <th style="min-width:75px;">Currency</th>
+                                <th style="width:40px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="(item, idx) in items" :key="item._key">
+                                <tr :class="item._error ? 'ff-row-error' : ''">
+                                    <td>
+                                        <select class="form-select form-select-sm"
+                                                x-model="item.equipment_type"
+                                                :class="item._error ? 'is-invalid' : ''"
+                                                @change="onTypeChange(idx)">
+                                            <option value="">— Select —</option>
+                                            <?php foreach ($categories as $cat): ?>
+                                            <option value="<?= e($cat['category']) ?>">
+                                                <?= e($categoryLabels[$cat['category']] ?? ucfirst(str_replace('_', ' ', $cat['category']))) ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <div class="invalid-feedback" x-show="item._error" x-text="item._error"></div>
+                                    </td>
+                                    <td>
+                                        <input type="number" class="form-control form-control-sm font-mono"
+                                               style="text-align:right;"
+                                               x-model="item.daily_rate"
+                                               step="0.01" min="0" placeholder="—">
+                                    </td>
+                                    <td>
+                                        <input type="number" class="form-control form-control-sm font-mono"
+                                               style="text-align:right;"
+                                               x-model="item.weekly_rate"
+                                               step="0.01" min="0" placeholder="—">
+                                    </td>
+                                    <td>
+                                        <input type="number" class="form-control form-control-sm font-mono"
+                                               style="text-align:right;"
+                                               x-model="item.monthly_rate"
+                                               step="0.01" min="0" placeholder="—">
+                                    </td>
+                                    <td>
+                                        <input type="number" class="form-control form-control-sm font-mono"
+                                               style="text-align:right;"
+                                               x-model="item.mileage_rate"
+                                               step="0.0001" min="0" placeholder="—">
+                                    </td>
+                                    <td>
+                                        <select class="form-select form-select-sm"
+                                                x-model="item.mileage_unit">
+                                            <option value="km">km</option>
+                                            <option value="miles">miles</option>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <select class="form-select form-select-sm"
+                                                x-model="item.currency">
+                                            <option value="CAD">CAD</option>
+                                            <option value="USD">USD</option>
+                                        </select>
+                                    </td>
+                                    <td style="text-align:center;">
+                                        <button type="button" class="btn btn-ghost btn-sm"
+                                                style="color:var(--color-danger);padding:4px 8px;"
+                                                @click="removeItem(idx)"
+                                                title="Remove row">×</button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+
+            <template x-if="items.length > 0">
+                <div class="card-footer" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;">
+                    <button type="button" class="btn btn-ghost btn-sm"
+                            @click="addItem()">+ Add another</button>
+                    <span class="text-secondary" style="font-size:0.8125rem;"
+                          x-text="items.length + ' item' + (items.length === 1 ? '' : 's')"></span>
+                </div>
+            </template>
         </div>
 
         <!-- ── Submit ──────────────────────────────────────────────────────── -->
@@ -247,7 +302,7 @@ require_once FF_ROOT . '/includes/header.php';
             <a href="<?= base_url('rates') ?>" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary"
                     :disabled="submitting">
-                <span x-text="submitting ? 'Saving…' : 'Create Rate Card'"></span>
+                <span x-text="submitting ? 'Creating…' : 'Create Rate Card'"></span>
             </button>
         </div>
 
@@ -263,19 +318,22 @@ function FF_RateCardCreate() {
             effective_from: '<?= date('Y-m-d') ?>',
             effective_to:   '',
             is_default:     false,
+            customer_id:    <?= $preCustomerId ? (int)$preCustomerId : 'null' ?>,
         },
         items:       [],
+        _nextKey:    0,
         errors:      {},
         globalError: null,
         submitting:  false,
 
         init() {
-            // Start with one empty item row for convenience
-            this.addItem();
+            // No auto-added blank row — user adds explicitly
         },
 
         addItem() {
             this.items.push({
+                _key:           this._nextKey++,
+                _error:         '',
                 equipment_type: '',
                 daily_rate:     '',
                 weekly_rate:    '',
@@ -284,47 +342,32 @@ function FF_RateCardCreate() {
                 mileage_unit:   'km',
                 currency:       'CAD',
             });
+            // Scroll table into view if it just appeared
+            this.$nextTick(() => {
+                const tbl = this.$el.querySelector('table');
+                if (tbl) tbl.querySelector('tbody tr:last-child')?.scrollIntoView({ block: 'nearest' });
+            });
         },
 
         removeItem(idx) {
             this.items.splice(idx, 1);
         },
 
-        // A row is "blank" when nothing has been entered: no equipment type
-        // AND no rate values. These are ignored on submit so the auto-added
-        // starter row (and any extra rows from "Add new +") never block the
-        // form with a spurious "please select an equipment type" error.
-        isBlankItem(item) {
-            return !item.equipment_type
-                && item.daily_rate   === ''
-                && item.weekly_rate  === ''
-                && item.monthly_rate === ''
-                && item.mileage_rate === '';
-        },
-
-        // Pre-fill rates when equipment type is selected from the dropdown
         onTypeChange(idx) {
-            const item     = this.items[idx];
-            const selectEl = document.querySelectorAll('select[x-model="item.equipment_type"]')[idx];
-            if (!selectEl) return;
-            const opt = selectEl.options[selectEl.selectedIndex];
-            if (!opt || !opt.value) return;
-
-            // Pre-fill from template defaults (user can override)
-            if (opt.dataset.daily)    item.daily_rate    = opt.dataset.daily;
-            if (opt.dataset.weekly)   item.weekly_rate   = opt.dataset.weekly;
-            if (opt.dataset.monthly)  item.monthly_rate  = opt.dataset.monthly;
-            if (opt.dataset.mileage)  item.mileage_rate  = opt.dataset.mileage;
-            if (opt.dataset.currency) item.currency      = opt.dataset.currency;
-            if (opt.dataset.unit)     item.mileage_unit  = opt.dataset.unit;
+            // Clear any duplicate-type error on change
+            this.items[idx]._error = '';
         },
 
         validate() {
-            this.errors     = {};
+            this.errors      = {};
             this.globalError = null;
+
+            // Clear per-item errors
+            this.items.forEach(i => i._error = '');
+
             let ok = true;
 
-            if (!this.form.name || !this.form.name.trim()) {
+            if (!this.form.name?.trim()) {
                 this.errors.name = 'Rate card name is required.';
                 ok = false;
             }
@@ -338,59 +381,55 @@ function FF_RateCardCreate() {
                 ok = false;
             }
 
-            // Items: each must have an equipment_type selected + non-negative rates
             const seen = new Set();
-            const rateLabels = {
-                daily_rate:   'Daily rate',
-                weekly_rate:  'Weekly rate',
-                monthly_rate: 'Monthly rate',
-                mileage_rate: 'Mileage rate',
-            };
-            const itemProblems = [];
+            const problems = [];
             for (let i = 0; i < this.items.length; i++) {
                 const item = this.items[i];
-                const lineNum = i + 1;
-                if (this.isBlankItem(item)) continue;  // ignore untouched rows
+                const num  = i + 1;
+
                 if (!item.equipment_type) {
-                    itemProblems.push(`Item ${lineNum}: please select an equipment type.`);
+                    item._error = 'Select an equipment category.';
+                    problems.push(`Item ${num}: equipment category required.`);
+                    ok = false;
                     continue;
                 }
                 if (seen.has(item.equipment_type)) {
-                    itemProblems.push(`Item ${lineNum}: equipment type '${item.equipment_type}' is listed more than once.`);
+                    item._error = 'Duplicate category — each may appear only once.';
+                    problems.push(`Item ${num}: '${item.equipment_type}' listed more than once.`);
+                    ok = false;
                     continue;
                 }
                 seen.add(item.equipment_type);
 
-                for (const [field, label] of Object.entries(rateLabels)) {
-                    const raw = item[field];
-                    if (raw === '' || raw === null || raw === undefined) continue;
+                const rateFields = { daily_rate: 'Daily', weekly_rate: 'Weekly', monthly_rate: 'Monthly', mileage_rate: 'Mileage' };
+                for (const [f, label] of Object.entries(rateFields)) {
+                    const raw = item[f];
+                    if (raw === '' || raw == null) continue;
                     const n = parseFloat(raw);
-                    if (isNaN(n)) {
-                        itemProblems.push(`Item ${lineNum}: ${label} must be a valid number.`);
-                    } else if (n < 0) {
-                        itemProblems.push(`Item ${lineNum}: ${label} cannot be negative.`);
-                    }
+                    if (isNaN(n))  { problems.push(`Item ${num}: ${label} rate must be a number.`); ok = false; }
+                    else if (n < 0){ problems.push(`Item ${num}: ${label} rate cannot be negative.`); ok = false; }
                 }
             }
-            if (itemProblems.length > 0) {
-                this.globalError = itemProblems.join(' ');
-                ok = false;
+
+            if (problems.length > 0) {
+                this.globalError = problems.join(' ');
             }
 
             return ok;
         },
 
         async submit() {
-            this.globalError = null;
             if (!this.validate()) return;
 
-            this.submitting = true;
+            this.submitting  = true;
+            this.globalError = null;
 
-            // Build payload — drop untouched rows, omit empty rate strings
-            const items = this.items.filter(item => !this.isBlankItem(item)).map(item => {
-                const out = { equipment_type: item.equipment_type,
-                               mileage_unit:   item.mileage_unit,
-                               currency:       item.currency };
+            const items = this.items.map(item => {
+                const out = {
+                    equipment_type: item.equipment_type,
+                    mileage_unit:   item.mileage_unit,
+                    currency:       item.currency,
+                };
                 if (item.daily_rate   !== '') out.daily_rate   = item.daily_rate;
                 if (item.weekly_rate  !== '') out.weekly_rate  = item.weekly_rate;
                 if (item.monthly_rate !== '') out.monthly_rate = item.monthly_rate;
@@ -404,19 +443,19 @@ function FF_RateCardCreate() {
                 effective_from: this.form.effective_from,
                 effective_to:   this.form.effective_to || null,
                 is_default:     this.form.is_default ? 1 : 0,
+                customer_id:    this.form.customer_id || null,
                 items:          items,
             };
 
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/rate_cards/create') ?>', payload);
                 if (!r.success) {
-                    // VALID-2: read per-field map from server response
                     if (r.error?.fields) {
                         this.errors = r.error.fields;
                         if (r.error.fields.items) this.globalError = r.error.fields.items;
                     }
                     this.globalError = this.globalError || r.error?.message || 'Failed to create rate card.';
-                    this.submitting = false;
+                    this.submitting  = false;
                     return;
                 }
                 window.location = '<?= base_url('rates/show') ?>?id=' + r.data.id;

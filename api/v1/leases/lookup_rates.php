@@ -126,9 +126,10 @@ if ($customerRate) {
 }
 
 // -----------------------------------------------------------------------
-// 3. Priority 2 — active rate_cards with matching item
+// 3. Priority 2 — active rate_cards with matching item.
+//    2a. Customer-specific card (customer_id = this customer) preferred first.
+//    2b. Global card (customer_id IS NULL) as fallback.
 //    D5: rate_cards has deleted_at — always filter it.
-//    Prefer is_default=1 card first, then latest effective_from.
 // -----------------------------------------------------------------------
 $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
@@ -140,9 +141,10 @@ $rateCardItem = db_row(
        AND rc.deleted_at IS NULL
        AND rc.effective_from <= ?
        AND (rc.effective_to IS NULL OR rc.effective_to >= ?)
-     ORDER BY rc.is_default DESC, rc.effective_from DESC
+       AND (rc.customer_id = ? OR rc.customer_id IS NULL)
+     ORDER BY (rc.customer_id IS NOT NULL) DESC, rc.is_default DESC, rc.effective_from DESC
      LIMIT 1",
-    [$equipmentType, $today, $today]
+    [$equipmentType, $today, $today, $customerId]
 );
 
 if ($rateCardItem) {

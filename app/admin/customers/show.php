@@ -70,9 +70,13 @@ $tagRows = db_select(
     [$customerId]
 );
 
-// Pre-count rate overrides for tab badge
+// Pre-count rate overrides + linked rate cards for tab badge
 $rateOverridesCount = (int) db_row(
     "SELECT COUNT(*) AS n FROM customer_equipment_rates WHERE customer_id = ?",
+    [$customerId]
+)['n'];
+$rateCardsCount = (int) db_row(
+    "SELECT COUNT(*) AS n FROM rate_cards WHERE customer_id = ? AND deleted_at IS NULL",
     [$customerId]
 )['n'];
 // S-CCA-1: server-preloaded credit-application count (active rows only, D-CCA-3).
@@ -1001,93 +1005,178 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     <!-- ── TAB: RATES ────────────────────────────────────────── -->
     <?php if (can('rates', 'view')): ?>
     <div x-show="activeTab === 'rates'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
+
+        <!-- ── Rate Cards linked to this customer ──── -->
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <span class="card-title">Rate Cards</span>
+                    <span x-show="rateCards.length > 0" class="badge badge-neutral"
+                          style="font-size:0.75rem;margin-left:8px;" x-text="rateCards.length"></span>
+                </div>
+                <?php if (can('rates', 'create')): ?>
+                <a href="<?= base_url('rates/create') ?>?customer_id=<?= (int)$customerId ?>"
+                   class="btn btn-secondary btn-sm">+ New Rate Card</a>
+                <?php endif; ?>
+            </div>
+
+            <div x-show="rateCardsLoading && rateCards.length === 0" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading…</span>
+            </div>
+
+            <div x-show="rateCardsLoaded && !rateCardsLoading && rateCards.length === 0" class="card-body">
+                <div class="empty-state" style="padding:24px 0;">
+                    <p class="empty-state-title" style="font-size:0.9375rem;">No rate cards for this customer</p>
+                    <p class="empty-state-text">Customer-specific rate cards are prioritised over global cards when creating leases.</p>
+                    <?php if (can('rates', 'create')): ?>
+                    <a href="<?= base_url('rates/create') ?>?customer_id=<?= (int)$customerId ?>"
+                       class="btn btn-primary btn-sm" style="margin-top:10px;">+ Create Rate Card</a>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div x-show="rateCards.length > 0">
+                <div class="tab-table-container">
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Card Name</th>
+                                    <th style="text-align:center;">Items</th>
+                                    <th>Effective Period</th>
+                                    <th>Status</th>
+                                    <th style="text-align:right;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="rc in rateCards" :key="rc.id">
+                                    <tr>
+                                        <td>
+                                            <div style="display:flex;align-items:center;gap:8px;">
+                                                <a :href="'<?= base_url('rates/show') ?>?id=' + rc.id"
+                                                   class="link font-medium" x-text="rc.name"></a>
+                                                <span x-show="rc.is_default" class="badge badge-info" style="font-size:0.7rem;">Default</span>
+                                            </div>
+                                            <div x-show="rc.description" class="text-secondary" style="font-size:0.775rem;margin-top:2px;" x-text="rc.description"></div>
+                                        </td>
+                                        <td class="font-mono" style="text-align:center;" x-text="rc.item_count ?? 0"></td>
+                                        <td style="white-space:nowrap;">
+                                            <span class="font-mono" style="font-size:0.8125rem;" x-text="rc.effective_from || '—'"></span>
+                                            <span class="text-secondary" style="font-size:0.8125rem;"> → </span>
+                                            <span class="font-mono" style="font-size:0.8125rem;" x-text="rc.effective_to || 'Open'"></span>
+                                        </td>
+                                        <td>
+                                            <span class="badge" :class="rc.is_active ? 'badge-success' : 'badge-neutral'"
+                                                  x-text="rc.is_active ? 'Active' : 'Inactive'"></span>
+                                        </td>
+                                        <td style="text-align:right;">
+                                            <a :href="'<?= base_url('rates/show') ?>?id=' + rc.id"
+                                               class="btn btn-secondary btn-sm">Edit</a>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="tab-table-footer">
+                    <span x-text="`${rateCards.length} rate card${rateCards.length !== 1 ? 's' : ''}`"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Custom Rate Overrides ──────────────────── -->
         <div class="card">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="card-title">Custom Rate Overrides</span>
+                <div>
+                    <span class="card-title">Rate Overrides</span>
+                    <span x-show="rateOverrides.length > 0" class="badge badge-neutral"
+                          style="font-size:0.75rem;margin-left:8px;" x-text="rateOverrides.length"></span>
+                </div>
                 <?php if (can('rates', 'edit')): ?>
                 <button type="button" class="btn btn-primary btn-sm"
                         @click="openRateModal()">+ Add Override</button>
                 <?php endif; ?>
             </div>
 
-            <!-- Loading -->
             <div x-show="rateOverridesLoading && rateOverrides.length === 0" class="card-body" style="text-align:center;padding:32px;">
-                <span class="text-secondary">Loading rate overrides…</span>
+                <span class="text-secondary">Loading…</span>
             </div>
 
-            <!-- Empty state -->
             <div x-show="rateOverridesLoaded && !rateOverridesLoading && rateOverrides.length === 0" class="card-body">
-                <div class="empty-state">
-                    <p class="empty-state-title">No custom rate overrides</p>
-                    <p class="empty-state-text">
-                        This customer uses the standard rate card. Add an override to set custom pricing per equipment type.
-                    </p>
+                <div class="empty-state" style="padding:24px 0;">
+                    <p class="empty-state-title" style="font-size:0.9375rem;">No rate overrides</p>
+                    <p class="empty-state-text">Overrides set a specific rate for one equipment category, taking priority over rate cards.</p>
                 </div>
             </div>
 
-            <!-- Table -->
             <div x-show="rateOverrides.length > 0">
                 <div class="tab-table-container">
                     <div class="table-responsive">
-<table class="table">
-                        <thead>
-                            <tr>
-                                <th>Equipment Type</th>
-                                <th style="text-align:right;">Daily</th>
-                                <th style="text-align:right;">Weekly</th>
-                                <th style="text-align:right;">Monthly</th>
-                                <th style="text-align:right;">Mileage</th>
-                                <th>Currency</th>
-                                <th>Effective</th>
-                                <?php if (can('rates', 'edit') || can('rates', 'delete')): ?>
-                                <th></th>
-                                <?php endif; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="r in rateOverrides" :key="r.id">
+                        <table class="table">
+                            <thead>
                                 <tr>
-                                    <td x-text="r.equipment_type"></td>
-                                    <td class="font-mono" style="text-align:right;"
-                                        x-text="r.daily_rate ? '$' + parseFloat(r.daily_rate).toFixed(2) : '—'"></td>
-                                    <td class="font-mono" style="text-align:right;"
-                                        x-text="r.weekly_rate ? '$' + parseFloat(r.weekly_rate).toFixed(2) : '—'"></td>
-                                    <td class="font-mono" style="text-align:right;"
-                                        x-text="r.monthly_rate ? '$' + parseFloat(r.monthly_rate).toFixed(2) : '—'"></td>
-                                    <td class="font-mono" style="text-align:right;">
-                                        <span x-show="r.mileage_rate" x-text="'$' + parseFloat(r.mileage_rate).toFixed(4) + '/' + r.mileage_unit"></span>
-                                        <span x-show="!r.mileage_rate">—</span>
-                                    </td>
-                                    <td x-text="r.currency"></td>
-                                    <td class="text-sm text-secondary">
-                                        <span x-text="r.effective_from"></span>
-                                        <span x-show="r.effective_to"> → <span x-text="r.effective_to"></span></span>
-                                        <span x-show="!r.effective_to"> → open</span>
-                                    </td>
+                                    <th>Equipment Category</th>
+                                    <th style="text-align:right;">Daily</th>
+                                    <th style="text-align:right;">Weekly</th>
+                                    <th style="text-align:right;">Monthly</th>
+                                    <th style="text-align:right;">Mileage</th>
+                                    <th>Currency</th>
+                                    <th>Effective</th>
                                     <?php if (can('rates', 'edit') || can('rates', 'delete')): ?>
-                                    <td style="white-space:nowrap;">
-                                        <?php if (can('rates', 'edit')): ?>
-                                        <button type="button" class="btn btn-sm btn-secondary"
-                                                @click="openRateModal(r)">Edit</button>
-                                        <?php endif; ?>
-                                        <?php if (can('rates', 'delete')): ?>
-                                        <button type="button" class="btn btn-sm btn-danger"
-                                                @click="deleteRateOverride(r)"
-                                                style="margin-left:4px;">Delete</button>
-                                        <?php endif; ?>
-                                    </td>
+                                    <th></th>
                                     <?php endif; ?>
                                 </tr>
-                            </template>
-                        </tbody>
-                    </table>
-</div>
+                            </thead>
+                            <tbody>
+                                <template x-for="r in rateOverrides" :key="r.id">
+                                    <tr>
+                                        <td>
+                                            <span class="badge badge-neutral"
+                                                  style="font-size:0.8125rem;text-transform:capitalize;"
+                                                  x-text="r.equipment_type.replace(/_/g, ' ')"></span>
+                                        </td>
+                                        <td class="font-mono" style="text-align:right;"
+                                            x-text="r.daily_rate ? '$' + parseFloat(r.daily_rate).toFixed(2) : '—'"></td>
+                                        <td class="font-mono" style="text-align:right;"
+                                            x-text="r.weekly_rate ? '$' + parseFloat(r.weekly_rate).toFixed(2) : '—'"></td>
+                                        <td class="font-mono" style="text-align:right;"
+                                            x-text="r.monthly_rate ? '$' + parseFloat(r.monthly_rate).toFixed(2) : '—'"></td>
+                                        <td class="font-mono" style="text-align:right;">
+                                            <span x-show="r.mileage_rate" x-text="'$' + parseFloat(r.mileage_rate).toFixed(4) + '/' + r.mileage_unit"></span>
+                                            <span x-show="!r.mileage_rate">—</span>
+                                        </td>
+                                        <td x-text="r.currency"></td>
+                                        <td class="text-secondary" style="font-size:0.8125rem;white-space:nowrap;">
+                                            <span x-text="r.effective_from"></span>
+                                            <span x-show="r.effective_to"> → <span x-text="r.effective_to"></span></span>
+                                            <span x-show="!r.effective_to"> → open</span>
+                                        </td>
+                                        <?php if (can('rates', 'edit') || can('rates', 'delete')): ?>
+                                        <td style="white-space:nowrap;">
+                                            <?php if (can('rates', 'edit')): ?>
+                                            <button type="button" class="btn btn-sm btn-secondary"
+                                                    @click="openRateModal(r)">Edit</button>
+                                            <?php endif; ?>
+                                            <?php if (can('rates', 'delete')): ?>
+                                            <button type="button" class="btn btn-sm btn-danger"
+                                                    @click="deleteRateOverride(r)"
+                                                    style="margin-left:4px;">Delete</button>
+                                            <?php endif; ?>
+                                        </td>
+                                        <?php endif; ?>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
                 <div class="tab-table-footer">
                     <span x-text="`${rateOverrides.length} override${rateOverrides.length !== 1 ? 's' : ''}`"></span>
                 </div>
             </div>
         </div>
+
     </div><!-- /rates tab -->
 
     <!-- ── Rate Override Modal ──────────────────────────────── -->
@@ -1103,26 +1192,28 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                 <div x-show="rateModal.error" class="alert alert-danger" x-text="rateModal.error" style="margin-bottom:12px;"></div>
 
                 <div class="form-grid">
-                    <!-- Equipment Type.
-                         KNOWN ISSUE (S-RATES-UI-CATEGORY-DEDUP): This <select> stores the
-                         equipment_template name string into customer_equipment_rates.equipment_type.
-                         However api/v1/leases/lookup_rates.php matches against the template
-                         CATEGORY enum (e.g. "dry_van"), not the name — so rate overrides stored
-                         here silently fail to match the lookup unless the stored value is a
-                         category slug. FK migration to template_id is blocked by this name/category
-                         mismatch; the full fix is tracked as S-RATES-UI-CATEGORY-DEDUP. The
-                         <select> already prevents free-text typos. -->
+                    <!-- Equipment Category (slug = category, S-RATES-UI-CATEGORY-DEDUP fix) -->
                     <div class="form-group form-group--full">
-                        <label class="form-label">Equipment Type <span class="text-danger">*</span></label>
+                        <label class="form-label">Equipment Category <span class="text-danger">*</span></label>
                         <select class="form-select" x-model="rateModal.form.equipment_type" :disabled="!!rateModal.id">
                             <option value="">— Select —</option>
                             <?php
-                            $templates = db_select("SELECT name FROM equipment_templates WHERE is_active=1 AND deleted_at IS NULL ORDER BY name");
-                            foreach ($templates as $t):
+                            $overrideCategories = db_select(
+                                "SELECT DISTINCT category FROM equipment_templates WHERE is_active=1 AND deleted_at IS NULL ORDER BY category"
+                            );
+                            $catLabels = [
+                                'chassis'=>'Chassis','dry_van'=>'Dry Van','reefer'=>'Reefer',
+                                'container'=>'Container','flatbed'=>'Flatbed','step_deck'=>'Step Deck',
+                                'lowboy'=>'Lowboy','tanker'=>'Tanker','dump'=>'Dump','other'=>'Other',
+                            ];
+                            foreach ($overrideCategories as $oc):
                             ?>
-                            <option value="<?= e($t['name']) ?>"><?= e($t['name']) ?></option>
+                            <option value="<?= e($oc['category']) ?>">
+                                <?= e($catLabels[$oc['category']] ?? ucfirst(str_replace('_', ' ', $oc['category']))) ?>
+                            </option>
                             <?php endforeach; ?>
                         </select>
+                        <div class="form-hint">Rates apply to all equipment templates sharing this category.</div>
                     </div>
 
                     <!-- Effective From / To -->
@@ -1654,7 +1745,7 @@ function FF_CustomerProfile() {
             invoices:      0,
             damage_claims: 0,
             mileage_logs:  0,
-            rates:         <?= (int) $rateOverridesCount ?>,      // server-preloaded
+            rates:         <?= (int)($rateOverridesCount + $rateCardsCount) ?>,  // overrides + linked rate cards
             documents:     0,
             credit_applications: <?= (int) $creditAppsCount ?>, // server-preloaded
             emails:        0,
@@ -1700,9 +1791,14 @@ function FF_CustomerProfile() {
         mileageLogsLoading:  false,
         mileageLogsFilters:  { log_type: '', sort: 'log_date', dir: 'DESC' },
 
+        // ── Rate Cards (linked to this customer) ──────────────────
+        rateCards:         [],
+        rateCardsLoaded:   false,
+        rateCardsLoading:  false,
+
         // ── Rate Overrides ────────────────────────────────────────
-        rateOverrides:       [],
-        rateOverridesLoaded: false,
+        rateOverrides:        [],
+        rateOverridesLoaded:  false,
         rateOverridesLoading: false,
 
         // ── Documents ─────────────────────────────────────────────
@@ -1766,6 +1862,7 @@ function FF_CustomerProfile() {
                 if (tab === 'invoices'      && !this.invoicesLoaded)         this.loadInvoices();
                 if (tab === 'damage_claims' && !this.damageClaimsLoaded)     this.loadDamageClaims();
                 if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)      this.loadMileageLogs();
+                if (tab === 'rates'         && !this.rateCardsLoaded)       this.loadRateCards();
                 if (tab === 'rates'         && !this.rateOverridesLoaded)    this.loadRateOverrides();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
                 if (tab === 'credit_applications' && !this.creditAppsLoaded) this.loadCreditApps();
@@ -1992,6 +2089,19 @@ function FF_CustomerProfile() {
         applyMileageLogsFilters() { this.mileageLogs = []; this.mileageLogsPage = 1; this.mileageLogsTotal = 0; this.mileageLogsLoaded = false; this.loadMileageLogs(); },
 
         // ── Rate Overrides ─────────────────────────────────────────
+        async loadRateCards() {
+            this.rateCardsLoading = true;
+            try {
+                const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 100, sort: 'effective_from', dir: 'DESC' });
+                const json = await FF_Api.get('<?= base_url('api/v1/rate_cards/index') ?>?' + p);
+                if (json.success) {
+                    this.rateCards       = json.data?.items ?? [];
+                    this.rateCardsLoaded = true;
+                }
+            } catch (e) { /* silent */ }
+            this.rateCardsLoading = false;
+        },
+
         async loadRateOverrides() {
             this.rateOverridesLoading = true;
             try {

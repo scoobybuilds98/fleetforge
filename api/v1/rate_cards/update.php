@@ -83,6 +83,19 @@ if (!$name) {
 $description = isset($body['description']) ? clean_string($body['description'], 1000) : $existing['description'];
 $isDefault   = isset($body['is_default'])  ? (int)(bool)$body['is_default']            : (int)$existing['is_default'];
 
+// Optional customer_id update — null = clear to global, non-null = set customer
+$customerId = $existing['customer_id'] ?? null;
+if (array_key_exists('customer_id', $body)) {
+    if (empty($body['customer_id'])) {
+        $customerId = null;
+    } else {
+        $customerId = clean_int($body['customer_id']);
+        if (!$customerId || !db_exists('customers', 'id = ? AND deleted_at IS NULL', [$customerId])) {
+            $fields['customer_id'] = 'Customer not found.';
+        }
+    }
+}
+
 $effectiveFrom = $existing['effective_from'];
 if (!empty($body['effective_from'])) {
     $effectiveFrom = clean_date($body['effective_from']);
@@ -212,6 +225,7 @@ $newValues = [
     'is_default'     => $isDefault,
     'effective_from' => $effectiveFrom,
     'effective_to'   => $effectiveTo,
+    'customer_id'    => $customerId,
 ];
 
 db_transaction(function() use ($id, $newValues, $existing, $isDefault, $replaceItems, $itemsToInsert) {
@@ -246,12 +260,14 @@ db_transaction(function() use ($id, $newValues, $existing, $isDefault, $replaceI
             'effective_from' => $existing['effective_from'],
             'effective_to'   => $existing['effective_to'],
             'is_default'     => $existing['is_default'],
+            'customer_id'    => $existing['customer_id'] ?? null,
         ]),
         'new_values'   => json_encode([
             'name'           => $newValues['name'],
             'effective_from' => $newValues['effective_from'],
             'effective_to'   => $newValues['effective_to'],
             'is_default'     => $newValues['is_default'],
+            'customer_id'    => $newValues['customer_id'],
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
@@ -264,5 +280,6 @@ json_success([
     'id'             => $id,
     'name'           => $name,
     'effective_from' => $effectiveFrom,
+    'customer_id'    => $customerId,
     'updated_at'     => $fresh['updated_at'],
 ]);

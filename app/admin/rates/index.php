@@ -4,14 +4,9 @@ declare(strict_types=1);
 /**
  * app/admin/rates/index.php
  *
- * Rates module — index page with two tabs:
- *   Tab 1: Rate Cards — paginated list, create/edit/delete actions
- *   Tab 2: Customer Rate Overrides — paginated list across all customers
- *
- * Server-renders 3 KPI tiles (total cards, active cards, total overrides).
- * Alpine.js manages tables, filters, tab switching, and modal interactions.
- *
- * This file fixes the live 404 on the /rates sidebar link (S019 stop condition).
+ * Rates dashboard — redesigned for S-RATES-REDESIGN.
+ * Tab 1: Rate Cards — interactive table with customer column, filters.
+ * Tab 2: Customer Rate Overrides — per-equipment-type overrides.
  *
  * D30: asset_url() / base_url().
  * D32: Only CSS classes confirmed in app.css.
@@ -20,10 +15,7 @@ declare(strict_types=1);
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/rate_cards/, api/v1/customer_equipment_rates/
  * @decisions D5/D7/D19/D30/D32
- * @session  S019
- *
- * Bulk-select (rate cards tab only): selectedCardIds, bulkDeleteCards()
- *   API: api/v1/rate_cards/bulk_delete
+ * @session  S019, S-RATES-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -32,13 +24,9 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('rates', 'view');
 
-// ── KPI tiles (server-rendered) ──────────────────────────────────────────────
 $today = date('Y-m-d');
 
-$totalCards = db_count(
-    "SELECT COUNT(*) FROM rate_cards WHERE deleted_at IS NULL"
-);
-
+$totalCards = db_count("SELECT COUNT(*) FROM rate_cards WHERE deleted_at IS NULL");
 $activeCards = db_count(
     "SELECT COUNT(*) FROM rate_cards
      WHERE deleted_at IS NULL
@@ -46,12 +34,12 @@ $activeCards = db_count(
        AND (effective_to IS NULL OR effective_to >= ?)",
     [$today, $today]
 );
-
-$totalOverrides = db_count(
-    "SELECT COUNT(*) FROM customer_equipment_rates"
+$customerCards = db_count(
+    "SELECT COUNT(*) FROM rate_cards WHERE deleted_at IS NULL AND customer_id IS NOT NULL"
 );
+$totalOverrides = db_count("SELECT COUNT(*) FROM customer_equipment_rates");
 
-$pageTitle = 'Rates';
+$pageTitle      = 'Rates';
 $helpModuleSlug = 'rates';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -59,36 +47,35 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title">Rates</h1>
     <?php if (can('rates', 'create')): ?>
-    <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm">
-        + New Rate Card
-    </a>
+    <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm">+ New Rate Card</a>
     <?php endif; ?>
     <div class="page-header-actions">
         <?= help_button('rates') ?>
     </div>
 </div>
 
-<!-- ── KPI tiles ───────────────────────────────────────────────────���─────── -->
+<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
 <div class="stat-grid" style="margin-bottom:24px;">
-
     <div class="stat-card">
         <div class="stat-label">Rate Cards</div>
         <div class="stat-value font-mono"><?= e($totalCards) ?></div>
         <div class="stat-delta">total in system</div>
     </div>
-
     <div class="stat-card">
         <div class="stat-label">Active Today</div>
         <div class="stat-value font-mono"><?= e($activeCards) ?></div>
         <div class="stat-delta">within effective date range</div>
     </div>
-
     <div class="stat-card">
-        <div class="stat-label">Customer Overrides</div>
-        <div class="stat-value font-mono"><?= e($totalOverrides) ?></div>
-        <div class="stat-delta">custom rates across all customers</div>
+        <div class="stat-label">Customer Cards</div>
+        <div class="stat-value font-mono"><?= e($customerCards) ?></div>
+        <div class="stat-delta">assigned to specific customers</div>
     </div>
-
+    <div class="stat-card">
+        <div class="stat-label">Rate Overrides</div>
+        <div class="stat-value font-mono"><?= e($totalOverrides) ?></div>
+        <div class="stat-delta">per-equipment-type overrides</div>
+    </div>
 </div>
 
 <!-- ── Tabs + Tables (Alpine.js) ─────────────────────────────────────────── -->
@@ -108,72 +95,67 @@ require_once FF_ROOT . '/includes/header.php';
         </button>
     </div>
 
-    <!-- ──── TAB 1: Rate Cards ──────────────────────────────────────────── -->
+    <!-- ──── TAB 1: Rate Cards ─────────────────────────────────────────── -->
     <div x-show="tab === 'cards'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card" style="border-top:none;border-radius:0 0 8px 8px;">
 
             <!-- Filter bar -->
-            <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
-                <input type="text"
-                       class="form-control"
+            <div class="card-header" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <!-- Name / customer search -->
+                <input type="text" class="form-control"
                        style="max-width:220px;height:32px;font-size:0.875rem;"
-                       placeholder="Search name…"
+                       placeholder="Search name or customer…"
                        x-model="cardFilters.q"
                        @input.debounce.400ms="loadCards(1)">
 
+                <!-- Scope: All / Global / Customer-specific -->
+                <select class="form-select form-select-sm" style="min-width:150px;"
+                        x-model="cardFilters.scope"
+                        @change="loadCards(1)">
+                    <option value="">All Rate Cards</option>
+                    <option value="global">Global Only</option>
+                    <option value="customer">Customer-Specific</option>
+                </select>
+
+                <!-- Active status -->
                 <select class="form-select form-select-sm"
                         x-model="cardFilters.active"
                         @change="loadCards(1)">
-                    <option value="">All Cards</option>
+                    <option value="">All Statuses</option>
                     <option value="1">Active Only</option>
                 </select>
 
-                <select class="form-select form-select-sm"
-                        x-model="cardFilters.is_default"
-                        @change="loadCards(1)">
-                    <option value="">All</option>
-                    <option value="1">Default Only</option>
-                </select>
-
-                <!-- Sort column -->
+                <!-- Sort -->
                 <select class="form-select form-select-sm"
                         x-model="cardSort"
                         @change="loadCards(1)">
-                    <option value="name">Name</option>
-                    <option value="effective_from">Effective From</option>
-                    <option value="effective_to">Effective To</option>
-                    <option value="is_active">Status</option>
-                    <option value="created_at">Created</option>
+                    <option value="effective_from">Sort: Effective From</option>
+                    <option value="name">Sort: Name</option>
+                    <option value="created_at">Sort: Created</option>
                 </select>
 
-                <!-- Sort direction -->
                 <select class="form-select form-select-sm" style="width:auto;"
                         x-model="cardDir"
                         @change="loadCards(1)">
-                    <option value="ASC">↑ Asc</option>
-                    <option value="DESC">↓ Desc</option>
+                    <option value="DESC">↓ Newest</option>
+                    <option value="ASC">↑ Oldest</option>
                 </select>
 
                 <button class="btn btn-secondary btn-sm"
-                        @click="cardFilters = {q:'',active:'',is_default:''}; loadCards(1)">Reset</button>
+                        @click="cardFilters = {q:'',scope:'',active:''}; loadCards(1)">Reset</button>
 
-                <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
+                <span class="text-secondary" style="margin-left:auto;font-size:0.8125rem;"
                       x-text="cardTotal > 0 ? cardTotal + ' card' + (cardTotal === 1 ? '' : 's') : ''"></span>
             </div>
 
-            <!-- Bulk action bar (cards) — visible only when rows are selected -->
+            <!-- Bulk action bar -->
             <?php if (can('rates', 'delete')): ?>
             <div class="ff-bulk-bar"
                  x-show="selectedCardIds.length > 0"
-                 x-transition:enter="ff-bulk-enter"
-                 x-transition:enter-start="ff-bulk-enter-from"
-                 x-transition:enter-end="ff-bulk-enter-to"
-                 x-transition:leave="ff-bulk-leave"
-                 x-transition:leave-start="ff-bulk-leave-from"
-                 x-transition:leave-end="ff-bulk-leave-to"
+                 x-transition:enter="ff-bulk-enter" x-transition:enter-start="ff-bulk-enter-from" x-transition:enter-end="ff-bulk-enter-to"
+                 x-transition:leave="ff-bulk-leave" x-transition:leave-start="ff-bulk-leave-from" x-transition:leave-end="ff-bulk-leave-to"
                  x-cloak>
-                <span class="ff-bulk-bar-count"
-                      x-text="selectedCardIds.length + ' selected'"></span>
+                <span class="ff-bulk-bar-count" x-text="selectedCardIds.length + ' selected'"></span>
                 <span class="ff-bulk-bar-sep"></span>
                 <button class="ff-bulk-btn ff-bulk-btn-delete"
                         :disabled="bulkWorking"
@@ -195,11 +177,9 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="card-body">
                     <div class="empty-state">
                         <p class="empty-state-title">No rate cards found</p>
-                        <p class="empty-state-text">Create a rate card to set standard rates by equipment type.</p>
+                        <p class="empty-state-text">Rate cards define standard pricing by equipment category.</p>
                         <?php if (can('rates', 'create')): ?>
-                        <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm" style="margin-top:12px;">
-                            + New Rate Card
-                        </a>
+                        <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm" style="margin-top:12px;">+ New Rate Card</a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -213,22 +193,17 @@ require_once FF_ROOT . '/includes/header.php';
                             <tr>
                                 <?php if (can('rates', 'delete')): ?>
                                 <th class="th-checkbox">
-                                    <!-- Select-all checkbox -->
                                     <label class="ff-checkbox">
-                                        <input type="checkbox"
-                                               :checked="selectAllCards"
-                                               @change="toggleSelectAllCards()">
+                                        <input type="checkbox" :checked="selectAllCards" @change="toggleSelectAllCards()">
                                         <span></span>
                                     </label>
                                 </th>
                                 <?php endif; ?>
-                                <th>Name</th>
-                                <th>Items</th>
-                                <th>Effective From</th>
-                                <th>Effective To</th>
+                                <th class="th-sortable" @click="setCardSort('name')">Rate Card <span x-show="cardSort === 'name'" x-text="cardDir === 'ASC' ? '↑' : '↓'"></span></th>
+                                <th>Customer</th>
+                                <th style="text-align:center;">Items</th>
+                                <th class="th-sortable" @click="setCardSort('effective_from')">Effective Period <span x-show="cardSort === 'effective_from'" x-text="cardDir === 'ASC' ? '↑' : '↓'"></span></th>
                                 <th>Status</th>
-                                <th>Default</th>
-                                <th>Created By</th>
                                 <th style="text-align:right;">Actions</th>
                             </tr>
                         </thead>
@@ -245,23 +220,45 @@ require_once FF_ROOT . '/includes/header.php';
                                         </label>
                                     </td>
                                     <?php endif; ?>
+                                    <!-- Rate card name + badges -->
                                     <td>
-                                        <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
-                                           class="link font-medium" x-text="row.name"></a>
+                                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                            <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
+                                               class="link font-medium" x-text="row.name"></a>
+                                            <span x-show="row.is_default" class="badge badge-info" style="font-size:0.7rem;">Default</span>
+                                        </div>
+                                        <div class="text-secondary" style="font-size:0.775rem;margin-top:2px;"
+                                             x-show="row.description" x-text="row.description"></div>
                                     </td>
-                                    <td class="font-mono" x-text="row.item_count ?? 0"></td>
-                                    <td class="font-mono" x-text="row.effective_from || '—'"></td>
-                                    <td class="font-mono" x-text="row.effective_to || 'Open-ended'"></td>
+                                    <!-- Customer column -->
+                                    <td>
+                                        <template x-if="row.customer_id">
+                                            <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id"
+                                               class="link" x-text="row.customer_name"></a>
+                                        </template>
+                                        <template x-if="!row.customer_id">
+                                            <span class="badge badge-neutral" style="font-size:0.75rem;">Global</span>
+                                        </template>
+                                    </td>
+                                    <!-- Items count -->
+                                    <td class="font-mono" style="text-align:center;">
+                                        <span x-text="row.item_count ?? 0"
+                                              :class="(row.item_count ?? 0) === 0 ? 'text-secondary' : ''"></span>
+                                    </td>
+                                    <!-- Effective period -->
+                                    <td style="white-space:nowrap;">
+                                        <span class="font-mono" style="font-size:0.8125rem;" x-text="row.effective_from || '—'"></span>
+                                        <span class="text-secondary" style="font-size:0.8125rem;"> → </span>
+                                        <span class="font-mono" style="font-size:0.8125rem;"
+                                              x-text="row.effective_to || 'Open'"></span>
+                                    </td>
+                                    <!-- Status badge -->
                                     <td>
                                         <span class="badge"
                                               :class="row.is_active ? 'badge-success' : 'badge-neutral'"
                                               x-text="row.is_active ? 'Active' : 'Inactive'"></span>
                                     </td>
-                                    <td>
-                                        <span x-show="row.is_default" class="badge badge-info">Default</span>
-                                        <span x-show="!row.is_default" class="text-secondary">—</span>
-                                    </td>
-                                    <td x-text="row.created_by_name || '—'"></td>
+                                    <!-- Actions -->
                                     <td style="text-align:right;white-space:nowrap;">
                                         <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
                                            class="btn btn-secondary btn-sm">Edit</a>
@@ -281,37 +278,32 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- Pagination -->
             <template x-if="!cardLoading && cardTotalPages > 1">
                 <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
-                    <button class="btn btn-secondary btn-sm"
-                            :disabled="cardPage <= 1"
-                            @click="loadCards(cardPage - 1)">← Prev</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="cardPage <= 1" @click="loadCards(cardPage - 1)">← Prev</button>
                     <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
                           x-text="'Page ' + cardPage + ' of ' + cardTotalPages"></span>
-                    <button class="btn btn-secondary btn-sm"
-                            :disabled="cardPage >= cardTotalPages"
-                            @click="loadCards(cardPage + 1)">Next →</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="cardPage >= cardTotalPages" @click="loadCards(cardPage + 1)">Next →</button>
                 </div>
             </template>
 
         </div>
     </div>
 
-    <!-- ──── TAB 2: Customer Overrides ─────────────────────────────────── -->
+    <!-- ──── TAB 2: Customer Overrides ──────────────────────────────────── -->
     <div x-show="tab === 'overrides'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card" style="border-top:none;border-radius:0 0 8px 8px;">
 
             <!-- Filter bar -->
-            <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
-                <input type="text"
-                       class="form-control"
+            <div class="card-header" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <input type="text" class="form-control"
                        style="max-width:220px;height:32px;font-size:0.875rem;"
-                       placeholder="Equipment type…"
-                       x-model="ovFilters.equipment_type"
+                       placeholder="Search customer or type…"
+                       x-model="ovFilters.q"
                        @input.debounce.400ms="loadOverrides(1)">
 
                 <button class="btn btn-secondary btn-sm"
-                        @click="ovFilters = {equipment_type:''}; loadOverrides(1)">Reset</button>
+                        @click="ovFilters = {q:''}; loadOverrides(1)">Reset</button>
 
-                <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
+                <span class="text-secondary" style="margin-left:auto;font-size:0.8125rem;"
                       x-text="ovTotal > 0 ? ovTotal + ' override' + (ovTotal === 1 ? '' : 's') : ''"></span>
             </div>
 
@@ -325,12 +317,12 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="card-body">
                     <div class="empty-state">
                         <p class="empty-state-title">No customer rate overrides</p>
-                        <p class="empty-state-text">Custom rates can be set on each customer's profile page.</p>
+                        <p class="empty-state-text">Per-equipment-type overrides can be set on each customer's Rates tab.</p>
                     </div>
                 </div>
             </template>
 
-            <!-- Overrides table -->
+            <!-- Overrides table — grouped by customer for readability -->
             <template x-if="!ovLoading && ovRows.length > 0">
                 <div class="table-wrapper">
                     <table class="table">
@@ -343,8 +335,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <th style="text-align:right;">Monthly</th>
                                 <th style="text-align:right;">Mileage</th>
                                 <th>Currency</th>
-                                <th>Effective From</th>
-                                <th>Effective To</th>
+                                <th>Effective</th>
                                 <th style="text-align:right;">Actions</th>
                             </tr>
                         </thead>
@@ -352,10 +343,13 @@ require_once FF_ROOT . '/includes/header.php';
                             <template x-for="row in ovRows" :key="row.id">
                                 <tr>
                                     <td>
-                                        <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id"
-                                           class="link" x-text="row.customer_name"></a>
+                                        <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id + '#rates'"
+                                           class="link font-medium" x-text="row.customer_name"></a>
                                     </td>
-                                    <td x-text="row.equipment_type"></td>
+                                    <td>
+                                        <span class="badge badge-neutral" style="font-size:0.75rem;text-transform:capitalize;"
+                                              x-text="row.equipment_type.replace(/_/g, ' ')"></span>
+                                    </td>
                                     <td class="font-mono" style="text-align:right;"
                                         x-text="row.daily_rate ? '$' + parseFloat(row.daily_rate).toFixed(2) : '—'"></td>
                                     <td class="font-mono" style="text-align:right;"
@@ -363,10 +357,13 @@ require_once FF_ROOT . '/includes/header.php';
                                     <td class="font-mono" style="text-align:right;"
                                         x-text="row.monthly_rate ? '$' + parseFloat(row.monthly_rate).toFixed(2) : '—'"></td>
                                     <td class="font-mono" style="text-align:right;"
-                                        x-text="row.mileage_rate ? row.mileage_rate + '/' + row.mileage_unit : '—'"></td>
+                                        x-text="row.mileage_rate ? '$' + parseFloat(row.mileage_rate).toFixed(4) + '/' + row.mileage_unit : '—'"></td>
                                     <td x-text="row.currency"></td>
-                                    <td class="font-mono" x-text="row.effective_from || '—'"></td>
-                                    <td class="font-mono" x-text="row.effective_to || 'Open-ended'"></td>
+                                    <td class="text-secondary" style="font-size:0.8125rem;white-space:nowrap;">
+                                        <span x-text="row.effective_from"></span>
+                                        <span x-show="row.effective_to"> → <span x-text="row.effective_to"></span></span>
+                                        <span x-show="!row.effective_to" class="text-secondary"> → open</span>
+                                    </td>
                                     <td style="text-align:right;">
                                         <?php if (can('rates', 'delete')): ?>
                                         <button class="btn btn-danger btn-sm"
@@ -383,14 +380,10 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- Pagination -->
             <template x-if="!ovLoading && ovTotalPages > 1">
                 <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
-                    <button class="btn btn-secondary btn-sm"
-                            :disabled="ovPage <= 1"
-                            @click="loadOverrides(ovPage - 1)">← Prev</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="ovPage <= 1" @click="loadOverrides(ovPage - 1)">← Prev</button>
                     <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
                           x-text="'Page ' + ovPage + ' of ' + ovTotalPages"></span>
-                    <button class="btn btn-secondary btn-sm"
-                            :disabled="ovPage >= ovTotalPages"
-                            @click="loadOverrides(ovPage + 1)">Next →</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="ovPage >= ovTotalPages" @click="loadOverrides(ovPage + 1)">Next →</button>
                 </div>
             </template>
 
@@ -407,14 +400,13 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal-body">
                 <p>Delete <strong x-text="deleteCardModal.name"></strong>?</p>
                 <p class="text-secondary" style="font-size:0.875rem;margin-top:8px;">
-                    This cannot be undone. Historical lease rates are unaffected.
+                    Historical lease rates are unaffected.
                 </p>
                 <p class="text-danger" x-show="deleteCardModal.error" x-text="deleteCardModal.error"
                    style="font-size:0.875rem;margin-top:8px;"></p>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary btn-sm"
-                        @click="deleteCardModal.open = false">Cancel</button>
+                <button class="btn btn-secondary btn-sm" @click="deleteCardModal.open = false">Cancel</button>
                 <button class="btn btn-danger btn-sm"
                         :disabled="deleteCardModal.saving"
                         @click="deleteCard()">
@@ -424,7 +416,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Delete override modal ───────────────────────────────────���─────── -->
+    <!-- ── Delete override modal ─────────────────────────────────────────── -->
     <div class="modal-backdrop" x-show="deleteOvModal.open" x-cloak>
         <div class="modal modal-sm">
             <div class="modal-header">
@@ -432,7 +424,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <button class="modal-close-btn" aria-label="Close" @click="deleteOvModal.open = false">×</button>
             </div>
             <div class="modal-body">
-                <p>Delete custom rates for <strong x-text="deleteOvModal.label"></strong>?</p>
+                <p>Delete override for <strong x-text="deleteOvModal.label"></strong>?</p>
                 <p class="text-secondary" style="font-size:0.875rem;margin-top:8px;">
                     Rate history is preserved. This removes the active override only.
                 </p>
@@ -440,8 +432,7 @@ require_once FF_ROOT . '/includes/header.php';
                    style="font-size:0.875rem;margin-top:8px;"></p>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary btn-sm"
-                        @click="deleteOvModal.open = false">Cancel</button>
+                <button class="btn btn-secondary btn-sm" @click="deleteOvModal.open = false">Cancel</button>
                 <button class="btn btn-danger btn-sm"
                         :disabled="deleteOvModal.saving"
                         @click="deleteOverride()">
@@ -456,7 +447,6 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function FF_RatesManager() {
     return {
-        // ── Tab state
         tab: 'cards',
 
         // ── Rate Cards tab
@@ -467,10 +457,9 @@ function FF_RatesManager() {
         cardLoading:     false,
         cardSort:        'effective_from',
         cardDir:         'DESC',
-        cardFilters:     { q: '', active: '', is_default: '' },
+        cardFilters:     { q: '', scope: '', active: '' },
 
-        // ── Bulk-select (cards tab only)
-        selectedCardIds: [],  // array of selected rate_card IDs
+        selectedCardIds: [],
         selectAllCards:  false,
         bulkWorking:     false,
 
@@ -480,7 +469,7 @@ function FF_RatesManager() {
         ovPage:       1,
         ovTotalPages: 1,
         ovLoading:    false,
-        ovFilters:    { equipment_type: '' },
+        ovFilters:    { q: '' },
 
         // ── Modals
         deleteCardModal: { open: false, id: null, name: '', updated_at: null, saving: false, error: '' },
@@ -494,21 +483,24 @@ function FF_RatesManager() {
         async loadCards(page = 1) {
             this.cardLoading = true;
             this.cardPage    = page;
+
             const params = new URLSearchParams({
-                page:      page,
-                per_page:  25,
-                sort:      this.cardSort,
-                dir:       this.cardDir,
-                ...Object.fromEntries(
-                    Object.entries(this.cardFilters).filter(([,v]) => v !== '')
-                ),
+                page:     page,
+                per_page: 25,
+                sort:     this.cardSort,
+                dir:      this.cardDir,
             });
+            if (this.cardFilters.q)      params.set('q', this.cardFilters.q);
+            if (this.cardFilters.active) params.set('active', this.cardFilters.active);
+            // scope: '' = all, 'global' = customer_id=0, 'customer' = customer_id > 0
+            if (this.cardFilters.scope === 'global')   params.set('customer_id', '0');
+            if (this.cardFilters.scope === 'customer') params.set('has_customer', '1');
+
             try {
                 const r = await FF_Api.get(`<?= base_url('api/v1/rate_cards/index') ?>?${params}`);
                 this.cardRows       = r.data?.items ?? [];
                 this.cardTotal      = r.data?.pagination?.total ?? 0;
                 this.cardTotalPages = r.data?.pagination?.total_pages ?? 1;
-                // Recalculate select-all state against the freshly loaded page.
                 this.selectAllCards =
                     this.cardRows.length > 0 &&
                     this.cardRows.every(r => this.selectedCardIds.includes(r.id));
@@ -524,14 +516,9 @@ function FF_RatesManager() {
                 this.cardDir = this.cardDir === 'ASC' ? 'DESC' : 'ASC';
             } else {
                 this.cardSort = col;
-                this.cardDir  = 'ASC';
+                this.cardDir  = 'DESC';
             }
             this.loadCards(1);
-        },
-
-        cardSortIcon(col) {
-            if (this.cardSort !== col) return '';
-            return this.cardDir === 'ASC' ? ' ↑' : ' ↓';
         },
 
         confirmDeleteCard(row) {
@@ -552,58 +539,37 @@ function FF_RatesManager() {
             }
         },
 
-        // ── Bulk select helpers (cards tab) ────────────────────────────────
-
-        /** Toggle a single card in/out of selectedCardIds. */
+        // ── Bulk select helpers ────────────────────────────────────────────
         toggleSelectCard(id) {
             const idx = this.selectedCardIds.indexOf(id);
-            if (idx === -1) {
-                this.selectedCardIds.push(id);
-            } else {
-                this.selectedCardIds.splice(idx, 1);
-            }
-            // Sync the select-all checkbox state.
-            this.selectAllCards =
-                this.cardRows.length > 0 &&
+            if (idx === -1) this.selectedCardIds.push(id);
+            else            this.selectedCardIds.splice(idx, 1);
+            this.selectAllCards = this.cardRows.length > 0 &&
                 this.cardRows.every(r => this.selectedCardIds.includes(r.id));
         },
 
-        /** Select or deselect every visible card on the current page. */
         toggleSelectAllCards() {
             if (this.selectAllCards) {
-                // Already all-selected — deselect the visible set.
                 const visibleIds = this.cardRows.map(r => r.id);
-                this.selectedCardIds = this.selectedCardIds.filter(
-                    id => !visibleIds.includes(id)
-                );
-                this.selectAllCards = false;
+                this.selectedCardIds = this.selectedCardIds.filter(id => !visibleIds.includes(id));
+                this.selectAllCards  = false;
             } else {
-                // Add all visible IDs that are not already selected.
-                this.cardRows.forEach(r => {
-                    if (!this.selectedCardIds.includes(r.id)) {
-                        this.selectedCardIds.push(r.id);
-                    }
-                });
+                this.cardRows.forEach(r => { if (!this.selectedCardIds.includes(r.id)) this.selectedCardIds.push(r.id); });
                 this.selectAllCards = true;
             }
         },
 
-        /** Clear the entire selection and reset the select-all toggle. */
         clearCardSelection() {
             this.selectedCardIds = [];
             this.selectAllCards  = false;
         },
 
-        /** POST selected IDs to api/v1/rate_cards/bulk_delete, then reload. */
         async bulkDeleteCards() {
             if (!this.selectedCardIds.length) return;
             if (!confirm(`Delete ${this.selectedCardIds.length} rate card(s)? This cannot be undone.`)) return;
-
             this.bulkWorking = true;
             try {
-                await FF_Api.post('<?= base_url('api/v1/rate_cards/bulk_delete') ?>', {
-                    ids: this.selectedCardIds,
-                });
+                await FF_Api.post('<?= base_url('api/v1/rate_cards/bulk_delete') ?>', { ids: this.selectedCardIds });
                 this.clearCardSelection();
                 this.loadCards(this.cardPage);
             } catch (e) {
@@ -613,17 +579,12 @@ function FF_RatesManager() {
             }
         },
 
-        // ── Customer Overrides ───────────────────────────────────────────────
+        // ── Customer Overrides ─────────────────────────────────────────────
         async loadOverrides(page = 1) {
             this.ovLoading = true;
             this.ovPage    = page;
-            const params = new URLSearchParams({
-                page:     page,
-                per_page: 50,
-                ...Object.fromEntries(
-                    Object.entries(this.ovFilters).filter(([,v]) => v !== '')
-                ),
-            });
+            const params = new URLSearchParams({ page, per_page: 50 });
+            if (this.ovFilters.q) params.set('q', this.ovFilters.q);
             try {
                 const r = await FF_Api.get(`<?= base_url('api/v1/customer_equipment_rates/index') ?>?${params}`);
                 this.ovRows       = r.data?.items ?? [];
@@ -641,7 +602,7 @@ function FF_RatesManager() {
                 open:       true,
                 id:         row.id,
                 updated_at: row.updated_at,
-                label:      row.customer_name + ' — ' + row.equipment_type,
+                label:      row.customer_name + ' — ' + row.equipment_type.replace(/_/g, ' '),
                 saving:     false,
                 error:      '',
             };

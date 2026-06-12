@@ -4,25 +4,26 @@ declare(strict_types=1);
 /**
  * api/v1/rate_cards/create.php
  *
- * Create a new rate card (header only — items added via update or item endpoints).
+ * Create a new rate card.
  *
  * Business rules:
  *   - name required and unique among non-deleted rate cards.
  *   - effective_from required (Y-m-d). effective_to optional but must be >= effective_from.
  *   - is_default: only one card can be default at a time. Setting is_default=1 clears
  *     is_default on all other cards in the same transaction.
- *   - items[] optional array — each item has equipment_type (required) + rates.
+ *   - customer_id optional FK to customers — NULL = global card.
+ *   - items[] optional array — each item has equipment_type (category slug, required) + rates.
  *   - D16: rate values via clean_decimal(), stored as strings for bcmath.
  *   - Audit log: action='create', module='rates', entity_type='rate_card'.
  *
  * @method  POST
  * @body    JSON: name (required), effective_from (required), description?,
- *               effective_to?, is_default?, items[]?
+ *               effective_to?, is_default?, customer_id?, items[]?
  * @auth    Session required; require_permission('rates','create')
- * @returns 201 { id, name, effective_from }
+ * @returns 201 { id, name, effective_from, customer_id }
  *
  * Decisions: D5 (soft delete), D7, D16 (bcmath), §7 (audit log)
- * Session: S019
+ * Session: S019, S-RATES-REDESIGN
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -79,6 +80,15 @@ if (db_exists('rate_cards', 'name = ? AND deleted_at IS NULL', [$name])) {
 // -----------------------------------------------------------------------
 $description = clean_string($body['description'] ?? null, 1000);
 $isDefault   = isset($body['is_default']) ? (int)(bool)$body['is_default'] : 0;
+
+// Optional customer_id — NULL = global rate card
+$customerId = null;
+if (!empty($body['customer_id'])) {
+    $customerId = clean_int($body['customer_id']);
+    if (!$customerId || !db_exists('customers', 'id = ? AND deleted_at IS NULL', [$customerId])) {
+        json_validation_error(['customer_id' => 'Customer not found.']);
+    }
+}
 
 // -----------------------------------------------------------------------
 // 5. Validate items array (optional)
@@ -170,7 +180,7 @@ if ($itemErrors) {
 // 6. Insert inside transaction + items + audit log
 // -----------------------------------------------------------------------
 $newId = db_transaction(function() use (
-    $name, $description, $isDefault, $effectiveFrom, $effectiveTo, $itemsToInsert
+    $name, $description, $isDefault, $effectiveFrom, $effectiveTo, $customerId, $itemsToInsert
 ) {
     // If setting as default, clear all other defaults first
     if ($isDefault) {
@@ -186,6 +196,7 @@ $newId = db_transaction(function() use (
         'is_default'     => $isDefault,
         'effective_from' => $effectiveFrom,
         'effective_to'   => $effectiveTo,
+        'customer_id'    => $customerId,
         'created_by'     => current_user_id(),
     ]);
 
@@ -208,6 +219,7 @@ $newId = db_transaction(function() use (
             'effective_from' => $effectiveFrom,
             'effective_to'   => $effectiveTo,
             'is_default'     => $isDefault,
+            'customer_id'    => $customerId,
             'item_count'     => count($itemsToInsert),
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
@@ -216,4 +228,4 @@ $newId = db_transaction(function() use (
     return $id;
 });
 
-json_success(['id' => $newId, 'name' => $name, 'effective_from' => $effectiveFrom], 201);
+json_success(['id' => $newId, 'name' => $name, 'effective_from' => $effectiveFrom, 'customer_id' => $customerId], 201);

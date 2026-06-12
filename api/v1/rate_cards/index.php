@@ -49,10 +49,27 @@ if (isset($_GET['active']) && $_GET['active'] !== '') {
     $params[] = $today;
 }
 
+// Filter: customer_id — '0' = global cards only, numeric = specific customer
+if (isset($_GET['customer_id']) && $_GET['customer_id'] !== '') {
+    $cid = clean_int($_GET['customer_id']);
+    if ($cid === 0) {
+        $where[] = 'rc.customer_id IS NULL';
+    } else {
+        $where[]  = 'rc.customer_id = ?';
+        $params[] = $cid;
+    }
+}
+
+// Filter: has_customer=1 — customer-specific cards only (any customer)
+if (!empty($_GET['has_customer'])) {
+    $where[] = 'rc.customer_id IS NOT NULL';
+}
+
 // Name search
 if ($q = clean_string($_GET['q'] ?? null)) {
     $like     = '%' . $q . '%';
-    $where[]  = 'rc.name LIKE ?';
+    $where[]  = '(rc.name LIKE ? OR c.company_name LIKE ?)';
+    $params[] = $like;
     $params[] = $like;
 }
 
@@ -75,17 +92,24 @@ $whereSQL = implode(' AND ', $where);
 // -----------------------------------------------------------------------
 // 4. Count + rows — include item_count per card
 // -----------------------------------------------------------------------
-$total = db_count("SELECT COUNT(*) FROM rate_cards rc WHERE $whereSQL", $params);
+$total = db_count(
+    "SELECT COUNT(*) FROM rate_cards rc
+     LEFT JOIN customers c ON c.id = rc.customer_id AND c.deleted_at IS NULL
+     WHERE $whereSQL",
+    $params
+);
 
 $rows = db_select(
     "SELECT
          rc.id, rc.name, rc.description, rc.is_default,
          rc.effective_from, rc.effective_to,
+         rc.customer_id, c.company_name AS customer_name,
          rc.created_by, rc.created_at, rc.updated_at,
          (SELECT COUNT(*) FROM rate_card_items rci
           WHERE rci.rate_card_id = rc.id) AS item_count,
          u.name AS created_by_name
      FROM rate_cards rc
+     LEFT JOIN customers c ON c.id = rc.customer_id AND c.deleted_at IS NULL
      LEFT JOIN users u ON u.id = rc.created_by AND u.deleted_at IS NULL
      WHERE $whereSQL
      ORDER BY rc.$sort $dir

@@ -48,6 +48,14 @@ if ($equipType = clean_string($_GET['equipment_type'] ?? null)) {
     $params[] = $equipType;
 }
 
+// Generic q search — matches customer name or equipment type
+if ($q = clean_string($_GET['q'] ?? null, 255)) {
+    $like     = '%' . $q . '%';
+    $where[]  = '(c.company_name LIKE ? OR cer.equipment_type LIKE ?)';
+    $params[] = $like;
+    $params[] = $like;
+}
+
 // -----------------------------------------------------------------------
 // 2. Sort — allowlisted
 // -----------------------------------------------------------------------
@@ -68,7 +76,9 @@ $whereSQL = implode(' AND ', $where);
 // 4. Count + rows — join customer name for cross-customer view
 // -----------------------------------------------------------------------
 $total = db_count(
-    "SELECT COUNT(*) FROM customer_equipment_rates cer WHERE $whereSQL",
+    "SELECT COUNT(*) FROM customer_equipment_rates cer
+     JOIN customers c ON c.id = cer.customer_id AND c.deleted_at IS NULL
+     WHERE $whereSQL",
     $params
 );
 
