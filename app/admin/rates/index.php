@@ -55,6 +55,33 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
+<style>
+/* Customer override tiles — contrasting cream cards on the dark theme (Apple light-card look). */
+.rate-cust-tile {
+    cursor: pointer;
+    background: #f7f5f0;                 /* warm cream */
+    color: #1c1c1e;                      /* near-black label */
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.18);
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+.rate-cust-tile:hover {
+    transform: translateY(-2px);
+    background: #fffefb;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.28);
+}
+.rate-cust-tile:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.rate-cust-tile.is-selected {
+    background: #fffefb;
+    box-shadow: 0 0 0 2px var(--color-primary), 0 12px 28px rgba(0,0,0,0.45);
+}
+.rate-cust-tile .rct-name  { font-weight: 600; font-size: 0.95rem; line-height: 1.3; color: #1c1c1e;
+                             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rate-cust-tile .rct-count { font-size: 0.8125rem; margin-top: 8px; color: #6e6e73; }  /* Apple secondary gray */
+</style>
+
 <div x-data="FF_RatesManager()" x-init="init()">
 
 <!-- KPI tiles — clickable filters for the Rate Cards section -->
@@ -215,14 +242,12 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- Customer tiles (Apple-style glass tiles) -->
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;">
                 <template x-for="group in groups" :key="group.customer_id">
-                    <div class="stat-card" role="button" tabindex="0"
-                         style="cursor:pointer;"
-                         :style="selectedId === group.customer_id ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
+                    <div class="rate-cust-tile" role="button" tabindex="0"
+                         :class="selectedId === group.customer_id ? 'is-selected' : ''"
                          @click="selectGroup(group)"
                          @keydown.enter="selectGroup(group)" @keydown.space.prevent="selectGroup(group)">
-                        <div style="font-weight:600;font-size:0.95rem;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                             x-text="group.customer_name"></div>
-                        <div class="text-secondary" style="font-size:0.8125rem;margin-top:8px;"
+                        <div class="rct-name" x-text="group.customer_name"></div>
+                        <div class="rct-count"
                              x-text="group.override_count + (group.override_count === 1 ? ' rate' : ' rates')"></div>
                     </div>
                 </template>
