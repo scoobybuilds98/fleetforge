@@ -121,6 +121,18 @@ require_once FF_ROOT . '/includes/header.php';
 .rate-item-card__pill--global   { background: rgba(0,0,0,0.06);      color: #6e6e73; }
 .rate-item-card a.rcard-link      { color: #1d4ed8; font-weight: 500; }
 .rate-item-card a.rcard-link:hover{ text-decoration: underline; }
+
+/* iOS-style toggle switch */
+.ios-toggle { position: relative; display: inline-block; width: 48px; height: 29px; flex-shrink: 0; }
+.ios-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.ios-toggle .track { position: absolute; inset: 0; border-radius: 999px; cursor: pointer;
+                     background: rgba(120,120,128,0.32); transition: background .22s ease; }
+.ios-toggle .knob  { position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; border-radius: 50%;
+                     background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.35), 0 1px 1px rgba(0,0,0,0.2);
+                     transition: transform .22s ease; pointer-events: none; }
+.ios-toggle input:checked ~ .track { background: #34c759; }   /* iOS green */
+.ios-toggle input:checked ~ .knob  { transform: translateX(19px); }
+.ios-toggle input:focus-visible ~ .track { box-shadow: 0 0 0 3px rgba(52,199,89,0.35); }
 </style>
 
 <div x-data="FF_RatesManager()" x-init="init()">
@@ -380,14 +392,20 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </template>
 
-    <!-- ── Rate Cards accordion (scope-filtered by the tiles) ────────────── -->
-    <div class="card" style="margin-top:20px;margin-bottom:12px;">
-        <!-- Header -->
-        <div class="card-header"
-             style="display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;"
-             @click="cardsOpen = !cardsOpen">
-            <span class="text-secondary" style="font-size:0.75rem;width:12px;flex-shrink:0;"
-                  x-text="cardsOpen ? '▼' : '▶'"></span>
+    <!-- ── Rate Cards — hidden by default, shown via the iOS toggle ──────── -->
+    <div style="display:flex;align-items:center;gap:12px;margin-top:24px;margin-bottom:12px;">
+        <span style="font-weight:600;font-size:1rem;">All Rate Cards</span>
+        <span class="badge badge-neutral" style="font-size:0.75rem;" x-text="cardsTotal"></span>
+        <label class="ios-toggle" style="margin-left:auto;" title="Show / hide rate cards">
+            <input type="checkbox" x-model="cardsOpen">
+            <span class="track"></span>
+            <span class="knob"></span>
+        </label>
+    </div>
+
+    <div class="card" x-show="cardsOpen" x-cloak style="margin-bottom:12px;">
+        <!-- Active scope filter + reset -->
+        <div class="card-header" style="display:flex;align-items:center;gap:12px;">
             <span style="font-weight:600;font-size:0.9375rem;" x-text="scopeLabel()"></span>
             <button class="btn btn-ghost btn-sm" x-show="cardScope !== 'all'"
                     style="padding:1px 8px;font-size:0.7rem;"
@@ -396,8 +414,7 @@ require_once FF_ROOT . '/includes/header.php';
                   x-text="cardsTotal + ' card' + (cardsTotal === 1 ? '' : 's')"></span>
         </div>
 
-        <!-- Expanded body -->
-        <div x-show="cardsOpen" class="card-body">
+        <div class="card-body">
             <div x-show="cardsLoading" style="text-align:center;padding:1.5rem;">
                 <span class="text-secondary">Loading…</span>
             </div>
