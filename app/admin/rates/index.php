@@ -212,37 +212,55 @@ require_once FF_ROOT . '/includes/header.php';
 
     <template x-if="!groupsLoading && groups.length > 0">
         <div>
-            <template x-for="group in groups" :key="group.customer_id">
-                <div class="card" style="margin-bottom:12px;">
-
-                    <!-- Accordion header — click to expand/collapse (lazy-loads) -->
-                    <div class="card-header"
-                         style="display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;"
-                         @click="toggleGroup(group)">
-                        <span class="text-secondary" style="font-size:0.75rem;width:12px;flex-shrink:0;"
-                              x-text="group.open ? '▼' : '▶'"></span>
-                        <a :href="'<?= base_url('customers/show') ?>?id=' + group.customer_id"
-                           class="link"
-                           x-text="group.customer_name"
-                           style="font-size:1rem;font-weight:600;"
-                           @click.stop></a>
-                        <span class="badge badge-neutral"
-                              style="margin-left:auto;font-size:0.75rem;"
-                              x-text="group.override_count + ' rate' + (group.override_count === 1 ? '' : 's')"></span>
+            <!-- Customer tiles (Apple-style glass tiles) -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;">
+                <template x-for="group in groups" :key="group.customer_id">
+                    <div class="stat-card" role="button" tabindex="0"
+                         style="cursor:pointer;"
+                         :style="selectedId === group.customer_id ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
+                         @click="selectGroup(group)"
+                         @keydown.enter="selectGroup(group)" @keydown.space.prevent="selectGroup(group)">
+                        <div style="font-weight:600;font-size:0.95rem;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                             x-text="group.customer_name"></div>
+                        <div class="text-secondary" style="font-size:0.8125rem;margin-top:8px;"
+                             x-text="group.override_count + (group.override_count === 1 ? ' rate' : ' rates')"></div>
                     </div>
+                </template>
+            </div>
 
-                    <!-- Expanded body -->
-                    <div x-show="group.open" class="card-body">
+            <!-- Pagination — customer pages -->
+            <div x-show="groupsTotalPages > 1"
+                 style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:16px;">
+                <button class="btn btn-secondary btn-sm" :disabled="groupsPage <= 1"
+                        @click="loadGroups(groupsPage - 1)">← Prev</button>
+                <span class="text-secondary" style="font-size:0.875rem;"
+                      x-text="'Page ' + groupsPage + ' of ' + groupsTotalPages"></span>
+                <button class="btn btn-secondary btn-sm" :disabled="groupsPage >= groupsTotalPages"
+                        @click="loadGroups(groupsPage + 1)">Next →</button>
+            </div>
 
+            <!-- Detail panel — selected customer's overrides -->
+            <template x-if="selectedGroup">
+                <div class="card" style="margin-top:18px;">
+                    <div class="card-header" style="display:flex;align-items:center;gap:10px;">
+                        <a :href="'<?= base_url('customers/show') ?>?id=' + selectedGroup.customer_id"
+                           class="link" style="font-weight:600;font-size:1rem;"
+                           x-text="selectedGroup.customer_name"></a>
+                        <span class="badge badge-neutral" style="font-size:0.75rem;"
+                              x-text="selectedGroup.override_count + ' rate' + (selectedGroup.override_count === 1 ? '' : 's')"></span>
+                        <button class="btn btn-ghost btn-sm" style="margin-left:auto;"
+                                @click="selectedId = null">Close ✕</button>
+                    </div>
+                    <div class="card-body">
                         <!-- Per-group loading -->
-                        <div x-show="group.loading" style="text-align:center;padding:1rem;">
+                        <div x-show="selectedGroup.loading" style="text-align:center;padding:1rem;">
                             <span class="text-secondary">Loading rates…</span>
                         </div>
 
                         <!-- Equipment rate cards grid -->
-                        <div x-show="group.loaded"
+                        <div x-show="selectedGroup.loaded"
                              style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
-                            <template x-for="item in group.items" :key="item.id">
+                            <template x-for="item in selectedGroup.items" :key="item.id">
                                 <div style="border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);overflow:hidden;">
 
                                     <!-- ── VIEW MODE ─────────────────────────── -->
@@ -288,7 +306,7 @@ require_once FF_ROOT . '/includes/header.php';
                                                 <?php endif; ?>
                                                 <?php if (can('rates', 'delete')): ?>
                                                 <button class="btn btn-outline-danger btn-sm"
-                                                        @click.stop="confirmDeleteOverride(item, group)">Delete</button>
+                                                        @click.stop="confirmDeleteOverride(item, selectedGroup)">Delete</button>
                                                 <?php endif; ?>
                                             </div>
                                             <?php endif; ?>
@@ -377,17 +395,6 @@ require_once FF_ROOT . '/includes/header.php';
 
                 </div>
             </template>
-
-            <!-- Pagination — customer pages -->
-            <div x-show="groupsTotalPages > 1"
-                 style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:4px;">
-                <button class="btn btn-secondary btn-sm" :disabled="groupsPage <= 1"
-                        @click="loadGroups(groupsPage - 1)">← Prev</button>
-                <span class="text-secondary" style="font-size:0.875rem;"
-                      x-text="'Page ' + groupsPage + ' of ' + groupsTotalPages"></span>
-                <button class="btn btn-secondary btn-sm" :disabled="groupsPage >= groupsTotalPages"
-                        @click="loadGroups(groupsPage + 1)">Next →</button>
-            </div>
         </div>
     </template>
 
@@ -459,13 +466,18 @@ function FF_RatesManager() {
         cardsOpen:    true,
         cardScope:    'all',
 
-        // Customer override groups — one page of customers at a time,
-        // overrides lazy-loaded per customer on accordion expand.
+        // Customer override groups — one page of customers (tiles); the
+        // selected customer's overrides lazy-load into the detail panel.
         groups:          [],
         groupsTotal:     0,
         groupsPage:      1,
         groupsTotalPages: 1,
         groupsLoading:   false,
+        selectedId:      null,   // customer_id of the open detail tile
+
+        get selectedGroup() {
+            return this.groups.find(g => g.customer_id === this.selectedId) || null;
+        },
 
         // Modals
         deleteCardModal: { open: false, id: null, name: '', updated_at: null, saving: false, error: '' },
@@ -535,24 +547,33 @@ function FF_RatesManager() {
                     customer_id:    row.customer_id,
                     customer_name:  row.customer_name,
                     override_count: row.override_count,
-                    open:    false,
                     loading: false,
                     loaded:  false,
                     items:   [],
                 }));
+                // Drop the detail panel if its customer is no longer on this page.
+                if (!this.groups.some(g => g.customer_id === this.selectedId)) {
+                    this.selectedId = null;
+                }
             } catch (e) {
                 this.groups = [];
                 this.groupsTotal = 0;
                 this.groupsTotalPages = 1;
+                this.selectedId = null;
             } finally {
                 this.groupsLoading = false;
             }
         },
 
-        // ── Expand/collapse a customer; lazy-load its overrides once ─────────
-        toggleGroup(group) {
-            group.open = !group.open;
-            if (group.open && !group.loaded && !group.loading) {
+        // ── Select a customer tile; lazy-load its overrides into detail ─────
+        selectGroup(group) {
+            // Click the open tile again to close the detail panel.
+            if (this.selectedId === group.customer_id) {
+                this.selectedId = null;
+                return;
+            }
+            this.selectedId = group.customer_id;
+            if (!group.loaded && !group.loading) {
                 this.loadGroupItems(group);
             }
         },
