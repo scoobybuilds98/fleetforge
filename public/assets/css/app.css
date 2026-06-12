@@ -2219,6 +2219,12 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .stat-card .stat-label { color: #44464c; font-weight: 600; }
 .stat-card .stat-value { color: #16161a; }
 .stat-card .stat-delta { color: #5d5f66; }
+/* Many tiles tag the sub-line with `.text-secondary`, whose `!important` (a light
+   slate meant for the dark theme) otherwise wins and washes out on the tile.
+   Re-assert the dark greys with equal weight but higher specificity. */
+.stat-card .stat-label.text-secondary { color: #44464c !important; }
+.stat-card .stat-delta.text-secondary { color: #5d5f66 !important; }
+.stat-card .stat-value.text-secondary { color: #16161a !important; }
 
 /* Per-card accent color variants */
 .stat-card--green  { --stat-accent: #22c55e; }
