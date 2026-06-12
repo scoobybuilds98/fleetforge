@@ -140,7 +140,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
                 <h3 class="card-title">Rate Items</h3>
                 <button type="button" class="btn btn-secondary btn-sm"
-                        @click="addItem()">+ Add Equipment Type</button>
+                        @click="addItem()">Add new +</button>
             </div>
             <div class="card-body">
 
