@@ -233,8 +233,15 @@ if (array_key_exists('template_id', $body)) {
     $tplId = clean_int($body['template_id']);
     if (!$tplId) {
         $fields['template_id'] = 'Please select an equipment type.';
-    } elseif (!db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL', [$tplId])) {
-        $fields['template_id'] = 'Selected equipment type does not exist.';
+    } elseif ($tplId === (int) $existing['template_id']) {
+        // Unchanged — always accepted (no-op write). Don't block editing other
+        // fields just because this unit's current type was later deactivated or
+        // soft-deleted; keeping the existing type is always valid.
+    } elseif (!db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL AND is_active = 1', [$tplId])) {
+        // Switching types is only allowed to a live, active template — mirrors
+        // the create-time rule (units/create.php requires is_active = 1) and
+        // keeps future lease rate lookups (lookup_rates.php) working.
+        $fields['template_id'] = 'Selected equipment type is not available.';
     } else {
         $updates['template_id'] = $tplId;
     }

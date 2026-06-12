@@ -54,7 +54,7 @@ $yards = db_select("SELECT name FROM yards WHERE is_active = 1 ORDER BY name", [
 // always renders.
 $templates = db_select(
     "SELECT id, name FROM equipment_templates
-      WHERE deleted_at IS NULL AND (is_active = 1 OR id = ?)
+      WHERE (deleted_at IS NULL AND is_active = 1) OR id = ?
       ORDER BY name ASC",
     [$unit['template_id']]
 );
@@ -96,7 +96,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label required" for="template_id">Equipment Type</label>
                         <select id="template_id" name="template_id" class="form-control form-select"
-                                x-model="form.template_id">
+                                x-model.number="form.template_id">
                             <?php foreach ($templates as $tpl): ?>
                             <option value="<?= (int)$tpl['id'] ?>"><?= e($tpl['name']) ?></option>
                             <?php endforeach; ?>
