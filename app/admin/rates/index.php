@@ -80,6 +80,34 @@ require_once FF_ROOT . '/includes/header.php';
 .rate-cust-tile .rct-name  { font-weight: 600; font-size: 0.95rem; line-height: 1.3; color: #1c1c1e;
                              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rate-cust-tile .rct-count { font-size: 0.8125rem; margin-top: 8px; color: #6e6e73; }  /* Apple secondary gray */
+
+/* Equipment rate cards (view mode) — cream cards matching the tiles. */
+.rate-item-card {
+    background: #f7f5f0;
+    color: #1c1c1e;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.28), 0 1px 2px rgba(0,0,0,0.16);
+    transition: transform .16s ease, box-shadow .16s ease;
+}
+.rate-item-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.42); }
+.rate-item-card__head {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding: 13px 15px; border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+.rate-item-card__type { font-weight: 600; font-size: 0.9375rem; text-transform: capitalize; line-height: 1.25; color: #1c1c1e; }
+.rate-item-card__cur  { font-size: 0.68rem; font-weight: 700; letter-spacing: .02em; color: #6e6e73;
+                        background: rgba(0,0,0,0.06); border-radius: 999px; padding: 3px 9px; flex-shrink: 0; }
+.rate-item-card__rows { padding: 14px 15px; display: grid; grid-template-columns: auto 1fr; gap: 9px 16px;
+                        font-size: 0.9rem; align-items: baseline; }
+.rate-item-card__k    { color: #6e6e73; }
+.rate-item-card__v    { text-align: right; color: #1c1c1e; font-variant-numeric: tabular-nums; }
+.rate-item-card__empty{ grid-column: 1 / -1; color: #8a8a8e; font-style: italic; }
+.rate-item-card__foot { padding: 11px 15px; border-top: 1px solid rgba(0,0,0,0.08); display: flex; gap: 8px; }
+/* Dark "Edit" button reads well on the light card (Apple primary-on-white). */
+.rate-item-card__foot .btn-secondary { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
+.rate-item-card__foot .btn-secondary:hover { background: #000; border-color: #000; }
 </style>
 
 <div x-data="FF_RatesManager()" x-init="init()">
@@ -282,49 +310,47 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="text-secondary">Loading rates…</span>
                         </div>
 
-                        <!-- Equipment rate cards grid -->
-                        <div x-show="selectedGroup.loaded"
-                             style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
+                        <!-- Equipment rate cards grid (x-if so display:grid is honoured) -->
+                        <template x-if="selectedGroup.loaded">
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">
                             <template x-for="item in selectedGroup.items" :key="item.id">
-                                <div style="border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);overflow:hidden;">
+                                <div>
 
-                                    <!-- ── VIEW MODE ─────────────────────────── -->
+                                    <!-- ── VIEW MODE — cream card ───────────── -->
                                     <template x-if="!item._editing">
-                                        <div>
+                                        <div class="rate-item-card">
                                             <!-- Header: type + currency -->
-                                            <div style="padding:14px 16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                                                <span class="font-semibold"
-                                                      x-text="item.equipment_type.replace(/_/g,' ')"
-                                                      style="font-size:0.9375rem;font-weight:600;text-transform:capitalize;line-height:1.3;"></span>
-                                                <span class="badge badge-neutral"
-                                                      x-text="item.currency || 'CAD'"
-                                                      style="font-size:0.7rem;flex-shrink:0;"></span>
+                                            <div class="rate-item-card__head">
+                                                <span class="rate-item-card__type"
+                                                      x-text="item.equipment_type.replace(/_/g,' ')"></span>
+                                                <span class="rate-item-card__cur"
+                                                      x-text="item.currency || 'CAD'"></span>
                                             </div>
                                             <!-- Body: rate pairs -->
-                                            <div style="padding:16px;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:0.875rem;align-items:baseline;">
-                                                <span x-show="item.daily_rate" class="text-secondary">Daily</span>
-                                                <span x-show="item.daily_rate" class="font-mono" style="text-align:right;"
+                                            <div class="rate-item-card__rows">
+                                                <span class="rate-item-card__k" x-show="item.daily_rate">Daily</span>
+                                                <span class="rate-item-card__v" x-show="item.daily_rate"
                                                       x-text="item.daily_rate ? '$' + parseFloat(item.daily_rate).toFixed(2) : ''"></span>
 
-                                                <span x-show="item.weekly_rate" class="text-secondary">Weekly</span>
-                                                <span x-show="item.weekly_rate" class="font-mono" style="text-align:right;"
+                                                <span class="rate-item-card__k" x-show="item.weekly_rate">Weekly</span>
+                                                <span class="rate-item-card__v" x-show="item.weekly_rate"
                                                       x-text="item.weekly_rate ? '$' + parseFloat(item.weekly_rate).toFixed(2) : ''"></span>
 
-                                                <span x-show="item.monthly_rate" class="text-secondary">Monthly</span>
-                                                <span x-show="item.monthly_rate" class="font-mono" style="text-align:right;"
+                                                <span class="rate-item-card__k" x-show="item.monthly_rate">Monthly</span>
+                                                <span class="rate-item-card__v" x-show="item.monthly_rate"
                                                       x-text="item.monthly_rate ? '$' + parseFloat(item.monthly_rate).toFixed(2) : ''"></span>
 
-                                                <span x-show="item.mileage_rate" class="text-secondary">Mileage</span>
-                                                <span x-show="item.mileage_rate" class="font-mono" style="text-align:right;"
+                                                <span class="rate-item-card__k" x-show="item.mileage_rate">Mileage</span>
+                                                <span class="rate-item-card__v" x-show="item.mileage_rate"
                                                       x-text="item.mileage_rate ? '$' + parseFloat(item.mileage_rate).toFixed(4) + ' / ' + item.mileage_unit : ''"></span>
 
                                                 <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate">
-                                                    <span class="text-secondary" style="grid-column:1/-1;font-style:italic;">No rates set</span>
+                                                    <span class="rate-item-card__empty">No rates set</span>
                                                 </template>
                                             </div>
                                             <!-- Footer: edit/delete -->
                                             <?php if (can('rates', 'edit') || can('rates', 'delete')): ?>
-                                            <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;">
+                                            <div class="rate-item-card__foot">
                                                 <?php if (can('rates', 'edit')): ?>
                                                 <button class="btn btn-secondary btn-sm"
                                                         @click.stop="editOverride(item)">Edit</button>
@@ -338,10 +364,10 @@ require_once FF_ROOT . '/includes/header.php';
                                         </div>
                                     </template>
 
-                                    <!-- ── EDIT MODE ─────────────────────────── -->
+                                    <!-- ── EDIT MODE — dark card (form) ─────── -->
                                     <?php if (can('rates', 'edit')): ?>
                                     <template x-if="item._editing">
-                                        <div>
+                                        <div style="border:1px solid var(--border-color);border-radius:14px;background:var(--bg-secondary);overflow:hidden;">
                                             <!-- Header: type (read-only) + currency selector -->
                                             <div style="padding:14px 16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;gap:8px;">
                                                 <span class="font-semibold"
@@ -416,6 +442,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 </div>
                             </template>
                         </div>
+                        </template>
                     </div>
 
                 </div>
