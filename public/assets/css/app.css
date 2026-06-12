@@ -2213,10 +2213,12 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     transform: translateY(-2px);
 }
 
-/* Dark text so labels/values read on the cream (dark mode) and white (light mode) tile. */
-.stat-card .stat-label { color: #6e6e73; }
-.stat-card .stat-value { color: #1c1c1e; }
-.stat-card .stat-delta { color: #8a8a8e; }
+/* Dark text so labels/values read on the cream (dark mode) and white (light mode) tile.
+   Greys are deliberately darker than Apple defaults — the lighter shades washed
+   out on the warm cream fill. */
+.stat-card .stat-label { color: #44464c; font-weight: 600; }
+.stat-card .stat-value { color: #16161a; }
+.stat-card .stat-delta { color: #5d5f66; }
 
 /* Per-card accent color variants */
 .stat-card--green  { --stat-accent: #22c55e; }
