@@ -133,34 +133,48 @@ require_once FF_ROOT . '/includes/header.php';
 .ios-toggle input:checked ~ .track { background: #34c759; }   /* iOS green */
 .ios-toggle input:checked ~ .knob  { transform: translateX(19px); }
 .ios-toggle input:focus-visible ~ .track { box-shadow: 0 0 0 3px rgba(52,199,89,0.35); }
+
+/* Cream KPI tiles (matching the customer tiles) — scoped to this page. */
+.rate-kpi-tile {
+    cursor: pointer; min-width: 0;
+    background: #f7f5f0; color: #1c1c1e;
+    border: 1px solid rgba(0,0,0,0.06); border-radius: 16px; padding: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.18);
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+.rate-kpi-tile:hover { transform: translateY(-2px); background: #fffefb;
+                       box-shadow: 0 12px 28px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.28); }
+.rate-kpi-tile .stat-label { color: #6e6e73; }
+.rate-kpi-tile .stat-value { color: #1c1c1e; }
+.rate-kpi-tile .stat-delta { color: #8a8a8e; }
 </style>
 
 <div x-data="FF_RatesManager()" x-init="init()">
 
 <!-- KPI tiles — clickable filters for the Rate Cards section -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+    <div class="rate-kpi-tile" role="button" tabindex="0" style="cursor:pointer;"
          :style="cardScope === 'all' ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
          @click="setScope('all')" @keydown.enter="setScope('all')" @keydown.space.prevent="setScope('all')">
         <div class="stat-label">Rate Cards</div>
         <div class="stat-value font-mono"><?= e($totalCards) ?></div>
         <div class="stat-delta">show all cards</div>
     </div>
-    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+    <div class="rate-kpi-tile" role="button" tabindex="0" style="cursor:pointer;"
          :style="cardScope === 'active' ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
          @click="setScope('active')" @keydown.enter="setScope('active')" @keydown.space.prevent="setScope('active')">
         <div class="stat-label">Active Today</div>
         <div class="stat-value font-mono"><?= e($activeCards) ?></div>
         <div class="stat-delta">show active only</div>
     </div>
-    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+    <div class="rate-kpi-tile" role="button" tabindex="0" style="cursor:pointer;"
          :style="cardScope === 'customer' ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
          @click="setScope('customer')" @keydown.enter="setScope('customer')" @keydown.space.prevent="setScope('customer')">
         <div class="stat-label">Customer Cards</div>
         <div class="stat-value font-mono"><?= e($customerCards) ?></div>
         <div class="stat-delta">customer-specific only</div>
     </div>
-    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+    <div class="rate-kpi-tile" role="button" tabindex="0" style="cursor:pointer;"
          @click="scrollToOverrides()" @keydown.enter="scrollToOverrides()" @keydown.space.prevent="scrollToOverrides()">
         <div class="stat-label">Rate Overrides</div>
         <div class="stat-value font-mono"><?= e($totalOverrides) ?></div>
