@@ -41,7 +41,7 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="page-header-actions">
         <?= help_button('equipment') ?>
         <a href="<?= base_url('equipment/templates') ?>" class="btn btn-secondary btn-sm">
-            Templates
+            Equipment Type
         </a>
         <?php if (can('equipment', 'create')): ?>
         <a href="<?= base_url('equipment/create') ?>" class="btn btn-primary btn-sm">

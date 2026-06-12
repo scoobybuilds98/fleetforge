@@ -41,7 +41,7 @@ require_once FF_ROOT . '/includes/header.php';
         <?= help_button('equipment') ?>
         <?php if (can('equipment', 'create')): ?>
         <a href="<?= base_url('equipment/templates/create') ?>" class="btn btn-primary btn-sm">
-            + New Template
+            + Add new equipment type
         </a>
         <?php endif; ?>
     </div>
@@ -115,7 +115,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <p class="empty-state-text">Create templates to define equipment types for your fleet.</p>
                 <?php if (can('equipment', 'create')): ?>
                 <a href="<?= base_url('equipment/templates/create') ?>" class="btn btn-primary btn-sm">
-                    + New Template
+                    + Add new equipment type
                 </a>
                 <?php endif; ?>
             </div>
