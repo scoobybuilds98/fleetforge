@@ -55,31 +55,39 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<!-- KPI tiles -->
+<div x-data="FF_RatesManager()" x-init="init()">
+
+<!-- KPI tiles — clickable filters for the Rate Cards section -->
 <div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card">
+    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+         :style="cardScope === 'all' ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
+         @click="setScope('all')" @keydown.enter="setScope('all')" @keydown.space.prevent="setScope('all')">
         <div class="stat-label">Rate Cards</div>
         <div class="stat-value font-mono"><?= e($totalCards) ?></div>
-        <div class="stat-delta">total in system</div>
+        <div class="stat-delta">show all cards</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+         :style="cardScope === 'active' ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
+         @click="setScope('active')" @keydown.enter="setScope('active')" @keydown.space.prevent="setScope('active')">
         <div class="stat-label">Active Today</div>
         <div class="stat-value font-mono"><?= e($activeCards) ?></div>
-        <div class="stat-delta">within effective date range</div>
+        <div class="stat-delta">show active only</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+         :style="cardScope === 'customer' ? 'outline:2px solid var(--color-primary);outline-offset:-1px;' : ''"
+         @click="setScope('customer')" @keydown.enter="setScope('customer')" @keydown.space.prevent="setScope('customer')">
         <div class="stat-label">Customer Cards</div>
         <div class="stat-value font-mono"><?= e($customerCards) ?></div>
-        <div class="stat-delta">assigned to specific customers</div>
+        <div class="stat-delta">customer-specific only</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+         @click="scrollToOverrides()" @keydown.enter="scrollToOverrides()" @keydown.space.prevent="scrollToOverrides()">
         <div class="stat-label">Rate Overrides</div>
         <div class="stat-value font-mono"><?= e($totalOverrides) ?></div>
-        <div class="stat-delta">per-equipment-type overrides</div>
+        <div class="stat-delta">jump to overrides ↓</div>
     </div>
 </div>
 
-<div x-data="FF_RatesManager()" x-init="init()">
 
     <!-- ── Customer search toolbar (single row) ──────────────────────────── -->
     <div class="card" style="margin-bottom:16px;">
@@ -97,47 +105,60 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Global Rate Cards accordion ───────────────────────────────────── -->
+    <!-- ── Rate Cards accordion (scope-filtered by the tiles) ────────────── -->
     <div class="card" style="margin-bottom:12px;">
         <!-- Header -->
         <div class="card-header"
              style="display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;"
-             @click="globalOpen = !globalOpen">
+             @click="cardsOpen = !cardsOpen">
             <span class="text-secondary" style="font-size:0.75rem;width:12px;flex-shrink:0;"
-                  x-text="globalOpen ? '▼' : '▶'"></span>
-            <span style="font-weight:600;font-size:0.9375rem;">Global Rate Cards</span>
+                  x-text="cardsOpen ? '▼' : '▶'"></span>
+            <span style="font-weight:600;font-size:0.9375rem;" x-text="scopeLabel()"></span>
+            <button class="btn btn-ghost btn-sm" x-show="cardScope !== 'all'"
+                    style="padding:1px 8px;font-size:0.7rem;"
+                    @click.stop="setScope('all')">Show all</button>
             <span class="badge badge-neutral" style="margin-left:auto;font-size:0.75rem;"
-                  x-text="globalCards.length + ' card' + (globalCards.length === 1 ? '' : 's')"></span>
+                  x-text="cardsTotal + ' card' + (cardsTotal === 1 ? '' : 's')"></span>
         </div>
 
         <!-- Expanded body -->
-        <div x-show="globalOpen" class="card-body">
-            <div x-show="globalLoading" style="text-align:center;padding:1.5rem;">
+        <div x-show="cardsOpen" class="card-body">
+            <div x-show="cardsLoading" style="text-align:center;padding:1.5rem;">
                 <span class="text-secondary">Loading…</span>
             </div>
 
-            <template x-if="!globalLoading && globalCards.length === 0">
+            <template x-if="!cardsLoading && cards.length === 0">
                 <div class="empty-state" style="padding:1.5rem 0;">
-                    <p class="empty-state-title">No global rate cards</p>
-                    <p class="empty-state-text">Global cards apply to all customers unless overridden.</p>
+                    <p class="empty-state-title" x-text="'No ' + scopeLabel().toLowerCase()"></p>
+                    <p class="empty-state-text">Rate cards define standard pricing by equipment category.</p>
                     <?php if (can('rates', 'create')): ?>
                     <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm" style="margin-top:12px;">+ New Rate Card</a>
                     <?php endif; ?>
                 </div>
             </template>
 
-            <template x-if="!globalLoading && globalCards.length > 0">
+            <template x-if="!cardsLoading && cards.length > 0">
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">
-                    <template x-for="card in globalCards" :key="card.id">
+                    <template x-for="card in cards" :key="card.id">
                         <div style="border:1px solid var(--border-color);border-radius:8px;padding:16px;">
                             <!-- Name + status -->
-                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
                                 <span class="font-semibold" x-text="card.name"
                                       style="font-size:0.9375rem;font-weight:600;line-height:1.3;"></span>
                                 <span class="badge"
                                       :class="card.is_active ? 'badge-success' : 'badge-neutral'"
                                       x-text="card.is_active ? 'Active' : 'Inactive'"
                                       style="font-size:0.7rem;flex-shrink:0;"></span>
+                            </div>
+                            <!-- Scope: Global or customer link -->
+                            <div style="margin-bottom:10px;">
+                                <template x-if="card.customer_id">
+                                    <a :href="'<?= base_url('customers/show') ?>?id=' + card.customer_id"
+                                       class="link" style="font-size:0.8125rem;" x-text="card.customer_name"></a>
+                                </template>
+                                <template x-if="!card.customer_id">
+                                    <span class="badge badge-neutral" style="font-size:0.7rem;">Global</span>
+                                </template>
                             </div>
                             <!-- Divider -->
                             <div style="border-top:1px solid var(--border-color);margin-bottom:10px;"></div>
@@ -168,6 +189,12 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── Customer accordion groups (paginated + lazy-loaded) ───────────── -->
+    <div x-ref="ovSection" style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;">
+        <span style="font-weight:600;font-size:0.9375rem;">Customer Rate Overrides</span>
+        <span class="badge badge-neutral" style="font-size:0.75rem;"
+              x-show="groupsTotal > 0" x-text="groupsTotal"></span>
+    </div>
+
     <div x-show="groupsLoading" style="text-align:center;padding:2rem;">
         <span class="text-secondary">Loading…</span>
     </div>
@@ -424,11 +451,13 @@ function FF_RatesManager() {
         // Search
         q: '',
 
-        // Global rate cards (customer_id IS NULL)
-        globalCards:   [],
-        globalTotal:   0,
-        globalLoading: false,
-        globalOpen:    true,
+        // Rate cards — scope-filtered by the KPI tiles.
+        // scope: 'all' | 'active' | 'customer'
+        cards:        [],
+        cardsTotal:   0,
+        cardsLoading: false,
+        cardsOpen:    true,
+        cardScope:    'all',
 
         // Customer override groups — one page of customers at a time,
         // overrides lazy-loaded per customer on accordion expand.
@@ -443,7 +472,7 @@ function FF_RatesManager() {
         deleteOvModal:   { open: false, id: null, label: '', updated_at: null, group: null, saving: false, error: '' },
 
         init() {
-            this.loadGlobalCards();
+            this.loadCards();
             this.loadGroups();
         },
 
@@ -452,17 +481,41 @@ function FF_RatesManager() {
             this.loadGroups(1);
         },
 
-        // ── Global rate cards ───────────────────────────────────────────────
-        async loadGlobalCards() {
-            this.globalLoading = true;
+        // ── Rate cards (scope-filtered) ─────────────────────────────────────
+        scopeLabel() {
+            return {
+                all:      'All Rate Cards',
+                active:   'Active Rate Cards',
+                customer: 'Customer-Specific Rate Cards',
+            }[this.cardScope] ?? 'Rate Cards';
+        },
+
+        // A KPI tile sets the scope; reload the cards and make sure the
+        // section is open so the result is visible.
+        setScope(scope) {
+            this.cardScope = scope;
+            this.cardsOpen = true;
+            this.loadCards();
+        },
+
+        scrollToOverrides() {
+            this.$refs.ovSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+
+        async loadCards() {
+            this.cardsLoading = true;
+            const params = new URLSearchParams({ per_page: 100, sort: 'effective_from', dir: 'DESC' });
+            if (this.cardScope === 'active')   params.set('active', '1');
+            if (this.cardScope === 'customer') params.set('has_customer', '1');
             try {
-                const r = await FF_Api.get(`<?= base_url('api/v1/rate_cards/index') ?>?customer_id=0&per_page=50&sort=effective_from&dir=DESC`);
-                this.globalCards = r.data?.items ?? [];
-                this.globalTotal = r.data?.pagination?.total ?? 0;
+                const r = await FF_Api.get(`<?= base_url('api/v1/rate_cards/index') ?>?${params}`);
+                this.cards      = r.data?.items ?? [];
+                this.cardsTotal = r.data?.pagination?.total ?? 0;
             } catch (e) {
-                this.globalCards = [];
+                this.cards = [];
+                this.cardsTotal = 0;
             } finally {
-                this.globalLoading = false;
+                this.cardsLoading = false;
             }
         },
 
@@ -531,7 +584,7 @@ function FF_RatesManager() {
             try {
                 await FF_Api.post('<?= base_url('api/v1/rate_cards/delete') ?>', { id: this.deleteCardModal.id, updated_at: this.deleteCardModal.updated_at });
                 this.deleteCardModal.open = false;
-                this.loadGlobalCards();
+                this.loadCards();
             } catch (e) {
                 this.deleteCardModal.error = e.message || 'Delete failed.';
             } finally {
