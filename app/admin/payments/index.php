@@ -261,18 +261,18 @@ require_once FF_ROOT . '/includes/header.php';
                         <th class="th-checkbox">
                             <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
                         </th>
-                        <th @click="setSort('payment_number')" style="cursor:pointer; white-space:nowrap;">
+                        <th class="th-sortable" @click="setSort('payment_number')" style="white-space:nowrap;">
                             Payment #
                             <span x-show="sort === 'payment_number'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                         <th>Customer</th>
-                        <th @click="setSort('payment_date')" style="cursor:pointer;">
+                        <th class="th-sortable" @click="setSort('payment_date')">
                             Date
                             <span x-show="sort === 'payment_date'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                         <th>Method</th>
                         <th>Reference</th>
-                        <th @click="setSort('amount')" style="cursor:pointer; text-align:right;">
+                        <th class="th-sortable" @click="setSort('amount')" style="text-align:right;">
                             Amount
                             <span x-show="sort === 'amount'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>

@@ -234,22 +234,22 @@ require_once FF_ROOT . '/includes/header.php';
                         <th class="th-checkbox">
                             <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
                         </th>
-                        <th @click="setSort('claim_number')" style="cursor:pointer;">
-                            Claim # <span x-text="sortIcon('claim_number')"></span>
+                        <th class="th-sortable" @click="setSort('claim_number')">
+                            Claim # <span x-show="sort === 'claim_number'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                         <th>Unit</th>
                         <th>Customer</th>
-                        <th @click="setSort('severity')" style="cursor:pointer;">
-                            Severity <span x-text="sortIcon('severity')"></span>
+                        <th class="th-sortable" @click="setSort('severity')">
+                            Severity <span x-show="sort === 'severity'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th @click="setSort('status')" style="cursor:pointer;">
-                            Status <span x-text="sortIcon('status')"></span>
+                        <th class="th-sortable" @click="setSort('status')">
+                            Status <span x-show="sort === 'status'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th @click="setSort('estimated_repair_cost')" style="cursor:pointer;text-align:right;">
-                            Est. Cost <span x-text="sortIcon('estimated_repair_cost')"></span>
+                        <th class="th-sortable" @click="setSort('estimated_repair_cost')" style="text-align:right;">
+                            Est. Cost <span x-show="sort === 'estimated_repair_cost'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th @click="setSort('created_at')" style="cursor:pointer;">
-                            Reported <span x-text="sortIcon('created_at')"></span>
+                        <th class="th-sortable" @click="setSort('created_at')">
+                            Reported <span x-show="sort === 'created_at'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                     </tr>
                 </thead>

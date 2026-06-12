@@ -209,23 +209,23 @@ require_once FF_ROOT . '/includes/header.php';
                         <th class="th-checkbox">
                             <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
                         </th>
-                        <th @click="setSort('work_order_number')" style="cursor:pointer;">
-                            WO # <span x-text="sortIcon('work_order_number')"></span>
+                        <th class="th-sortable" @click="setSort('work_order_number')">
+                            WO # <span x-show="sort === 'work_order_number'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                         <th>Unit</th>
                         <th>Title</th>
                         <th>Type</th>
-                        <th @click="setSort('priority')" style="cursor:pointer;">
-                            Priority <span x-text="sortIcon('priority')"></span>
+                        <th class="th-sortable" @click="setSort('priority')">
+                            Priority <span x-show="sort === 'priority'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th @click="setSort('status')" style="cursor:pointer;">
-                            Status <span x-text="sortIcon('status')"></span>
+                        <th class="th-sortable" @click="setSort('status')">
+                            Status <span x-show="sort === 'status'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th @click="setSort('requested_date')" style="cursor:pointer;">
-                            Requested <span x-text="sortIcon('requested_date')"></span>
+                        <th class="th-sortable" @click="setSort('requested_date')">
+                            Requested <span x-show="sort === 'requested_date'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th style="text-align:right;" @click="setSort('total_cost')" style="cursor:pointer;">
-                            Cost <span x-text="sortIcon('total_cost')"></span>
+                        <th class="th-sortable" @click="setSort('total_cost')" style="text-align:right;">
+                            Cost <span x-show="sort === 'total_cost'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                         <th>Vendor</th>
                     </tr>

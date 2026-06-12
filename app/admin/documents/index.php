@@ -101,41 +101,31 @@ require_once FF_ROOT . '/includes/header.php';
 <table class="table">
                 <thead>
                     <tr>
-                        <th>
-                            <a href="#" @click.prevent="toggleSort('document_type')" class="sort-link">
-                                Type
-                                <span x-show="filters.sort === 'document_type'"
-                                      x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
-                            </a>
+                        <th class="th-sortable" @click="toggleSort('document_type')">
+                            Type
+                            <span x-show="filters.sort === 'document_type'"
+                                  x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th>
-                            <a href="#" @click.prevent="toggleSort('title')" class="sort-link">
-                                Title
-                                <span x-show="filters.sort === 'title'"
-                                      x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
-                            </a>
+                        <th class="th-sortable" @click="toggleSort('title')">
+                            Title
+                            <span x-show="filters.sort === 'title'"
+                                  x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                         <th>Entity</th>
-                        <th>
-                            <a href="#" @click.prevent="toggleSort('file_size_kb')" class="sort-link">
-                                Size
-                                <span x-show="filters.sort === 'file_size_kb'"
-                                      x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
-                            </a>
+                        <th class="th-sortable" @click="toggleSort('file_size_kb')">
+                            Size
+                            <span x-show="filters.sort === 'file_size_kb'"
+                                  x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th>
-                            <a href="#" @click.prevent="toggleSort('expiration_date')" class="sort-link">
-                                Expires
-                                <span x-show="filters.sort === 'expiration_date'"
-                                      x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
-                            </a>
+                        <th class="th-sortable" @click="toggleSort('expiration_date')">
+                            Expires
+                            <span x-show="filters.sort === 'expiration_date'"
+                                  x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
-                        <th>
-                            <a href="#" @click.prevent="toggleSort('uploaded_at')" class="sort-link">
-                                Uploaded
-                                <span x-show="filters.sort === 'uploaded_at'"
-                                      x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
-                            </a>
+                        <th class="th-sortable" @click="toggleSort('uploaded_at')">
+                            Uploaded
+                            <span x-show="filters.sort === 'uploaded_at'"
+                                  x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                         </th>
                         <th>By</th>
                         <th></th>

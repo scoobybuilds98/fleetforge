@@ -182,14 +182,14 @@ require_once FF_ROOT . '/includes/header.php';
                     <th class="th-checkbox">
                         <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
                     </th>
-                    <th>Inspection #</th>
-                    <th>Type</th>
+                    <th class="th-sortable" @click="setSort('inspection_number')">Inspection # <span x-show="sort === 'inspection_number'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
+                    <th class="th-sortable" @click="setSort('inspection_type')">Type <span x-show="sort === 'inspection_type'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
                     <th>Unit</th>
-                    <th>Date</th>
+                    <th class="th-sortable" @click="setSort('inspection_date')">Date <span x-show="sort === 'inspection_date'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
                     <th>Inspector</th>
                     <th>Lease</th>
-                    <th>Condition</th>
-                    <th>Status</th>
+                    <th class="th-sortable" @click="setSort('overall_condition')">Condition <span x-show="sort === 'overall_condition'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
+                    <th class="th-sortable" @click="setSort('status')">Status <span x-show="sort === 'status'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
                     <th></th>
                 </tr>
             </thead>
@@ -315,6 +315,17 @@ function inspectionList() {
                     }
                     this.loading = false;
                 });
+        },
+
+        setSort(col) {
+            if (this.sort === col) {
+                this.dir = this.dir === 'ASC' ? 'DESC' : 'ASC';
+            } else {
+                this.sort = col;
+                this.dir  = 'DESC';
+            }
+            this.page = 1;
+            this.loadInspections();
         },
 
         setFilter(key, val) {

@@ -174,24 +174,24 @@ require_once FF_ROOT . '/includes/header.php';
         <table class="table">
             <thead>
                 <tr>
-                    <th @click="setSort('credit_note_number')" style="cursor:pointer; user-select:none;">
-                        CN # <span x-text="sortIcon('credit_note_number')"></span>
+                    <th class="th-sortable" @click="setSort('credit_note_number')">
+                        CN # <span x-show="sort === 'credit_note_number'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                     </th>
                     <th>Customer</th>
                     <th>Source</th>
-                    <th @click="setSort('amount')" style="cursor:pointer; user-select:none; text-align:right;">
-                        Amount <span x-text="sortIcon('amount')"></span>
+                    <th class="th-sortable" @click="setSort('amount')" style="text-align:right;">
+                        Amount <span x-show="sort === 'amount'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                     </th>
-                    <th @click="setSort('amount_remaining')" style="cursor:pointer; user-select:none; text-align:right;">
-                        Remaining <span x-text="sortIcon('amount_remaining')"></span>
+                    <th class="th-sortable" @click="setSort('amount_remaining')" style="text-align:right;">
+                        Remaining <span x-show="sort === 'amount_remaining'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                     </th>
                     <th>Cur</th>
-                    <th @click="setSort('status')" style="cursor:pointer; user-select:none;">
-                        Status <span x-text="sortIcon('status')"></span>
+                    <th class="th-sortable" @click="setSort('status')">
+                        Status <span x-show="sort === 'status'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                     </th>
                     <th>Expires</th>
-                    <th @click="setSort('created_at')" style="cursor:pointer; user-select:none;">
-                        Created <span x-text="sortIcon('created_at')"></span>
+                    <th class="th-sortable" @click="setSort('created_at')">
+                        Created <span x-show="sort === 'created_at'" x-text="dir === 'ASC' ? '↑' : '↓'"></span>
                     </th>
                 </tr>
             </thead>

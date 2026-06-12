@@ -203,11 +203,11 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                             <th class="th-checkbox">
                                 <input type="checkbox" class="ff-checkbox" :checked="selectAll" @change="toggleSelectAll()" title="Select all">
                             </th>
-                            <th>Date</th>
+                            <th class="th-sortable" @click="setSort('log_date')">Date <span x-show="sort === 'log_date'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
                             <th>Unit</th>
                             <th>Equipment</th>
-                            <th>Odometer</th>
-                            <th>Type</th>
+                            <th class="th-sortable" @click="setSort('odometer_reading')">Odometer <span x-show="sort === 'odometer_reading'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
+                            <th class="th-sortable" @click="setSort('log_type')">Type <span x-show="sort === 'log_type'" x-text="dir === 'ASC' ? '↑' : '↓'"></span></th>
                             <th>Lease</th>
                             <th>Recorded By</th>
                             <th></th>
@@ -317,6 +317,16 @@ function FF_MileageLogs() {
         },
 
         changePage(p) { this.load(p); },
+
+        setSort(col) {
+            if (this.sort === col) {
+                this.dir = this.dir === 'ASC' ? 'DESC' : 'ASC';
+            } else {
+                this.sort = col;
+                this.dir  = 'DESC';
+            }
+            this.load();
+        },
 
         clearFilters() {
             this.filters = { log_type: '', date_from: '', date_to: '', equipment_unit_id: '' };
