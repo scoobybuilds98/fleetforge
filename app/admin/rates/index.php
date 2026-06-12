@@ -81,18 +81,19 @@ require_once FF_ROOT . '/includes/header.php';
 
 <div x-data="FF_RatesManager()" x-init="init()">
 
-    <!-- ── Search toolbar (single row) ───────────────────────────────────── -->
+    <!-- ── Customer search toolbar (single row) ──────────────────────────── -->
     <div class="card" style="margin-bottom:16px;">
         <div class="card-header" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="width:18px;height:18px;color:var(--text-secondary);flex-shrink:0;"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
             <input type="text" class="form-control form-control-sm"
-                   style="flex:1;min-width:0;max-width:260px;"
-                   placeholder="Search customer or equipment type…"
+                   style="flex:1;min-width:0;max-width:320px;"
+                   placeholder="Search customers by name…"
                    x-model="q"
-                   @input.debounce.400ms="search()">
-            <button class="btn btn-ghost btn-sm" style="white-space:nowrap;"
-                    @click="q='';search()">Reset</button>
+                   @input.debounce.350ms="search()">
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap;" x-show="q"
+                    @click="q='';search()">Clear</button>
             <span class="text-secondary" style="margin-left:auto;white-space:nowrap;font-size:0.8125rem;"
-                  x-text="ovTotal > 0 ? ovTotal + ' override' + (ovTotal === 1 ? '' : 's') + ' · ' + ovGroups.length + ' customer' + (ovGroups.length === 1 ? '' : 's') : ''"></span>
+                  x-text="groupsTotal > 0 ? groupsTotal + ' customer' + (groupsTotal === 1 ? '' : 's') + ' with overrides' : ''"></span>
         </div>
     </div>
 
@@ -166,32 +167,33 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Customer accordion groups ─────────────────────────────────────── -->
-    <div x-show="ovLoading" style="text-align:center;padding:2rem;">
+    <!-- ── Customer accordion groups (paginated + lazy-loaded) ───────────── -->
+    <div x-show="groupsLoading" style="text-align:center;padding:2rem;">
         <span class="text-secondary">Loading…</span>
     </div>
 
-    <template x-if="!ovLoading && ovGroups.length === 0 && (q !== '')">
+    <template x-if="!groupsLoading && groups.length === 0">
         <div class="card">
             <div class="card-body">
                 <div class="empty-state">
-                    <p class="empty-state-title">No results for "<span x-text="q"></span>"</p>
+                    <p class="empty-state-title" x-text="q ? 'No customers match “' + q + '”' : 'No customer rate overrides yet'"></p>
+                    <p class="empty-state-text" x-show="!q">Per-equipment-type overrides can be set on each customer's Rates tab.</p>
                 </div>
             </div>
         </div>
     </template>
 
-    <template x-if="!ovLoading && ovGroups.length > 0">
+    <template x-if="!groupsLoading && groups.length > 0">
         <div>
-            <template x-for="group in ovGroups" :key="group.customer_id">
+            <template x-for="group in groups" :key="group.customer_id">
                 <div class="card" style="margin-bottom:12px;">
 
-                    <!-- Accordion header — click to expand/collapse -->
+                    <!-- Accordion header — click to expand/collapse (lazy-loads) -->
                     <div class="card-header"
                          style="display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;"
-                         @click="toggleGroup(group.customer_id)">
+                         @click="toggleGroup(group)">
                         <span class="text-secondary" style="font-size:0.75rem;width:12px;flex-shrink:0;"
-                              x-text="openGroups[group.customer_id] ? '▼' : '▶'"></span>
+                              x-text="group.open ? '▼' : '▶'"></span>
                         <a :href="'<?= base_url('customers/show') ?>?id=' + group.customer_id"
                            class="link"
                            x-text="group.customer_name"
@@ -199,12 +201,20 @@ require_once FF_ROOT . '/includes/header.php';
                            @click.stop></a>
                         <span class="badge badge-neutral"
                               style="margin-left:auto;font-size:0.75rem;"
-                              x-text="group.items.length + ' rate' + (group.items.length === 1 ? '' : 's')"></span>
+                              x-text="group.override_count + ' rate' + (group.override_count === 1 ? '' : 's')"></span>
                     </div>
 
-                    <!-- Expanded: equipment rate cards grid -->
-                    <div x-show="openGroups[group.customer_id]" class="card-body">
-                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
+                    <!-- Expanded body -->
+                    <div x-show="group.open" class="card-body">
+
+                        <!-- Per-group loading -->
+                        <div x-show="group.loading" style="text-align:center;padding:1rem;">
+                            <span class="text-secondary">Loading rates…</span>
+                        </div>
+
+                        <!-- Equipment rate cards grid -->
+                        <div x-show="group.loaded"
+                             style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
                             <template x-for="item in group.items" :key="item.id">
                                 <div style="border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);overflow:hidden;">
 
@@ -251,7 +261,7 @@ require_once FF_ROOT . '/includes/header.php';
                                                 <?php endif; ?>
                                                 <?php if (can('rates', 'delete')): ?>
                                                 <button class="btn btn-outline-danger btn-sm"
-                                                        @click.stop="confirmDeleteOverride(item)">Delete</button>
+                                                        @click.stop="confirmDeleteOverride(item, group)">Delete</button>
                                                 <?php endif; ?>
                                             </div>
                                             <?php endif; ?>
@@ -340,6 +350,17 @@ require_once FF_ROOT . '/includes/header.php';
 
                 </div>
             </template>
+
+            <!-- Pagination — customer pages -->
+            <div x-show="groupsTotalPages > 1"
+                 style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:4px;">
+                <button class="btn btn-secondary btn-sm" :disabled="groupsPage <= 1"
+                        @click="loadGroups(groupsPage - 1)">← Prev</button>
+                <span class="text-secondary" style="font-size:0.875rem;"
+                      x-text="'Page ' + groupsPage + ' of ' + groupsTotalPages"></span>
+                <button class="btn btn-secondary btn-sm" :disabled="groupsPage >= groupsTotalPages"
+                        @click="loadGroups(groupsPage + 1)">Next →</button>
+            </div>
         </div>
     </template>
 
@@ -409,24 +430,26 @@ function FF_RatesManager() {
         globalLoading: false,
         globalOpen:    true,
 
-        // Customer override groups
-        ovGroups:  [],
-        ovTotal:   0,
-        ovLoading: false,
-        openGroups: {},   // { customer_id: true/false }
+        // Customer override groups — one page of customers at a time,
+        // overrides lazy-loaded per customer on accordion expand.
+        groups:          [],
+        groupsTotal:     0,
+        groupsPage:      1,
+        groupsTotalPages: 1,
+        groupsLoading:   false,
 
         // Modals
         deleteCardModal: { open: false, id: null, name: '', updated_at: null, saving: false, error: '' },
-        deleteOvModal:   { open: false, id: null, label: '', updated_at: null, saving: false, error: '' },
+        deleteOvModal:   { open: false, id: null, label: '', updated_at: null, group: null, saving: false, error: '' },
 
         init() {
             this.loadGlobalCards();
-            this.loadOverrides();
+            this.loadGroups();
         },
 
-        // ── Search ──────────────────────────────────────────────────────────
+        // ── Search (customer name) ──────────────────────────────────────────
         search() {
-            this.loadOverrides();
+            this.loadGroups(1);
         },
 
         // ── Global rate cards ───────────────────────────────────────────────
@@ -443,43 +466,58 @@ function FF_RatesManager() {
             }
         },
 
-        // ── Customer override groups ─────────────────────────────────────────
-        async loadOverrides() {
-            this.ovLoading = true;
-            const params = new URLSearchParams({ per_page: 100, sort: 'equipment_type', dir: 'ASC' });
+        // ── Customer list (paginated, searchable) ───────────────────────────
+        async loadGroups(page = 1) {
+            this.groupsLoading = true;
+            this.groupsPage    = page;
+            const params = new URLSearchParams({ page, per_page: 15 });
             if (this.q) params.set('q', this.q);
             try {
-                const r = await FF_Api.get(`<?= base_url('api/v1/customer_equipment_rates/index') ?>?${params}`);
-                const items = r.data?.items ?? [];
-                this.ovTotal  = r.data?.pagination?.total ?? 0;
-                this.ovGroups = this._buildGroups(items);
-                // Auto-expand first group on initial load
-                if (Object.keys(this.openGroups).length === 0 && this.ovGroups.length > 0) {
-                    this.openGroups[this.ovGroups[0].customer_id] = true;
-                }
+                const r = await FF_Api.get(`<?= base_url('api/v1/customer_equipment_rates/groups') ?>?${params}`);
+                const rows = r.data?.items ?? [];
+                this.groupsTotal      = r.data?.pagination?.total ?? 0;
+                this.groupsTotalPages = r.data?.pagination?.total_pages ?? 1;
+                // Map to accordion groups with lazy-load state
+                this.groups = rows.map(row => ({
+                    customer_id:    row.customer_id,
+                    customer_name:  row.customer_name,
+                    override_count: row.override_count,
+                    open:    false,
+                    loading: false,
+                    loaded:  false,
+                    items:   [],
+                }));
             } catch (e) {
-                this.ovGroups = [];
+                this.groups = [];
+                this.groupsTotal = 0;
+                this.groupsTotalPages = 1;
             } finally {
-                this.ovLoading = false;
+                this.groupsLoading = false;
             }
         },
 
-        _buildGroups(items) {
-            const map = {};
-            for (const item of items) {
-                // Inline-edit state flags (not part of the API payload)
-                item._editing   = false;
-                item._saving    = false;
-                item._saveError = '';
-                const k = item.customer_id;
-                if (!map[k]) map[k] = { customer_id: k, customer_name: item.customer_name, items: [] };
-                map[k].items.push(item);
+        // ── Expand/collapse a customer; lazy-load its overrides once ─────────
+        toggleGroup(group) {
+            group.open = !group.open;
+            if (group.open && !group.loaded && !group.loading) {
+                this.loadGroupItems(group);
             }
-            return Object.values(map).sort((a, b) => a.customer_name.localeCompare(b.customer_name));
         },
 
-        toggleGroup(customerId) {
-            this.openGroups[customerId] = !this.openGroups[customerId];
+        async loadGroupItems(group) {
+            group.loading = true;
+            try {
+                const r = await FF_Api.get(`<?= base_url('api/v1/customer_equipment_rates/index') ?>?customer_id=${group.customer_id}&per_page=100&sort=equipment_type&dir=ASC`);
+                const items = r.data?.items ?? [];
+                items.forEach(it => { it._editing = false; it._saving = false; it._saveError = ''; });
+                group.items          = items;
+                group.override_count = items.length;
+                group.loaded         = true;
+            } catch (e) {
+                group.items = [];
+            } finally {
+                group.loading = false;
+            }
         },
 
         // ── Delete: rate card ────────────────────────────────────────────────
@@ -555,12 +593,13 @@ function FF_RatesManager() {
         },
 
         // ── Delete: override ─────────────────────────────────────────────────
-        confirmDeleteOverride(item) {
+        confirmDeleteOverride(item, group) {
             this.deleteOvModal = {
                 open:       true,
                 id:         item.id,
                 updated_at: item.updated_at,
                 label:      item.customer_name + ' — ' + item.equipment_type.replace(/_/g, ' '),
+                group:      group,
                 saving:     false,
                 error:      '',
             };
@@ -570,9 +609,23 @@ function FF_RatesManager() {
             this.deleteOvModal.saving = true;
             this.deleteOvModal.error  = '';
             try {
-                await FF_Api.post('<?= base_url('api/v1/customer_equipment_rates/delete') ?>', { id: this.deleteOvModal.id, updated_at: this.deleteOvModal.updated_at });
+                const r = await FF_Api.post('<?= base_url('api/v1/customer_equipment_rates/delete') ?>', { id: this.deleteOvModal.id, updated_at: this.deleteOvModal.updated_at });
+                if (r && r.success === false) {
+                    this.deleteOvModal.error = r.error?.message || 'Delete failed.';
+                    return;
+                }
+                // Remove the override from its group in place (no full reload)
+                const group = this.deleteOvModal.group;
+                if (group) {
+                    group.items = group.items.filter(i => i.id !== this.deleteOvModal.id);
+                    group.override_count = group.items.length;
+                    // If the customer no longer has any overrides, refresh the
+                    // page so they drop off the list (and counts stay correct).
+                    if (group.override_count === 0) {
+                        this.loadGroups(this.groupsPage);
+                    }
+                }
                 this.deleteOvModal.open = false;
-                this.loadOverrides();
             } catch (e) {
                 this.deleteOvModal.error = e.message || 'Delete failed.';
             } finally {
