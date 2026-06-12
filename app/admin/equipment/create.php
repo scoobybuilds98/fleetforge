@@ -73,11 +73,11 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <div class="form-row-2">
                     <div class="form-group">
-                        <label class="form-label required" for="template_id">Equipment Template</label>
+                        <label class="form-label required" for="template_id">Equipment Type</label>
                         <select id="template_id" name="template_id" class="form-control form-select"
                                 x-model="form.template_id"
                                 @change="onTemplateChange()">
-                            <option value="">— Select template —</option>
+                            <option value="">— Select equipment type —</option>
                             <?php foreach ($templates as $tpl): ?>
                             <option value="<?= $tpl['id'] ?>"
                                     data-defaults="<?= htmlspecialchars(json_encode($tpl), ENT_QUOTES) ?>">

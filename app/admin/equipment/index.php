@@ -159,8 +159,8 @@ require_once FF_ROOT . '/includes/header.php';
             <select class="form-select form-control-sm"
                     x-model="filters.template_id"
                     @change="resetPage()"
-                    aria-label="Filter by template">
-                <option value="">All Templates</option>
+                    aria-label="Filter by equipment type">
+                <option value="">All Equipment Types</option>
                 <template x-for="tpl in templates" :key="tpl.id">
                     <option :value="tpl.id" x-text="tpl.name"></option>
                 </template>
@@ -181,7 +181,7 @@ require_once FF_ROOT . '/includes/header.php';
                     aria-label="Sort by">
                 <optgroup label="Identifier">
                     <option value="unit_number">Unit #</option>
-                    <option value="template">Template / Type</option>
+                    <option value="template">Equipment Type</option>
                     <option value="status">Status</option>
                 </optgroup>
                 <optgroup label="Asset">
@@ -300,7 +300,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <th class="th-sortable" @click="setSort('unit_number')" style="cursor:pointer;">
                                 Unit # <span x-text="sortIndicator('unit_number')"></span>
                             </th>
-                            <th>Template</th>
+                            <th>Equipment Type</th>
                             <th>Year</th>
                             <th class="th-sortable" @click="setSort('status')" style="cursor:pointer;">
                                 Status <span x-text="sortIndicator('status')"></span>
@@ -393,7 +393,7 @@ require_once FF_ROOT . '/includes/header.php';
 
                         <!-- Template + category -->
                         <div class="eq-mc-row">
-                            <span class="eq-mc-label">Template</span>
+                            <span class="eq-mc-label">Equipment Type</span>
                             <span class="eq-mc-value">
                                 <span x-text="unit.template_name" class="font-medium"></span>
                                 <template x-if="unit.template_category">

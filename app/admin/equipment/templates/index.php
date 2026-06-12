@@ -22,7 +22,7 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('equipment', 'view');
 
-$pageTitle      = 'Equipment Templates';
+$pageTitle      = 'Equipment Types';
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -35,7 +35,7 @@ require_once FF_ROOT . '/includes/header.php';
         <a href="<?= base_url('equipment') ?>" class="btn btn-ghost btn-sm" style="margin-bottom:0.5rem;">
             ← Equipment
         </a>
-        <h1 class="page-header-title h4">Equipment Templates</h1>
+        <h1 class="page-header-title h4">Equipment Types</h1>
     </div>
     <div class="page-header-actions">
         <?= help_button('equipment') ?>
@@ -57,12 +57,12 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="table-toolbar-left">
             <input type="search"
                    class="form-control form-control-sm"
-                   placeholder="Search template name…"
+                   placeholder="Search equipment type name…"
                    x-model="filters.search"
                    @input.debounce.400ms="resetPage()"
                    maxlength="255"
                    style="min-width:220px;"
-                   aria-label="Search templates">
+                   aria-label="Search equipment types">
             <select class="form-select form-control-sm"
                     x-model="filters.category"
                     @change="resetPage()">
@@ -82,7 +82,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="table-toolbar-right">
             <span class="text-secondary text-sm"
                   x-show="!loading"
-                  x-text="pagination.total !== undefined ? pagination.total + ' template' + (pagination.total !== 1 ? 's' : '') : ''">
+                  x-text="pagination.total !== undefined ? pagination.total + ' equipment type' + (pagination.total !== 1 ? 's' : '') : ''">
             </span>
         </div>
     </div>
@@ -100,7 +100,7 @@ require_once FF_ROOT . '/includes/header.php';
 
         <template x-if="!loading && loadError">
             <div class="empty-state">
-                <p class="empty-state-title">Failed to load templates</p>
+                <p class="empty-state-title">Failed to load equipment types</p>
                 <p class="empty-state-text" x-text="loadError"></p>
                 <button class="btn btn-secondary btn-sm" @click="load()">Retry</button>
             </div>
@@ -111,8 +111,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="empty-state-icon">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>
                 </div>
-                <p class="empty-state-title">No templates yet</p>
-                <p class="empty-state-text">Create templates to define equipment types for your fleet.</p>
+                <p class="empty-state-title">No equipment types yet</p>
+                <p class="empty-state-text">Create equipment types to define the equipment categories in your fleet.</p>
                 <?php if (can('equipment', 'create')): ?>
                 <a href="<?= base_url('equipment/templates/create') ?>" class="btn btn-primary btn-sm">
                     + Add new equipment type
@@ -123,7 +123,7 @@ require_once FF_ROOT . '/includes/header.php';
 
         <template x-if="!loading && !loadError && templates.length > 0">
             <div class="table-wrapper">
-                <table class="table" aria-label="Equipment templates">
+                <table class="table" aria-label="Equipment types">
                     <thead>
                         <tr>
                             <th>Name</th>
@@ -152,7 +152,7 @@ require_once FF_ROOT . '/includes/header.php';
                                     <a :href="'<?= base_url('equipment') ?>?template_id=' + tpl.id"
                                        class="font-mono font-medium link"
                                        x-text="tpl.unit_count"
-                                       :title="tpl.unit_count + ' unit' + (tpl.unit_count !== 1 ? 's' : '') + ' using this template'">
+                                       :title="tpl.unit_count + ' unit' + (tpl.unit_count !== 1 ? 's' : '') + ' using this equipment type'">
                                     </a>
                                 </td>
                                 <td class="font-mono text-sm">
@@ -180,7 +180,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         <?php if (can('equipment', 'delete')): ?>
                                         <button class="btn btn-ghost btn-sm text-danger"
                                                 :disabled="tpl.unit_count > 0"
-                                                :title="tpl.unit_count > 0 ? 'Cannot delete: ' + tpl.unit_count + ' units use this template' : 'Delete template'"
+                                                :title="tpl.unit_count > 0 ? 'Cannot delete: ' + tpl.unit_count + ' units use this equipment type' : 'Delete equipment type'"
                                                 @click="deleteTemplate(tpl)">
                                             Delete
                                         </button>
@@ -241,7 +241,7 @@ function FF_Templates() {
                     this.templates  = r.data.items;
                     this.pagination = r.data.pagination;
                 } else {
-                    this.loadError = r.message || 'Failed to load templates.';
+                    this.loadError = r.message || 'Failed to load equipment types.';
                 }
             } catch(e) {
                 this.loadError = 'Network error.';
@@ -254,14 +254,14 @@ function FF_Templates() {
 
         async deleteTemplate(tpl) {
             if (tpl.unit_count > 0) return;
-            if (!(await FF_Confirm.ask('Delete template "' + tpl.name + '"? This cannot be undone.'))) return;
+            if (!(await FF_Confirm.ask('Delete equipment type "' + tpl.name + '"? This cannot be undone.'))) return;
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/delete') ?>', { id: tpl.id });
                 if (r.success) {
                     await this.load();
-                    FF_Toast.success('Template deleted.');
+                    FF_Toast.success('Equipment type deleted.');
                 } else {
-                    FF_Toast.error(r.message || 'Failed to delete template.');
+                    FF_Toast.error(r.message || 'Failed to delete equipment type.');
                 }
             } catch(e) {
                 FF_Toast.error('Network error.');

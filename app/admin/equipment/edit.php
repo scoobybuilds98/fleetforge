@@ -82,9 +82,9 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <div class="form-row-2">
                     <div class="form-group">
-                        <label class="form-label">Equipment Template</label>
+                        <label class="form-label">Equipment Type</label>
                         <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($unit['template_name']) ?></div>
-                        <div class="form-hint">Template cannot be changed after creation.</div>
+                        <div class="form-hint">Equipment type cannot be changed after creation.</div>
                     </div>
                     <div class="form-group">
                         <label class="form-label required" for="unit_number">Unit Number</label>

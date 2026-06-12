@@ -21,7 +21,7 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('equipment', 'create');
 
-$pageTitle = 'New Equipment Template';
+$pageTitle = 'New Equipment Type';
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -32,9 +32,9 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <div>
         <a href="<?= base_url('equipment/templates') ?>" class="btn btn-ghost btn-sm" style="margin-bottom:0.5rem;">
-            ← Templates
+            ← Equipment Types
         </a>
-        <h1 class="page-header-title h4">New Equipment Template</h1>
+        <h1 class="page-header-title h4">New Equipment Type</h1>
     </div>
     <div class="page-header-actions">
         <?= help_button('equipment') ?>
@@ -50,12 +50,12 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- ── Section 1: Identity ─────────────────────────────── -->
         <div class="card" style="margin-bottom:1.5rem;">
-            <div class="card-header"><div class="card-title">Template Identity</div></div>
+            <div class="card-header"><div class="card-title">Equipment Type Identity</div></div>
             <div class="card-body">
 
                 <div class="form-row-2">
                     <div class="form-group">
-                        <label class="form-label required" for="name">Template Name</label>
+                        <label class="form-label required" for="name">Equipment Type Name</label>
                         <input type="text" id="name" name="name" class="form-control"
                                x-model="form.name"
                                placeholder="e.g. 53ft Dry Van"
@@ -102,7 +102,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <label class="form-label" for="description">Description</label>
                     <textarea id="description" name="description" class="form-control"
                               x-model="form.description" rows="2" maxlength="2000"
-                              placeholder="Optional description shown on template detail."></textarea>
+                              placeholder="Optional description shown on equipment type detail."></textarea>
                     <div class="form-hint" style="text-align:right;" x-text="(form.description || '').length + ' / 2000'"></div>
                 </div>
 
@@ -227,7 +227,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <input type="number" min="0" id="default_mileage_rate" name="default_mileage_rate" class="form-control font-mono"
                                    x-model="form.default_mileage_rate" step="0.0001" placeholder="0.0000">
                         </div>
-                        <div class="form-hint">Set to 0 to disable mileage billing for this template.</div>
+                        <div class="form-hint">Set to 0 to disable mileage billing for this equipment type.</div>
                         <div class="field-error" data-error-for="default_mileage_rate"></div>
                     </div>
                     <div class="form-group">
@@ -285,7 +285,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="d-flex gap-3" style="justify-content:flex-end;margin-bottom:2rem;">
             <a href="<?= base_url('equipment/templates') ?>" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary" :disabled="submitting">
-                <span x-show="!submitting">Create Template</span>
+                <span x-show="!submitting">Create Equipment Type</span>
                 <span x-show="submitting">Saving…</span>
             </button>
         </div>
@@ -335,7 +335,7 @@ function FF_CreateTemplate() {
 
             // Required fields
             if (!this.form.name || !this.form.name.trim()) {
-                FF_Validate.field(form, 'name', 'Template name is required.');
+                FF_Validate.field(form, 'name', 'Equipment type name is required.');
                 ok = false;
             }
             if (!this.form.category) {
@@ -443,7 +443,7 @@ function FF_CreateTemplate() {
                     FF_Validate.applyApi(form, r.error);
                     FF_Validate.scrollToFirst(form);
                 } else {
-                    FF_Validate.banner(form, r.error?.message || 'Failed to create template.');
+                    FF_Validate.banner(form, r.error?.message || 'Failed to create equipment type.');
                     if (r.error?.fields) FF_Validate.applyApi(form, r.error);
                 }
             } catch (e) {
@@ -456,8 +456,8 @@ function FF_CreateTemplate() {
 </script>
 
 <?php
-$overlayTitle    = 'Template Created!';
-$overlaySubtitle = 'Redirecting to template details…';
+$overlayTitle    = 'Equipment Type Created!';
+$overlaySubtitle = 'Redirecting to equipment type details…';
 require_once FF_ROOT . '/includes/success_overlay.php';
 ?>
 

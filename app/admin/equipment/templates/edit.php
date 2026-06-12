@@ -32,7 +32,7 @@ if (!$templateId) {
     exit;
 }
 
-$pageTitle = 'Edit Equipment Template';
+$pageTitle = 'Edit Equipment Type';
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -43,14 +43,14 @@ require_once FF_ROOT . '/includes/header.php';
 <nav class="breadcrumb">
     <a href="<?= base_url('equipment') ?>">Equipment</a>
     <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('equipment/templates') ?>">Templates</a>
+    <a href="<?= base_url('equipment/templates') ?>">Equipment Types</a>
     <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current" x-show="!loading" x-text="form.name || 'Edit Template'">Edit Template</span>
+    <span class="breadcrumb-current" x-show="!loading" x-text="form.name || 'Edit Equipment Type'">Edit Equipment Type</span>
     <span class="breadcrumb-current" x-show="loading">Loading…</span>
 </nav>
 <div class="page-header">
     <div>
-        <h1 class="page-header-title h4">Edit Template</h1>
+        <h1 class="page-header-title h4">Edit Equipment Type</h1>
         <p class="text-secondary text-sm" x-show="!loading" x-text="form.name"></p>
     </div>
     <div class="page-header-actions">
@@ -90,13 +90,13 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- ── Section 1: Identity ──────────────────────────── -->
             <div class="card" style="margin-bottom:1.5rem;">
                 <div class="card-header">
-                    <div class="card-title">Template Identity</div>
+                    <div class="card-title">Equipment Type Identity</div>
                 </div>
                 <div class="card-body">
 
                     <div class="form-row-2">
                         <div class="form-group">
-                            <label class="form-label required" for="name">Template Name</label>
+                            <label class="form-label required" for="name">Equipment Type Name</label>
                             <input type="text" id="name" name="name" class="form-control"
                                    x-model="form.name"
                                    placeholder="e.g. 53ft Dry Van"
@@ -151,7 +151,7 @@ require_once FF_ROOT . '/includes/header.php';
                             </div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Units Using This Template</label>
+                            <label class="form-label">Units Using This Equipment Type</label>
                             <div class="field-value font-mono"
                                  x-text="unitCount + ' unit' + (unitCount !== 1 ? 's' : '')"></div>
                         </div>
@@ -161,7 +161,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="description">Description</label>
                         <textarea id="description" name="description" class="form-control"
                                   x-model="form.description" rows="2" maxlength="5000"
-                                  placeholder="Optional description shown on template detail."></textarea>
+                                  placeholder="Optional description shown on equipment type detail."></textarea>
                     </div>
 
                 </div>
@@ -285,7 +285,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <input type="number" min="0" id="default_mileage_rate" name="default_mileage_rate" class="form-control font-mono"
                                        x-model="form.default_mileage_rate" step="0.0001" placeholder="0.0000">
                             </div>
-                            <div class="form-hint">Set to 0 to disable mileage billing for this template.</div>
+                            <div class="form-hint">Set to 0 to disable mileage billing for this equipment type.</div>
                             <div class="field-error" data-error-for="default_mileage_rate"></div>
                         </div>
                         <div class="form-group">
@@ -405,7 +405,7 @@ function FF_EditTemplate(templateId) {
             try {
                 const res  = await fetch('<?= base_url('api/v1/equipment/templates/show.php') ?>?id=<?= $templateId ?>');
                 const data = await res.json();
-                if (!data.success) throw new Error(data.error?.message || 'Template not found.');
+                if (!data.success) throw new Error(data.error?.message || 'Equipment type not found.');
 
                 const t = data.data;
                 this.updatedAt = t.updated_at;
@@ -428,7 +428,7 @@ function FF_EditTemplate(templateId) {
                 // Defer banner display until next tick so form is mounted
                 this.$nextTick(() => {
                     const form = document.querySelector('form');
-                    if (form) FF_Validate.banner(form, e.message || 'Failed to load template.');
+                    if (form) FF_Validate.banner(form, e.message || 'Failed to load equipment type.');
                 });
             } finally {
                 this.loading = false;
@@ -448,7 +448,7 @@ function FF_EditTemplate(templateId) {
             let ok = true;
 
             if (!this.form.name || !this.form.name.trim()) {
-                FF_Validate.field(form, 'name', 'Template name is required.');
+                FF_Validate.field(form, 'name', 'Equipment type name is required.');
                 ok = false;
             }
             if (!this.form.category) {
@@ -563,7 +563,7 @@ function FF_EditTemplate(templateId) {
                     FF_Validate.applyApi(form, r.error);
                     FF_Validate.scrollToFirst(form);
                 } else {
-                    FF_Validate.banner(form, r.error?.message || 'Failed to save template.');
+                    FF_Validate.banner(form, r.error?.message || 'Failed to save equipment type.');
                     if (r.error?.fields) FF_Validate.applyApi(form, r.error);
                 }
             } catch (e) {
@@ -577,8 +577,8 @@ function FF_EditTemplate(templateId) {
 </script>
 
 <?php
-$overlayTitle    = 'Template Saved!';
-$overlaySubtitle = 'Redirecting to templates list…';
+$overlayTitle    = 'Equipment Type Saved!';
+$overlaySubtitle = 'Redirecting to equipment types list…';
 require_once FF_ROOT . '/includes/success_overlay.php';
 ?>
 

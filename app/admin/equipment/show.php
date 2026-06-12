@@ -324,7 +324,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     <div class="card-body" style="padding:0;">
                         <table class="spec-table">
                             <tr>
-                                <td class="spec-label">Template</td>
+                                <td class="spec-label">Equipment Type</td>
                                 <td>
                                     <span class="font-medium" x-text="unit.template_name"></span>
                                     <span class="text-secondary text-sm" x-text="unit.template_category ? ' · ' + unit.template_category.replace('_',' ') : ''" style="text-transform:capitalize;"></span>
