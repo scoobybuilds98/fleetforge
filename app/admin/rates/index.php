@@ -108,6 +108,19 @@ require_once FF_ROOT . '/includes/header.php';
 /* Dark "Edit" button reads well on the light card (Apple primary-on-white). */
 .rate-item-card__foot .btn-secondary { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
 .rate-item-card__foot .btn-secondary:hover { background: #000; border-color: #000; }
+
+/* Truncating card name in the head. */
+.rate-item-card__type--name { text-transform: none; flex: 1; min-width: 0;
+                              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Status / scope pills tuned to read on the cream card (saturated text, soft fill). */
+.rate-item-card__pill { font-size: 0.68rem; font-weight: 700; letter-spacing: .02em;
+                        border-radius: 999px; padding: 3px 9px; flex-shrink: 0; white-space: nowrap; }
+.rate-item-card__pill--active   { background: rgba(34,197,94,0.18);  color: #15803d; }
+.rate-item-card__pill--inactive { background: rgba(0,0,0,0.06);      color: #6e6e73; }
+.rate-item-card__pill--default  { background: rgba(59,130,246,0.18); color: #1d4ed8; }
+.rate-item-card__pill--global   { background: rgba(0,0,0,0.06);      color: #6e6e73; }
+.rate-item-card a.rcard-link      { color: #1d4ed8; font-weight: 500; }
+.rate-item-card a.rcard-link:hover{ text-decoration: underline; }
 </style>
 
 <div x-data="FF_RatesManager()" x-init="init()">
@@ -400,41 +413,46 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
 
             <template x-if="!cardsLoading && cards.length > 0">
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">
                     <template x-for="card in cards" :key="card.id">
-                        <div style="border:1px solid var(--border-color);border-radius:8px;padding:16px;">
-                            <!-- Name + status -->
-                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
-                                <span class="font-semibold" x-text="card.name"
-                                      style="font-size:0.9375rem;font-weight:600;line-height:1.3;"></span>
-                                <span class="badge"
-                                      :class="card.is_active ? 'badge-success' : 'badge-neutral'"
-                                      x-text="card.is_active ? 'Active' : 'Inactive'"
-                                      style="font-size:0.7rem;flex-shrink:0;"></span>
+                        <div class="rate-item-card">
+                            <!-- Header: name + status/default -->
+                            <div class="rate-item-card__head">
+                                <span class="rate-item-card__type rate-item-card__type--name"
+                                      x-text="card.name"></span>
+                                <div style="display:flex;gap:5px;flex-shrink:0;">
+                                    <span class="rate-item-card__pill"
+                                          :class="card.is_active ? 'rate-item-card__pill--active' : 'rate-item-card__pill--inactive'"
+                                          x-text="card.is_active ? 'Active' : 'Inactive'"></span>
+                                    <span x-show="card.is_default"
+                                          class="rate-item-card__pill rate-item-card__pill--default">Default</span>
+                                </div>
                             </div>
-                            <!-- Scope: Global or customer link -->
-                            <div style="margin-bottom:10px;">
-                                <template x-if="card.customer_id">
-                                    <a :href="'<?= base_url('customers/show') ?>?id=' + card.customer_id"
-                                       class="link" style="font-size:0.8125rem;" x-text="card.customer_name"></a>
-                                </template>
-                                <template x-if="!card.customer_id">
-                                    <span class="badge badge-neutral" style="font-size:0.7rem;">Global</span>
-                                </template>
+                            <!-- Rows: scope / types / effective -->
+                            <div class="rate-item-card__rows">
+                                <span class="rate-item-card__k">Scope</span>
+                                <span class="rate-item-card__v">
+                                    <template x-if="card.customer_id">
+                                        <a :href="'<?= base_url('customers/show') ?>?id=' + card.customer_id"
+                                           class="rcard-link" x-text="card.customer_name"></a>
+                                    </template>
+                                    <template x-if="!card.customer_id">
+                                        <span class="rate-item-card__pill rate-item-card__pill--global">Global</span>
+                                    </template>
+                                </span>
+
+                                <span class="rate-item-card__k">Types</span>
+                                <span class="rate-item-card__v" x-text="card.item_count ?? 0"></span>
+
+                                <span class="rate-item-card__k">Effective</span>
+                                <span class="rate-item-card__v">
+                                    <span x-text="card.effective_from || '—'"></span>
+                                    <span style="color:#8a8a8e;"> → </span>
+                                    <span x-text="card.effective_to || 'Open'"></span>
+                                </span>
                             </div>
-                            <!-- Divider -->
-                            <div style="border-top:1px solid var(--border-color);margin-bottom:10px;"></div>
-                            <!-- Info -->
-                            <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:0.8125rem;align-items:baseline;">
-                                <span class="text-secondary">Types</span>
-                                <span class="font-mono" x-text="card.item_count ?? 0"></span>
-                                <span class="text-secondary">From</span>
-                                <span class="font-mono" x-text="card.effective_from || '—'"></span>
-                                <span class="text-secondary">To</span>
-                                <span class="font-mono" x-text="card.effective_to || 'Open'"></span>
-                            </div>
-                            <!-- Actions -->
-                            <div style="display:flex;gap:8px;margin-top:12px;">
+                            <!-- Footer: edit/delete -->
+                            <div class="rate-item-card__foot">
                                 <a :href="'<?= base_url('rates/show') ?>?id=' + card.id"
                                    class="btn btn-secondary btn-sm">Edit</a>
                                 <?php if (can('rates', 'delete')): ?>
@@ -515,7 +533,7 @@ function FF_RatesManager() {
         cards:        [],
         cardsTotal:   0,
         cardsLoading: false,
-        cardsOpen:    true,
+        cardsOpen:    false,   // default hidden — toggle via the section header
         cardScope:    'all',
 
         // Customer override groups — one page of customers (tiles); the
