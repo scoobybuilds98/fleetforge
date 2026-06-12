@@ -165,46 +165,6 @@ require_once FF_ROOT . '/includes/header.php';
             <option value="returned">Returned</option>
         </select>
 
-        <!-- Sort field dropdown -->
-        <select class="form-input" style="width:180px;" x-model="sort"
-                @change="if (sort !== 'company_name') filters.customer_filter = ''; resetAndLoad()">
-            <optgroup label="Date">
-                <option value="payment_date">Payment Date</option>
-                <option value="created_at">Created At</option>
-                <option value="updated_at">Updated At</option>
-            </optgroup>
-            <optgroup label="Amount">
-                <option value="amount">Amount</option>
-            </optgroup>
-            <optgroup label="Reference">
-                <option value="payment_number">Payment #</option>
-                <option value="payment_method">Method</option>
-            </optgroup>
-            <optgroup label="Customer">
-                <option value="company_name">Customer</option>
-            </optgroup>
-            <optgroup label="Status">
-                <option value="status">Status</option>
-            </optgroup>
-        </select>
-
-        <!-- Contextual customer filter — appears when sorting by customer name -->
-        <input x-show="sort === 'company_name'"
-               x-transition
-               type="search"
-               class="form-input"
-               placeholder="Filter by customer…"
-               x-model="filters.customer_filter"
-               @input.debounce.350ms="resetAndLoad()"
-               style="min-width:160px;"
-               aria-label="Filter by customer name">
-
-        <!-- Sort direction -->
-        <select class="form-input" style="width:auto;" x-model="dir" @change="resetAndLoad()">
-            <option value="ASC">↑ Asc</option>
-            <option value="DESC">↓ Desc</option>
-        </select>
-
         <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
 
         <span class="text-muted" style="font-size:0.85rem; margin-left:auto;" x-show="!loading">

@@ -126,26 +126,6 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                    x-model="filters.date_from" @change="load()" title="From date">
             <input type="date" class="form-control form-control-sm"
                    x-model="filters.date_to" @change="load()" title="To date">
-            <!-- Sort controls -->
-            <select class="form-control form-control-sm" style="width:160px;"
-                    x-model="sort" @change="load()">
-                <optgroup label="Date">
-                    <option value="log_date">Log Date</option>
-                    <option value="created_at">Created</option>
-                    <option value="updated_at">Updated</option>
-                </optgroup>
-                <optgroup label="Reading">
-                    <option value="odometer_reading">Odometer</option>
-                </optgroup>
-                <optgroup label="Type">
-                    <option value="log_type">Log Type</option>
-                </optgroup>
-            </select>
-            <select class="form-control form-control-sm" style="width:auto;"
-                    x-model="dir" @change="load()">
-                <option value="DESC">↓ Desc</option>
-                <option value="ASC">↑ Asc</option>
-            </select>
             <button class="btn btn-ghost btn-sm" @click="clearFilters()">Clear</button>
         </div>
     </div>

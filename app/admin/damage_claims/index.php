@@ -162,35 +162,8 @@ require_once FF_ROOT . '/includes/header.php';
         <button class="btn btn-secondary btn-sm"
                 @click="resetFilters()">Reset</button>
 
-        <div class="table-toolbar-right" style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <select class="form-select form-select-sm"
-                    x-model="sort"
-                    @change="page=1;fetch()"
-                    style="min-width:150px;">
-                <optgroup label="Date">
-                    <option value="created_at">Date Reported</option>
-                    <option value="updated_at">Updated</option>
-                </optgroup>
-                <optgroup label="Claim">
-                    <option value="claim_number">Claim #</option>
-                    <option value="severity">Severity</option>
-                    <option value="status">Status</option>
-                </optgroup>
-                <optgroup label="Cost">
-                    <option value="estimated_repair_cost">Est. Cost</option>
-                    <option value="actual_repair_cost">Actual Cost</option>
-                </optgroup>
-            </select>
-            <select class="form-select form-select-sm"
-                    x-model="dir"
-                    @change="page=1;fetch()"
-                    style="width:auto;">
-                <option value="DESC">↓ Desc</option>
-                <option value="ASC">↑ Asc</option>
-            </select>
-            <span class="text-secondary" style="font-size:0.875rem;white-space:nowrap;"
-                  x-text="total > 0 ? total + ' claim' + (total === 1 ? '' : 's') : ''"></span>
-        </div>
+        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;white-space:nowrap;"
+              x-text="total > 0 ? total + ' claim' + (total === 1 ? '' : 's') : ''"></span>
     </div>
 
     <!-- Bulk action bar -->

@@ -130,31 +130,7 @@ require_once FF_ROOT . '/includes/header.php';
 
         <button class="btn btn-sm btn-ghost" @click="clearFilters()">Clear</button>
 
-        <div style="display:flex;gap:6px;align-items:center;margin-left:auto;">
-            <select class="form-control form-control-sm" style="width:180px;"
-                    x-model="sort" @change="page=1; loadInspections()">
-                <optgroup label="Date">
-                    <option value="inspection_date">Date</option>
-                    <option value="created_at">Created</option>
-                    <option value="updated_at">Updated</option>
-                </optgroup>
-                <optgroup label="Number">
-                    <option value="inspection_number">Inspection #</option>
-                </optgroup>
-                <optgroup label="Type &amp; Status">
-                    <option value="inspection_type">Type</option>
-                    <option value="status">Status</option>
-                    <option value="overall_condition">Condition</option>
-                </optgroup>
-            </select>
-            <select class="form-control form-control-sm" style="width:auto;"
-                    x-model="dir" @change="page=1; loadInspections()">
-                <option value="ASC">↑ Asc</option>
-                <option value="DESC">↓ Desc</option>
-            </select>
-        </div>
-
-        <span class="text-secondary" style="font-size:0.875rem;"
+        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
               x-text="total + ' result' + (total !== 1 ? 's' : '')"></span>
     </div>
 

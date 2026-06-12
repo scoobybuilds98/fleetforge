@@ -125,22 +125,6 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="1">Active Only</option>
                 </select>
 
-                <!-- Sort -->
-                <select class="form-select form-select-sm"
-                        x-model="cardSort"
-                        @change="loadCards(1)">
-                    <option value="effective_from">Sort: Effective From</option>
-                    <option value="name">Sort: Name</option>
-                    <option value="created_at">Sort: Created</option>
-                </select>
-
-                <select class="form-select form-select-sm" style="width:auto;"
-                        x-model="cardDir"
-                        @change="loadCards(1)">
-                    <option value="DESC">↓ Newest</option>
-                    <option value="ASC">↑ Oldest</option>
-                </select>
-
                 <button class="btn btn-secondary btn-sm"
                         @click="cardFilters = {q:'',scope:'',active:''}; loadCards(1)">Reset</button>
 

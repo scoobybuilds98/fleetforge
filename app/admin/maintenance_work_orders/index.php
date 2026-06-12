@@ -143,24 +143,8 @@ require_once FF_ROOT . '/includes/header.php';
 
         <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
 
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <select class="form-select form-select-sm" x-model="sort" @change="goPage(1)" style="width:auto;">
-                <option value="work_order_number">WO #</option>
-                <option value="requested_date">Requested date</option>
-                <option value="scheduled_date">Scheduled date</option>
-                <option value="completed_date">Completed date</option>
-                <option value="priority">Priority</option>
-                <option value="status">Status</option>
-                <option value="total_cost">Total cost</option>
-                <option value="updated_at">Updated</option>
-            </select>
-            <select class="form-select form-select-sm" x-model="dir" @change="goPage(1)" style="width:auto;">
-                <option value="ASC">↑ Asc</option>
-                <option value="DESC">↓ Desc</option>
-            </select>
-            <span class="text-secondary" style="font-size:0.875rem;white-space:nowrap;"
-                  x-text="total > 0 ? total + ' work order' + (total === 1 ? '' : 's') : ''"></span>
-        </div>
+        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;white-space:nowrap;"
+              x-text="total > 0 ? total + ' work order' + (total === 1 ? '' : 's') : ''"></span>
     </div>
 
     <!-- Loading -->
