@@ -206,45 +206,131 @@ require_once FF_ROOT . '/includes/header.php';
                     <div x-show="openGroups[group.customer_id]" class="card-body">
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
                             <template x-for="item in group.items" :key="item.id">
-                                <div style="border:1px solid var(--border-color);border-radius:8px;padding:16px;">
+                                <div style="border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);overflow:hidden;">
 
-                                    <!-- Equipment type + currency badge (mirrors unit card) -->
-                                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
-                                        <span class="font-semibold"
-                                              x-text="item.equipment_type.replace(/_/g,' ')"
-                                              style="font-size:0.9375rem;font-weight:600;text-transform:capitalize;line-height:1.3;"></span>
-                                        <span class="badge badge-neutral"
-                                              x-text="item.currency || 'CAD'"
-                                              style="font-size:0.7rem;flex-shrink:0;"></span>
-                                    </div>
+                                    <!-- ── VIEW MODE ─────────────────────────── -->
+                                    <template x-if="!item._editing">
+                                        <div>
+                                            <!-- Header: type + currency -->
+                                            <div style="padding:14px 16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                                                <span class="font-semibold"
+                                                      x-text="item.equipment_type.replace(/_/g,' ')"
+                                                      style="font-size:0.9375rem;font-weight:600;text-transform:capitalize;line-height:1.3;"></span>
+                                                <span class="badge badge-neutral"
+                                                      x-text="item.currency || 'CAD'"
+                                                      style="font-size:0.7rem;flex-shrink:0;"></span>
+                                            </div>
+                                            <!-- Body: rate pairs -->
+                                            <div style="padding:16px;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:0.875rem;align-items:baseline;">
+                                                <span x-show="item.daily_rate" class="text-secondary">Daily</span>
+                                                <span x-show="item.daily_rate" class="font-mono" style="text-align:right;"
+                                                      x-text="item.daily_rate ? '$' + parseFloat(item.daily_rate).toFixed(2) : ''"></span>
 
-                                    <!-- Divider -->
-                                    <div style="border-top:1px solid var(--border-color);margin-bottom:10px;"></div>
+                                                <span x-show="item.weekly_rate" class="text-secondary">Weekly</span>
+                                                <span x-show="item.weekly_rate" class="font-mono" style="text-align:right;"
+                                                      x-text="item.weekly_rate ? '$' + parseFloat(item.weekly_rate).toFixed(2) : ''"></span>
 
-                                    <!-- Rate pairs -->
-                                    <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:0.8125rem;align-items:baseline;">
-                                        <span x-show="item.daily_rate" class="text-secondary">Daily</span>
-                                        <span x-show="item.daily_rate" class="font-mono"
-                                              x-text="item.daily_rate ? '$' + parseFloat(item.daily_rate).toFixed(2) : ''"></span>
+                                                <span x-show="item.monthly_rate" class="text-secondary">Monthly</span>
+                                                <span x-show="item.monthly_rate" class="font-mono" style="text-align:right;"
+                                                      x-text="item.monthly_rate ? '$' + parseFloat(item.monthly_rate).toFixed(2) : ''"></span>
 
-                                        <span x-show="item.weekly_rate" class="text-secondary">Weekly</span>
-                                        <span x-show="item.weekly_rate" class="font-mono"
-                                              x-text="item.weekly_rate ? '$' + parseFloat(item.weekly_rate).toFixed(2) : ''"></span>
+                                                <span x-show="item.mileage_rate" class="text-secondary">Mileage</span>
+                                                <span x-show="item.mileage_rate" class="font-mono" style="text-align:right;"
+                                                      x-text="item.mileage_rate ? '$' + parseFloat(item.mileage_rate).toFixed(4) + ' / ' + item.mileage_unit : ''"></span>
 
-                                        <span x-show="item.monthly_rate" class="text-secondary">Monthly</span>
-                                        <span x-show="item.monthly_rate" class="font-mono"
-                                              x-text="item.monthly_rate ? '$' + parseFloat(item.monthly_rate).toFixed(2) : ''"></span>
+                                                <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate">
+                                                    <span class="text-secondary" style="grid-column:1/-1;font-style:italic;">No rates set</span>
+                                                </template>
+                                            </div>
+                                            <!-- Footer: edit/delete -->
+                                            <?php if (can('rates', 'edit') || can('rates', 'delete')): ?>
+                                            <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;">
+                                                <?php if (can('rates', 'edit')): ?>
+                                                <button class="btn btn-secondary btn-sm"
+                                                        @click.stop="editOverride(item)">Edit</button>
+                                                <?php endif; ?>
+                                                <?php if (can('rates', 'delete')): ?>
+                                                <button class="btn btn-outline-danger btn-sm"
+                                                        @click.stop="confirmDeleteOverride(item)">Delete</button>
+                                                <?php endif; ?>
+                                            </div>
+                                            <?php endif; ?>
+                                        </div>
+                                    </template>
 
-                                        <span x-show="item.mileage_rate" class="text-secondary">Mileage</span>
-                                        <span x-show="item.mileage_rate" class="font-mono"
-                                              x-text="item.mileage_rate ? '$' + parseFloat(item.mileage_rate).toFixed(4) + '/' + item.mileage_unit : ''"></span>
-                                    </div>
-
-                                    <?php if (can('rates', 'delete')): ?>
-                                    <div style="margin-top:12px;">
-                                        <button class="btn btn-outline-danger btn-sm"
-                                                @click.stop="confirmDeleteOverride(item)">Delete</button>
-                                    </div>
+                                    <!-- ── EDIT MODE ─────────────────────────── -->
+                                    <?php if (can('rates', 'edit')): ?>
+                                    <template x-if="item._editing">
+                                        <div>
+                                            <!-- Header: type (read-only) + currency selector -->
+                                            <div style="padding:14px 16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                                                <span class="font-semibold"
+                                                      x-text="item.equipment_type.replace(/_/g,' ')"
+                                                      style="font-size:0.9375rem;font-weight:600;text-transform:capitalize;"></span>
+                                                <select class="form-select"
+                                                        x-model="item.currency"
+                                                        style="width:90px;flex-shrink:0;">
+                                                    <option value="CAD">CAD</option>
+                                                    <option value="USD">USD</option>
+                                                </select>
+                                            </div>
+                                            <!-- Body: 2×2 inputs -->
+                                            <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                                                <div>
+                                                    <label class="form-label" style="font-size:0.75rem;margin-bottom:4px;">Daily Rate</label>
+                                                    <div style="position:relative;">
+                                                        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                                                        <input type="number" class="form-control font-mono" style="padding-left:22px;"
+                                                               x-model="item.daily_rate" step="0.01" min="0" placeholder="0.00">
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label class="form-label" style="font-size:0.75rem;margin-bottom:4px;">Weekly Rate</label>
+                                                    <div style="position:relative;">
+                                                        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                                                        <input type="number" class="form-control font-mono" style="padding-left:22px;"
+                                                               x-model="item.weekly_rate" step="0.01" min="0" placeholder="0.00">
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label class="form-label" style="font-size:0.75rem;margin-bottom:4px;">Monthly Rate</label>
+                                                    <div style="position:relative;">
+                                                        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                                                        <input type="number" class="form-control font-mono" style="padding-left:22px;"
+                                                               x-model="item.monthly_rate" step="0.01" min="0" placeholder="0.00">
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;height:18px;">
+                                                        <label class="form-label" style="font-size:0.75rem;margin:0;">Mileage Rate</label>
+                                                        <select class="form-select" x-model="item.mileage_unit"
+                                                                style="width:auto;height:20px;font-size:0.7rem;padding:0 18px 0 6px;">
+                                                            <option value="km">/ km</option>
+                                                            <option value="miles">/ mi</option>
+                                                        </select>
+                                                    </div>
+                                                    <div style="position:relative;">
+                                                        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                                                        <input type="number" class="form-control font-mono" style="padding-left:22px;"
+                                                               x-model="item.mileage_rate" step="0.0001" min="0" placeholder="0.0000">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <!-- Error -->
+                                            <div x-show="item._saveError" class="text-danger" style="font-size:0.8rem;padding:0 16px 8px;"
+                                                 x-text="item._saveError"></div>
+                                            <!-- Footer: save/cancel -->
+                                            <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;">
+                                                <button class="btn btn-secondary btn-sm"
+                                                        @click.stop="cancelOverrideEdit(item)">Cancel</button>
+                                                <button class="btn btn-primary btn-sm"
+                                                        :disabled="item._saving"
+                                                        @click.stop="saveOverride(item)">
+                                                    <span x-text="item._saving ? 'Saving…' : 'Save'"></span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </template>
                                     <?php endif; ?>
 
                                 </div>
@@ -381,6 +467,10 @@ function FF_RatesManager() {
         _buildGroups(items) {
             const map = {};
             for (const item of items) {
+                // Inline-edit state flags (not part of the API payload)
+                item._editing   = false;
+                item._saving    = false;
+                item._saveError = '';
                 const k = item.customer_id;
                 if (!map[k]) map[k] = { customer_id: k, customer_name: item.customer_name, items: [] };
                 map[k].items.push(item);
@@ -408,6 +498,59 @@ function FF_RatesManager() {
                 this.deleteCardModal.error = e.message || 'Delete failed.';
             } finally {
                 this.deleteCardModal.saving = false;
+            }
+        },
+
+        // ── Edit: override (inline upsert) ───────────────────────────────────
+        editOverride(item) {
+            // Snapshot current values so Cancel can restore them
+            item._snapshot = {
+                daily_rate:   item.daily_rate,
+                weekly_rate:  item.weekly_rate,
+                monthly_rate: item.monthly_rate,
+                mileage_rate: item.mileage_rate,
+                mileage_unit: item.mileage_unit,
+                currency:     item.currency,
+            };
+            item._saveError = '';
+            item._editing   = true;
+        },
+
+        cancelOverrideEdit(item) {
+            if (item._snapshot) Object.assign(item, item._snapshot);
+            item._saveError = '';
+            item._editing   = false;
+        },
+
+        async saveOverride(item) {
+            item._saving    = true;
+            item._saveError = '';
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/customer_equipment_rates/upsert') ?>', {
+                    id:             item.id,
+                    customer_id:    item.customer_id,
+                    equipment_type: item.equipment_type,
+                    effective_from: item.effective_from,
+                    updated_at:     item.updated_at,
+                    daily_rate:     item.daily_rate   === '' ? null : item.daily_rate,
+                    weekly_rate:    item.weekly_rate  === '' ? null : item.weekly_rate,
+                    monthly_rate:   item.monthly_rate === '' ? null : item.monthly_rate,
+                    mileage_rate:   item.mileage_rate === '' ? null : item.mileage_rate,
+                    mileage_unit:   item.mileage_unit,
+                    currency:       item.currency,
+                });
+                if (!r.success) {
+                    item._saveError = r.error?.fields
+                        ? Object.values(r.error.fields).join(' ')
+                        : (r.error?.message || 'Save failed.');
+                    return;
+                }
+                item.updated_at = r.data.updated_at;
+                item._editing   = false;
+            } catch (e) {
+                item._saveError = e.message || 'Save failed.';
+            } finally {
+                item._saving = false;
             }
         },
 
