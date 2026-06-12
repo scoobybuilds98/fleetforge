@@ -4,6 +4,9 @@ declare(strict_types=1);
 /**
  * api/v1/customer_equipment_rates/delete.php
  *
+ * @deprecated S-RATES-CONSOLIDATE — customer pricing moved onto rate cards;
+ *   no UI calls this endpoint. Kept for reversibility until a cleanup migration.
+ *
  * Hard-delete a customer equipment rate override.
  *
  * Business rules:

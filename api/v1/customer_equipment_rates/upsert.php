@@ -4,6 +4,10 @@ declare(strict_types=1);
 /**
  * api/v1/customer_equipment_rates/upsert.php
  *
+ * @deprecated S-RATES-CONSOLIDATE — customer pricing moved onto rate cards.
+ *   No UI writes overrides anymore (lookup_rates.php ignores this table). Kept
+ *   functional-but-dormant for reversibility until a cleanup migration.
+ *
  * Create or update a custom rate override for a customer + equipment_type combination.
  *
  * Business rules:
