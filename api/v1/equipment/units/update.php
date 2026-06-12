@@ -12,7 +12,7 @@ declare(strict_types=1);
  * @method   POST
  * @body     JSON
  * @required id, updated_at
- * @optional unit_number, vin, year, gps_device_id, samsara_vehicle_url,
+ * @optional template_id, unit_number, vin, year, gps_device_id, samsara_vehicle_url,
  *           tracking_provider, owner_company_id, yard_location,
  *           length_ft, height_ft, width_ft, weight_capacity_lbs,
  *           wheel_size, tire_size, axle_count, license_plate, license_state,
@@ -52,7 +52,7 @@ if ($fields) {
 // ── Fetch existing ─────────────────────────────────────────────
 // SAMSARA-3: include samsara_vehicle_id so we can PATCH Samsara after update
 $existing = db_row(
-    "SELECT id, unit_number, status, updated_at, samsara_vehicle_id, samsara_entity_type
+    "SELECT id, unit_number, status, updated_at, template_id, samsara_vehicle_id, samsara_entity_type
        FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -224,6 +224,22 @@ foreach ($intervalLabels as $f => $label) {
     }
 }
 
+// Equipment type (template_id) — a live FK; changing it is allowed. The unit's
+// stored specs and any existing lease rate/snapshots are independent, so this
+// only re-points display joins and the rate source for FUTURE leases. The
+// column is NOT NULL with ON DELETE RESTRICT, so the target must resolve to a
+// live (non-deleted) template.
+if (array_key_exists('template_id', $body)) {
+    $tplId = clean_int($body['template_id']);
+    if (!$tplId) {
+        $fields['template_id'] = 'Please select an equipment type.';
+    } elseif (!db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL', [$tplId])) {
+        $fields['template_id'] = 'Selected equipment type does not exist.';
+    } else {
+        $updates['template_id'] = $tplId;
+    }
+}
+
 // owner_company_id: any valid int (FK reference — can be null to clear)
 if (array_key_exists('owner_company_id', $body)) {
     $updates['owner_company_id'] = clean_int($body['owner_company_id']);
@@ -287,7 +303,10 @@ db_transaction(function () use (&$newUpdatedAt, $id, $updates, $userId, $existin
         'entity_type'  => 'equipment_unit',
         'entity_id'    => $id,
         'entity_label' => $existing['unit_number'],
-        'old_values'   => json_encode(['unit_number' => $existing['unit_number']]),
+        'old_values'   => json_encode([
+            'unit_number' => $existing['unit_number'],
+            'template_id' => $existing['template_id'],
+        ]),
         'new_values'   => json_encode($updates),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);

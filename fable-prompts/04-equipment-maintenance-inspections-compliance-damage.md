@@ -21,9 +21,12 @@ WO status, inspection type/result, claim status.
    didn't break submit/validation (we changed display strings + a `value="template"`
    sort key was left intentionally). Confirm create still inserts (we proved prod
    ids 7/8/9 saved). Slug uniqueness excludes soft-deleted rows (Class 9) — confirm.
-2. **Unit create/edit** — template prefill (`onTemplateChange`), the immutable
-   "equipment type cannot be changed after creation" rule; confirm the API enforces
-   it too (Class 8: UI-only guard).
+2. **Unit create/edit** — template prefill (`onTemplateChange`). Equipment type IS
+   now changeable on edit (a live FK validated by `db_exists` + the NOT NULL FK):
+   confirm the change persists, is audited (old/new template_id), and that changing
+   it does NOT mutate the unit's stored specs or corrupt existing lease snapshots
+   (leases freeze their own rates + `equipment_snapshot_json`); only FUTURE leases
+   use the new type's rate lookup. Watch the category→rate-card coupling (Class 2).
 3. **Maintenance work order** lifecycle — open→in_progress→closed; parts/labor cost
    roll-up; does closing a WO touch equipment status or accounting?
 4. **Inspections** (CVI/MVI/etc.) — interval scheduling drives compliance; tz of the

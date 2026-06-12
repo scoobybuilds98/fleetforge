@@ -47,6 +47,18 @@ if (!$unit) {
 // Load yards for dropdown
 $yards = db_select("SELECT name FROM yards WHERE is_active = 1 ORDER BY name", []);
 
+// Load equipment types for the type dropdown. The type IS changeable — it's a
+// live FK; the unit's stored specs and any existing lease snapshots/rates are
+// independent of it (set/frozen at their own creation time). Include this
+// unit's current template even if it's now inactive, so the current selection
+// always renders.
+$templates = db_select(
+    "SELECT id, name FROM equipment_templates
+      WHERE deleted_at IS NULL AND (is_active = 1 OR id = ?)
+      ORDER BY name ASC",
+    [$unit['template_id']]
+);
+
 $pageTitle = 'Edit Unit ' . $unit['unit_number'];
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
@@ -82,9 +94,15 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <div class="form-row-2">
                     <div class="form-group">
-                        <label class="form-label">Equipment Type</label>
-                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($unit['template_name']) ?></div>
-                        <div class="form-hint">Equipment type cannot be changed after creation.</div>
+                        <label class="form-label required" for="template_id">Equipment Type</label>
+                        <select id="template_id" name="template_id" class="form-control form-select"
+                                x-model="form.template_id">
+                            <?php foreach ($templates as $tpl): ?>
+                            <option value="<?= (int)$tpl['id'] ?>"><?= e($tpl['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="field-error" data-error-for="template_id"></div>
+                        <div class="form-hint">Existing leases and their rates are unaffected; new leases will use the selected type's rates.</div>
                     </div>
                     <div class="form-group">
                         <label class="form-label required" for="unit_number">Unit Number</label>
@@ -284,6 +302,7 @@ function FF_EditUnit() {
         form: {
             id:                  <?= $unitId ?>,
             updated_at:          <?= json_encode($unit['updated_at']) ?>,
+            template_id:         <?= (int)$unit['template_id'] ?>,
             unit_number:         <?= json_encode($unit['unit_number']) ?>,
             vin:                 <?= json_encode($unit['vin'] ?? '') ?>,
             year:                <?= json_encode($unit['year'] ?? '') ?>,
@@ -319,6 +338,10 @@ function FF_EditUnit() {
             FF_Validate.clear(form);
             let ok = true;
 
+            if (!this.form.template_id) {
+                FF_Validate.field(form, 'template_id', 'Please select an equipment type.');
+                ok = false;
+            }
             if (!this.form.unit_number || !this.form.unit_number.trim()) {
                 FF_Validate.field(form, 'unit_number', 'Unit number is required.');
                 ok = false;
