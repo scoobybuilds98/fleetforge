@@ -160,89 +160,6 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Rate Cards accordion (scope-filtered by the tiles) ────────────── -->
-    <div class="card" style="margin-bottom:12px;">
-        <!-- Header -->
-        <div class="card-header"
-             style="display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;"
-             @click="cardsOpen = !cardsOpen">
-            <span class="text-secondary" style="font-size:0.75rem;width:12px;flex-shrink:0;"
-                  x-text="cardsOpen ? '▼' : '▶'"></span>
-            <span style="font-weight:600;font-size:0.9375rem;" x-text="scopeLabel()"></span>
-            <button class="btn btn-ghost btn-sm" x-show="cardScope !== 'all'"
-                    style="padding:1px 8px;font-size:0.7rem;"
-                    @click.stop="setScope('all')">Show all</button>
-            <span class="badge badge-neutral" style="margin-left:auto;font-size:0.75rem;"
-                  x-text="cardsTotal + ' card' + (cardsTotal === 1 ? '' : 's')"></span>
-        </div>
-
-        <!-- Expanded body -->
-        <div x-show="cardsOpen" class="card-body">
-            <div x-show="cardsLoading" style="text-align:center;padding:1.5rem;">
-                <span class="text-secondary">Loading…</span>
-            </div>
-
-            <template x-if="!cardsLoading && cards.length === 0">
-                <div class="empty-state" style="padding:1.5rem 0;">
-                    <p class="empty-state-title" x-text="'No ' + scopeLabel().toLowerCase()"></p>
-                    <p class="empty-state-text">Rate cards define standard pricing by equipment category.</p>
-                    <?php if (can('rates', 'create')): ?>
-                    <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm" style="margin-top:12px;">+ New Rate Card</a>
-                    <?php endif; ?>
-                </div>
-            </template>
-
-            <template x-if="!cardsLoading && cards.length > 0">
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">
-                    <template x-for="card in cards" :key="card.id">
-                        <div style="border:1px solid var(--border-color);border-radius:8px;padding:16px;">
-                            <!-- Name + status -->
-                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
-                                <span class="font-semibold" x-text="card.name"
-                                      style="font-size:0.9375rem;font-weight:600;line-height:1.3;"></span>
-                                <span class="badge"
-                                      :class="card.is_active ? 'badge-success' : 'badge-neutral'"
-                                      x-text="card.is_active ? 'Active' : 'Inactive'"
-                                      style="font-size:0.7rem;flex-shrink:0;"></span>
-                            </div>
-                            <!-- Scope: Global or customer link -->
-                            <div style="margin-bottom:10px;">
-                                <template x-if="card.customer_id">
-                                    <a :href="'<?= base_url('customers/show') ?>?id=' + card.customer_id"
-                                       class="link" style="font-size:0.8125rem;" x-text="card.customer_name"></a>
-                                </template>
-                                <template x-if="!card.customer_id">
-                                    <span class="badge badge-neutral" style="font-size:0.7rem;">Global</span>
-                                </template>
-                            </div>
-                            <!-- Divider -->
-                            <div style="border-top:1px solid var(--border-color);margin-bottom:10px;"></div>
-                            <!-- Info -->
-                            <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:0.8125rem;align-items:baseline;">
-                                <span class="text-secondary">Types</span>
-                                <span class="font-mono" x-text="card.item_count ?? 0"></span>
-                                <span class="text-secondary">From</span>
-                                <span class="font-mono" x-text="card.effective_from || '—'"></span>
-                                <span class="text-secondary">To</span>
-                                <span class="font-mono" x-text="card.effective_to || 'Open'"></span>
-                            </div>
-                            <!-- Actions -->
-                            <div style="display:flex;gap:8px;margin-top:12px;">
-                                <a :href="'<?= base_url('rates/show') ?>?id=' + card.id"
-                                   class="btn btn-secondary btn-sm">Edit</a>
-                                <?php if (can('rates', 'delete')): ?>
-                                <button class="btn btn-outline-danger btn-sm"
-                                        :disabled="card.is_default"
-                                        @click.stop="confirmDeleteCard(card)">Delete</button>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-            </template>
-        </div>
-    </div>
-
     <!-- ── Customer accordion groups (paginated + lazy-loaded) ───────────── -->
     <div x-ref="ovSection" style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;">
         <span style="font-weight:600;font-size:0.9375rem;">Customer Rate Overrides</span>
@@ -449,6 +366,89 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
     </template>
+
+    <!-- ── Rate Cards accordion (scope-filtered by the tiles) ────────────── -->
+    <div class="card" style="margin-top:20px;margin-bottom:12px;">
+        <!-- Header -->
+        <div class="card-header"
+             style="display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;"
+             @click="cardsOpen = !cardsOpen">
+            <span class="text-secondary" style="font-size:0.75rem;width:12px;flex-shrink:0;"
+                  x-text="cardsOpen ? '▼' : '▶'"></span>
+            <span style="font-weight:600;font-size:0.9375rem;" x-text="scopeLabel()"></span>
+            <button class="btn btn-ghost btn-sm" x-show="cardScope !== 'all'"
+                    style="padding:1px 8px;font-size:0.7rem;"
+                    @click.stop="setScope('all')">Show all</button>
+            <span class="badge badge-neutral" style="margin-left:auto;font-size:0.75rem;"
+                  x-text="cardsTotal + ' card' + (cardsTotal === 1 ? '' : 's')"></span>
+        </div>
+
+        <!-- Expanded body -->
+        <div x-show="cardsOpen" class="card-body">
+            <div x-show="cardsLoading" style="text-align:center;padding:1.5rem;">
+                <span class="text-secondary">Loading…</span>
+            </div>
+
+            <template x-if="!cardsLoading && cards.length === 0">
+                <div class="empty-state" style="padding:1.5rem 0;">
+                    <p class="empty-state-title" x-text="'No ' + scopeLabel().toLowerCase()"></p>
+                    <p class="empty-state-text">Rate cards define standard pricing by equipment category.</p>
+                    <?php if (can('rates', 'create')): ?>
+                    <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm" style="margin-top:12px;">+ New Rate Card</a>
+                    <?php endif; ?>
+                </div>
+            </template>
+
+            <template x-if="!cardsLoading && cards.length > 0">
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">
+                    <template x-for="card in cards" :key="card.id">
+                        <div style="border:1px solid var(--border-color);border-radius:8px;padding:16px;">
+                            <!-- Name + status -->
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
+                                <span class="font-semibold" x-text="card.name"
+                                      style="font-size:0.9375rem;font-weight:600;line-height:1.3;"></span>
+                                <span class="badge"
+                                      :class="card.is_active ? 'badge-success' : 'badge-neutral'"
+                                      x-text="card.is_active ? 'Active' : 'Inactive'"
+                                      style="font-size:0.7rem;flex-shrink:0;"></span>
+                            </div>
+                            <!-- Scope: Global or customer link -->
+                            <div style="margin-bottom:10px;">
+                                <template x-if="card.customer_id">
+                                    <a :href="'<?= base_url('customers/show') ?>?id=' + card.customer_id"
+                                       class="link" style="font-size:0.8125rem;" x-text="card.customer_name"></a>
+                                </template>
+                                <template x-if="!card.customer_id">
+                                    <span class="badge badge-neutral" style="font-size:0.7rem;">Global</span>
+                                </template>
+                            </div>
+                            <!-- Divider -->
+                            <div style="border-top:1px solid var(--border-color);margin-bottom:10px;"></div>
+                            <!-- Info -->
+                            <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:0.8125rem;align-items:baseline;">
+                                <span class="text-secondary">Types</span>
+                                <span class="font-mono" x-text="card.item_count ?? 0"></span>
+                                <span class="text-secondary">From</span>
+                                <span class="font-mono" x-text="card.effective_from || '—'"></span>
+                                <span class="text-secondary">To</span>
+                                <span class="font-mono" x-text="card.effective_to || 'Open'"></span>
+                            </div>
+                            <!-- Actions -->
+                            <div style="display:flex;gap:8px;margin-top:12px;">
+                                <a :href="'<?= base_url('rates/show') ?>?id=' + card.id"
+                                   class="btn btn-secondary btn-sm">Edit</a>
+                                <?php if (can('rates', 'delete')): ?>
+                                <button class="btn btn-outline-danger btn-sm"
+                                        :disabled="card.is_default"
+                                        @click.stop="confirmDeleteCard(card)">Delete</button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </div>
+    </div>
 
     <!-- ── Delete rate card modal ─────────────────────────────────────────── -->
     <div class="modal-backdrop" x-show="deleteCardModal.open" x-cloak>
