@@ -4,13 +4,13 @@ declare(strict_types=1);
 /**
  * app/admin/rates/index.php
  *
- * Rates dashboard — redesigned for S-RATES-REDESIGN.
- * Tab 1: Rate Cards — interactive table with customer column, filters.
- * Tab 2: Customer Rate Overrides — per-equipment-type overrides.
+ * Rates dashboard — unified card view.
+ * Section 1: Rate Cards — card grid (global + customer-specific).
+ * Section 2: Customer Rate Overrides — card grid per equipment type.
  *
+ * D5:  rate_cards has deleted_at.
  * D30: asset_url() / base_url().
  * D32: Only CSS classes confirmed in app.css.
- * D5:  rate_cards has deleted_at — all DB queries filter it.
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/rate_cards/, api/v1/customer_equipment_rates/
@@ -54,7 +54,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
+<!-- KPI tiles -->
 <div class="stat-grid" style="margin-bottom:24px;">
     <div class="stat-card">
         <div class="stat-label">Rate Cards</div>
@@ -78,303 +78,233 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<!-- ── Tabs + Tables (Alpine.js) ─────────────────────────────────────────── -->
 <div x-data="FF_RatesManager()" x-init="init()">
 
-    <!-- Tab nav -->
-    <div style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:0;">
-        <button class="btn btn-ghost btn-sm"
-                :style="tab === 'cards' ? 'border-bottom:2px solid var(--color-primary);margin-bottom:-2px;border-radius:4px 4px 0 0;font-weight:600;' : ''"
-                @click="tab = 'cards'; loadCards()">
-            Rate Cards
-        </button>
-        <button class="btn btn-ghost btn-sm"
-                :style="tab === 'overrides' ? 'border-bottom:2px solid var(--color-primary);margin-bottom:-2px;border-radius:4px 4px 0 0;font-weight:600;' : ''"
-                @click="tab = 'overrides'; loadOverrides()">
-            Customer Overrides
-        </button>
-    </div>
+    <!-- ── Section 1: Rate Cards ──────────────────────────────────────────── -->
+    <div class="card" style="margin-bottom:20px;">
 
-    <!-- ──── TAB 1: Rate Cards ─────────────────────────────────────────── -->
-    <div x-show="tab === 'cards'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
-        <div class="card" style="border-top:none;border-radius:0 0 8px 8px;">
+        <!-- Filter bar — single row -->
+        <div class="card-header" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;">
+            <strong style="white-space:nowrap;font-size:0.9375rem;">Rate Cards</strong>
+            <input type="text" class="form-control form-control-sm"
+                   style="flex:1;min-width:0;max-width:200px;"
+                   placeholder="Search…"
+                   x-model="cardQ"
+                   @input.debounce.400ms="loadCards(1)">
+            <select class="form-select form-select-sm" style="width:auto;"
+                    x-model="cardScope" @change="loadCards(1)">
+                <option value="">All</option>
+                <option value="global">Global</option>
+                <option value="customer">Customer</option>
+            </select>
+            <select class="form-select form-select-sm" style="width:auto;"
+                    x-model="cardActive" @change="loadCards(1)">
+                <option value="">Any Status</option>
+                <option value="1">Active</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap;"
+                    @click="cardQ='';cardScope='';cardActive='';loadCards(1)">Reset</button>
+            <span class="text-secondary" style="margin-left:auto;white-space:nowrap;font-size:0.8125rem;"
+                  x-text="cardTotal > 0 ? cardTotal + ' card' + (cardTotal === 1 ? '' : 's') : ''"></span>
+        </div>
 
-            <!-- Filter bar -->
-            <div class="card-header" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-                <!-- Name / customer search -->
-                <input type="text" class="form-control"
-                       style="max-width:220px;height:32px;font-size:0.875rem;"
-                       placeholder="Search name or customer…"
-                       x-model="cardFilters.q"
-                       @input.debounce.400ms="loadCards(1)">
-
-                <!-- Scope: All / Global / Customer-specific -->
-                <select class="form-select form-select-sm" style="min-width:150px;"
-                        x-model="cardFilters.scope"
-                        @change="loadCards(1)">
-                    <option value="">All Rate Cards</option>
-                    <option value="global">Global Only</option>
-                    <option value="customer">Customer-Specific</option>
-                </select>
-
-                <!-- Active status -->
-                <select class="form-select form-select-sm"
-                        x-model="cardFilters.active"
-                        @change="loadCards(1)">
-                    <option value="">All Statuses</option>
-                    <option value="1">Active Only</option>
-                </select>
-
-                <button class="btn btn-secondary btn-sm"
-                        @click="cardFilters = {q:'',scope:'',active:''}; loadCards(1)">Reset</button>
-
-                <span class="text-secondary" style="margin-left:auto;font-size:0.8125rem;"
-                      x-text="cardTotal > 0 ? cardTotal + ' card' + (cardTotal === 1 ? '' : 's') : ''"></span>
-            </div>
-
-            <!-- Bulk action bar -->
-            <?php if (can('rates', 'delete')): ?>
-            <div class="ff-bulk-bar"
-                 x-show="selectedCardIds.length > 0"
-                 x-transition:enter="ff-bulk-enter" x-transition:enter-start="ff-bulk-enter-from" x-transition:enter-end="ff-bulk-enter-to"
-                 x-transition:leave="ff-bulk-leave" x-transition:leave-start="ff-bulk-leave-from" x-transition:leave-end="ff-bulk-leave-to"
-                 x-cloak>
-                <span class="ff-bulk-bar-count" x-text="selectedCardIds.length + ' selected'"></span>
-                <span class="ff-bulk-bar-sep"></span>
-                <button class="ff-bulk-btn ff-bulk-btn-delete"
-                        :disabled="bulkWorking"
-                        @click="bulkDeleteCards()">
-                    <span x-text="bulkWorking ? 'Deleting…' : 'Delete selected'"></span>
-                </button>
-                <button class="ff-bulk-btn ff-bulk-btn-clear"
-                        @click="clearCardSelection()">Clear selection</button>
-            </div>
-            <?php endif; ?>
+        <div class="card-body">
 
             <!-- Loading -->
-            <div class="card-body" x-show="cardLoading" style="text-align:center;padding:32px;">
+            <div x-show="cardLoading" style="text-align:center;padding:2rem;">
                 <span class="text-secondary">Loading…</span>
             </div>
 
             <!-- Empty state -->
             <template x-if="!cardLoading && cardRows.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No rate cards found</p>
-                        <p class="empty-state-text">Rate cards define standard pricing by equipment category.</p>
-                        <?php if (can('rates', 'create')): ?>
-                        <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm" style="margin-top:12px;">+ New Rate Card</a>
-                        <?php endif; ?>
-                    </div>
+                <div class="empty-state">
+                    <p class="empty-state-title">No rate cards found</p>
+                    <p class="empty-state-text">Rate cards define standard pricing by equipment category.</p>
+                    <?php if (can('rates', 'create')): ?>
+                    <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm" style="margin-top:12px;">+ New Rate Card</a>
+                    <?php endif; ?>
                 </div>
             </template>
 
-            <!-- Cards table -->
+            <!-- Card grid -->
             <template x-if="!cardLoading && cardRows.length > 0">
-                <div class="table-wrapper">
-                    <table class="table">
-                        <thead>
-                            <tr>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+                    <template x-for="row in cardRows" :key="row.id">
+                        <div class="rate-card-tile"
+                             style="border:1px solid var(--border-color);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:10px;transition:border-color .15s,box-shadow .15s;"
+                             @mouseenter="$el.style.borderColor='var(--color-primary)';$el.style.boxShadow='0 2px 8px rgba(0,0,0,.1)'"
+                             @mouseleave="$el.style.borderColor='var(--border-color)';$el.style.boxShadow=''">
+
+                            <!-- Name + status badges -->
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                                <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
+                                   class="link font-medium"
+                                   x-text="row.name"
+                                   style="font-size:0.9375rem;line-height:1.3;"></a>
+                                <div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
+                                    <span class="badge"
+                                          :class="row.is_active ? 'badge-success' : 'badge-neutral'"
+                                          x-text="row.is_active ? 'Active' : 'Inactive'"
+                                          style="font-size:0.7rem;"></span>
+                                    <span x-show="row.is_default" class="badge badge-info" style="font-size:0.7rem;">Default</span>
+                                </div>
+                            </div>
+
+                            <!-- Customer or Global badge -->
+                            <div>
+                                <template x-if="row.customer_id">
+                                    <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id"
+                                       class="link text-secondary"
+                                       style="font-size:0.875rem;"
+                                       x-text="row.customer_name"></a>
+                                </template>
+                                <template x-if="!row.customer_id">
+                                    <span class="badge badge-neutral" style="font-size:0.75rem;">Global</span>
+                                </template>
+                            </div>
+
+                            <!-- Effective period -->
+                            <div class="text-secondary" style="font-size:0.8125rem;">
+                                <span class="font-mono" x-text="row.effective_from || '—'"></span>
+                                <span> → </span>
+                                <span class="font-mono" x-text="row.effective_to || 'Open'"></span>
+                            </div>
+
+                            <!-- Equipment type count -->
+                            <div class="text-secondary" style="font-size:0.8125rem;">
+                                <span x-text="(row.item_count ?? 0) + ' equipment type' + ((row.item_count ?? 0) === 1 ? '' : 's')"></span>
+                            </div>
+
+                            <!-- Actions -->
+                            <div style="display:flex;gap:8px;margin-top:2px;">
+                                <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
+                                   class="btn btn-secondary btn-sm">Edit</a>
                                 <?php if (can('rates', 'delete')): ?>
-                                <th class="th-checkbox">
-                                    <label class="ff-checkbox">
-                                        <input type="checkbox" :checked="selectAllCards" @change="toggleSelectAllCards()">
-                                        <span></span>
-                                    </label>
-                                </th>
+                                <button class="btn btn-outline-danger btn-sm"
+                                        :disabled="row.is_default"
+                                        @click.stop="confirmDeleteCard(row)">Delete</button>
                                 <?php endif; ?>
-                                <th class="th-sortable" @click="setCardSort('name')">Rate Card <span x-show="cardSort === 'name'" x-text="cardDir === 'ASC' ? '↑' : '↓'"></span></th>
-                                <th>Customer</th>
-                                <th style="text-align:center;">Items</th>
-                                <th class="th-sortable" @click="setCardSort('effective_from')">Effective Period <span x-show="cardSort === 'effective_from'" x-text="cardDir === 'ASC' ? '↑' : '↓'"></span></th>
-                                <th>Status</th>
-                                <th style="text-align:right;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="row in cardRows" :key="row.id">
-                                <tr :class="selectedCardIds.includes(row.id) ? 'ff-row-selected' : ''">
-                                    <?php if (can('rates', 'delete')): ?>
-                                    <td class="td-checkbox">
-                                        <label class="ff-checkbox">
-                                            <input type="checkbox"
-                                                   :checked="selectedCardIds.includes(row.id)"
-                                                   @change="toggleSelectCard(row.id)">
-                                            <span></span>
-                                        </label>
-                                    </td>
-                                    <?php endif; ?>
-                                    <!-- Rate card name + badges -->
-                                    <td>
-                                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                                            <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
-                                               class="link font-medium" x-text="row.name"></a>
-                                            <span x-show="row.is_default" class="badge badge-info" style="font-size:0.7rem;">Default</span>
-                                        </div>
-                                        <div class="text-secondary" style="font-size:0.775rem;margin-top:2px;"
-                                             x-show="row.description" x-text="row.description"></div>
-                                    </td>
-                                    <!-- Customer column -->
-                                    <td>
-                                        <template x-if="row.customer_id">
-                                            <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id"
-                                               class="link" x-text="row.customer_name"></a>
-                                        </template>
-                                        <template x-if="!row.customer_id">
-                                            <span class="badge badge-neutral" style="font-size:0.75rem;">Global</span>
-                                        </template>
-                                    </td>
-                                    <!-- Items count -->
-                                    <td class="font-mono" style="text-align:center;">
-                                        <span x-text="row.item_count ?? 0"
-                                              :class="(row.item_count ?? 0) === 0 ? 'text-secondary' : ''"></span>
-                                    </td>
-                                    <!-- Effective period -->
-                                    <td style="white-space:nowrap;">
-                                        <span class="font-mono" style="font-size:0.8125rem;" x-text="row.effective_from || '—'"></span>
-                                        <span class="text-secondary" style="font-size:0.8125rem;"> → </span>
-                                        <span class="font-mono" style="font-size:0.8125rem;"
-                                              x-text="row.effective_to || 'Open'"></span>
-                                    </td>
-                                    <!-- Status badge -->
-                                    <td>
-                                        <span class="badge"
-                                              :class="row.is_active ? 'badge-success' : 'badge-neutral'"
-                                              x-text="row.is_active ? 'Active' : 'Inactive'"></span>
-                                    </td>
-                                    <!-- Actions -->
-                                    <td style="text-align:right;white-space:nowrap;">
-                                        <a :href="'<?= base_url('rates/show') ?>?id=' + row.id"
-                                           class="btn btn-secondary btn-sm">Edit</a>
-                                        <?php if (can('rates', 'delete')): ?>
-                                        <button class="btn btn-outline-danger btn-sm"
-                                                @click.stop="confirmDeleteCard(row)"
-                                                :disabled="row.is_default">Delete</button>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                            </div>
+
+                        </div>
+                    </template>
                 </div>
             </template>
-
-            <!-- Pagination -->
-            <template x-if="!cardLoading && cardTotalPages > 1">
-                <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
-                    <button class="btn btn-secondary btn-sm" :disabled="cardPage <= 1" @click="loadCards(cardPage - 1)">← Prev</button>
-                    <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
-                          x-text="'Page ' + cardPage + ' of ' + cardTotalPages"></span>
-                    <button class="btn btn-secondary btn-sm" :disabled="cardPage >= cardTotalPages" @click="loadCards(cardPage + 1)">Next →</button>
-                </div>
-            </template>
-
         </div>
+
+        <!-- Pagination -->
+        <template x-if="!cardLoading && cardTotalPages > 1">
+            <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
+                <button class="btn btn-secondary btn-sm" :disabled="cardPage <= 1" @click="loadCards(cardPage - 1)">← Prev</button>
+                <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
+                      x-text="'Page ' + cardPage + ' of ' + cardTotalPages"></span>
+                <button class="btn btn-secondary btn-sm" :disabled="cardPage >= cardTotalPages" @click="loadCards(cardPage + 1)">Next →</button>
+            </div>
+        </template>
+
     </div>
 
-    <!-- ──── TAB 2: Customer Overrides ──────────────────────────────────── -->
-    <div x-show="tab === 'overrides'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
-        <div class="card" style="border-top:none;border-radius:0 0 8px 8px;">
+    <!-- ── Section 2: Customer Rate Overrides ─────────────────────────────── -->
+    <div class="card">
 
-            <!-- Filter bar -->
-            <div class="card-header" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-                <input type="text" class="form-control"
-                       style="max-width:220px;height:32px;font-size:0.875rem;"
-                       placeholder="Search customer or type…"
-                       x-model="ovFilters.q"
-                       @input.debounce.400ms="loadOverrides(1)">
+        <!-- Filter bar — single row -->
+        <div class="card-header" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;">
+            <strong style="white-space:nowrap;font-size:0.9375rem;">Customer Rate Overrides</strong>
+            <input type="text" class="form-control form-control-sm"
+                   style="flex:1;min-width:0;max-width:200px;"
+                   placeholder="Search…"
+                   x-model="ovQ"
+                   @input.debounce.400ms="loadOverrides(1)">
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap;"
+                    @click="ovQ='';loadOverrides(1)">Reset</button>
+            <span class="text-secondary" style="margin-left:auto;white-space:nowrap;font-size:0.8125rem;"
+                  x-text="ovTotal > 0 ? ovTotal + ' override' + (ovTotal === 1 ? '' : 's') : ''"></span>
+        </div>
 
-                <button class="btn btn-secondary btn-sm"
-                        @click="ovFilters = {q:''}; loadOverrides(1)">Reset</button>
-
-                <span class="text-secondary" style="margin-left:auto;font-size:0.8125rem;"
-                      x-text="ovTotal > 0 ? ovTotal + ' override' + (ovTotal === 1 ? '' : 's') : ''"></span>
-            </div>
+        <div class="card-body">
 
             <!-- Loading -->
-            <div class="card-body" x-show="ovLoading" style="text-align:center;padding:32px;">
+            <div x-show="ovLoading" style="text-align:center;padding:2rem;">
                 <span class="text-secondary">Loading…</span>
             </div>
 
             <!-- Empty state -->
             <template x-if="!ovLoading && ovRows.length === 0">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <p class="empty-state-title">No customer rate overrides</p>
-                        <p class="empty-state-text">Per-equipment-type overrides can be set on each customer's Rates tab.</p>
-                    </div>
+                <div class="empty-state">
+                    <p class="empty-state-title">No customer rate overrides</p>
+                    <p class="empty-state-text">Per-equipment-type overrides can be set on each customer's Rates tab.</p>
                 </div>
             </template>
 
-            <!-- Overrides table — grouped by customer for readability -->
+            <!-- Override card grid -->
             <template x-if="!ovLoading && ovRows.length > 0">
-                <div class="table-wrapper">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Customer</th>
-                                <th>Equipment Type</th>
-                                <th style="text-align:right;">Daily</th>
-                                <th style="text-align:right;">Weekly</th>
-                                <th style="text-align:right;">Monthly</th>
-                                <th style="text-align:right;">Mileage</th>
-                                <th>Currency</th>
-                                <th>Effective</th>
-                                <th style="text-align:right;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="row in ovRows" :key="row.id">
-                                <tr>
-                                    <td>
-                                        <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id + '#rates'"
-                                           class="link font-medium" x-text="row.customer_name"></a>
-                                    </td>
-                                    <td>
-                                        <span class="badge badge-neutral" style="font-size:0.75rem;text-transform:capitalize;"
-                                              x-text="row.equipment_type.replace(/_/g, ' ')"></span>
-                                    </td>
-                                    <td class="font-mono" style="text-align:right;"
-                                        x-text="row.daily_rate ? '$' + parseFloat(row.daily_rate).toFixed(2) : '—'"></td>
-                                    <td class="font-mono" style="text-align:right;"
-                                        x-text="row.weekly_rate ? '$' + parseFloat(row.weekly_rate).toFixed(2) : '—'"></td>
-                                    <td class="font-mono" style="text-align:right;"
-                                        x-text="row.monthly_rate ? '$' + parseFloat(row.monthly_rate).toFixed(2) : '—'"></td>
-                                    <td class="font-mono" style="text-align:right;"
-                                        x-text="row.mileage_rate ? '$' + parseFloat(row.mileage_rate).toFixed(4) + '/' + row.mileage_unit : '—'"></td>
-                                    <td x-text="row.currency"></td>
-                                    <td class="text-secondary" style="font-size:0.8125rem;white-space:nowrap;">
-                                        <span x-text="row.effective_from"></span>
-                                        <span x-show="row.effective_to"> → <span x-text="row.effective_to"></span></span>
-                                        <span x-show="!row.effective_to" class="text-secondary"> → open</span>
-                                    </td>
-                                    <td style="text-align:right;">
-                                        <?php if (can('rates', 'delete')): ?>
-                                        <button class="btn btn-danger btn-sm"
-                                                @click.stop="confirmDeleteOverride(row)">Delete</button>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">
+                    <template x-for="row in ovRows" :key="row.id">
+                        <div style="border:1px solid var(--border-color);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px;">
+
+                            <!-- Customer name -->
+                            <a :href="'<?= base_url('customers/show') ?>?id=' + row.customer_id + '#rates'"
+                               class="link font-medium"
+                               x-text="row.customer_name"
+                               style="font-size:0.9375rem;"></a>
+
+                            <!-- Equipment type -->
+                            <span class="badge badge-neutral"
+                                  x-text="row.equipment_type.replace(/_/g,' ')"
+                                  style="font-size:0.75rem;text-transform:capitalize;align-self:flex-start;"></span>
+
+                            <!-- Rate pairs — 2-column label/value grid -->
+                            <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:0.8125rem;align-items:baseline;margin-top:2px;">
+                                <span x-show="row.daily_rate" class="text-secondary">Daily</span>
+                                <span x-show="row.daily_rate" class="font-mono"
+                                      x-text="row.daily_rate ? '$' + parseFloat(row.daily_rate).toFixed(2) : ''"></span>
+
+                                <span x-show="row.weekly_rate" class="text-secondary">Weekly</span>
+                                <span x-show="row.weekly_rate" class="font-mono"
+                                      x-text="row.weekly_rate ? '$' + parseFloat(row.weekly_rate).toFixed(2) : ''"></span>
+
+                                <span x-show="row.monthly_rate" class="text-secondary">Monthly</span>
+                                <span x-show="row.monthly_rate" class="font-mono"
+                                      x-text="row.monthly_rate ? '$' + parseFloat(row.monthly_rate).toFixed(2) : ''"></span>
+
+                                <span x-show="row.mileage_rate" class="text-secondary">Mileage</span>
+                                <span x-show="row.mileage_rate" class="font-mono"
+                                      x-text="row.mileage_rate ? '$' + parseFloat(row.mileage_rate).toFixed(4) + '/' + row.mileage_unit : ''"></span>
+                            </div>
+
+                            <!-- Effective period (if set) -->
+                            <div x-show="row.effective_from" class="text-secondary" style="font-size:0.8rem;">
+                                <span class="font-mono" x-text="row.effective_from"></span>
+                                <span> → </span>
+                                <span class="font-mono" x-text="row.effective_to || 'Open'"></span>
+                            </div>
+
+                            <?php if (can('rates', 'delete')): ?>
+                            <div style="margin-top:4px;">
+                                <button class="btn btn-outline-danger btn-sm"
+                                        @click.stop="confirmDeleteOverride(row)">Delete</button>
+                            </div>
+                            <?php endif; ?>
+
+                        </div>
+                    </template>
                 </div>
             </template>
-
-            <!-- Pagination -->
-            <template x-if="!ovLoading && ovTotalPages > 1">
-                <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
-                    <button class="btn btn-secondary btn-sm" :disabled="ovPage <= 1" @click="loadOverrides(ovPage - 1)">← Prev</button>
-                    <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
-                          x-text="'Page ' + ovPage + ' of ' + ovTotalPages"></span>
-                    <button class="btn btn-secondary btn-sm" :disabled="ovPage >= ovTotalPages" @click="loadOverrides(ovPage + 1)">Next →</button>
-                </div>
-            </template>
-
         </div>
+
+        <!-- Pagination -->
+        <template x-if="!ovLoading && ovTotalPages > 1">
+            <div class="card-footer" style="display:flex;justify-content:center;gap:8px;padding:12px;">
+                <button class="btn btn-secondary btn-sm" :disabled="ovPage <= 1" @click="loadOverrides(ovPage - 1)">← Prev</button>
+                <span class="text-secondary" style="line-height:32px;font-size:0.875rem;"
+                      x-text="'Page ' + ovPage + ' of ' + ovTotalPages"></span>
+                <button class="btn btn-secondary btn-sm" :disabled="ovPage >= ovTotalPages" @click="loadOverrides(ovPage + 1)">Next →</button>
+            </div>
+        </template>
+
     </div>
 
-    <!-- ── Delete card modal ─────────────────────────────────────────────── -->
+    <!-- ── Delete rate card modal ─────────────────────────────────────────── -->
     <div class="modal-backdrop" x-show="deleteCardModal.open" x-cloak>
         <div class="modal modal-sm">
             <div class="modal-header">
@@ -431,36 +361,31 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function FF_RatesManager() {
     return {
-        tab: 'cards',
+        // Rate Cards section
+        cardRows:       [],
+        cardTotal:      0,
+        cardPage:       1,
+        cardTotalPages: 1,
+        cardLoading:    false,
+        cardQ:          '',
+        cardScope:      '',
+        cardActive:     '',
 
-        // ── Rate Cards tab
-        cardRows:        [],
-        cardTotal:       0,
-        cardPage:        1,
-        cardTotalPages:  1,
-        cardLoading:     false,
-        cardSort:        'effective_from',
-        cardDir:         'DESC',
-        cardFilters:     { q: '', scope: '', active: '' },
-
-        selectedCardIds: [],
-        selectAllCards:  false,
-        bulkWorking:     false,
-
-        // ── Overrides tab
+        // Overrides section
         ovRows:       [],
         ovTotal:      0,
         ovPage:       1,
         ovTotalPages: 1,
         ovLoading:    false,
-        ovFilters:    { q: '' },
+        ovQ:          '',
 
-        // ── Modals
+        // Modals
         deleteCardModal: { open: false, id: null, name: '', updated_at: null, saving: false, error: '' },
         deleteOvModal:   { open: false, id: null, label: '', updated_at: null, saving: false, error: '' },
 
         init() {
             this.loadCards();
+            this.loadOverrides();
         },
 
         // ── Rate Cards ──────────────────────────────────────────────────────
@@ -468,41 +393,22 @@ function FF_RatesManager() {
             this.cardLoading = true;
             this.cardPage    = page;
 
-            const params = new URLSearchParams({
-                page:     page,
-                per_page: 25,
-                sort:     this.cardSort,
-                dir:      this.cardDir,
-            });
-            if (this.cardFilters.q)      params.set('q', this.cardFilters.q);
-            if (this.cardFilters.active) params.set('active', this.cardFilters.active);
-            // scope: '' = all, 'global' = customer_id=0, 'customer' = customer_id > 0
-            if (this.cardFilters.scope === 'global')   params.set('customer_id', '0');
-            if (this.cardFilters.scope === 'customer') params.set('has_customer', '1');
+            const params = new URLSearchParams({ page, per_page: 24, sort: 'effective_from', dir: 'DESC' });
+            if (this.cardQ)                        params.set('q', this.cardQ);
+            if (this.cardActive)                   params.set('active', this.cardActive);
+            if (this.cardScope === 'global')        params.set('customer_id', '0');
+            if (this.cardScope === 'customer')      params.set('has_customer', '1');
 
             try {
                 const r = await FF_Api.get(`<?= base_url('api/v1/rate_cards/index') ?>?${params}`);
                 this.cardRows       = r.data?.items ?? [];
                 this.cardTotal      = r.data?.pagination?.total ?? 0;
                 this.cardTotalPages = r.data?.pagination?.total_pages ?? 1;
-                this.selectAllCards =
-                    this.cardRows.length > 0 &&
-                    this.cardRows.every(r => this.selectedCardIds.includes(r.id));
             } catch (e) {
                 this.cardRows = [];
             } finally {
                 this.cardLoading = false;
             }
-        },
-
-        setCardSort(col) {
-            if (this.cardSort === col) {
-                this.cardDir = this.cardDir === 'ASC' ? 'DESC' : 'ASC';
-            } else {
-                this.cardSort = col;
-                this.cardDir  = 'DESC';
-            }
-            this.loadCards(1);
         },
 
         confirmDeleteCard(row) {
@@ -523,52 +429,14 @@ function FF_RatesManager() {
             }
         },
 
-        // ── Bulk select helpers ────────────────────────────────────────────
-        toggleSelectCard(id) {
-            const idx = this.selectedCardIds.indexOf(id);
-            if (idx === -1) this.selectedCardIds.push(id);
-            else            this.selectedCardIds.splice(idx, 1);
-            this.selectAllCards = this.cardRows.length > 0 &&
-                this.cardRows.every(r => this.selectedCardIds.includes(r.id));
-        },
-
-        toggleSelectAllCards() {
-            if (this.selectAllCards) {
-                const visibleIds = this.cardRows.map(r => r.id);
-                this.selectedCardIds = this.selectedCardIds.filter(id => !visibleIds.includes(id));
-                this.selectAllCards  = false;
-            } else {
-                this.cardRows.forEach(r => { if (!this.selectedCardIds.includes(r.id)) this.selectedCardIds.push(r.id); });
-                this.selectAllCards = true;
-            }
-        },
-
-        clearCardSelection() {
-            this.selectedCardIds = [];
-            this.selectAllCards  = false;
-        },
-
-        async bulkDeleteCards() {
-            if (!this.selectedCardIds.length) return;
-            if (!confirm(`Delete ${this.selectedCardIds.length} rate card(s)? This cannot be undone.`)) return;
-            this.bulkWorking = true;
-            try {
-                await FF_Api.post('<?= base_url('api/v1/rate_cards/bulk_delete') ?>', { ids: this.selectedCardIds });
-                this.clearCardSelection();
-                this.loadCards(this.cardPage);
-            } catch (e) {
-                alert(e.message || 'Bulk delete failed.');
-            } finally {
-                this.bulkWorking = false;
-            }
-        },
-
         // ── Customer Overrides ─────────────────────────────────────────────
         async loadOverrides(page = 1) {
             this.ovLoading = true;
             this.ovPage    = page;
-            const params = new URLSearchParams({ page, per_page: 50 });
-            if (this.ovFilters.q) params.set('q', this.ovFilters.q);
+
+            const params = new URLSearchParams({ page, per_page: 48 });
+            if (this.ovQ) params.set('q', this.ovQ);
+
             try {
                 const r = await FF_Api.get(`<?= base_url('api/v1/customer_equipment_rates/index') ?>?${params}`);
                 this.ovRows       = r.data?.items ?? [];
