@@ -290,6 +290,18 @@ function FF_RateCardCreate() {
             this.items.splice(idx, 1);
         },
 
+        // A row is "blank" when nothing has been entered: no equipment type
+        // AND no rate values. These are ignored on submit so the auto-added
+        // starter row (and any extra rows from "Add new +") never block the
+        // form with a spurious "please select an equipment type" error.
+        isBlankItem(item) {
+            return !item.equipment_type
+                && item.daily_rate   === ''
+                && item.weekly_rate  === ''
+                && item.monthly_rate === ''
+                && item.mileage_rate === '';
+        },
+
         // Pre-fill rates when equipment type is selected from the dropdown
         onTypeChange(idx) {
             const item     = this.items[idx];
@@ -338,6 +350,7 @@ function FF_RateCardCreate() {
             for (let i = 0; i < this.items.length; i++) {
                 const item = this.items[i];
                 const lineNum = i + 1;
+                if (this.isBlankItem(item)) continue;  // ignore untouched rows
                 if (!item.equipment_type) {
                     itemProblems.push(`Item ${lineNum}: please select an equipment type.`);
                     continue;
@@ -373,8 +386,8 @@ function FF_RateCardCreate() {
 
             this.submitting = true;
 
-            // Build payload — omit empty rate strings
-            const items = this.items.map(item => {
+            // Build payload — drop untouched rows, omit empty rate strings
+            const items = this.items.filter(item => !this.isBlankItem(item)).map(item => {
                 const out = { equipment_type: item.equipment_type,
                                mileage_unit:   item.mileage_unit,
                                currency:       item.currency };

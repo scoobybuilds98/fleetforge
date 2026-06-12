@@ -462,6 +462,17 @@ function FF_RateCardShow() {
             this.items.splice(idx, 1);
         },
 
+        // A row is "blank" when nothing has been entered: no equipment type
+        // AND no rate values. Ignored on save so an empty "+ Add Row" row never
+        // blocks the save with a spurious "please select an equipment type".
+        isBlankItem(item) {
+            return !item.equipment_type
+                && (item.daily_rate   === '' || item.daily_rate   === null)
+                && (item.weekly_rate  === '' || item.weekly_rate  === null)
+                && (item.monthly_rate === '' || item.monthly_rate === null)
+                && (item.mileage_rate === '' || item.mileage_rate === null);
+        },
+
         cancelItemEdit(idx) {
             const snapshot = this.itemsSnapshot[idx];
             if (snapshot) {
@@ -489,6 +500,7 @@ function FF_RateCardShow() {
             for (let i = 0; i < this.items.length; i++) {
                 const item = this.items[i];
                 const lineNum = i + 1;
+                if (this.isBlankItem(item)) continue;  // ignore untouched rows
                 if (!item.equipment_type) {
                     problems.push(`Item ${lineNum}: please select an equipment type.`);
                     continue;
@@ -517,7 +529,7 @@ function FF_RateCardShow() {
 
             this.saving = true;
             try {
-                const itemPayload = this.items.map(item => ({
+                const itemPayload = this.items.filter(item => !this.isBlankItem(item)).map(item => ({
                     equipment_type: item.equipment_type,
                     daily_rate:     item.daily_rate   || null,
                     weekly_rate:    item.weekly_rate  || null,
