@@ -76,17 +76,38 @@ function require_portal_auth(): void
         exit;
     }
 
-    // WHY: verify the customer is still active — prevents continued access
-    // after an admin deactivates the customer account mid-session.
+    // Mid-session revocation re-check (shared with the portal API bootstraps so
+    // the page + JSON surfaces lock out a suspended account identically).
+    $revoked = portal_status_revoked();
+    if ($revoked !== null) {
+        _portal_session_clear();
+        $_SESSION['portal_auth_flash'] = $revoked;
+        header('Location: ' . base_url('portal/auth/login'));
+        exit;
+    }
+}
+
+/**
+ * portal_status_revoked() — re-validate that BOTH the logged-in customer and
+ * the portal user are still in an allowed status. Returns a user-facing flash
+ * message when access must be revoked, or null when access may continue.
+ *
+ * The session snapshot alone is not enough: an admin can suspend the customer
+ * or deactivate a single portal login mid-session, and without a per-request
+ * re-check that account keeps access (page OR JSON poll) until the session
+ * times out. Shared by require_portal_auth() (page → redirect) and the portal
+ * API bootstraps (→ 401 JSON). Assumes a portal session already exists.
+ */
+function portal_status_revoked(): ?string
+{
+    // WHY: customer still active — prevents access after an admin deactivates
+    // the customer account mid-session.
     $cust = db_row(
         "SELECT status FROM customers WHERE id = ? AND deleted_at IS NULL",
         [portal_customer_id()]
     );
     if (!$cust || !in_array($cust['status'], ['active', 'pending', 'credit_hold'], true)) {
-        _portal_session_clear();
-        $_SESSION['portal_auth_flash'] = 'Your account has been suspended. Please contact support.';
-        header('Location: ' . base_url('portal/auth/login'));
-        exit;
+        return 'Your account has been suspended. Please contact support.';
     }
 
     // MEDIUM [10]: re-check the portal user's OWN status too. The customer can
@@ -95,11 +116,10 @@ function require_portal_auth(): void
     // expired. Only 'active' portal users may proceed.
     $pu = db_row("SELECT status FROM portal_users WHERE id = ?", [portal_user_id()]);
     if (!$pu || $pu['status'] !== 'active') {
-        _portal_session_clear();
-        $_SESSION['portal_auth_flash'] = 'Your portal access has been deactivated. Please contact support.';
-        header('Location: ' . base_url('portal/auth/login'));
-        exit;
+        return 'Your portal access has been deactivated. Please contact support.';
     }
+
+    return null;
 }
 
 /**

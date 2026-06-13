@@ -95,6 +95,14 @@ if (!$portalUserId || !$portalCustomerId) {
     portal_msgr_err('UNAUTHORIZED', 'No authenticated portal user.', 401);
 }
 
+// Mid-session revocation: re-check customer + portal-user status every request
+// (the session snapshot alone would keep a suspended account polling messages).
+$portalRevoked = portal_status_revoked();
+if ($portalRevoked !== null) {
+    _portal_session_clear();
+    portal_msgr_err('UNAUTHORIZED', $portalRevoked, 401);
+}
+
 // ── CSRF (state-changing methods only) ──────────────────────
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
