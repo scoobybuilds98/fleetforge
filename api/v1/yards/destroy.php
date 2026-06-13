@@ -65,6 +65,24 @@ if ($activeCount > 0) {
     );
 }
 
+// MEDIUM [09]: yard membership is a denormalized name string on
+// equipment_units.yard_location (no FK), so deleting a yard with units parked
+// there orphans them (they keep pointing at a now-deleted yard name). Guard on
+// it the same way as reservations — the operator must move the units first.
+$parkedCount = db_count(
+    "SELECT COUNT(*) FROM equipment_units
+     WHERE yard_location = ? AND deleted_at IS NULL",
+    [$yard['name']]
+);
+if ($parkedCount > 0) {
+    json_error(
+        'HAS_PARKED_UNITS',
+        "Cannot delete '{$yard['name']}' — {$parkedCount} equipment unit(s) are parked here. " .
+        "Move them to another yard first.",
+        422
+    );
+}
+
 $deletedAt = date('Y-m-d H:i:s');
 
 db_transaction(function () use ($id, $yard, $deletedAt): void {

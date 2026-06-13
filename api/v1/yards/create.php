@@ -81,19 +81,27 @@ if (!$slug) {
 // ── Uniqueness check (name + slug) ───────────────────────────────
 // VALID-2: report collisions through the standard fields envelope so
 // the client can highlight the offending input. (HTTP 422)
-if (db_exists('yards', 'name = ?', [$name])) {
+// MEDIUM [09]: yards has a GLOBAL unique key on name (not scoped to deleted_at),
+// and yard delete is a SOFT delete. Block only on an ACTIVE collision; if a
+// SOFT-DELETED yard holds this name, revive it in place below instead of either
+// a misleading lockout or a 1062 on the insert (mirrors the C2 customer revive).
+if (db_exists('yards', 'name = ? AND deleted_at IS NULL', [$name])) {
     json_validation_error(
         ['name' => "A yard named '{$name}' already exists."],
         "A yard named '{$name}' already exists."
     );
 }
+$reviveRow = db_row("SELECT id FROM yards WHERE name = ? AND deleted_at IS NOT NULL LIMIT 1", [$name]);
+$reviveId  = $reviveRow !== null ? (int) $reviveRow['id'] : null;
+// slug check stays GLOBAL (incl. soft-deleted) so a generated slug never 1062s
+// against a tombstoned row's slug.
 if (db_exists('yards', 'slug = ?', [$slug])) {
     // Append numeric suffix to slug to resolve collision
     $slug = $slug . '-' . time();
 }
 
-// ── Insert ────────────────────────────────────────────────────────
-$yardId = db_insert('yards', [
+// ── Insert (or revive a soft-deleted yard with the same name) ──────
+$yardData = [
     'name'        => $name,
     'slug'        => $slug,
     'address'     => $address,
@@ -105,7 +113,24 @@ $yardId = db_insert('yards', [
     'notes'       => $notes,
     'manager_id'  => $managerId,
     'is_active'   => 1,
-]);
+];
+try {
+    if ($reviveId !== null) {
+        db_update('yards', $yardData + ['deleted_at' => null, 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$reviveId]);
+        $yardId = $reviveId;
+    } else {
+        $yardId = db_insert('yards', $yardData);
+    }
+} catch (\PDOException $e) {
+    // Belt for the global name/slug unique key (TOCTOU or a soft-deleted slug).
+    if ($e->getCode() === '23000') {
+        json_validation_error(
+            ['name' => "A yard named '{$name}' already exists."],
+            "A yard named '{$name}' already exists."
+        );
+    }
+    throw $e;
+}
 
 // ── Audit ─────────────────────────────────────────────────────────
 db_insert('audit_log', [
