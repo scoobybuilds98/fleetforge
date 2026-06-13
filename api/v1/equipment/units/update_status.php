@@ -95,10 +95,23 @@ db_transaction(function () use ($id, $newStatus, $reason, &$result) {
     $changedBy = current_user()['name'] ?? 'system';
 
     // ── Update unit status ─────────────────────────────────────
-    db_execute(
-        "UPDATE equipment_units SET status = ?, updated_by = ?, updated_at = NOW() WHERE id = ?",
-        [$newStatus, current_user_id(), $id]
-    );
+    if ($newStatus === 'decommissioned') {
+        // Stamp the dedicated decommission columns so reports/filters keyed on
+        // decommissioned_date (e.g. "units decommissioned this year") see the
+        // unit. Business date via PHP date() (app timezone), not UTC CURDATE().
+        db_execute(
+            "UPDATE equipment_units
+                SET status = ?, decommissioned_date = ?, decommission_reason = ?,
+                    updated_by = ?, updated_at = NOW()
+              WHERE id = ?",
+            [$newStatus, date('Y-m-d'), $reason, current_user_id(), $id]
+        );
+    } else {
+        db_execute(
+            "UPDATE equipment_units SET status = ?, updated_by = ?, updated_at = NOW() WHERE id = ?",
+            [$newStatus, current_user_id(), $id]
+        );
+    }
 
     // ── equipment_status_log ───────────────────────────────────
     db_insert('equipment_status_log', [
