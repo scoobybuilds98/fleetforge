@@ -113,10 +113,12 @@ function build_activity_description(array $row): string
  */
 function time_ago(string $datetimeStr): string
 {
-    // WHY strtotime on a bare datetime: MySQL DATETIME is UTC, PHP default
-    // timezone is America/Vancouver (set in config/app.php) — we compare
-    // against time() which is also UTC-anchored, so the diff is correct.
-    $diff = time() - (int) strtotime($datetimeStr);
+    // MEDIUM [06]: MySQL DATETIMEs are stored UTC, but PHP's default tz is
+    // America/Vancouver, so strtotime() on a BARE datetime parsed it as LOCAL —
+    // then subtracting from time() (true UTC epoch) skewed every age by the UTC
+    // offset (~7-8h: hours-old events read "just now"; the old "diff is correct"
+    // comment was wrong). Parse the string explicitly as UTC.
+    $diff = time() - (int) strtotime($datetimeStr . ' UTC');
 
     if ($diff < 60) {
         return 'just now';
@@ -134,6 +136,6 @@ function time_ago(string $datetimeStr): string
         return $d . ' day' . ($d === 1 ? '' : 's') . ' ago';
     }
 
-    // Older than a week: show the date
-    return date('M j', strtotime($datetimeStr));
+    // Older than a week: show the date (parse as UTC, render in business tz).
+    return date('M j', (int) strtotime($datetimeStr . ' UTC'));
 }
