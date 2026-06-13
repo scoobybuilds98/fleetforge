@@ -96,6 +96,7 @@ foreach ($cleanIds as $id) {
     // ── Fetch lease: must exist and not be soft-deleted ────────
     $lease = db_row(
         "SELECT id, status, contract_number, equipment_unit_id,
+                start_date, last_billed_date,
                 precharge_balance, precharge_enabled
            FROM leases
           WHERE id = ? AND deleted_at IS NULL",
@@ -126,6 +127,33 @@ foreach ($cleanIds as $id) {
         $errors[] = [
             'id'     => $id,
             'reason' => 'Has outstanding precharge balance — close individually.',
+        ];
+        continue;
+    }
+
+    // ── Skip leases with an unbilled final period (MEDIUM [03]) ───────────────
+    // bulk_close does NOT generate the partial_end final invoice that close.php
+    // produces, and the monthly cron only bills 'active' leases — so days between
+    // the last billed period and the close date would silently go unbilled
+    // (revenue loss). Mirror close.php's coverage check: coverageEnd =
+    // MAX(billing_period_end) over non-void invoices; if the next period would
+    // start on or before today, the lease has a billable tail and MUST be closed
+    // individually (where the final invoice + advance/mileage reconciliation run).
+    $coverageEnd = db_row(
+        "SELECT MAX(billing_period_end) AS max_end
+           FROM invoices
+          WHERE lease_id = ? AND deleted_at IS NULL
+            AND status <> 'void' AND billing_period_end IS NOT NULL",
+        [$id]
+    )['max_end'] ?? ($lease['last_billed_date'] ?: null);
+    $tailStart = $coverageEnd
+        ? date('Y-m-d', strtotime($coverageEnd . ' +1 day'))
+        : ($lease['start_date'] ?: null);
+    if ($tailStart !== null && $tailStart <= $today) {
+        $skipped++;
+        $errors[] = [
+            'id'     => $id,
+            'reason' => 'Has an unbilled final period — close individually so the final invoice is generated.',
         ];
         continue;
     }
