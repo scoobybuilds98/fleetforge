@@ -133,6 +133,15 @@ $dailyRate    = $checkNonNegDecimal($body['default_daily_rate']   ?? null, 'defa
 $weeklyRate   = $checkNonNegDecimal($body['default_weekly_rate']  ?? null, 'default_weekly_rate',  'Weekly rate');
 $monthlyRate  = $checkNonNegDecimal($body['default_monthly_rate'] ?? null, 'default_monthly_rate', 'Monthly rate');
 $mileageRate  = $checkNonNegDecimal($body['default_mileage_rate'] ?? null, 'default_mileage_rate', 'Mileage rate');
+// default_mileage_rate is NOT NULL DEFAULT '0.0000' (unlike daily/weekly/monthly
+// which are nullable = "tier not configured"). $checkNonNegDecimal returns null
+// when the field is omitted, and inserting an explicit NULL into the NOT-NULL
+// column throws 1048 → HTTP 500. Fall back to the column default so an omitted
+// mileage rate behaves as "0", not a fatal. (Invalid values still set a field
+// error above and are rejected before the insert.)
+if ($mileageRate === null && !isset($fields['default_mileage_rate'])) {
+    $mileageRate = '0.0000';
+}
 
 $rawCurrency  = $body['default_currency'] ?? 'CAD';
 $currency     = in_array($rawCurrency, ['CAD','USD'], true) ? $rawCurrency : 'CAD';

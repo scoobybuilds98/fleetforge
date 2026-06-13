@@ -236,6 +236,23 @@ try {
             . " weekly now {$afterWeekly} (expected 720.00)");
     }
 
+    // ── 4b. templates/create.php — default_mileage_rate omitted must not 500 ─
+    // default_mileage_rate is NOT NULL DEFAULT '0.0000'; omitting it used to
+    // insert explicit NULL → 1048 → HTTP 500. Complete tiers, no mileage key.
+    $r = $post('api/v1/equipment/templates/create.php', [
+        'name'                 => $TTOK . '-nomileage',
+        'category'             => 'dry_van',
+        'default_daily_rate'   => '120',
+        'default_weekly_rate'  => '720',
+        'default_monthly_rate' => '2400',
+        // default_mileage_rate intentionally omitted
+    ]);
+    if (($r['success'] ?? null) === true) {
+        $pass("4b template create — omitted default_mileage_rate succeeds (no 500; defaults to 0)");
+    } else {
+        $fail("4b template create — omitted default_mileage_rate failed: " . json_encode($r['error'] ?? $r));
+    }
+
     // ── 6. leases/create.php — regression: existing D132 guard intact ────────
     if ($custId && $unitId) {
         $r = $post('api/v1/leases/create.php', [
