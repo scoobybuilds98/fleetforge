@@ -69,7 +69,7 @@ $kpiRow = db_row(
      FROM invoices i
      LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
      WHERE i.deleted_at IS NULL
-       AND i.status NOT IN ('draft','void')
+       AND i.status NOT IN ('draft','void','written_off')
        AND i.invoice_date BETWEEN ? AND ?",
     [$dateFrom, $dateTo]
 );
@@ -135,7 +135,7 @@ switch ($view) {
                         MIN(invoice_date)   AS first_invoice_date,
                         MAX(invoice_date)   AS last_invoice_date
                  FROM invoices
-                 WHERE deleted_at IS NULL AND status NOT IN ('draft','void')
+                 WHERE deleted_at IS NULL AND status NOT IN ('draft','void','written_off')
                  GROUP BY customer_id
              ) all_inv ON all_inv.customer_id = c.id
              LEFT JOIN (
@@ -144,7 +144,7 @@ switch ($view) {
                         COUNT(*) AS period_invoices
                  FROM invoices
                  WHERE deleted_at IS NULL
-                   AND status NOT IN ('draft','void')
+                   AND status NOT IN ('draft','void','written_off')
                    AND invoice_date BETWEEN ? AND ?
                  GROUP BY customer_id
              ) period_inv ON period_inv.customer_id = c.id
@@ -255,11 +255,11 @@ switch ($view) {
              JOIN (
                  SELECT customer_id, MIN(invoice_date) AS first_date
                  FROM invoices
-                 WHERE deleted_at IS NULL AND status NOT IN ('draft','void')
+                 WHERE deleted_at IS NULL AND status NOT IN ('draft','void','written_off')
                  GROUP BY customer_id
              ) first_inv ON first_inv.customer_id = i.customer_id
              WHERE i.deleted_at IS NULL
-               AND i.status NOT IN ('draft','void')
+               AND i.status NOT IN ('draft','void','written_off')
                AND i.invoice_date BETWEEN ? AND ?
              GROUP BY DATE_FORMAT(i.invoice_date, '%Y-%m'), DATE_FORMAT(i.invoice_date, '%b %Y')
              ORDER BY period ASC",

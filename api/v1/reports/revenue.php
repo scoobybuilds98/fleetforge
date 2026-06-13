@@ -81,7 +81,7 @@ $kpiRow = db_row(
         COALESCE(SUM(CASE WHEN i.status = 'overdue' THEN i.balance_due ELSE 0 END), 0) AS overdue_amount
      FROM invoices i
      WHERE i.deleted_at IS NULL
-       AND i.status NOT IN ('draft', 'void')
+       AND i.status NOT IN ('draft', 'void', 'written_off')
        AND i.invoice_date BETWEEN ? AND ?",
     [$dateFrom, $dateTo]
 );
@@ -131,7 +131,7 @@ switch ($view) {
                 COALESCE(SUM(i.balance_due),             0)    AS outstanding
              FROM invoices i
              WHERE i.deleted_at IS NULL
-               AND i.status NOT IN ('draft','void')
+               AND i.status NOT IN ('draft','void','written_off')
                AND i.invoice_date BETWEEN ? AND ?
              GROUP BY DATE_FORMAT(i.invoice_date, '%Y-%m'), DATE_FORMAT(i.invoice_date, '%b %Y')
              ORDER BY period ASC",
@@ -191,7 +191,7 @@ switch ($view) {
              FROM invoices i
              LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
              WHERE i.deleted_at IS NULL
-               AND i.status NOT IN ('draft','void')
+               AND i.status NOT IN ('draft','void','written_off')
                AND i.invoice_date BETWEEN ? AND ?
              GROUP BY i.customer_id
              ORDER BY gross_revenue DESC
@@ -247,7 +247,7 @@ switch ($view) {
              LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
              LEFT JOIN equipment_templates et ON et.id = eu.template_id  AND et.deleted_at IS NULL
              WHERE i.deleted_at IS NULL
-               AND i.status NOT IN ('draft','void')
+               AND i.status NOT IN ('draft','void','written_off')
                AND i.invoice_date BETWEEN ? AND ?
              GROUP BY equipment_type
              ORDER BY gross_revenue DESC",
@@ -372,7 +372,7 @@ switch ($view) {
                 COALESCE(SUM(i.balance_due),  0)         AS outstanding
              FROM invoices i
              WHERE i.deleted_at IS NULL
-               AND i.status NOT IN ('draft','void')
+               AND i.status NOT IN ('draft','void','written_off')
                AND i.invoice_date BETWEEN ? AND ?
              GROUP BY DATE_FORMAT(i.invoice_date, '%Y-%m'), DATE_FORMAT(i.invoice_date, '%b %Y')
              ORDER BY period ASC",

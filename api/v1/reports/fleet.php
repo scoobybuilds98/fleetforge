@@ -117,7 +117,7 @@ $revRows = db_select(
      FROM invoices i
      JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
      WHERE i.deleted_at IS NULL
-       AND i.status NOT IN ('draft','void')
+       AND i.status NOT IN ('draft','void','written_off')
        AND i.invoice_date BETWEEN ? AND ?
      GROUP BY l.equipment_unit_id",
     [$dateFrom, $dateTo]

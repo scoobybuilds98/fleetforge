@@ -96,7 +96,7 @@ function view_revenue_forecast(string $dateFrom, string $dateTo): array
             COALESCE(SUM(i.total_amount), 0)       AS revenue
          FROM invoices i
          WHERE i.deleted_at IS NULL
-           AND i.status NOT IN ('void', 'draft')
+           AND i.status NOT IN ('void', 'draft', 'written_off')
            AND i.invoice_date BETWEEN ? AND ?
          GROUP BY DATE_FORMAT(i.invoice_date, '%Y-%m'), period
          ORDER BY period ASC",
@@ -243,7 +243,7 @@ function view_utilization_matrix(): array
          LEFT JOIN invoices i
             ON i.lease_id = l.id
            AND i.deleted_at IS NULL
-           AND i.status NOT IN ('void', 'draft')
+           AND i.status NOT IN ('void', 'draft', 'written_off')
            AND i.invoice_date BETWEEN ? AND ?
          WHERE eu.deleted_at IS NULL
          GROUP BY eu.id, eu.unit_number, et.category
@@ -329,7 +329,7 @@ function view_concentration_risk(): array
          FROM invoices i
          LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
          WHERE i.deleted_at IS NULL
-           AND i.status NOT IN ('void', 'draft')
+           AND i.status NOT IN ('void', 'draft', 'written_off')
            AND i.invoice_date BETWEEN ? AND ?
          GROUP BY i.customer_id, customer_name
          ORDER BY revenue DESC
@@ -398,7 +398,7 @@ function view_seasonal_pattern(): array
             COUNT(*)                               AS invoice_count
          FROM invoices i
          WHERE i.deleted_at IS NULL
-           AND i.status NOT IN ('void', 'draft')
+           AND i.status NOT IN ('void', 'draft', 'written_off')
          GROUP BY MONTH(i.invoice_date), month_label
          ORDER BY month_num ASC",
         []
@@ -464,7 +464,7 @@ function view_cohort_revenue(string $dateFrom, string $dateTo): array
          FROM invoices i
          JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
          WHERE i.deleted_at IS NULL
-           AND i.status NOT IN ('void', 'draft')
+           AND i.status NOT IN ('void', 'draft', 'written_off')
            AND i.invoice_date BETWEEN ? AND ?
          GROUP BY DATE_FORMAT(i.invoice_date, '%Y-%m'), period, YEAR(l.start_date), cohort_year
          ORDER BY period ASC, cohort_year ASC",
@@ -732,7 +732,7 @@ function view_avg_lease_value(string $dateFrom, string $dateTo): array
             SUM(i.total_amount)                   AS total_revenue
          FROM invoices i
          WHERE i.deleted_at IS NULL
-           AND i.status NOT IN ('void', 'draft')
+           AND i.status NOT IN ('void', 'draft', 'written_off')
            AND i.invoice_date BETWEEN ? AND ?
          GROUP BY DATE_FORMAT(i.invoice_date, '%Y-%m'), period
          ORDER BY period ASC",
@@ -750,7 +750,7 @@ function view_avg_lease_value(string $dateFrom, string $dateTo): array
     $allTimeRow = db_row(
         "SELECT AVG(total_amount) AS avg_all_time
          FROM invoices
-         WHERE deleted_at IS NULL AND status NOT IN ('void', 'draft')",
+         WHERE deleted_at IS NULL AND status NOT IN ('void', 'draft', 'written_off')",
         []
     );
     $avgAllTime = round((float)($allTimeRow['avg_all_time'] ?? 0), 2);
