@@ -133,11 +133,45 @@ $dailyRate    = $checkNonNegDecimal($body['default_daily_rate']   ?? null, 'defa
 $weeklyRate   = $checkNonNegDecimal($body['default_weekly_rate']  ?? null, 'default_weekly_rate',  'Weekly rate');
 $monthlyRate  = $checkNonNegDecimal($body['default_monthly_rate'] ?? null, 'default_monthly_rate', 'Monthly rate');
 $mileageRate  = $checkNonNegDecimal($body['default_mileage_rate'] ?? null, 'default_mileage_rate', 'Mileage rate');
+// default_mileage_rate is NOT NULL DEFAULT '0.0000' (unlike daily/weekly/monthly
+// which are nullable = "tier not configured"). $checkNonNegDecimal returns null
+// when the field is omitted, and inserting an explicit NULL into the NOT-NULL
+// column throws 1048 → HTTP 500. Fall back to the column default so an omitted
+// mileage rate behaves as "0", not a fatal. (Invalid values still set a field
+// error above and are rejected before the insert.)
+if ($mileageRate === null && !isset($fields['default_mileage_rate'])) {
+    $mileageRate = '0.0000';
+}
 
 $rawCurrency  = $body['default_currency'] ?? 'CAD';
 $currency     = in_array($rawCurrency, ['CAD','USD'], true) ? $rawCurrency : 'CAD';
 $rawMileage   = $body['default_mileage_unit'] ?? 'km';
 $mileageUnit  = in_array($rawMileage, ['km','miles'], true) ? $rawMileage : 'km';
+
+// ── D132 / I3 default rate-tier completeness ───────────────────
+// Templates use NULL to mean "tier not configured". When any default tier is
+// > 0, all three (daily/weekly/monthly) must be > 0 — a NULL or 0 tier
+// alongside a positive sibling is the rate-tier hole. A template with that
+// hole seeds leases with the same hole, which breaks holistic partial-period
+// billing (computes $0 base_rental). Mirrors leases/create.php (D132) and the
+// _smoke_billing_invariants I3 guard. A template with all tiers unset (all
+// NULL) is fine — "no rates configured" is a separate, valid state.
+$tplTiers = [
+    'default_daily_rate'   => $dailyRate,
+    'default_weekly_rate'  => $weeklyRate,
+    'default_monthly_rate' => $monthlyRate,
+];
+$anyTierPositive = false;
+foreach ($tplTiers as $v) {
+    if ($v !== null && bccomp((string) $v, '0', 4) > 0) { $anyTierPositive = true; break; }
+}
+if ($anyTierPositive) {
+    foreach ($tplTiers as $field => $v) {
+        if (!isset($fields[$field]) && ($v === null || bccomp((string) $v, '0', 4) <= 0)) {
+            $fields[$field] = 'Must be greater than zero when other default rate tiers are set (D132). Configure all three tiers, or leave all unset.';
+        }
+    }
+}
 
 // ── Duplicate name check ───────────────────────────────────────
 if ($name && db_exists('equipment_templates', 'name = ? AND deleted_at IS NULL', [$name])) {

@@ -245,6 +245,42 @@ if (isset($body['is_active'])) {
     $updates['is_active'] = (bool) $body['is_active'] ? 1 : 0;
 }
 
+// ── D132 / I3 default rate-tier completeness (partial-update aware) ──
+// Compute the EFFECTIVE post-update tiers: the provided value when this request
+// touched the field, else the current DB value. When any effective tier is > 0,
+// all three (daily/weekly/monthly) must be > 0 — a NULL or 0 tier alongside a
+// positive sibling is the rate-tier hole. Mirrors templates/create.php and the
+// lease guards (D132); stops an edit from re-opening the hole that breaks
+// holistic partial-period billing on leases seeded from this template. Skipped
+// when the request touched no tier field (nothing could newly create a hole).
+$tierCols = ['default_daily_rate', 'default_weekly_rate', 'default_monthly_rate'];
+$touchesTier = false;
+foreach ($tierCols as $col) {
+    if (array_key_exists($col, $body)) { $touchesTier = true; break; }
+}
+if ($touchesTier) {
+    $cur = db_row(
+        "SELECT default_daily_rate, default_weekly_rate, default_monthly_rate
+           FROM equipment_templates WHERE id = ?",
+        [$id]
+    );
+    $effective = [];
+    foreach ($tierCols as $col) {
+        $effective[$col] = array_key_exists($col, $updates) ? $updates[$col] : ($cur[$col] ?? null);
+    }
+    $anyTierPositive = false;
+    foreach ($effective as $v) {
+        if ($v !== null && bccomp((string) $v, '0', 4) > 0) { $anyTierPositive = true; break; }
+    }
+    if ($anyTierPositive) {
+        foreach ($effective as $col => $v) {
+            if (!isset($fields[$col]) && ($v === null || bccomp((string) $v, '0', 4) <= 0)) {
+                $fields[$col] = 'Must be greater than zero when other default rate tiers are set (D132). Configure all three tiers, or leave all unset.';
+            }
+        }
+    }
+}
+
 if ($fields) {
     json_validation_error($fields);
 }
