@@ -27,9 +27,11 @@ require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
 require_permission('customers', 'edit');
 
-// Only managers and super_admins may re-enable
+// Only managers and super_admins may re-enable.
+// H6: session role lives under 'role_slug' (auth_login), not 'role' — reading
+// $user['role'] yielded '' for everyone, so this gate 403'd every role.
 $user = current_user();
-if (!in_array($user['role'] ?? '', ['manager', 'super_admin'], true)) {
+if (!in_array($user['role_slug'] ?? '', ['manager', 'super_admin'], true)) {
     json_error('FORBIDDEN', 'Only managers and super admins can re-enable email.', 403);
 }
 

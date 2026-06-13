@@ -71,7 +71,10 @@ db_transaction(function () use ($id, $cancelReason, &$result) {
     // Active leases require Manager role + reason
     if ($lease['status'] === 'active') {
         $user = current_user();
-        $role = $user['role'] ?? '';
+        // H6: the session stores the role under 'role_slug' (auth_login), never
+        // 'role' — reading $user['role'] yielded '' for everyone, so this gate
+        // 403'd EVERY role (incl. super_admin) on an active-lease cancel.
+        $role = $user['role_slug'] ?? '';
         if (!in_array($role, ['super_admin', 'manager'])) {
             json_error('FORBIDDEN', 'Cancelling an active lease requires Manager role.', 403);
         }
