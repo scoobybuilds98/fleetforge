@@ -2523,6 +2523,14 @@ CREATE TABLE `email_bounces` (
   KEY `idx_email_bounces_type` (`bounce_type`),
   KEY `idx_email_bounces_processed` (`processed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `ses_webhook_events` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `message_id` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'SNS top-level MessageId — UNIQUE for idempotency (replay = no-op)',
+  `notification_type` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Bounce | Complaint | Delivery | ... from the SES payload notificationType',
+  `received_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When FF first processed this SNS message',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ses_message_id` (`message_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `email_logs` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `to_email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -3617,6 +3625,7 @@ CREATE TABLE `rate_card_items` (
 CREATE TABLE `rate_cards` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `customer_id` int unsigned DEFAULT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `is_default` tinyint(1) NOT NULL DEFAULT '0',
   `effective_from` date NOT NULL,
@@ -3629,6 +3638,8 @@ CREATE TABLE `rate_cards` (
   KEY `idx_default` (`is_default`),
   KEY `idx_effective` (`effective_from`),
   KEY `created_by` (`created_by`),
+  KEY `idx_rate_cards_customer_id` (`customer_id`),
+  CONSTRAINT `fk_rate_cards_customer_id` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `rate_cards_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `rate_limit_attempts` (

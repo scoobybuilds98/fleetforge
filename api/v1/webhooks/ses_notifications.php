@@ -111,6 +111,35 @@ if (!is_array($sesPayload)) {
 
 $notifType = $sesPayload['notificationType'] ?? $sesPayload['eventType'] ?? '';
 
+// ── Idempotency on the SNS MessageId (MEDIUM 08) ─────────────
+// SNS retries until it gets a 2xx and may deliver the same message more than
+// once. Without dedup, a redelivered bounce/complaint was reprocessed —
+// duplicating email_bounces + audit_log rows and re-disabling email. Record
+// each MessageId once (the QBO payment webhook already does this with
+// acc_qbo_webhook_events; email_bounces can't be the key since one message
+// fans out to several recipients). A replay is a no-op.
+$snsMessageId = (string) ($msg['MessageId'] ?? '');
+if ($snsMessageId !== '') {
+    if (db_row("SELECT id FROM ses_webhook_events WHERE message_id = ?", [$snsMessageId]) !== null) {
+        error_log("[ses_webhook] duplicate SNS MessageId {$snsMessageId} — skipping reprocess.");
+        http_response_code(200);
+        echo json_encode(['status' => 'duplicate', 'message_id' => $snsMessageId]);
+        exit;
+    }
+    try {
+        db_insert('ses_webhook_events', [
+            'message_id'        => $snsMessageId,
+            'notification_type' => $notifType !== '' ? $notifType : null,
+        ]);
+    } catch (\Throwable $e) {
+        // Concurrent delivery won the UNIQUE race — the other handler owns it.
+        error_log("[ses_webhook] MessageId insert race for {$snsMessageId}: " . $e->getMessage());
+        http_response_code(200);
+        echo json_encode(['status' => 'duplicate_race', 'message_id' => $snsMessageId]);
+        exit;
+    }
+}
+
 // ── Build recipient list ─────────────────────────────────────
 $recipients = [];
 
