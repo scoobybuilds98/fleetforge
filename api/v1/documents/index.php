@@ -66,15 +66,9 @@ if ($entityId !== null) {
     }
 
     // ── Permission gate (maps entity type → module) ───────────────────────
-    $permModule = match ($entityType) {
-        'equipment_unit' => 'equipment',
-        'lease'          => 'leases',
-        'customer'       => 'customers',
-        'inspection'     => 'inspections',
-        'damage_claim'   => 'maintenance',
-        default          => 'equipment',
-    };
-    require_permission($permModule, 'view');
+    // C1: shared map (document_entity_module) so Mode A, Mode B and serve.php
+    // all gate on the same per-entity permission.
+    require_permission(document_entity_module($entityType), 'view');
 
     // ── Fetch documents ───────────────────────────────────────────────────
     $rows = db_select(
@@ -106,10 +100,33 @@ if ($entityId !== null) {
 // MODE B — global paginated list
 // ════════════════════════════════════════════════════════════════════════════
 // No entity_id provided — list all documents with optional entity_type filter.
-// Any authenticated user can access the global list (documents nav has module=null).
+//
+// C1 (access-scope): the global list is visible to any authenticated user, so
+// it MUST be scoped to the entity types the caller can actually view — using
+// the same per-entity permission Mode A enforces. Without this, a user whose
+// access to a module was revoked (per-user/role override) could still list and
+// download every document of that type. super_admin sees all (can() wins).
 
 $where  = ['d.deleted_at IS NULL'];
 $params = [];
+
+// C1: restrict the result set to entity types the caller may view. Checking
+// every documents.entity_type enum member keeps the scope correct even for
+// types Mode A's $allowedTypes doesn't list (contract / service_request).
+$documentEntityTypes = [
+    'customer', 'equipment_unit', 'lease', 'inspection',
+    'damage_claim', 'contract', 'service_request',
+];
+$viewableTypes = array_values(array_filter(
+    $documentEntityTypes,
+    static fn(string $t): bool => can_view_document($t)
+));
+if ($viewableTypes === []) {
+    // Caller can view no document-bearing module → empty list (not a leak, not a 500).
+    json_paginated([], 0, $page ?? 1, $perPage ?? 25);
+}
+$where[]  = 'd.entity_type IN (' . implode(',', array_fill(0, count($viewableTypes), '?')) . ')';
+foreach ($viewableTypes as $t) { $params[] = $t; }
 
 // Optional entity_type filter
 if ($entityType && in_array($entityType, $allowedTypes, true)) {

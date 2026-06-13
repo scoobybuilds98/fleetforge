@@ -74,6 +74,25 @@ if ($validKey === null) {
 }
 
 // -----------------------------------------------------------------------
+// 2a. Per-entity authorization (C1 — documents access-scope leak)
+// -----------------------------------------------------------------------
+// A valid session + valid signature is NOT sufficient for access-controlled
+// documents: a low-privilege user (or one whose module access was revoked via
+// a permission override) could otherwise stream any customer credit app,
+// signed contract or insurance cert by holding a signed URL. If this key maps
+// to a row in `documents`, enforce the SAME per-entity permission the
+// entity-scoped list (Mode A) uses. Non-document files (invoice PDFs, report
+// exports, branding/* which skips auth entirely) have no documents row and
+// keep the session+signature contract unchanged.
+$docRow = db_row(
+    "SELECT entity_type FROM documents WHERE file_path = ? LIMIT 1",
+    [$validKey]
+);
+if ($docRow !== null && !can_view_document((string) $docRow['entity_type'])) {
+    json_error('FORBIDDEN', 'You do not have permission to view this document.', 403);
+}
+
+// -----------------------------------------------------------------------
 // 3. Resolve and validate the absolute filesystem path
 // -----------------------------------------------------------------------
 // localPath() prepends FF_ROOT/storage/ and re-validates the key.

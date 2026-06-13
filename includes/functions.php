@@ -802,3 +802,38 @@ function invalidate_dashboard_cache(): void
 {
     db_execute("DELETE FROM report_cache WHERE report_type LIKE 'dashboard_%'");
 }
+
+/**
+ * document_entity_module() — map a documents.entity_type to the permission
+ * module that gates viewing that entity.
+ *
+ * SINGLE SOURCE OF TRUTH shared by every document access surface:
+ *   - api/v1/documents/index.php  Mode A (entity-scoped list) permission gate
+ *   - api/v1/documents/index.php  Mode B (global list) per-row scoping
+ *   - api/v1/storage/serve.php    per-entity download authorization
+ *
+ * Covers all seven documents.entity_type enum members. The 'view' action on the
+ * returned module is the gate for seeing/downloading a document of that type.
+ * (C1 — documents access-scope leak: the global list and file-serve previously
+ * trusted authentication without authorization.)
+ */
+function document_entity_module(string $entityType): string
+{
+    return match ($entityType) {
+        'equipment_unit'                  => 'equipment',
+        'lease', 'contract'               => 'leases',
+        'customer'                        => 'customers',
+        'inspection'                      => 'inspections',
+        'damage_claim', 'service_request' => 'maintenance',
+        default                           => 'equipment', // unknown type → gate behind a real module, never open
+    };
+}
+
+/**
+ * can_view_document() — true if the current user may see/download a document
+ * owned by the given entity_type. super_admin short-circuits inside can().
+ */
+function can_view_document(string $entityType): bool
+{
+    return can(document_entity_module($entityType), 'view');
+}
