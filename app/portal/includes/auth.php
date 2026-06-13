@@ -88,6 +88,18 @@ function require_portal_auth(): void
         header('Location: ' . base_url('portal/auth/login'));
         exit;
     }
+
+    // MEDIUM [10]: re-check the portal user's OWN status too. The customer can
+    // stay active while a single portal login is deactivated (or the row
+    // deleted) — without this, that revoked user kept access until the session
+    // expired. Only 'active' portal users may proceed.
+    $pu = db_row("SELECT status FROM portal_users WHERE id = ?", [portal_user_id()]);
+    if (!$pu || $pu['status'] !== 'active') {
+        _portal_session_clear();
+        $_SESSION['portal_auth_flash'] = 'Your portal access has been deactivated. Please contact support.';
+        header('Location: ' . base_url('portal/auth/login'));
+        exit;
+    }
 }
 
 /**
