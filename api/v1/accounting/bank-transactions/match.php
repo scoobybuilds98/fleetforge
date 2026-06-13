@@ -41,6 +41,14 @@ if (!$matchedType) {
     $fields['matched_type'] = 'Match type must be payment, AP payment, journal entry, bank transfer, or other.';
 }
 
+// MEDIUM [01b]: matched_id is required when matching to a concrete record. Only
+// 'bank_transfer'/'other' may be matched without one. (Was optional for all
+// types → a 'payment' match could be saved pointing at nothing.)
+$idRequiredTypes = ['payment', 'ap_payment', 'journal_entry'];
+if (in_array($matchedType, $idRequiredTypes, true) && !$matchedId) {
+    $fields['matched_id'] = 'Please select the specific record to match to.';
+}
+
 if ($fields) {
     json_validation_error($fields);
 }
@@ -70,6 +78,23 @@ if ($matchedId) {
         json_error('NOT_FOUND', 'Matched record not found.', 404, [
             'fields' => ['matched_id' => 'Matched record not found.'],
         ]);
+    }
+
+    // MEDIUM [01b]: double-match guard. A given payment / AP payment / journal
+    // entry must reconcile to at most ONE bank transaction — otherwise the same
+    // cash event is reconciled twice. Reject if another matched txn already
+    // points at this (type, id).
+    if (in_array($matchedType, $idRequiredTypes, true)) {
+        $dupe = db_row(
+            "SELECT id FROM acc_bank_transactions
+              WHERE matched_type = ? AND matched_id = ? AND status = 'matched' AND id != ?",
+            [$matchedType, $matchedId, $id]
+        );
+        if ($dupe) {
+            json_error('ALREADY_MATCHED',
+                "That {$matchedType} is already matched to bank transaction #{$dupe['id']}. Unmatch it first.",
+                409, ['fields' => ['matched_id' => "Already matched to bank transaction #{$dupe['id']}."]]);
+        }
     }
 }
 
