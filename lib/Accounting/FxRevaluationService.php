@@ -212,14 +212,15 @@ class FxRevaluationService
             $delta       = bcsub($cadRevalued, $cadBook, 2);
 
             $rows[] = [
-                'account_id'   => $accountId,
-                'code'         => $a['code'],
-                'name'         => $a['name'],
-                'account_type' => $a['account_type'],
-                'usd_balance'  => $usdBalance,
-                'cad_book'     => $cadBook,
-                'cad_revalued' => $cadRevalued,
-                'delta'        => $delta,
+                'account_id'     => $accountId,
+                'code'           => $a['code'],
+                'name'           => $a['name'],
+                'account_type'   => $a['account_type'],
+                'normal_balance' => $a['normal_balance'],
+                'usd_balance'    => $usdBalance,
+                'cad_book'       => $cadBook,
+                'cad_revalued'   => $cadRevalued,
+                'delta'          => $delta,
             ];
             $totalUsd     = bcadd($totalUsd, $usdBalance, 2);
             $totalCadBook = bcadd($totalCadBook, $cadBook, 2);
@@ -319,28 +320,38 @@ class FxRevaluationService
                     $delta = (string) $a['delta'];
                     if (bccomp($delta, '0', 2) === 0) continue;
 
-                    // Positive delta = gain on this account (asset increased / liability decreased)
-                    // Negative delta = loss (asset decreased / liability increased)
-                    if (bccomp($delta, '0', 2) > 0) {
-                        // Gain: DR account / CR FX Gain account
+                    // MEDIUM [01c]: gain/loss is normal-balance-aware. `delta` =
+                    // cad_revalued − cad_book on the normal-balance-signed value:
+                    //   debit-normal (asset):  delta>0 → CAD value rose  → GAIN
+                    //   credit-normal (liab):  delta>0 → CAD owed  rose  → LOSS
+                    // The old code always treated delta>0 as a gain (DR account /
+                    // CR gain), so a USD liability whose CAD obligation grew was
+                    // booked as a gain that REDUCED the liability — backwards on
+                    // both the P&L and the balance sheet.
+                    $isCredit = ($a['normal_balance'] ?? 'debit') === 'credit';
+                    $deltaPos = bccomp($delta, '0', 2) > 0;
+                    $isGain   = $isCredit ? !$deltaPos : $deltaPos;
+                    $abs      = $deltaPos ? $delta : bcmul($delta, '-1', 2);
+
+                    if ($isGain) {
+                        // Gain → DR account (increase asset / decrease liability) / CR FX Gain
                         $lines[] = [
-                            'account_id'        => $a['account_id'],
-                            'debit'             => $delta,
-                            'credit'            => '0.00',
-                            'description'       => "FX revaluation — {$a['code']} {$a['name']}",
-                            'foreign_amount'    => $a['usd_balance'],
-                            'foreign_currency'  => 'USD',
-                            'exchange_rate'     => $rate,
+                            'account_id'       => $a['account_id'],
+                            'debit'            => $abs,
+                            'credit'           => '0.00',
+                            'description'      => "FX revaluation — {$a['code']} {$a['name']}",
+                            'foreign_amount'   => $a['usd_balance'],
+                            'foreign_currency' => 'USD',
+                            'exchange_rate'    => $rate,
                         ];
                         $lines[] = [
                             'account_id'  => $fxGainAccountId,
                             'debit'       => '0.00',
-                            'credit'      => $delta,
+                            'credit'      => $abs,
                             'description' => "Unrealized FX gain — {$a['code']} {$a['name']}",
                         ];
                     } else {
-                        $abs = bcmul($delta, '-1', 2);
-                        // Loss: DR FX Loss account / CR account
+                        // Loss → DR FX Loss / CR account (decrease asset / increase liability)
                         $lines[] = [
                             'account_id'  => $fxLossAccountId,
                             'debit'       => $abs,
@@ -348,13 +359,13 @@ class FxRevaluationService
                             'description' => "Unrealized FX loss — {$a['code']} {$a['name']}",
                         ];
                         $lines[] = [
-                            'account_id'        => $a['account_id'],
-                            'debit'             => '0.00',
-                            'credit'            => $abs,
-                            'description'       => "FX revaluation — {$a['code']} {$a['name']}",
-                            'foreign_amount'    => $a['usd_balance'],
-                            'foreign_currency'  => 'USD',
-                            'exchange_rate'     => $rate,
+                            'account_id'       => $a['account_id'],
+                            'debit'            => '0.00',
+                            'credit'           => $abs,
+                            'description'      => "FX revaluation — {$a['code']} {$a['name']}",
+                            'foreign_amount'   => $a['usd_balance'],
+                            'foreign_currency' => 'USD',
+                            'exchange_rate'    => $rate,
                         ];
                     }
                 }
