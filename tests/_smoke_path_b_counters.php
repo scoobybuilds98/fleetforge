@@ -312,8 +312,17 @@ db_transaction(function () use ($inv3, $leaseId, $customerId, $balanceDue3) {
     );
 });
 
-// Partial payment of $400
-$partial = '400.00';
+// A TRUE partial payment = half the invoice's actual balance (rounded to cents,
+// floored at $0.01). Must be strictly less than balance_due so the invoice lands
+// partially_paid and customers.outstanding_balance stays >= 0 (the real code, and
+// this test's own UPDATE, floor OB at GREATEST(0, ...)). Hardcoding $400 broke on
+// any run where the holistic engine prorated inv3 below $400 (e.g. a mid-month
+// lease start), making the "expected = OB - 400" go negative while reality floored
+// to 0.00.
+$partial = bcdiv($balanceDue3, '2', 2);
+if (bccomp($partial, '0', 2) <= 0) {
+    $partial = '0.01';
+}
 $obBeforePartial = (string) (db_row("SELECT outstanding_balance FROM customers WHERE id = ?", [$customerId])['outstanding_balance']);
 db_transaction(function () use ($inv3, $leaseId, $customerId, $partial) {
     $payId = db_insert('payments', [
