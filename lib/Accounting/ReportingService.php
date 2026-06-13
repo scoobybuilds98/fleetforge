@@ -137,21 +137,28 @@ class ReportingService
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $params = array_merge($types, [$from, $to]);
 
+        // C5: the je status/date predicates MUST live in WHERE (with INNER
+        // JOINs), not in a LEFT JOIN ... ON. With a LEFT JOIN, a non-matching
+        // je (draft, or out-of-period) only nulls the je columns — the jel row
+        // survives the join, so SUM(jel.debit/credit) still counts it, leaking
+        // draft + other-period activity into every period total. INNER JOIN +
+        // WHERE drops those lines entirely. Accounts with no posted-in-period
+        // activity simply produce no row (they were skipped as zero anyway).
         $rows = \db_select(
             "SELECT a.id AS account_id, a.code, a.name, a.account_type, a.normal_balance,
                     COALESCE(SUM(jel.debit), 0) AS total_debit,
                     COALESCE(SUM(jel.credit), 0) AS total_credit
                FROM acc_accounts a
-               LEFT JOIN acc_journal_entry_lines jel ON jel.account_id = a.id
-               LEFT JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-                                              AND je.status = 'posted'
-                                              AND je.entry_date BETWEEN ? AND ?
+               JOIN acc_journal_entry_lines jel ON jel.account_id = a.id
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
               WHERE a.account_type IN ({$placeholders})
                 AND a.is_active = 1
                 AND a.is_header = 0
+                AND je.status = 'posted'
+                AND je.entry_date BETWEEN ? AND ?
               GROUP BY a.id, a.code, a.name, a.account_type, a.normal_balance
               ORDER BY a.sort_order ASC, a.code ASC",
-            array_merge([$from, $to], $types)
+            $params
         );
 
         $out = [];
