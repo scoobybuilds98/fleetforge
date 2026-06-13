@@ -232,11 +232,21 @@ if ($fields) {
     json_validation_error($fields);
 }
 
-// FIX #10: check for duplicate company_name when it's being changed
-if (array_key_exists('company_name', $body) && $companyName !== $existing['company_name']) {
-    // Use the email being set (or the existing email from DB) for the dupe check
-    $checkEmail = $email ?? $existing['email'];
-    if (db_exists('customers', 'company_name = ? AND email = ? AND id != ?', [$companyName, $checkEmail, $id])) {
+// FIX #10 / C2: check for a duplicate (company_name, email) pair whenever EITHER
+// half is being changed. The guard previously fired only on a company_name
+// change, so an email-only edit into an existing pair skipped the check and hit
+// the uq_company_email unique key → uncaught 1062 → HTTP 500. Compute the
+// effective pair (changed value, else the existing one) and check it.
+$companyChanged = array_key_exists('company_name', $body) && $companyName !== $existing['company_name'];
+$emailChanged   = array_key_exists('email', $body) && ($email ?? null) !== ($existing['email'] ?? null);
+if ($companyChanged || $emailChanged) {
+    $checkCompany = $companyChanged ? $companyName : $existing['company_name'];
+    $checkEmail   = $emailChanged   ? $email       : $existing['email'];
+    // db_exists() only sees ACTIVE peers (auto-filters deleted_at) — that is the
+    // right scope for a friendly message; collisions with a SOFT-DELETED peer
+    // (which the global unique key still rejects) are caught by the 23000 catch
+    // around the UPDATE below.
+    if (db_exists('customers', 'company_name = ? AND email = ? AND id != ?', [$checkCompany, $checkEmail, $id])) {
         json_validation_error(
             ['company_name' => 'Another customer with this company name and email already exists.'],
             'Another customer with this company name and email already exists.'
@@ -333,7 +343,7 @@ if ($isRelatedParty !== null) $data['is_related_party'] = $isRelatedParty ? 1 : 
 
 $userId = current_user_id();
 
-db_transaction(function () use (&$data, $id, $replaceTags, $newTags, $userId, $existing, $companyName): void {
+$runUpdate = function () use (&$data, $id, $replaceTags, $newTags, $userId, $existing, $companyName): void {
     db_update('customers', $data, 'id = ?', [$id]);
 
     // Replace tags wholesale if the 'tags' key was present in request
@@ -390,7 +400,23 @@ db_transaction(function () use (&$data, $id, $replaceTags, $newTags, $userId, $e
     } catch (\Throwable $e) {
         error_log('[NOTIF customer.status_change] ' . $e->getMessage());
     }
-});
+};
+
+// C2: a collision with a SOFT-DELETED peer (invisible to the db_exists guard
+// above, but still rejected by the global uq_company_email key) or a TOCTOU
+// race would otherwise surface the 1062 as an HTTP 500. Translate it to the
+// same clean 422 the active-peer guard returns.
+try {
+    db_transaction($runUpdate);
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000') {
+        json_validation_error(
+            ['company_name' => 'Another customer with this company name and email already exists.'],
+            'Another customer with this company name and email already exists.'
+        );
+    }
+    throw $e;
+}
 
 // Re-fetch updated_at after the update
 $updated = db_row("SELECT id, company_name, updated_at FROM customers WHERE id = ?", [$id]);

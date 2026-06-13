@@ -198,71 +198,92 @@ if ($dupExists) {
     );
 }
 
+// ── C2: revive-in-place for a soft-deleted match ───────────────
+// uq_company_email (company_name,email) is a GLOBAL unique key that spans
+// soft-deleted rows, and customers.delete is a SOFT delete. The db_exists()
+// check above only sees ACTIVE rows (it auto-appends deleted_at IS NULL), so a
+// tombstoned company+email slips past it and the bare INSERT below would hit a
+// 1062 → HTTP 500. Mirror the users/create.php FLEETFORGE-F fix: if a
+// soft-deleted row holds this exact pair, revive it in place instead of
+// inserting. Only meaningful when email is set — NULL emails don't collide on
+// the unique index (MySQL allows multiple NULLs), so they always insert fresh.
+$reviveId = null;
+if ($email !== null) {
+    $softMatch = db_row(
+        "SELECT id FROM customers WHERE company_name = ? AND email = ? AND deleted_at IS NOT NULL LIMIT 1",
+        [$companyName, $email]
+    );
+    $reviveId = $softMatch !== null ? (int) $softMatch['id'] : null;
+}
+
 $userId = current_user_id();
 $now    = date('Y-m-d H:i:s');
 
-// ── Insert (transaction: customer + tags + optional note + audit_log) ──
+// Field set shared by the insert (new) and update (revive) paths.
+$customerData = [
+    'company_name'        => $companyName,
+    'contact_name'        => $contactName,
+    'email'               => $email,
+    'phone'               => $phone,
+    'alt_phone'           => $altPhone,
+    'website'             => $website,
+    'address'             => $address,
+    'city'                => $city,
+    'state'               => $state,
+    'province'            => $province,
+    'postal_code'         => $postalCode,
+    'country'             => $country,
+    'tax_id'              => $taxId,
+    'dot_number'          => $dotNumber,
+    'mc_number'           => $mcNumber,
+    'gst_number'          => $gstNumber,
+    'pst_number'          => $pstNumber,
+    'billing_contact_name'=> $billingContactName,
+    'billing_email'       => $billingEmail,
+    'billing_phone'       => $billingPhone,
+    'billing_address'     => $billingAddress,
+    'currency'            => $currency,
+    'mileage_unit'        => $mileageUnit,
+    'gst_exempt'          => $gstExempt ? 1 : 0,
+    'pst_exempt'          => $pstExempt ? 1 : 0,
+    'gst_exempt_number'   => $gstExemptNumber,
+    'pst_exempt_number'   => $pstExemptNumber,
+    'gst_exempt_expiry'   => $gstExemptExpiry,
+    'pst_exempt_expiry'   => $pstExemptExpiry,
+    'tax_rate_id'         => $taxRateId,
+    'billing_cycle'       => $billingCycle,
+    'invoice_delivery'    => $invoiceDelivery,
+    'invoice_email'       => $invoiceEmail,
+    'po_required'         => $poRequired ? 1 : 0,
+    'default_po_number'   => $defaultPoNumber,
+    'discount_type'       => $discountType,
+    'discount_value'      => $discountValue,
+    'payment_terms'       => $paymentTerms,
+    'credit_limit'        => $creditLimit,
+    'status'              => $status,
+    'risk_score'          => $riskScore,
+    'risk_notes'          => $riskNotes,
+    'created_by'          => $userId,
+    'updated_by'          => $userId,
+];
+
+// ── Insert/revive (transaction: customer + tags + optional note + audit_log) ──
 $newId = null;
 
-db_transaction(function () use (
-    &$newId, $userId, $now,
-    $companyName, $contactName, $email, $phone, $altPhone, $website,
-    $address, $city, $state, $province, $postalCode, $country,
-    $taxId, $dotNumber, $mcNumber, $gstNumber, $pstNumber,
-    $billingContactName, $billingEmail, $billingPhone, $billingAddress,
-    $currency, $mileageUnit, $billingCycle, $invoiceDelivery,
-    $invoiceEmail, $poRequired, $defaultPoNumber, $paymentTerms, $creditLimit,
-    $gstExempt, $pstExempt, $gstExemptNumber, $pstExemptNumber,
-    $gstExemptExpiry, $pstExemptExpiry, $taxRateId,
-    $discountType, $discountValue, $status, $riskScore, $riskNotes,
-    $tags, $noteText
+$runCreate = function () use (
+    &$newId, $userId, $reviveId, $customerData, $tags, $noteText, $companyName, $status
 ): void {
-    $newId = db_insert('customers', [
-        'company_name'        => $companyName,
-        'contact_name'        => $contactName,
-        'email'               => $email,
-        'phone'               => $phone,
-        'alt_phone'           => $altPhone,
-        'website'             => $website,
-        'address'             => $address,
-        'city'                => $city,
-        'state'               => $state,
-        'province'            => $province,
-        'postal_code'         => $postalCode,
-        'country'             => $country,
-        'tax_id'              => $taxId,
-        'dot_number'          => $dotNumber,
-        'mc_number'           => $mcNumber,
-        'gst_number'          => $gstNumber,
-        'pst_number'          => $pstNumber,
-        'billing_contact_name'=> $billingContactName,
-        'billing_email'       => $billingEmail,
-        'billing_phone'       => $billingPhone,
-        'billing_address'     => $billingAddress,
-        'currency'            => $currency,
-        'mileage_unit'        => $mileageUnit,
-        'gst_exempt'          => $gstExempt ? 1 : 0,
-        'pst_exempt'          => $pstExempt ? 1 : 0,
-        'gst_exempt_number'   => $gstExemptNumber,
-        'pst_exempt_number'   => $pstExemptNumber,
-        'gst_exempt_expiry'   => $gstExemptExpiry,
-        'pst_exempt_expiry'   => $pstExemptExpiry,
-        'tax_rate_id'         => $taxRateId,
-        'billing_cycle'       => $billingCycle,
-        'invoice_delivery'    => $invoiceDelivery,
-        'invoice_email'       => $invoiceEmail,
-        'po_required'         => $poRequired ? 1 : 0,
-        'default_po_number'   => $defaultPoNumber,
-        'discount_type'       => $discountType,
-        'discount_value'      => $discountValue,
-        'payment_terms'       => $paymentTerms,
-        'credit_limit'        => $creditLimit,
-        'status'              => $status,
-        'risk_score'          => $riskScore,
-        'risk_notes'          => $riskNotes,
-        'created_by'          => $userId,
-        'updated_by'          => $userId,
-    ]);
+    if ($reviveId !== null) {
+        // Revive the tombstoned row in place — clear the soft-delete marker and
+        // overwrite with the freshly-submitted field set. Replace tags wholesale
+        // (a recreated customer starts from the submitted set); historical notes
+        // are left untouched (non-destructive).
+        db_update('customers', $customerData + ['deleted_at' => null], 'id = ?', [$reviveId]);
+        $newId = $reviveId;
+        db_execute("DELETE FROM customer_tags WHERE customer_id = ?", [$newId]);
+    } else {
+        $newId = db_insert('customers', $customerData);
+    }
 
     // Insert tags
     foreach ($tags as $tag) {
@@ -308,7 +329,22 @@ db_transaction(function () use (
     } catch (\Throwable $e) {
         error_log('[NOTIF customer.created] ' . $e->getMessage());
     }
-});
+};
+
+// C2 belt-and-suspenders: a TOCTOU race (or a soft-deleted row that appeared
+// between the lookups) can still collide on uq_company_email. Translate the
+// 1062 into the same clean 422 instead of letting it surface as an HTTP 500.
+try {
+    db_transaction($runCreate);
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000') {
+        json_validation_error(
+            ['company_name' => 'A customer with this company name and email already exists.'],
+            'A customer with this company name and email already exists.'
+        );
+    }
+    throw $e;
+}
 
 // QBO sync enqueue (S-QBO-6). No-op when sync_enabled='0' (D-CPA-5
 // default) or mode rejects pushes. Never throws — sync is best-effort
