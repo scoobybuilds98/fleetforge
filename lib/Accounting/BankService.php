@@ -770,19 +770,25 @@ class BankService
                     continue;
                 }
 
-                // Restore balance_due on invoice
+                // Restore balance_due on invoice.
+                // H5: MySQL evaluates SET left-to-right, so by the time the
+                // `status` CASE runs, `balance_due` ALREADY holds the restored
+                // value from the first assignment. The old code added the amount
+                // a SECOND time (`balance_due + ?`), inflating the comparison and
+                // flagging partially-restored invoices as 'overdue'. Compare the
+                // restored balance directly — the same already-applied semantics
+                // ap-payments/create.php documents.
                 \db_execute(
                     "UPDATE invoices SET
                         balance_due = balance_due + ?,
                         amount_paid = amount_paid - ?,
                         status = CASE
-                            WHEN balance_due + ? >= total_amount THEN 'overdue'
-                            WHEN balance_due + ? > 0 THEN 'partially_paid'
+                            WHEN balance_due >= total_amount THEN 'overdue'
+                            WHEN balance_due > 0 THEN 'partially_paid'
                             ELSE status
                         END
                      WHERE id = ? AND deleted_at IS NULL",
                     [
-                        $alloc['amount'], $alloc['amount'],
                         $alloc['amount'], $alloc['amount'],
                         $alloc['invoice_id'],
                     ]
