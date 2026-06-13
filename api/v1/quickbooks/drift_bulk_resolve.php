@@ -54,6 +54,9 @@ $allowedActions = ['accept', 'suppress'];
 $allowedEntityTypes = [
     'invoice', 'payment', 'bill', 'bill_payment', 'credit_memo',
     'journal_entry', 'customer', 'vendor',
+    // DriftChecker emits gl_account/balance_drift events (checkGlAccountBalances);
+    // without this an operator can't bulk-resolve GL balance drift scoped by entity.
+    'gl_account',
 ];
 
 if (!in_array($action, $allowedActions, true)) {
