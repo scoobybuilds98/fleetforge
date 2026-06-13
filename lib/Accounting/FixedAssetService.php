@@ -378,18 +378,43 @@ class FixedAssetService
         $accumulated     = (string) $asset['accumulated_depreciation'];
 
         // -- STRAIGHT LINE -----------------------------------------------------
+        // Straight-line over the REMAINING life: monthly = (NBV − salvage) /
+        // remaining_months. For a never-impaired asset this is identical to the
+        // classic (cost − salvage)/(life·12) every month (proven algebraically),
+        // but it self-corrects after an impairment — impair() resets NBV /
+        // depreciable_cost to the lower carrying value WITHOUT shortening
+        // useful_life_years, so the old `depreciable_cost / (life·12)` spread the
+        // reduced base over the FULL original life and under-depreciated
+        // ($60/mo vs the correct $100/mo). The final month trues up to salvage.
         if ($method === 'straight_line') {
-            $life = (string) $asset['useful_life_years'];
-            // monthly = (cost - salvage) / (life * 12)  → rounded half-up
-            $months  = bcmul($life, '12', 2);
-            $raw     = bcdiv($depreciable, $months, 6);
-            $amount  = self::roundMoney($raw);
+            $life        = (string) $asset['useful_life_years'];
+            $totalMonths = (int) bcmul($life, '12', 0);
+            $startY = (int) substr((string) $asset['depreciation_start_date'], 0, 4);
+            $startM = (int) substr((string) $asset['depreciation_start_date'], 5, 2);
+            $py     = (int) ($period['year']  ?? $startY);
+            $pm     = (int) ($period['month'] ?? $startM);
+            $elapsedMonths   = ($py - $startY) * 12 + ($pm - $startM);
+            $remainingMonths = $totalMonths - $elapsedMonths;
+            // Amount still to depreciate from the opening (pre-this-period) NBV.
+            $deprRemaining = bcsub($openingNbv, $salvage, 2);
+
+            if (bccomp($deprRemaining, '0', 2) <= 0) {
+                $amount = '0.00';
+            } elseif ($remainingMonths <= 1) {
+                // Final scheduled month (or past end-of-life): book the remainder
+                // so the asset lands exactly on salvage.
+                $amount = self::roundMoney($deprRemaining);
+            } else {
+                $amount = self::roundMoney(bcdiv($deprRemaining, (string) $remainingMonths, 6));
+            }
             $detail += [
-                'depreciable_cost'  => $depreciable,
-                'useful_life_years' => $life,
-                'months'            => $months,
-                'monthly_amount'    => $amount,
-                'formula'           => '(cost - salvage) / (life * 12)',
+                'opening_nbv'        => $openingNbv,
+                'salvage'            => $salvage,
+                'useful_life_years'  => $life,
+                'elapsed_months'     => $elapsedMonths,
+                'remaining_months'   => max(0, $remainingMonths),
+                'monthly_amount'     => $amount,
+                'formula'            => '(opening_nbv - salvage) / remaining_months (re-spreads after impairment)',
             ];
         }
 
