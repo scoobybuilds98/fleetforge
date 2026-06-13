@@ -190,6 +190,32 @@ db_transaction(function () use ($id, $payment, $allocations, $reason, &$reverted
     }
 
     // ------------------------------------------------------------------
+    // Step 4b: Reverse the GL (Codex). onPaymentReceived / onOverpaymentReceived
+    // posted a JE (source_type='payment', source_id=this payment) debiting Cash
+    // / crediting AR. Reversing only the operational counters above left that JE
+    // posted, so the ledger showed cash still received after the delete. Reverse
+    // every still-posted payment JE (a reversing entry dated today, into the
+    // open current period) so the subledger and GL stay in lock-step. Idempotent:
+    // an already-reversed entry is skipped; any other failure (e.g. no open
+    // period to reverse into) aborts the whole delete so we never commit a
+    // counter reversal without the matching GL reversal.
+    $paymentJes = \db_select(
+        "SELECT id FROM acc_journal_entries
+          WHERE source_type = 'payment' AND source_id = ? AND status = 'posted'",
+        [$id]
+    );
+    foreach ($paymentJes as $je) {
+        try {
+            \FleetForge\Accounting\JournalEntryService::reverse((int) $je['id'], null, current_user_id());
+        } catch (\Throwable $e) {
+            if (stripos($e->getMessage(), 'already been reversed') !== false) {
+                continue; // idempotent — nothing to do
+            }
+            throw $e;     // closed period / no period → roll the whole delete back
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Step 5: Audit log inside transaction
     // ------------------------------------------------------------------
     $invoiceList = implode(', ', array_column($allocations, 'invoice_number'));
