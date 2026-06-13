@@ -67,7 +67,11 @@ $params    = [];
 if (array_key_exists('condition', $body)) {
     $condition = clean_string($body['condition'] ?? null);
     $validConds = ['ok', 'fair', 'damaged', 'missing', 'na'];
-    if ($condition && !in_array($condition, $validConds, true)) {
+    // MEDIUM [04]: `condition` is NOT NULL. The old `$condition && !in_array`
+    // short-circuited the whitelist when the value was null/'' and then wrote
+    // that NULL into the column → 1048 aborts the whole txn (500). Reject any
+    // value not in the whitelist (incl. null/empty) with a clean 422.
+    if (!in_array($condition, $validConds, true)) {
         $fieldErrors['condition'] = 'Please select a valid condition (ok, fair, damaged, missing, or na).';
     } else {
         $sqlFields[] = '`condition` = ?';

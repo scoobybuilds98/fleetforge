@@ -64,9 +64,18 @@ if (in_array($existing['status'], ['complete', 'signed'], true)) {
 }
 
 // Validate enums + numeric fields BEFORE building SQL
+// MEDIUM [04]: inspection_type and inspection_date are NOT NULL. Validation
+// gated on isset() (misses a JSON null), but the write below gates on
+// array_key_exists() and binds the cleaned value — so a null/'' slipped through
+// and pushed NULL into the NOT-NULL column → 1048 aborted the whole txn (500).
+// Reject any present-but-empty/invalid value here with a clean 422 so the loop
+// only ever writes a valid value.
 $validTypes = ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance'];
-if (isset($body['inspection_type']) && !in_array($body['inspection_type'], $validTypes, true)) {
+if (array_key_exists('inspection_type', $body) && !in_array($body['inspection_type'], $validTypes, true)) {
     $fieldErrors['inspection_type'] = 'Please select a valid inspection type.';
+}
+if (array_key_exists('inspection_date', $body) && clean_date($body['inspection_date'] ?? null) === null) {
+    $fieldErrors['inspection_date'] = 'A valid inspection date is required.';
 }
 $validFuel = ['empty', 'quarter', 'half', 'three_quarter', 'full'];
 if (isset($body['fuel_level']) && $body['fuel_level'] !== null && $body['fuel_level'] !== ''
