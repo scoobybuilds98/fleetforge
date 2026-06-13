@@ -77,6 +77,23 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
         );
     }
 
+    // H4: a deposit may not be applied for more than the invoice balance.
+    // acc_customer_deposits is all-or-nothing (no amount_remaining column), so
+    // the full deposit amount drives the JE (DR deposit liability / CR AR) and
+    // the customer outstanding_balance reduction while only the invoice balance
+    // is clamped to 0 — applying a $1000 deposit to a $300 invoice over-credited
+    // AR and over-reduced OB by $700 and silently consumed the remainder. Reject
+    // an over-application; the operator applies it to an invoice that can absorb
+    // it. (Partial application would need an amount_remaining column — separate.)
+    if (bccomp((string) $deposit['amount'], (string) $invoice['balance_due'], 2) > 0) {
+        $depFmt = '$' . number_format((float) $deposit['amount'], 2);
+        $balFmt = '$' . number_format((float) $invoice['balance_due'], 2);
+        json_validation_error(
+            ['amount' => "Deposit amount ({$depFmt}) exceeds the invoice balance of {$balFmt}. Apply it to an invoice whose balance is at least the deposit amount."],
+            "Deposit amount ({$depFmt}) exceeds the invoice balance of {$balFmt}."
+        );
+    }
+
     $amount = (string) $deposit['amount'];
 
     // Post JE: DR Deposit Liability / CR AR
