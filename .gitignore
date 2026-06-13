@@ -6,6 +6,20 @@
 .env
 *.pem
 *.key
+# Local super-admin credential scratch file (plaintext login) — never commit.
+user-credentials
+
+# --- Customer PII — credit-application PDFs + signature images ---
+# Sibling of storage/{uploads,documents}/ which were already ignored; this dir
+# was missed and holds real customer financial documents. Never commit.
+storage/credit_applications/
+
+# --- Security audit harness + findings (local only) ---
+# fable-prompts/ and fleetforge-audits/ contain detailed write-ups of
+# still-unpatched vulnerabilities; keeping them out of the repo avoids handing
+# an attacker the open-bug list. Local working artifacts, not project source.
+fable-prompts/
+fleetforge-audits/
 
 # --- Composer / npm ---
 vendor/
