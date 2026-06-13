@@ -39,6 +39,16 @@ class ClaudeClient
     /** HTTP timeout for standard requests (seconds) */
     private const TIMEOUT_SECONDS = 120;
 
+    /**
+     * Bounded retry on a transient 429 for the non-streaming path. The daily
+     * AI brief crons run unattended, so a single rate-limit blip must not skip
+     * the whole brief — mirror the streaming path's Retry-After retry. Capped
+     * so total added latency (MAX_RETRIES_429 × RETRY_AFTER_CAP_SECONDS) stays
+     * well under TIMEOUT_SECONDS.
+     */
+    public const MAX_RETRIES_429        = 2;
+    public const RETRY_AFTER_CAP_SECONDS = 30;
+
     /** Path to AI log file (relative to project root) */
     private const LOG_FILE = 'logs/ai.log';
 
@@ -723,20 +733,28 @@ class ClaudeClient
     {
         $jsonPayload = json_encode($payload, JSON_THROW_ON_ERROR);
 
-        $ch = curl_init(self::API_URL);
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $jsonPayload,
-            CURLOPT_HTTPHEADER     => $this->buildHeaders(),
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-            CURLOPT_SSL_VERIFYPEER => true,
-        ]);
+        // Bounded retry on a transient 429, honoring Retry-After. Unlike the
+        // streaming path this request is buffered, so a retry is always safe
+        // (no half-streamed text to duplicate). Other failures fall straight
+        // through to the error handling below on the first attempt.
+        $attempt = 0;
+        while (true) {
+            $resp = $this->httpPost($jsonPayload);
+            $raw  = $resp['body'];
+            $code = $resp['code'];
+            $err  = $resp['error'];
 
-        $raw  = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err  = curl_error($ch);
-        curl_close($ch);
+            if ($code === 429 && $err === '' && $attempt < self::MAX_RETRIES_429) {
+                $retryAfter = (int) ($resp['headers']['retry-after'] ?? 1);
+                if ($retryAfter < 1) $retryAfter = 1;
+                if ($retryAfter > self::RETRY_AFTER_CAP_SECONDS) $retryAfter = self::RETRY_AFTER_CAP_SECONDS;
+                $attempt++;
+                $this->log('AI_HTTP_RETRY', "HTTP=429 sleeping {$retryAfter}s before retry (attempt {$attempt}/" . self::MAX_RETRIES_429 . ')');
+                $this->sleepSeconds($retryAfter);
+                continue;
+            }
+            break;
+        }
 
         if ($raw === false || $err !== '') {
             $this->setError('NETWORK', 'Could not reach Anthropic API: ' . ($err ?: 'unknown network error'));
@@ -781,6 +799,56 @@ class ClaudeClient
         }
 
         return $data;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // httpPost() — single buffered HTTP POST to the Messages API.
+    //
+    // Isolated transport seam: makeRequest()'s retry loop drives it, and
+    // tests override it to inject a 429-then-200 transport double without a
+    // live network. Captures response headers so the caller can read
+    // Retry-After on a 429.
+    //
+    // @return array{body: string|false, code: int, error: string, headers: array<string,string>}
+    // ────────────────────────────────────────────────────────────
+    protected function httpPost(string $jsonPayload): array
+    {
+        $headers = [];
+
+        $ch = curl_init(self::API_URL);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $jsonPayload,
+            CURLOPT_HTTPHEADER     => $this->buildHeaders(),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
+            CURLOPT_SSL_VERIFYPEER => true,
+            // Capture response headers (one line per call) so makeRequest can
+            // honor Retry-After on a 429 — same approach as the streaming path.
+            CURLOPT_HEADERFUNCTION => function ($ch, $headerLine) use (&$headers): int {
+                $parts = explode(':', trim($headerLine), 2);
+                if (count($parts) === 2) {
+                    $headers[strtolower(trim($parts[0]))] = trim($parts[1]);
+                }
+                return strlen($headerLine);
+            },
+        ]);
+
+        $raw  = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err  = curl_error($ch);
+        curl_close($ch);
+
+        return ['body' => $raw, 'code' => $code, 'error' => $err, 'headers' => $headers];
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // sleepSeconds() — wraps sleep() so the 429 backoff is overridable in
+    // tests (a no-op double keeps the retry smoke instant).
+    // ────────────────────────────────────────────────────────────
+    protected function sleepSeconds(int $seconds): void
+    {
+        sleep($seconds);
     }
 
     // ────────────────────────────────────────────────────────────
