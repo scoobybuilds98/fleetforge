@@ -89,16 +89,28 @@ if ($webhookEventId === '') {
     $webhookEventId = 'syn-' . bin2hex(random_bytes(16));
 }
 
-// ── 6. Idempotency check on webhook event ─────────────────────────
+// ── 6. Idempotency check on webhook event (outcome-aware) ─────────
+// MEDIUM [01e]: a prior delivery that FAILED (processing_result='error') must be
+// reprocessable — Intuit re-delivers failed webhooks, and the old "any existing
+// row → 200 duplicate" short-circuit dropped the retry, so a payment recorded in
+// QBO stayed unpaid in FF forever. Skip only when the prior attempt SUCCEEDED
+// (or is still in-flight: processing_result NULL → avoid double-processing a
+// concurrent delivery). Reprocess only confirmed 'error' rows.
 $existingEvent = db_row(
     "SELECT id, processing_result FROM acc_qbo_webhook_events WHERE webhook_event_id = ?",
     [$webhookEventId]
 );
+$reprocessEventId = null;
 if ($existingEvent !== null) {
-    // Already processed (or in-flight). 200 immediately; do not re-process.
-    http_response_code(200);
-    echo json_encode(['status' => 'duplicate', 'webhook_event_id' => $webhookEventId]);
-    exit;
+    if (($existingEvent['processing_result'] ?? null) === 'error') {
+        // Retry of a previously-errored event — fall through and reprocess,
+        // reusing the existing row (step 11 overwrites its outcome).
+        $reprocessEventId = (int) $existingEvent['id'];
+    } else {
+        http_response_code(200);
+        echo json_encode(['status' => 'duplicate', 'webhook_event_id' => $webhookEventId]);
+        exit;
+    }
 }
 
 // ── 7. Insert webhook event row ───────────────────────────────────
@@ -114,13 +126,17 @@ foreach ($payload['eventNotifications'] ?? [] as $notif) {
 }
 
 try {
-    db_insert('acc_qbo_webhook_events', [
-        'webhook_event_id'   => $webhookEventId,
-        'event_type'         => $eventType,
-        'realm_id'           => $realmId !== '' ? $realmId : null,
-        'payload'            => $rawBody,
-        'signature_verified' => 1,
-    ]);
+    // Reprocessing a prior 'error' event reuses its row — only INSERT for a
+    // genuinely new event (else the UNIQUE webhook_event_id would 1062).
+    if ($reprocessEventId === null) {
+        db_insert('acc_qbo_webhook_events', [
+            'webhook_event_id'   => $webhookEventId,
+            'event_type'         => $eventType,
+            'realm_id'           => $realmId !== '' ? $realmId : null,
+            'payload'            => $rawBody,
+            'signature_verified' => 1,
+        ]);
+    }
 } catch (\Throwable $e) {
     // Most likely cause: UNIQUE violation on webhook_event_id (race
     // between the SELECT above and this INSERT — another concurrent
