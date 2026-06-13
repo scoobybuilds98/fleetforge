@@ -49,15 +49,24 @@ try {
         ];
     }
 
-    // Identify manual-locked FF accounts (off-limits to auto-match).
-    $manualLockedFfIds = [];
+    // Identify manual-locked mappings (off-limits to auto-match) by BOTH the FF
+    // account id AND the claimed QBO account id. MEDIUM [01e]: the skip below
+    // only checked the decision's ff_account_id, but a 'mapped' decision UPDATEs
+    // `WHERE qbo_account_id = ?` — so a DIFFERENT (unlocked) FF row matched to a
+    // manually-locked row's qbo_account_id would overwrite (steal) that lock.
+    // Track the locked qbo_ids too and skip any decision claiming one.
+    $manualLockedFfIds  = [];
+    $manualLockedQboIds = [];
     $manualRows = db_select(
-        "SELECT ff_account_id FROM acc_qbo_account_map
+        "SELECT ff_account_id, qbo_account_id FROM acc_qbo_account_map
           WHERE ff_account_id IS NOT NULL
             AND match_confidence = 'manual'"
     );
     foreach ($manualRows as $m) {
         $manualLockedFfIds[(int) $m['ff_account_id']] = true;
+        if ($m['qbo_account_id'] !== null && $m['qbo_account_id'] !== '') {
+            $manualLockedQboIds[(string) $m['qbo_account_id']] = true;
+        }
     }
     $manualPreserved = count($manualLockedFfIds);
 
@@ -72,6 +81,12 @@ try {
     foreach ($decisions as $d) {
         // Skip auto-match for FF accounts the operator has locked.
         if ($d['ff_account_id'] !== null && isset($manualLockedFfIds[(int) $d['ff_account_id']])) {
+            continue;
+        }
+        // MEDIUM [01e]: and never re-route a QBO account already claimed by a
+        // manual lock to a different FF row (the 'mapped' UPDATE keys on
+        // qbo_account_id, which would otherwise overwrite the locked mapping).
+        if ($d['qbo_account_id'] !== null && isset($manualLockedQboIds[(string) $d['qbo_account_id']])) {
             continue;
         }
 
