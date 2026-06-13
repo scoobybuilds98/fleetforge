@@ -16,8 +16,9 @@ declare(strict_types=1);
  *   2. Mode kill — quickbooks.sync_mode.invoice must allow FF→QBO
  *      pushes. 'sync' (default) + 'ff_to_qbo' allow; 'qbo_to_ff' +
  *      'disabled' refuse.
- *   3. Operation whitelist — 'create' only in S-QBO-11. 'update'
- *      returns false silently (deferred to S-QBO-12 per D-QBO-11-4).
+ *   3. Operation whitelist — 'create' (S-QBO-11) and 'void' (S-QBO-12,
+ *      InvoicePusher::pushVoid; widened in C6) are accepted. 'update' returns
+ *      false silently (deferred per D-QBO-11-4); unknown operations refused.
  *   4. INSERT into acc_qbo_sync_queue. Best-effort: swallows any
  *      exception (DB FK violations, schema drift, etc.) so the FF
  *      send flow always succeeds.

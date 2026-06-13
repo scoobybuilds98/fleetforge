@@ -93,10 +93,11 @@ if (!$template) {
 // matched live data. Lookup silently fell through to Priority 3 (template
 // defaults) for every production template — root cause of the zero-rate bug
 // class closed by S-MILEAGE-RATE-ZERO-FIX (data side) and S-BILLING-RATE-FIX
-// (base_rental side). UI dropdowns at app/admin/{customers/show,rates/create,
-// rates/show}.php still submit template names; the UX dedup question (multiple
-// templates per category) is queued as S-RATES-UI-CATEGORY-DEDUP — this fix
-// does not make that worse but also does not address it.
+// (base_rental side). The rate UIs (rates/create.php, rates/show.php) now store
+// category slugs, and customers/show.php has no rate-lookup dropdown — the
+// category/name mismatch and the per-category dedup are CLOSED (S-RATES-REDESIGN
+// / S-RATES-UI-CATEGORY-DEDUP, 2026-06-12; memory project_rates_ui_category_dedup).
+// (customer_equipment_rates retains legacy template-name data but lookup ignores it.)
 $equipmentType = $template['category'];
 $today         = date('Y-m-d');
 
