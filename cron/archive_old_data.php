@@ -13,9 +13,13 @@ declare(strict_types=1);
  * Crontab (production): 0 4 1 * *  /usr/bin/php /var/www/fleetforge/cron/archive_old_data.php >> /var/www/fleetforge/logs/cron.log 2>&1
  * Local test:           php /Users/avi/Documents/fleetforge/cron/archive_old_data.php
  *
- * Archive tables:
- *   audit_log_archive        — exists (created by FLEETFORGE_DATABASE_MASTER.sql)
- *   notification_log_archive — created on first run if it doesn't exist
+ * Archive tables (both migration-owned by db_migrations/000_baseline.sql):
+ *   audit_log_archive        — exists in the baseline schema
+ *   notification_log_archive — exists in the baseline schema (channel/status
+ *                              enums are a superset of notification_log, incl.
+ *                              'slack'/'skipped'). NOT bootstrapped here: an
+ *                              inline CREATE TABLE would drift from the schema
+ *                              and silently truncate new enum values on archive.
  *
  * Retention defaults (configurable in settings table):
  *   archive.audit_log_retention_days        — default 365 (1 year)
@@ -60,33 +64,10 @@ try {
         'ip_address'   => '127.0.0.1',
     ]);
 
-    // ── Ensure notification_log_archive exists ───────────────────────────────
-    // notification_log_archive is not in the baseline schema — created on first
-    // run here so the archive cron is self-bootstrapping.
-    db_execute(
-        "CREATE TABLE IF NOT EXISTS `notification_log_archive` (
-          `id`                int unsigned      NOT NULL AUTO_INCREMENT,
-          `rule_id`           int unsigned      DEFAULT NULL,
-          `channel`           enum('email','sms','in_app','webhook')
-                                COLLATE utf8mb4_unicode_ci NOT NULL,
-          `recipient`         varchar(255)      COLLATE utf8mb4_unicode_ci NOT NULL,
-          `subject`           varchar(500)      COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-          `body`              text              COLLATE utf8mb4_unicode_ci,
-          `entity_type`       varchar(100)      COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-          `entity_id`         int unsigned      DEFAULT NULL,
-          `notification_type` varchar(100)      COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-          `status`            enum('queued','sent','delivered','failed','bounced')
-                                COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'queued',
-          `error_message`     text              COLLATE utf8mb4_unicode_ci,
-          `sent_at`           datetime          DEFAULT NULL,
-          `created_at`        datetime          NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`),
-          KEY `idx_status`  (`status`),
-          KEY `idx_created` (`created_at`),
-          KEY `idx_entity`  (`entity_type`,`entity_id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        []
-    );
+    // notification_log_archive is migration-owned (db_migrations/000_baseline.sql)
+    // with channel/status enums that are a superset of notification_log — no
+    // inline bootstrap here. A stale inline CREATE TABLE silently drifts from the
+    // schema and would truncate new enum values ('slack'/'skipped') on archival.
 
     // ── Retention thresholds ─────────────────────────────────────────────────
     $auditRetentionDays  = max(30, (int) settings_get('archive.audit_log_retention_days', '365'));
