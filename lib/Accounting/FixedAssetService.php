@@ -416,17 +416,47 @@ class FixedAssetService
                     'formula'      => 'cost * rate * 0.5 / 12',
                 ];
             } else {
-                // UCC = cost - accumulated  (UCC carries forward)
-                $ucc     = bcsub($cost, $accumulated, 2);
-                $annual  = bcmul($ucc, $rate, 6);
-                $monthly = self::roundMoney(bcdiv($annual, '12', 6));
+                // CRA declining balance: the rate applies to the UCC at the
+                // START of the fiscal year (= calendar year here), and the
+                // resulting annual CCA is spread evenly across the 12 monthly
+                // runs. The previous `cost - accumulated` used the LIVE
+                // accumulated, which grows with each monthly run, so the rate
+                // hit a shrinking mid-year UCC and compounded monthly →
+                // ~12.7% under-depreciation in year 2 (H3).
+                //
+                // calculateForPeriod is stateless and is driven by two callers
+                // that both carry `accumulated` forward but hold no DB run
+                // history mid-projection (the depreciationSchedule simulation),
+                // so we cannot query prior-year postings. Instead recover the
+                // constant monthly M directly: with monthsElapsed = (month - 1)
+                // equal charges of M already in `accumulated` this year,
+                //   UCC_opening = (cost - accumulated) + monthsElapsed * M
+                //   M           = UCC_opening * rate / 12
+                // Solving eliminates the unknown opening UCC:
+                //   M = (cost - accumulated) * (rate/12) / (1 - monthsElapsed * rate/12)
+                // For month 1 this collapses to (cost - accumulated) * rate / 12,
+                // and it yields the same constant M for every month of the year
+                // regardless of rounding drift in `accumulated`.
+                $monthsElapsed = max(0, (int) ($period['month'] ?? 1) - 1);
+                $uccNow  = bcsub($cost, $accumulated, 6);            // cost − live accumulated
+                $rate12  = bcdiv($rate, '12', 12);
+                $denom   = bcsub('1', bcmul((string) $monthsElapsed, $rate12, 12), 12);
+
+                if (bccomp($denom, '0', 12) <= 0) {
+                    // Degenerate (absurd rate × month) — fall back to the live UCC.
+                    $monthly    = self::roundMoney(bcmul($uccNow, $rate12, 12));
+                    $openingUcc = $uccNow;
+                } else {
+                    $monthly    = self::roundMoney(bcdiv(bcmul($uccNow, $rate12, 12), $denom, 12));
+                    $openingUcc = bcadd($uccNow, bcmul((string) $monthsElapsed, $monthly, 6), 2);
+                }
                 $detail += [
-                    'rate'        => $rate,
-                    'opening_ucc' => $ucc,
-                    'half_year'   => false,
-                    'annual_amount'=> self::roundMoney($annual),
-                    'monthly'     => $monthly,
-                    'formula'     => 'opening_ucc * rate / 12',
+                    'rate'         => $rate,
+                    'opening_ucc'  => self::money($openingUcc),
+                    'half_year'    => false,
+                    'annual_amount'=> self::roundMoney(bcmul($openingUcc, $rate, 6)),
+                    'monthly'      => $monthly,
+                    'formula'      => 'year_opening_ucc * rate / 12 (held constant across the fiscal year)',
                 ];
             }
             $amount = $monthly;
