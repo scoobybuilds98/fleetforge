@@ -119,6 +119,23 @@ if ($allocErrors) {
     json_validation_error(['allocations' => implode(' ', $allocErrors)]);
 }
 
+// WAVE 1 (C3): reject the same bill listed more than once in a single payment.
+// Each allocation row is validated against the bill's FULL balance in a pre-loop
+// (before any UPDATE), so duplicate rows for one bill each pass the per-row
+// balance check and the apply loop would double-apply. Today that is caught only
+// by the acc_ap_payment_allocations uq_payment_bill unique key — as a raw 1062 →
+// HTTP 500 on the second allocation insert (the txn rolls back, so no corruption,
+// but the operator gets an opaque 500). Return a clean 422 instead; the unique
+// key remains the DB backstop.
+$billIds    = array_column($validatedAllocations, 'bill_id');
+$dupBillIds = array_keys(array_filter(array_count_values($billIds), static fn(int $n): bool => $n > 1));
+if ($dupBillIds) {
+    $list = implode(', ', $dupBillIds);
+    json_error('DUPLICATE_BILL',
+        "A bill may only appear once per payment (duplicated bill id(s): {$list}). Combine the amounts into a single allocation.", 422,
+        ['fields' => ['allocations' => 'Each bill may only be paid once per payment — combine duplicate rows into one allocation.']]);
+}
+
 $result = db_transaction(function () use (
     $vendorId, $bankAccountId, $paymentDate, $paymentMethod, $referenceNum,
     $checkNumber, $notes, $currency, $totalAmount, $validatedAllocations,

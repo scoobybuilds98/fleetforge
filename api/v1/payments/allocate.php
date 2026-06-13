@@ -139,6 +139,46 @@ db_transaction(function () use ($paymentId, $invoiceId, $amountRaw, $payment, &$
         json_error('NOT_FOUND', 'Invoice not found.', 404);
     }
 
+    // WAVE 1 / lock the payment row too (consistent order: invoice then payment)
+    // so two concurrent allocations of the same payment can't both pass the
+    // cumulative-balance bound below.
+    $paymentLocked = db_row(
+        "SELECT customer_id, amount FROM payments WHERE id = ? FOR UPDATE",
+        [$paymentId]
+    );
+    if (!$paymentLocked) {
+        json_error('NOT_FOUND', 'Payment not found.', 404);
+    }
+
+    // WAVE 1 (cross-customer, Codex): a payment may only be applied to an
+    // invoice belonging to the SAME customer. The endpoint loaded both
+    // customer_ids but never compared them, so Customer A's payment could be
+    // applied to Customer B's invoice.
+    if ($invoice['customer_id'] !== null
+        && (int) $paymentLocked['customer_id'] !== (int) $invoice['customer_id']) {
+        json_error('CUSTOMER_MISMATCH',
+            'This payment belongs to a different customer than the selected invoice.', 422,
+            ['fields' => ['invoice_id' => 'This payment belongs to a different customer than the selected invoice.']]);
+    }
+
+    // WAVE 1 (C4): bound the CUMULATIVE allocations for this payment against
+    // payments.amount. The per-invoice balance check below never saw the running
+    // total, so a $100 payment could be allocated $100 to invoice after invoice
+    // (each ≤ that invoice's balance), over-crediting outstanding_balance /
+    // leases.total_paid and re-introducing the S-FIX-2 drift. uq_payment_invoice
+    // only blocks the same (payment,invoice) pair twice — not this.
+    $alreadyAllocated = db_row(
+        "SELECT COALESCE(SUM(amount), '0') AS s FROM payment_allocations WHERE payment_id = ?",
+        [$paymentId]
+    )['s'];
+    $unapplied = bcsub((string) $paymentLocked['amount'], (string) $alreadyAllocated, 2);
+    if (bccomp($amountRaw, $unapplied, 2) > 0) {
+        $unappliedFmt = '$' . number_format(max(0, (float) $unapplied), 2);
+        json_error('ALLOCATION_EXCEEDS_PAYMENT',
+            "Allocation exceeds the payment's unapplied balance of {$unappliedFmt}.", 422,
+            ['fields' => ['amount' => "Allocation exceeds the payment's unapplied balance of {$unappliedFmt}."]]);
+    }
+
     // D20: Cannot exceed balance_due (defense in depth; pre-flight already rejected this)
     $balanceDue = (string) $invoice['balance_due'];
     if (bccomp($amountRaw, $balanceDue, 6) > 0) {
