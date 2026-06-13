@@ -27,6 +27,16 @@ class JournalEntryService
     private const AJE_TYPES = ['adjusting', 'reclassifying', 'prior_period'];
 
     /**
+     * Every member of the acc_journal_entries.entry_type ENUM. Writing a value
+     * outside this set throws SQLSTATE 1265 (data truncated) under
+     * STRICT_TRANS_TABLES and aborts the txn as a raw 500 — whitelist first.
+     */
+    private const VALID_ENTRY_TYPES = [
+        'manual', 'system', 'recurring', 'reversing', 'year_end',
+        'adjustment', 'adjusting', 'reclassifying', 'closing', 'prior_period',
+    ];
+
+    /**
      * Create a journal entry (draft or posted).
      *
      * Each line must have: account_id, debit (string), credit (string).
@@ -112,6 +122,14 @@ class JournalEntryService
         // the 'draft' → 'submitted' → 'approved' chain. Default 'posted' keeps
         // bridge code unchanged (D-AJE-2).
         $entryType = $header['entry_type'] ?? 'manual';
+        // Whitelist against the ENUM before any insert — an out-of-enum value
+        // (e.g. from a hand-crafted API call) would otherwise hit a 1265 data
+        // truncation under STRICT and surface as an opaque 500.
+        if (!in_array($entryType, self::VALID_ENTRY_TYPES, true)) {
+            throw new \RuntimeException(
+                "Invalid entry_type '{$entryType}'. Allowed: " . implode(', ', self::VALID_ENTRY_TYPES) . '.'
+            );
+        }
         if ($postImmediately) {
             $entryStatus = 'posted';
         } elseif (in_array($entryType, self::AJE_TYPES, true)) {
