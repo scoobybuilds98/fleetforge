@@ -152,8 +152,10 @@ class RecurringEntryService
             foreach ($lines as $l) {
                 $jeLines[] = [
                     'account_id'  => (int) $l['account_id'],
-                    'debit'       => number_format((float) $l['debit'], 2, '.', ''),
-                    'credit'      => number_format((float) $l['credit'], 2, '.', ''),
+                    // D16 bcmath: normalize to 2dp WITHOUT a float round-trip
+                    // (number_format((float)…) reintroduces binary-float error on money).
+                    'debit'       => bcadd((string) $l['debit'], '0', 2),
+                    'credit'      => bcadd((string) $l['credit'], '0', 2),
                     'description' => $l['description'] ?? null,
                 ];
             }
