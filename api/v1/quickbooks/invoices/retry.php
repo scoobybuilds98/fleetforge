@@ -55,12 +55,21 @@ try {
         );
     }
 
-    // Already-mapped rows shouldn't retry create — would create a duplicate.
-    // (failed rows may still have qbo_invoice_id from a prior partial success;
-    // the enqueuer + pushImpl idempotency check catches this safely.)
+    // Preserve the ORIGINAL operation rather than blindly hardcoding 'create'
+    // (C6): a failed VOID must retry as 'void' — hardcoding 'create' would hit
+    // gate-0 (which requires status='sent' for create) and silently fail,
+    // leaving the stale open invoice in QBO. A non-void invoice retries 'create'
+    // as before (the enqueuer + pushImpl idempotency check safely no-ops an
+    // already-mapped row, so this can't duplicate). 'update' is deferred at the
+    // enqueuer, so it is not derived here.
+    $invStatus = (string) (db_row(
+        "SELECT status FROM invoices WHERE id = ?",
+        [(int) $row['ff_invoice_id']]
+    )['status'] ?? '');
+    $retryOperation = $invStatus === 'void' ? 'void' : 'create';
     $enqueued = \FleetForge\QboPushers\InvoiceEnqueuer::enqueue(
         (int) $row['ff_invoice_id'],
-        'create'
+        $retryOperation
     );
 
     if (!$enqueued) {

@@ -46,7 +46,9 @@ class InvoiceEnqueuer
      * refuses; never throws.
      *
      * @param  int    $ffInvoiceId  invoices.id of the invoice to sync
-     * @param  string $operation    'create' allowed in S-QBO-11; others rejected
+     * @param  string $operation    'create' | 'void' (gate-0 enforces the status
+     *                              each requires). 'update' is deferred at the
+     *                              enqueuer; unknown operations are rejected.
      * @return bool   true if a queue row was inserted; false otherwise
      */
     public static function enqueue(int $ffInvoiceId, string $operation): bool
@@ -115,10 +117,15 @@ class InvoiceEnqueuer
             return false;
         }
 
-        // Gate 3: operation whitelist. S-QBO-11 ships create only.
-        // Update/void deferred to S-QBO-12. Silent refusal (no error)
-        // — caller doesn't care.
-        if ($operation !== 'create') {
+        // Gate 3: operation whitelist. 'create' (S-QBO-11) and 'void' (S-QBO-12,
+        // InvoicePusher::pushVoid) are enqueued by real call sites — send.php
+        // enqueues 'create', void.php / bulk_void.php enqueue 'void'. This gate
+        // previously hard-rejected everything but 'create', so those void calls
+        // were silently dropped (gate-0 accepted them, gate-3 killed them) and a
+        // voided FF invoice left a stale OPEN invoice in QBO (C6). 'update' stays
+        // deferred at the enqueuer (no flow enqueues it yet; pushUpdate is driven
+        // only via pushImpl directly per S-QBO-12). Unknown operations refused.
+        if (!in_array($operation, ['create', 'void'], true)) {
             return false;
         }
 
