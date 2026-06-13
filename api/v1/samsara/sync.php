@@ -7,7 +7,12 @@ declare(strict_types=1);
  * Refresh live telemetry from Samsara on demand.
  *
  *   POST { equipment_unit_id: int }  → sync ONE unit (Sync Now button)
- *   GET                               → sync ALL linked units (dashboard refresh)
+ *   POST {}                           → sync ALL linked units (dashboard refresh)
+ *
+ * POST-only: this endpoint writes telemetry columns + a location_history row,
+ * so it must be CSRF-protected (api/bootstrap.php enforces the token on POST)
+ * and gated on equipment:edit like every other Samsara mutating endpoint —
+ * not reachable via a GET (<img src=…/sync>) or by a view-only role.
  *
  * Unlike cron/samsara_sync.php, this endpoint is called by a
  * human clicking a button, so it:
@@ -28,8 +33,9 @@ declare(strict_types=1);
  *      so the trail only grows when the trackable actually moved.
  *   4. Stamp samsara_last_synced_at to now
  *
- * Permission: equipment:view (read-only from the user's POV —
- * the writes are derived state, not user input).
+ * Permission: equipment:edit — the endpoint mutates equipment_units +
+ * samsara_location_history, so it requires the same write permission as
+ * link/unlink/import (was equipment:view, under-privileged for a mutation).
  *
  * @depends api/bootstrap.php, lib/GPS/SamsaraClient.php
  * @session SAMSARA-1, SAMSARA-2
@@ -37,13 +43,12 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
-require_method('GET', 'POST');
+require_method('POST');
 require_auth_api();
-require_permission('equipment', 'view');
+require_permission('equipment', 'edit');
 
 use FleetForge\GPS\SamsaraClient;
 
-$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $client = new SamsaraClient();
 
 /**
@@ -156,14 +161,13 @@ function ff_samsara_sync_one(array $unit, SamsaraClient $client): array
 }
 
 
-if ($method === 'POST') {
-    // ── Single-unit sync (Sync Now button) ──────────────────
-    $body   = json_body();
-    $unitId = clean_int($body['equipment_unit_id'] ?? null);
-    if ($unitId === null || $unitId <= 0) {
-        json_validation_error(['equipment_unit_id' => 'Equipment unit is required.']);
-    }
+// Route on payload, not HTTP method: an equipment_unit_id present → sync that
+// one unit (Sync Now button); absent → sync all linked units (dashboard refresh).
+$body   = json_body();
+$unitId = clean_int($body['equipment_unit_id'] ?? null);
 
+if ($unitId !== null && $unitId > 0) {
+    // ── Single-unit sync (Sync Now button) ──────────────────
     $unit = db_row(
         "SELECT id, unit_number, samsara_vehicle_id, samsara_entity_type,
                 samsara_last_location_lat, samsara_last_location_lng
@@ -187,7 +191,7 @@ if ($method === 'POST') {
     json_success($result);
 }
 
-// ── GET → sync ALL linked units ─────────────────────────────
+// ── Sync ALL linked units (no equipment_unit_id in the body) ─
 // Used by the Fleet Tracking dashboard's "Refresh now" button.
 // Each unit is synced independently so one bad vehicle does not
 // short-circuit the whole batch. Failures are collected per-unit

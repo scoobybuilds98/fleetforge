@@ -371,7 +371,7 @@ $gpsConfigured = ($samsaraKey !== '');
  *   • Three tab views (map, list, unlinked)
  *   • Leaflet marker management for the map view
  *   • Alert dismissal state via localStorage (24-hour TTL)
- *   • Sync All Now button → POSTs to /api/v1/samsara/sync as a GET
+ *   • Sync All Now button → POSTs to /api/v1/samsara/sync (CSRF-protected)
  */
 function FF_FleetTracking() {
     // Use base_url() with an explicit path — it handles the slash between
@@ -557,12 +557,13 @@ function FF_FleetTracking() {
             this.loading = false;
         },
 
-        // POST to /api/v1/samsara/sync as GET (sync ALL linked units)
-        // and re-pull /fleet so the dashboard updates.
+        // POST to /api/v1/samsara/sync with no body (sync ALL linked units)
+        // and re-pull /fleet so the dashboard updates. POST (not GET) so the
+        // mutation is CSRF-protected and gated on equipment:edit.
         async syncAllNow() {
             this.syncing = true;
             try {
-                await FF_Api.get(SYNC_URL);
+                await FF_Api.post(SYNC_URL, {});
                 await this.refresh();
             } catch (e) {
                 this.error = 'Sync request failed.';
