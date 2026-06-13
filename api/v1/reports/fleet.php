@@ -111,7 +111,7 @@ $daysRows = db_select(
 // 2. Revenue per unit — invoices billed against leases for this unit, within the period.
 $revRows = db_select(
     "SELECT l.equipment_unit_id,
-            SUM(i.total_amount)    AS revenue,
+            SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)    AS revenue,
             COUNT(DISTINCT i.id)  AS invoice_count,
             COUNT(DISTINCT i.lease_id) AS lease_count
      FROM invoices i

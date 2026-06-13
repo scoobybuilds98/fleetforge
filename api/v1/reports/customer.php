@@ -62,8 +62,8 @@ $kpiRow = db_row(
     "SELECT
         COUNT(DISTINCT i.customer_id)                                       AS unique_customers,
         COUNT(DISTINCT CASE WHEN c.status = 'active' THEN c.id END)        AS active_customers,
-        COALESCE(SUM(i.total_amount), 0)                                    AS total_revenue,
-        COALESCE(AVG(i.total_amount), 0)                                    AS avg_invoice_value,
+        COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0)                                    AS total_revenue,
+        COALESCE(AVG(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0)                                    AS avg_invoice_value,
         COUNT(*)                                                             AS invoice_count,
         COUNT(DISTINCT i.lease_id)                                           AS lease_count
      FROM invoices i
@@ -127,9 +127,9 @@ switch ($view) {
              FROM customers c
              LEFT JOIN (
                  SELECT customer_id,
-                        SUM(total_amount)   AS total_invoiced,
-                        SUM(amount_paid)    AS total_paid,
-                        SUM(balance_due)    AS total_balance,
+                        SUM(CASE WHEN currency='USD' THEN total_amount*COALESCE(exchange_rate_to_cad,1) ELSE total_amount END)   AS total_invoiced,
+                        SUM(CASE WHEN currency='USD' THEN amount_paid*COALESCE(exchange_rate_to_cad,1) ELSE amount_paid END)    AS total_paid,
+                        SUM(CASE WHEN currency='USD' THEN balance_due*COALESCE(exchange_rate_to_cad,1) ELSE balance_due END)    AS total_balance,
                         COUNT(*)            AS invoice_count,
                         COUNT(DISTINCT lease_id) AS lease_count,
                         MIN(invoice_date)   AS first_invoice_date,
@@ -140,7 +140,7 @@ switch ($view) {
              ) all_inv ON all_inv.customer_id = c.id
              LEFT JOIN (
                  SELECT customer_id,
-                        SUM(total_amount) AS period_revenue,
+                        SUM(CASE WHEN currency='USD' THEN total_amount*COALESCE(exchange_rate_to_cad,1) ELSE total_amount END) AS period_revenue,
                         COUNT(*) AS period_invoices
                  FROM invoices
                  WHERE deleted_at IS NULL
@@ -203,7 +203,7 @@ switch ($view) {
                 MAX(DATEDIFF(i.paid_date, i.due_date))                AS max_days,
                 COUNT(CASE WHEN DATEDIFF(i.paid_date, i.due_date) > 0  THEN 1 END) AS late_count,
                 COUNT(CASE WHEN DATEDIFF(i.paid_date, i.due_date) <= 0 THEN 1 END) AS on_time_count,
-                COALESCE(SUM(i.total_amount), 0)                      AS total_paid_amount
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0)                      AS total_paid_amount
              FROM invoices i
              LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
              WHERE i.deleted_at IS NULL
@@ -246,11 +246,11 @@ switch ($view) {
             "SELECT
                 DATE_FORMAT(i.invoice_date, '%Y-%m')     AS period,
                 DATE_FORMAT(i.invoice_date, '%b %Y')     AS period_label,
-                COALESCE(SUM(CASE WHEN first_inv.first_date >= ? THEN i.total_amount ELSE 0 END), 0) AS new_revenue,
-                COALESCE(SUM(CASE WHEN first_inv.first_date <  ? THEN i.total_amount ELSE 0 END), 0) AS returning_revenue,
+                COALESCE(SUM(CASE WHEN first_inv.first_date >= ? THEN (CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END) ELSE 0 END), 0) AS new_revenue,
+                COALESCE(SUM(CASE WHEN first_inv.first_date <  ? THEN (CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END) ELSE 0 END), 0) AS returning_revenue,
                 COUNT(DISTINCT CASE WHEN first_inv.first_date >= ? THEN i.customer_id END) AS new_customers,
                 COUNT(DISTINCT CASE WHEN first_inv.first_date <  ? THEN i.customer_id END) AS returning_customers,
-                COALESCE(SUM(i.total_amount), 0) AS total_revenue
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0) AS total_revenue
              FROM invoices i
              JOIN (
                  SELECT customer_id, MIN(invoice_date) AS first_date

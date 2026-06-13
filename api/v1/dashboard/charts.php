@@ -165,7 +165,7 @@ function chart_revenue_trend(): array
         "SELECT
             YEAR(invoice_date)  AS yr,
             MONTH(invoice_date) AS mo,
-            SUM(total_amount)   AS total
+            SUM(CASE WHEN currency='USD' THEN total_amount*COALESCE(exchange_rate_to_cad,1) ELSE total_amount END)   AS total
            FROM invoices
           WHERE status NOT IN ('draft','void','written_off')
             AND deleted_at IS NULL
@@ -287,7 +287,7 @@ function chart_top_customers(): array
     $rows = db_select(
         "SELECT
             COALESCE(company_name_snapshot, customer_name_snapshot, 'Unknown') AS customer_name,
-            SUM(total_amount) AS total
+            SUM(CASE WHEN currency='USD' THEN total_amount*COALESCE(exchange_rate_to_cad,1) ELSE total_amount END) AS total
            FROM invoices
           WHERE status NOT IN ('draft','void','written_off')
             AND deleted_at IS NULL
@@ -422,7 +422,7 @@ function chart_revenue_by_type(): array
     $rows = db_select(
         "SELECT
             COALESCE(et.category, 'unknown') AS category,
-            SUM(inv.total_amount) AS total
+            SUM(CASE WHEN inv.currency='USD' THEN inv.total_amount*COALESCE(inv.exchange_rate_to_cad,1) ELSE inv.total_amount END) AS total
            FROM invoices inv
            JOIN leases l         ON l.id  = inv.lease_id
            JOIN equipment_units eu ON eu.id = l.equipment_unit_id
@@ -467,7 +467,7 @@ function chart_weekly_heatmap(): array
     $today   = date('Y-m-d');
 
     $rows = db_select(
-        "SELECT DATE(invoice_date) AS day, SUM(total_amount) AS total
+        "SELECT DATE(invoice_date) AS day, SUM(CASE WHEN currency='USD' THEN total_amount*COALESCE(exchange_rate_to_cad,1) ELSE total_amount END) AS total
            FROM invoices
           WHERE status NOT IN ('draft','void','written_off')
             AND deleted_at IS NULL

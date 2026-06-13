@@ -246,6 +246,30 @@ class ReportBuilder
     }
 
     /**
+     * H1 — convert a money column to the canonical reporting currency (CAD).
+     *
+     * Operator policy (locked 2026-06-13): all report/dashboard/analytics money
+     * aggregates report in CAD. USD rows must be multiplied by their stored
+     * exchange_rate_to_cad; CAD rows pass through. Wrap the raw column in this
+     * SQL fragment inside any SUM/AVG so no surface re-implements the rule:
+     *
+     *   SUM(ReportBuilder::cad('i.total_amount', 'i'))
+     *
+     * @param string $amountCol  the money column expression (e.g. 'i.total_amount')
+     * @param string $alias      table alias owning currency + exchange_rate_to_cad
+     *                           ('' for an unaliased single-table query). Both
+     *                           `invoices` and `leases` carry those two columns.
+     * @return string SQL: CASE WHEN <a>.currency='USD' THEN <col>*COALESCE(<a>.exchange_rate_to_cad,1) ELSE <col> END
+     */
+    public static function cad(string $amountCol, string $alias = ''): string
+    {
+        $p = $alias === '' ? '' : $alias . '.';
+        return "(CASE WHEN {$p}currency = 'USD' "
+             . "THEN {$amountCol} * COALESCE({$p}exchange_rate_to_cad, 1) "
+             . "ELSE {$amountCol} END)";
+    }
+
+    /**
      * Safe bcmath division returning '0.00' instead of divide-by-zero.
      * Used when computing rates/percentages from potentially-zero denominators.
      */

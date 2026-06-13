@@ -68,17 +68,17 @@ if ($format === 'json') {
 $kpiRow = db_row(
     "SELECT
         COUNT(*)                                           AS invoice_count,
-        COALESCE(SUM(i.total_amount),             0)      AS gross_revenue,
-        COALESCE(SUM(i.subtotal_after_discount),  0)      AS net_revenue,
-        COALESCE(SUM(i.tax_total),                0)      AS total_tax,
-        COALESCE(SUM(i.amount_paid),              0)      AS total_collected,
-        COALESCE(SUM(i.balance_due),              0)      AS total_outstanding,
-        COALESCE(AVG(i.total_amount),             0)      AS avg_invoice_value,
-        COALESCE(SUM(i.discount_amount),          0)      AS total_discounts,
+        COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END),             0)      AS gross_revenue,
+        COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.subtotal_after_discount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.subtotal_after_discount END),  0)      AS net_revenue,
+        COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.tax_total*COALESCE(i.exchange_rate_to_cad,1) ELSE i.tax_total END),                0)      AS total_tax,
+        COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.amount_paid*COALESCE(i.exchange_rate_to_cad,1) ELSE i.amount_paid END),              0)      AS total_collected,
+        COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.balance_due*COALESCE(i.exchange_rate_to_cad,1) ELSE i.balance_due END),              0)      AS total_outstanding,
+        COALESCE(AVG(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END),             0)      AS avg_invoice_value,
+        COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.discount_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.discount_amount END),          0)      AS total_discounts,
         COUNT(DISTINCT i.customer_id)                     AS unique_customers,
         COUNT(CASE WHEN i.status = 'paid' THEN 1 END)     AS paid_count,
         COUNT(CASE WHEN i.status = 'overdue' THEN 1 END)  AS overdue_count,
-        COALESCE(SUM(CASE WHEN i.status = 'overdue' THEN i.balance_due ELSE 0 END), 0) AS overdue_amount
+        COALESCE(SUM(CASE WHEN i.status = 'overdue' THEN (CASE WHEN i.currency='USD' THEN i.balance_due*COALESCE(i.exchange_rate_to_cad,1) ELSE i.balance_due END) ELSE 0 END), 0) AS overdue_amount
      FROM invoices i
      WHERE i.deleted_at IS NULL
        AND i.status NOT IN ('draft', 'void', 'written_off')
@@ -123,12 +123,12 @@ switch ($view) {
                 DATE_FORMAT(i.invoice_date, '%b %Y')           AS period_label,
                 COUNT(*)                                        AS invoice_count,
                 COUNT(DISTINCT i.customer_id)                   AS unique_customers,
-                COALESCE(SUM(i.subtotal_after_discount), 0)    AS net_revenue,
-                COALESCE(SUM(i.tax_total),               0)    AS tax_total,
-                COALESCE(SUM(i.total_amount),            0)    AS gross_revenue,
-                COALESCE(SUM(i.discount_amount),         0)    AS discounts,
-                COALESCE(SUM(i.amount_paid),             0)    AS collected,
-                COALESCE(SUM(i.balance_due),             0)    AS outstanding
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.subtotal_after_discount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.subtotal_after_discount END), 0)    AS net_revenue,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.tax_total*COALESCE(i.exchange_rate_to_cad,1) ELSE i.tax_total END),               0)    AS tax_total,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END),            0)    AS gross_revenue,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.discount_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.discount_amount END),         0)    AS discounts,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.amount_paid*COALESCE(i.exchange_rate_to_cad,1) ELSE i.amount_paid END),             0)    AS collected,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.balance_due*COALESCE(i.exchange_rate_to_cad,1) ELSE i.balance_due END),             0)    AS outstanding
              FROM invoices i
              WHERE i.deleted_at IS NULL
                AND i.status NOT IN ('draft','void','written_off')
@@ -183,11 +183,11 @@ switch ($view) {
                 ANY_VALUE(c.status)                                                      AS customer_status,
                 COUNT(*)                                                                 AS invoice_count,
                 COUNT(DISTINCT i.lease_id)                                               AS lease_count,
-                COALESCE(SUM(i.subtotal_after_discount), 0)                             AS net_revenue,
-                COALESCE(SUM(i.total_amount),            0)                             AS gross_revenue,
-                COALESCE(SUM(i.amount_paid),             0)                             AS collected,
-                COALESCE(SUM(i.balance_due),             0)                             AS outstanding,
-                COALESCE(AVG(i.total_amount),            0)                             AS avg_invoice
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.subtotal_after_discount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.subtotal_after_discount END), 0)                             AS net_revenue,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END),            0)                             AS gross_revenue,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.amount_paid*COALESCE(i.exchange_rate_to_cad,1) ELSE i.amount_paid END),             0)                             AS collected,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.balance_due*COALESCE(i.exchange_rate_to_cad,1) ELSE i.balance_due END),             0)                             AS outstanding,
+                COALESCE(AVG(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END),            0)                             AS avg_invoice
              FROM invoices i
              LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
              WHERE i.deleted_at IS NULL
@@ -239,9 +239,9 @@ switch ($view) {
                 COUNT(DISTINCT eu.id)                        AS unit_count,
                 COUNT(DISTINCT i.lease_id)                   AS lease_count,
                 COUNT(*)                                     AS invoice_count,
-                COALESCE(SUM(i.subtotal_after_discount), 0) AS net_revenue,
-                COALESCE(SUM(i.total_amount),            0) AS gross_revenue,
-                COALESCE(SUM(i.amount_paid),             0) AS collected
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.subtotal_after_discount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.subtotal_after_discount END), 0) AS net_revenue,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END),            0) AS gross_revenue,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.amount_paid*COALESCE(i.exchange_rate_to_cad,1) ELSE i.amount_paid END),             0) AS collected
              FROM invoices i
              LEFT JOIN leases l           ON l.id  = i.lease_id          AND l.deleted_at  IS NULL
              LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
@@ -367,9 +367,9 @@ switch ($view) {
                 DATE_FORMAT(i.invoice_date, '%b %Y')     AS period_label,
                 COUNT(*)                                  AS invoice_count,
                 COUNT(CASE WHEN i.status = 'paid' THEN 1 END) AS fully_paid_count,
-                COALESCE(SUM(i.total_amount), 0)         AS invoiced,
-                COALESCE(SUM(i.amount_paid),  0)         AS collected,
-                COALESCE(SUM(i.balance_due),  0)         AS outstanding
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0)         AS invoiced,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.amount_paid*COALESCE(i.exchange_rate_to_cad,1) ELSE i.amount_paid END),  0)         AS collected,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.balance_due*COALESCE(i.exchange_rate_to_cad,1) ELSE i.balance_due END),  0)         AS outstanding
              FROM invoices i
              WHERE i.deleted_at IS NULL
                AND i.status NOT IN ('draft','void','written_off')
@@ -418,9 +418,9 @@ switch ($view) {
             "SELECT
                 i.status,
                 COUNT(*)                                  AS invoice_count,
-                COALESCE(SUM(i.total_amount), 0)         AS total_amount,
-                COALESCE(SUM(i.balance_due),  0)         AS balance_due,
-                COALESCE(AVG(i.total_amount), 0)         AS avg_amount,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0)         AS total_amount,
+                COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.balance_due*COALESCE(i.exchange_rate_to_cad,1) ELSE i.balance_due END),  0)         AS balance_due,
+                COALESCE(AVG(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0)         AS avg_amount,
                 COUNT(DISTINCT i.customer_id)             AS unique_customers
              FROM invoices i
              WHERE i.deleted_at IS NULL

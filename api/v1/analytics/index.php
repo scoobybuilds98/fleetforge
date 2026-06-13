@@ -93,7 +93,7 @@ function view_revenue_forecast(string $dateFrom, string $dateTo): array
     $rows = db_select(
         "SELECT
             DATE_FORMAT(i.invoice_date, '%Y-%m')  AS period,
-            COALESCE(SUM(i.total_amount), 0)       AS revenue
+            COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0)       AS revenue
          FROM invoices i
          WHERE i.deleted_at IS NULL
            AND i.status NOT IN ('void', 'draft', 'written_off')
@@ -231,7 +231,7 @@ function view_utilization_matrix(): array
                     ) + 1
                 )
             ), 0) AS days_on_lease,
-            COALESCE(SUM(i.total_amount), 0) AS total_revenue
+            COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0) AS total_revenue
          FROM equipment_units eu
          JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
          LEFT JOIN leases l
@@ -325,7 +325,7 @@ function view_concentration_risk(): array
     $rows = db_select(
         "SELECT
             COALESCE(c.company_name, i.company_name_snapshot, 'Unknown') AS customer_name,
-            SUM(i.total_amount) AS revenue
+            SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END) AS revenue
          FROM invoices i
          LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
          WHERE i.deleted_at IS NULL
@@ -394,7 +394,7 @@ function view_seasonal_pattern(): array
         "SELECT
             MONTH(i.invoice_date)                  AS month_num,
             DATE_FORMAT(i.invoice_date, '%b')      AS month_label,
-            AVG(i.total_amount)                    AS avg_revenue,
+            AVG(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)                    AS avg_revenue,
             COUNT(*)                               AS invoice_count
          FROM invoices i
          WHERE i.deleted_at IS NULL
@@ -460,7 +460,7 @@ function view_cohort_revenue(string $dateFrom, string $dateTo): array
         "SELECT
             DATE_FORMAT(i.invoice_date, '%Y-%m')   AS period,
             YEAR(l.start_date)                     AS cohort_year,
-            SUM(i.total_amount)                    AS revenue
+            SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)                    AS revenue
          FROM invoices i
          JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
          WHERE i.deleted_at IS NULL
@@ -727,9 +727,9 @@ function view_avg_lease_value(string $dateFrom, string $dateTo): array
     $rows = db_select(
         "SELECT
             DATE_FORMAT(i.invoice_date, '%Y-%m')  AS period,
-            AVG(i.total_amount)                   AS avg_value,
+            AVG(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)                   AS avg_value,
             COUNT(*)                              AS invoice_count,
-            SUM(i.total_amount)                   AS total_revenue
+            SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)                   AS total_revenue
          FROM invoices i
          WHERE i.deleted_at IS NULL
            AND i.status NOT IN ('void', 'draft', 'written_off')
@@ -748,7 +748,7 @@ function view_avg_lease_value(string $dateFrom, string $dateTo): array
 
     // All-time avg for comparison
     $allTimeRow = db_row(
-        "SELECT AVG(total_amount) AS avg_all_time
+        "SELECT AVG(CASE WHEN currency='USD' THEN total_amount*COALESCE(exchange_rate_to_cad,1) ELSE total_amount END) AS avg_all_time
          FROM invoices
          WHERE deleted_at IS NULL AND status NOT IN ('void', 'draft', 'written_off')",
         []

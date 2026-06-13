@@ -62,7 +62,7 @@ if ($cached) {
 // Uses SQL SUM (DECIMAL field) then formats as bcmath string.
 // WHY bcmath: monetary display value must not go through float math (D16).
 $revenueRow = db_row(
-    "SELECT COALESCE(SUM(monthly_rate), 0) AS total
+    "SELECT COALESCE(SUM(CASE WHEN currency='USD' THEN monthly_rate*COALESCE(exchange_rate_to_cad,1) ELSE monthly_rate END), 0) AS total
        FROM leases
       WHERE status = 'active'
         AND deleted_at IS NULL"
@@ -94,7 +94,7 @@ $utilizationPct = $totalActiveUnits > 0
 $overdueRow = db_row(
     "SELECT
         COUNT(*) AS inv_count,
-        COALESCE(SUM(balance_due), 0) AS inv_total
+        COALESCE(SUM(CASE WHEN currency='USD' THEN balance_due*COALESCE(exchange_rate_to_cad,1) ELSE balance_due END), 0) AS inv_total
        FROM invoices
       WHERE status = 'overdue'
         AND deleted_at IS NULL"
