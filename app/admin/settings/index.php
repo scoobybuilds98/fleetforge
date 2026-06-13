@@ -112,8 +112,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 )));
                 if (!empty($cleanKeys)) {
                     $ph = implode(',', array_fill(0, count($cleanKeys), '?'));
+                    // S-SECURITY-SAVE-SCOPE parity: the backward-compat path
+                    // below filters `label IS NOT NULL` so the save scope matches
+                    // the render scope. Apply the SAME guard here, or a crafted
+                    // _form_keys[] could address a deliberately-hidden NULL-label
+                    // row (e.g. security.rate_limit.*) that the form never shows.
                     $groupKeys = db_select(
-                        "SELECT `key`, value_type FROM settings WHERE `key` IN ($ph)",
+                        "SELECT `key`, value_type FROM settings WHERE `key` IN ($ph) AND label IS NOT NULL",
                         $cleanKeys
                     );
                 } else {
