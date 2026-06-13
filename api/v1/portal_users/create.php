@@ -82,10 +82,18 @@ if (!$customer) {
     json_error('NOT_FOUND', 'Customer not found or deleted.', 404);
 }
 
-// Email uniqueness — portal_users.email has a UNIQUE constraint but
-// surface a friendly 409 instead of letting the DB throw.
-$existing = db_row("SELECT id FROM portal_users WHERE email = ?", [$email]);
+// Email uniqueness — portal_users.email has a UNIQUE constraint but surface a
+// friendly 409 instead of letting the DB throw. MEDIUM [05/10]: branch on the
+// existing row's status so a DEACTIVATED account tells the admin to reactivate
+// (portal_users is hard-deleted, not soft — there's no revive, but an inactive
+// row should not read like a blocked duplicate).
+$existing = db_row("SELECT id, status FROM portal_users WHERE email = ?", [$email]);
 if ($existing) {
+    if (($existing['status'] ?? '') === 'inactive') {
+        json_error('CONFLICT',
+            'A deactivated portal user already uses this email. Reactivate that account instead of creating a new one.',
+            409, ['fields' => ['email' => 'Deactivated account exists — reactivate it.'], 'portal_user_id' => (int) $existing['id']]);
+    }
     json_error('CONFLICT', 'A portal user with this email already exists.', 409);
 }
 
@@ -102,16 +110,26 @@ $isPrimary = $existingCount === 0 ? 1 : 0;
 $plainToken = bin2hex(random_bytes(32));
 $tokenHash  = hash('sha256', $plainToken);
 
-$newId = db_insert('portal_users', [
-    'customer_id'           => $customerId,
-    'name'                  => trim($name),
-    'email'                 => trim($email),
-    'status'                => 'invited',
-    'is_primary'            => $isPrimary,
-    'password_reset_token'  => $tokenHash,
-    'password_reset_expiry' => date('Y-m-d H:i:s', strtotime('+7 days')),
-    'invite_sent_at'        => date('Y-m-d H:i:s'),
-]);
+// Belt for the TOCTOU race: two concurrent invites for the same email can both
+// pass the pre-check above, then collide on the UNIQUE email index. Translate
+// the 1062 into the same friendly 409 instead of an unhandled 500.
+try {
+    $newId = db_insert('portal_users', [
+        'customer_id'           => $customerId,
+        'name'                  => trim($name),
+        'email'                 => trim($email),
+        'status'                => 'invited',
+        'is_primary'            => $isPrimary,
+        'password_reset_token'  => $tokenHash,
+        'password_reset_expiry' => date('Y-m-d H:i:s', strtotime('+7 days')),
+        'invite_sent_at'        => date('Y-m-d H:i:s'),
+    ]);
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000') {
+        json_error('CONFLICT', 'A portal user with this email already exists.', 409);
+    }
+    throw $e;
+}
 
 // S-FIX-PORTAL-INVITE-EMAIL: send the invite via the shared Mailer. Mailer
 // routes to AWS SES in production and to logs/mail.log in dev automatically
