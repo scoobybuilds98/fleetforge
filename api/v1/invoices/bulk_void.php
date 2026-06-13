@@ -8,13 +8,14 @@ declare(strict_types=1);
  * independently inside its own db_transaction; a failure on one ID never
  * aborts the remaining IDs.
  *
- * Voidable statuses: 'draft', 'sent'. All others are skipped unless the
- * caller is a super_admin, in which case any status is accepted.
+ * Voidable statuses: 'draft', 'sent' — for EVERYONE (matches the single-void
+ * void.php). MEDIUM [02]: paid/partially_paid invoices are NOT bulk-voidable
+ * (the counter reversal here only un-books total_revenue for prior-status
+ * 'sent' and never reverses payment allocations) — reverse the payment first.
  *
  * Path B counter logic is replicated EXACTLY from void.php (S-FIX-2 D45):
  *   draft → void  : total_invoiced -= total_amount; outstanding_balance unchanged
  *   sent  → void  : total_invoiced -= total_amount; outstanding_balance -= balance_due
- *   (super_admin only: any other status uses the same $decOb calculation)
  *
  * AutoEntryBridge and audit_log run INSIDE the transaction (same as void.php).
  * InvoiceEnqueuer::enqueue() runs OUTSIDE the transaction, per void.php pattern.
@@ -68,7 +69,6 @@ if (!$voidReason) {
 
 // ── Shared context ────────────────────────────────────────────────────────────
 
-$superAdmin = is_super_admin();
 $userId     = current_user_id();
 $userName   = current_user()['name'] ?? 'System';
 $ipAddress  = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -96,12 +96,19 @@ foreach ($ids as $id) {
         continue;
     }
 
-    // State-machine gate — super_admin can void any status; others only draft/sent.
-    if (!$superAdmin && !in_array($invoice['status'], $voidable, true)) {
+    // State-machine gate — only draft/sent are voidable, for EVERYONE (matches
+    // the single-void void.php). MEDIUM [02]: the old super_admin "any status"
+    // escape hatch let a paid/partially_paid invoice be voided, but the counter
+    // reversal below only un-books total_revenue when the prior status was
+    // 'sent' (decRevenue) — voiding a 'paid' invoice left revenue overstated —
+    // and it never reverses the payment allocations / amount_paid, orphaning
+    // them. Voiding a paid invoice must go through payment reversal first, not
+    // a bulk void.
+    if (!in_array($invoice['status'], $voidable, true)) {
         $skipped++;
         $errors[] = [
             'id'     => $id,
-            'reason' => "Cannot void invoice with status {$invoice['status']}",
+            'reason' => "Cannot void invoice with status {$invoice['status']} — only draft or sent invoices can be voided. Reverse the payment(s) first.",
         ];
         continue;
     }
