@@ -108,6 +108,20 @@ foreach ($chartsToFetch as $chartKey) {
     $results[$chartKey] = $dataset;
 }
 
+// Serve-time financial redaction. Revenue/AR charts expose dollar figures and
+// are gated on payments:view; operational charts (fleet_status, utilization)
+// stay visible to all staff. Per-chart cache is role-blind, so withhold on the
+// way out rather than caching pre-redacted.
+$moneyCharts = ['revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast'];
+if (!can_view_financials()) {
+    if ($requestedChart !== null && in_array($requestedChart, $moneyCharts, true)) {
+        json_error('FORBIDDEN', 'You do not have permission to view financial charts.', 403);
+    }
+    foreach ($moneyCharts as $mc) {
+        unset($results[$mc]);
+    }
+}
+
 // If a single chart was requested, return its dataset directly under 'data'
 if ($requestedChart !== null) {
     json_success($results[$requestedChart]);

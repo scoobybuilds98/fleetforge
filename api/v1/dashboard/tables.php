@@ -253,7 +253,7 @@ $overduePayments = db_select(
     []
 );
 
-json_success([
+$payload = [
     'active_leases'        => $activeLeases,
     'pending_leases'       => $pendingLeases,
     'upcoming_returns'     => $upcomingReturns,
@@ -264,4 +264,19 @@ json_success([
     'high_value_leases'    => $highValueLeases,
     'recently_activated'   => $recentlyActivated,
     'overdue_payments'     => $overduePayments,
-]);
+];
+
+// Serve-time financial redaction. Dispatchers (payments=NONE) get the
+// operational lists but never the dollar columns — strip every money field
+// from every row. high_value_leases keeps its server-side ranking; only the
+// amounts are removed, so no figure leaks.
+if (!can_view_financials()) {
+    $moneyKeys = ['monthly_rate', 'daily_rate', 'weekly_rate', 'total_amount', 'balance_due'];
+    foreach ($payload as $key => $rows) {
+        if (is_array($rows)) {
+            $payload[$key] = redact_rows($rows, $moneyKeys);
+        }
+    }
+}
+
+json_success($payload);

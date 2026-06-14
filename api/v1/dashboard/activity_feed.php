@@ -28,6 +28,13 @@ require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 require_method('GET');
 require_auth_api();
 
+// The activity feed surfaces audit_log rows, so it is gated on audit:view —
+// dispatchers (audit=NONE) get an empty feed, not the audit trail. Endpoint
+// stays 200 so the card renders an empty state rather than erroring.
+if (!can('audit', 'view')) {
+    json_success(['items' => []]);
+}
+
 // ── Input ──────────────────────────────────────────────────────
 // Clamp limit to 1–50 to prevent unbounded queries
 $limit = min(50, max(1, clean_int($_GET['limit'] ?? 20) ?? 20));

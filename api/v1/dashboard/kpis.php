@@ -43,6 +43,19 @@ $cacheHash   = hash('sha256', $cacheKey);
 $cacheTtlMin = 5;
 $now         = date('Y-m-d H:i:s');
 
+// Serve-time financial redaction. report_cache uses a ROLE-BLIND key (the full
+// payload is cached once for everyone), so monetary KPIs must be stripped on
+// the way OUT for roles without payments:view — never cached pre-redacted, or a
+// dispatcher could be served an admin's cached amounts (and vice versa).
+$redactKpis = static function (array $p): array {
+    if (can_view_financials()) return $p;
+    unset($p['active_revenue'], $p['monthly_collections']);
+    if (isset($p['overdue_invoices']) && is_array($p['overdue_invoices'])) {
+        unset($p['overdue_invoices']['total']); // keep the count, drop the dollar sum
+    }
+    return $p;
+};
+
 $cached = db_row(
     "SELECT result_data FROM report_cache
       WHERE report_type = 'dashboard_kpis'
@@ -54,7 +67,7 @@ $cached = db_row(
 if ($cached) {
     // Return cached payload directly — avoid re-running all queries
     $payload = json_decode($cached['result_data'], true);
-    json_success($payload);
+    json_success($redactKpis($payload));
 }
 
 // ── KPI 1: Active Revenue ──────────────────────────────────────
@@ -233,4 +246,4 @@ db_execute(
     ]
 );
 
-json_success($payload);
+json_success($redactKpis($payload));

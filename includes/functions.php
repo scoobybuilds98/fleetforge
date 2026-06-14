@@ -837,3 +837,30 @@ function can_view_document(string $entityType): bool
 {
     return can(document_entity_module($entityType), 'view');
 }
+
+/**
+ * redact_keys() — return $row without the listed top-level keys.
+ *
+ * Serve-time redaction primitive: drop fields a role may not see right before
+ * a payload is serialized, rather than re-querying or branching every SELECT.
+ * Pairs with can_view_financials() for the money-field redaction sweep.
+ */
+function redact_keys(array $row, array $keys): array
+{
+    foreach ($keys as $k) {
+        unset($row[$k]);
+    }
+    return $row;
+}
+
+/**
+ * redact_rows() — strip $keys from every associative row of a list. Non-array
+ * elements pass through untouched.
+ */
+function redact_rows(array $rows, array $keys): array
+{
+    return array_map(
+        static fn($r) => is_array($r) ? redact_keys($r, $keys) : $r,
+        $rows
+    );
+}

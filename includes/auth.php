@@ -185,6 +185,21 @@ function can(string $module, string $action): bool
     return (bool) ($user['permissions'][$module][$action] ?? false);
 }
 
+/**
+ * can_view_financials() — the shared "can see money" predicate.
+ *
+ * Centralizes the rule that monetary amounts (revenue, balances, lease rates,
+ * costs) are gated on payments:view. Dispatchers have payments=NONE and an
+ * invoices=view that config/permissions.php documents as "status + dates only —
+ * no amounts (enforced in API)". Use this ONE predicate everywhere money is
+ * serialized (dashboard / customers / equipment / vendor) so the redaction rule
+ * has a single home rather than ad-hoc can('payments','view') checks.
+ */
+function can_view_financials(): bool
+{
+    return can('payments', 'view');
+}
+
 // current_user() — return the ff_user session array, or null
 function current_user(): ?array
 {
