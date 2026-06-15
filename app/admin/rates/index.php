@@ -203,7 +203,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <a :href="'<?= base_url('customers/show') ?>?id=' + selectedGroup.customer_id"
                        class="link" style="font-weight:600;font-size:1rem;" x-text="selectedGroup.customer_name"></a>
                     <span class="badge badge-neutral" style="font-size:0.75rem;"
-                          x-text="selectedGroup.card_count + (selectedGroup.card_count === 1 ? ' rate card' : ' rate cards')"></span>
+                          x-text="(selectedGroup.loaded ? selectedGroup.items.length : selectedGroup.card_count) + (selectedGroup.card_count === 1 ? ' rate card' : ' rate cards')"></span>
                     <?php if (can('rates', 'create')): ?>
                     <a :href="'<?= base_url('rates/create') ?>?customer_id=' + selectedGroup.customer_id"
                        class="btn btn-secondary btn-sm" style="margin-left:auto;">+ New Card</a>
@@ -472,9 +472,8 @@ function FF_RatesManager() {
                         });
                     }
                 }
-                group.items      = allItems;
-                group.card_count = allItems.length;
-                group.loaded     = true;
+                group.items  = allItems;
+                group.loaded = true;
             } catch (e) {
                 group.items = [];
             } finally {
