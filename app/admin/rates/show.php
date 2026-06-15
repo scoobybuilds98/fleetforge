@@ -227,7 +227,7 @@ require_once FF_ROOT . '/includes/header.php';
                       x-text="items.length + ' item' + (items.length === 1 ? '' : 's')"></span>
             </div>
             <?php if (can('rates', 'edit')): ?>
-            <button class="btn btn-secondary btn-sm" @click="addItem()">+ Add Type</button>
+            <button class="btn btn-secondary btn-sm" @click="addItem()" x-show="items.length === 0">+ Add Type</button>
             <?php endif; ?>
         </div>
 
@@ -265,7 +265,7 @@ require_once FF_ROOT . '/includes/header.php';
                                                     @click="item.editing = true">Edit</button>
                                             <button class="btn btn-outline-danger btn-sm"
                                                     style="padding:3px 12px;font-size:0.75rem;"
-                                                    @click="removeItem(idx)">Delete</button>
+                                                    @click="deleteItem(idx)">Delete</button>
                                         </div>
                                         <?php endif; ?>
                                     </div>
@@ -399,8 +399,7 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
 
                 <?php if (can('rates', 'edit')): ?>
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
-                    <button class="btn btn-ghost btn-sm" @click="addItem()">+ Add another type</button>
+                <div style="display:flex;align-items:center;justify-content:flex-end;margin-top:16px;">
                     <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveItems()">
                         <span x-text="saving ? 'Saving…' : 'Save All Items'"></span>
                     </button>
@@ -541,6 +540,11 @@ function FF_RateCardShow() {
         },
 
         removeItem(idx) { this.items.splice(idx, 1); },
+
+        async deleteItem(idx) {
+            this.items.splice(idx, 1);
+            await this.saveItems();
+        },
 
         isBlankItem(item) {
             return !item.equipment_type

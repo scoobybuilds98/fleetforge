@@ -189,6 +189,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </p>
                 </div>
                 <button type="button" class="btn btn-secondary btn-sm"
+                        x-show="items.length === 0"
                         @click="addItem()">+ Add Equipment Type</button>
             </div>
 
@@ -310,12 +311,6 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </div>
 
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;">
-                        <button type="button" class="btn btn-ghost btn-sm"
-                                @click="addItem()">+ Add another type</button>
-                        <span class="text-secondary" style="font-size:0.8125rem;"
-                              x-text="items.length + ' item' + (items.length === 1 ? '' : 's')"></span>
-                    </div>
                 </div>
             </template>
         </div>
@@ -354,6 +349,7 @@ function FF_RateCardCreate() {
         },
 
         addItem() {
+            if (this.items.length >= 1) return;
             this.items.push({
                 _key:           this._nextKey++,
                 _error:         '',

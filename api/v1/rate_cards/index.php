@@ -127,4 +127,28 @@ foreach ($rows as &$row) {
 }
 unset($row);
 
+// When include_items=1, nest rate_card_items within each card row so the
+// customer panel can show individual items without a per-card API round-trip.
+if (!empty($_GET['include_items']) && $rows) {
+    $cardIds = array_column($rows, 'id');
+    $in      = implode(',', array_fill(0, count($cardIds), '?'));
+    $items   = db_select(
+        "SELECT rate_card_id, equipment_type,
+                daily_rate, weekly_rate, monthly_rate,
+                mileage_rate, mileage_unit, currency, notes
+         FROM rate_card_items
+         WHERE rate_card_id IN ($in)
+         ORDER BY rate_card_id ASC, equipment_type ASC",
+        $cardIds
+    );
+    $byCard = [];
+    foreach ($items as $item) {
+        $byCard[$item['rate_card_id']][] = $item;
+    }
+    foreach ($rows as &$row) {
+        $row['items'] = $byCard[$row['id']] ?? [];
+    }
+    unset($row);
+}
+
 json_paginated($rows, $total, $page, $perPage);

@@ -196,14 +196,14 @@ require_once FF_ROOT . '/includes/header.php';
             <button class="btn btn-secondary btn-sm" :disabled="groupsPage >= groupsTotalPages" @click="loadGroups(groupsPage + 1)">Next →</button>
         </div>
 
-        <!-- Detail — selected customer's cards -->
+        <!-- Detail — selected customer's rate types (one tile per rate_card_item) -->
         <template x-if="selectedGroup">
             <div class="card" style="margin-top:18px;">
                 <div class="card-header" style="display:flex;align-items:center;gap:10px;">
                     <a :href="'<?= base_url('customers/show') ?>?id=' + selectedGroup.customer_id"
                        class="link" style="font-weight:600;font-size:1rem;" x-text="selectedGroup.customer_name"></a>
                     <span class="badge badge-neutral" style="font-size:0.75rem;"
-                          x-text="selectedGroup.card_count + ' card' + (selectedGroup.card_count === 1 ? '' : 's')"></span>
+                          x-text="selectedGroup.card_count + (selectedGroup.card_count === 1 ? ' rate card' : ' rate cards')"></span>
                     <?php if (can('rates', 'create')): ?>
                     <a :href="'<?= base_url('rates/create') ?>?customer_id=' + selectedGroup.customer_id"
                        class="btn btn-secondary btn-sm" style="margin-left:auto;">+ New Card</a>
@@ -214,36 +214,64 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="card-body">
                     <div x-show="selectedGroup.loading" style="text-align:center;padding:1rem;">
-                        <span class="text-secondary">Loading cards…</span>
+                        <span class="text-secondary">Loading…</span>
                     </div>
-                    <template x-if="selectedGroup.loaded">
+                    <template x-if="selectedGroup.loaded && selectedGroup.items.length === 0">
+                        <div class="empty-state" style="padding:1rem 0;">
+                            <p class="empty-state-title">No rate cards yet</p>
+                            <?php if (can('rates', 'create')): ?>
+                            <p class="empty-state-text">Create a rate card for this customer to define their pricing.</p>
+                            <?php endif; ?>
+                        </div>
+                    </template>
+                    <template x-if="selectedGroup.loaded && selectedGroup.items.length > 0">
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">
-                            <template x-for="card in selectedGroup.cards" :key="card.id">
+                            <template x-for="item in selectedGroup.items" :key="item.card_id + '-' + item.equipment_type">
                                 <div class="rate-item-card">
                                     <div class="rate-item-card__head">
-                                        <span class="rate-item-card__type rate-item-card__type--name" x-text="card.name"></span>
-                                        <div style="display:flex;gap:5px;flex-shrink:0;">
+                                        <span class="rate-item-card__type rate-item-card__type--name" x-text="categoryLabel(item.equipment_type)"></span>
+                                        <div style="display:flex;gap:5px;flex-shrink:0;align-items:center;">
+                                            <span class="rate-item-card__cur" x-text="item.currency || 'CAD'"></span>
                                             <span class="rate-item-card__pill"
-                                                  :class="card.is_active ? 'rate-item-card__pill--active' : 'rate-item-card__pill--inactive'"
-                                                  x-text="card.is_active ? 'Active' : 'Inactive'"></span>
-                                            <span x-show="card.is_default" class="rate-item-card__pill rate-item-card__pill--default">Default</span>
+                                                  :class="item.is_active ? 'rate-item-card__pill--active' : 'rate-item-card__pill--inactive'"
+                                                  x-text="item.is_active ? 'Active' : 'Inactive'"></span>
                                         </div>
                                     </div>
                                     <div class="rate-item-card__rows">
-                                        <span class="rate-item-card__k">Types</span>
-                                        <span class="rate-item-card__v" x-text="card.item_count ?? 0"></span>
-                                        <span class="rate-item-card__k">Effective</span>
-                                        <span class="rate-item-card__v">
-                                            <span x-text="card.effective_from || '—'"></span>
-                                            <span style="color:#8a8a8e;"> → </span>
-                                            <span x-text="card.effective_to || 'Open'"></span>
-                                        </span>
+                                        <template x-if="item.daily_rate">
+                                            <span class="rate-item-card__k">Daily</span>
+                                        </template>
+                                        <template x-if="item.daily_rate">
+                                            <span class="rate-item-card__v font-mono" x-text="'$' + parseFloat(item.daily_rate).toFixed(2)"></span>
+                                        </template>
+                                        <template x-if="item.weekly_rate">
+                                            <span class="rate-item-card__k">Weekly</span>
+                                        </template>
+                                        <template x-if="item.weekly_rate">
+                                            <span class="rate-item-card__v font-mono" x-text="'$' + parseFloat(item.weekly_rate).toFixed(2)"></span>
+                                        </template>
+                                        <template x-if="item.monthly_rate">
+                                            <span class="rate-item-card__k">Monthly</span>
+                                        </template>
+                                        <template x-if="item.monthly_rate">
+                                            <span class="rate-item-card__v font-mono" x-text="'$' + parseFloat(item.monthly_rate).toFixed(2)"></span>
+                                        </template>
+                                        <template x-if="item.mileage_rate">
+                                            <span class="rate-item-card__k">Mileage</span>
+                                        </template>
+                                        <template x-if="item.mileage_rate">
+                                            <span class="rate-item-card__v font-mono" x-text="'$' + parseFloat(item.mileage_rate).toFixed(4) + ' / ' + (item.mileage_unit || 'km')"></span>
+                                        </template>
+                                        <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate">
+                                            <span class="rate-item-card__empty">No rates set</span>
+                                        </template>
                                     </div>
                                     <div class="rate-item-card__foot">
-                                        <a :href="'<?= base_url('rates/show') ?>?id=' + card.id" class="btn btn-secondary btn-sm">Edit</a>
+                                        <a :href="'<?= base_url('rates/show') ?>?id=' + item.card_id" class="btn btn-secondary btn-sm">Edit</a>
                                         <?php if (can('rates', 'delete')): ?>
-                                        <button class="btn btn-outline-danger btn-sm" :disabled="card.is_default"
-                                                @click.stop="confirmDeleteCard(card)">Delete</button>
+                                        <button class="btn btn-outline-danger btn-sm"
+                                                :disabled="item.is_default"
+                                                @click.stop="confirmDeleteCard({ id: item.card_id, name: item.card_name, updated_at: item.card_updated_at })">Delete</button>
                                         <?php endif; ?>
                                     </div>
                                 </div>
@@ -375,6 +403,16 @@ function FF_RatesManager() {
 
         search() { this.loadGroups(1); },
 
+        categoryLabel(slug) {
+            if (!slug) return '—';
+            const labels = {
+                chassis: 'Chassis', dry_van: 'Dry Van', reefer: 'Reefer',
+                container: 'Container', flatbed: 'Flatbed', step_deck: 'Step Deck',
+                lowboy: 'Lowboy', tanker: 'Tanker', dump: 'Dump', other: 'Other',
+            };
+            return labels[slug] || slug.replace(/_/g, ' ');
+        },
+
         scrollToCustomers() { this.$refs.custSection?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
         scrollToGlobal()    { this.$nextTick(() => this.$refs.globalSection?.scrollIntoView({ behavior: 'smooth', block: 'start' })); },
 
@@ -393,7 +431,7 @@ function FF_RatesManager() {
                     customer_id:   row.customer_id,
                     customer_name: row.customer_name,
                     card_count:    row.card_count,
-                    loading: false, loaded: false, cards: [],
+                    loading: false, loaded: false, items: [],
                 }));
                 if (!this.groups.some(g => g.customer_id === this.selectedId)) this.selectedId = null;
             } catch (e) {
@@ -412,12 +450,33 @@ function FF_RatesManager() {
         async loadGroupCards(group) {
             group.loading = true;
             try {
-                const r = await FF_Api.get(`<?= base_url('api/v1/rate_cards/index') ?>?customer_id=${group.customer_id}&per_page=100&sort=effective_from&dir=DESC`);
-                group.cards      = r.data?.items ?? [];
-                group.card_count = group.cards.length;
+                const r = await FF_Api.get(`<?= base_url('api/v1/rate_cards/index') ?>?customer_id=${group.customer_id}&per_page=100&include_items=1&sort=effective_from&dir=DESC`);
+                const cards = r.data?.items ?? [];
+                // Flatten each card's items so each type appears as its own tile.
+                const allItems = [];
+                for (const card of cards) {
+                    for (const item of (card.items || [])) {
+                        allItems.push({
+                            equipment_type:  item.equipment_type,
+                            daily_rate:      item.daily_rate,
+                            weekly_rate:     item.weekly_rate,
+                            monthly_rate:    item.monthly_rate,
+                            mileage_rate:    item.mileage_rate,
+                            mileage_unit:    item.mileage_unit || 'km',
+                            currency:        item.currency || 'CAD',
+                            card_id:         card.id,
+                            card_name:       card.name,
+                            is_active:       !!card.is_active,
+                            is_default:      !!card.is_default,
+                            card_updated_at: card.updated_at,
+                        });
+                    }
+                }
+                group.items      = allItems;
+                group.card_count = allItems.length;
                 group.loaded     = true;
             } catch (e) {
-                group.cards = [];
+                group.items = [];
             } finally {
                 group.loading = false;
             }
