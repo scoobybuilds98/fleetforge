@@ -163,16 +163,6 @@ require_once FF_ROOT . '/includes/header.php';
                             </button>
                         </div>
                         <div class="form-error" x-show="errors.start_date" x-text="errors.start_date"></div>
-                        <!-- S-LEASE-RENTAL-DAY-TIME: lease start time (mandatory) -->
-                        <div style="margin-top:6px;">
-                            <label class="form-label" for="start_time" style="font-size:0.8125rem;margin-bottom:3px;">Lease Start Time <span style="color:var(--color-danger,#dc2626);">*</span></label>
-                            <input type="time" id="start_time" class="form-control"
-                                   x-model="form.start_time"
-                                   :class="errors.start_time ? 'is-invalid' : ''"
-                                   required style="max-width:150px;">
-                            <div class="form-error" x-show="errors.start_time" x-text="errors.start_time"></div>
-                            <div class="form-hint" style="font-size:0.75rem;">Sets the billing cut-off for same-day returns.</div>
-                        </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="end_date">End Date</label>
@@ -195,6 +185,18 @@ require_once FF_ROOT . '/includes/header.php';
                                    x-model="form.end_time" style="max-width:150px;">
                         </div>
                     </div>
+                    <!-- S-LEASE-RENTAL-DAY-TIME: lease start time (mandatory) -->
+                    <div class="form-group">
+                        <label class="form-label required" for="start_time">Lease Start Time</label>
+                        <input type="time" id="start_time" class="form-control"
+                               x-model="form.start_time"
+                               :class="errors.start_time ? 'is-invalid' : ''"
+                               required style="max-width:150px;">
+                        <div class="form-error" x-show="errors.start_time" x-text="errors.start_time"></div>
+                        <div class="form-hint">Sets the billing cut-off for same-day returns.</div>
+                    </div>
+                </div>
+                <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label" for="minimum_end_date">Minimum End Date</label>
                         <div style="display:flex;gap:6px;align-items:center;">
