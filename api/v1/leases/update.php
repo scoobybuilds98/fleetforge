@@ -43,7 +43,7 @@ declare(strict_types=1);
  * @depends     api/bootstrap.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases
  * @decisions   D19 (optimistic lock)
- * @session     S007, S-LEASE-UNITS
+ * @session     S007, S-LEASE-UNITS, S-LEASE-DISTANCE-EDIT-ACTIVE
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -80,6 +80,34 @@ if (!$existing) {
 if (in_array($existing['status'], ['completed', 'cancelled'])) {
     json_error('IMMUTABLE_RECORD',
         "Lease {$existing['contract_number']} is {$existing['status']} and cannot be edited.", 422);
+}
+
+// S-LEASE-DISTANCE-EDIT-ACTIVE: once a lease is active the only permissible edits
+// are distance/odometer fields. Dates, notes, add-ons, precharge, and tax flags must
+// be configured while the lease is still pending; rate changes always go through the
+// amendment workflow. This keeps active-lease financial state stable between billing
+// cycles and avoids post-hoc edits that would invalidate already-sent invoices.
+if ($existing['status'] === 'active') {
+    $distanceAllowed = [
+        'id', 'updated_at',
+        'mileage_at_start',
+        'estimated_mileage', 'estimated_mileage_km', 'estimated_mileage_miles',
+        'km_to_miles_conversion', 'miles_to_km_conversion',
+    ];
+    $blocked = array_values(array_diff(array_keys($body), $distanceAllowed));
+    if ($blocked !== []) {
+        json_error(
+            'ACTIVE_LEASE_DISTANCE_ONLY',
+            'Only distance/odometer fields can be changed on an active lease '
+            . '(mileage_at_start, estimated_mileage, km_to_miles_conversion, '
+            . 'miles_to_km_conversion). Edit the lease while pending for other '
+            . 'metadata; use the amendment workflow for rate changes. '
+            . 'Blocked field' . (count($blocked) === 1 ? '' : 's') . ': '
+            . implode(', ', $blocked) . '.',
+            422,
+            ['blocked_fields' => $blocked]
+        );
+    }
 }
 
 // ── D19 Optimistic lock check ──────────────────────────────────
@@ -445,6 +473,25 @@ if (isset($data['estimated_mileage_km']) || isset($data['estimated_mileage_miles
 $newUpdatedAt = null;
 
 db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdatedAt) {
+    // S-LEASE-DISTANCE-EDIT-ACTIVE: capture old values of distance fields before
+    // the write so the audit trail records old→new for each changed odometer/allowance
+    // column. Required by the audit_log standard (old_values + new_values per change).
+    $distanceCols = [
+        'mileage_at_start', 'estimated_mileage', 'estimated_mileage_km',
+        'estimated_mileage_miles', 'km_to_miles_conversion', 'miles_to_km_conversion',
+    ];
+    $changedDistCols = array_intersect(array_keys($data), $distanceCols);
+    $oldDistValues   = null;
+    if ($changedDistCols !== []) {
+        $oldRow = db_row(
+            "SELECT mileage_at_start, estimated_mileage, estimated_mileage_km,
+                    estimated_mileage_miles, km_to_miles_conversion, miles_to_km_conversion
+               FROM leases WHERE id = ?",
+            [$id]
+        );
+        $oldDistValues = array_intersect_key($oldRow, array_flip($changedDistCols));
+    }
+
     db_update('leases', $data, 'id = ?', [$id]);
 
     $newRow = db_row("SELECT updated_at FROM leases WHERE id = ?", [$id]);
@@ -459,7 +506,7 @@ db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdated
         'entity_id'    => $id,
         'entity_label' => $existing['contract_number'],
         'notes'        => "Lease {$existing['contract_number']} metadata updated",
-        'old_values'   => null,
+        'old_values'   => $oldDistValues !== null ? json_encode($oldDistValues) : null,
         'new_values'   => json_encode($data),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);

@@ -17,7 +17,7 @@ declare(strict_types=1);
  *              includes/footer.php, api/v1/leases/update.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases
  * @decisions   D19 (optimistic lock), D30 (asset_url), D32 (CSS classes)
- * @session     S007
+ * @session     S007, S-LEASE-DISTANCE-EDIT-ACTIVE
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -78,8 +78,10 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php if ($isActive): ?>
 <div class="card card-body" style="background:var(--color-warning-light);color:var(--color-warning-text);margin-bottom:1.5rem;">
-    <strong>Active Lease</strong> — Rate changes and customer/unit changes require an amendment record.
-    Only dates, add-ons, notes, and mileage can be edited here.
+    <strong>Active Lease — distance fields only.</strong> Only start odometer, allowance, and conversion factors can be edited while the lease is active.
+    Dates, notes, add-ons, rates, and financial fields are locked.
+    To change other metadata, the lease must be in <strong>pending</strong> status; rate changes use the
+    <a href="<?= e(base_url('leases/show?id=' . $leaseId)) ?>#amendments" class="text-link" style="color:inherit;text-decoration:underline;">Amendments tab</a>.
 </div>
 <?php endif; ?>
 
@@ -103,9 +105,13 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-hint">Contract number cannot be changed after creation.</div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="po_number">PO Number</label>
+                        <label class="form-label"<?= $isActive ? '' : ' for="po_number"' ?>>PO Number</label>
+                        <?php if ($isActive): ?>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['po_number'] ?? '—') ?></div>
+                        <?php else: ?>
                         <input type="text" id="po_number" class="form-control"
                                x-model="form.po_number" maxlength="100">
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="form-row-2">
@@ -138,20 +144,28 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-hint">Start date cannot be changed.</div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="end_date">End Date</label>
+                        <label class="form-label"<?= $isActive ? '' : ' for="end_date"' ?>>End Date</label>
+                        <?php if ($isActive): ?>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['end_date'] ?? '—') ?></div>
+                        <?php else: ?>
                         <?php // [UI-AUDIT-1:M18] :min prevents picking a date before lease start. ?>
                         <input type="date" id="end_date" class="form-control"
                                x-model="form.end_date"
                                min="<?= e($lease['start_date']) ?>"
                                :class="errors.end_date ? 'is-invalid' : ''">
                         <div class="form-error" x-show="errors.end_date" x-text="errors.end_date"></div>
+                        <?php endif; ?>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="minimum_end_date">Minimum End Date</label>
+                        <label class="form-label"<?= $isActive ? '' : ' for="minimum_end_date"' ?>>Minimum End Date</label>
+                        <?php if ($isActive): ?>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['minimum_end_date'] ?? '—') ?></div>
+                        <?php else: ?>
                         <?php // [UI-AUDIT-1:M18] Same constraint on minimum_end_date. ?>
                         <input type="date" id="minimum_end_date" class="form-control"
                                x-model="form.minimum_end_date"
                                min="<?= e($lease['start_date']) ?>">
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -192,9 +206,13 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="form-row-2">
                     <div class="form-group">
-                        <label class="form-label" for="rate_notes">Rate Notes</label>
+                        <label class="form-label"<?= $isActive ? '' : ' for="rate_notes"' ?>>Rate Notes</label>
+                        <?php if ($isActive): ?>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['rate_notes'] ?? '—') ?></div>
+                        <?php else: ?>
                         <input type="text" id="rate_notes" class="form-control"
                                x-model="form.rate_notes" maxlength="5000">
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -357,7 +375,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- Odometer readings -->
+                <!-- Odometer readings — start is editable for active leases; end is set at close -->
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="mileage_at_start">Starting Mileage</label>
@@ -365,22 +383,34 @@ require_once FF_ROOT . '/includes/header.php';
                                x-model="form.mileage_at_start" min="0">
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="mileage_at_end">Ending Mileage</label>
+                        <label class="form-label">Ending Mileage</label>
+                        <?php if ($isActive): ?>
+                        <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;"
+                             title="Set at lease close"><?= e($lease['mileage_at_end'] ?? '—') ?></div>
+                        <div class="form-hint">Set at lease close.</div>
+                        <?php else: ?>
                         <input type="number" id="mileage_at_end" class="form-control font-mono"
                                x-model="form.mileage_at_end" min="0">
+                        <?php endif; ?>
                     </div>
                 </div>
 
-                <!-- ══════════════════════════════════════════════════════════
-                     S-MILEAGE-1 Model B — Mileage precharge subsection
-                     ──────────────────────────────────────────────────────────
-                     Same controls as create.php. Becomes read-only once
-                     the precharge has been billed on Invoice 1
-                     (precharge_invoiced_at IS NOT NULL) — server returns
-                     409 PRECHARGE_LOCKED and surfaces the error in the
-                     form-error banner.
-                     ══════════════════════════════════════════════════════════ -->
+                <!-- S-MILEAGE-1 Model B — Mileage precharge subsection
+                     Active leases: rendered read-only (precharge is locked after
+                     Invoice 1 billing; cannot change on an active lease at all). -->
                 <div style="border-top:1px solid var(--border-color);margin-top:24px;padding-top:24px;">
+                    <?php if ($isActive): ?>
+                    <div class="form-hint" style="opacity:0.7;">
+                        <strong>Mileage precharge:</strong>
+                        <?php if (!empty($lease['precharge_enabled'])): ?>
+                            Enabled — $<?= e(number_format((float)($lease['precharge_amount'] ?? 0), 2)) ?>
+                            <?php if (!empty($lease['precharge_invoiced_at'])): ?>(billed on Invoice 1)<?php endif; ?>
+                        <?php else: ?>
+                            Not applied
+                        <?php endif; ?>
+                        <span style="margin-left:8px;">— locked while lease is active.</span>
+                    </div>
+                    <?php else: ?>
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;"
                            :style="prechargeFrozen ? 'cursor:not-allowed;opacity:0.65;' : ''">
                         <input type="checkbox"
@@ -414,6 +444,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div class="form-error" x-show="errors.precharge_amount" x-text="errors.precharge_amount"></div>
                     </div>
+                    <?php endif; ?>
                 </div>
 
             </div>
@@ -421,8 +452,47 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- ── Section 5: Add-ons ───────────────────────────────── -->
         <div class="card" style="margin-bottom:1.5rem;">
-            <div class="card-header"><div class="card-title">Add-ons</div></div>
+            <div class="card-header">
+                <div class="card-title">Add-ons</div>
+                <?php if ($isActive): ?>
+                <div style="font-size:0.8125rem;color:var(--text-secondary);">Locked while lease is active.</div>
+                <?php endif; ?>
+            </div>
             <div class="card-body">
+                <?php if ($isActive): ?>
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label class="form-label">Insurance</label>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;">
+                            <?php if (!empty($lease['insurance_opt_in'])): ?>
+                                Included — $<?= e(number_format((float)($lease['insurance_cost'] ?? 0), 2)) ?>/period
+                            <?php else: ?>
+                                Not included
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Warranty</label>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;">
+                            <?php if (!empty($lease['warranty_opt_in'])): ?>
+                                Included — $<?= e(number_format((float)($lease['warranty_cost'] ?? 0), 2)) ?>/period
+                            <?php else: ?>
+                                Not included
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">GPS Tracking</label>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;">
+                            <?php if (!empty($lease['gps_opt_in'])): ?>
+                                Included — $<?= e(number_format((float)($lease['gps_cost'] ?? 0), 2)) ?>/day
+                            <?php else: ?>
+                                Not included
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php else: ?>
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;">
@@ -463,22 +533,36 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                     <div class="form-group"></div>
                 </div>
+                <?php endif; ?>
             </div>
         </div>
 
         <!-- ── Section 6: Notes ─────────────────────────────────── -->
         <div class="card" style="margin-bottom:1.5rem;">
-            <div class="card-header"><div class="card-title">Notes</div></div>
+            <div class="card-header">
+                <div class="card-title">Notes</div>
+                <?php if ($isActive): ?>
+                <div style="font-size:0.8125rem;color:var(--text-secondary);">Locked while lease is active.</div>
+                <?php endif; ?>
+            </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label class="form-label" for="notes">Notes</label>
+                    <label class="form-label"<?= $isActive ? '' : ' for="notes"' ?>>Notes</label>
+                    <?php if ($isActive): ?>
+                    <div class="form-control" style="background:var(--bg-muted);cursor:default;min-height:3rem;white-space:pre-wrap;"><?= e($lease['notes'] ?? '') ?: '<span style="color:var(--text-muted);">—</span>' ?></div>
+                    <?php else: ?>
                     <textarea id="notes" class="form-control"
                               x-model="form.notes" rows="2" maxlength="5000"></textarea>
+                    <?php endif; ?>
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="internal_notes">Internal Notes</label>
+                    <label class="form-label"<?= $isActive ? '' : ' for="internal_notes"' ?>>Internal Notes</label>
+                    <?php if ($isActive): ?>
+                    <div class="form-control" style="background:var(--bg-muted);cursor:default;min-height:3rem;white-space:pre-wrap;"><?= e($lease['internal_notes'] ?? '') ?: '<span style="color:var(--text-muted);">—</span>' ?></div>
+                    <?php else: ?>
                     <textarea id="internal_notes" class="form-control"
                               x-model="form.internal_notes" rows="2" maxlength="5000"></textarea>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -499,45 +583,47 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
+// S-LEASE-DISTANCE-EDIT-ACTIVE: active leases only send distance fields.
+const _leaseIsActive = <?= $isActive ? 'true' : 'false' ?>;
+
 function FF_EditLease() {
     return {
         form: {
-            id:                 <?= $leaseId ?>,
-            updated_at:         <?= json_encode($lease['updated_at']) ?>,
-            po_number:          <?= json_encode($lease['po_number'] ?? '') ?>,
-            end_date:           <?= json_encode($lease['end_date'] ?? '') ?>,
-            minimum_end_date:   <?= json_encode($lease['minimum_end_date'] ?? '') ?>,
-            rate_notes:         <?= json_encode($lease['rate_notes'] ?? '') ?>,
-            mileage_at_start:   <?= json_encode($lease['mileage_at_start'] ?? '') ?>,
-            mileage_at_end:     <?= json_encode($lease['mileage_at_end'] ?? '') ?>,
-            // S-LEASE-UNITS: dual-unit allowance + conversion (rates are read-only on edit)
+            id:                      <?= $leaseId ?>,
+            updated_at:              <?= json_encode($lease['updated_at']) ?>,
+            // Distance fields — editable regardless of lease status
+            mileage_at_start:        <?= json_encode($lease['mileage_at_start'] ?? '') ?>,
             estimated_mileage_km:    <?= json_encode($lease['estimated_mileage_km'] ?? $lease['estimated_mileage'] ?? '') ?>,
             estimated_mileage_miles: <?= json_encode($lease['estimated_mileage_miles'] ?? '') ?>,
             km_to_miles_conversion:  <?= (float)($lease['km_to_miles_conversion'] ?? 0.621371) ?>,
             miles_to_km_conversion:  <?= (float)($lease['miles_to_km_conversion'] ?? 1.609344) ?>,
-            insurance_opt_in:   <?= $lease['insurance_opt_in'] ? 'true' : 'false' ?>,
-            insurance_cost:     <?= json_encode($lease['insurance_cost'] ?? '0.00') ?>,
-            warranty_opt_in:    <?= $lease['warranty_opt_in'] ? 'true' : 'false' ?>,
-            warranty_cost:      <?= json_encode($lease['warranty_cost'] ?? '0.00') ?>,
-            // S-LEASE-GPS-COST: per-day GPS rate; reads existing values
-            gps_opt_in:         <?= $lease['gps_opt_in'] ? 'true' : 'false' ?>,
-            gps_cost:           <?= json_encode($lease['gps_cost'] ?? '1.00') ?>,
-            notes:              <?= json_encode($lease['notes'] ?? '') ?>,
-            internal_notes:     <?= json_encode($lease['internal_notes'] ?? '') ?>,
-            // S-MILEAGE-1 Model B: precharge toggle + amount (editable until
-            // Invoice 1 bills the precharge — see prechargeFrozen below).
-            precharge_enabled:  <?= !empty($lease['precharge_enabled']) ? 'true' : 'false' ?>,
-            precharge_amount:   <?= json_encode($lease['precharge_amount'] ?? '') ?>,
+            <?php if (!$isActive): ?>
+            // Pending-only fields — locked on active leases (API returns 422 ACTIVE_LEASE_DISTANCE_ONLY)
+            po_number:               <?= json_encode($lease['po_number'] ?? '') ?>,
+            end_date:                <?= json_encode($lease['end_date'] ?? '') ?>,
+            minimum_end_date:        <?= json_encode($lease['minimum_end_date'] ?? '') ?>,
+            rate_notes:              <?= json_encode($lease['rate_notes'] ?? '') ?>,
+            mileage_at_end:          <?= json_encode($lease['mileage_at_end'] ?? '') ?>,
+            insurance_opt_in:        <?= $lease['insurance_opt_in'] ? 'true' : 'false' ?>,
+            insurance_cost:          <?= json_encode($lease['insurance_cost'] ?? '0.00') ?>,
+            warranty_opt_in:         <?= $lease['warranty_opt_in'] ? 'true' : 'false' ?>,
+            warranty_cost:           <?= json_encode($lease['warranty_cost'] ?? '0.00') ?>,
+            gps_opt_in:              <?= $lease['gps_opt_in'] ? 'true' : 'false' ?>,
+            gps_cost:                <?= json_encode($lease['gps_cost'] ?? '1.00') ?>,
+            notes:                   <?= json_encode($lease['notes'] ?? '') ?>,
+            internal_notes:          <?= json_encode($lease['internal_notes'] ?? '') ?>,
+            precharge_enabled:       <?= !empty($lease['precharge_enabled']) ? 'true' : 'false' ?>,
+            precharge_amount:        <?= json_encode($lease['precharge_amount'] ?? '') ?>,
+            <?php endif; ?>
         },
         errors:      {},
         submitting:  false,
-        // S-MILEAGE-1: read-only flag mirrors update.php's PRECHARGE_LOCKED
-        // server check. Set from precharge_invoiced_at — non-null = billed = frozen.
+        <?php if (!$isActive): ?>
+        // S-MILEAGE-1: frozen once Invoice 1 has billed the precharge.
         prechargeFrozen: <?= !empty($lease['precharge_invoiced_at']) ? 'true' : 'false' ?>,
+        <?php endif; ?>
 
-        // S-LEASE-UNITS: primary unit is fixed at creation — read-only here.
-        // Pattern A bidirectional behavior matches create.php; no override
-        // flags, no auto-reciprocation between factors.
+        // S-LEASE-UNITS: primary unit fixed at creation — read-only on edit.
         _mileageUnit:        <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
         factor_section_open: false,
 
@@ -557,7 +643,6 @@ function FF_EditLease() {
             this.form.estimated_mileage_km = (Math.round(miles * factor * 1000) / 1000).toFixed(3);
         },
 
-        // Factors are independently editable — D-B.
         onKmToMilesFactorInput(value) {
             const v = parseFloat(value);
             this.form.km_to_miles_conversion = (isNaN(v) || v <= 0) ? 0.621371 : v;
@@ -573,29 +658,41 @@ function FF_EditLease() {
         },
 
         validate() {
-            // VALID-2: use FF_Validate for per-field error display
             const f = document.querySelector('form');
             FF_Validate.clear(f);
             this.errors = {};
             let ok = true;
-            const startDate = <?= json_encode($lease['start_date']) ?>;
 
+            // Distance fields are validated for all statuses
+            const distanceChecks = [
+                ['mileage_at_start',        'Starting mileage cannot be negative.'],
+                ['estimated_mileage_km',    'KM allowance cannot be negative.'],
+                ['estimated_mileage_miles', 'Mile allowance cannot be negative.'],
+            ];
+            distanceChecks.forEach(([k, msg]) => {
+                const v = this.form[k];
+                if (v !== '' && v !== null && v !== undefined && Number(v) < 0) {
+                    FF_Validate.field(f, k, msg);
+                    ok = false;
+                }
+            });
+
+            <?php if (!$isActive): ?>
+            // Pending-only validation
+            const startDate = <?= json_encode($lease['start_date']) ?>;
             if (this.form.end_date && this.form.end_date < startDate) {
                 FF_Validate.field(f, 'end_date', 'End date must be after start date.');
                 this.errors.end_date = 'End date must be after start date.';
                 ok = false;
             }
 
-            const numChecks = [
-                ['mileage_at_start',        'Starting mileage cannot be negative.'],
-                ['mileage_at_end',          'End mileage cannot be negative.'],
-                ['estimated_mileage_km',    'KM allowance cannot be negative.'],
-                ['estimated_mileage_miles', 'Mile allowance cannot be negative.'],
-                ['insurance_cost',          'Insurance cost cannot be negative.'],
-                ['warranty_cost',           'Warranty cost cannot be negative.'],
-                ['gps_cost',                'GPS cost cannot be negative.'],
+            const pendingChecks = [
+                ['mileage_at_end',   'End mileage cannot be negative.'],
+                ['insurance_cost',   'Insurance cost cannot be negative.'],
+                ['warranty_cost',    'Warranty cost cannot be negative.'],
+                ['gps_cost',         'GPS cost cannot be negative.'],
             ];
-            numChecks.forEach(([k, msg]) => {
+            pendingChecks.forEach(([k, msg]) => {
                 const v = this.form[k];
                 if (v !== '' && v !== null && v !== undefined && Number(v) < 0) {
                     FF_Validate.field(f, k, msg);
@@ -609,6 +706,7 @@ function FF_EditLease() {
                     'End mileage must be greater than or equal to start mileage.');
                 ok = false;
             }
+            <?php endif; ?>
 
             if (!ok) FF_Validate.scrollToFirst(f);
             return ok;
@@ -616,7 +714,7 @@ function FF_EditLease() {
 
         async submit() {
             if (!this.validate()) return;
-            this.submitting  = true;
+            this.submitting = true;
             const f = document.querySelector('form');
 
             try {
