@@ -1153,6 +1153,21 @@ class AutoEntryBridge
         );
         if (!$invoice) return null;
 
+        // Ownership guard — the claim and the invoice MUST belong to the same
+        // customer. The caller only validated that invoice_id exists, so without
+        // this check a damage claim for customer A could retag customer B's
+        // invoice JE to 'damage_recovery', contaminating AR subledger lineage.
+        // Refuse and log on any mismatch (NULL claim customer also fails).
+        if ((int) ($claim['customer_id'] ?? 0) !== (int) ($invoice['customer_id'] ?? 0)) {
+            \error_log(
+                "[S-ACCT-DMG] ownership mismatch — claim #{$claim['claim_number']} "
+                . "customer=" . ($claim['customer_id'] ?? 'NULL')
+                . " vs invoice {$invoice['invoice_number']} customer=" . ($invoice['customer_id'] ?? 'NULL')
+                . " — refusing to link damage recovery JE."
+            );
+            return null;
+        }
+
         // Preferred path: reclassify the existing invoice JE in place.
         // The DR AR / CR Revenue / CR Tax lines stay exactly the same —
         // we just retag the source so subledger queries pick it up.
