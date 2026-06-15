@@ -89,11 +89,12 @@ function require_auth(): void
         exit;
     }
     // S-PERM-SESSION-REFRESH: auto-refresh the in-session override map if a
-    // super_admin has changed this user's overrides since their login. The
-    // function early-returns for super_admin (their can() short-circuits)
-    // and caches within the request via a static guard — at most one
-    // extra SELECT per authenticated page request.
-    _ff_check_permission_freshness();
+    // super_admin has changed this user's overrides since their login. Also
+    // re-validates live account status/role and redirects to login if the
+    // account was suspended/deleted/role-changed mid-session. The function
+    // caches within the request via a static guard — at most one extra SELECT
+    // per authenticated page request.
+    _ff_check_permission_freshness(false); // page context → redirect on revocation
 }
 
 // require_auth_api() — return 401 JSON if no valid admin session
@@ -102,11 +103,12 @@ function require_auth_api(): void
     if (!current_user()) {
         json_error('UNAUTHORIZED', 'Authentication required.', 401);
     }
-    // S-PERM-SESSION-REFRESH: same auto-refresh hook on the API side. The
-    // static guard inside the function ensures only one DB hit per request
-    // even when multiple endpoints chain (rare) or when a page invokes
-    // both require_auth() + an inline API call within one PHP process.
-    _ff_check_permission_freshness();
+    // S-PERM-SESSION-REFRESH: same auto-refresh + live status/role re-check on
+    // the API side, but revocation emits a 401 JSON instead of a redirect. The
+    // static guard inside the function ensures only one DB hit per request even
+    // when multiple endpoints chain (rare) or when a page invokes both
+    // require_auth() + an inline API call within one PHP process.
+    _ff_check_permission_freshness(true); // API context → 401 on revocation
 }
 
 // require_permission() — 403 if the current user lacks the given permission
@@ -653,7 +655,7 @@ function _ff_refresh_permission_overrides_if_stale(array &$sessionUser): bool
  * super_admin grants overrides to a user who's already logged in, and the
  * target user sees no change until they log out + log back in.
  */
-function _ff_check_permission_freshness(): void
+function _ff_check_permission_freshness(bool $apiContext = false): void
 {
     static $checked = false;
     if ($checked) return;
@@ -662,6 +664,34 @@ function _ff_check_permission_freshness(): void
     // No session → no-op. Protects cron/* and CLI scripts that include
     // auth.php without going through a web request.
     if (!isset($_SESSION['ff_user']['id'])) return;
+
+    // Live account-status re-check (applies to EVERY role, incl. super_admin):
+    // a user suspended / locked / soft-deleted — or moved to a different role —
+    // mid-session must lose access NOW, not at session timeout. The session is
+    // only a snapshot; login required status='active' AND deleted_at IS NULL,
+    // and the live session must hold to the same bar. Admin-side analogue of the
+    // portal require_portal_auth re-check. One PK-indexed SELECT per request.
+    $uid  = (int) $_SESSION['ff_user']['id'];
+    $live = db_row("SELECT status, deleted_at, role_id FROM users WHERE id = ?", [$uid]);
+
+    $sessionRoleId = isset($_SESSION['ff_user']['role_id']) ? (int) $_SESSION['ff_user']['role_id'] : null;
+    $revoked =
+        !$live
+        || $live['deleted_at'] !== null
+        || $live['status'] !== 'active'
+        // Role swap: cached role_slug/permissions are stale → force re-login so
+        // the new (possibly downgraded) role's scope loads fresh. Only enforced
+        // when the session actually carries a role_id (older sessions skip it).
+        || ($sessionRoleId !== null && (int) $live['role_id'] !== $sessionRoleId);
+
+    if ($revoked) {
+        _ff_session_destroy();
+        if ($apiContext) {
+            json_error('UNAUTHORIZED', 'Your session is no longer valid. Please sign in again.', 401);
+        }
+        header('Location: ' . base_url('auth/login'));
+        exit;
+    }
 
     // super_admin short-circuits can() regardless of overrides (D-PERM-REFRESH-4).
     if (($_SESSION['ff_user']['role_slug'] ?? null) === 'super_admin') return;

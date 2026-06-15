@@ -114,8 +114,14 @@ try {
                       WHERE ur.slug='super_admin' AND u.deleted_at IS NULL LIMIT 1");
     if (!$admin) { echo "SETUP FAIL no super_admin\n"; exit(2); }
     $superSess = ['id' => (int) $admin['id'], 'name' => 'H6 Admin', 'role_slug' => 'super_admin'];
-    // Synthetic dispatcher: has leases.edit (passes require_permission) but is not manager.
-    $dispSess  = ['id' => 0, 'name' => 'H6 Disp', 'role_slug' => 'dispatcher',
+    // Synthetic dispatcher: has leases.edit (passes require_permission) but is not
+    // manager. Needs a REAL active user id — require_auth_api() now re-checks live
+    // users.status/deleted_at, so an id=0 session is revoked (401) before the gate.
+    // can() reads the session 'permissions', not the DB role, so dispatcher perms
+    // are attached to a valid user id.
+    $realUser = db_row("SELECT id FROM users WHERE status='active' AND deleted_at IS NULL ORDER BY id LIMIT 1");
+    if (!$realUser) { echo "SETUP FAIL no active user\n"; exit(2); }
+    $dispSess  = ['id' => (int) $realUser['id'], 'name' => 'H6 Disp', 'role_slug' => 'dispatcher',
                   'permissions' => ['leases' => ['edit' => 1, 'view' => 1], 'customers' => ['edit' => 1]],
                   'permission_overrides' => [], 'role_permission_overrides' => []];
 
