@@ -19,8 +19,10 @@ declare(strict_types=1);
  *              Tax rates (D11): looked up from customer's tax_rate_id at creation
  *              time and frozen on the lease (tax_rate_gst, tax_rate_pst, tax_rate_hst).
  *
- *              Contract number format: CN-XXXXXX-YYYY (generate_random_code(6) + year).
- *              De-duplicated with numeric suffix if collision (unlikely but safe).
+ *              Contract number: if contract_number is submitted and non-empty, it is
+ *              used verbatim (trimmed). A duplicate returns 422 CONTRACT_NUMBER_TAKEN.
+ *              If blank, auto-generates CN-XXXXXX-YYYY (generate_random_code(6) + year)
+ *              with collision retry loop (unlikely but safe).
  *
  *              Dual-unit mileage (S-LEASE-UNITS): new fields mileage_rate_km,
  *              mileage_rate_miles, estimated_mileage_km, estimated_mileage_miles,
@@ -535,15 +537,27 @@ if ($customer['tax_rate_id']) {
 // WHY: prefix from settings so admin can rebrand without code change
 $leasePrefix     = settings_get('lease.prefix', 'CN');
 $year            = date('Y');
-$contractNumber  = $leasePrefix . '-' . generate_random_code(6) . '-' . $year;
-$attempt         = 0;
-// De-duplicate on collision (extremely rare with 6 char A-Z0-9 space)
-while (db_exists('leases', 'contract_number = ?', [$contractNumber])) {
-    $attempt++;
-    if ($attempt > 20) {
-        json_error('SERVER_ERROR', 'Could not generate unique contract number.', 500);
+$suppliedCN      = trim($body['contract_number'] ?? '');
+if ($suppliedCN !== '') {
+    // User supplied a value — use it verbatim; reject duplicates explicitly.
+    // WHY: silent re-generate would discard the operator's intent and produce
+    // a number they didn't ask for, with no feedback.
+    if (db_exists('leases', 'contract_number = ?', [$suppliedCN])) {
+        json_error('CONTRACT_NUMBER_TAKEN',
+            'Contract number ' . $suppliedCN . ' already in use.', 422);
     }
+    $contractNumber = $suppliedCN;
+} else {
+    // Auto-generate; de-duplicate on collision (extremely rare with 6-char A-Z0-9 space)
     $contractNumber = $leasePrefix . '-' . generate_random_code(6) . '-' . $year;
+    $attempt        = 0;
+    while (db_exists('leases', 'contract_number = ?', [$contractNumber])) {
+        $attempt++;
+        if ($attempt > 20) {
+            json_error('SERVER_ERROR', 'Could not generate unique contract number.', 500);
+        }
+        $contractNumber = $leasePrefix . '-' . generate_random_code(6) . '-' . $year;
+    }
 }
 
 // ── Transaction: FOR UPDATE on unit + create lease ─────────────
