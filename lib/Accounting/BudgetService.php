@@ -143,8 +143,10 @@ class BudgetService
                 throw new \RuntimeException('Archived budgets cannot be edited.');
             }
 
+            // D19 via the shared gate so the app-wide FF_OPTIMISTIC_LOCKING flag
+            // governs budgets too (locking disabled by default — last-write-wins).
             $providedUpdatedAt = (string) ($data['updated_at'] ?? '');
-            if ($providedUpdatedAt && $providedUpdatedAt !== (string) $current['updated_at']) {
+            if ($providedUpdatedAt && !optimistic_lock_matches($providedUpdatedAt, (string) $current['updated_at'])) {
                 throw new \RuntimeException('STALE_DATA: this budget was modified by someone else.');
             }
 

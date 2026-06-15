@@ -266,27 +266,36 @@ try {
     else
         fail("T6b: credit_requested not found in form_data");
 
-    // T7/T8: Optimistic lock checks
-    section('T7-T8: Optimistic lock (SC6)');
+    // T7/T8: Optimistic lock comparison algorithm.
+    // NOTE: enforcement is DISABLED app-wide (S-DISABLE-OPTLOCK, last-write-wins) —
+    // optimistic_lock_matches() now always returns true. These assert the underlying
+    // comparison (optimistic_lock_compare) still works so locking is re-enableable.
+    section('T7-T8: Optimistic lock comparison (algorithm preserved)');
 
     $staleTs = '2020-01-01 00:00:00';
     $realTs  = $app['updated_at'];
 
-    if (!optimistic_lock_matches($staleTs, $realTs))
-        ok("T7: Stale CCA updated_at → optimistic_lock_matches returns false (SC6)");
+    if (!optimistic_lock_compare($staleTs, $realTs))
+        ok("T7: Stale CCA updated_at → optimistic_lock_compare returns false");
     else
-        fail("T7: optimistic_lock_matches should return false for stale timestamp");
+        fail("T7: optimistic_lock_compare should return false for stale timestamp");
 
-    if (optimistic_lock_matches($realTs, $realTs))
-        ok("T8a: Fresh CCA updated_at → optimistic_lock_matches returns true");
+    if (optimistic_lock_compare($realTs, $realTs))
+        ok("T8a: Fresh CCA updated_at → optimistic_lock_compare returns true");
     else
-        fail("T8a: optimistic_lock_matches should return true for matching timestamp");
+        fail("T8a: optimistic_lock_compare should return true for matching timestamp");
 
     $custTs = $cust['updated_at'];
-    if (!optimistic_lock_matches($staleTs, $custTs))
-        ok("T8b: Stale customers updated_at → optimistic_lock_matches returns false (SC6 customer row)");
+    if (!optimistic_lock_compare($staleTs, $custTs))
+        ok("T8b: Stale customers updated_at → optimistic_lock_compare returns false");
     else
-        fail("T8b: optimistic_lock_matches should return false for stale customer timestamp");
+        fail("T8b: optimistic_lock_compare should return false for stale customer timestamp");
+
+    // Enforcement gate is disabled → stale token no longer blocks (last-write-wins).
+    if (optimistic_lock_matches($staleTs, $realTs))
+        ok("T8c: Locking DISABLED → optimistic_lock_matches returns true even for a stale token");
+    else
+        fail("T8c: optimistic_lock_matches should return true while FF_OPTIMISTIC_LOCKING is off");
 
 } finally {
     $pdo->rollBack();

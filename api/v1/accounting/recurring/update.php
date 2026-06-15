@@ -32,8 +32,11 @@ if (!$row) {
     json_error('NOT_FOUND', 'Template not found.', 404);
 }
 
+// D19 via the shared gate (optimistic_lock_matches) so the app-wide
+// FF_OPTIMISTIC_LOCKING flag governs this too. Locking is disabled by default
+// (last-write-wins); guard preserved for when a token is supplied + re-enabled.
 $providedUpdatedAt = (string) ($input['updated_at'] ?? '');
-if ($providedUpdatedAt && $providedUpdatedAt !== (string) $row['updated_at']) {
+if ($providedUpdatedAt && !optimistic_lock_matches($providedUpdatedAt, (string) $row['updated_at'])) {
     json_error('STALE_DATA', 'Template was modified by someone else. Reload and try again.', 409);
 }
 

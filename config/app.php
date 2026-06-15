@@ -98,6 +98,14 @@ define('APP_URL',          rtrim((string) env('APP_URL', ''), '/'));
 define('APP_TIMEZONE',     (string) env('APP_TIMEZONE',     'America/Vancouver'));
 define('APP_SECRET',       (string) env('APP_SECRET',       ''));
 
+// D19 optimistic locking. Operator decision 2026-06-16 (S-DISABLE-OPTLOCK):
+// last-write-wins app-wide — an edit must NEVER be blocked by a "modified by
+// another user" 409, no matter how many users touch a record. Disabled by
+// default; set FF_OPTIMISTIC_LOCKING=1 in .env to re-enable strict locking.
+// Background/business-rule 409s (already-sent, already-paid, invalid transition)
+// are unaffected — those do not go through optimistic_lock_matches().
+define('FF_OPTIMISTIC_LOCKING', (bool) env('FF_OPTIMISTIC_LOCKING', false));
+
 define('FF_VERSION',       (string) env('FF_VERSION',       '1.0.0'));
 if (!defined('FF_ASSET_VERSION')) {
     $gitHead = FF_ROOT . '/.git/HEAD';

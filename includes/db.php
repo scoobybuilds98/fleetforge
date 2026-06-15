@@ -239,21 +239,15 @@ function db_sanitize_column(string $col): string
 }
 
 // ============================================================
-// optimistic_lock_matches() — D19 optimistic locking (S-PROD-1B #36)
+// optimistic_lock_compare() — pure D19 timestamp-token comparison (S-PROD-1B #36)
 //
-// Normalizes both timestamps to Unix seconds before comparing.
-// Comparison normalized to Unix timestamp / second precision.
-// Subsecond drift discarded — concurrent same-second edits are
-// extremely rare; the SELECT-then-UPDATE pattern guards against
-// actual lost-update scenarios.
-//
-// Guards against: DST transitions, microsecond precision differences
-// (DATETIME(6) vs DATETIME), and timezone-format variations that
-// would cause a raw string comparison to incorrectly fire the lock.
-// Fails closed (returns false) on malformed input so a garbled
-// token never silently passes the lock.
+// Normalizes both timestamps to Unix seconds before comparing, so it is robust to
+// DST transitions, DATETIME(6) vs DATETIME microsecond differences, and timezone
+// format variations that would trip a raw string comparison. Fails closed (returns
+// false) on malformed input. This is the algorithm; the enforcement gate is
+// optimistic_lock_matches() below.
 // ============================================================
-function optimistic_lock_matches(string $client, string $db): bool
+function optimistic_lock_compare(string $client, string $db): bool
 {
     try {
         $clientTs = (new DateTimeImmutable($client))->getTimestamp();
@@ -262,4 +256,27 @@ function optimistic_lock_matches(string $client, string $db): bool
     } catch (\Exception $e) {
         return false; // Malformed input fails closed
     }
+}
+
+// ============================================================
+// optimistic_lock_matches() — D19 enforcement gate
+//
+// As of 2026-06-16 (operator decision, S-DISABLE-OPTLOCK) optimistic locking is
+// DISABLED app-wide: last-write-wins, an edit must never be blocked by a
+// "modified by another user" 409. Every editor checks this as
+// `if (!optimistic_lock_matches(...)) { 409 STALE_DATA }`, so returning true here
+// universally suppresses those 409s without touching any call site or any
+// business-rule 409 (already-sent/paid/invalid-transition do NOT use this helper).
+//
+// Reversible: set FF_OPTIMISTIC_LOCKING=1 in .env to restore strict locking; the
+// real comparison (optimistic_lock_compare) is preserved and still unit-tested.
+// Defensive default: if the flag constant is somehow undefined (e.g. a script that
+// loads db.php without config/app.php), treat locking as OFF.
+// ============================================================
+function optimistic_lock_matches(string $client, string $db): bool
+{
+    if (!(defined('FF_OPTIMISTIC_LOCKING') && FF_OPTIMISTIC_LOCKING)) {
+        return true; // locking disabled → never report a conflict (last-write-wins)
+    }
+    return optimistic_lock_compare($client, $db);
 }

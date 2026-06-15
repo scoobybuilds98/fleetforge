@@ -70,8 +70,10 @@ if (in_array($log['log_type'], $immutableTypes, true)) {
         ['fields' => ['id' => "Cannot edit a {$log['log_type']} mileage log — these are system-generated."]]);
 }
 
-// ── Optimistic lock: compare created_at (D19 adapted for no updated_at)
-if ($log['created_at'] !== $lockAt) {
+// ── Optimistic lock: compare created_at (D19 adapted for no updated_at), via the
+//    shared gate so the app-wide FF_OPTIMISTIC_LOCKING flag governs it (disabled
+//    by default — last-write-wins). $lockAt is required (validated above).
+if (!optimistic_lock_matches($lockAt, $log['created_at'])) {
     json_error('STALE_DATA',
         'This mileage log was modified by another user. Refresh and try again.', 409,
         ['fields' => ['created_at' => 'This mileage log was modified by another user. Refresh and try again.']]);
