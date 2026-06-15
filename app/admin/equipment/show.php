@@ -107,11 +107,26 @@ function healthBadgeClass(?int $score): string {
     };
 }
 
-// Compliance days-remaining helper
+// Compliance days helper. Convention: POSITIVE = days until a FUTURE expiry,
+// NEGATIVE = days a PAST expiry is overdue, 0 = expires today.
+// S-CVI-OVERDUE-SIGN-FIX: the diff direction was reversed — `$date->diff(today)`
+// inverts for a future date, so a future expiry returned negative and rendered as
+// "overdue". Anchor today->$date so future yields invert=0 (positive). Matches the
+// JS daysUntil() twin (new Date(expiry) - now).
 function daysUntil(?string $date): ?int {
     if (!$date) return null;
-    $diff = (new DateTimeImmutable($date))->diff(new DateTimeImmutable('today'));
+    $diff = (new DateTimeImmutable('today'))->diff(new DateTimeImmutable($date));
     return $diff->invert ? -$diff->days : $diff->days;
+}
+
+// Human label for a compliance day-delta (pairs with daysUntil()):
+// future -> "expires in N days", past -> "overdue N days", 0 -> "expires today".
+function complianceDelta(?int $days): string {
+    if ($days === null) return '';
+    if ($days === 0)    return 'expires today';
+    $n    = abs($days);
+    $unit = $n === 1 ? 'day' : 'days';
+    return $days < 0 ? "overdue {$n} {$unit}" : "expires in {$n} {$unit}";
 }
 ?>
 
@@ -255,7 +270,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         ?>
         <div class="stat-value font-mono <?= $cls ?>"><?= e(date('M j, Y', strtotime($unit['cvi_expiry']))) ?></div>
         <div class="stat-delta text-secondary">
-            <?= $cviDays < 0 ? abs($cviDays) . ' days overdue' : $cviDays . ' days remaining' ?>
+            <?= e(complianceDelta($cviDays)) ?>
         </div>
         <?php else: ?>
         <div class="stat-value text-secondary">—</div>
@@ -862,7 +877,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                     <tr>
                                         <td class="font-medium" x-text="doc.label"></td>
                                         <td class="font-mono" x-text="doc.expiry ? formatDate(doc.expiry) : '—'"></td>
-                                        <td class="font-mono" x-text="doc.days !== null ? (doc.days < 0 ? Math.abs(doc.days) + ' days overdue' : doc.days + ' days') : '—'"></td>
+                                        <td class="font-mono" x-text="complianceDelta(doc.days)"></td>
                                         <td>
                                             <span class="badge badge-no-dot"
                                                   :class="complianceBadge(doc.days)"
@@ -2356,6 +2371,16 @@ function FF_UnitDetail() {
             if (days <= 7)  return 'Critical';
             if (days <= 30) return 'Expiring Soon';
             return 'OK';
+        },
+
+        // Human day-delta, mirrors the PHP complianceDelta(): future -> "expires in
+        // N days", past -> "overdue N days", 0 -> "expires today". (S-CVI-OVERDUE-SIGN-FIX)
+        complianceDelta(days) {
+            if (days === null) return '—';
+            if (days === 0)    return 'expires today';
+            const n = Math.abs(days);
+            const unit = n === 1 ? 'day' : 'days';
+            return days < 0 ? `overdue ${n} ${unit}` : `expires in ${n} ${unit}`;
         },
 
         // ── Documents tab methods ─────────────────────────────────
