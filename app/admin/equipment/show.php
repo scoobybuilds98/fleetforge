@@ -280,7 +280,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     <div class="stat-card stat-card--slate">
         <span class="stat-icon stat-icon--slate"><svg><use href="#icon-tag"/></svg></span>
         <div class="stat-label">VIN</div>
-        <div class="stat-value font-mono text-sm"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
+        <div class="stat-value stat-value--vin"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
     </div>
 
 </div>
