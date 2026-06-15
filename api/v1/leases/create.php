@@ -480,7 +480,7 @@ $leaseId = null;
 
 db_transaction(function () use (
     $unitId, $customerId, $contractNumber, $customer,
-    $startDate, $endDate, $minimumEndDate,
+    $startDate, $startTime, $endDate, $endTime, $minimumEndDate,
     $dailyRate, $weeklyRate, $monthlyRate, $mileageRate, $rateNotes,
     $currency, $mileageUnit, $billingCycle,
     $gstExemptFinal, $pstExemptFinal,
