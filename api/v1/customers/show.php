@@ -101,4 +101,10 @@ if (isset($customer['invoice_cc_emails']) && $customer['invoice_cc_emails'] !== 
     $customer['invoice_cc_emails'] = json_decode($customer['invoice_cc_emails'], true) ?? [];
 }
 
+// Serve-time financial redaction — strip dollar fields for roles without
+// payments:view (dispatchers see the customer record minus balances/revenue).
+if (!can_view_financials()) {
+    $customer = redact_keys($customer, ['credit_limit', 'outstanding_balance', 'total_revenue', 'account_credit_balance']);
+}
+
 json_success(['customer' => $customer]);

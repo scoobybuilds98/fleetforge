@@ -116,7 +116,7 @@ if (!$row) {
 // WHY: Trap 7 — qr_code_path is a server filesystem path, strip it from API response
 // The QR download endpoint handles generation/serving separately
 
-json_success([
+$payload = ([
     'id'                     => (int) $row['id'],
     'template_id'            => (int) $row['template_id'],
     'template_name'          => $row['template_name'],
@@ -199,3 +199,11 @@ json_success([
     // has no tags or has not been synced yet.
     'samsara_tags'                   => $row['samsara_tags'] ? json_decode($row['samsara_tags'], true) : [],
 ]);
+
+// Serve-time financial redaction — unit cost/revenue are dollar figures gated
+// on payments:view. Operational fields (status, health, telemetry) stay.
+if (!can_view_financials()) {
+    $payload = redact_keys($payload, ['total_revenue', 'total_maintenance_cost', 'acquisition_cost']);
+}
+
+json_success($payload);

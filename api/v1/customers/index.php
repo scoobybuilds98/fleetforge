@@ -187,4 +187,11 @@ foreach ($rows as $row) {
     ];
 }
 
+// Serve-time financial redaction — roles without payments:view (e.g.
+// dispatchers, who are documented as not receiving customer balances/revenue)
+// get the operational customer list with the dollar fields stripped.
+if (!can_view_financials()) {
+    $items = redact_rows($items, ['outstanding_balance', 'total_revenue', 'account_credit_balance', 'credit_limit']);
+}
+
 json_paginated($items, $total, $page, $perPage);

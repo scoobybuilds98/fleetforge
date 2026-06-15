@@ -171,4 +171,10 @@ foreach ($rows as $row) {
     ];
 }
 
+// Serve-time financial redaction — strip per-unit revenue for roles without
+// payments:view; the operational fleet list stays intact.
+if (!can_view_financials()) {
+    $items = redact_rows($items, ['total_revenue', 'total_maintenance_cost', 'acquisition_cost']);
+}
+
 json_paginated($items, $total, $page, $perPage);

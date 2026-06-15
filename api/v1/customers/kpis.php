@@ -75,9 +75,17 @@ $overdueRow = db_row(
 );
 $overdueBalance = bcround((string) ($overdueRow['total'] ?? '0'), 2);
 
-json_success([
+$kpis = [
     'total'           => $total,
     'active'          => $active,
     'credit_hold'     => $creditHold,
     'overdue_balance' => $overdueBalance,
-]);
+];
+
+// Serve-time financial redaction — overdue_balance is a dollar figure; counts
+// stay visible. Roles without payments:view get the counts, not the balance.
+if (!can_view_financials()) {
+    unset($kpis['overdue_balance']);
+}
+
+json_success($kpis);
