@@ -163,12 +163,15 @@ require_once FF_ROOT . '/includes/header.php';
                             </button>
                         </div>
                         <div class="form-error" x-show="errors.start_date" x-text="errors.start_date"></div>
-                        <!-- S-LEASE-RENTAL-DAY-TIME: pickup time -->
+                        <!-- S-LEASE-RENTAL-DAY-TIME: lease start time (mandatory) -->
                         <div style="margin-top:6px;">
-                            <label class="form-label" for="start_time" style="font-size:0.8125rem;margin-bottom:3px;">Pickup Time <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);">(optional)</span></label>
+                            <label class="form-label" for="start_time" style="font-size:0.8125rem;margin-bottom:3px;">Lease Start Time <span style="color:var(--color-danger,#dc2626);">*</span></label>
                             <input type="time" id="start_time" class="form-control"
-                                   x-model="form.start_time" style="max-width:150px;">
-                            <div class="form-hint" style="font-size:0.75rem;">Sets the billing cut-off for returns.</div>
+                                   x-model="form.start_time"
+                                   :class="errors.start_time ? 'is-invalid' : ''"
+                                   required style="max-width:150px;">
+                            <div class="form-error" x-show="errors.start_time" x-text="errors.start_time"></div>
+                            <div class="form-hint" style="font-size:0.75rem;">Sets the billing cut-off for same-day returns.</div>
                         </div>
                     </div>
                     <div class="form-group">
@@ -1285,6 +1288,10 @@ function FF_CreateLease() {
             }
             if (!this.form.start_date) {
                 FF_Validate.field(form, 'start_date', 'Start date is required.');
+                ok = false;
+            }
+            if (!this.form.start_time) {
+                FF_Validate.field(form, 'start_time', 'Lease start time is required.');
                 ok = false;
             }
             if (this.form.end_date && this.form.start_date &&

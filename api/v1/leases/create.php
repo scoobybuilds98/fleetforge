@@ -69,13 +69,14 @@ $fields = [];
 $customerId    = clean_int($body['customer_id'] ?? null);
 $unitId        = clean_int($body['equipment_unit_id'] ?? null);
 $startDate     = clean_date($body['start_date'] ?? null);
-// S-LEASE-RENTAL-DAY-TIME: optional pickup / expected-return times.
+// S-LEASE-RENTAL-DAY-TIME: start_time is mandatory; end_time is optional.
 $startTime     = clean_time($body['start_time'] ?? null);
 $endTime       = clean_time($body['end_time'] ?? null);
 
 if (!$customerId)  $fields['customer_id']        = 'Please select a customer.';
 if (!$unitId)      $fields['equipment_unit_id']  = 'Please select an equipment unit.';
 if (!$startDate)   $fields['start_date']         = 'Start date is required.';
+if (!$startTime)   $fields['start_time']         = 'Lease start time is required.';
 
 // ── Rate fields — at least one must be > 0; negatives rejected ─
 // VALID-2: use clean_decimal() so we can detect negatives — the

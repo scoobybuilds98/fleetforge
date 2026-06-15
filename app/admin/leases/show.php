@@ -1295,8 +1295,8 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                         <input type="time" id="actual_return_time" class="form-control"
                                x-model="closeForm.actual_return_time" style="max-width:150px;">
                         <div class="form-hint" style="font-size:0.75rem;">
-                            Pickup time: <span x-text="lease.start_time ? lease.start_time.slice(0,5) : ''"></span>.
-                            Returns after pickup time are billed for the extra day.
+                            Lease start time: <span x-text="lease.start_time ? lease.start_time.slice(0,5) : ''"></span>.
+                            Returns after the start time are billed for the extra day.
                         </div>
                     </div>
 
