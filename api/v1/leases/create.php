@@ -69,6 +69,9 @@ $fields = [];
 $customerId    = clean_int($body['customer_id'] ?? null);
 $unitId        = clean_int($body['equipment_unit_id'] ?? null);
 $startDate     = clean_date($body['start_date'] ?? null);
+// S-LEASE-RENTAL-DAY-TIME: optional pickup / expected-return times.
+$startTime     = clean_time($body['start_time'] ?? null);
+$endTime       = clean_time($body['end_time'] ?? null);
 
 if (!$customerId)  $fields['customer_id']        = 'Please select a customer.';
 if (!$unitId)      $fields['equipment_unit_id']  = 'Please select an equipment unit.';
@@ -562,7 +565,9 @@ db_transaction(function () use (
         'equipment_snapshot_json'  => $equipmentSnapshotJson,
         'status'                   => 'pending',
         'start_date'               => $startDate,
+        'start_time'               => $startTime,
         'end_date'                 => $endDate,
+        'end_time'                 => $endTime,
         'minimum_end_date'         => $minimumEndDate,
         'daily_rate'               => $dailyRate,
         'weekly_rate'              => $weeklyRate,

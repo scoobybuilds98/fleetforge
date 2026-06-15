@@ -55,6 +55,11 @@ if (!$id) {
 }
 
 $actualReturnDate = clean_date($body['actual_return_date'] ?? null) ?? date('Y-m-d');
+// S-LEASE-RENTAL-DAY-TIME: optional actual return time. When present (and
+// lease.start_time is also set), InvoiceGenerator computes the effective
+// billable end date (effective_billable_end_date rule) before calling the
+// engine. NULL = legacy fall-back (inclusive date-only extent unchanged).
+$actualReturnTime = clean_time($body['actual_return_time'] ?? null);
 $mileageAtEnd     = clean_int($body['mileage_at_end'] ?? null);
 $closeNotes       = clean_string($body['close_notes'] ?? null, 5000);
 
@@ -686,11 +691,12 @@ db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNot
 
     // ── Update lease → completed ───────────────────────────────
     $leaseUpdate = [
-        'status'             => 'completed',
-        'actual_return_date' => $actualReturnDate,
-        'closed_at'          => date('Y-m-d H:i:s'),
-        'closed_by_user_id'  => current_user_id(),
-        'updated_by'         => current_user_id(),
+        'status'               => 'completed',
+        'actual_return_date'   => $actualReturnDate,
+        'actual_return_time'   => $actualReturnTime,  // S-LEASE-RENTAL-DAY-TIME; NULL = not captured
+        'closed_at'            => date('Y-m-d H:i:s'),
+        'closed_by_user_id'    => current_user_id(),
+        'updated_by'           => current_user_id(),
     ];
     if ($mileageAtEnd !== null) {
         $leaseUpdate['mileage_at_end'] = $mileageAtEnd;

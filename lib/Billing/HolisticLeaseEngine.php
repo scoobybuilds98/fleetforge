@@ -733,6 +733,66 @@ class HolisticLeaseEngine
     }
 
     /**
+     * S-LEASE-RENTAL-DAY-TIME — Compute the effective billable end date
+     * from the raw return date + time-of-day comparison.
+     *
+     * Rule (locked with operator):
+     *   if (return_time > pickup_time + grace_minutes) → bill the return day
+     *                                                     return $returnDate
+     *   else (on-time or within grace)                 → final day not billed
+     *                                                     return $returnDate − 1 day
+     *
+     * Minimum: $startDate — the result is never before the lease start, so
+     * a same-day pickup + on-time return still produces at least 1 billed day
+     * (inclusiveDays($startDate, $startDate) = 1, D14).
+     *
+     * Times are compared as integer minutes-since-midnight; no float math.
+     * Called only when BOTH $returnTime and $pickupTime are non-empty strings
+     * (caller is responsible for the NULL guard — NULL → legacy fall-back).
+     *
+     * @param string $returnDate   Y-m-d — raw actual_return_date
+     * @param string $returnTime   HH:MM or HH:MM:SS — actual_return_time
+     * @param string $pickupTime   HH:MM or HH:MM:SS — start_time
+     * @param int    $graceMinutes lease.return_grace_minutes setting (default 0)
+     * @param string $startDate    Y-m-d — lease start_date (min-1-day guard)
+     * @return string  Y-m-d effective extent end
+     */
+    public static function effectiveBillableEndDate(
+        string $returnDate,
+        string $returnTime,
+        string $pickupTime,
+        int    $graceMinutes,
+        string $startDate
+    ): string {
+        $returnMin = self::timeToMinutes($returnTime);
+        $pickupMin = self::timeToMinutes($pickupTime);
+        $deadline  = $pickupMin + $graceMinutes;
+
+        if ($returnMin > $deadline) {
+            // Late return: bill the return day as a full extent day.
+            return $returnDate;
+        }
+
+        // On-time or within grace: the return day is not billed.
+        $dt       = new \DateTimeImmutable($returnDate);
+        $adjusted = $dt->modify('-1 day')->format('Y-m-d');
+
+        // Min 1 billed day: never return a date before the lease start.
+        return ($adjusted < $startDate) ? $startDate : $adjusted;
+    }
+
+    /**
+     * Convert a HH:MM or HH:MM:SS time string to integer minutes since
+     * midnight. Used for the time-of-day billing comparison (integer-only,
+     * no float arithmetic per D16 spirit).
+     */
+    private static function timeToMinutes(string $time): int
+    {
+        $parts = explode(':', $time);
+        return (int)$parts[0] * 60 + (int)($parts[1] ?? 0);
+    }
+
+    /**
      * Inclusive day counting per D14 (spec §6.1).
      *
      * inclusiveDays('2026-03-28', '2026-03-28') = 1

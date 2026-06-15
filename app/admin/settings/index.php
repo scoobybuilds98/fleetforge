@@ -116,7 +116,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 }
             }
 
-            if (empty($saveError)) {
+            // S-LEASE-RENTAL-DAY-TIME: also save grace minutes when submitted via that form
+            if (isset($_POST['lease_return_grace_minutes']) && !isset($_POST['lease_km_to_miles_conversion'])) {
+                $rawGrace = (string) ($_POST['lease_return_grace_minutes'] ?? '0');
+                $graceVal = (string)(int) preg_replace('/[^0-9]/', '', $rawGrace);
+                db_execute(
+                    "UPDATE settings SET `value` = ?, updated_by = ?, updated_at = NOW() WHERE `key` = 'lease.return_grace_minutes'",
+                    [$graceVal, current_user_id()]
+                );
+                db_insert('audit_log', [
+                    'user_id'      => current_user_id(),
+                    'user_name'    => current_user()['name'] ?? 'system',
+                    'action'       => 'update',
+                    'module'       => 'settings',
+                    'entity_type'  => 'settings_group',
+                    'entity_label' => 'lease',
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                    'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                    'notes'        => "Lease return grace minutes updated to {$graceVal}",
+                ]);
+                $saveFlash = 'Lease time-of-day settings saved.';
+            }
+
+            if (empty($saveError) && isset($_POST['lease_km_to_miles_conversion'])) {
                 $oldKm = settings_get('lease.km_to_miles_conversion', '0.621371');
                 $oldMi = settings_get('lease.miles_to_km_conversion', '1.609344');
                 db_execute(
@@ -942,6 +964,52 @@ $_miFactor = settings_get('lease.miles_to_km_conversion', '1.609344') ?? '1.6093
             <?php if ($canEdit): ?>
             <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
                 <button type="submit" class="btn btn-primary btn-sm">Save Conversion Factors</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+
+<?php
+// S-LEASE-RENTAL-DAY-TIME: card for time-of-day return grace window.
+$_graceMinutes = settings_get('lease.return_grace_minutes', '0') ?? '0';
+?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;">Lease Time-of-Day Billing</div>
+    <div class="card-body">
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="lease">
+
+            <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 16px 0;">
+                When a pickup time and actual return time are both captured, FleetForge compares
+                them to determine whether the return day should be billed.
+                If the customer returns within the grace window of the original pickup time,
+                the return day is not billed.
+            </p>
+
+            <div class="form-group" style="max-width:320px;">
+                <label class="form-label" for="lease_return_grace_minutes">Return grace window</label>
+                <div class="input-group">
+                    <input type="number" id="lease_return_grace_minutes"
+                           name="lease_return_grace_minutes"
+                           class="form-control font-mono"
+                           value="<?= e($_graceMinutes) ?>"
+                           min="0" max="1440" step="1"
+                           placeholder="0"
+                           <?= !$canEdit ? 'readonly' : '' ?>>
+                    <span class="input-group-suffix">minutes</span>
+                </div>
+                <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;">
+                    0 = any return past pickup time triggers an extra billed day.
+                    Example: 60 = up to 1 hour past pickup time is considered on-time.
+                    Applies only to leases where pickup time is captured.
+                </p>
+            </div>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save Time-of-Day Settings</button>
             </div>
             <?php endif; ?>
         </form>

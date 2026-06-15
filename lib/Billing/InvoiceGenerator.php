@@ -195,6 +195,20 @@ class InvoiceGenerator
                 $extentEnd = $periodEnd;
                 if (!empty($lease['actual_return_date'])) {
                     $extentEnd = (string)$lease['actual_return_date'];
+                    // S-LEASE-RENTAL-DAY-TIME: apply time-of-day rule when
+                    // both pickup and actual-return times are captured.
+                    // NULL on either = legacy lease; fall back to inclusive
+                    // date-only extent (no change in behaviour).
+                    if (!empty($lease['actual_return_time']) && !empty($lease['start_time'])) {
+                        $grace     = (int)(settings_get('lease.return_grace_minutes', '0') ?? '0');
+                        $extentEnd = HolisticLeaseEngine::effectiveBillableEndDate(
+                            $extentEnd,
+                            (string)$lease['actual_return_time'],
+                            (string)$lease['start_time'],
+                            $grace,
+                            (string)$lease['start_date']
+                        );
+                    }
                 } elseif (!empty($lease['end_date'])) {
                     $extentEnd = (string)$lease['end_date'];
                 }
@@ -1492,7 +1506,8 @@ class InvoiceGenerator
             // FOR UPDATE on the lease row for the whole batch (D20) — the
             // per-segment createFromLease() re-locks the same row harmlessly.
             $lease = db_row(
-                "SELECT id, status, start_date, end_date, actual_return_date, engine_version,
+                "SELECT id, status, start_date, start_time, end_date, end_time,
+                        actual_return_date, actual_return_time, engine_version,
                         daily_rate, weekly_rate, monthly_rate
                    FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
                 [$leaseId]
@@ -1571,6 +1586,18 @@ class InvoiceGenerator
             $extentDefinitive = false;
             if (!empty($lease['actual_return_date'])) {
                 $target = (string)$lease['actual_return_date'];
+                // S-LEASE-RENTAL-DAY-TIME: apply time-of-day rule to the
+                // fan-out target (extent_end) when both times are captured.
+                if (!empty($lease['actual_return_time']) && !empty($lease['start_time'])) {
+                    $grace  = (int)(settings_get('lease.return_grace_minutes', '0') ?? '0');
+                    $target = HolisticLeaseEngine::effectiveBillableEndDate(
+                        $target,
+                        (string)$lease['actual_return_time'],
+                        (string)$lease['start_time'],
+                        $grace,
+                        (string)$lease['start_date']
+                    );
+                }
                 $extentDefinitive = true;
             } elseif (!empty($lease['end_date'])) {
                 $target = (string)$lease['end_date'];

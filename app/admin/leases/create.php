@@ -163,6 +163,13 @@ require_once FF_ROOT . '/includes/header.php';
                             </button>
                         </div>
                         <div class="form-error" x-show="errors.start_date" x-text="errors.start_date"></div>
+                        <!-- S-LEASE-RENTAL-DAY-TIME: pickup time -->
+                        <div style="margin-top:6px;">
+                            <label class="form-label" for="start_time" style="font-size:0.8125rem;margin-bottom:3px;">Pickup Time <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);">(optional)</span></label>
+                            <input type="time" id="start_time" class="form-control"
+                                   x-model="form.start_time" style="max-width:150px;">
+                            <div class="form-hint" style="font-size:0.75rem;">Sets the billing cut-off for returns.</div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="end_date">End Date</label>
@@ -178,6 +185,12 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div class="form-hint">Leave blank for open-ended lease.</div>
                         <div class="form-error" x-show="errors.end_date" x-text="errors.end_date"></div>
+                        <!-- S-LEASE-RENTAL-DAY-TIME: expected return time -->
+                        <div style="margin-top:6px;" x-show="form.end_date" x-cloak>
+                            <label class="form-label" for="end_time" style="font-size:0.8125rem;margin-bottom:3px;">Expected Return Time <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);">(optional)</span></label>
+                            <input type="time" id="end_time" class="form-control"
+                                   x-model="form.end_time" style="max-width:150px;">
+                        </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="minimum_end_date">Minimum End Date</label>
@@ -895,7 +908,9 @@ function FF_CreateLease() {
             contract_number:    '',
             po_number:          '',
             start_date:         '',
+            start_time:         '',
             end_date:           '',
+            end_time:           '',
             minimum_end_date:   '',
             billing_cycle:      'monthly',
             currency:           'CAD',

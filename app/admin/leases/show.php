@@ -298,9 +298,29 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                             <td><span class="badge badge-no-dot" :class="statusBadgeClass(lease.status)"
                                                       x-text="lease.status.charAt(0).toUpperCase() + lease.status.slice(1)"></span></td>
                                         </tr>
-                                        <tr><td class="text-secondary">Start Date</td><td x-text="formatDate(lease.start_date)"></td></tr>
-                                        <tr><td class="text-secondary">End Date</td><td x-text="lease.end_date ? formatDate(lease.end_date) : 'Open-ended'"></td></tr>
-                                        <tr x-show="lease.actual_return_date"><td class="text-secondary">Return Date</td><td x-text="formatDate(lease.actual_return_date)"></td></tr>
+                                        <tr><td class="text-secondary">Start Date</td>
+                                            <td>
+                                                <span x-text="formatDate(lease.start_date)"></span>
+                                                <span x-show="lease.start_time" class="text-secondary" style="font-size:0.8125rem;" x-text="' at ' + (lease.start_time ? lease.start_time.slice(0,5) : '')"></span>
+                                            </td>
+                                        </tr>
+                                        <tr><td class="text-secondary">End Date</td>
+                                            <td>
+                                                <template x-if="!lease.end_date"><span>Open-ended</span></template>
+                                                <template x-if="lease.end_date">
+                                                    <span>
+                                                        <span x-text="formatDate(lease.end_date)"></span>
+                                                        <span x-show="lease.end_time" class="text-secondary" style="font-size:0.8125rem;" x-text="' by ' + (lease.end_time ? lease.end_time.slice(0,5) : '')"></span>
+                                                    </span>
+                                                </template>
+                                            </td>
+                                        </tr>
+                                        <tr x-show="lease.actual_return_date"><td class="text-secondary">Return Date</td>
+                                            <td>
+                                                <span x-text="formatDate(lease.actual_return_date)"></span>
+                                                <span x-show="lease.actual_return_time" class="text-secondary" style="font-size:0.8125rem;" x-text="' at ' + (lease.actual_return_time ? lease.actual_return_time.slice(0,5) : '')"></span>
+                                            </td>
+                                        </tr>
                                         <tr><td class="text-secondary">Billing Cycle</td><td x-text="lease.billing_cycle === 'monthly' ? 'Monthly' : 'On Close Only'"></td></tr>
                                         <!-- ADV-BILL-1: only show when activation generated a prepaid batch -->
                                         <tr x-show="(lease.advance_billing_periods || 0) > 0">
@@ -1266,6 +1286,20 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                x-model="closeForm.actual_return_date">
                     </div>
 
+                    <!-- S-LEASE-RENTAL-DAY-TIME: return time -->
+                    <div class="form-group" x-show="lease && lease.start_time" x-cloak>
+                        <label class="form-label" for="actual_return_time">
+                            Return Time
+                            <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);font-size:0.8125rem;">(optional)</span>
+                        </label>
+                        <input type="time" id="actual_return_time" class="form-control"
+                               x-model="closeForm.actual_return_time" style="max-width:150px;">
+                        <div class="form-hint" style="font-size:0.75rem;">
+                            Pickup time: <span x-text="lease.start_time ? lease.start_time.slice(0,5) : ''"></span>.
+                            Returns after pickup time are billed for the extra day.
+                        </div>
+                    </div>
+
                     <!-- ── SAMSARA-3: Closing Odometer section ─────────
                          Shows lease's starting odometer (if captured),
                          lets user enter / fetch the current odometer,
@@ -1775,6 +1809,7 @@ function FF_LeaseDetail() {
 
         closeForm: {
             actual_return_date: new Date().toISOString().slice(0,10),
+            actual_return_time: '',  // S-LEASE-RENTAL-DAY-TIME; empty = not captured
             mileage_at_end:     '',
             close_notes:        '',
             // SAMSARA-3: closing odometer (decimal km, live from Samsara or manual)
@@ -2562,6 +2597,10 @@ function FF_LeaseDetail() {
                 actual_return_date: this.closeForm.actual_return_date || null,
                 close_notes:        this.closeForm.close_notes || null,
             };
+            // S-LEASE-RENTAL-DAY-TIME: include return time when supplied
+            if (this.closeForm.actual_return_time) {
+                payload.actual_return_time = this.closeForm.actual_return_time;
+            }
             if (this.closeForm.mileage_at_end !== '') {
                 payload.mileage_at_end = parseInt(this.closeForm.mileage_at_end);
             }
