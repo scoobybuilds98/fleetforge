@@ -84,6 +84,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 $saveFlash = 'Currency settings saved.';
             }
 
+        } elseif ($groupName === 'lease') {
+            // S-MILEAGE-UNIT-SIMPLIFY: custom handler for the lease conversion
+            // factor card. When the unlink toggle is OFF (default) the server
+            // derives miles_to_km = 1 / km_to_miles (bcdiv, 6dp) to keep the
+            // pair mathematically reciprocal. When unlink is ON both values are
+            // saved as-submitted so an operator can configure a non-standard pair.
+            $rawKm = $_POST['lease_km_to_miles_conversion'] ?? null;
+            $rawMi = $_POST['lease_miles_to_km_conversion'] ?? null;
+            $unlink = !empty($_POST['lease_factors_unlinked']);
+
+            $kmStripped = $rawKm !== null ? (string) preg_replace('/[^0-9.]/', '', (string) $rawKm) : null;
+            $miStripped = $rawMi !== null ? (string) preg_replace('/[^0-9.]/', '', (string) $rawMi) : null;
+
+            if ($kmStripped === null || $kmStripped === '' || !is_numeric($kmStripped) || (float) $kmStripped <= 0) {
+                $saveError = 'KM → Miles factor must be a positive number.';
+            } elseif ($unlink && ($miStripped === null || $miStripped === '' || !is_numeric($miStripped) || (float) $miStripped <= 0)) {
+                $saveError = 'Miles → KM factor must be a positive number when unlinked.';
+            }
+
+            if (empty($saveError)) {
+                $kmFinal = bcround((string)(float)$kmStripped, 6);
+                $miFinal = $unlink
+                    ? bcround((string)(float)$miStripped, 6)
+                    : bcround(bcdiv('1', $kmFinal, 12), 6); // 1/x to 6dp
+
+                if (bccomp($kmFinal, '0', 6) <= 0) {
+                    $saveError = 'KM → Miles factor must be greater than zero.';
+                } elseif (bccomp($miFinal, '0', 6) <= 0) {
+                    $saveError = 'Miles → KM factor must be greater than zero.';
+                }
+            }
+
+            if (empty($saveError)) {
+                $oldKm = settings_get('lease.km_to_miles_conversion', '0.621371');
+                $oldMi = settings_get('lease.miles_to_km_conversion', '1.609344');
+                db_execute(
+                    "UPDATE settings SET `value` = ?, updated_by = ?, updated_at = NOW() WHERE `key` = 'lease.km_to_miles_conversion'",
+                    [$kmFinal, current_user_id()]
+                );
+                db_execute(
+                    "UPDATE settings SET `value` = ?, updated_by = ?, updated_at = NOW() WHERE `key` = 'lease.miles_to_km_conversion'",
+                    [$miFinal, current_user_id()]
+                );
+                db_insert('audit_log', [
+                    'user_id'      => current_user_id(),
+                    'user_name'    => current_user()['name'] ?? 'system',
+                    'action'       => 'update',
+                    'module'       => 'settings',
+                    'entity_type'  => 'settings_group',
+                    'entity_label' => 'lease',
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                    'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+                    'notes'        => "Lease conversion factors updated: km→mi {$oldKm}→{$kmFinal}; mi→km {$oldMi}→{$miFinal}" . ($unlink ? ' (unlinked)' : ' (auto-reciprocated)'),
+                ]);
+                $saveFlash = 'Lease conversion factors saved.';
+            }
+
         } elseif ($groupName) {
             // S-INTEL-FIX: per-form opt-in via _form_keys[]
             //
@@ -361,6 +418,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             'company'            => 'general',
             'invoices'           => 'general',
             'leases'             => 'general',
+            'lease'              => 'general',
             'maintenance'        => 'general',
             'alerts'             => 'general',
             'notifications'      => 'general',
@@ -401,7 +459,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio','credit_application')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio','credit_application','lease')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -789,6 +847,101 @@ if (!empty($grouped['currency'])) {
             <?php if ($canEdit): ?>
             <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
                 <button type="submit" class="btn btn-primary btn-sm">Save Currency Settings</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+
+<?php
+// S-MILEAGE-UNIT-SIMPLIFY: custom card for global lease km↔miles conversion
+// factors. The generic loop skips group_name='lease' (not in $primaryGroups).
+// Auto-reciprocation: km→mi changes auto-derive mi→km = 1/x in Alpine.
+// Advanced unlink toggle enables independent editing of both factors.
+$_kmFactor = settings_get('lease.km_to_miles_conversion', '0.621371') ?? '0.621371';
+$_miFactor = settings_get('lease.miles_to_km_conversion', '1.609344') ?? '1.609344';
+?>
+<div class="card" style="margin-bottom:20px;"
+     x-data="{
+        kmVal: '<?= e($_kmFactor) ?>',
+        miVal: '<?= e($_miFactor) ?>',
+        unlinked: false,
+        updateMi() {
+            if (!this.unlinked) {
+                const v = parseFloat(this.kmVal);
+                if (v > 0) this.miVal = (1 / v).toFixed(6);
+            }
+        }
+     }">
+    <div class="card-header" style="font-weight:600;">Mileage Conversion Factors</div>
+    <div class="card-body">
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="lease">
+            <input type="hidden" name="lease_factors_unlinked" :value="unlinked ? '1' : ''">
+
+            <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 16px 0;">
+                These factors are used when creating new leases to derive the counterpart unit's rate and allowance.
+                They are snapshotted into each lease at creation and cannot be retroactively changed per-lease.
+            </p>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px 24px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="lease_km_to_miles_conversion">1 km =</label>
+                    <div class="input-group">
+                        <input type="number" id="lease_km_to_miles_conversion"
+                               name="lease_km_to_miles_conversion"
+                               class="form-control font-mono"
+                               x-model="kmVal"
+                               @input="updateMi()"
+                               step="0.000001" min="0.000001"
+                               placeholder="0.621371"
+                               <?= !$canEdit ? 'readonly' : '' ?>>
+                        <span class="input-group-suffix">miles</span>
+                    </div>
+                    <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;">International standard: 0.621371</p>
+                </div>
+
+                <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="lease_miles_to_km_conversion">1 mile =</label>
+                    <div class="input-group">
+                        <input type="number" id="lease_miles_to_km_conversion"
+                               name="lease_miles_to_km_conversion"
+                               class="form-control font-mono"
+                               x-model="miVal"
+                               step="0.000001" min="0.000001"
+                               placeholder="1.609344"
+                               :readonly="!unlinked<?= !$canEdit ? ' || true' : '' ?>"
+                               :style="!unlinked ? 'background:var(--bg-muted);cursor:not-allowed;' : ''">
+                        <span class="input-group-suffix">km</span>
+                    </div>
+                    <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;" x-show="!unlinked">Auto-derived as 1 ÷ (km→miles factor).</p>
+                    <p class="text-muted" style="font-size:0.75rem;margin:4px 0 0;" x-show="unlinked" x-cloak>International standard: 1.609344</p>
+                </div>
+            </div>
+
+            <!-- Advanced unlink toggle -->
+            <?php if ($canEdit): ?>
+            <div style="margin-top:16px;">
+                <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:0.875rem;">
+                    <input type="checkbox" class="form-check-input" x-model="unlinked"
+                           @change="if (!unlinked) updateMi()">
+                    <span>Advanced: unlink factors (allow non-reciprocal pair)</span>
+                </label>
+                <div x-show="unlinked" x-cloak
+                     style="margin-top:6px;padding:8px 12px;border-radius:5px;
+                            background:var(--color-warning-bg,#fef3c7);
+                            border:1px solid var(--color-warning-border,#fcd34d);
+                            font-size:0.8125rem;color:var(--color-warning,#92400e);">
+                    ⚠ Non-reciprocal factors will cause km↔miles round-trips to drift.
+                    Use only if you have a specific business reason.
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save Conversion Factors</button>
             </div>
             <?php endif; ?>
         </form>

@@ -24,30 +24,30 @@ declare(strict_types=1);
  *              If blank, auto-generates CN-XXXXXX-YYYY (generate_random_code(6) + year)
  *              with collision retry loop (unlikely but safe).
  *
- *              Dual-unit mileage (S-LEASE-UNITS): new fields mileage_rate_km,
- *              mileage_rate_miles, estimated_mileage_km, estimated_mileage_miles,
- *              km_to_miles_conversion, miles_to_km_conversion. Legacy mileage_rate
- *              and estimated_mileage kept synced to primary-unit value for backward
- *              compat (close.php, billing math reads unchanged).
+ *              Mileage (S-MILEAGE-UNIT-SIMPLIFY): accepts mileage_unit + single
+ *              mileage_rate + single estimated_mileage. Counterpart columns
+ *              (mileage_rate_km, mileage_rate_miles, estimated_mileage_km,
+ *              estimated_mileage_miles) are derived using global settings factors
+ *              (lease.km_to_miles_conversion / lease.miles_to_km_conversion)
+ *              and snapshots those factors into km_to_miles_conversion /
+ *              miles_to_km_conversion on the lease row.
  *
  * @method      POST
  * @body        JSON — customer_id, equipment_unit_id, start_date (required)
- *              daily_rate, weekly_rate, monthly_rate (at least one > 0, or mileage_rate_km/miles)
+ *              daily_rate, weekly_rate, monthly_rate (at least one > 0, or mileage_rate)
  *              Optional: end_date, currency, mileage_unit, billing_cycle,
  *              gst_exempt, pst_exempt, discount_type, discount_value,
  *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
  *              gps_opt_in, gps_cost (S-LEASE-GPS-COST: per-day rate, defaults
  *              opt_in=true / cost=$1.00 if absent),
- *              po_number, notes, internal_notes, rate_notes, minimum_end_date,
- *              mileage_rate_km, mileage_rate_miles, estimated_mileage_km,
- *              estimated_mileage_miles, km_to_miles_conversion, miles_to_km_conversion
+ *              po_number, notes, internal_notes, rate_notes, minimum_end_date
  * @auth        Session required; require_permission('leases','create')
  * @returns     201 { id, contract_number } | 409 UNIT_UNAVAILABLE | 422 validation errors
  *
  * @depends     api/bootstrap.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases, §12 billing
  * @decisions   D14 (day counting), D16 (bcmath), D19 (optimistic lock), D20 (FOR UPDATE)
- * @session     S007, S-LEASE-UNITS
+ * @session     S007, S-LEASE-UNITS, S-MILEAGE-UNIT-SIMPLIFY
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -93,27 +93,8 @@ $weeklyRate  = ($weeklyRateIn  !== null && bccomp($weeklyRateIn,  '0', 4) >= 0) 
 $monthlyRate = ($monthlyRateIn !== null && bccomp($monthlyRateIn, '0', 4) >= 0) ? $monthlyRateIn : '0.00';
 $mileageRate = ($mileageRateIn !== null && bccomp($mileageRateIn, '0', 4) >= 0) ? $mileageRateIn : '0.0000';
 
-// Dual-unit rate fields — hoisted above the $anyMileageRate guard so the
-// guard can read them without triggering "Undefined variable" warnings.
-// Allowance and conversion-factor extraction stay at their original spots
-// further down — only the rate fields are referenced by the guard.
-$rateKmRaw    = isset($body['mileage_rate_km'])    ? clean_decimal($body['mileage_rate_km'])    : null;
-$rateMilesRaw = isset($body['mileage_rate_miles'])  ? clean_decimal($body['mileage_rate_miles']) : null;
-
-if ($rateKmRaw !== null && bccomp($rateKmRaw, '0', 4) < 0) {
-    $fields['mileage_rate_km'] = 'KM mileage rate cannot be negative.';
-    $rateKmRaw = null;
-}
-if ($rateMilesRaw !== null && bccomp($rateMilesRaw, '0', 4) < 0) {
-    $fields['mileage_rate_miles'] = 'Mile mileage rate cannot be negative.';
-    $rateMilesRaw = null;
-}
-
 // Enforce: at least one rate must be positive (spec §7.5 docblock)
-// Check both legacy mileage_rate and new dual-unit fields
-$anyMileageRate = bccomp($mileageRate, '0', 4) > 0
-    || ($rateKmRaw !== null    && bccomp($rateKmRaw,    '0', 4) > 0)
-    || ($rateMilesRaw !== null && bccomp($rateMilesRaw, '0', 4) > 0);
+$anyMileageRate = bccomp($mileageRate, '0', 4) > 0;
 
 if (
     !isset($fields['daily_rate']) && !isset($fields['weekly_rate']) &&
@@ -170,57 +151,14 @@ if ($billingCycleRaw === 'monthly') {
     }
 }
 
-// ── Dual-unit mileage fields (S-LEASE-UNITS) ───────────────────
-// Accept new dual-unit fields. If only legacy mileage_rate is provided,
-// derive dual-unit values from it using conversion factors.
-
-// Conversion factors — pull from settings for per-request defaults
-$sysKmToMiles  = (string)(settings_get('lease.km_to_miles_default', '0.621371') ?? '0.621371');
-$sysMilesToKm  = (string)(settings_get('lease.miles_to_km_default', '1.609344') ?? '1.609344');
-
-$kmToMilesRaw  = $body['km_to_miles_conversion']  ?? null;
-$milesToKmRaw  = $body['miles_to_km_conversion']   ?? null;
-
-$kmToMilesCand = ($kmToMilesRaw !== null) ? clean_decimal($kmToMilesRaw) : null;
-$milesToKmCand = ($milesToKmRaw !== null) ? clean_decimal($milesToKmRaw) : null;
-
-if ($kmToMilesCand !== null && bccomp($kmToMilesCand, '0', 6) <= 0) {
-    $fields['km_to_miles_conversion'] = 'KM to miles conversion factor must be greater than zero.';
-    $kmToMilesCand = null;
-}
-if ($milesToKmCand !== null && bccomp($milesToKmCand, '0', 6) <= 0) {
-    $fields['miles_to_km_conversion'] = 'Miles to KM conversion factor must be greater than zero.';
-    $milesToKmCand = null;
-}
-
-$kmToMilesFinal = $kmToMilesCand ?? $sysKmToMiles;
-$milesToKmFinal = $milesToKmCand ?? $sysMilesToKm;
-
-// Round conversion factors to 6 decimal places
-$kmToMilesFinal = bcround($kmToMilesFinal, 6);
-$milesToKmFinal = bcround($milesToKmFinal, 6);
-
-// Flag non-standard conversion factors for audit log (warn, don't reject)
-$nonStandardConversion = (
-    bccomp($kmToMilesFinal, '0.5', 6) < 0 || bccomp($kmToMilesFinal, '0.7', 6) > 0 ||
-    bccomp($milesToKmFinal, '1.5', 6) < 0 || bccomp($milesToKmFinal, '1.7', 6) > 0
-);
-
-// Dual-unit rate fields ($rateKmRaw, $rateMilesRaw) are extracted above
-// the $anyMileageRate guard. Allowance fields are local to this section.
-
-// Dual-unit allowance fields
-$allowKmRaw    = isset($body['estimated_mileage_km'])    ? clean_decimal($body['estimated_mileage_km'])    : null;
-$allowMilesRaw = isset($body['estimated_mileage_miles']) ? clean_decimal($body['estimated_mileage_miles']) : null;
-
-if ($allowKmRaw !== null && bccomp($allowKmRaw, '0', 3) < 0) {
-    $fields['estimated_mileage_km'] = 'KM allowance cannot be negative.';
-    $allowKmRaw = null;
-}
-if ($allowMilesRaw !== null && bccomp($allowMilesRaw, '0', 3) < 0) {
-    $fields['estimated_mileage_miles'] = 'Mile allowance cannot be negative.';
-    $allowMilesRaw = null;
-}
+// ── Mileage conversion factors (S-MILEAGE-UNIT-SIMPLIFY) ───────────────────
+// Always derived from global settings. Per-lease overrides removed —
+// conversion factors are configured once in Settings → General and
+// snapshots into each lease at creation.
+$kmToMilesFinal = bcround(
+    (string)(settings_get('lease.km_to_miles_conversion', '0.621371') ?? '0.621371'), 6);
+$milesToKmFinal = bcround(
+    (string)(settings_get('lease.miles_to_km_conversion', '1.609344') ?? '1.609344'), 6);
 
 // ── Optional fields ────────────────────────────────────────────
 $endDate        = clean_date($body['end_date'] ?? null);
@@ -422,20 +360,12 @@ if ($prechargeEnabled === 0 && $prechargeAmount !== null) {
 // class S-MILEAGE-RATE-ZERO-FIX backfilled. See FLEETFORGE_PROGRESS.md
 // D133 row + REFERENCE.md §13.8 mileage tier extension.
 // ════════════════════════════════════════════════════════════════════════
-$anyAllowancePositive = (
-    ($allowKmRaw    !== null && bccomp($allowKmRaw,    '0', 3) > 0)
- || ($allowMilesRaw !== null && bccomp($allowMilesRaw, '0', 3) > 0)
- || bccomp($estimatedMileage, '0', 4) > 0
-);
-$intentSignalPresent = $anyAllowancePositive || ($prechargeEnabled === 1);
+$anyAllowancePositive = bccomp($estimatedMileage, '0', 4) > 0;
+$intentSignalPresent  = $anyAllowancePositive || ($prechargeEnabled === 1);
 
 if ($intentSignalPresent && !$anyMileageRate) {
-    // Field-level error on mileage_rate_km — the modern dual-unit field that
-    // the form pre-fills from lookup_rates.php and the operator most likely
-    // sees first. Skip if a per-field error already exists so the user gets
-    // the most specific message.
-    if (!isset($fields['mileage_rate_km'])) {
-        $fields['mileage_rate_km'] = 'Mileage rate (mileage_rate_km) must be > 0 when an estimated mileage allowance or precharge is configured. Set a valid rate, or zero out the allowance/precharge if no per-km charge is intended.';
+    if (!isset($fields['mileage_rate'])) {
+        $fields['mileage_rate'] = 'Mileage rate must be > 0 when an estimated mileage allowance or precharge is configured. Set a rate or clear the allowance/precharge.';
     }
 }
 
@@ -452,42 +382,23 @@ if ($fields) {
     json_validation_error($fields);
 }
 
-// ── Resolve dual-unit values (S-LEASE-UNITS) ──────────────────
-// If new dual-unit fields were submitted, use them and derive the legacy field.
-// If only legacy mileage_rate was submitted, derive dual-unit values from it.
-
-if ($rateKmRaw !== null || $rateMilesRaw !== null) {
-    // New dual-unit path
-    $rateKmFinal    = ($rateKmRaw    !== null) ? bcround($rateKmRaw,    4) : '0.0000';
-    $rateMilesFinal = ($rateMilesRaw !== null) ? bcround($rateMilesRaw, 4) : '0.0000';
-    // Legacy mileage_rate = primary-unit value (backward compat for close.php etc.)
-    $mileageRate = ($mileageUnit === 'miles') ? $rateMilesFinal : $rateKmFinal;
+// ── Derive dual-unit values from single rate + global factor ──────────────
+// (S-MILEAGE-UNIT-SIMPLIFY) Form sends mileage_rate in the selected unit.
+// Counterpart columns are derived here and snapshots the global factors.
+if ($mileageUnit === 'km') {
+    $rateKmFinal    = bcround($mileageRate, 4);
+    $rateMilesFinal = bcround(bcmul($mileageRate, $kmToMilesFinal, 8), 4);
 } else {
-    // Legacy path: derive dual-unit from mileage_rate + mileage_unit
-    if ($mileageUnit === 'km') {
-        $rateKmFinal    = bcround($mileageRate, 4);
-        $rateMilesFinal = bcround(bcmul($mileageRate, $kmToMilesFinal, 8), 4);
-    } else {
-        $rateMilesFinal = bcround($mileageRate, 4);
-        $rateKmFinal    = bcround(bcmul($mileageRate, $milesToKmFinal, 8), 4);
-    }
+    $rateMilesFinal = bcround($mileageRate, 4);
+    $rateKmFinal    = bcround(bcmul($mileageRate, $milesToKmFinal, 8), 4);
 }
 
-if ($allowKmRaw !== null || $allowMilesRaw !== null) {
-    // New dual-unit path
-    $allowKmFinal    = ($allowKmRaw    !== null) ? bcround($allowKmRaw,    3) : '0.000';
-    $allowMilesFinal = ($allowMilesRaw !== null) ? bcround($allowMilesRaw, 3) : '0.000';
-    // Legacy estimated_mileage = primary-unit value (backward compat)
-    $estimatedMileage = ($mileageUnit === 'miles') ? $allowMilesFinal : $allowKmFinal;
+if ($mileageUnit === 'km') {
+    $allowKmFinal    = bcround($estimatedMileage, 3);
+    $allowMilesFinal = bcround(bcmul($estimatedMileage, $kmToMilesFinal, 8), 3);
 } else {
-    // Legacy path: derive dual-unit from estimated_mileage + mileage_unit
-    if ($mileageUnit === 'km') {
-        $allowKmFinal    = bcround($estimatedMileage, 3);
-        $allowMilesFinal = bcround(bcmul($estimatedMileage, $kmToMilesFinal, 8), 3);
-    } else {
-        $allowMilesFinal = bcround($estimatedMileage, 3);
-        $allowKmFinal    = bcround(bcmul($estimatedMileage, $milesToKmFinal, 8), 3);
-    }
+    $allowMilesFinal = bcround($estimatedMileage, 3);
+    $allowKmFinal    = bcround(bcmul($estimatedMileage, $milesToKmFinal, 8), 3);
 }
 
 // ── Fetch customer (for snapshot + tax defaults) ───────────────
@@ -579,7 +490,6 @@ db_transaction(function () use (
     $advancePeriods,
     $rateKmFinal, $rateMilesFinal, $allowKmFinal, $allowMilesFinal,
     $kmToMilesFinal, $milesToKmFinal,
-    $nonStandardConversion,
     $prechargeEnabled, $prechargeAmount,
     &$leaseId
 ) {
@@ -759,21 +669,6 @@ db_transaction(function () use (
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
-
-    // Non-standard conversion factor warning (S-LEASE-UNITS)
-    if ($nonStandardConversion) {
-        db_insert('audit_log', [
-            'user_id'      => current_user_id(),
-            'user_name'    => current_user()['name'] ?? 'system',
-            'action'       => 'update',
-            'module'       => 'leases',
-            'entity_type'  => 'lease',
-            'entity_id'    => $leaseId,
-            'entity_label' => $contractNumber,
-            'notes'        => "Non-standard conversion factors on {$contractNumber}: km_to_miles={$kmToMilesFinal}, miles_to_km={$milesToKmFinal} (S-LEASE-UNITS warning)",
-            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-        ]);
-    }
 
     // ── In-app notification (NOTIF-1) ──────────────────────────
     // Wrapped in try/catch so notification failure NEVER rolls back the lease.
