@@ -69,12 +69,14 @@ $total = db_count(
 // -----------------------------------------------------------------------
 // 4. One row per customer with card count, name-sorted
 // -----------------------------------------------------------------------
+// COUNT(rci.id) gives item count per customer — each item is its own visible tile.
 $rows = db_select(
     "SELECT rc.customer_id,
             c.company_name AS customer_name,
-            COUNT(*)       AS card_count
+            COUNT(rci.id)  AS card_count
      FROM rate_cards rc
      JOIN customers c ON c.id = rc.customer_id
+     LEFT JOIN rate_card_items rci ON rci.rate_card_id = rc.id
      WHERE $whereSQL
      GROUP BY rc.customer_id, c.company_name
      ORDER BY c.company_name ASC

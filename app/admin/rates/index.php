@@ -32,19 +32,27 @@ require_permission('rates', 'view');
 
 $today = date('Y-m-d');
 
-$totalCards = db_count("SELECT COUNT(*) FROM rate_cards WHERE deleted_at IS NULL");
+// Count rate_card_items rows — each item is a standalone "rate card" in the UI.
+$totalCards = db_count(
+    "SELECT COUNT(*) FROM rate_card_items rci
+     JOIN rate_cards rc ON rc.id = rci.rate_card_id AND rc.deleted_at IS NULL"
+);
 $activeCards = db_count(
-    "SELECT COUNT(*) FROM rate_cards
-     WHERE deleted_at IS NULL
-       AND effective_from <= ?
-       AND (effective_to IS NULL OR effective_to >= ?)",
+    "SELECT COUNT(*) FROM rate_card_items rci
+     JOIN rate_cards rc ON rc.id = rci.rate_card_id AND rc.deleted_at IS NULL
+     WHERE rc.effective_from <= ?
+       AND (rc.effective_to IS NULL OR rc.effective_to >= ?)",
     [$today, $today]
 );
 $customerCards = db_count(
-    "SELECT COUNT(*) FROM rate_cards WHERE deleted_at IS NULL AND customer_id IS NOT NULL"
+    "SELECT COUNT(*) FROM rate_card_items rci
+     JOIN rate_cards rc ON rc.id = rci.rate_card_id AND rc.deleted_at IS NULL
+     WHERE rc.customer_id IS NOT NULL"
 );
 $globalCards = db_count(
-    "SELECT COUNT(*) FROM rate_cards WHERE deleted_at IS NULL AND customer_id IS NULL"
+    "SELECT COUNT(*) FROM rate_card_items rci
+     JOIN rate_cards rc ON rc.id = rci.rate_card_id AND rc.deleted_at IS NULL
+     WHERE rc.customer_id IS NULL"
 );
 
 $pageTitle      = 'Rates';
@@ -203,7 +211,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <a :href="'<?= base_url('customers/show') ?>?id=' + selectedGroup.customer_id"
                        class="link" style="font-weight:600;font-size:1rem;" x-text="selectedGroup.customer_name"></a>
                     <span class="badge badge-neutral" style="font-size:0.75rem;"
-                          x-text="(selectedGroup.loaded ? selectedGroup.items.length : selectedGroup.card_count) + (selectedGroup.card_count === 1 ? ' rate card' : ' rate cards')"></span>
+                          x-text="(selectedGroup.loaded ? selectedGroup.items.length : selectedGroup.card_count) + ((selectedGroup.loaded ? selectedGroup.items.length : selectedGroup.card_count) === 1 ? ' rate card' : ' rate cards')"></span>
                     <?php if (can('rates', 'create')): ?>
                     <a :href="'<?= base_url('rates/create') ?>?customer_id=' + selectedGroup.customer_id"
                        class="btn btn-secondary btn-sm" style="margin-left:auto;">+ New Card</a>
