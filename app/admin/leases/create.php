@@ -210,8 +210,6 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div class="form-hint">Early return fee applies before this date.</div>
                     </div>
-                </div>
-                <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="billing_cycle">Billing Cycle</label>
                         <select id="billing_cycle" class="form-control form-select"
