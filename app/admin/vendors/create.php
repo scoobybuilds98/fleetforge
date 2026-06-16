@@ -278,6 +278,18 @@ function vendorCreate() {
             notes:           '',
         },
 
+        init() { // S-FORM-DRAFT-ROLLOUT
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'vendor-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
+        }, // S-FORM-DRAFT-ROLLOUT
+
         updateSpecializations(event) {
             // Collect selected <option> values into the array
             this.form.specializations = Array.from(event.target.selectedOptions).map(o => o.value);
@@ -318,6 +330,7 @@ function vendorCreate() {
             // FF_Api sends JSON + X-CSRF-Token + X-Requested-With automatically
             FF_Api.post('<?= base_url('api/v1/vendors/create.php') ?>', payload)
                 .then(d => {
+                    if (d.success && this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT (only on confirmed success)
                     this.showSuccessOverlay = true;
                     const _newId = d.data.id;
                     setTimeout(() => { window.location = '<?= base_url('vendors/show') ?>?id=' + _newId; }, 3500);

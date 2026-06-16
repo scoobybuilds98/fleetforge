@@ -516,7 +516,17 @@ function FF_CustomerForm() {
             'new','seasonal','government','broker'
         ],
 
-        init() {},
+        init() {
+            // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper. No banking/
+            // payout credentials exist on this form (DOT/MC/GST/PST are carrier/tax
+            // numbers, not secrets), so the whole form is drafted.
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId: 'customer-create', entityId: 'new',
+                    el: this.$root, model: this.form, version: '1',
+                });
+            }
+        },
 
         isValidEmail(email) {
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -593,6 +603,7 @@ function FF_CustomerForm() {
                 const r = await FF_Api.post('<?= base_url('api/v1/customers/create') ?>', payload);
 
                 if (r.success) {
+                    if (this._draft) this._draft.clear(true);   // S-FORM-DRAFT-ROLLOUT: wipe draft on confirmed save
                     this.showSuccessOverlay = true;
                     const _newId = r.data.id;
                     setTimeout(() => { window.location.href = '<?= base_url('customers/show') ?>?id=' + _newId; }, 3500);

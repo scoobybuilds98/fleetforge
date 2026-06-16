@@ -523,7 +523,18 @@ function FF_CustomerEditForm() {
             'new','seasonal','government','broker'
         ],
 
-        init() {},
+        init() {
+            // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper. Exclude id +
+            // updated_at (D19 optimistic-lock token); no banking/payout credentials
+            // exist on this form, so all other fields are drafted.
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId: 'customer-edit', entityId: this.form.id,
+                    el: this.$root, model: this.form, version: '1',
+                    exclude: ['id', 'updated_at'],
+                });
+            }
+        },
 
         isValidEmail(email) {
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -596,6 +607,7 @@ function FF_CustomerEditForm() {
                 const r = await FF_Api.post('<?= base_url('api/v1/customers/update') ?>', payload);
 
                 if (r.success) {
+                    if (this._draft) this._draft.clear(true);   // S-FORM-DRAFT-ROLLOUT: wipe draft on confirmed save
                     window.location.href = '<?= base_url('customers/show') ?>?id=' + this.form.id;
                     return;
                 }

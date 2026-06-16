@@ -346,6 +346,16 @@ function FF_RateCardCreate() {
 
         init() {
             // No auto-added blank row — user adds explicitly
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'rate-card-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['customer_id'], // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
         },
 
         addItem() {
@@ -477,6 +487,7 @@ function FF_RateCardCreate() {
                     this.submitting  = false;
                     return;
                 }
+                if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                 window.location = '<?= base_url('rates/show') ?>?id=' + r.data.id;
             } catch (e) {
                 this.globalError = e.message || 'An error occurred. Please try again.';

@@ -456,6 +456,19 @@ function FF_InvoiceCreate() {
             this.form.lease_id = <?= (int) $preLeaseId ?>;
             await this._fetchLeaseContext(<?= (int) $preLeaseId ?>);
             <?php endif; ?>
+            // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper. This form is a
+            // lease-period invoice generator — no manual line-items/amounts (those are
+            // server-derived) and no payment-credential fields. Exclude lease_id (owned
+            // by the FF_RecordPicker, can't rehydrate at runtime) + the transient
+            // odometer GPS metadata; the manual fields (po_number, notes, period,
+            // odometer values, type toggles) are drafted/restored.
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId: 'invoice-create', entityId: 'new',
+                    el: this.$root, model: this.form, version: '1',
+                    exclude: ['lease_id', 'odometer_source', 'odometer_fetched_at'],
+                });
+            }
         },
 
         // ── S-INVOICE-CREATION-UX C2 date helpers ──────────────────
@@ -1027,6 +1040,7 @@ function FF_InvoiceCreate() {
                 }
 
                 if (r.success) {
+                    if (this._draft) this._draft.clear(true);   // S-FORM-DRAFT-ROLLOUT: wipe draft on confirmed save
                     this.result = r.data;
                     this.showSuccessOverlay = true;
                     // R2 §3.6 (2.3): land on a view showing ALL invoices created by

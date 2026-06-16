@@ -319,6 +319,16 @@ function createInspection() {
 
         init() {
             // Convert empty pre-populated strings to null for API
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'inspection-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['equipment_unit_id', 'lease_id', 'inspected_by_user_id'], // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
         },
 
         validate() {
@@ -401,6 +411,7 @@ function createInspection() {
                         this.formError  = d.error.message || d.message || 'Failed to create inspection.';
                         this.submitting = false;
                     } else {
+                        if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                         this.showSuccessOverlay = true;
                         const _newId = d.data.id;
                         setTimeout(() => { window.location.href = '<?= base_url('inspections/show') ?>?id=' + _newId; }, 3500);

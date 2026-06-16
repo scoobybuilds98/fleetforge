@@ -396,6 +396,15 @@ function FF_EditTemplate(templateId) {
         // ── Init ──────────────────────────────────────────────────
         async init() {
             await this.load();
+            // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper after the
+            // server prefill loads. updated_at lives in component state (this.updatedAt),
+            // not in form, so the lock token is never persisted.
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId: 'equipment-template-edit', entityId: templateId,
+                    el: this.$root, model: this.form, version: '1',
+                });
+            }
         },
 
         // ── Load template from API ─────────────────────────────────
@@ -552,6 +561,7 @@ function FF_EditTemplate(templateId) {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/update.php') ?>', payload);
 
                 if (r.success) {
+                    if (this._draft) this._draft.clear(true);   // S-FORM-DRAFT-ROLLOUT: wipe draft on confirmed save
                     this.showSuccessOverlay = true;
                     setTimeout(() => {
                         window.location.href = '<?= base_url('equipment/templates') ?>';

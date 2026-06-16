@@ -106,6 +106,18 @@ function budgetEdit() {
         saving: false,
         error: '',
         success: '',
+        init() { // S-FORM-DRAFT-ROLLOUT
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'budget-edit', // S-FORM-DRAFT-ROLLOUT
+                    entityId: this.form.id, // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['id', 'updated_at'], // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
+        }, // S-FORM-DRAFT-ROLLOUT
         async submit() {
             this.saving = true; this.error = ''; this.success = '';
             try {
@@ -117,6 +129,7 @@ function budgetEdit() {
                 });
                 const j = await r.json();
                 if (j && j.success) {
+                    if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                     this.form.updated_at = j.data.updated_at;
                     this.success = 'Saved.';
                 } else {

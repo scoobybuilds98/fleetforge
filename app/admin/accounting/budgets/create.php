@@ -80,6 +80,17 @@ function budgetCreate() {
         form: { name: '', year: <?= (int) date('Y') + 1 ?>, version: 'base', notes: '', copy_prior_year: false },
         saving: false,
         error: '',
+        init() { // S-FORM-DRAFT-ROLLOUT
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'budget-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
+        }, // S-FORM-DRAFT-ROLLOUT
         async submit() {
             this.saving = true; this.error = '';
             try {
@@ -91,6 +102,7 @@ function budgetCreate() {
                 });
                 const j = await r.json();
                 if (j && j.success) {
+                    if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                     window.location.href = '<?= e(base_url('accounting/budgets/show')) ?>?id=' + j.data.id;
                 } else {
                     this.error = (j && j.error && j.error.message) || 'Create failed.';

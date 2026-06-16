@@ -194,6 +194,18 @@ function userCreate() {
             timezone: '',
         },
 
+        init() { // S-FORM-DRAFT-ROLLOUT
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'user-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
+        }, // S-FORM-DRAFT-ROLLOUT
+
         submit() {
             this.error = null;
 
@@ -223,6 +235,7 @@ function userCreate() {
 
             FF_Api.post('<?= base_url('api/v1/users/create.php') ?>', payload)
                 .then(d => {
+                    if (d.success && this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT (only on confirmed success)
                     // Show success overlay then redirect to show page with flash message
                     this.showSuccessOverlay = true;
                     const _newId = d.data.id;

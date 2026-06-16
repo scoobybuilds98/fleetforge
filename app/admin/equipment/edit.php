@@ -323,7 +323,18 @@ function FF_EditUnit() {
         },
         submitting:  false,
 
-        init() {},
+        init() {
+            // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper. Exclude id +
+            // updated_at (the D19 optimistic-lock token) so a restore can never
+            // re-inject a stale token — only editable fields are persisted/restored.
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId: 'equipment-unit-edit', entityId: this.form.id,
+                    el: this.$root, model: this.form, version: '1',
+                    exclude: ['id', 'updated_at'],
+                });
+            }
+        },
 
         // VALID-2: unified validation using FF_Validate
         validate() {
@@ -407,6 +418,7 @@ function FF_EditUnit() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/units/update') ?>', this.form);
                 if (r.success) {
+                    if (this._draft) this._draft.clear(true);   // S-FORM-DRAFT-ROLLOUT: wipe draft on confirmed save
                     window.location.href = '<?= base_url('equipment/show') ?>?id=<?= $unitId ?>';
                 } else if (r.error?.code === 'STALE_DATA') {
                     FF_Validate.banner(form, (r.error?.message || 'This unit was modified by another user.') + ' Reload this page to get the latest version.');

@@ -244,6 +244,16 @@ function createCreditNote() {
             if (params.get('customer_id')) {
                 this.form.customer_id = params.get('customer_id');
             }
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'credit-note-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['customer_id', 'lease_id', 'source_invoice_id', 'source_payment_id'], // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
         },
 
         onCustomerChange() {
@@ -274,6 +284,7 @@ function createCreditNote() {
 
             FF_Api.post('<?= base_url('api/v1/credit_notes/create') ?>', payload)
                 .then(data => {
+                    if (data.success && this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT (only on confirmed success)
                     // Show success overlay then redirect to the new credit note's detail page
                     this.showSuccessOverlay = true;
                     const _newId = data.data.id;

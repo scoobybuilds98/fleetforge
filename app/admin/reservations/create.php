@@ -504,6 +504,16 @@ function FF_ReservationCreate() {
         async init() {
             await this.loadCustomers();
             await this.loadTemplates();
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'reservation-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['customer_id'], // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
         },
 
         // ── [SELECTOR-1] Build the option label for a unit row ─
@@ -772,6 +782,7 @@ function FF_ReservationCreate() {
                     throw new Error(res.error?.message || 'Failed to create reservation.');
                 }
 
+                if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                 this.showSuccessOverlay = true;
                 const newId = res.data.id;
                 setTimeout(() => {
@@ -806,6 +817,7 @@ function FF_ReservationCreate() {
                     throw new Error(res.error?.message || 'Failed to create reservation.');
                 }
 
+                if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                 this.showSuccessOverlay = true;
                 const newId = res.data.id;
                 setTimeout(() => {

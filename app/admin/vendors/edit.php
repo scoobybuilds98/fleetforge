@@ -308,6 +308,18 @@ function vendorEdit() {
         error:       null,
         form:        <?= json_encode($formSeed) ?>,
 
+        init() { // S-FORM-DRAFT-ROLLOUT
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'vendor-edit', // S-FORM-DRAFT-ROLLOUT
+                    entityId: this.vendorId, // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
+        }, // S-FORM-DRAFT-ROLLOUT
+
         updateSpecializations(event) {
             // Collect selected <option> values into the array.
             this.form.specializations = Array.from(event.target.selectedOptions).map(o => o.value);
@@ -348,6 +360,7 @@ function vendorEdit() {
 
             try {
                 const d = await FF_Api.post('<?= base_url('api/v1/vendors/update.php') ?>', payload);
+                if (d.success && this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT (only on confirmed success)
                 FF_Toast.success('Vendor updated.');
                 // WHY: navigate to show page so the user sees the saved record.
                 setTimeout(() => {

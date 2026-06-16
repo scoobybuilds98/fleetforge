@@ -324,7 +324,15 @@ function FF_CreateTemplate() {
         submitting:         false,
         showSuccessOverlay: false,
 
-        init() {},
+        init() {
+            // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper (reused, not modified).
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId: 'equipment-template-create', entityId: 'new',
+                    el: this.$root, model: this.form, version: '1',
+                });
+            }
+        },
 
         // VALID-2: spec-exact per-field validation with FF_Validate
         // WHY: users must know exactly which field failed and why
@@ -437,6 +445,7 @@ function FF_CreateTemplate() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/create') ?>', payload);
                 if (r.success) {
+                    if (this._draft) this._draft.clear(true);   // S-FORM-DRAFT-ROLLOUT: wipe draft on confirmed save
                     this.showSuccessOverlay = true;
                     setTimeout(() => { window.location.href = '<?= base_url('equipment/templates') ?>'; }, 3500);
                 } else if (r.error?.code === 'VALIDATION_ERROR') {

@@ -405,7 +405,15 @@ function FF_CreateUnit() {
         submitting:         false,
         showSuccessOverlay: false,
 
-        init() {},
+        init() {
+            // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper (reused, not modified).
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId: 'equipment-unit-create', entityId: 'new',
+                    el: this.$root, model: this.form, version: '1',
+                });
+            }
+        },
 
         // Pre-fill defaults from selected template
         onTemplateChange() {
@@ -518,6 +526,7 @@ function FF_CreateUnit() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/units/create') ?>', payload);
                 if (r.success) {
+                    if (this._draft) this._draft.clear(true);   // S-FORM-DRAFT-ROLLOUT: wipe draft on confirmed save
                     this.showSuccessOverlay = true;
                     const _newId = r.data.id;
                     setTimeout(() => { window.location.href = '<?= base_url('equipment/show') ?>?id=' + _newId; }, 3500);

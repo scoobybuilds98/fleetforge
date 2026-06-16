@@ -100,7 +100,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="damageClaimCreate()">
+<div x-data="damageClaimCreate()" x-init="init()"><!-- S-FORM-DRAFT-ROLLOUT -->
 
 <div class="card" style="max-width:760px;">
 
@@ -363,6 +363,19 @@ function damageClaimCreate() {
             notes:                 '',
         },
 
+        init() { // S-FORM-DRAFT-ROLLOUT
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'damage-claim-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['equipment_unit_id', 'customer_id', 'lease_id', 'vendor_id'], // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
+        }, // S-FORM-DRAFT-ROLLOUT
+
         validate() {
             const form = document.querySelector('form');
             FF_Validate.clear(form);
@@ -432,6 +445,7 @@ function damageClaimCreate() {
                         this.submitting = false;
                         return;
                     }
+                    if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                     this.showSuccessOverlay = true;
                     const _newId = r.data.id;
                     setTimeout(() => { window.location = '<?= base_url('damage_claims/show') ?>?id=' + _newId; }, 3500);

@@ -370,6 +370,19 @@ function FF_CreatePayment() {
         submitting:         false,
         showSuccessOverlay: false,
 
+        init() { // S-FORM-DRAFT-ROLLOUT
+            if (window.FF_FormDraft) { // S-FORM-DRAFT-ROLLOUT
+                this._draft = FF_FormDraft.attach({ // S-FORM-DRAFT-ROLLOUT
+                    formId: 'payment-create', // S-FORM-DRAFT-ROLLOUT
+                    entityId: 'new', // S-FORM-DRAFT-ROLLOUT
+                    el: this.$root, // S-FORM-DRAFT-ROLLOUT
+                    model: this.form, // S-FORM-DRAFT-ROLLOUT
+                    version: '1', // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['invoice_id'], // S-FORM-DRAFT-ROLLOUT
+                }); // S-FORM-DRAFT-ROLLOUT
+            } // S-FORM-DRAFT-ROLLOUT
+        }, // S-FORM-DRAFT-ROLLOUT
+
         onInvoiceChange() {
             const id = parseInt(this.form.invoice_id, 10);
             if (id && invoiceMap[id]) {
@@ -491,6 +504,7 @@ function FF_CreatePayment() {
             try {
                 const res = await FF_Api.post('<?= base_url('api/v1/payments/create.php') ?>', payload);
                 if (res.success) {
+                    if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT
                     // S-ANIMATIONS-PACK Bundle B: celebrate payment received.
                     // Confetti fires AS WELL AS the truck overlay so the moment
                     // feels distinct from a generic "saved" — money in the
