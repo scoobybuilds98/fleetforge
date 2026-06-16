@@ -337,7 +337,7 @@ require_once FF_ROOT . '/includes/header.php';
                                     </span>
                                 </td>
                                 <td x-text="unit.yard_location || '—'" class="text-secondary"></td>
-                                <td x-text="unit.mileage ? unit.mileage.toLocaleString() + ' mi' : '0 mi'"
+                                <td x-text="unit.mileage ? unit.mileage.toLocaleString() + ' mi' : (unit.samsara_odometer_km && Number(unit.samsara_odometer_km) > 0 ? Math.round(Number(unit.samsara_odometer_km)).toLocaleString() + ' km' : '0 mi')"
                                     class="font-mono text-sm"></td>
                                 <td>
                                     <template x-if="unit.health_score !== null">
@@ -418,7 +418,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="eq-mc-row">
                             <span class="eq-mc-label">Mileage</span>
                             <span class="eq-mc-value font-mono"
-                                  x-text="unit.mileage ? unit.mileage.toLocaleString() + ' mi' : '0 mi'">
+                                  x-text="unit.mileage ? unit.mileage.toLocaleString() + ' mi' : (unit.samsara_odometer_km && Number(unit.samsara_odometer_km) > 0 ? Math.round(Number(unit.samsara_odometer_km)).toLocaleString() + ' km' : '0 mi')">
                             </span>
                         </div>
                         <div class="eq-mc-row">

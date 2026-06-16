@@ -127,6 +127,7 @@ $rows = db_select(
         u.created_at,
         u.updated_at,
         u.samsara_vehicle_id,
+        u.samsara_odometer_km,
         t.name     AS template_name,
         t.category AS template_category
        FROM equipment_units u
@@ -159,6 +160,9 @@ foreach ($rows as $row) {
         'mvi_expiry'          => $row['mvi_expiry'],
         'insurance_expiry'    => $row['insurance_expiry'],
         'samsara_linked'      => !empty($row['samsara_vehicle_id']),
+        // S-UNIT-MILEAGE-TILE-SAMSARA: surfaced so the list Mileage column can
+        // fall back to the live GPS odometer (km) when the manual mileage is 0.
+        'samsara_odometer_km' => $row['samsara_odometer_km'] !== null ? (string) $row['samsara_odometer_km'] : null,
         'health_score'        => $row['health_score'] !== null ? (int) $row['health_score'] : null,
         // health_color: derived band per S-CRON-3 (no separate column;
         // recomputed on every read from the canonical helper).
