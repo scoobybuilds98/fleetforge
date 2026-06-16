@@ -515,8 +515,13 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 </div>
                             </div>
 
-                            <!-- Result area -->
+                            <!-- Result area — branches MUST share one root <div>: Alpine x-if
+                                 renders only a single root element, so the three mutually-
+                                 exclusive branch <template>s below have to live inside one
+                                 wrapper or the distance-display branch never renders (the bug
+                                 that made "Calculate" appear to do nothing). -->
                             <template x-if="distResult">
+                              <div>
 
                                 <!-- Not linked -->
                                 <template x-if="distResult.linked === false">
@@ -612,6 +617,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                     </div>
                                 </template>
 
+                              </div>
                             </template><!-- /distResult -->
 
                             <!-- Saved logs table -->
