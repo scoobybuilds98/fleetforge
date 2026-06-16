@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-FORM-DRAFT-AUTOSAVE** — IN-FLIGHT
+  Started: 2026-06-16T19:06 UTC by code-desktop (Opus 4.8)
+  Touching: public/assets/js/app.js, app/admin/leases/create.php, app/admin/leases/edit.php
+
 **S-UNIT-MILEAGE-LIST-SAMSARA** — SHIPPED 2026-06-16 (see PROGRESS.md SESSION LOG row). **Follow-on to S-UNIT-MILEAGE-TILE-SAMSARA: the Equipment LIST page's MILEAGE column showed "0 mi" for every Samsara-tracked trailer (same root cause — bound to `unit.mileage` only).** FIX (UI/API, no schema): (1) added `samsara_odometer_km` to the list-feed API (`api/v1/equipment/units/index.php`); (2) both Mileage render sites in `app/admin/equipment/index.php` (table cell + mobile card) now fall back to `{km} km` when manual mileage is 0 and a Samsara odometer exists, else `0 mi`. Verified in real browser: 12TR1301→9,643 km, 12TR1303→375 km, 12TR1307→5,454 km; no-Samsara unit stays 0 mi. (Note: unit 11 shows 1,350,686 km = the literal stored Samsara value — a data question, not a display bug.) SC1 php -l 2/2; doc_freshness 29/29. Commit: `<this commit>`.
 
 **S-UNIT-MILEAGE-TILE-SAMSARA** — SHIPPED 2026-06-16 (see PROGRESS.md SESSION LOG row). **Operator-noticed: the Mileage hero tile read "0 mi" on a Samsara-tracked trailer (40TR1351) that has a real 4,136.64 km GPS odometer.** ROOT CAUSE: the tile rendered only `equipment_units.mileage` (manual integer, hard-labeled "mi") and ignored `samsara_odometer_km`. FIX (show.php, UI only): tile now falls back to `samsara_odometer_km` (shown in km, "from Samsara" sub-label) when manual mileage is 0 and Samsara has a reading; manual>0 still shows "mi"; neither shows "0 mi". Verified in real browser across all 3 branches (40TR1351→4,137 km from Samsara; T5302→86,274 mi; T5301→0 mi). SC1 php -l clean; doc_freshness 29/29. View-layer only, no schema. Commit: `<this commit>`.
