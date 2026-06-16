@@ -252,16 +252,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="date" id="registration_expiry" class="form-control" x-model="form.registration_expiry">
                     </div>
                 </div>
-                <div class="form-row-2">
-                    <div class="form-group">
-                        <label class="form-label" for="mvi_expiry">MVI Expiry</label>
-                        <input type="date" id="mvi_expiry" class="form-control" x-model="form.mvi_expiry">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="insurance_expiry">Insurance Expiry</label>
-                        <input type="date" id="insurance_expiry" class="form-control" x-model="form.insurance_expiry">
-                    </div>
-                </div>
+                <!-- MVI Expiry and Insurance Expiry inputs hidden from the editor (operator request 2026-06-17). -->
+                <!-- mvi_expiry / insurance_expiry stay in the form data object (init below) so existing -->
+                <!-- values round-trip unchanged on save; columns retained, just no longer UI-editable. -->
             </div>
         </div>
 

@@ -1806,7 +1806,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 <option value="">— Select type —</option>
                                 <option value="cvi">CVI Certificate</option>
                                 <option value="registration">Registration Document</option>
-                                <option value="insurance">Insurance Certificate</option>
+                                <!-- Insurance removed from unit upload selector (operator request 2026-06-17); MVI was never an upload type. -->
                                 <option value="other">Other</option>
                             </select>
                         </div>
@@ -2614,11 +2614,11 @@ function FF_UnitDetail() {
 
         complianceDocs() {
             if (!this.unit) return [];
+            // MVI and Insurance intentionally hidden from the unit compliance grid
+            // (operator request 2026-06-17). Underlying *_expiry columns retained.
             return [
                 { label: 'CVI',          expiry: this.unit.cvi_expiry,          days: this.daysUntil(this.unit.cvi_expiry),          interval: this.unit.cvi_interval_days },
                 { label: 'Registration', expiry: this.unit.registration_expiry,  days: this.daysUntil(this.unit.registration_expiry),  interval: this.unit.registration_interval_days },
-                { label: 'MVI',          expiry: this.unit.mvi_expiry,           days: this.daysUntil(this.unit.mvi_expiry),           interval: this.unit.mvi_interval_days },
-                { label: 'Insurance',    expiry: this.unit.insurance_expiry,     days: this.daysUntil(this.unit.insurance_expiry),     interval: this.unit.insurance_interval_days },
             ];
         },
 
