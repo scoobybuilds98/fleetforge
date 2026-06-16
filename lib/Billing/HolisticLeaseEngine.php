@@ -316,7 +316,15 @@ class HolisticLeaseEngine
 
         // Monthly applies iff weekly math over the full extent exceeds the
         // monthly rate (R2 §3, rate-driven crossover — never a fixed day count).
+        // S-BILLING-RATE-FIX: a monthly_rate of 0 means "no monthly tier
+        // offered" (legitimate for daily/weekly-only or on_close_only leases) —
+        // it must NEVER trigger the monthly regime, which would bill a flat $0
+        // (single calendar month) or $0 segments (spanning) and trip the D132
+        // zero-base backstop, fatally aborting billing / lease close. Require a
+        // positive monthly rate before monthly can apply; otherwise the lease
+        // stays on the sub-month weekly ladder.
         $monthlyApplies = ($total > 7)
+            && bccomp($monthly, '0', 6) > 0
             && bccomp($this->weeklyMath($total, $weekly), $monthly, 6) > 0;
 
         if (!$monthlyApplies) {

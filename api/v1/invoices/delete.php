@@ -84,6 +84,16 @@ db_transaction(function () use ($id, $invoice) {
     }
     // Otherwise sent / partially_paid / overdue → both decrements stand.
 
+    // total_revenue (customers + equipment_units) is booked ONLY at send
+    // (send.php), NOT at draft creation. So it must NOT mirror $decTotalInvoiced
+    // (which includes drafts): decrementing a never-booked draft would drive
+    // total_revenue negative. Reverse revenue only for statuses where it was
+    // net-booked and not already reversed — sent / partially_paid / overdue /
+    // paid. (void already reversed it; written_off deliberately preserves it.)
+    $decRevenue = in_array($status, ['sent', 'partially_paid', 'overdue', 'paid'], true)
+        ? $totalAmount
+        : '0.00';
+
     if ($invoice['lease_id']) {
         db_execute(
             "UPDATE leases SET total_invoiced = total_invoiced - ?, outstanding_balance = outstanding_balance - ?, updated_at = NOW() WHERE id = ?",
@@ -118,16 +128,16 @@ db_transaction(function () use ($id, $invoice) {
             "UPDATE customers SET outstanding_balance = outstanding_balance - ?,
                                   total_revenue       = total_revenue       - ?,
                                   updated_at = NOW() WHERE id = ?",
-            [$decOb, $decTotalInvoiced, $invoice['customer_id']]
+            [$decOb, $decRevenue, $invoice['customer_id']]
         );
     }
-    // total_revenue mirrors $decTotalInvoiced — zero for void/written_off (already reversed)
-    if ($decTotalInvoiced !== '0.00' && $invoice['lease_id']) {
+    // Equipment total_revenue follows the same send-booked rule as customers.
+    if ($decRevenue !== '0.00' && $invoice['lease_id']) {
         db_execute(
             "UPDATE equipment_units eu
                JOIN leases l ON l.id = ? AND l.equipment_unit_id = eu.id AND l.deleted_at IS NULL
                 SET eu.total_revenue = eu.total_revenue - ?, eu.updated_at = NOW()",
-            [$invoice['lease_id'], $decTotalInvoiced]
+            [$invoice['lease_id'], $decRevenue]
         );
     }
 

@@ -65,8 +65,14 @@ $expect_throw('1-5 days, daily=0',         fn() => $calc->calculate(3,  '0',    
 $expect_throw('6-7 days, weekly=0',        fn() => $calc->calculate(7,  '125',   '0',    '2200'));
 $expect_throw('8-29 days, weekly=0',       fn() => $calc->calculate(22, '125',   '0',    '2200'));
 $expect_throw('30+ days, monthly=0',       fn() => $calc->calculate(45, '125',   '500',  '0'));
-// Adversarial: weekly_capped path with monthly=0 (weekly_math huge, would cap to 0)
-$expect_throw('8-29 days, weekly_capped, monthly=0', fn() => $calc->calculate(15, '125', '5000', '0'));
+// NOTE (S-BILLING-RATE-FIX monthly=0 cap fix): the former adversarial case
+// `calculate(15, '125', '5000', '0')` used to assert a THROW on the theory that
+// weekly_math caps to monthly=0 → $0. That was the bug: a POSITIVE weekly rate
+// with monthly=0 is a valid "no monthly tier" config (allowed for on_close_only
+// leases — D132 gates only billing_cycle='monthly'), and the 8–29 day path must
+// bill weekly math, not cap to the absent monthly rate. It now asserts an amount
+// below. The genuine zero-BILLABLE-rate backstop is still covered by the
+// weekly=0 cases above (a $0 weekly tier flowing through the weekly path throws).
 
 echo "\n";
 foreach ($out as $line) echo $line, "\n";
@@ -78,6 +84,8 @@ $expect_amount('1-5 days, daily method',         fn() => $calc->calculate(3,  '1
 $expect_amount('6-7 days, weekly method',        fn() => $calc->calculate(7,  '125',   '500',  '2200'), 'weekly');
 $expect_amount('8-29 days, weekly method',       fn() => $calc->calculate(22, '125',   '508.08','2200'), 'weekly');
 $expect_amount('8-29 days, weekly_capped',       fn() => $calc->calculate(15, '125',   '5000', '2200'), 'weekly_capped');
+// S-BILLING-RATE-FIX: weekly>0 + monthly=0 bills weekly math (NOT capped to $0).
+$expect_amount('8-29 days, weekly>0 + monthly=0 → weekly math', fn() => $calc->calculate(15, '125', '5000', '0'), 'weekly');
 $expect_amount('30+ days, monthly method',       fn() => $calc->calculate(45, '125',   '508.08','2200'), 'monthly');
 // Edge case: 0 days returns method=none with amount=0 — legit, no throw
 try {

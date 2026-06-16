@@ -113,12 +113,8 @@ foreach ($ids as $id) {
         continue;
     }
 
-    // Already void — skip gracefully.
-    if ($invoice['status'] === 'void') {
-        $skipped++;
-        $errors[] = ['id' => $id, 'reason' => 'Cannot void invoice with status void'];
-        continue;
-    }
+    // (A 'void' status is already rejected by the $voidable gate above — no
+    //  separate already-void branch is needed; it would be unreachable.)
 
     // ── Per-invoice transaction: mirrors void.php exactly ────────────────────
     try {
@@ -126,7 +122,7 @@ foreach ($ids as $id) {
             // S-FIX-2 Path B canonical truth (D45):
             //   draft → void : OB unchanged (decOb = 0.00)
             //   sent  → void : OB -= balance_due
-            //   super_admin other statuses follow the same rule for symmetry.
+            // (Only draft/sent reach here per the $voidable gate above.)
             $preVoidStatus = $invoice['status'];
             $totalAmount   = (string) $invoice['total_amount'];
             $balanceDue    = (string) $invoice['balance_due'];
@@ -155,6 +151,27 @@ foreach ($ids as $id) {
                          updated_at = NOW()
                      WHERE id = ?",
                     [$totalAmount, $decOb, $invoice['lease_id']]
+                );
+
+                // Walk the billing-coverage anchor back to the latest STILL-LIVE
+                // invoice (mirrors single-item void.php). Without this, bulk-voiding
+                // the most-recent invoice leaves leases.last_billed_date pointing
+                // PAST real coverage. The just-voided row is status='void' above so
+                // MAX excludes it; NULL when no live invoice remains.
+                $cov = db_row(
+                    "SELECT i2.billing_period_end AS max_end, i2.id AS inv_id
+                       FROM invoices i2
+                      WHERE i2.lease_id = ?
+                        AND i2.deleted_at IS NULL
+                        AND i2.status <> 'void'
+                        AND i2.billing_period_end IS NOT NULL
+                      ORDER BY i2.billing_period_end DESC, i2.id DESC
+                      LIMIT 1",
+                    [$invoice['lease_id']]
+                );
+                db_execute(
+                    "UPDATE leases SET last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
+                    [$cov['max_end'] ?? null, $cov['inv_id'] ?? null, $invoice['lease_id']]
                 );
             }
             if ($invoice['customer_id']) {

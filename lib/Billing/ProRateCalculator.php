@@ -115,8 +115,15 @@ class ProRateCalculator
             ];
         }
 
-        // 8–29 days: weekly math, capped at monthly rate
-        if (bccomp($weeklyMath, $monthly, 6) > 0) {
+        // 8–29 days: weekly math, capped at monthly rate.
+        // S-BILLING-RATE-FIX: only cap when a POSITIVE monthly rate exists. A
+        // monthly_rate of 0 means "no monthly tier offered" — legitimate for
+        // daily/weekly-only or on_close_only leases (D132 tier-completeness is
+        // enforced only for billing_cycle='monthly'). Without the monthly>0
+        // guard, weeklyMath>0 always satisfies `weeklyMath > 0`, caps the charge
+        // to $0, and assertNonZero then throws on an otherwise-valid 8–29 day
+        // weekly period — fatally aborting invoice generation / lease close.
+        if (bccomp($monthly, '0', 6) > 0 && bccomp($weeklyMath, $monthly, 6) > 0) {
             // Weekly math exceeds monthly — cap at monthly rate
             $rounded = bcround($monthly, 2);
             $this->assertNonZero($rounded, 'weekly_capped', $days, $daily, $weekly, $monthly);

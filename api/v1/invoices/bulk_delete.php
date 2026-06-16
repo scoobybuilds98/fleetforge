@@ -122,6 +122,15 @@ foreach ($ids as $id) {
             }
             // sent / partially_paid / overdue → both decrements stand (super_admin path).
 
+            // total_revenue (customers + equipment_units) is booked ONLY at send,
+            // never at draft creation — so it must NOT mirror $decTotalInvoiced
+            // (which includes drafts) or deleting a draft drives revenue negative.
+            // Reverse it only for statuses where revenue was net-booked and not
+            // already reversed. Mirrors invoices/delete.php.
+            $decRevenue = in_array($status, ['sent', 'partially_paid', 'overdue', 'paid'], true)
+                ? $totalAmount
+                : '0.00';
+
             if ($invoice['lease_id']) {
                 db_execute(
                     "UPDATE leases
@@ -130,6 +139,27 @@ foreach ($ids as $id) {
                          updated_at = NOW()
                      WHERE id = ?",
                     [$decTotalInvoiced, $decOb, $invoice['lease_id']]
+                );
+
+                // Walk the billing-coverage anchor back to the latest STILL-LIVE
+                // invoice (mirrors invoices/delete.php + invoices/void.php). Without
+                // this, bulk-deleting the most-recent invoice leaves
+                // leases.last_billed_date pointing PAST real coverage, so reports
+                // and the lease-close partial_end derivation read a stale anchor.
+                $cov = db_row(
+                    "SELECT i2.billing_period_end AS max_end, i2.id AS inv_id
+                       FROM invoices i2
+                      WHERE i2.lease_id = ?
+                        AND i2.deleted_at IS NULL
+                        AND i2.status <> 'void'
+                        AND i2.billing_period_end IS NOT NULL
+                      ORDER BY i2.billing_period_end DESC, i2.id DESC
+                      LIMIT 1",
+                    [$invoice['lease_id']]
+                );
+                db_execute(
+                    "UPDATE leases SET last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
+                    [$cov['max_end'] ?? null, $cov['inv_id'] ?? null, $invoice['lease_id']]
                 );
             }
 
@@ -140,17 +170,17 @@ foreach ($ids as $id) {
                          total_revenue       = total_revenue       - ?,
                          updated_at = NOW()
                      WHERE id = ?",
-                    [$decOb, $decTotalInvoiced, $invoice['customer_id']]
+                    [$decOb, $decRevenue, $invoice['customer_id']]
                 );
             }
 
-            // total_revenue mirrors $decTotalInvoiced — zero for void/written_off (already reversed)
-            if ($decTotalInvoiced !== '0.00' && $invoice['lease_id']) {
+            // Equipment total_revenue follows the same send-booked rule.
+            if ($decRevenue !== '0.00' && $invoice['lease_id']) {
                 db_execute(
                     "UPDATE equipment_units eu
                        JOIN leases l ON l.id = ? AND l.equipment_unit_id = eu.id AND l.deleted_at IS NULL
                             SET eu.total_revenue = eu.total_revenue - ?, eu.updated_at = NOW()",
-                    [$invoice['lease_id'], $decTotalInvoiced]
+                    [$invoice['lease_id'], $decRevenue]
                 );
             }
 

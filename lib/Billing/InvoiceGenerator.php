@@ -1007,7 +1007,17 @@ class InvoiceGenerator
             // unchanged, so historical invoices keep their original tax treatment.
             // Audit log the demotion so accountants can see why a previously
             // exempt customer started getting taxed.
-            $expiryCheckDate = $invoiceDate ?? date('Y-m-d');
+            // S-FIX-2 Bug #5 ordering fix: check exemption-certificate expiry
+            // against THIS invoice's own date, not "today". $invoiceDate is
+            // assigned further down (= $periodStart, the invoice_date for the
+            // period), so referencing it here silently fell back to date('Y-m-d')
+            // and evaluated expiry against the generation day. That over-taxed
+            // backdated invoices (a cert valid during the past period but expired
+            // by today was wrongly demoted) and under-taxed advance invoices (a
+            // cert expiring before a future period was kept). Use $periodStart —
+            // the canonical invoice date — to mirror lease-create's start_date
+            // expiry check and keep historical/advance invoices CRA-correct.
+            $expiryCheckDate = $periodStart;
             $expiryAuditEntries = [];
 
             if ($gstExempt && !empty($lease['customer_gst_exempt_expiry'])
