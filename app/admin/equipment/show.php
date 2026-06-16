@@ -257,7 +257,23 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
     <div class="stat-card stat-card--blue">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-map-pin"/></svg></span>
         <div class="stat-label">Mileage</div>
-        <div class="stat-value font-mono"><?= number_format((int)$unit['mileage']) ?> <span class="text-sm text-secondary">mi</span></div>
+        <?php
+        // S-UNIT-MILEAGE-TILE-SAMSARA: the manual `mileage` column (miles) is the
+        // primary source. When it's empty (0) but the unit is Samsara-linked and has
+        // a live GPS odometer, fall back to samsara_odometer_km (shown in km) so a
+        // tracked unit no longer reads "0 mi" while Samsara holds real distance.
+        $milesManual  = (int) $unit['mileage'];
+        $samsaraOdoKm = ($unit['samsara_odometer_km'] !== null && $unit['samsara_odometer_km'] !== '')
+            ? (float) $unit['samsara_odometer_km'] : null;
+        if ($milesManual > 0):
+        ?>
+        <div class="stat-value font-mono"><?= number_format($milesManual) ?> <span class="text-sm text-secondary">mi</span></div>
+        <?php elseif ($samsaraOdoKm !== null && $samsaraOdoKm > 0): ?>
+        <div class="stat-value font-mono"><?= number_format($samsaraOdoKm) ?> <span class="text-sm text-secondary">km</span></div>
+        <div class="stat-delta text-secondary">from Samsara</div>
+        <?php else: ?>
+        <div class="stat-value font-mono">0 <span class="text-sm text-secondary">mi</span></div>
+        <?php endif; ?>
     </div>
 
     <div class="stat-card stat-card--<?= ($unit['cvi_expiry'] && daysUntil($unit['cvi_expiry']) < 0) ? 'red' : (($unit['cvi_expiry'] && daysUntil($unit['cvi_expiry']) <= 30) ? 'amber' : 'teal') ?>">
