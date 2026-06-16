@@ -124,7 +124,8 @@ class InvoiceGenerator
                         c.pst_exempt_number  AS customer_pst_exempt_number,
                         c.id                  AS customer_row_id,
                         c.company_name        AS customer_company_name,
-                        eu.samsara_vehicle_id AS samsara_vehicle_id
+                        eu.samsara_vehicle_id   AS samsara_vehicle_id,
+                        eu.samsara_entity_type  AS samsara_entity_type
                  FROM leases l
                  LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
                  LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
@@ -552,7 +553,8 @@ class InvoiceGenerator
                     $endDtUtc   = (new \DateTimeImmutable($periodEnd   . ' 23:59:59', new \DateTimeZone('UTC')));
                     $samsaraResult = $samsara->getDistanceForPeriod(
                         (string) $lease['samsara_vehicle_id'],
-                        $startDtUtc, $endDtUtc, 'km'
+                        $startDtUtc, $endDtUtc, 'km',
+                        (string) ($lease['samsara_entity_type'] ?? 'vehicle')
                     );
                     if ($samsaraResult['distance'] !== null) {
                         $periodDistanceKm   = (string) $samsaraResult['distance'];

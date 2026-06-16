@@ -42,7 +42,8 @@ class FixtureProvider
         string $samsaraVehicleId,
         \DateTimeImmutable $startUtc,
         \DateTimeImmutable $endUtc,
-        string $unit = 'km'
+        string $unit = 'km',
+        string $entityType = 'vehicle'
     ): array {
         $utcZone   = new \DateTimeZone('UTC');
         $startUtc  = $startUtc->setTimezone($utcZone);
@@ -70,17 +71,20 @@ class FixtureProvider
                 'Empty samsaraVehicleId.', $queriedAt);
         }
 
+        $noReadingMsg = $entityType === 'trailer'
+            ? 'No gpsOdometerMeters readings found in period (incl. ±24h wider window). [fixture: FIX_NONE]'
+            : 'No obdOdometerMeters or gpsDistanceMeters readings found in period (incl. ±24h wider window). [fixture: FIX_NONE]';
+
         return match ($samsaraVehicleId) {
-            'FIX_STD'    => self::scenarioStandard($startUtc, $endUtc, $unit, $queriedAt),
-            'FIX_PARKED' => self::scenarioParked($startUtc, $endUtc, $unit, $queriedAt),
-            'FIX_NONE'   => self::failure($unit, 'no_readings_in_period',
-                'No obdOdometerMeters or gpsDistanceMeters readings found in period (incl. ±24h wider window). [fixture: FIX_NONE]',
-                $queriedAt),
-            'FIX_RESET'  => self::scenarioGatewayReset($startUtc, $endUtc, $unit, $queriedAt),
-            'FIX_SPARSE' => self::scenarioSparse($startUtc, $endUtc, $unit, $queriedAt),
-            'FIX_GAP'    => self::scenarioLargeGap($startUtc, $endUtc, $unit, $queriedAt),
-            default      => self::failure($unit, 'unit_not_in_samsara',
-                "Vehicle/trailer ID '{$samsaraVehicleId}' not in fixture catalog. Known IDs: FIX_STD, FIX_PARKED, FIX_NONE, FIX_RESET, FIX_SPARSE, FIX_GAP.",
+            'FIX_STD',
+            'FIX_TRAILER_STD' => self::scenarioStandard($startUtc, $endUtc, $unit, $queriedAt),
+            'FIX_PARKED'      => self::scenarioParked($startUtc, $endUtc, $unit, $queriedAt),
+            'FIX_NONE'        => self::failure($unit, 'no_readings_in_period', $noReadingMsg, $queriedAt),
+            'FIX_RESET'       => self::scenarioGatewayReset($startUtc, $endUtc, $unit, $queriedAt),
+            'FIX_SPARSE'      => self::scenarioSparse($startUtc, $endUtc, $unit, $queriedAt),
+            'FIX_GAP'         => self::scenarioLargeGap($startUtc, $endUtc, $unit, $queriedAt),
+            default           => self::failure($unit, 'unit_not_in_samsara',
+                "Vehicle/trailer ID '{$samsaraVehicleId}' not in fixture catalog. Known IDs: FIX_STD, FIX_TRAILER_STD, FIX_PARKED, FIX_NONE, FIX_RESET, FIX_SPARSE, FIX_GAP.",
                 $queriedAt),
         };
     }

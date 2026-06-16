@@ -2557,9 +2557,10 @@ billing-grade integration. S-MILEAGE-2 wires this method into
 ```php
 public function getDistanceForPeriod(
     string             $samsaraVehicleId,
-    \DateTimeImmutable $startUtc,    // any TZ; normalized to UTC internally
-    \DateTimeImmutable $endUtc,      // any TZ; normalized to UTC internally
-    string             $unit = 'km'  // 'km' or 'miles'
+    \DateTimeImmutable $startUtc,         // any TZ; normalized to UTC internally
+    \DateTimeImmutable $endUtc,           // any TZ; normalized to UTC internally
+    string             $unit = 'km',      // 'km' or 'miles'
+    string             $entityType = 'vehicle'  // 'vehicle' (default) or 'trailer'
 ): array
 ```
 
@@ -2603,13 +2604,18 @@ Queries Samsara over `[startUtc - 24h, endUtc + 24h]`. From the resulting readin
 
 Only fails with `reason='no_readings_in_period'` when the entire wider window has zero readings of the preferred type.
 
-### Distance type preference (D-B)
+### Distance type preference — vehicle vs trailer (D-B + S-SAMSARA-DISTANCE-TRAILER-FIX)
 
-Requests `obdOdometerMeters,gpsDistanceMeters` in one `types=` call. **`gpsOdometerMeters` is intentionally NOT requested** per the locked S-MILEAGE-1B decision. Preference order:
+The method branches on `$entityType`:
 
-1. `obdOdometerMeters` present → use it (truck case, `source='obd'`)
-2. else `gpsDistanceMeters` present → use it (trailer case, `source='gps'`)
+**Vehicle (default):** Requests `obdOdometerMeters,gpsDistanceMeters`. Preference order:
+1. `obdOdometerMeters` present → use it (`source='obd'`, trucks with OBD gateway)
+2. else `gpsDistanceMeters` present → use it (`source='gps'`)
 3. else fail with `no_readings_in_period`
+
+**Trailer:** Requests `gpsOdometerMeters` only from `/fleet/trailers/stats/history`. This is a **cumulative GPS odometer** (meters). The existing bookend delta math (`bookendHigh − bookendLow`) is mathematically identical to `obdOdometerMeters`. Source is always `'gps'`. `gpsDistanceMeters` is **invalid for trailers** — Samsara returns HTTP 400 for it. Do NOT request it for trailers.
+
+Callers resolve `$entityType` from `equipment_units.samsara_entity_type` (values: `'vehicle'` | `'trailer'`). Default `'vehicle'` is backward-compatible with all pre-fix callers.
 
 ### Advisory warnings (D-F)
 
@@ -2652,28 +2658,29 @@ When set to `'1'`, `getDistanceForPeriod` dispatches to `\FleetForge\Samsara\Fix
 
 Production must NEVER silently run in fixture mode. The row defaults to `'0'`, is visible in the Settings UI, and the dispatch is gated on a strict string comparison. Smoke tests snapshot+restore the value automatically.
 
-**6 canned scenarios** keyed by `samsaraVehicleId`:
+**7 canned scenarios** keyed by `samsaraVehicleId`:
 
-| Vehicle ID  | Scenario | Distance | Source | Warnings |
-|-------------|----------|----------|--------|----------|
-| `FIX_STD`   | Standard 30-day, daily readings | 1234.56 km | gps | none |
-| `FIX_PARKED`| Parked unit, same first/last reading | 0.00 km | gps | none |
-| `FIX_NONE`  | No readings even in wider window | failure | unavailable | reason=no_readings_in_period |
-| `FIX_RESET` | Gateway reset (last < first) | 0.00 km (clamped) | gps | gateway_reset_detected |
-| `FIX_SPARSE`| 1 in-period reading; bookends from wider window | 500.00 km | gps | reading_outside_period, sparse_readings |
-| `FIX_GAP`   | 7-day gap mid-period | 2300.00 km | gps | large_gap_detected |
+| Vehicle ID       | Scenario | Distance | Source | Warnings |
+|------------------|----------|----------|--------|----------|
+| `FIX_STD`        | Standard 30-day, daily readings (vehicle) | 1234.56 km | gps | none |
+| `FIX_TRAILER_STD`| Standard 30-day, daily readings (trailer — pass `entityType='trailer'`) | 1234.56 km | gps | none |
+| `FIX_PARKED`     | Parked unit, same first/last reading | 0.00 km | gps | none |
+| `FIX_NONE`       | No readings even in wider window | failure | unavailable | reason=no_readings_in_period |
+| `FIX_RESET`      | Gateway reset (last < first) | 0.00 km (clamped) | gps | gateway_reset_detected |
+| `FIX_SPARSE`     | 1 in-period reading; bookends from wider window | 500.00 km | gps | reading_outside_period, sparse_readings |
+| `FIX_GAP`        | 7-day gap mid-period | 2300.00 km | gps | large_gap_detected |
 
-Plus an implicit 7th case: any unknown vehicleId falls through to `reason='unit_not_in_samsara'` so adversarial / typo'd inputs degrade safely (a misspelled fixture name will fail loudly, not silently match the wrong scenario).
+Plus an implicit 8th case: any unknown vehicleId falls through to `reason='unit_not_in_samsara'` so adversarial / typo'd inputs degrade safely (a misspelled fixture name will fail loudly, not silently match the wrong scenario).
 
 ### Smoke test
 
 ```sh
 php tests/_smoke_samsara_distance.php
-# → 16/16 passed in 0.0s
-# (or "14/16 passed (FAILED: T# name, ...) in X.Ys" — grep-able for CI)
+# → 18/18 passed in 0.0s
+# (or "16/18 passed (FAILED: T# name, ...) in X.Ys" — grep-able for CI)
 ```
 
-16 stress tests across two groups: **T1-T13** Samsara distance + fixture-mode coverage from S-MILEAGE-1B (T13 added in S-MILEAGE-1B-FOLLOWUP for FIX_GAP `large_gap_detected` warning). Each T1-T13 PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern. **T14-T16** S-MILEAGE-2A surface tests added via ADD-not-REPLACE (preserves T8/T10/T12 placeholders as 2B carry-forward per D141): T14 = `precharge_invoice_emit` (BEGIN/ROLLBACK-isolated synthesize precharge lease + `InvoiceGenerator::createFromLease` + assert `mileage_precharge` line with locked D139 shape + per-line tax computed); T15 = `precharge_amount_check` (three malformed shapes via direct `db_insert` hit `chk_leases_precharge_amount` CHECK); T16 = `dispatch_path_fixture_vs_http` (source-inspection on `SamsaraClient.php` confirms strict `fixture_mode === '1'` dispatch gate + production HTTP loop).
+18 stress tests across three groups: **T1-T13** Samsara distance + fixture-mode coverage from S-MILEAGE-1B (T13 added in S-MILEAGE-1B-FOLLOWUP for FIX_GAP `large_gap_detected` warning). Each T1-T13 PASS/FAIL line carries the actual `distance` field value as a string for float-leak inspection. T7 specifically asserts the bcmath miles return value has no trailing-nines pattern. **T14-T16** S-MILEAGE-2A surface tests added via ADD-not-REPLACE (preserves T8/T10/T12 placeholders as 2B carry-forward per D141): T14 = `precharge_invoice_emit` (BEGIN/ROLLBACK-isolated synthesize precharge lease + `InvoiceGenerator::createFromLease` + assert `mileage_precharge` line with locked D139 shape + per-line tax computed); T15 = `precharge_amount_check` (three malformed shapes via direct `db_insert` hit `chk_leases_precharge_amount` CHECK); T16 = `dispatch_path_fixture_vs_http` (source-inspection on `SamsaraClient.php` confirms strict `fixture_mode === '1'` dispatch gate + production HTTP loop). **T17-T18** S-SAMSARA-DISTANCE-TRAILER-FIX trailer coverage: T17 = `trailer_standard` (`FIX_TRAILER_STD` with `entityType='trailer'` → success, source=gps, distance=1234.56, warnings=[]); T18 = `trailer_endpoint_source` (source-inspection confirms `/fleet/trailers/stats/history` + `gpsOdometerMeters` + `entityType === 'trailer'` present in SamsaraClient.php).
 
 T8 (period_too_long real exercise) and T10 (structured failure shape real exercise) updated in **S-MILEAGE-2B C7 (D162)** from source-inspection placeholders to real fixture-mode coverage. T8 supplies a 101-day range to `FixtureProvider::getDistanceForPeriod` and asserts `reason='period_too_long'` + detail mentions "90-day cap" (FixtureProvider honors the cap per `lib/Samsara/FixtureProvider.php:57-70`). T10 supplies an inverted range (end < start) and asserts `reason='api_error'` + structured failure shape with `detail` / `queried_at` / `source` keys present. Production HTTP pagination cap (maxPages=50 + cap-exceeded message) + malformed-JSON branches stay source-inspectable via T8-INSP / T10-INSP cross-checks (these branches require real HTTP and can't be exercised through fixtures). T12 (fixture flag dispatch) verifies via the `SAMSARA_HISTORY_FIXTURE` log line that fixture-mode dispatch executes when configured.
 

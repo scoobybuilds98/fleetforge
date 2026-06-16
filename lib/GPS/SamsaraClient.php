@@ -1240,13 +1240,15 @@ class SamsaraClient
      * @param  \DateTimeImmutable $startUtc          Period start (any TZ; normalized to UTC)
      * @param  \DateTimeImmutable $endUtc            Period end   (any TZ; normalized to UTC)
      * @param  string             $unit              'km' (default) or 'miles'
+     * @param  string             $entityType        'vehicle' (default) or 'trailer'
      * @return array              Success or failure shape per D-D.
      */
     public function getDistanceForPeriod(
         string $samsaraVehicleId,
         \DateTimeImmutable $startUtc,
         \DateTimeImmutable $endUtc,
-        string $unit = 'km'
+        string $unit = 'km',
+        string $entityType = 'vehicle'
     ): array {
         // S-MILEAGE-1B / D-G — fixture-mode dispatch.
         // When settings.samsara.fixture_mode === '1', skip the real
@@ -1260,7 +1262,7 @@ class SamsaraClient
             $this->log('SAMSARA_HISTORY_FIXTURE',
                 "fixture-mode dispatch for vehicleId={$samsaraVehicleId}");
             return \FleetForge\Samsara\FixtureProvider::getDistanceForPeriod(
-                $samsaraVehicleId, $startUtc, $endUtc, $unit
+                $samsaraVehicleId, $startUtc, $endUtc, $unit, $entityType
             );
         }
 
@@ -1317,13 +1319,21 @@ class SamsaraClient
         $cursor      = null;
         $maxPages    = 50;
         $vehicleSeen = false;
+        $isTrailer   = $entityType === 'trailer';
 
         for ($page = 0; $page < $maxPages; $page++) {
-            $url = self::API_BASE . '/fleet/vehicles/stats/history'
-                 . '?types=' . urlencode('obdOdometerMeters,gpsDistanceMeters')
-                 . '&startTime=' . urlencode($widerStartIso)
-                 . '&endTime=' . urlencode($widerEndIso)
-                 . '&vehicleIds=' . urlencode($samsaraVehicleId);
+            // Trailers use a separate endpoint + stat type (S-SAMSARA-DISTANCE-TRAILER-FIX).
+            $url = $isTrailer
+                ? (self::API_BASE . '/fleet/trailers/stats/history'
+                   . '?trailerIds=' . urlencode($samsaraVehicleId)
+                   . '&types=gpsOdometerMeters'
+                   . '&startTime=' . urlencode($widerStartIso)
+                   . '&endTime='   . urlencode($widerEndIso))
+                : (self::API_BASE . '/fleet/vehicles/stats/history'
+                   . '?types=' . urlencode('obdOdometerMeters,gpsDistanceMeters')
+                   . '&startTime=' . urlencode($widerStartIso)
+                   . '&endTime='   . urlencode($widerEndIso)
+                   . '&vehicleIds=' . urlencode($samsaraVehicleId));
             if ($cursor !== null) {
                 $url .= '&after=' . urlencode($cursor);
             }
@@ -1357,7 +1367,8 @@ class SamsaraClient
                     continue;
                 }
                 $vehicleSeen = true;
-                foreach (['obdOdometerMeters', 'gpsDistanceMeters'] as $type) {
+                $types = $isTrailer ? ['gpsOdometerMeters'] : ['obdOdometerMeters', 'gpsDistanceMeters'];
+                foreach ($types as $type) {
                     $entries = $v[$type] ?? [];
                     if (!is_array($entries)) continue;
                     foreach ($entries as $entry) {
@@ -1395,32 +1406,46 @@ class SamsaraClient
             );
         }
 
-        // Determine type preference: OBD if any present, else gpsDistance (D-B)
-        $obdReadings = [];
-        $gpsReadings = [];
-        foreach ($allReadings as $time => $byType) {
-            if (isset($byType['obdOdometerMeters'])) {
-                $obdReadings[$time] = $byType['obdOdometerMeters'];
+        // Determine type: trailer uses gpsOdometerMeters only (cumulative — bookend delta
+        // is identical math to obdOdometerMeters). Vehicle prefers OBD over GPS (D-B).
+        if ($isTrailer) {
+            $usedReadings = [];
+            foreach ($allReadings as $time => $byType) {
+                if (isset($byType['gpsOdometerMeters'])) {
+                    $usedReadings[$time] = $byType['gpsOdometerMeters'];
+                }
             }
-            if (isset($byType['gpsDistanceMeters'])) {
-                $gpsReadings[$time] = $byType['gpsDistanceMeters'];
+            $source = empty($usedReadings) ? 'unavailable' : 'gps';
+        } else {
+            $obdReadings = [];
+            $gpsReadings = [];
+            foreach ($allReadings as $time => $byType) {
+                if (isset($byType['obdOdometerMeters'])) {
+                    $obdReadings[$time] = $byType['obdOdometerMeters'];
+                }
+                if (isset($byType['gpsDistanceMeters'])) {
+                    $gpsReadings[$time] = $byType['gpsDistanceMeters'];
+                }
             }
-        }
 
-        $usedReadings = [];
-        $source       = 'unavailable';
-        if (!empty($obdReadings)) {
-            $usedReadings = $obdReadings;
-            $source       = 'obd';
-        } elseif (!empty($gpsReadings)) {
-            $usedReadings = $gpsReadings;
-            $source       = 'gps';
+            $usedReadings = [];
+            $source       = 'unavailable';
+            if (!empty($obdReadings)) {
+                $usedReadings = $obdReadings;
+                $source       = 'obd';
+            } elseif (!empty($gpsReadings)) {
+                $usedReadings = $gpsReadings;
+                $source       = 'gps';
+            }
         }
 
         if (empty($usedReadings)) {
+            $noReadingTypes = $isTrailer
+                ? 'gpsOdometerMeters'
+                : 'obdOdometerMeters or gpsDistanceMeters';
             return $this->distanceFailure(
                 $samsaraVehicleId, $unit, 'no_readings_in_period',
-                'No obdOdometerMeters or gpsDistanceMeters readings found in period (incl. ±24h wider window).',
+                "No {$noReadingTypes} readings found in period (incl. ±24h wider window).",
                 $queriedAt
             );
         }

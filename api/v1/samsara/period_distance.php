@@ -124,7 +124,8 @@ $result = $client->getDistanceForPeriod(
     $eu['samsara_vehicle_id'],
     $startUtc,
     $endUtc,
-    $unit
+    $unit,
+    $eu['samsara_entity_type'] ?? 'vehicle'
 );
 
 // Merge provenance into the result so the caller never needs a second query.

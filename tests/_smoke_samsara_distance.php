@@ -93,7 +93,7 @@ $_maxStr = db_row("SELECT MAX(invoice_number) AS m FROM invoices WHERE invoice_n
 $_maxNum = $_maxStr !== '' ? (int)substr(strrchr($_maxStr, '-'), 1) : 0;
 if ($_counter <= $_maxNum) { fwrite(STDERR, "INFO invoice-counter-drift: invoice.next_number.{$_yr}={$_counter} <= MAX(invoice_number)={$_maxNum} (advisory — T14 counter bump handles this inside its BEGIN/ROLLBACK)\n"); }
 
-echo "\n[Running 16 stress tests: T1-T13 fixture-mode coverage, T14-T16 S-MILEAGE-2A surface]\n\n";
+echo "\n[Running 18 stress tests: T1-T13 fixture-mode coverage, T14-T16 S-MILEAGE-2A surface, T17-T18 trailer entity-type]\n\n";
 
 $start = new DateTimeImmutable('2026-04-01T00:00:00Z');
 $end   = new DateTimeImmutable('2026-04-30T23:59:59Z');
@@ -485,6 +485,40 @@ record($results, 'T16', 'dispatch_path_fixture_vs_http',
     $t16Ok
         ? 'source: fixture_mode==1 routes to FixtureProvider; else production HTTP loop (curl + /fleet/vehicles/stats/history)'
         : 'dispatch markers missing from SamsaraClient.php — production HTTP path may be broken',
+    '');
+
+// =====================================================================
+// T17 — Trailer standard path: entityType='trailer', FIX_TRAILER_STD →
+// same success shape as FIX_STD (source=gps, 1234.56 km, no warnings).
+// Verifies FixtureProvider routes FIX_TRAILER_STD and that the
+// entityType='trailer' 5th-param flows from caller through dispatch.
+// =====================================================================
+$r = $client->getDistanceForPeriod('FIX_TRAILER_STD', $start, $end, 'km', 'trailer');
+$ok = ($r['distance'] === '1234.56')
+    && ($r['source'] === 'gps')
+    && ($r['warnings'] === [])
+    && ($r['reading_count'] > 0);
+record($results, 'T17', 'trailer_standard',
+    $ok, $ok ? 'trailer entityType: source=gps distance=1234.56 warnings=[]'
+             : 'expected distance=1234.56/source=gps/no warnings; got ' . json_encode($r),
+    $r['distance']);
+
+// =====================================================================
+// T18 — Trailer endpoint source inspection: SamsaraClient.php contains
+// /fleet/trailers/stats/history + gpsOdometerMeters + entityType dispatch.
+// Mirrors the T16 pattern for the trailer code path.
+// =====================================================================
+$srcSamsara18 = $srcSamsara ?? file_get_contents(FF_ROOT . '/lib/GPS/SamsaraClient.php');
+$t18Ok = (
+       strpos($srcSamsara18, '/fleet/trailers/stats/history') !== false
+    && strpos($srcSamsara18, 'gpsOdometerMeters') !== false
+    && strpos($srcSamsara18, "entityType === 'trailer'") !== false
+);
+record($results, 'T18', 'trailer_endpoint_source',
+    $t18Ok,
+    $t18Ok
+        ? 'source: /fleet/trailers/stats/history + gpsOdometerMeters + trailer dispatch present'
+        : 'trailer dispatch markers missing from SamsaraClient.php — trailer billing still broken',
     '');
 
 // =====================================================================
