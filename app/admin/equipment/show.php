@@ -1853,6 +1853,209 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     </div>
                 </div>
 
+                <!-- ── Distance Travelled (S-UNIT-DISTANCE-SECTION) ─── -->
+                <div class="card spec-card" style="margin-top:16px;margin-bottom:0;">
+                    <div class="card-header" style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+                        <div class="card-title">Distance Travelled</div>
+                        <!-- km / miles toggle -->
+                        <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">
+                            <button type="button"
+                                    @click="distUnit='km'"
+                                    :class="distUnit==='km' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'"
+                                    style="border-radius:0;border:none;padding:4px 12px;font-size:0.78rem;">km</button>
+                            <button type="button"
+                                    @click="distUnit='miles'"
+                                    :class="distUnit==='miles' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'"
+                                    style="border-radius:0;border:none;border-left:1px solid var(--border-color);padding:4px 12px;font-size:0.78rem;">miles</button>
+                        </div>
+                    </div>
+                    <div class="card-body" style="padding:16px;">
+
+                        <!-- Quick presets -->
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                            <span style="font-size:0.78rem;color:var(--text-secondary);align-self:center;">Presets:</span>
+                            <button type="button" class="btn btn-ghost btn-sm" style="font-size:0.78rem;padding:3px 9px;"
+                                    @click="distPreset('7d')">Last 7 days</button>
+                            <button type="button" class="btn btn-ghost btn-sm" style="font-size:0.78rem;padding:3px 9px;"
+                                    @click="distPreset('30d')">Last 30 days</button>
+                            <button type="button" class="btn btn-ghost btn-sm" style="font-size:0.78rem;padding:3px 9px;"
+                                    @click="distPreset('month')">This month</button>
+                        </div>
+
+                        <!-- Date inputs + Calculate -->
+                        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+                            <div style="flex:1;min-width:180px;">
+                                <label class="form-label" style="font-size:0.8rem;">Start</label>
+                                <input type="datetime-local" class="form-control" x-model="distStart" style="font-size:0.85rem;">
+                            </div>
+                            <div style="flex:1;min-width:180px;">
+                                <label class="form-label" style="font-size:0.8rem;">End</label>
+                                <input type="datetime-local" class="form-control" x-model="distEnd" style="font-size:0.85rem;">
+                            </div>
+                            <div>
+                                <button type="button" class="btn btn-primary btn-sm"
+                                        @click="calcDistance()"
+                                        :disabled="distLoading || !distStart || !distEnd"
+                                        style="white-space:nowrap;">
+                                    <span x-show="!distLoading">Calculate</span>
+                                    <span x-show="distLoading">Calculating…</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Result area -->
+                        <template x-if="distResult">
+
+                            <!-- Not linked -->
+                            <template x-if="distResult.linked === false">
+                                <div style="color:var(--text-secondary);font-size:0.875rem;">
+                                    This unit is not linked to Samsara — link it above to query distance.
+                                </div>
+                            </template>
+
+                            <!-- Linked + got a distance -->
+                            <template x-if="distResult.linked && distResult.distance !== null && distResult.distance !== undefined">
+                                <div>
+                                    <!-- Warnings banner -->
+                                    <template x-if="distResult.warnings && distResult.warnings.length">
+                                        <div class="toast toast-warning" style="position:relative;margin-bottom:12px;animation:none;">
+                                            <span class="toast-icon">!</span>
+                                            <div class="toast-body">
+                                                <div class="toast-message" style="font-size:0.82rem;">
+                                                    <strong>Data quality warnings:</strong>
+                                                    <ul style="margin:4px 0 0 16px;padding:0;">
+                                                        <template x-for="w in distResult.warnings" :key="w">
+                                                            <li x-text="w"></li>
+                                                        </template>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- Big number -->
+                                    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+                                        <!-- editable distance field (manual edit → source='manual') -->
+                                        <input type="text"
+                                               x-model="distEditValue"
+                                               @input="if (distEditValue !== distResult.distance) distEditedManually = true"
+                                               class="form-control font-mono"
+                                               style="width:140px;font-size:1.5rem;font-weight:700;padding:4px 8px;text-align:right;"
+                                               :aria-label="'Distance in ' + distUnit">
+                                        <span style="font-size:1.1rem;color:var(--text-secondary);" x-text="distUnit"></span>
+                                        <!-- Source badge -->
+                                        <span x-show="distResult.source === 'obd'"
+                                              style="display:inline-block;padding:2px 8px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:10px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">OBD</span>
+                                        <span x-show="distResult.source === 'gps'"
+                                              style="display:inline-block;padding:2px 8px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:10px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">GPS</span>
+                                        <span x-show="distEditedManually"
+                                              style="display:inline-block;padding:2px 8px;background:#fefce8;color:#854d0e;border:1px solid #fef08a;border-radius:10px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Edited</span>
+                                    </div>
+
+                                    <!-- Reading window -->
+                                    <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">
+                                        <span x-text="distFormatTs(distResult.first_reading_at)"></span>
+                                        <span> → </span>
+                                        <span x-text="distFormatTs(distResult.last_reading_at)"></span>
+                                        <span x-show="distResult.reading_count">
+                                            · <span x-text="distResult.reading_count"></span> readings
+                                        </span>
+                                    </div>
+                                    <div style="font-size:0.75rem;color:var(--text-muted);">
+                                        Queried <span x-text="distFormatTs(distResult.queried_at)"></span>
+                                    </div>
+
+                                    <?php if (can('equipment', 'edit')): ?>
+                                    <!-- Save row -->
+                                    <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+                                        <input type="text"
+                                               x-model="distSaveLabel"
+                                               class="form-control"
+                                               placeholder="Optional label (e.g. June mileage audit)"
+                                               style="flex:1;min-width:200px;font-size:0.85rem;">
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                                @click="saveDistanceLog()"
+                                                :disabled="distSaving">
+                                            <span x-show="!distSaving">Save</span>
+                                            <span x-show="distSaving">Saving…</span>
+                                        </button>
+                                    </div>
+                                    <template x-if="distSaveError">
+                                        <div style="color:var(--color-danger);font-size:0.82rem;margin-top:6px;" x-text="distSaveError"></div>
+                                    </template>
+                                    <?php endif; ?>
+                                </div>
+                            </template>
+
+                            <!-- Linked but no distance (API failure / no readings) -->
+                            <template x-if="distResult.linked && (distResult.distance === null || distResult.distance === undefined)">
+                                <div style="font-size:0.875rem;color:var(--text-secondary);">
+                                    No distance data returned for this window.
+                                    <template x-if="distResult.reason">
+                                        <span>
+                                            (<span x-text="distResult.reason"></span>:
+                                            <span x-text="distResult.detail"></span>)
+                                        </span>
+                                    </template>
+                                </div>
+                            </template>
+
+                        </template><!-- /distResult -->
+
+                        <!-- Saved logs table -->
+                        <template x-if="distLogs.length > 0">
+                            <div style="margin-top:20px;">
+                                <div style="font-size:0.82rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">Saved Readings</div>
+                                <div style="overflow-x:auto;">
+                                    <table class="spec-table" style="font-size:0.82rem;">
+                                        <thead>
+                                            <tr>
+                                                <th style="text-align:left;padding:6px 10px;color:var(--text-secondary);font-weight:600;">Period</th>
+                                                <th style="text-align:right;padding:6px 10px;color:var(--text-secondary);font-weight:600;">Distance</th>
+                                                <th style="padding:6px 10px;color:var(--text-secondary);font-weight:600;">Source</th>
+                                                <th style="padding:6px 10px;color:var(--text-secondary);font-weight:600;">Label</th>
+                                                <th style="padding:6px 10px;color:var(--text-secondary);font-weight:600;">Saved</th>
+                                                <?php if (can('equipment', 'edit')): ?>
+                                                <th style="padding:6px 10px;"></th>
+                                                <?php endif; ?>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="log in distLogs" :key="log.id">
+                                                <tr>
+                                                    <td style="padding:6px 10px;white-space:nowrap;">
+                                                        <span x-text="distFormatDate(log.period_start)"></span>
+                                                        <span style="color:var(--text-muted);"> → </span>
+                                                        <span x-text="distFormatDate(log.period_end)"></span>
+                                                    </td>
+                                                    <td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:600;" x-text="log.distance + ' ' + log.unit"></td>
+                                                    <td style="padding:6px 10px;">
+                                                        <span x-show="log.source==='obd'"
+                                                              style="display:inline-block;padding:1px 6px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:8px;font-size:0.7rem;font-weight:700;text-transform:uppercase;">OBD</span>
+                                                        <span x-show="log.source==='gps'"
+                                                              style="display:inline-block;padding:1px 6px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:8px;font-size:0.7rem;font-weight:700;text-transform:uppercase;">GPS</span>
+                                                        <span x-show="log.source==='manual'"
+                                                              style="display:inline-block;padding:1px 6px;background:#fefce8;color:#854d0e;border:1px solid #fef08a;border-radius:8px;font-size:0.7rem;font-weight:700;text-transform:uppercase;">Manual</span>
+                                                    </td>
+                                                    <td style="padding:6px 10px;color:var(--text-secondary);" x-text="log.label || '—'"></td>
+                                                    <td style="padding:6px 10px;color:var(--text-muted);white-space:nowrap;" x-text="distFormatDate(log.created_at)"></td>
+                                                    <?php if (can('equipment', 'edit')): ?>
+                                                    <td style="padding:6px 10px;">
+                                                        <button type="button" class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:0.75rem;"
+                                                                @click="deleteDistanceLog(log.id)">Delete</button>
+                                                    </td>
+                                                    <?php endif; ?>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </template>
+
+                    </div>
+                </div><!-- /Distance Travelled card -->
+
                 <!-- Actions bar -->
                 <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
                     <a href="<?= base_url('tracking') ?>" class="btn btn-secondary btn-sm">
@@ -2093,6 +2296,20 @@ function FF_UnitDetail() {
         samsaraSyncing:            false,
         samsaraError:              '',
         trackingMap:               null, // Leaflet instance for the live map
+
+        // ── Distance Travelled (S-UNIT-DISTANCE-SECTION) ──────────
+        distUnit:            'km',
+        distStart:           '',
+        distEnd:             '',
+        distLoading:         false,
+        distResult:          null,   // full period_distance API response
+        distEditValue:       '',     // editable copy of distance before save
+        distEditedManually:  false,  // true when user changed distEditValue
+        distSaveLabel:       '',
+        distSaving:          false,
+        distSaveError:       '',
+        distLogs:            [],     // saved equipment_distance_logs rows
+        distLogsLoaded:      false,
 
         // ── Payoff Analysis (PAYOFF-1) ────────────────────────────
         // WHY: Driven off the server-side $linkedAssetId lookup — when
@@ -2481,6 +2698,8 @@ function FF_UnitDetail() {
                 // Mapped state — render the live map (must defer one
                 // tick so Leaflet sees the now-visible #unit-tracking-map div).
                 this.$nextTick(() => this.initSamsaraMap());
+                // Load saved distance logs on first visit
+                if (!this.distLogsLoaded) this.loadDistanceLogs();
             } else {
                 // Unmapped — fetch the vehicle dropdown source if we
                 // haven't already, so the link form is ready to use.
@@ -2627,6 +2846,139 @@ function FF_UnitDetail() {
                 .addTo(this.trackingMap)
                 .bindPopup(popupHtml)
                 .openPopup();
+        },
+
+        // ── Distance Travelled helpers (S-UNIT-DISTANCE-SECTION) ──
+
+        // Fill distStart / distEnd from a named preset.
+        distPreset(key) {
+            const now = new Date();
+            const pad  = n => String(n).padStart(2,'0');
+            const toLocal = d => d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+                                 + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+            if (key === '7d') {
+                const s = new Date(now); s.setDate(s.getDate() - 7); s.setHours(0,0,0,0);
+                const e = new Date(now); e.setHours(23,59,0,0);
+                this.distStart = toLocal(s); this.distEnd = toLocal(e);
+            } else if (key === '30d') {
+                const s = new Date(now); s.setDate(s.getDate() - 30); s.setHours(0,0,0,0);
+                const e = new Date(now); e.setHours(23,59,0,0);
+                this.distStart = toLocal(s); this.distEnd = toLocal(e);
+            } else if (key === 'month') {
+                const s = new Date(now.getFullYear(), now.getMonth(), 1);
+                const e = new Date(now); e.setHours(23,59,0,0);
+                this.distStart = toLocal(s); this.distEnd = toLocal(e);
+            }
+        },
+
+        // GET /api/v1/samsara/period_distance — fetch distance for the window.
+        async calcDistance() {
+            if (!this.distStart || !this.distEnd) return;
+            this.distLoading = true;
+            this.distResult  = null;
+            this.distEditValue      = '';
+            this.distEditedManually = false;
+            this.distSaveError      = '';
+            try {
+                const params = new URLSearchParams({
+                    equipment_unit_id: <?= $unitId ?>,
+                    period_start:      this.distStart,
+                    period_end:        this.distEnd,
+                    unit:              this.distUnit,
+                });
+                const r = await FF_Api.get('<?= base_url('api/v1/samsara/period_distance') ?>?' + params);
+                if (r.success) {
+                    this.distResult    = r.data;
+                    this.distEditValue = r.data.distance ?? '';
+                } else {
+                    FF_Toast.error(r.error?.message || 'Failed to fetch distance.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error fetching distance.');
+            }
+            this.distLoading = false;
+        },
+
+        // Format an ISO timestamp to a compact local string for the reading window line.
+        distFormatTs(val) {
+            if (!val) return '—';
+            const d = new Date(val);
+            if (isNaN(d.getTime())) return val;
+            return d.toLocaleString(undefined, { month:'short', day:'numeric',
+                                                  hour:'2-digit', minute:'2-digit', timeZoneName:'short' });
+        },
+
+        // Format a datetime to a short date for the saved-logs table.
+        distFormatDate(val) {
+            if (!val) return '—';
+            const d = new Date(val);
+            if (isNaN(d.getTime())) return val;
+            return d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
+        },
+
+        // POST /api/v1/equipment_units/distance_logs/create — save current result.
+        async saveDistanceLog() {
+            if (!this.distResult || this.distEditValue === '') return;
+            this.distSaving    = true;
+            this.distSaveError = '';
+            const source = this.distEditedManually ? 'manual' : (this.distResult.source || 'gps');
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/equipment_units/distance_logs/create') ?>', {
+                    equipment_unit_id: <?= $unitId ?>,
+                    period_start:      this.distStart,
+                    period_end:        this.distEnd,
+                    distance:          String(this.distEditValue),
+                    unit:              this.distUnit,
+                    source:            source,
+                    reading_count:     this.distResult.reading_count ?? null,
+                    warnings:          this.distResult.warnings ?? null,
+                    first_reading_at:  this.distResult.first_reading_at ?? null,
+                    last_reading_at:   this.distResult.last_reading_at  ?? null,
+                    label:             this.distSaveLabel || null,
+                    queried_at:        this.distResult.queried_at ?? null,
+                });
+                if (r.success) {
+                    // Prepend to local list so it appears immediately
+                    this.distLogs.unshift(r.data);
+                    this.distSaveLabel = '';
+                    FF_Toast.success('Distance reading saved.');
+                } else {
+                    this.distSaveError = r.error?.message || 'Save failed.';
+                }
+            } catch (e) {
+                this.distSaveError = 'Network error saving distance log.';
+            }
+            this.distSaving = false;
+        },
+
+        // GET /api/v1/equipment_units/distance_logs/index — load saved logs.
+        async loadDistanceLogs() {
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/equipment_units/distance_logs/index') ?>?equipment_unit_id=<?= $unitId ?>');
+                if (r.success) {
+                    this.distLogs       = r.data?.items ?? [];
+                    this.distLogsLoaded = true;
+                }
+            } catch (e) { /* non-fatal */ }
+        },
+
+        // POST /api/v1/equipment_units/distance_logs/delete — hard-delete a log row.
+        async deleteDistanceLog(id) {
+            if (!(await FF_Confirm.ask('Delete this saved distance reading? This cannot be undone.'))) return;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/equipment_units/distance_logs/delete') ?>', {
+                    id:                id,
+                    equipment_unit_id: <?= $unitId ?>,
+                });
+                if (r.success) {
+                    this.distLogs = this.distLogs.filter(l => l.id !== id);
+                    FF_Toast.success('Distance reading deleted.');
+                } else {
+                    FF_Toast.error(r.error?.message || 'Delete failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error deleting distance log.');
+            }
         },
 
         // Compact "5 minutes ago" / "2 hours ago" formatter used by
