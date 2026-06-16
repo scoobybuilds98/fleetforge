@@ -159,6 +159,29 @@ $acquiredDate    = clean_date($body['acquired_date'] ?? null);
 // FIX #19: acquisition cost must be >= 0
 $acquisitionCost = isset($body['acquisition_cost']) ? clean_non_negative_decimal($body['acquisition_cost']) : null;
 
+// VALID: enforce DB column ranges so an out-of-range value returns a clean 422
+// instead of a PDO SQLSTATE[22003] overflow (same root cause as Sentry
+// FLEETFORGE-M, which fired on the update path). Column types:
+//   length_ft/height_ft/width_ft DECIMAL(6,2) → 9999.99
+//   weight_capacity_lbs INT UNSIGNED          → 4294967295
+//   axle_count TINYINT UNSIGNED               → 255
+foreach (['length_ft' => ['Length', $lengthFt],
+          'height_ft' => ['Height', $heightFt],
+          'width_ft'  => ['Width',  $widthFt]] as $f => [$label, $val]) {
+    if ($val !== null && bccomp($val, '9999.99', 4) > 0) {
+        $fields[$f] = "{$label} must be 9999.99 ft or less.";
+    }
+}
+if ($weightCap !== null && $weightCap > 4294967295) {
+    $fields['weight_capacity_lbs'] = 'Weight capacity must be 4294967295 or less.';
+}
+if ($axleCount !== null && $axleCount > 255) {
+    $fields['axle_count'] = 'Axle count must be 255 or less.';
+}
+if ($fields) {
+    json_validation_error($fields);
+}
+
 $userId = current_user_id();
 $newId  = null;
 

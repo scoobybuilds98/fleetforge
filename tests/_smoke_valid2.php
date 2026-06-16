@@ -253,6 +253,25 @@ $cases = [
         'expect'=> ['year'],
     ],
     [
+        // FLEETFORGE-M regression: length_ft DECIMAL(6,2) overflow must return a
+        // clean 422 (not a PDO SQLSTATE[22003] 500). TST002 must not already exist.
+        'label' => 'Equipment Unit — length_ft out of range (create)',
+        'url'   => "$baseApi/equipment/units/create.php",
+        'body'  => ['unit_number' => 'TST002', 'template_id' => 1,
+                    'ownership_type' => 'owned', 'length_ft' => '15000'],
+        'expect'=> ['length_ft'],
+    ],
+    [
+        // FLEETFORGE-M direct regression on the failing endpoint. id=1 must exist;
+        // updated_at is required but its value is irrelevant (optimistic locking
+        // disabled app-wide, D19). axle_count TINYINT(255) overflow exercised too.
+        'label' => 'Equipment Unit — length_ft/axle out of range (update)',
+        'url'   => "$baseApi/equipment/units/update.php",
+        'body'  => ['id' => 1, 'updated_at' => '2020-01-01 00:00:00',
+                    'length_ft' => '12345.67', 'axle_count' => 9000],
+        'expect'=> ['length_ft', 'axle_count'],
+    ],
+    [
         'label' => 'Lease — empty body',
         'url'   => "$baseApi/leases/create.php",
         'body'  => [],

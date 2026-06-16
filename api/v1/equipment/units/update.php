@@ -125,6 +125,11 @@ foreach ($dimensionLabels as $f => $label) {
             $d = clean_decimal($raw);
             if ($d === null || bccomp($d, '0', 4) <= 0) {
                 $fields[$f] = "{$label} must be greater than zero.";
+            } elseif (bccomp($d, '9999.99', 4) > 0) {
+                // length_ft/height_ft/width_ft are DECIMAL(6,2) — max 9999.99 ft.
+                // Reject overflow with a clean 422 instead of letting PDO raise
+                // SQLSTATE[22003] "Out of range value" (Sentry FLEETFORGE-M).
+                $fields[$f] = "{$label} must be 9999.99 ft or less.";
             } else {
                 $updates[$f] = $d;
             }
@@ -165,12 +170,16 @@ if (array_key_exists('year', $body)) {
     }
 }
 
-// VALID-2: weight_capacity_lbs and axle_count must be > 0
+// VALID-2: weight_capacity_lbs and axle_count must be > 0 and within column range.
+// Per-field max matches the DB column type so an oversized value returns a clean
+// 422 rather than a PDO SQLSTATE[22003] overflow (same root cause as FLEETFORGE-M):
+//   weight_capacity_lbs INT UNSIGNED  → 4294967295
+//   axle_count          TINYINT UNSIGNED → 255
 $positiveIntLabels = [
-    'weight_capacity_lbs' => 'Weight capacity',
-    'axle_count'          => 'Axle count',
+    'weight_capacity_lbs' => ['Weight capacity', 4294967295],
+    'axle_count'          => ['Axle count', 255],
 ];
-foreach ($positiveIntLabels as $f => $label) {
+foreach ($positiveIntLabels as $f => [$label, $max]) {
     if (array_key_exists($f, $body)) {
         $raw = $body[$f];
         if ($raw === null || $raw === '') {
@@ -179,6 +188,8 @@ foreach ($positiveIntLabels as $f => $label) {
             $i = clean_int($raw);
             if ($i === null || $i <= 0) {
                 $fields[$f] = "{$label} must be greater than zero.";
+            } elseif ($i > $max) {
+                $fields[$f] = "{$label} must be {$max} or less.";
             } else {
                 $updates[$f] = $i;
             }
