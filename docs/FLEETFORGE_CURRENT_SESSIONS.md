@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-SAMSARA-DISTANCE-TRAILER-FIX** — IN-FLIGHT
+  Started: 2026-06-16T00:00 UTC by desktop-1
+  Touching: lib/GPS/SamsaraClient.php, lib/Samsara/FixtureProvider.php, lib/Billing/InvoiceGenerator.php, api/v1/samsara/period_distance.php, tests/_smoke_samsara_distance.php
+
 **S-UNIT-DISTANCE-SECTION** — SHIPPED 2026-06-16 (see PROGRESS.md SESSION LOG row). **Distance Travelled section on equipment unit Samsara Mapping tab.** NEW `api/v1/samsara/period_distance.php` (shared endpoint — reused by S-SAMSARA-PERIOD-DISTANCE-AUTOFETCH, do NOT rebuild). NEW `equipment_distance_logs` table (migration 111/0/0) + 3 endpoints (index/create/delete). UI: km/miles toggle, presets, date pickers, Calculate, result display (warnings, source badge, window), Save with label, saved-logs table with Delete. SC1 php -l 5/5; SC2–SC9 12/12 functional; schema parity PASS; migrate 111/0/0; doc_freshness 29/29. Commits: `a95b7df` (IN-FLIGHT registration) + `<this commit>` (all code + docs).
 
 **S-RATES-ITEM-PANEL** — SHIPPED 2026-06-16 (see PROGRESS.md SESSION LOG row). **Rate card item-level display + delete persistence on customer panel.** Bug 1: customer panel showed parent card summary instead of individual items; index API extended with `include_items=1`. Bug 2a: delete only spliced JS array (restored on refresh); fixed to call `saveItems()` immediately. Bug 2b: multi-type UI removed (one type per card enforced). Commits: `3c5081c` + `7d0736f`.
