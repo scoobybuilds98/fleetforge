@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-UNIT-DISTANCE-SECTION** — IN-FLIGHT
+  Started: 2026-06-16T00:00Z by desktop-1
+  Touching: api/v1/samsara/period_distance.php, api/v1/equipment_units/, app/admin/equipment/show.php, db_migrations/, FLEETFORGE_DATABASE_MASTER.sql
+
 **S-RATES-ITEM-PANEL** — SHIPPED 2026-06-16 (see PROGRESS.md SESSION LOG row). **Rate card item-level display + delete persistence on customer panel.** Bug 1: customer panel showed parent card summary instead of individual items; index API extended with `include_items=1`. Bug 2a: delete only spliced JS array (restored on refresh); fixed to call `saveItems()` immediately. Bug 2b: multi-type UI removed (one type per card enforced). Commits: `3c5081c` + `7d0736f`.
 
 **S-LEASE-DISTANCE-EDIT-ACTIVE** — SHIPPED 2026-06-16 (see PROGRESS.md SESSION LOG row). **Active-lease distance-field edit: lock all metadata for active leases; allow only mileage_at_start, estimated_mileage*, km_to_miles_conversion, miles_to_km_conversion.** API gate: 422 `ACTIVE_LEASE_DISTANCE_ONLY` for any non-distance field on active status; audit_log captures old→new for distance changes. Edit form: `$isActive` flag renders static divs for all locked fields (dates, notes, add-ons, precharge, po_number, mileage_at_end); JS `form` object emits distance-only fields for active leases; `validate()` splits active vs pending checks. No migration. SC1 php -l 2/2; SC7 model_b_lifecycle 26/26 + doc_freshness 29/29. `mileage_at_start` lives on `leases` table. No operator deploy step beyond standard ff-deploy. Commits: `<this commit>`.
