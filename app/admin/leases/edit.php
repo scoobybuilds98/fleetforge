@@ -627,7 +627,24 @@ function FF_EditLease() {
         _mileageUnit:        <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
         factor_section_open: false,
 
-        init() {},
+        init() {
+            // S-FORM-DRAFT-AUTOSAVE: mirror in-progress edits to localStorage so
+            // a Back/refresh/close never loses them; offer a restore banner on
+            // return. Keyed by lease id so each lease has its own draft.
+            // EXCLUSIONS: `id` + `updated_at` — updated_at is the optimistic-lock
+            // token (D19); it must always reflect the freshly server-rendered
+            // value, NEVER a stale token re-injected from a draft. The restore
+            // only refills editable business fields, leaving updated_at intact.
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId:   'lease-edit',
+                    entityId: this.form.id,
+                    el:       this.$root,
+                    model:    this.form,
+                    exclude:  ['id', 'updated_at'],
+                });
+            }
+        },
 
         // Allowance handlers (3-decimal precision, DECIMAL(12,3)).
         onAllowanceKmInput(value) {
@@ -720,6 +737,9 @@ function FF_EditLease() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/update') ?>', this.form);
                 if (r.success) {
+                    // S-FORM-DRAFT-AUTOSAVE: server confirmed — wipe the draft
+                    // (stop=true) BEFORE the hard redirect navigates away.
+                    if (this._draft) this._draft.clear(true);
                     window.location.href = '<?= base_url('leases/show') ?>?id=<?= $leaseId ?>';
                 } else if (r.error?.code === 'STALE_DATA') {
                     FF_Validate.banner(f, (r.error.message || '') + ' Reload this page to get the latest version.');

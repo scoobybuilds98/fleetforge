@@ -3310,6 +3310,326 @@ window.FF_RecordPicker = FF_RecordPicker;
 
 
 // ============================================================
+// 07h. FF_FormDraft — reusable form-draft autosave (localStorage)
+// ============================================================
+// WHY: multi-section create/edit forms (lease create, lease edit, and any
+//      future form that opts in) lose every in-progress edit if the user
+//      hits Back, refreshes, or accidentally closes the tab before saving.
+//      FF_FormDraft transparently mirrors a form's reactive state into
+//      localStorage (debounced) and offers a one-click "restore" on return.
+//
+// DESIGN
+//   • Key  = `ff_draft:<formId>:<entityId>`  (entityId 'new' for create).
+//   • Value= { v:<DRAFT_VERSION>, t:<epoch ms>, s:{ <section>:{ d:{...}, t } } }
+//            Each PAGE/STEP writes its own SECTION slice into the SAME entity
+//            key and merges — so a multi-page wizard never clobbers a sibling
+//            step's fields. Single-page forms use the default section ('_main')
+//            which holds the whole form.
+//   • DRAFT_VERSION tags the payload. On load, a stored draft whose `v` does
+//     not match the current DRAFT_VERSION is silently discarded + deleted
+//     (so a schema/shape change never mis-applies a stale draft).
+//   • exclude[] lists field names (dot-paths allowed, e.g. 'lessor.bpo_amount')
+//     that must NEVER be persisted — sensitive fields (password/token/payment)
+//     and non-restorable/transient fields (optimistic-lock tokens, picker-owned
+//     ids, GPS-fetch metadata).
+//   • All storage access is wrapped in try/catch — privacy modes throw on
+//     localStorage; the helper then degrades to a no-op (form still works).
+//
+// USAGE (from inside an Alpine component's init()):
+//   this._draft = FF_FormDraft.attach({
+//       formId:   'lease-create',
+//       entityId: 'new',            // or the record id on edit
+//       el:       this.$root,       // listeners + banner mount point
+//       model:    this.form,        // the reactive object to track/restore
+//       exclude:  ['customer_id', 'equipment_unit_id'],
+//       // section: 'step-2',       // wizard pages: a per-step slice key
+//       // beforeUnloadWarn: true,  // optional native unload prompt (default off)
+//   });
+//   // …and in the submit() success branch, once the server confirms the save:
+//   if (this._draft) this._draft.clear(true);   // wipe the whole entity key
+//
+// The returned controller also exposes save()/scheduleSave()/flush()/restore()/
+// hasDraft()/showBanner() for callers that need finer control.
+const FF_FormDraft = (function () {
+    'use strict';
+
+    // Bump DRAFT_VERSION to invalidate every existing draft app-wide (e.g. when
+    // a form's field shape changes in a way that would make old drafts wrong).
+    const DRAFT_VERSION = '1';
+    const PREFIX        = 'ff_draft:';
+    const DEBOUNCE_MS   = 500;
+    const DEFAULT_SECTION = '_main';
+
+    // ── Safe localStorage wrappers (privacy mode throws) ────────────────────
+    function lsGet(k)    { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
+    function lsSet(k, v) { try { window.localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+    function lsDel(k)    { try { window.localStorage.removeItem(k); } catch (e) { /* best-effort */ } }
+
+    function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
+
+    // Remove excluded keys from a snapshot. Supports dotted paths so nested
+    // fields (e.g. 'lessor.bpo_amount') can be excluded too.
+    function stripExcludes(data, excludes) {
+        if (!excludes || !excludes.length) return data;
+        const clone = deepClone(data);
+        excludes.forEach(function (path) {
+            const parts = String(path).split('.');
+            let node = clone;
+            for (let i = 0; i < parts.length - 1 && node; i++) node = node[parts[i]];
+            if (node && typeof node === 'object') delete node[parts[parts.length - 1]];
+        });
+        return clone;
+    }
+
+    // Deep-merge `source` INTO `target`, mutating target in place so an Alpine
+    // reactive object keeps its identity (replacing it would break reactivity).
+    // Only keys present in source are touched — fields absent from the draft
+    // (e.g. an excluded optimistic-lock token) keep their current value.
+    function assign(target, source) {
+        if (!target || !source || typeof source !== 'object') return target;
+        Object.keys(source).forEach(function (k) {
+            const sv = source[k];
+            if (sv && typeof sv === 'object' && !Array.isArray(sv) &&
+                target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])) {
+                assign(target[k], sv);
+            } else {
+                target[k] = sv;
+            }
+        });
+        return target;
+    }
+
+    function relativeTime(ts) {
+        const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+        if (s < 45) return 'just now';
+        const m = Math.round(s / 60);
+        if (m < 60) return m + (m === 1 ? ' minute' : ' minutes') + ' ago';
+        const h = Math.round(m / 60);
+        if (h < 24) return h + (h === 1 ? ' hour' : ' hours') + ' ago';
+        const d = Math.round(h / 24);
+        return d + (d === 1 ? ' day' : ' days') + ' ago';
+    }
+
+    function attach(config) {
+        config = config || {};
+        const formId   = config.formId || 'form';
+        const entityId = (config.entityId === undefined || config.entityId === null || config.entityId === '')
+            ? 'new' : String(config.entityId);
+        const section  = config.section || DEFAULT_SECTION;
+        const version  = config.version || DRAFT_VERSION;
+        const excludes = config.exclude || [];
+        const el       = config.el || null;
+        const key      = PREFIX + formId + ':' + entityId;
+        const warnUnload = !!config.beforeUnloadWarn;
+        const bannerText = config.bannerLabel || 'Unsaved changes';
+
+        // Idempotency guard. Alpine auto-invokes a component's init() method AND
+        // re-invokes it via x-init="init()", so attach() commonly runs twice for
+        // the same element. Without this, we would stack duplicate banners and
+        // double-bind input/change/click + pagehide listeners. Return the
+        // already-attached controller instead of wiring a second one.
+        const guardProp = '__ffDraft_' + key;
+        if (el && el[guardProp]) return el[guardProp];
+
+        // get()/set() — either supplied directly, or derived from `model`.
+        const getFn = config.get || (config.model ? function () { return config.model; } : null);
+        const setFn = config.set || (config.model ? function (d) { assign(config.model, d); } : null);
+
+        let debounceTimer = null;
+        let bannerEl      = null;
+        let stopped       = false;   // hard-disable after a confirmed server save
+
+        function readStore() {
+            const raw = lsGet(key);
+            if (!raw) return null;
+            let parsed;
+            try { parsed = JSON.parse(raw); } catch (e) { lsDel(key); return null; }
+            // Version mismatch → discard silently so a stale-shape draft is
+            // never mis-applied.
+            if (!parsed || parsed.v !== version) { lsDel(key); return null; }
+            return parsed;
+        }
+
+        function writeSlice(data) {
+            let store = null;
+            const raw = lsGet(key);
+            if (raw) { try { store = JSON.parse(raw); } catch (e) { store = null; } }
+            if (!store || store.v !== version) store = { v: version, t: 0, s: {} };
+            const now = Date.now();
+            store.s[section] = { d: data, t: now };
+            store.t = now;
+            lsSet(key, JSON.stringify(store));
+        }
+
+        function save() {
+            if (stopped || !getFn) return;
+            let snapshot;
+            try { snapshot = deepClone(getFn()); } catch (e) { return; }
+            writeSlice(stripExcludes(snapshot, excludes));
+        }
+
+        function scheduleSave() {
+            if (stopped) return;
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(function () { debounceTimer = null; save(); }, DEBOUNCE_MS);
+        }
+
+        // Persist any pending debounced write immediately (called on pagehide so
+        // a Back/refresh/close within the debounce window doesn't lose the last
+        // keystrokes).
+        function flush() {
+            if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; save(); }
+        }
+
+        // Delete the whole entity key. Pass stop=true after a confirmed server
+        // save to also disable any further autosave for this page lifecycle —
+        // prevents a late click/redirect from resurrecting the just-cleared draft.
+        function clear(stop) {
+            if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+            if (stop) stopped = true;
+            lsDel(key);
+            removeBanner();
+        }
+
+        function hasDraft() {
+            const store = readStore();
+            return !!(store && store.s && store.s[section] && store.s[section].d);
+        }
+
+        function restore() {
+            const store = readStore();
+            if (!store || !store.s || !store.s[section]) return false;
+            const data = store.s[section].d;
+            if (setFn) { try { setFn(data); } catch (e) { /* ignore */ } }
+            if (typeof config.onRestore === 'function') { try { config.onRestore(data); } catch (e) {} }
+            return true;
+        }
+
+        // ── Restore banner ──────────────────────────────────────────────────
+        function removeBanner() {
+            if (bannerEl && bannerEl.parentNode) bannerEl.parentNode.removeChild(bannerEl);
+            bannerEl = null;
+        }
+
+        function showBanner() {
+            if (!el) return;
+            const store = readStore();
+            if (!store || !store.s || !store.s[section] || !store.s[section].d) return;
+            removeBanner();
+
+            const ts = store.t || store.s[section].t || Date.now();
+            const wrap = document.createElement('div');
+            wrap.className = 'ff-draft-banner';
+            wrap.setAttribute('role', 'status');
+            wrap.setAttribute('aria-live', 'polite');
+            wrap.style.cssText =
+                'display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;' +
+                'margin-bottom:1.25rem;padding:.7rem 1rem;border-radius:8px;' +
+                'background:var(--color-warning-light,#fff7e6);' +
+                'border:1px solid var(--color-warning,#e0a106);' +
+                'color:var(--color-warning-text,var(--text-primary,#1a1a1a));' +
+                'font-size:.9rem;';
+
+            const msg = document.createElement('span');
+            msg.style.cssText = 'flex:1 1 auto;min-width:12rem;';
+            msg.innerHTML = '<strong>' + bannerText + '</strong> from ' + relativeTime(ts) +
+                ' — restore your in-progress edits?';
+
+            const btnRestore = document.createElement('button');
+            btnRestore.type = 'button';
+            btnRestore.textContent = 'Restore';
+            btnRestore.style.cssText =
+                'border:none;cursor:pointer;font-weight:600;font-size:.85rem;' +
+                'padding:.38rem .85rem;border-radius:6px;' +
+                'background:var(--color-primary,#2563eb);color:var(--text-on-primary,#fff);';
+
+            const btnDiscard = document.createElement('button');
+            btnDiscard.type = 'button';
+            btnDiscard.textContent = 'Discard';
+            btnDiscard.style.cssText =
+                'cursor:pointer;font-weight:600;font-size:.85rem;' +
+                'padding:.38rem .85rem;border-radius:6px;' +
+                'background:transparent;color:var(--text-secondary,#555);' +
+                'border:1px solid var(--border-color,#d0d0d0);';
+
+            const btnDismiss = document.createElement('button');
+            btnDismiss.type = 'button';
+            btnDismiss.setAttribute('aria-label', 'Dismiss');
+            btnDismiss.innerHTML = '&times;';
+            btnDismiss.style.cssText =
+                'cursor:pointer;background:transparent;border:none;line-height:1;' +
+                'font-size:1.2rem;color:var(--text-muted,#888);padding:0 .25rem;';
+
+            // stopPropagation is belt-and-suspenders — the banner is mounted as a
+            // SIBLING above `el`, so its clicks don't reach the save listeners on
+            // `el` anyway; this also guards if a caller mounts it inside instead.
+            btnRestore.addEventListener('click', function (e) { e.stopPropagation(); restore(); removeBanner(); });
+            btnDiscard.addEventListener('click', function (e) { e.stopPropagation(); clear(false); });
+            btnDismiss.addEventListener('click', function (e) { e.stopPropagation(); removeBanner(); });
+
+            wrap.appendChild(msg);
+            wrap.appendChild(btnRestore);
+            wrap.appendChild(btnDiscard);
+            wrap.appendChild(btnDismiss);
+
+            // Mount as a sibling BEFORE the component root when possible.
+            if (el.parentNode) el.parentNode.insertBefore(wrap, el);
+            else el.insertBefore(wrap, el.firstChild);
+            bannerEl = wrap;
+        }
+
+        // ── Wire change tracking ────────────────────────────────────────────
+        // Bubble-phase listeners fire AFTER Alpine's x-model has updated the
+        // model, so save() reads fresh values. `click` covers programmatic
+        // toggles (segmented controls, opt-in buttons, GPS-fetch) that don't
+        // emit input/change.
+        if (el) {
+            el.addEventListener('input',  scheduleSave, false);
+            el.addEventListener('change', scheduleSave, false);
+            el.addEventListener('click',  scheduleSave, false);
+        }
+
+        const onHide = function () { flush(); };
+        window.addEventListener('pagehide', onHide);
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'hidden') flush();
+        });
+
+        if (warnUnload) {
+            window.addEventListener('beforeunload', function (e) {
+                if (!stopped && hasDraft()) { e.preventDefault(); e.returnValue = ''; return ''; }
+            });
+        }
+
+        // On attach: offer to restore a valid existing draft. (A version
+        // mismatch was already deleted silently by readStore() inside showBanner.)
+        showBanner();
+
+        const controller = {
+            key: key, version: version, section: section,
+            save: save, scheduleSave: scheduleSave, flush: flush,
+            clear: clear, restore: restore, hasDraft: hasDraft,
+            showBanner: showBanner, removeBanner: removeBanner,
+        };
+        if (el) el[guardProp] = controller;
+        return controller;
+    }
+
+    return {
+        attach: attach,
+        assign: assign,
+        DRAFT_VERSION: DRAFT_VERSION,
+        PREFIX: PREFIX,
+        // exposed for unit/edge testing
+        _stripExcludes: stripExcludes,
+        _relativeTime: relativeTime,
+    };
+})();
+
+window.FF_FormDraft = FF_FormDraft;
+
+
+// ============================================================
 // 07i. FF_Messenger — admin customer messenger page (app/admin/messenger/index.php)
 // ============================================================
 // Facebook-Messenger-style inbox for admin↔customer conversations.

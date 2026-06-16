@@ -1002,6 +1002,24 @@ function FF_CreateLease() {
             this.$watch('form.billing_cycle', (v) => {
                 if (v !== 'monthly') this.form.advance_billing_periods = 0;
             });
+
+            // S-FORM-DRAFT-AUTOSAVE: mirror in-progress edits to localStorage so
+            // a Back/refresh/close never loses them; offer a restore banner on
+            // return. EXCLUSIONS: customer_id/equipment_unit_id are owned by the
+            // FF_RecordPicker sub-components, which can't be re-displayed at
+            // runtime — restoring a bare id would show an empty-looking picker
+            // with a hidden value. odometer_start_source/_fetched_at are
+            // transient GPS-fetch metadata that would show a stale badge.
+            if (window.FF_FormDraft) {
+                this._draft = FF_FormDraft.attach({
+                    formId:   'lease-create',
+                    entityId: 'new',
+                    el:       this.$root,
+                    model:    this.form,
+                    exclude:  ['customer_id', 'equipment_unit_id',
+                               'odometer_start_source', 'odometer_start_fetched_at'],
+                });
+            }
         },
 
         // ADV-BILL-1: clamp the advance-periods input to [0, cap] on every change.
@@ -1378,6 +1396,10 @@ function FF_CreateLease() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/create') ?>', payload);
                 if (r.success) {
+                    // S-FORM-DRAFT-AUTOSAVE: server confirmed creation — wipe the
+                    // saved draft. stop=true also disables further autosave so the
+                    // 3.5s success overlay + redirect can't resurrect it.
+                    if (this._draft) this._draft.clear(true);
                     const _newId = r.data.id;
 
                     // S-ACCT-LESSOR-1: if capital lease was selected, run the
