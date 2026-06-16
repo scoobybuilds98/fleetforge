@@ -455,24 +455,33 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                     </div>
                 </template>
 
-                <!-- ── Distance Travelled (S-UNIT-DISTANCE-SECTION) ─── -->
-                <template x-if="unit.samsara_vehicle_id">
+                <!-- ── Distance Travelled (S-UNIT-DISTANCE-SECTION) ─────────
+                     S-UNIT-DISTANCE-UNIVERSAL: rendered for EVERY equipment/unit
+                     type. Visibility is NO LONGER gated on Samsara linkage — an
+                     unlinked unit shows a "not connected" note (below) in place of
+                     the calculator controls instead of vanishing. -->
                     <div class="card spec-card" style="margin-bottom:0;grid-column:1/-1;">
                         <div class="card-header" style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
                             <div class="card-title">Distance Travelled</div>
-                            <!-- km / miles toggle -->
-                            <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">
-                                <button type="button"
-                                        @click="distUnit='km'"
-                                        :class="distUnit==='km' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'"
-                                        style="border-radius:0;border:none;padding:4px 12px;font-size:0.78rem;">km</button>
-                                <button type="button"
-                                        @click="distUnit='miles'"
-                                        :class="distUnit==='miles' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'"
-                                        style="border-radius:0;border:none;border-left:1px solid var(--border-color);padding:4px 12px;font-size:0.78rem;">miles</button>
-                            </div>
+                            <!-- km / miles toggle — only meaningful when a GPS device is linked -->
+                            <template x-if="unit.samsara_vehicle_id">
+                                <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;">
+                                    <button type="button"
+                                            @click="distUnit='km'"
+                                            :class="distUnit==='km' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'"
+                                            style="border-radius:0;border:none;padding:4px 12px;font-size:0.78rem;">km</button>
+                                    <button type="button"
+                                            @click="distUnit='miles'"
+                                            :class="distUnit==='miles' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'"
+                                            style="border-radius:0;border:none;border-left:1px solid var(--border-color);padding:4px 12px;font-size:0.78rem;">miles</button>
+                                </div>
+                            </template>
                         </div>
                         <div class="card-body" style="padding:16px;">
+
+                            <!-- LINKED: full distance calculator (presets + pickers + result + saved logs) -->
+                            <template x-if="unit.samsara_vehicle_id">
+                            <div>
 
                             <!-- Quick presets -->
                             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
@@ -656,9 +665,28 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                 </div>
                             </template>
 
+                            </div>
+                            </template><!-- /LINKED -->
+
+                            <!-- UNLINKED: no GPS device → note in place of the controls (never hide the section) -->
+                            <template x-if="!unit.samsara_vehicle_id">
+                                <div style="display:flex;gap:10px;align-items:flex-start;color:var(--text-secondary);font-size:0.9rem;padding:4px 0;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width:18px;height:18px;flex-shrink:0;margin-top:1px;opacity:0.7;" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                                    </svg>
+                                    <div>
+                                        <strong style="color:var(--text-primary);">This unit isn't connected to any GPS device.</strong>
+                                        <div style="font-size:0.82rem;color:var(--text-muted);margin-top:3px;">
+                                            Link it to a Samsara device from the
+                                            <a href="#" @click.prevent="activeTab='tracking'" style="color:var(--color-primary);text-decoration:underline;">Samsara Mapping</a>
+                                            tab to calculate distance travelled over a period.
+                                        </div>
+                                    </div>
+                                </div>
+                            </template><!-- /UNLINKED -->
+
                         </div>
-                    </div>
-                </template><!-- /Distance Travelled -->
+                    </div><!-- /Distance Travelled -->
 
                 <!-- ── SAMSARA-2: Tag pills (lenders + lessees) ─────────────
                      Only rendered when samsara_tags has at least one entry.
