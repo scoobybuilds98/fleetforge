@@ -3073,6 +3073,7 @@ _71 tables._
 | `mileage_rate` | decimal(8,4) |  | YES |
 | `mileage_unit` | enum('km','miles') |  | NO |
 | `hourly_rate` | decimal(10,4) |  | YES |
+| `gps_price` | decimal(10,2) |  | YES |
 | `currency` | enum('CAD','USD') |  | NO |
 | `notes` | text |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
@@ -3088,7 +3089,6 @@ _71 tables._
 | `name` | varchar(255) |  | NO |
 | `customer_id` | int unsigned | MUL | YES |
 | `description` | text |  | YES |
-| `gps_price` | decimal(10,2) |  | YES |
 | `is_default` | tinyint(1) | MUL | NO |
 | `effective_from` | date | MUL | NO |
 | `effective_to` | date |  | YES |

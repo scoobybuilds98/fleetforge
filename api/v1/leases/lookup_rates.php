@@ -38,7 +38,7 @@ declare(strict_types=1);
  *   mileage_rate: string|null,
  *   mileage_unit: "km"|"miles",
  *   currency: "CAD"|"USD",
- *   gps_price: string|null,   (S-GPS-RATE-CARD: card-level GPS daily rate, null if not set)
+ *   gps_price: string|null,   (S-GPS-RATE-ITEM: per-item GPS daily rate, null if not set or not applicable)
  *   hourly_rate: string|null  (S-RATECARD-HOURLY: per-item hourly rate, null if not set)
  * }
  *
@@ -113,8 +113,8 @@ $today         = date('Y-m-d');
 // -----------------------------------------------------------------------
 $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
-            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.currency,
-            rc.name AS card_name, rc.customer_id, rc.gps_price
+            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price, rci.currency,
+            rc.name AS card_name, rc.customer_id
      FROM rate_card_items rci
      JOIN rate_cards rc ON rc.id = rci.rate_card_id
      WHERE (

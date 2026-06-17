@@ -35,7 +35,7 @@ if (!$id) {
 
 $card = db_row(
     "SELECT
-         rc.id, rc.name, rc.description, rc.gps_price, rc.is_default,
+         rc.id, rc.name, rc.description, rc.is_default,
          rc.effective_from, rc.effective_to,
          rc.customer_id, c.company_name AS customer_name,
          rc.created_by, rc.created_at, rc.updated_at,
@@ -57,7 +57,8 @@ $items = db_select(
     "SELECT rci.id, rci.rate_card_id, rci.equipment_type,
             rci.equipment_template_id, et.name AS equipment_template_name,
             rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
-            rci.mileage_rate, rci.mileage_unit, rci.currency, rci.notes,
+            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price,
+            rci.currency, rci.notes,
             rci.created_at, rci.updated_at
      FROM rate_card_items rci
      LEFT JOIN equipment_templates et ON et.id = rci.equipment_template_id AND et.deleted_at IS NULL

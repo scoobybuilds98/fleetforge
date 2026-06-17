@@ -83,21 +83,6 @@ if (!$name) {
 $description = isset($body['description']) ? clean_string($body['description'], 1000) : $existing['description'];
 $isDefault   = isset($body['is_default'])  ? (int)(bool)$body['is_default']            : (int)$existing['is_default'];
 
-// S-GPS-RATE-CARD: GPS daily rate — optional, carry existing value when absent
-$gpsPrice = $existing['gps_price'] ?? null;
-if (array_key_exists('gps_price', $body)) {
-    if ($body['gps_price'] === '' || $body['gps_price'] === null) {
-        $gpsPrice = null;
-    } else {
-        $gpsPriceIn = clean_decimal((string)$body['gps_price']);
-        if ($gpsPriceIn === null || bccomp($gpsPriceIn, '0', 4) < 0) {
-            $fields['gps_price'] = 'GPS price must be a valid non-negative number.';
-        } else {
-            $gpsPrice = $gpsPriceIn;
-        }
-    }
-}
-
 // Optional customer_id update — null = clear to global, non-null = set customer
 $customerId = $existing['customer_id'] ?? null;
 if (array_key_exists('customer_id', $body)) {
@@ -161,6 +146,7 @@ $rateLabels = [
     'monthly_rate' => 'Monthly rate',
     'mileage_rate' => 'Mileage rate',
     'hourly_rate'  => 'Hourly rate',
+    'gps_price'    => 'GPS rate',
 ];
 
 if ($replaceItems && is_array($body['items'])) {
@@ -200,6 +186,7 @@ if ($replaceItems && is_array($body['items'])) {
             'monthly_rate' => null,
             'mileage_rate' => null,
             'hourly_rate'  => null,
+            'gps_price'    => null,
         ];
         $itemHadError = false;
         foreach ($rateLabels as $field => $label) {
@@ -241,6 +228,7 @@ if ($replaceItems && is_array($body['items'])) {
             'mileage_rate'          => $rates['mileage_rate'],
             'mileage_unit'          => $mileageUnit,
             'hourly_rate'           => $rates['hourly_rate'],
+            'gps_price'             => $rates['gps_price'],
             'currency'              => $currency,
             'notes'                 => clean_string($item['notes'] ?? null, 1000),
         ];
@@ -284,7 +272,6 @@ if ($conflicts) {
 $newValues = [
     'name'           => $name,
     'description'    => $description,
-    'gps_price'      => $gpsPrice,
     'is_default'     => $isDefault,
     'effective_from' => $effectiveFrom,
     'effective_to'   => $effectiveTo,
@@ -324,7 +311,6 @@ db_transaction(function() use ($id, $newValues, $existing, $isDefault, $replaceI
             'effective_to'   => $existing['effective_to'],
             'is_default'     => $existing['is_default'],
             'customer_id'    => $existing['customer_id'] ?? null,
-            'gps_price'      => $existing['gps_price'] ?? null,
         ]),
         'new_values'   => json_encode([
             'name'           => $newValues['name'],
@@ -332,7 +318,6 @@ db_transaction(function() use ($id, $newValues, $existing, $isDefault, $replaceI
             'effective_to'   => $newValues['effective_to'],
             'is_default'     => $newValues['is_default'],
             'customer_id'    => $newValues['customer_id'],
-            'gps_price'      => $newValues['gps_price'],
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);

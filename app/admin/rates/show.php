@@ -44,7 +44,7 @@ $items = db_select(
     "SELECT rci.id, rci.equipment_type, rci.equipment_template_id,
             et.name AS equipment_template_name,
             rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
-            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.currency, rci.notes, rci.updated_at
+            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price, rci.currency, rci.notes, rci.updated_at
      FROM rate_card_items rci
      LEFT JOIN equipment_templates et ON et.id = rci.equipment_template_id AND et.deleted_at IS NULL
      WHERE rci.rate_card_id = ?
@@ -210,23 +210,6 @@ require_once FF_ROOT . '/includes/header.php';
                     <input x-show="editMode" type="text" class="form-control" x-model="form.description" maxlength="1000">
                 </div>
 
-                <!-- GPS Price — S-GPS-RATE-CARD -->
-                <div class="form-group">
-                    <label class="form-label">GPS Tracking Rate ($/day)</label>
-                    <div x-show="!editMode" class="form-control-static font-mono"
-                         x-text="form.gps_price ? '$' + parseFloat(form.gps_price).toFixed(2) + '/day' : '—'"></div>
-                    <template x-if="editMode">
-                        <div style="position:relative;">
-                            <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
-                            <input type="number" class="form-control font-mono"
-                                   style="padding-left:22px;"
-                                   x-model="form.gps_price"
-                                   step="0.01" min="0" placeholder="0.00">
-                        </div>
-                    </template>
-                    <div class="form-hint" x-show="editMode">Per-day GPS charge applied to new leases on this card.</div>
-                </div>
-
             </div>
 
             <!-- Meta info -->
@@ -316,7 +299,11 @@ require_once FF_ROOT . '/includes/header.php';
                                         <span class="rate-item-card__v font-mono" x-show="item.hourly_rate"
                                               x-text="item.hourly_rate ? '$' + parseFloat(item.hourly_rate).toFixed(4) + '/hr' : ''"></span>
 
-                                        <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate && !item.hourly_rate">
+                                        <span class="rate-item-card__k" x-show="item.gps_price">GPS</span>
+                                        <span class="rate-item-card__v font-mono" x-show="item.gps_price"
+                                              x-text="item.gps_price ? '$' + parseFloat(item.gps_price).toFixed(2) + '/day' : ''"></span>
+
+                                        <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate && !item.hourly_rate && !item.gps_price">
                                             <span class="rate-item-card__empty">No rates set</span>
                                         </template>
                                     </div>
@@ -459,6 +446,16 @@ require_once FF_ROOT . '/includes/header.php';
                                             </div>
                                         </div>
 
+                                        <div>
+                                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px;">GPS $/day</label>
+                                            <div style="position:relative;">
+                                                <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                                                <input type="number" class="form-control font-mono"
+                                                       style="padding-left:22px;"
+                                                       x-model="item.gps_price" step="0.01" min="0" placeholder="0.00">
+                                            </div>
+                                        </div>
+
                                     </div>
                                     <!-- Footer: save/cancel -->
                                     <?php if (can('rates', 'edit')): ?>
@@ -527,7 +524,6 @@ function FF_RateCardShow() {
         'id'            => $card['id'],
         'name'          => $card['name'],
         'description'   => $card['description'],
-        'gps_price'     => $card['gps_price'],
         'is_default'    => (bool)$card['is_default'],
         'effective_from'=> $card['effective_from'],
         'effective_to'  => $card['effective_to'],
@@ -597,7 +593,6 @@ function FF_RateCardShow() {
                     effective_to:   this.form.effective_to || null,
                     is_default:     this.form.is_default ? 1 : 0,
                     customer_id:    this.form.customer_id || null,
-                    gps_price:      (this.form.gps_price !== '' && this.form.gps_price != null) ? this.form.gps_price : null,
                 });
                 if (!r.success) {
                     if (r.error?.code === 'STALE_DATA') {
@@ -625,7 +620,7 @@ function FF_RateCardShow() {
                 id: null, equipment_type: '', equipment_template_id: null,
                 _templateName: '', _templateSearch: '', _templateResults: [], _templateOpen: false,
                 daily_rate: '', weekly_rate: '',
-                monthly_rate: '', mileage_rate: '', mileage_unit: 'km', hourly_rate: '', currency: 'CAD',
+                monthly_rate: '', mileage_rate: '', mileage_unit: 'km', hourly_rate: '', gps_price: '', currency: 'CAD',
                 notes: '', editing: true,
             });
         },
@@ -682,7 +677,8 @@ function FF_RateCardShow() {
                 && (item.weekly_rate  === '' || item.weekly_rate  == null)
                 && (item.monthly_rate === '' || item.monthly_rate == null)
                 && (item.mileage_rate === '' || item.mileage_rate == null)
-                && (item.hourly_rate  === '' || item.hourly_rate  == null);
+                && (item.hourly_rate  === '' || item.hourly_rate  == null)
+                && (item.gps_price    === '' || item.gps_price    == null);
         },
 
         cancelItemEdit(idx) {
@@ -709,7 +705,7 @@ function FF_RateCardShow() {
                     continue;
                 }
                 seen.add(key);
-                const fields = { daily_rate: 'Daily', weekly_rate: 'Weekly', monthly_rate: 'Monthly', mileage_rate: 'Mileage', hourly_rate: 'Hourly' };
+                const fields = { daily_rate: 'Daily', weekly_rate: 'Weekly', monthly_rate: 'Monthly', mileage_rate: 'Mileage', hourly_rate: 'Hourly', gps_price: 'GPS rate' };
                 for (const [f, label] of Object.entries(fields)) {
                     const raw = item[f];
                     if (raw === '' || raw == null) continue;
@@ -731,6 +727,7 @@ function FF_RateCardShow() {
                     mileage_rate:          item.mileage_rate || null,
                     mileage_unit:          item.mileage_unit,
                     hourly_rate:           item.hourly_rate  || null,
+                    gps_price:             item.gps_price    || null,
                     currency:              item.currency,
                     notes:                 item.notes || null,
                 }));
