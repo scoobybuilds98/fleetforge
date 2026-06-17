@@ -199,15 +199,16 @@ if ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) < 0) {
 }
 $warrantyCost = ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) >= 0) ? $warrantyCostIn : '0.00';
 
-// S-LEASE-GPS-COST: per-day GPS rate. Defaults differ from insurance/warranty —
-// opt_in defaults to true (matches schema DEFAULT 1) and cost defaults to '1.00'
-// (matches schema DEFAULT 1.00) when the field is absent from the payload.
+// S-GPS-RATE-CARD: GPS opt-in toggle stays on the lease. GPS cost is no longer
+// entered manually — the form auto-populates gps_cost from the rate card's
+// gps_price via lookup_rates. Default to '0.00' (no billing) when absent so
+// leases without a rate-card GPS price don't generate phantom GPS charges.
 $gpsOptIn  = isset($body['gps_opt_in']) ? (bool) $body['gps_opt_in'] : true;
 $gpsCostIn = clean_decimal($body['gps_cost'] ?? null);
 if ($gpsCostIn !== null && bccomp($gpsCostIn, '0', 4) < 0) {
     $fields['gps_cost'] = 'GPS cost cannot be negative.';
 }
-$gpsCost = ($gpsCostIn !== null && bccomp($gpsCostIn, '0', 4) >= 0) ? $gpsCostIn : '1.00';
+$gpsCost = ($gpsCostIn !== null && bccomp($gpsCostIn, '0', 4) >= 0) ? $gpsCostIn : '0.00';
 
 $poNumber       = clean_string($body['po_number'] ?? null, 100);
 $notes          = clean_string($body['notes'] ?? null, 5000);

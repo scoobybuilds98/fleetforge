@@ -569,18 +569,23 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-LEASE-GPS-COST: GPS tracking add-on. Default ON ($1/day).
-                     Engine bills per-day (gps_cost × billing_days). -->
+                <!-- S-GPS-RATE-CARD: GPS opt-in toggle; rate comes from the rate card, not entered manually -->
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;">
                             <input type="checkbox" class="form-check-input" x-model="form.gps_opt_in">
-                            GPS Tracking ($/day)
+                            GPS Tracking
                         </label>
-                        <div class="input-group" x-show="form.gps_opt_in">
-                            <span class="input-group-prefix">$</span>
-                            <input type="number" class="form-control font-mono"
-                                   x-model="form.gps_cost" step="0.01" min="0" placeholder="1.00">
+                        <div x-show="form.gps_opt_in" style="margin-top:4px;">
+                            <template x-if="form.gps_cost && parseFloat(form.gps_cost) > 0">
+                                <span class="text-secondary" style="font-size:0.8125rem;">
+                                    $<span x-text="parseFloat(form.gps_cost).toFixed(2)"></span>/day
+                                    <span style="color:var(--text-muted);">(from rate card)</span>
+                                </span>
+                            </template>
+                            <template x-if="!form.gps_cost || parseFloat(form.gps_cost) <= 0">
+                                <span class="text-secondary" style="font-size:0.8125rem;">No GPS rate on this rate card</span>
+                            </template>
                         </div>
                     </div>
                     <div class="form-group"></div>
@@ -932,9 +937,9 @@ function FF_CreateLease() {
             insurance_cost:     '',
             warranty_opt_in:    false,
             warranty_cost:      '',
-            // S-LEASE-GPS-COST: GPS toggle defaults ON, rate defaults to $1/day
+            // S-GPS-RATE-CARD: GPS toggle; cost auto-populated from rate card via _lookupRates()
             gps_opt_in:         true,
-            gps_cost:           '1.00',
+            gps_cost:           '',
             gst_exempt:         false,
             pst_exempt:         false,
             notes:              '',
@@ -1250,6 +1255,8 @@ function FF_CreateLease() {
                 this.form.daily_rate   = d.daily_rate   ?? '';
                 this.form.weekly_rate  = d.weekly_rate  ?? '';
                 this.form.monthly_rate = d.monthly_rate ?? '';
+                // S-GPS-RATE-CARD: GPS cost comes from the rate card, not user input
+                this.form.gps_cost     = d.gps_price    ?? '';
 
                 // S-BILLING-RATE-FIX D-D: when the rate source supplied a
                 // monthly rate but no weekly, pre-fill weekly from
@@ -1329,7 +1336,6 @@ function FF_CreateLease() {
                 ['discount_value',         'Discount value cannot be negative.'],
                 ['insurance_cost',         'Insurance cost cannot be negative.'],
                 ['warranty_cost',          'Warranty cost cannot be negative.'],
-                ['gps_cost',               'GPS cost cannot be negative.'],
             ];
             numChecks.forEach(([k, msg]) => {
                 const v = this.form[k];

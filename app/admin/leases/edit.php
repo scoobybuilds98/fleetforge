@@ -518,17 +518,18 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-LEASE-GPS-COST: GPS tracking add-on (per-day rate) -->
+                <!-- S-GPS-RATE-CARD: GPS opt-in toggle; rate is frozen from rate card at creation -->
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;">
                             <input type="checkbox" class="form-check-input" x-model="form.gps_opt_in">
-                            GPS Tracking ($/day)
+                            GPS Tracking
                         </label>
-                        <div class="input-group" x-show="form.gps_opt_in">
-                            <span class="input-group-prefix">$</span>
-                            <input type="number" class="form-control font-mono"
-                                   x-model="form.gps_cost" step="0.01" min="0" placeholder="1.00">
+                        <div x-show="form.gps_opt_in" style="margin-top:4px;">
+                            <span class="text-secondary" style="font-size:0.8125rem;">
+                                $<span class="font-mono" x-text="parseFloat(form.gps_cost || 0).toFixed(2)"></span>/day
+                                <span style="color:var(--text-muted);">(rate card rate)</span>
+                            </span>
                         </div>
                     </div>
                     <div class="form-group"></div>
@@ -707,7 +708,6 @@ function FF_EditLease() {
                 ['mileage_at_end',   'End mileage cannot be negative.'],
                 ['insurance_cost',   'Insurance cost cannot be negative.'],
                 ['warranty_cost',    'Warranty cost cannot be negative.'],
-                ['gps_cost',         'GPS cost cannot be negative.'],
             ];
             pendingChecks.forEach(([k, msg]) => {
                 const v = this.form[k];

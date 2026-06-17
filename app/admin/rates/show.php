@@ -206,6 +206,23 @@ require_once FF_ROOT . '/includes/header.php';
                     <input x-show="editMode" type="text" class="form-control" x-model="form.description" maxlength="1000">
                 </div>
 
+                <!-- GPS Price — S-GPS-RATE-CARD -->
+                <div class="form-group">
+                    <label class="form-label">GPS Tracking Rate ($/day)</label>
+                    <div x-show="!editMode" class="form-control-static font-mono"
+                         x-text="form.gps_price ? '$' + parseFloat(form.gps_price).toFixed(2) + '/day' : '—'"></div>
+                    <template x-if="editMode">
+                        <div style="position:relative;">
+                            <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                            <input type="number" class="form-control font-mono"
+                                   style="padding-left:22px;"
+                                   x-model="form.gps_price"
+                                   step="0.01" min="0" placeholder="0.00">
+                        </div>
+                    </template>
+                    <div class="form-hint" x-show="editMode">Per-day GPS charge applied to new leases on this card.</div>
+                </div>
+
             </div>
 
             <!-- Meta info -->
@@ -446,6 +463,7 @@ function FF_RateCardShow() {
         'id'            => $card['id'],
         'name'          => $card['name'],
         'description'   => $card['description'],
+        'gps_price'     => $card['gps_price'],
         'is_default'    => (bool)$card['is_default'],
         'effective_from'=> $card['effective_from'],
         'effective_to'  => $card['effective_to'],
@@ -509,6 +527,7 @@ function FF_RateCardShow() {
                     effective_to:   this.form.effective_to || null,
                     is_default:     this.form.is_default ? 1 : 0,
                     customer_id:    this.form.customer_id || null,
+                    gps_price:      (this.form.gps_price !== '' && this.form.gps_price != null) ? this.form.gps_price : null,
                 });
                 if (!r.success) {
                     if (r.error?.code === 'STALE_DATA') {

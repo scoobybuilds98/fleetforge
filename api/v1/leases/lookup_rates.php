@@ -37,7 +37,8 @@ declare(strict_types=1);
  *   monthly_rate: string|null,
  *   mileage_rate: string|null,
  *   mileage_unit: "km"|"miles",
- *   currency: "CAD"|"USD"
+ *   currency: "CAD"|"USD",
+ *   gps_price: string|null   (S-GPS-RATE-CARD: card-level GPS daily rate, null if not set)
  * }
  *
  * Decisions: D5 (soft delete on rate_cards), D16 (bcmath strings), D7 (routing)
@@ -111,7 +112,7 @@ $today         = date('Y-m-d');
 $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
             rci.mileage_rate, rci.mileage_unit, rci.currency,
-            rc.name AS card_name, rc.customer_id
+            rc.name AS card_name, rc.customer_id, rc.gps_price
      FROM rate_card_items rci
      JOIN rate_cards rc ON rc.id = rci.rate_card_id
      WHERE rci.equipment_type = ?
@@ -137,6 +138,7 @@ if ($rateCardItem) {
         'mileage_rate' => $rateCardItem['mileage_rate'],
         'mileage_unit' => $rateCardItem['mileage_unit'],
         'currency'     => $rateCardItem['currency'],
+        'gps_price'    => $rateCardItem['gps_price'],
     ]);
 }
 
@@ -159,6 +161,7 @@ if ($hasTemplateRates) {
         'mileage_rate' => $template['default_mileage_rate'],
         'mileage_unit' => $template['default_mileage_unit'] ?? 'km',
         'currency'     => $template['default_currency'] ?? 'CAD',
+        'gps_price'    => null,
     ]);
 }
 
@@ -174,4 +177,5 @@ json_success([
     'mileage_rate' => null,
     'mileage_unit' => 'km',
     'currency'     => 'CAD',
+    'gps_price'    => null,
 ]);

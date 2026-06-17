@@ -3652,6 +3652,7 @@ CREATE TABLE `rate_cards` (
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `customer_id` int unsigned DEFAULT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
+  `gps_price` decimal(10,2) DEFAULT NULL COMMENT 'S-GPS-RATE-CARD: GPS tracking daily rate. NULL = not set.',
   `is_default` tinyint(1) NOT NULL DEFAULT '0',
   `effective_from` date NOT NULL,
   `effective_to` date DEFAULT NULL,

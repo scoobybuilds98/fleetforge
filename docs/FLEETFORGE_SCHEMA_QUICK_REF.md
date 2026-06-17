@@ -3079,7 +3079,9 @@ _71 tables._
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `name` | varchar(255) |  | NO |
+| `customer_id` | int unsigned | MUL | YES |
 | `description` | text |  | YES |
+| `gps_price` | decimal(10,2) |  | YES |
 | `is_default` | tinyint(1) | MUL | NO |
 | `effective_from` | date | MUL | NO |
 | `effective_to` | date |  | YES |

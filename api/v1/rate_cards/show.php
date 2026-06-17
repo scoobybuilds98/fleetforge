@@ -35,7 +35,7 @@ if (!$id) {
 
 $card = db_row(
     "SELECT
-         rc.id, rc.name, rc.description, rc.is_default,
+         rc.id, rc.name, rc.description, rc.gps_price, rc.is_default,
          rc.effective_from, rc.effective_to,
          rc.customer_id, c.company_name AS customer_name,
          rc.created_by, rc.created_at, rc.updated_at,

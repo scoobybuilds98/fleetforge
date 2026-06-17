@@ -81,6 +81,16 @@ if (db_exists('rate_cards', 'name = ? AND deleted_at IS NULL', [$name])) {
 $description = clean_string($body['description'] ?? null, 1000);
 $isDefault   = isset($body['is_default']) ? (int)(bool)$body['is_default'] : 0;
 
+// S-GPS-RATE-CARD: GPS daily rate on the card — propagated to leases.gps_cost at creation
+$gpsPrice = null;
+if (isset($body['gps_price']) && $body['gps_price'] !== '' && $body['gps_price'] !== null) {
+    $gpsPriceIn = clean_decimal((string)$body['gps_price']);
+    if ($gpsPriceIn === null || bccomp($gpsPriceIn, '0', 4) < 0) {
+        json_validation_error(['gps_price' => 'GPS price must be a valid non-negative number.']);
+    }
+    $gpsPrice = $gpsPriceIn;
+}
+
 // Optional customer_id — NULL = global rate card
 $customerId = null;
 if (!empty($body['customer_id'])) {
@@ -197,7 +207,7 @@ if ($conflicts) {
 // 6. Insert inside transaction + items + audit log
 // -----------------------------------------------------------------------
 $newId = db_transaction(function() use (
-    $name, $description, $isDefault, $effectiveFrom, $effectiveTo, $customerId, $itemsToInsert
+    $name, $description, $gpsPrice, $isDefault, $effectiveFrom, $effectiveTo, $customerId, $itemsToInsert
 ) {
     // If setting as default, clear all other defaults first
     if ($isDefault) {
@@ -210,6 +220,7 @@ $newId = db_transaction(function() use (
     $id = db_insert('rate_cards', [
         'name'           => $name,
         'description'    => $description,
+        'gps_price'      => $gpsPrice,
         'is_default'     => $isDefault,
         'effective_from' => $effectiveFrom,
         'effective_to'   => $effectiveTo,
@@ -237,6 +248,7 @@ $newId = db_transaction(function() use (
             'effective_to'   => $effectiveTo,
             'is_default'     => $isDefault,
             'customer_id'    => $customerId,
+            'gps_price'      => $gpsPrice,
             'item_count'     => count($itemsToInsert),
         ]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',

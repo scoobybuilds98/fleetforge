@@ -170,6 +170,21 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-hint" style="text-align:right;" x-text="(form.description || '').length + ' / 255'"></div>
                     </div>
 
+                    <!-- GPS Price — S-GPS-RATE-CARD -->
+                    <div class="form-group">
+                        <label class="form-label" for="gps_price">GPS Tracking Rate ($/day)</label>
+                        <div style="position:relative;">
+                            <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                            <input type="number" id="gps_price" class="form-control font-mono"
+                                   style="padding-left:22px;"
+                                   :class="errors.gps_price ? 'is-invalid' : ''"
+                                   x-model="form.gps_price"
+                                   step="0.01" min="0" placeholder="0.00">
+                        </div>
+                        <div class="form-hint">Per-day GPS charge applied to leases using this card. Leave blank for no GPS charge.</div>
+                        <div class="invalid-feedback" x-show="errors.gps_price" x-text="errors.gps_price"></div>
+                    </div>
+
                 </div>
 
                 <div class="alert alert-warning" x-show="form.is_default" style="margin-top:8px;padding:10px 14px;" x-cloak>
@@ -337,6 +352,7 @@ function FF_RateCardCreate() {
             effective_to:   '',
             is_default:     false,
             customer_id:    <?= $preCustomerId ? (int)$preCustomerId : 'null' ?>,
+            gps_price:      '',
         },
         items:       [],
         _nextKey:    0,
@@ -409,6 +425,13 @@ function FF_RateCardCreate() {
                 this.errors.effective_to = 'End date must be on or after the start date.';
                 ok = false;
             }
+            if (this.form.gps_price !== '' && this.form.gps_price != null) {
+                const gn = parseFloat(this.form.gps_price);
+                if (isNaN(gn) || gn < 0) {
+                    this.errors.gps_price = 'GPS price must be a valid non-negative number.';
+                    ok = false;
+                }
+            }
 
             const seen = new Set();
             const problems = [];
@@ -473,6 +496,7 @@ function FF_RateCardCreate() {
                 effective_to:   this.form.effective_to || null,
                 is_default:     this.form.is_default ? 1 : 0,
                 customer_id:    this.form.customer_id || null,
+                gps_price:      this.form.gps_price !== '' ? this.form.gps_price : null,
                 items:          items,
             };
 
