@@ -179,8 +179,8 @@ else { echo "FAIL C4 " . implode('; ', $c4Errors) . "\n"; $failures[] = 'C4'; }
 $c5Errors = [];
 try {
     $tuples = ItemMatcher::ffItemTypes();
-    if (count($tuples) !== 18) {
-        $c5Errors[] = 'expected 18 tuples (16 non-variant + 2 GPS variants), got ' . count($tuples);
+    if (count($tuples) !== 19) {
+        $c5Errors[] = 'expected 19 tuples (17 non-variant + 2 GPS variants), got ' . count($tuples);
     }
     // Verify a few canonical ENUM values are present.
     $itemTypes = array_column($tuples, 'ff_item_type');
@@ -203,7 +203,7 @@ try {
 } catch (Throwable $e) {
     $c5Errors[] = 'exception: ' . $e->getMessage();
 }
-if (empty($c5Errors)) { echo "PASS C5 ffItemTypes() introspects ENUM and yields 18 tuples\n"; $pass++; }
+if (empty($c5Errors)) { echo "PASS C5 ffItemTypes() introspects ENUM and yields 19 tuples\n"; $pass++; }
 else { echo "FAIL C5 " . implode('; ', $c5Errors) . "\n"; $failures[] = 'C5'; }
 
 // ── C6: displayNameFor mapping correctness ──────────────────
@@ -596,13 +596,13 @@ foreach ($enumTypes as $t) {
         $c18Errors[] = "item_type '{$t}' missing from UI_CATEGORIES";
     }
 }
-if (empty($c18Errors)) { echo "PASS C18 UI_CATEGORIES covers all 17 ENUM values exactly once\n"; $pass++; }
+if (empty($c18Errors)) { echo "PASS C18 UI_CATEGORIES covers all 18 ENUM values exactly once\n"; $pass++; }
 else { echo "FAIL C18 " . implode('; ', $c18Errors) . "\n"; $failures[] = 'C18'; }
 
 // ── C19: S-QBO-MATCHER-WEDGE-RECOVERY — item wedge rescue ──
 // Item map has no FK on ff_item_type (ENUM column; MySQL doesn't FK ENUMs),
 // so we use an existing valid ff_item_type value + variant pairing that
-// won't collide with the live 18 tuples. base_rental with a unique variant
+// won't collide with the live 19 tuples. base_rental with a unique variant
 // (smoke-only sentinel) is safe.
 $c19Errors = [];
 try {

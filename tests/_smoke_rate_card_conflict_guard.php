@@ -79,14 +79,14 @@ try {
     $expectCount(
         'overlap: dry_van vs open-ended card1',
         1,
-        ConflictGuard::conflicts($custA, ['dry_van'], '2025-06-01', null)
+        ConflictGuard::conflicts($custA, [['equipment_type'=>'dry_van','equipment_template_id'=>null]], '2025-06-01', null)
     );
 
     // ── 2. Same customer, different type → no conflict ──────────────────────
     $expectCount(
         'different type: reefer',
         0,
-        ConflictGuard::conflicts($custA, ['reefer'], '2025-06-01', null)
+        ConflictGuard::conflicts($custA, [['equipment_type'=>'reefer','equipment_template_id'=>null]], '2025-06-01', null)
     );
 
     // ── 3. Same type, window ENTIRELY BEFORE card1 starts → no conflict ─────
@@ -94,28 +94,28 @@ try {
     $expectCount(
         'disjoint before: dry_van 2024',
         0,
-        ConflictGuard::conflicts($custA, ['dry_van'], '2024-01-01', '2024-12-31')
+        ConflictGuard::conflicts($custA, [['equipment_type'=>'dry_van','equipment_template_id'=>null]], '2024-01-01', '2024-12-31')
     );
 
     // ── 4. Global card (customer_id NULL) is exempt ─────────────────────────
     $expectCount(
         'global exempt',
         0,
-        ConflictGuard::conflicts(null, ['dry_van'], '2025-06-01', null)
+        ConflictGuard::conflicts(null, [['equipment_type'=>'dry_van','equipment_template_id'=>null]], '2025-06-01', null)
     );
 
     // ── 5. Excluding self (update path) → no conflict ───────────────────────
     $expectCount(
         'self-exclude card1',
         0,
-        ConflictGuard::conflicts($custA, ['dry_van'], '2025-06-01', null, $card1)
+        ConflictGuard::conflicts($custA, [['equipment_type'=>'dry_van','equipment_template_id'=>null]], '2025-06-01', null, $card1)
     );
 
     // ── 6. Different customer → isolated ────────────────────────────────────
     $expectCount(
         'different customer B',
         0,
-        ConflictGuard::conflicts($custB, ['dry_van'], '2025-06-01', null)
+        ConflictGuard::conflicts($custB, [['equipment_type'=>'dry_van','equipment_template_id'=>null]], '2025-06-01', null)
     );
 
     // ── 7. CLOSED existing window — new window AFTER it ends → no conflict ──
@@ -123,7 +123,7 @@ try {
     $expectCount(
         'disjoint after closed: flatbed 2025-04-01',
         0,
-        ConflictGuard::conflicts($custA, ['flatbed'], '2025-04-01', null)
+        ConflictGuard::conflicts($custA, [['equipment_type'=>'flatbed','equipment_template_id'=>null]], '2025-04-01', null)
     );
 
     // ── 8. CLOSED existing window — new window OVERLAPS it → conflict ───────
@@ -131,18 +131,18 @@ try {
     $expectCount(
         'overlap closed: flatbed 2025-03-01',
         1,
-        ConflictGuard::conflicts($custA, ['flatbed'], '2025-03-01', null)
+        ConflictGuard::conflicts($custA, [['equipment_type'=>'flatbed','equipment_template_id'=>null]], '2025-03-01', null)
     );
 
     // ── 9. Multiple types, only one collides → exactly one conflict row ─────
     $expectCount(
         'mixed batch: [dry_van, reefer]',
         1,
-        ConflictGuard::conflicts($custA, ['dry_van', 'reefer'], '2025-06-01', null)
+        ConflictGuard::conflicts($custA, [['equipment_type'=>'dry_van','equipment_template_id'=>null],['equipment_type'=>'reefer','equipment_template_id'=>null]], '2025-06-01', null)
     );
 
     // ── 10. Conflict row carries card id + name for the error message ───────
-    $c = ConflictGuard::conflicts($custA, ['dry_van'], '2025-06-01', null);
+    $c = ConflictGuard::conflicts($custA, [['equipment_type'=>'dry_van','equipment_template_id'=>null]], '2025-06-01', null);
     if ($c && (int)$c[0]['card_id'] === $card1 && $c[0]['card_name'] === 'ZZ Guard Card 1'
         && str_contains(ConflictGuard::message($c), 'dry van')) {
         $passes++;

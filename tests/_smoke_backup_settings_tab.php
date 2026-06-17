@@ -104,11 +104,11 @@ if ($html !== '') {
             ko("missing {$label} ('{$needle}')");
         }
     }
-    // Manual card must NOT carry a generate button this session (S-BACKUP-3c).
-    if (stripos($html, 'coming soon') !== false) {
-        ok('Manual card is display-only (no generate button)');
+    // S-BACKUP-3c shipped the generate button — verify it is present.
+    if (str_contains($html, 'generate()')) {
+        ok('Manual card has generate button (S-BACKUP-3c wired)');
     } else {
-        ko('Manual card missing the display-only marker');
+        ko('Manual card missing generate() button (S-BACKUP-3c expected)');
     }
 }
 

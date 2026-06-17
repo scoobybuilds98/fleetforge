@@ -61,8 +61,9 @@ class ItemMatcher
     public const MIN_TOKEN_LENGTH = 4;
 
     /**
-     * Display-name mapping for the 17 actual FF item_type ENUM values
-     * (verified at S-QBO-10 pre-flight against invoice_line_items.item_type).
+     * Display-name mapping for the 18 actual FF item_type ENUM values
+     * (verified at S-QBO-10 pre-flight against invoice_line_items.item_type;
+     * 'mileage' added when the ENUM was extended).
      * Used as:
      *   - the auto-match comparison key (normalized) against QBO Item.Name
      *   - the default Name when ItemCreator authors a new QBO Item
@@ -79,6 +80,7 @@ class ItemMatcher
         'mileage_credit'                   => 'Mileage Credit',
         'mileage_usage'                    => 'Mileage Usage',
         'mileage_drawdown_credit'          => 'Mileage Drawdown Credit',
+        'mileage'                          => 'Mileage',
         'damage'                           => 'Damage Recovery',
         'late_fee'                         => 'Late Fee',
         'early_return_credit'              => 'Early Return Credit',
@@ -106,6 +108,7 @@ class ItemMatcher
             'mileage_credit',
             'mileage_usage',
             'mileage_drawdown_credit',
+            'mileage',
         ],
         'Fees' => [
             'late_fee',

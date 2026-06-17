@@ -626,7 +626,7 @@ function legacy_append_mileage_to_full_month_draft(
 
 $result = null;
 
-db_transaction(function () use ($id, $actualReturnDate, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $reconMode, $prechargeRefund, &$result) {
+db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $reconMode, $prechargeRefund, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     // SAMSARA-3: include odometer_start_km so we can derive the period
     // start odometer for the final invoice when the user supplies a
