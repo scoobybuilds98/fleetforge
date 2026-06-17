@@ -6,7 +6,10 @@ declare(strict_types=1);
  *
  * @file        api/v1/yards/delete.php
  * @description Deactivates a yard (sets is_active = 0).
- *              Yards have no deleted_at column — deactivation is the removal mechanism.
+ *              Yards have a deleted_at column but it is intentionally never
+ *              populated — deactivation (is_active = 0) is the removal mechanism,
+ *              and yards is NOT a soft-delete table (absent from SOFT_DELETE_TABLES),
+ *              so name/slug uniqueness is effectively permanent.
  *              A deactivated yard is hidden from all dropdowns but its historical
  *              data (reservation yard_location snapshots) is preserved.
  *

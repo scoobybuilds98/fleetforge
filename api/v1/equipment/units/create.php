@@ -104,14 +104,25 @@ if (!$template) {
 }
 
 // ── Unique unit_number check ───────────────────────────────────
-// FIX #25: exclude soft-deleted units so a deleted unit_number can be reused
-if (db_exists('equipment_units', 'unit_number = ? AND deleted_at IS NULL', [$unitNumber])) {
+// The unit_number UNIQUE index is GLOBAL (spans soft-deleted rows), so the
+// pre-check must count ALL rows. db_exists() would auto-append
+// "AND deleted_at IS NULL" and miss a soft-deleted unit still holding the
+// number, letting the INSERT 1062 → HTTP 500 (FLEETFORGE-M / FLEETFORGE-P class).
+if (db_count("SELECT COUNT(*) FROM equipment_units WHERE unit_number = ?", [$unitNumber]) > 0) {
     json_error('ALREADY_EXISTS', 'Unit number already exists.', 409,
         ['fields' => ['unit_number' => 'Unit number already exists.']]);
 }
 
 // ── Optional fields ────────────────────────────────────────────
 $vin             = clean_string($body['vin'] ?? null, 50);
+// Unique vin check — vin carries a GLOBAL UNIQUE index spanning soft-deleted
+// rows. Skip when blank (clean_string returns null for '' and a unique index
+// permits multiple NULLs). Count ALL rows so a soft-deleted unit's VIN is seen
+// and we return a clean 409 instead of a 1062 → HTTP 500 (FLEETFORGE-M).
+if ($vin !== null && db_count("SELECT COUNT(*) FROM equipment_units WHERE vin = ?", [$vin]) > 0) {
+    json_error('ALREADY_EXISTS', 'VIN already exists.', 409,
+        ['fields' => ['vin' => 'VIN already exists.']]);
+}
 // (year + mileage already validated and stored in $year / $mileageRaw above)
 $gpsDeviceId     = clean_string($body['gps_device_id'] ?? null, 100);
 $samsaraUrl      = clean_string($body['samsara_vehicle_url'] ?? null, 500);
@@ -186,6 +197,11 @@ $userId = current_user_id();
 $newId  = null;
 
 // ── Insert (transaction: unit + status_log + audit_log) ────────
+// Belt-and-suspenders for the TOCTOU race / reuse-after-delete: translate a
+// 1062 on the vin or unit_number UNIQUE index into the same clean 409 the
+// pre-checks return, instead of an uncaught PDOException → HTTP 500. Narrow on
+// the key name so FK and other unique-key 23000s still surface (FLEETFORGE-M).
+try {
 db_transaction(function () use (
     &$newId, $userId,
     $templateId, $unitNumber, $vin, $year,
@@ -276,6 +292,19 @@ db_transaction(function () use (
         error_log('[NOTIF equipment.created] ' . $e->getMessage());
     }
 });
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000') {
+        if (stripos($e->getMessage(), 'vin') !== false) {
+            json_error('ALREADY_EXISTS', 'VIN already exists.', 409,
+                ['fields' => ['vin' => 'VIN already exists.']]);
+        }
+        if (stripos($e->getMessage(), 'unit_number') !== false) {
+            json_error('ALREADY_EXISTS', 'Unit number already exists.', 409,
+                ['fields' => ['unit_number' => 'Unit number already exists.']]);
+        }
+    }
+    throw $e;
+}
 
 // ── SAMSARA-3: Mirror the new unit to Samsara ──────────────────
 // WHY after the transaction: the FleetForge record is the source of

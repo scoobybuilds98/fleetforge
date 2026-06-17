@@ -23,6 +23,9 @@ declare(strict_types=1);
  *              used verbatim (trimmed). A duplicate returns 422 CONTRACT_NUMBER_TAKEN.
  *              If blank, auto-generates CN-XXXXXX-YYYY (generate_random_code(6) + year)
  *              with collision retry loop (unlikely but safe).
+ *              Duplicate detection spans soft-deleted leases (the contract_number
+ *              UNIQUE index is global), and the INSERT is wrapped to translate a
+ *              concurrent-race 1062 into the same 422 (Sentry FLEETFORGE-P).
  *
  *              Mileage (S-MILEAGE-UNIT-SIMPLIFY): accepts mileage_unit + single
  *              mileage_rate + single estimated_mileage. Counterpart columns
@@ -453,11 +456,23 @@ if ($customer['tax_rate_id']) {
 $leasePrefix     = settings_get('lease.prefix', 'CN');
 $year            = date('Y');
 $suppliedCN      = trim($body['contract_number'] ?? '');
+
+// leases.contract_number carries a GLOBAL UNIQUE index (FLEETFORGE_DATABASE_MASTER.sql
+// — `UNIQUE KEY contract_number`) that spans soft-deleted rows too. db_exists()
+// auto-appends `AND deleted_at IS NULL`, so it was BLIND to a soft-deleted lease
+// still holding the number: the create passed this pre-check, then the INSERT
+// collided on the index → 1062 → HTTP 500 (Sentry FLEETFORGE-P, events 97s apart =
+// reuse-after-delete, not a sub-second race). Check against ALL rows so the
+// pre-check matches what the index actually enforces — once used, a contract
+// number is taken for good, exactly like users.email / customers (FLEETFORGE-F).
+$contractNumberTaken = static fn(string $cn): bool =>
+    db_count("SELECT COUNT(*) FROM leases WHERE contract_number = ?", [$cn]) > 0;
+
 if ($suppliedCN !== '') {
     // User supplied a value — use it verbatim; reject duplicates explicitly.
     // WHY: silent re-generate would discard the operator's intent and produce
     // a number they didn't ask for, with no feedback.
-    if (db_exists('leases', 'contract_number = ?', [$suppliedCN])) {
+    if ($contractNumberTaken($suppliedCN)) {
         json_error('CONTRACT_NUMBER_TAKEN',
             'Contract number ' . $suppliedCN . ' already in use.', 422);
     }
@@ -466,7 +481,7 @@ if ($suppliedCN !== '') {
     // Auto-generate; de-duplicate on collision (extremely rare with 6-char A-Z0-9 space)
     $contractNumber = $leasePrefix . '-' . generate_random_code(6) . '-' . $year;
     $attempt        = 0;
-    while (db_exists('leases', 'contract_number = ?', [$contractNumber])) {
+    while ($contractNumberTaken($contractNumber)) {
         $attempt++;
         if ($attempt > 20) {
             json_error('SERVER_ERROR', 'Could not generate unique contract number.', 500);
@@ -478,7 +493,7 @@ if ($suppliedCN !== '') {
 // ── Transaction: FOR UPDATE on unit + create lease ─────────────
 $leaseId = null;
 
-db_transaction(function () use (
+$createLease = function () use (
     $unitId, $customerId, $contractNumber, $customer,
     $startDate, $startTime, $endDate, $endTime, $minimumEndDate,
     $dailyRate, $weeklyRate, $monthlyRate, $mileageRate, $rateNotes,
@@ -690,6 +705,27 @@ db_transaction(function () use (
     } catch (\Throwable $e) {
         error_log('[NOTIF lease.created] ' . $e->getMessage());
     }
-});
+};
+
+// Belt-and-suspenders for the TOCTOU race (Sentry FLEETFORGE-P): two concurrent
+// creates — or a stale-draft resubmit (S-FORM-DRAFT-ROLLOUT) — carrying the same
+// supplied contract_number can both pass the duplicate pre-check above, then one
+// collides on the leases.contract_number UNIQUE index inside the transaction. The
+// soft-delete blind spot is already closed by the pre-check; this covers the race.
+// db_transaction
+// has already rolled the row back by the time we catch here; translate the 1062
+// into the same friendly 422 the pre-check returns instead of letting the
+// PDOException surface as an HTTP 500. Mirrors the users/create.php FLEETFORGE-F fix.
+// Guarded narrowly on the contract_number key so other 23000s (FK violations,
+// other unique keys) still surface for real triage rather than being masked.
+try {
+    db_transaction($createLease);
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'contract_number') !== false) {
+        json_error('CONTRACT_NUMBER_TAKEN',
+            'Contract number ' . $contractNumber . ' already in use.', 422);
+    }
+    throw $e;
+}
 
 json_success(['id' => $leaseId, 'contract_number' => $contractNumber], 201);

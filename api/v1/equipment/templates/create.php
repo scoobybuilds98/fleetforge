@@ -196,8 +196,11 @@ if (!function_exists('make_template_slug')) {
 $baseSlug = make_template_slug($name);
 $slug     = $baseSlug;
 $suffix   = 2;
-// FIX #38: exclude soft-deleted rows so a deleted slug can be reused
-while (db_exists('equipment_templates', 'slug = ? AND deleted_at IS NULL', [$slug])) {
+// The slug UNIQUE index is GLOBAL (spans soft-deleted rows), so the dedup loop
+// must count ALL rows. db_exists() would auto-append "AND deleted_at IS NULL"
+// and miss a soft-deleted template still holding the slug, letting the INSERT
+// 1062 → HTTP 500 when an archived template's name is reused (FLEETFORGE-P class).
+while (db_count("SELECT COUNT(*) FROM equipment_templates WHERE slug = ?", [$slug]) > 0) {
     $slug = $baseSlug . '-' . $suffix;
     $suffix++;
 }
@@ -207,6 +210,10 @@ $userId = current_user_id();
 // ── Insert ─────────────────────────────────────────────────────
 $newId = null;
 
+// Belt-and-suspenders for the slug-collision race: translate a 1062 on the slug
+// UNIQUE index into the same 422 the name pre-check returns, instead of an
+// uncaught PDOException → HTTP 500. Narrow on 'slug' so FK/other 23000s surface.
+try {
 db_transaction(function () use (
     &$newId, $userId,
     $name, $slug, $description, $category, $brand, $model,
@@ -262,5 +269,11 @@ db_transaction(function () use (
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 });
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'slug') !== false) {
+        json_validation_error(['name' => 'A template with this name already exists.']);
+    }
+    throw $e;
+}
 
 json_success(['id' => $newId, 'name' => $name, 'slug' => $slug], 201);

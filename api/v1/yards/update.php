@@ -66,18 +66,29 @@ $managerId  = clean_int($body['manager_id']    ?? null) ?: null;
 
 $oldValues = $existing;
 
-db_update('yards', [
-    'name'        => $name,
-    'address'     => $address,
-    'city'        => $city,
-    'state'       => $state,
-    'postal_code' => $postalCode,
-    'capacity'    => $capacity,
-    'phone'       => $phone,
-    'notes'       => $notes,
-    'manager_id'  => $managerId,
-    'is_active'   => $isActive,
-], 'id = ?', [$id]);
+// Belt for the global name unique key: a concurrent rename to the same name can
+// pass the pre-check above, then 1062 on db_update. Translate to the same 409
+// instead of an uncaught PDOException → HTTP 500. Narrow on 'name' so the
+// manager_id FK / other 23000s still surface.
+try {
+    db_update('yards', [
+        'name'        => $name,
+        'address'     => $address,
+        'city'        => $city,
+        'state'       => $state,
+        'postal_code' => $postalCode,
+        'capacity'    => $capacity,
+        'phone'       => $phone,
+        'notes'       => $notes,
+        'manager_id'  => $managerId,
+        'is_active'   => $isActive,
+    ], 'id = ?', [$id]);
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'name') !== false) {
+        json_error('ALREADY_EXISTS', "A yard named '{$name}' already exists.", 409);
+    }
+    throw $e;
+}
 
 // ── Audit ─────────────────────────────────────────────────────────
 db_insert('audit_log', [

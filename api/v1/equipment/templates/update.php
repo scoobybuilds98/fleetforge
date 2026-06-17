@@ -93,7 +93,10 @@ if (isset($body['name'])) {
             $baseSlug = make_template_slug($name);
             $newSlug  = $baseSlug;
             $suffix   = 2;
-            while (db_exists('equipment_templates', 'slug = ? AND id != ? AND deleted_at IS NULL', [$newSlug, $id])) {
+            // slug UNIQUE index is GLOBAL (spans soft-deleted rows) — count ALL
+            // rows except self so a slug held by a soft-deleted sibling is seen;
+            // db_exists would hide it and the db_update would 1062 → HTTP 500.
+            while (db_count("SELECT COUNT(*) FROM equipment_templates WHERE slug = ? AND id != ?", [$newSlug, $id]) > 0) {
                 $newSlug = $baseSlug . '-' . $suffix;
                 $suffix++;
             }
@@ -293,6 +296,10 @@ if (empty($updates)) {
 $userId = current_user_id();
 $newUpdatedAt = null;
 
+// Belt-and-suspenders: translate a 1062 on the slug UNIQUE index (concurrent
+// rename, or a slug held by a soft-deleted template) into the same 422 the name
+// pre-check returns, instead of an uncaught PDOException → HTTP 500.
+try {
 db_transaction(function () use (&$newUpdatedAt, $id, $updates, $userId, $existing): void {
     db_update('equipment_templates', $updates, 'id = ?', [$id]);
 
@@ -315,5 +322,11 @@ db_transaction(function () use (&$newUpdatedAt, $id, $updates, $userId, $existin
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 });
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'slug') !== false) {
+        json_validation_error(['name' => 'A template with this name already exists.']);
+    }
+    throw $e;
+}
 
 json_success(['id' => $id, 'updated_at' => $newUpdatedAt]);

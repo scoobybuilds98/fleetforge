@@ -125,7 +125,9 @@ try {
         'invite_sent_at'        => date('Y-m-d H:i:s'),
     ]);
 } catch (\PDOException $e) {
-    if ($e->getCode() === '23000') {
+    // Narrow on the email key so the customer_id FK / other 23000s surface for
+    // real triage instead of being mislabeled as a duplicate email.
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'email') !== false) {
         json_error('CONFLICT', 'A portal user with this email already exists.', 409);
     }
     throw $e;

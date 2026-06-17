@@ -192,7 +192,9 @@ $createUser = function () use (
 try {
     $newId = db_transaction($createUser);
 } catch (\PDOException $e) {
-    if ($e->getCode() === '23000') {
+    // Narrow on the email key so the audit_log/role_id FK and any other 23000
+    // surface for real triage instead of being mislabeled as a duplicate email.
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'email') !== false) {
         json_error('ALREADY_EXISTS', 'A user with that email already exists.', 409);
     }
     throw $e;

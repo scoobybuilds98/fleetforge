@@ -84,9 +84,12 @@ if (isset($body['email'])) {
     if (!$email) {
         json_error('VALIDATION_ERROR', 'A valid email address is required.', 422);
     }
-    // Uniqueness check — exclude self
+    // Uniqueness check — exclude self. The email UNIQUE index is GLOBAL (spans
+    // soft-deleted users), so count ALL rows: db_exists would auto-append
+    // "AND deleted_at IS NULL" and miss an email held by a soft-deleted user,
+    // letting the UPDATE 1062 → HTTP 500 (FLEETFORGE-F class on the edit path).
     if ($email !== $existing['email']) {
-        if (db_exists('users', 'email = ? AND id != ? AND deleted_at IS NULL', [$email, $id])) {
+        if (db_count("SELECT COUNT(*) FROM users WHERE email = ? AND id != ?", [$email, $id]) > 0) {
             json_error('ALREADY_EXISTS', 'A user with that email already exists.', 409);
         }
     }
@@ -168,6 +171,11 @@ if ($roleChanged) {
 // -----------------------------------------------------------------------
 // 6. Update inside transaction + audit log
 // -----------------------------------------------------------------------
+// Belt-and-suspenders: translate a 1062 on the email UNIQUE index (concurrent
+// edit, or an email held by a soft-deleted user) into the same 409 the pre-check
+// returns, instead of an uncaught PDOException → HTTP 500. Narrow on 'email' so
+// the role_id FK / other 23000s still surface (FLEETFORGE-F class).
+try {
 db_transaction(function () use ($id, $updateFields, $oldAuditValues, $newAuditValues, $auditNotes, $email) {
     db_update('users', $updateFields, 'id = ?', [$id]);
 
@@ -186,6 +194,12 @@ db_transaction(function () use ($id, $updateFields, $oldAuditValues, $newAuditVa
         'user_agent'   => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
     ]);
 });
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'email') !== false) {
+        json_error('ALREADY_EXISTS', 'A user with that email already exists.', 409);
+    }
+    throw $e;
+}
 
 // Fetch fresh updated_at for next D19 lock cycle
 $fresh = db_row(

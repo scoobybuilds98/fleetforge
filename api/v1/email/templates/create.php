@@ -71,17 +71,29 @@ if (trim($bodyText) === '') {
     $bodyText = strip_tags(preg_replace('/<br\s*\/?>/i', "\n", $bodyHtml));
 }
 
-$id = db_insert('email_templates', [
-    'name'       => $name,
-    'slug'       => $slug,
-    'subject'    => $subject,
-    'body_html'  => $bodyHtml,
-    'body_text'  => $bodyText,
-    'category'   => $category,
-    'variables'  => json_encode(array_values(array_unique($variables))),
-    'is_active'  => $isActive,
-    'created_by' => current_user_id(),
-]);
+// Belt-and-suspenders for the concurrent-create race: two requests resolving to
+// the same slug both pass the all-rows dedup loop above, then one collides on the
+// slug UNIQUE index. Translate that 1062 into a clean 422 instead of an uncaught
+// PDOException → HTTP 500. Narrow on 'slug' so the created_by FK / other 23000s surface.
+try {
+    $id = db_insert('email_templates', [
+        'name'       => $name,
+        'slug'       => $slug,
+        'subject'    => $subject,
+        'body_html'  => $bodyHtml,
+        'body_text'  => $bodyText,
+        'category'   => $category,
+        'variables'  => json_encode(array_values(array_unique($variables))),
+        'is_active'  => $isActive,
+        'created_by' => current_user_id(),
+    ]);
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'slug') !== false) {
+        json_error('VALIDATION_ERROR', 'A template with the slug ' . $slug . ' already exists.', 422,
+            ['fields' => ['slug' => 'This slug is already in use.']]);
+    }
+    throw $e;
+}
 
 try {
     db_insert('audit_log', [

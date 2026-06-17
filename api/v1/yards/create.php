@@ -122,8 +122,10 @@ try {
         $yardId = db_insert('yards', $yardData);
     }
 } catch (\PDOException $e) {
-    // Belt for the global name/slug unique key (TOCTOU or a soft-deleted slug).
-    if ($e->getCode() === '23000') {
+    // Belt for the global name/slug unique key (TOCTOU race). Narrow on the key
+    // names so the manager_id FK (yards_ibfk_1) / other 23000s still surface.
+    if ($e->getCode() === '23000'
+        && (stripos($e->getMessage(), 'name') !== false || stripos($e->getMessage(), 'slug') !== false)) {
         json_validation_error(
             ['name' => "A yard named '{$name}' already exists."],
             "A yard named '{$name}' already exists."

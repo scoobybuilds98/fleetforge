@@ -76,11 +76,13 @@ if (isset($body['unit_number'])) {
     if (!$un) {
         $fields['unit_number'] = 'Unit number is required.';
     } else {
-        // FIX #36: filter soft-deleted units so deleted unit_numbers can be reused
-        $conflict = db_row(
-            "SELECT id FROM equipment_units WHERE unit_number = ? AND id != ? AND deleted_at IS NULL",
+        // The unit_number UNIQUE index is GLOBAL (spans soft-deleted rows), so
+        // check ALL rows except self — a number held only by a soft-deleted unit
+        // is still taken and would 1062 on db_update → HTTP 500 (FLEETFORGE-M).
+        $conflict = db_count(
+            "SELECT COUNT(*) FROM equipment_units WHERE unit_number = ? AND id != ?",
             [$un, $id]
-        );
+        ) > 0;
         if ($conflict) {
             $fields['unit_number'] = 'Unit number already exists.';
         } else {
@@ -89,9 +91,24 @@ if (isset($body['unit_number'])) {
     }
 }
 
+// vin: GLOBAL UNIQUE index spanning soft-deleted rows — check ALL rows except
+// self, skipping blank (NULL clears the VIN; a unique index allows multi-NULL).
+// Handled here rather than in the generic $stringFields loop so a collision
+// returns a clean 422 instead of a 1062 → HTTP 500 (FLEETFORGE-M).
+if (array_key_exists('vin', $body)) {
+    $vinVal = clean_string($body['vin'], 50);
+    if ($vinVal !== null && db_count(
+        "SELECT COUNT(*) FROM equipment_units WHERE vin = ? AND id != ?",
+        [$vinVal, $id]
+    ) > 0) {
+        $fields['vin'] = 'VIN already exists.';
+    } else {
+        $updates['vin'] = $vinVal;
+    }
+}
+
 // String fields
 $stringFields = [
-    'vin'                => 50,
     'gps_device_id'      => 100,
     'samsara_vehicle_url'=> 500,
     'yard_location'      => 100,
@@ -306,6 +323,11 @@ $updates['updated_by'] = current_user_id();
 $userId = current_user_id();
 $newUpdatedAt = null;
 
+// Belt-and-suspenders: translate a 1062 on the vin/unit_number UNIQUE index
+// (concurrent rename, or a value held by a soft-deleted unit that slipped past
+// the pre-check) into the same clean 422 instead of an uncaught PDOException →
+// HTTP 500. Narrow on the key name so other 23000s still surface (FLEETFORGE-M).
+try {
 db_transaction(function () use (&$newUpdatedAt, $id, $updates, $userId, $existing): void {
     db_update('equipment_units', $updates, 'id = ?', [$id]);
 
@@ -329,6 +351,17 @@ db_transaction(function () use (&$newUpdatedAt, $id, $updates, $userId, $existin
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 });
+} catch (\PDOException $e) {
+    if ($e->getCode() === '23000') {
+        if (stripos($e->getMessage(), 'vin') !== false) {
+            json_validation_error(['vin' => 'VIN already exists.']);
+        }
+        if (stripos($e->getMessage(), 'unit_number') !== false) {
+            json_validation_error(['unit_number' => 'Unit number already exists.']);
+        }
+    }
+    throw $e;
+}
 
 // ── SAMSARA-3: PATCH the Samsara trailer with any changed fields ──
 // WHY after the transaction: DB is source of truth. Samsara failure

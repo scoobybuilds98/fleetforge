@@ -409,7 +409,9 @@ $runUpdate = function () use (&$data, $id, $replaceTags, $newTags, $userId, $exi
 try {
     db_transaction($runUpdate);
 } catch (\PDOException $e) {
-    if ($e->getCode() === '23000') {
+    // Narrow on the uq_company_email key so unrelated 23000s (FK writes inside
+    // the transaction) surface for real triage instead of a false duplicate.
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'uq_company_email') !== false) {
         json_validation_error(
             ['company_name' => 'Another customer with this company name and email already exists.'],
             'Another customer with this company name and email already exists.'

@@ -337,7 +337,10 @@ $runCreate = function () use (
 try {
     db_transaction($runCreate);
 } catch (\PDOException $e) {
-    if ($e->getCode() === '23000') {
+    // Narrow on the uq_company_email key so unrelated 23000s (tax_rate_id FK,
+    // customer_tags/customer_notes/audit_log FK writes inside the transaction)
+    // surface for real triage instead of being mislabeled as a duplicate.
+    if ($e->getCode() === '23000' && stripos($e->getMessage(), 'uq_company_email') !== false) {
         json_validation_error(
             ['company_name' => 'A customer with this company name and email already exists.'],
             'A customer with this company name and email already exists.'

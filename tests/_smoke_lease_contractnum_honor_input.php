@@ -4,16 +4,20 @@ declare(strict_types=1);
 /**
  * tests/_smoke_lease_contractnum_honor_input.php
  *
- * SC2: create with contract_number='MTTS1049' → persisted as MTTS1049.
+ * SC2: create with contract_number='MTTS<pid>' → persisted verbatim.
  * SC3: create with blank contract_number → auto-generated (CN-XXXXXX-YYYY).
- * SC4: create with a duplicate contract_number → 422 CONTRACT_NUMBER_TAKEN, no row.
+ * SC4: create with a duplicate (live) contract_number → 422 CONTRACT_NUMBER_TAKEN, no row.
+ * SC5: create with a contract_number held by a SOFT-DELETED lease → 422
+ *      CONTRACT_NUMBER_TAKEN (not an HTTP 500). Regression for Sentry FLEETFORGE-P:
+ *      the contract_number UNIQUE index is global, so db_exists() (which filters
+ *      deleted_at IS NULL) was blind to the collision and let it 1062 on INSERT.
  *
- * All writes rolled back / cleaned up. Runs against the real db + schema.
+ * All writes cleaned up; reserved units released. Runs against the real db + schema.
  *
  * Run:  php tests/_smoke_lease_contractnum_honor_input.php
  * Exit: 0 all pass, 1 on failure, 2 on setup error.
  *
- * @session S-LEASE-CONTRACTNUM-HONOR-INPUT
+ * @session S-LEASE-CONTRACTNUM-HONOR-INPUT, FLEETFORGE-P (soft-delete dup guard)
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -29,9 +33,10 @@ $passes   = 0;
 $pass = static function (string $m) use (&$passes): void { $passes++; echo "  \033[32mPASS\033[0m — {$m}\n"; };
 $fail = static function (string $m) use (&$failures): void { $failures[] = $m; echo "  \033[31mFAIL\033[0m — {$m}\n"; };
 
-$PID       = getmypid();
-$CTOK      = 'MTTS-CNUM-' . $PID;   // unique prefix keeps cleanup safe
-$FIXED_CN  = 'MTTS' . $PID;         // SC2 / SC4 test contract number
+$PID        = getmypid();
+$CTOK       = 'MTTS-CNUM-' . $PID;  // unique prefix keeps cleanup safe
+$FIXED_CN   = 'MTTS' . $PID;        // SC2 / SC4 test contract number
+$SOFTDEL_CN = 'MTTS' . $PID . 'D';  // SC5: number held by a soft-deleted lease
 
 // ── Subprocess POST harness (mirrors project convention) ─────────────────────
 $harnessFile = sys_get_temp_dir() . '/_ff_cnum_harness_' . $PID . '.php';
@@ -81,16 +86,21 @@ $post = static function (string $endpoint, array $payload) use ($harnessFile, &$
     return is_array($j) ? $j : ['_raw' => $out];
 };
 
-$createdIds = [];
+$createdIds    = [];
+$reservedUnits = [];
 
-$cleanup = static function () use (&$createdIds, $CTOK, $FIXED_CN, $PID) {
+$cleanup = static function () use (&$createdIds, &$reservedUnits, $CTOK, $PID) {
     foreach ($createdIds as $id) {
         db_execute("DELETE FROM audit_log WHERE entity_type='lease' AND entity_id=?", [$id]);
         db_execute("DELETE FROM leases WHERE id=?", [$id]);
     }
-    // Belt-and-suspenders: wipe by contract_number pattern
+    // Belt-and-suspenders: wipe by contract_number pattern (covers soft-deleted rows too)
     db_execute("DELETE FROM leases WHERE contract_number LIKE ?", ['MTTS' . $PID . '%']);
     db_execute("DELETE FROM leases WHERE contract_number LIKE ?", [$CTOK . '%']);
+    // Release the units this test reserved so the dev DB stays re-runnable.
+    foreach ($reservedUnits as $uid) {
+        db_execute("UPDATE equipment_units SET status='available' WHERE id=? AND status IN ('reserved','on_lease')", [$uid]);
+    }
 };
 
 try {
@@ -103,18 +113,20 @@ try {
     $custId = (int) (db_row("SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1")['id'] ?? 0);
     if (!$custId) { echo "SETUP FAIL: no customer\n"; exit(2); }
 
-    // Need two distinct available units (SC2 + SC3 each create a lease)
+    // Need three distinct available units (SC2 + SC3 + SC5 each create a lease)
     $units = db_select("SELECT eu.id FROM equipment_units eu
                        WHERE eu.deleted_at IS NULL AND eu.status='available'
-                       ORDER BY eu.id LIMIT 2");
-    if (count($units) < 2) { echo "SETUP FAIL: need 2 available units\n"; exit(2); }
-    [$unitA, $unitB] = [(int) $units[0]['id'], (int) $units[1]['id']];
+                       ORDER BY eu.id LIMIT 3");
+    if (count($units) < 3) { echo "SETUP FAIL: need 3 available units\n"; exit(2); }
+    [$unitA, $unitB, $unitC] = [(int) $units[0]['id'], (int) $units[1]['id'], (int) $units[2]['id']];
+    $reservedUnits = [$unitA, $unitB, $unitC];
 
     $cleanup();
 
     $basePayload = [
         'customer_id'       => $custId,
         'start_date'        => date('Y-m-d'),
+        'start_time'        => '09:00',   // S-LEASE-RENTAL-DAY-TIME: now mandatory
         'daily_rate'        => '50',
         'weekly_rate'       => '300',
         'monthly_rate'      => '1000',
@@ -193,6 +205,50 @@ try {
         $pass('SC4 no row inserted (count unchanged at ' . $countBefore . ')');
     } else {
         $fail('SC4 row count changed: before=' . $countBefore . ' after=' . $countAfter);
+    }
+
+    echo "\nC4 — SC5: number held by a SOFT-DELETED lease → 422, not 500 (FLEETFORGE-P)\n";
+    // Root cause: leases.contract_number is a GLOBAL unique index (spans soft-deleted
+    // rows), but the old pre-check used db_exists() which filters deleted_at IS NULL —
+    // so a reused number passed the pre-check, then 1062'd on INSERT → HTTP 500.
+    // Reproduce deterministically: create a lease, soft-delete it, reuse the number.
+    $rVictim = $post('api/v1/leases/create.php', array_merge($basePayload, [
+        'equipment_unit_id' => $unitC,
+        'contract_number'   => $SOFTDEL_CN,
+    ]));
+    $victimId = (int) ($rVictim['data']['id'] ?? 0);
+    if (($rVictim['success'] ?? false) && $victimId > 0) {
+        $createdIds[] = $victimId;
+        // Soft-delete the lease — the contract_number stays live in the unique index.
+        db_execute("UPDATE leases SET deleted_at = NOW() WHERE id = ?", [$victimId]);
+        // Free the unit too, so the reuse attempt reaches the leases INSERT rather
+        // than tripping the unit FOR UPDATE gate first. This faithfully reproduces
+        // the production flow (number reused on an AVAILABLE unit): with the fix the
+        // pre-check 422s before the txn; reverted, it 1062s on INSERT → 500.
+        db_execute("UPDATE equipment_units SET status='available' WHERE id = ?", [$unitC]);
+        $pass('SC5 setup: victim lease ' . $SOFTDEL_CN . ' created, soft-deleted, unit freed');
+
+        $rReuse = $post('api/v1/leases/create.php', array_merge($basePayload, [
+            'equipment_unit_id' => $unitC,   // available again → exercises the INSERT path
+            'contract_number'   => $SOFTDEL_CN,
+        ]));
+        $reuseCode = $rReuse['error']['code'] ?? '';
+        if (!($rReuse['success'] ?? true) && $reuseCode === 'CONTRACT_NUMBER_TAKEN') {
+            $pass('SC5 reuse of soft-deleted number → 422 CONTRACT_NUMBER_TAKEN (no PDO 500)');
+        } else {
+            $fail('SC5 expected CONTRACT_NUMBER_TAKEN, got: ' . json_encode($rReuse));
+        }
+        // No NEW (live) lease should exist for the number.
+        $liveCount = (int) (db_row(
+            "SELECT COUNT(*) AS n FROM leases WHERE contract_number=? AND deleted_at IS NULL",
+            [$SOFTDEL_CN])['n'] ?? 0);
+        if ($liveCount === 0) {
+            $pass('SC5 no live lease created for the soft-deleted number');
+        } else {
+            $fail('SC5 a live lease was created for ' . $SOFTDEL_CN . ' (count=' . $liveCount . ')');
+        }
+    } else {
+        $fail('SC5 setup failed — could not create victim lease: ' . json_encode($rVictim));
     }
 
 } finally {
